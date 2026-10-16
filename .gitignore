@@ -1,0 +1,21 @@
+# Build output
+.build/
+DerivedData/
+*.xcresult
+.swiftpm/
+xcuserdata/
+
+# Scratch notes
+.notes/
+
+# Local environment
+.env
+.env.*
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
