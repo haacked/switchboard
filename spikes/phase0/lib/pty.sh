@@ -32,15 +32,19 @@ wait_until() {
   return 1
 }
 
-# The server starts from an empty environment. A test claude must not inherit
-# this shell's SUPACODE_* variables, because the Supacode resume hook would then
-# overwrite the record of the user's own pane. It must not inherit CLAUDE*
-# variables either, because they mark a child of another Claude session.
+# clean_env <command...>: runs the command in an empty environment. A test
+# claude must not inherit this shell's SUPACODE_* variables, because the
+# Supacode resume hook would then overwrite the record of the user's own pane.
+# It must not inherit CLAUDE* variables either, because they mark a child of
+# another Claude session.
+clean_env() {
+  env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" \
+    SHELL=/bin/zsh TERM=xterm-256color LANG="${LANG:-en_US.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" "$@"
+}
+
 pty_server_start() {
   ptmux has-session 2>/dev/null && return 0
-  env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" \
-    SHELL=/bin/zsh TERM=xterm-256color LANG="${LANG:-en_US.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" \
-    tmux -L "$PTY_SOCKET" -f /dev/null new-session -d -s base -x "$PTY_COLS" -y "$PTY_ROWS"
+  clean_env tmux -L "$PTY_SOCKET" -f /dev/null new-session -d -s base -x "$PTY_COLS" -y "$PTY_ROWS"
   # These let claude turn on focus reporting and extended keys, as it would in
   # Ghostty. A killed claude can then leave them on in the pane.
   ptmux set -g focus-events on
@@ -97,19 +101,28 @@ screen_matches() {
 # Polls the visible screen every 100 ms until every regex matches some line.
 pty_wait() { wait_until "$2" 0.1 screen_matches "$1" "${@:3}"; }
 
-# The numbered items of a menu on screen, such as "1. Yes", one per line.
-pty_menu() {
-  pty_screen "$1" | grep -E '^ +(❯ )?[0-9]+\. ' | sed -E 's/^ +(❯ )?//; s/ +$//' || true
+# pty_menu_cursor <target> <title regex>: the highlighted item of the menu below
+# the title, without its marker. Claude Code also marks each past prompt with
+# ❯, so the search starts at the title.
+pty_menu_cursor() {
+  pty_screen "$1" | awk -v t="$2" '$0 ~ t {f = 1} f && /^ *❯ / {sub(/^ *❯ /, ""); sub(/ +$/, ""); print; exit}'
 }
 
-# pty_select <target> <n>: picks item n of the menu on screen, counting from the first.
+# pty_select <target> <title regex> <item regex>: moves down the menu below the
+# title until the highlighted item matches, then picks it. Claude Code menus
+# don't always number their items or keep their order, so this matches the
+# item's text. Returns 1 if no item matches after 10 moves.
 pty_select() {
   local i
-  for ((i = 1; i < $2; i++)); do
+  for ((i = 0; i < 10; i++)); do
+    if grep -Eq -- "$3" <<<"$(pty_menu_cursor "$1" "$2")"; then
+      pty_key "$1" Enter
+      return 0
+    fi
     pty_key "$1" Down
     sleep 0.2
   done
-  pty_key "$1" Enter
+  return 1
 }
 
 # Terminal modes that a killed program can leave on in the pane.

@@ -10,13 +10,14 @@
 claude_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 claude_ready_re='shift\+tab to cycle'
 
-# Dialogs that claude can open, each followed by the menu item to pick.
+# Dialogs that claude can open: a regex for the dialog's title, then a regex
+# for the item to pick. The menu sits below the title.
 # SB_EXIT_CHOICE picks what /exit does with background work that still runs:
 # 1 exits and stops it, 2 moves the session to the background, 3 stays.
 claude_dialogs=(
-  'Yes, I trust this folder' 2
-  'Do you want to proceed' 1
-  'Background work is running' "${SB_EXIT_CHOICE:-1}"
+  'Accessing workspace' '^Yes, I trust this folder'
+  'Do you want to proceed' '^(1\. )?Yes'
+  'Background work is running' "^${SB_EXIT_CHOICE:-1}\\. "
 )
 
 # Joins a multi-line value with ';', so summary.txt keeps one key=value per line.
@@ -30,9 +31,17 @@ snap() {
   proc_tree "$(pty_shell_pid "$run")" >"$dir/tree-$1.txt" || true
 }
 
-# write_settings <path>: hook settings that log every event to $SB_HOOK_LOG.
+# sh_quote <text>: the text in single quotes, for a command that sh runs.
+sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
+# write_settings <path> [log]: hook settings that log every event to <log>, or
+# to $SB_HOOK_LOG when no log is given. A background session needs <log>,
+# because its worker does not inherit SB_HOOK_LOG.
 write_settings() {
-  jq -n --arg c "$claude_lib_dir/hook-log.sh" \
+  local c
+  c=$(sh_quote "$claude_lib_dir/hook-log.sh")
+  [ -z "${2:-}" ] || c="SB_HOOK_LOG=$(sh_quote "$2") $c"
+  jq -n --arg c "$c" \
     '{hooks: ([$ARGS.positional[] | {(.): [{matcher: "", hooks: [{type: "command", command: $c, timeout: 5}]}]}] | add)}' \
     --args SessionStart SessionEnd Stop UserPromptSubmit PreToolUse PostToolUse \
     SubagentStart SubagentStop Notification >"$1"
@@ -64,14 +73,18 @@ subagent_stop_count() {
 claude_pid() { pty_child_pid "$run"; }
 
 # answer_dialog: picks the listed item if a known dialog is on screen.
-# Returns 0 only when it answered one.
+# Returns 0 only when it answered one. A dialog that claude drew outside the
+# alternate screen stays on screen after claude exits, so this answers only
+# while claude runs.
 answer_dialog() {
   local screen i
+  claude_pid >/dev/null || return 1
   screen=$(pty_screen "$run")
   for ((i = 0; i < ${#claude_dialogs[@]}; i += 2)); do
     if grep -Eq -- "${claude_dialogs[i]}" <<<"$screen"; then
-      record dialog "${claude_dialogs[i]}: $(pty_menu "$run") -> ${claude_dialogs[i + 1]}"
-      pty_select "$run" "${claude_dialogs[i + 1]}"
+      record dialog "${claude_dialogs[i]}: ${claude_dialogs[i + 1]}"
+      pty_select "$run" "${claude_dialogs[i]}" "${claude_dialogs[i + 1]}" ||
+        record dialog_unanswered "$(pty_menu_cursor "$run" "${claude_dialogs[i]}")"
       # Gives the dialog time to close, so the next poll doesn't answer it again.
       sleep 0.5
       return 0
