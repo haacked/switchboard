@@ -8,7 +8,10 @@
 #   model     the model for claude to use
 
 claude_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-claude_ready_re='shift\+tab to cycle'
+# In default permission mode, the prompt footer shows "manual mode on" instead
+# of the shift+tab hint.
+claude_ready_re='shift\+tab to cycle|manual mode on'
+claude_proceed_title='Do you want to proceed'
 
 # Dialogs that claude can open: a regex for the dialog's title, then a regex
 # for the item to pick. The menu sits below the title.
@@ -16,7 +19,7 @@ claude_ready_re='shift\+tab to cycle'
 # 1 exits and stops it, 2 moves the session to the background, 3 stays.
 claude_dialogs=(
   'Accessing workspace' '^Yes, I trust this folder'
-  'Do you want to proceed' '^(1\. )?Yes'
+  "$claude_proceed_title" '^(1\. )?Yes'
   'Background work is running' "^${SB_EXIT_CHOICE:-1}\\. "
 )
 
@@ -34,17 +37,21 @@ snap() {
 # sh_quote <text>: the text in single quotes, for a command that sh runs.
 sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 
-# write_settings <path> [log]: hook settings that log every event to <log>, or
-# to $SB_HOOK_LOG when no log is given. A background session needs <log>,
-# because its worker does not inherit SB_HOOK_LOG.
+# The events that write_settings logs. A test can replace the list after it
+# sources this file.
+hook_events=(SessionStart SessionEnd Stop UserPromptSubmit PreToolUse PostToolUse
+  SubagentStart SubagentStop Notification)
+
+# write_settings <path> [log]: hook settings that log every event in
+# hook_events to <log>, or to $SB_HOOK_LOG when no log is given. A background
+# session needs <log>, because its worker does not inherit SB_HOOK_LOG.
 write_settings() {
   local c
   c=$(sh_quote "$claude_lib_dir/hook-log.sh")
   [ -z "${2:-}" ] || c="SB_HOOK_LOG=$(sh_quote "$2") $c"
   jq -n --arg c "$c" \
     '{hooks: ([$ARGS.positional[] | {(.): [{matcher: "", hooks: [{type: "command", command: $c, timeout: 5}]}]}] | add)}' \
-    --args SessionStart SessionEnd Stop UserPromptSubmit PreToolUse PostToolUse \
-    SubagentStart SubagentStop Notification >"$1"
+    --args "${hook_events[@]}" >"$1"
 }
 
 # hooks_of <event> [log files]: the logged payloads of one event, oldest first.
@@ -103,6 +110,32 @@ answer_then() {
 # claude_until <timeout seconds> <command...>: wait_until that answers dialogs.
 claude_until() { wait_until "$1" 0.1 answer_then "${@:2}"; }
 
+# accept_trust <folder>: starts claude in a new pane in the folder, accepts the
+# workspace trust dialog, and stops claude. Claude Code stores trust for the
+# repo's main checkout, so this covers every worktree of the repo.
+accept_trust() {
+  local pid
+  pty_kill "$run"
+  pty_new "$run" "$1"
+  pty_type "$run" claude
+  pty_key "$run" Enter
+  if ! claude_until 60 screen_matches "$run" "$claude_ready_re" >/dev/null; then
+    pty_kill "$run"
+    return 1
+  fi
+  pid=$(claude_pid)
+  kill -TERM "$pid"
+  pty_wait_gone "$pid" 10 >/dev/null || true
+  pty_kill "$run"
+}
+
+# slash_command <command>: pastes the command and submits it.
+slash_command() {
+  pty_paste "$run" "$1"
+  sleep 0.3
+  pty_key "$run" Enter
+}
+
 # claude_cmd <args...>: the command line typed into the pane.
 claude_cmd() {
   echo "SB_HOOK_LOG=$dir/hooks.jsonl claude --model $model --settings $settings $*"
@@ -159,11 +192,7 @@ stop_claude() {
   case "$method" in
   term) kill -TERM "$pid" ;;
   hup) kill -HUP "$pid" ;;
-  exit)
-    pty_paste "$run" "/exit"
-    sleep 0.3
-    pty_key "$run" Enter
-    ;;
+  exit) slash_command /exit ;;
   *)
     echo "stop_claude: unknown method '$method' (use term, hup, or exit)" >&2
     return 2

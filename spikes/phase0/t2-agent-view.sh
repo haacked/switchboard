@@ -37,9 +37,7 @@ wt="$T2_ROOT/wt"
 runs="$T2_ROOT/runs"
 model="${T2_MODEL:-haiku}"
 
-# Workspace trust is stored for the repo's main checkout, so accepting it once
-# in the linked worktree covers every worktree of the repo. `claude --bg`
-# without a terminal refuses an untrusted folder.
+# `claude --bg` without a terminal refuses an untrusted folder.
 cmd_setup() {
   mkdir -p "$runs" "$repo"
   if [ ! -d "$repo/.git" ]; then
@@ -51,15 +49,7 @@ cmd_setup() {
   run=setup-trust
   dir="$runs/$run"
   mkdir -p "$dir"
-  pty_kill "$run"
-  pty_new "$run" "$wt"
-  pty_type "$run" claude
-  pty_key "$run" Enter
-  claude_until 60 screen_matches "$run" "$claude_ready_re" >/dev/null
-  pid=$(claude_pid)
-  kill -TERM "$pid"
-  pty_wait_gone "$pid" 10 >/dev/null || true
-  pty_kill "$run"
+  accept_trust "$wt"
   echo "root: $T2_ROOT"
 }
 
