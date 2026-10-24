@@ -36,10 +36,12 @@ wait_until() {
 # claude must not inherit this shell's SUPACODE_* variables, because the
 # Supacode resume hook would then overwrite the record of the user's own pane.
 # It must not inherit CLAUDE* variables either, because they mark a child of
-# another Claude session.
+# another Claude session. It keeps CLAUDE_CONFIG_DIR, so a test claude uses
+# the same Claude account as the claude commands that the tests run directly.
 clean_env() {
   env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" PATH="$PATH" \
-    SHELL=/bin/zsh TERM=xterm-256color LANG="${LANG:-en_US.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" "$@"
+    SHELL=/bin/zsh TERM=xterm-256color LANG="${LANG:-en_US.UTF-8}" TMPDIR="${TMPDIR:-/tmp}" \
+    ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} "$@"
 }
 
 pty_server_start() {
@@ -49,6 +51,9 @@ pty_server_start() {
   # Ghostty. A killed claude can then leave them on in the pane.
   ptmux set -g focus-events on
   ptmux set -s extended-keys on
+  # Each new session takes CLAUDE_CONFIG_DIR from the shell that runs pty_new.
+  # It drops the variable when that shell has none.
+  ptmux set -ga update-environment CLAUDE_CONFIG_DIR
 }
 
 pty_server_stop() { ptmux kill-server 2>/dev/null || true; }
