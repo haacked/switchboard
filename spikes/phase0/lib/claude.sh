@@ -77,6 +77,20 @@ subagent_stop_count() {
   hooks_of SubagentStop | jq -r .agent_id | grep -cFxf <(hooks_of SubagentStart | jq -r .agent_id) || true
 }
 
+# subagent_reported: the turn that the last subagent's result started has ended.
+# While fork mode is on, which is the default, a subagent in an interactive
+# session always runs in the background. Its result arrives as a prompt that
+# starts a turn, so the next ask would otherwise take that turn's Stop. On
+# 2.1.308 the prompt is a <task-notification> block with the agent_id as
+# <task-id>. On 2.1.310 it is an <agent-message from="<agent_id>"> block.
+subagent_reported() {
+  local id t
+  id=$(hooks_of SubagentStart | tail -1 | jq -r .agent_id)
+  t=$(hooks_of UserPromptSubmit | jq -r --arg id "$id" \
+    'select(.prompt | contains("<task-id>\($id)</task-id>") or contains("<agent-message from=\"\($id)\"")) | .t' | head -1)
+  [ -n "$t" ] && (($(last_hook Stop | jq -r .t) > t))
+}
+
 claude_pid() { pty_child_pid "$run"; }
 
 # answer_dialog: picks the listed item if a known dialog is on screen.

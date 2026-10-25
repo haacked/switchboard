@@ -139,18 +139,6 @@ turn() {
   record "$1_turn_ms" $(($(last_hook Stop | jq -r .t) - $(hooks_of UserPromptSubmit | sed -n "$((n + 1))p" | jq -r .t)))
 }
 
-# subagent_reported: the turn that the last subagent's result started has ended.
-# While fork mode is on, which is the default, a subagent in an interactive
-# session always runs in the background. Its result arrives as a
-# <task-notification> prompt that starts a turn. The next ask would otherwise
-# take that turn's Stop.
-subagent_reported() {
-  local id t
-  id=$(hooks_of SubagentStart | tail -1 | jq -r .agent_id)
-  t=$(hooks_of UserPromptSubmit | jq -r --arg tag "<task-id>$id</task-id>" 'select(.prompt | contains($tag)) | .t')
-  [ -n "$t" ] && (($(last_hook Stop | jq -r .t) > t))
-}
-
 # parity: for each event, how often the command hook and the listener saw it,
 # whether they saw the same payloads, and the range of the listener's arrival
 # time minus the command hook's time. Events that fire together, such as two
