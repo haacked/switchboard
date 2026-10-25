@@ -1,0 +1,81 @@
+#!/bin/bash
+# A stand-in for claude in sbd's integration tests. It runs the hook command
+# from the settings file for each event, with a payload shaped like claude's,
+# and answers each prompt on its own line:
+#   ask ...          replies with a question
+#   offer ...        replies with an offer of a next step
+#   slow <n>         runs a Bash tool call of n seconds
+#   interrupt ...    starts a tool call and ends without a Stop, as Escape
+#                    does. Claude Code reports the idle prompt later.
+#   fail ...         ends the turn with StopFailure, as an API error does
+#   clear <uuid>     switches to another conversation, as /clear does
+#   anything else    replies "Done: <prompt>"
+# It records its arguments in $SB_HOME/stub-args.log.
+
+settings='' session='' prompt='' source=startup
+args=("$@")
+while [ $# -gt 0 ]; do
+  case $1 in
+  --settings) settings=$2 && shift 2 ;;
+  --session-id) session=$2 && shift 2 ;;
+  --resume) session=$2 source=resume && shift 2 ;;
+  --model | --permission-mode) shift 2 ;;
+  --) prompt=${2:-} && break ;;
+  --*) shift ;;
+  *) prompt=$1 && shift ;;
+  esac
+done
+printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
+hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
+
+# hook <event> [json fields]
+hook() {
+  jq -nc --arg e "$1" --arg s "$session" --argjson f "${2:-{\}}" '{hook_event_name: $e, session_id: $s} + $f' |
+    sh -c "$hook_cmd" >/dev/null
+}
+
+turn() {
+  local p=$1 reply n
+  hook UserPromptSubmit "$(jq -nc --arg p "$p" '{prompt: $p}')"
+  case $p in
+  slow*)
+    n=${p#slow }
+    hook PreToolUse "{\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"tool_input\":{\"command\":\"sleep $n\"}}"
+    sleep "$n"
+    hook PostToolUse "{\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"tool_input\":{\"command\":\"sleep $n\"}}"
+    reply="Slept $n s."
+    ;;
+  interrupt*)
+    hook PreToolUse '{"tool_name":"Bash","tool_use_id":"t2","tool_input":{"command":"sleep 100"}}'
+    echo "⏺ Interrupted"
+    sleep 1
+    hook Notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+    return
+    ;;
+  fail*)
+    hook StopFailure '{"error":"rate_limit"}'
+    echo "⏺ API Error"
+    return
+    ;;
+  clear*)
+    hook SessionEnd '{"reason":"clear"}'
+    session=${p#clear }
+    hook SessionStart '{"source":"clear"}'
+    echo "⏺ cleared, now $session"
+    return
+    ;;
+  ask*) reply="Which database should I use, Postgres or SQLite?" ;;
+  offer*) reply="I wrote the parser. Want me to run the tests?" ;;
+  *) reply="Done: $p" ;;
+  esac
+  echo "⏺ $reply"
+  hook Stop "$(jq -nc --arg r "$reply" '{last_assistant_message: $r}')"
+}
+
+trap 'hook SessionEnd "{\"reason\":\"other\"}"; exit 143' TERM
+hook SessionStart "{\"source\":\"$source\"}"
+echo "claude-stub $session ($source)"
+[ -n "$prompt" ] && turn "$prompt"
+while IFS= read -r line; do
+  [ -n "$line" ] && turn "$line"
+done

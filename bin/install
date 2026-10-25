@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Installs Switchboard: the app in ~/Applications, sb in ~/.local/bin, and sbd
+# as a launchd agent that starts at login. `sb service uninstall` removes the
+# agent.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+app=$(bin/bundle | tail -1)
+dest="$HOME/Applications/Switchboard.app"
+mkdir -p "$HOME/Applications" "$HOME/.local/bin"
+rm -rf "$HOME/Applications/Switchboard.app"
+cp -R "$app" "$dest"
+ln -sf "$dest/Contents/MacOS/sb" "$HOME/.local/bin/sb"
+"$dest/Contents/MacOS/sb" service install
+echo "Installed $dest. Open it with: open \"$dest\""

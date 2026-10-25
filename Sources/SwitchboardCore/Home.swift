@@ -1,0 +1,82 @@
+import Foundation
+
+/// The folder that holds sbd's state, socket, terminals, and settings. It is
+/// `path` when given, else $SB_HOME when set and not empty, else ~/.sb. A test
+/// runs a private sbd by setting SB_HOME.
+public struct Home: Sendable {
+  public let path: String
+
+  public init(path: String? = nil) {
+    let env = ProcessInfo.processInfo.environment["SB_HOME"]
+    self.path = (path ?? env.flatMap { $0.isEmpty ? nil : $0 } ?? "~/.sb").expandingTilde
+  }
+
+  public var socket: String { "\(path)/sbd.sock" }
+  public var database: String { "\(path)/sb.db" }
+  public var tmuxSocket: String { "\(path)/tmux.sock" }
+  public var tmuxConfig: String { "\(path)/tmux.conf" }
+  public var claudeSettings: String { "\(path)/claude-settings.json" }
+  public var config: String { "\(path)/config.json" }
+  public var log: String { "\(path)/sbd.log" }
+
+  /// Where sbd writes a session's launcher script.
+  public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
+
+  public func create() throws {
+    try FileManager.default.createDirectory(
+      atPath: path, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+  }
+
+  public func loadConfig() -> Config {
+    guard let data = FileManager.default.contents(atPath: config) else { return Config() }
+    do {
+      return try JSONCoding.decoder.decode(Config.self, from: data)
+    } catch {
+      FileHandle.standardError.write(Data("sbd: ignoring \(config): \(error)\n".utf8))
+      return Config()
+    }
+  }
+}
+
+/// Settings from $SB_HOME/config.json. Every field is optional there.
+public struct Config: Codable, Equatable, Sendable {
+  /// The claude command. A test points it at a stub.
+  public var claude: String = "claude"
+  /// How long a session sits idle after its turn ends before sbd stops claude.
+  public var idleStopSeconds: Int = 900
+  /// How often sbd checks its processes and stops idle sessions.
+  public var tickSeconds: Double = 1
+  /// The model for new sessions, or nil for claude's default.
+  public var model: String?
+  /// Where `sb new --branch` creates worktrees: <root>/<repo>/<branch>.
+  public var worktreeRoot: String = "~/dev/worktrees"
+  /// The tmux binary, or nil to look on PATH, then in Homebrew's and the
+  /// system's bin folders.
+  public var tmux: String?
+  /// The shell for both panes, or nil for the user's login shell.
+  public var shell: String?
+  /// Extra arguments for every claude command, such as --permission-mode.
+  public var claudeArgs: [String] = []
+  /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
+  public var env: [String: String] = [:]
+
+  public init() {}
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let d = Config()
+    claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? d.claude
+    idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
+    tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
+    model = try c.decodeIfPresent(String.self, forKey: .model)
+    worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
+    tmux = try c.decodeIfPresent(String.self, forKey: .tmux)
+    shell = try c.decodeIfPresent(String.self, forKey: .shell)
+    claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
+    env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
+  }
+}
+
+extension String {
+  public var expandingTilde: String { (self as NSString).expandingTildeInPath }
+}

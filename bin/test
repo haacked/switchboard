@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Runs the unit and integration tests. The Command Line Tools' build system
+# can leave out the folder that holds Swift Testing's macro plugin. This
+# script passes that folder to the compiler when it exists.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+args=()
+if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
+exec swift test ${args[@]+"${args[@]}"} "$@"

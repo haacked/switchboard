@@ -1,0 +1,279 @@
+import Foundation
+
+/// A tool call that the main session waits on: a running tool, a permission
+/// prompt, or a question.
+public struct ToolCall: Equatable, Sendable {
+  public var tool: String
+  public var summary: String
+  /// Milliseconds since the epoch.
+  public var since: Int64
+  /// The call's tool_use_id. PermissionRequest carries none.
+  public var id: String?
+  /// The call's input, which pairs a PermissionRequest with its PostToolUse.
+  public var input: JSON?
+}
+
+/// What a session's events say about it. sbd applies each event as it
+/// arrives. At startup, sbd applies the whole event log again.
+public struct SessionFacts: Equatable, Sendable {
+  /// True from claude's SessionStart until claude ends or exits.
+  public var live = false
+  public var turnRunning = false
+  public var turnStarted: Int64?
+  public var runningTool: ToolCall?
+  public var openPermission: ToolCall?
+  public var openQuestion: ToolCall?
+  /// The number of prompts that the user sent. A subagent's result also
+  /// arrives as a prompt. This count leaves it out.
+  public var prompts = 0
+  public var lastReply: String?
+  public var lastActivity: Int64 = 0
+  /// When claude last reported SessionStart.
+  public var lastStart: Int64?
+  /// When sbd last started or resumed claude.
+  public var lastLaunch: Int64?
+  /// Subagents that started and have not stopped.
+  public var subagents: Set<String> = []
+  /// When the state last changed. `Attention.track` sets it.
+  public var stateSince: Int64 = 0
+  public var lastState: AttentionState?
+
+  public init() {}
+
+  public mutating func apply(_ event: Event) {
+    let d = event.data
+    lastActivity = max(lastActivity, event.t)
+    // Hooks fire for a subagent's tool calls too, with its agent_id. They
+    // don't change what the main session waits on.
+    let fromSubagent = d["agent_id"]?.string != nil
+    let tool = d["tool_name"]?.string ?? ""
+    switch event.kind {
+    case "SessionStart":
+      live = true
+      lastStart = event.t
+    case "running":
+      live = true
+    case "started", "resumed":
+      lastLaunch = event.t
+    case "SessionEnd", "stopped", "exited":
+      live = false
+      endTurn()
+      subagents = []
+    case "UserPromptSubmit":
+      if !Attention.isSubagentResult(d["prompt"]?.string ?? "") { prompts += 1 }
+      startTurn(event.t)
+      runningTool = nil
+      openPermission = nil
+      openQuestion = nil
+    case "PreToolUse" where !fromSubagent:
+      startTurn(event.t)
+      let call = Attention.call(tool, d, event.t)
+      if tool == "AskUserQuestion" {
+        openQuestion = call
+      } else if d["tool_input"]?["run_in_background"]?.bool != true {
+        runningTool = call
+      }
+    case "PermissionRequest" where !fromSubagent:
+      let call = Attention.call(tool, d, event.t)
+      if tool == "AskUserQuestion" {
+        if openQuestion == nil { openQuestion = call }
+      } else {
+        openPermission = call
+      }
+    case "PostToolUse" where !fromSubagent, "PostToolUseFailure" where !fromSubagent:
+      let id = d["tool_use_id"]?.string
+      if tool == "AskUserQuestion" { openQuestion = nil }
+      if let running = runningTool, Attention.same(running, tool, id) { runningTool = nil }
+      // A PermissionRequest has no tool_use_id, so its tool and input pair it
+      // with the call that finished.
+      if let open = openPermission, open.tool == tool, open.input == d["tool_input"] { openPermission = nil }
+    case "Notification":
+      switch d["notification_type"]?.string ?? "" {
+      case "permission_prompt", "elicitation_dialog":
+        // A prompt that no PermissionRequest reported, such as one from a hook
+        // that failed.
+        if openPermission == nil && openQuestion == nil && turnRunning {
+          openPermission = ToolCall(tool: "prompt", summary: d["message"]?.string ?? "a prompt", since: event.t)
+        }
+      case "idle_prompt":
+        // A turn that the user interrupted with Escape or No ends without a
+        // Stop. Claude Code reports the idle prompt 60 s later.
+        endTurn()
+      default:
+        break
+      }
+    case "Stop":
+      endTurn()
+      lastReply = d["last_assistant_message"]?.string
+    case "StopFailure":
+      // An API or usage limit error ends the turn without a Stop.
+      endTurn()
+    case "SubagentStart":
+      if let id = d["agent_id"]?.string { subagents.insert(id) }
+    case "SubagentStop":
+      if let id = d["agent_id"]?.string { subagents.remove(id) }
+    default:
+      break
+    }
+  }
+
+  private mutating func startTurn(_ t: Int64) {
+    if !turnRunning {
+      turnRunning = true
+      turnStarted = t
+    }
+  }
+
+  private mutating func endTurn() {
+    turnRunning = false
+    turnStarted = nil
+    runningTool = nil
+    openPermission = nil
+    openQuestion = nil
+  }
+}
+
+/// The state and its reason line.
+public struct Verdict: Equatable, Sendable {
+  public var state: AttentionState
+  public var reason: String
+}
+
+public enum ReplyKind: Equatable, Sendable {
+  /// A question that only the user can answer.
+  case question(String)
+  /// A next step that needs no decision, such as "Want me to push?".
+  case offer(String)
+  case other
+}
+
+/// The attention rules. They follow the `/sessions` skill
+/// (`~/.dotfiles/ai/skills/sessions/SKILL.md`) for the facts that hooks and
+/// sb provide. They have no PR, CI, or merge queue rules.
+public enum Attention {
+  static let dayMs: Int64 = 24 * 3600 * 1000
+  public static let staleAfterMs: Int64 = 2 * dayMs
+
+  public static func evaluate(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict {
+    if session.done { return Verdict(state: .done, reason: "marked done") }
+    if let p = facts.openPermission {
+      return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
+    }
+    if let q = facts.openQuestion {
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
+    }
+    if facts.turnRunning {
+      if let tool = facts.runningTool {
+        return Verdict(state: .working, reason: oneLine("\(tool.summary) (\(minutes(now - tool.since)))"))
+      }
+      return Verdict(state: .working, reason: "working (\(minutes(now - (facts.turnStarted ?? now))))")
+    }
+    if let note = session.waitNote { return Verdict(state: .waiting, reason: oneLine(note)) }
+    if facts.prompts == 0 && facts.lastReply == nil {
+      return Verdict(state: .needsYou, reason: "give it a first prompt")
+    }
+    if now - facts.lastActivity > staleAfterMs {
+      return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
+    }
+    switch classify(facts.lastReply ?? "") {
+    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"))
+    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"))
+    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
+    }
+  }
+
+  /// Evaluates the session at `now`, and records in `facts` when its state
+  /// changed. sbd calls it after each event, with the event's time, and on
+  /// each tick, for the states that time alone changes.
+  @discardableResult
+  public static func track(_ session: Session, _ facts: inout SessionFacts, now: Int64) -> Verdict {
+    let verdict = evaluate(session, facts, now: now)
+    if verdict.state != facts.lastState {
+      facts.lastState = verdict.state
+      facts.stateSince = now
+    }
+    return verdict
+  }
+
+  static let offerStarts = [
+    "want me to", "should i", "shall i", "would you like me to", "do you want me to", "should we",
+    "shall we", "ready for me to", "ok to", "okay to", "want to",
+  ]
+  static let nextStepPhrases = ["next, i'll", "next i'll", "i'll now", "the next step is", "next step:"]
+
+  /// Classifies a reply by the last question in its last paragraph, or by a
+  /// next step that the paragraph announces.
+  public static func classify(_ reply: String) -> ReplyKind {
+    let paragraphs = reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    guard let last = paragraphs.last else { return .other }
+    let parts = sentences(last)
+    if let q = parts.last(where: { $0.hasSuffix("?") }) {
+      let lower = q.lowercased()
+      return offerStarts.contains(where: { lower.hasPrefix($0) }) ? .offer(q) : .question(q)
+    }
+    if let s = parts.first(where: { s in nextStepPhrases.contains { s.lowercased().contains($0) } }) {
+      return .offer(s)
+    }
+    return .other
+  }
+
+  static func sentences(_ text: String) -> [String] {
+    var out: [String] = []
+    var current = ""
+    for ch in text {
+      current.append(ch == "\n" ? " " : ch)
+      if ch == "?" || ch == "." || ch == "!" {
+        out.append(current)
+        current = ""
+      }
+    }
+    out.append(current)
+    return out.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*_` -").union(.whitespaces)) }.filter {
+      !$0.isEmpty
+    }
+  }
+
+  /// A subagent's result arrives as a prompt. On Claude Code 2.1.308 it is a
+  /// <task-notification> block. On 2.1.310 it is an <agent-message> block.
+  public static func isSubagentResult(_ prompt: String) -> Bool {
+    prompt.hasPrefix("<task-notification>") || prompt.hasPrefix("<agent-message ")
+  }
+
+  static func call(_ tool: String, _ d: JSON, _ t: Int64) -> ToolCall {
+    let input = d["tool_input"]
+    let summary =
+      tool == "AskUserQuestion"
+      ? (input?["questions"]?.array?.first?["question"]?.string ?? "a question") : toolSummary(tool, input)
+    return ToolCall(tool: tool, summary: summary, since: t, id: d["tool_use_id"]?.string, input: input)
+  }
+
+  /// Whether a finished call is this one: by tool_use_id, or by tool name
+  /// when either side has no id.
+  static func same(_ call: ToolCall, _ tool: String, _ id: String?) -> Bool {
+    if let a = call.id, let b = id { return a == b }
+    return call.tool == tool
+  }
+
+  public static func toolSummary(_ tool: String, _ input: JSON?) -> String {
+    switch tool {
+    case "Bash":
+      return "`\(oneLine(input?["command"]?.string ?? "a command", max: 50))`"
+    case "Edit", "Write", "Read", "NotebookEdit":
+      let path = input?["file_path"]?.string ?? input?["notebook_path"]?.string ?? ""
+      return "\(tool) \((path as NSString).lastPathComponent)"
+    case "Agent", "Task":
+      return "a subagent: \(oneLine(input?["description"]?.string ?? "", max: 40))"
+    default:
+      if tool.hasPrefix("mcp__") {
+        return tool.split(separator: "_", omittingEmptySubsequences: true).dropFirst().joined(separator: " ")
+      }
+      return tool
+    }
+  }
+
+  static func minutes(_ ms: Int64) -> String {
+    let m = max(0, ms) / 60_000
+    return m < 1 ? "<1 min" : "\(m) min"
+  }
+}

@@ -1,0 +1,95 @@
+import Foundation
+
+public struct CommandResult: Sendable {
+  public var status: Int32
+  public var stdout: String
+  public var stderr: String
+}
+
+/// Runs a program and waits for it. `env` replaces the environment when set.
+@discardableResult
+public func runCommand(_ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil) throws
+  -> CommandResult
+{
+  let p = Process()
+  p.executableURL = URL(fileURLWithPath: executable)
+  p.arguments = args
+  if let env { p.environment = env }
+  let out = Pipe()
+  let err = Pipe()
+  p.standardOutput = out
+  p.standardError = err
+  let stdin = input.map { _ in Pipe() }
+  p.standardInput = stdin ?? FileHandle.nullDevice
+  try p.run()
+  if let stdin, let input {
+    stdin.fileHandleForWriting.write(input)
+    try? stdin.fileHandleForWriting.close()
+  }
+  // Reads both pipes before waiting, so a full pipe can't stall the program.
+  var outData = Data()
+  let group = DispatchGroup()
+  group.enter()
+  DispatchQueue.global().async {
+    outData = out.fileHandleForReading.readDataToEndOfFile()
+    group.leave()
+  }
+  let errData = err.fileHandleForReading.readDataToEndOfFile()
+  group.wait()
+  p.waitUntilExit()
+  return CommandResult(
+    status: p.terminationStatus, stdout: String(decoding: outData, as: UTF8.self),
+    stderr: String(decoding: errData, as: UTF8.self))
+}
+
+/// The text in single quotes, for a command that a POSIX shell runs.
+public func shellQuote(_ text: String) -> String {
+  "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+/// The full path of `name`. A name with a slash is checked as given. A name
+/// without one is looked up on PATH, then in Homebrew's and the system's bin
+/// folders.
+public func findExecutable(_ name: String) -> String? {
+  if name.contains("/") {
+    let path = name.expandingTilde
+    return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+  }
+  let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+  for dir in path.split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+    let full = "\(dir)/\(name)"
+    if FileManager.default.isExecutableFile(atPath: full) { return full }
+  }
+  return nil
+}
+
+/// A program in the same folder as this one, as sb and sbd sit together both
+/// in a build folder and in the app bundle. It follows a symlink to this
+/// program first, such as ~/.local/bin/sb.
+public func siblingExecutable(_ name: String) -> String {
+  let me = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath()
+  return me.deletingLastPathComponent().appendingPathComponent(name).path
+}
+
+/// A process from `ps`.
+public struct ProcessRow: Sendable {
+  public var pid: Int
+  public var ppid: Int
+  public var pgid: Int
+  public var command: String
+}
+
+public enum Processes {
+  /// Every process, grouped by parent pid.
+  public static func byParent() -> [Int: [ProcessRow]] {
+    guard let r = try? runCommand("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
+    let rows = r.stdout.split(separator: "\n").compactMap { line -> ProcessRow? in
+      let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+      guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
+        return nil
+      }
+      return ProcessRow(pid: pid, ppid: ppid, pgid: pgid, command: parts.count > 3 ? String(parts[3]) : "")
+    }
+    return Dictionary(grouping: rows, by: \.ppid)
+  }
+}

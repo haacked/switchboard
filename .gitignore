@@ -19,3 +19,6 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# App bundles from bin/bundle
+build/
