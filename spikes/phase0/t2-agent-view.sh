@@ -60,9 +60,7 @@ new_run() {
   dir="$runs/$run"
   settings="$dir/settings.json"
   mkdir -p "$dir"
-  write_settings "$dir/hooks.json" "$dir/hooks.jsonl"
-  jq --arg id "$run" '.env = {SB_SESSION_ID: $id}' "$dir/hooks.json" >"$settings"
-  rm "$dir/hooks.json"
+  write_settings "$dir/hooks.jsonl" | jq --arg id "$run" '.env = {SB_SESSION_ID: $id}' >"$settings"
   record claude_version "$(claude --version)"
   trap on_exit EXIT
 }

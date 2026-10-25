@@ -42,7 +42,7 @@ while [ "$i" -lt 120 ]; do i=$((i + 1)); echo "step $i"; sleep 1; done
 echo "AGENT-DONE-$1"
 EOF
   chmod +x "$work/slow-task.sh"
-  write_settings "$settings"
+  write_settings >"$settings"
   pty_server_start
   echo "root: $T1_ROOT"
 }

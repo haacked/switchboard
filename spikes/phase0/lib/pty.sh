@@ -11,6 +11,13 @@ ptmux() { tmux -L "$PTY_SOCKET" "$@"; }
 # EPOCHREALTIME has six decimal places, so dropping the separator gives microseconds.
 now_ms() { echo $((${EPOCHREALTIME//[.,]/} / 1000)); }
 
+# sleep_until <ms>: sleeps until now_ms reaches <ms>. Returns at once if that
+# time has passed.
+sleep_until() {
+  local d=$(($1 - $(now_ms)))
+  ((d <= 0)) || sleep "$((d / 1000)).$(printf '%03d' $((d % 1000)))"
+}
+
 # wait_until <timeout seconds> <interval seconds> <command...>
 # Runs the command every interval until it succeeds. Prints the ms from the
 # start to the poll that succeeded, timed before the command ran, and returns 0.

@@ -64,8 +64,7 @@ cmd_setup() {
 t3_settings() {
   local url="http://127.0.0.1:$port/hook/$run" post
   post="curl -s -o /dev/null --max-time 5 -H 'Content-Type: application/json' -H \"X-SB-Session: \$SB_SESSION_ID\" --data-binary @- $(sh_quote "$url") || true"
-  write_settings "$dir/hooks.json" "$dir/hooks.jsonl"
-  jq --arg url "$url" --arg post "$post" --argjson timeouts "$1" '
+  write_settings "$dir/hooks.jsonl" | jq --arg url "$url" --arg post "$post" --argjson timeouts "$1" '
     .permissions = {ask: ["Bash(touch:*)"]}
     | .hooks |= with_entries(.key as $e | .value[0].hooks += [
         if $e == "SessionStart" then {type: "command", command: $post, timeout: 5}
@@ -73,8 +72,7 @@ t3_settings() {
           headers: {"X-SB-Session": "$SB_SESSION_ID", "X-SB-Token": "$SB_HOOK_TOKEN"},
           allowedEnvVars: ["SB_SESSION_ID", "SB_HOOK_TOKEN"]}
           + ($timeouts[$e] // $timeouts["*"] | if . then {timeout: .} else {} end)
-        end])' "$dir/hooks.json" >"$settings"
-  rm "$dir/hooks.json"
+        end])' >"$settings"
 }
 
 # new_run <kind> [policy] [timeouts]: sets run, dir, settings, and uuid, starts
@@ -127,11 +125,6 @@ http_t() { http_of "$1" | head -1 | jq -r .t; }
 notified() { http_of Notification | jq -e --arg k "$1" 'select(.body.notification_type == $k)' >/dev/null; }
 
 claude_rss_kb() { ps -o rss= -p "$(claude_pid)" | tr -d ' '; }
-
-sleep_until() {
-  local d=$(($1 - $(now_ms)))
-  ((d <= 0)) || sleep "$((d / 1000)).$(printf '%03d' $((d % 1000)))"
-}
 
 touch_prompt() {
   echo "Use the Bash tool to run exactly this command: touch $1.txt . Then reply with only the word DONE."

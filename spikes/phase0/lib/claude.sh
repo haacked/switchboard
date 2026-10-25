@@ -4,7 +4,7 @@
 # The caller sets these globals for the current run:
 #   run       the pane target
 #   dir       the run folder, which gets hooks.jsonl, summary.txt, and snapshots
-#   settings  the hook settings file that write_settings created
+#   settings  the settings file that claude_cmd passes to claude
 #   model     the model for claude to use
 
 claude_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,16 +42,16 @@ sh_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 hook_events=(SessionStart SessionEnd Stop UserPromptSubmit PreToolUse PostToolUse
   SubagentStart SubagentStop Notification)
 
-# write_settings <path> [log]: hook settings that log every event in
+# write_settings [log]: prints hook settings that log every event in
 # hook_events to <log>, or to $SB_HOOK_LOG when no log is given. A background
 # session needs <log>, because its worker does not inherit SB_HOOK_LOG.
 write_settings() {
   local c
   c=$(sh_quote "$claude_lib_dir/hook-log.sh")
-  [ -z "${2:-}" ] || c="SB_HOOK_LOG=$(sh_quote "$2") $c"
+  [ -z "${1:-}" ] || c="SB_HOOK_LOG=$(sh_quote "$1") $c"
   jq -n --arg c "$c" \
     '{hooks: ([$ARGS.positional[] | {(.): [{matcher: "", hooks: [{type: "command", command: $c, timeout: 5}]}]}] | add)}' \
-    --args "${hook_events[@]}" >"$1"
+    --args "${hook_events[@]}"
 }
 
 # hooks_of <event> [log files]: the logged payloads of one event, oldest first.
@@ -154,17 +154,23 @@ send_prompt() {
   pty_key "$run" Enter
 }
 
-# ask <label> <text> <timeout seconds>: sends a prompt, waits for the turn to
-# end, and records the reply as <label>_reply.
+# await_reply <label> <Stop count before the turn> <timeout seconds>: waits
+# for a new Stop, answering dialogs, and records the reply as <label>_reply.
+# Records <label>_timeout and returns 1 if no Stop comes in time.
+await_reply() {
+  if ! claude_until "$3" hook_count_above Stop "$2" >/dev/null; then
+    record "$1_timeout" "no Stop within $3 s"
+    return 1
+  fi
+  record "$1_reply" "$(last_hook Stop | jq -r .last_assistant_message)"
+}
+
+# ask <label> <text> <timeout seconds>: sends a prompt and runs await_reply.
 ask() {
   local stops
   stops=$(hook_count Stop)
   send_prompt "$2"
-  if ! claude_until "$3" hook_count_above Stop "$stops" >/dev/null; then
-    record "$1_timeout" "$2"
-    return 1
-  fi
-  record "$1_reply" "$(last_hook Stop | jq -r .last_assistant_message)"
+  await_reply "$1" "$stops" "$3"
 }
 
 # check_transcript <label> <nonce>
