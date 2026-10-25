@@ -4,7 +4,7 @@
 # agent.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-app=$(bin/bundle | tail -1)
+app=$(bin/bundle | tee /dev/stderr | tail -1)
 dest="$HOME/Applications/Switchboard.app"
 mkdir -p "$HOME/Applications" "$HOME/.local/bin"
 rm -rf "$HOME/Applications/Switchboard.app"

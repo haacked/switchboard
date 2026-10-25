@@ -4,7 +4,7 @@
 # signed ad hoc, which is enough to run it on this Mac.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for product in Switchboard sbd sb; do swift build -c release --product "$product"; done
+swift build -c release
 bin=$(swift build -c release --show-bin-path)
 version=$("$bin/sb" version | awk '{print $2}')
 app=build/Switchboard.app
