@@ -27,10 +27,13 @@ public func runCommand(_ executable: String, _ args: [String], env: [String: Str
     try? stdin.fileHandleForWriting.close()
   }
   // Reads both pipes before waiting, so a full pipe can't stall the program.
+  // stdout is read on a queue of its own. A global queue gets no thread
+  // while a caller waits here on every thread of Swift's cooperative pool,
+  // as parallel tests do.
   var outData = Data()
   let group = DispatchGroup()
   group.enter()
-  DispatchQueue.global().async {
+  DispatchQueue(label: "runCommand.stdout").async {
     outData = out.fileHandleForReading.readDataToEndOfFile()
     group.leave()
   }
