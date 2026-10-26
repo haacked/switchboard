@@ -45,7 +45,12 @@ public struct Session: Codable, Equatable, Sendable {
   /// True once claude has run, so a transcript exists to resume.
   public var started: Bool
   public var done: Bool
+  /// v0.1's free-text wait. `Service.load` turns it into a manual wait.
   public var waitNote: String?
+  /// The open waits, oldest first. Nil in a session that an older sbd stored.
+  public var waits: [Wait]?
+  /// Nil in a session that an older sbd stored.
+  public var notes: [Note]?
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,
@@ -102,12 +107,13 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True while a terminal shows the session's Claude pane.
   public var attached: Bool
   public var lastReply: String?
-  public var waitNote: String?
+  public var waits: [Wait]
+  public var notes: [Note]
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
     state: AttentionState, reason: String, since: Int64, lastActivity: Int64, live: Bool,
-    claudePid: Int?, attached: Bool, lastReply: String?, waitNote: String?
+    claudePid: Int?, attached: Bool, lastReply: String?, waits: [Wait], notes: [Note]
   ) {
     self.id = id
     self.name = name
@@ -123,7 +129,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
     self.claudePid = claudePid
     self.attached = attached
     self.lastReply = lastReply
-    self.waitNote = waitNote
+    self.waits = waits
+    self.notes = notes
   }
 }
 
@@ -153,7 +160,7 @@ public enum Pane: String, Sendable {
 }
 
 public func nowMs() -> Int64 {
-  Int64(Date().timeIntervalSince1970 * 1000)
+  Clock.now()
 }
 
 /// The text on one line, cut to `max` characters with an ellipsis.

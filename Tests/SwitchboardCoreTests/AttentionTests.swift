@@ -6,7 +6,7 @@ import Testing
 func session(done: Bool = false, wait: String? = nil) -> Session {
   var s = Session(id: "s1", name: "test", cwd: "/tmp", claudeSessionId: "uuid", created: 0)
   s.done = done
-  s.waitNote = wait
+  if let wait { s.waits = [Wait(id: "w1", kind: .manual, note: wait, created: 0, then: .notify)] }
   return s
 }
 
@@ -219,6 +219,11 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
   @Test func toolSummaries() {
     #expect(Attention.toolSummary("Edit", ["file_path": "/x/y/Main.swift"]) == "Edit Main.swift")
     #expect(Attention.toolSummary("mcp__grafana__list_datasources", nil) == "grafana list datasources")
+  }
+
+  @Test(arguments: [1e19, -1e19, .nan, .infinity, 1.5])
+  func intIsNilForANumberThatIsNotAnInt(_ n: Double) {
+    #expect(JSON.number(n).int == nil)
   }
 
   @Test func jsonRoundTrips() {

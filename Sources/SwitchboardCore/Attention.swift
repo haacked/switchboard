@@ -37,12 +37,16 @@ public struct SessionFacts: Equatable, Sendable {
   /// When the state last changed. `Attention.track` sets it.
   public var stateSince: Int64 = 0
   public var lastState: AttentionState?
+  /// The reason line of a wait that resolved with `notify`. The next prompt,
+  /// or a new wait, clears it.
+  public var waitOutcome: String?
 
   public init() {}
 
   public mutating func apply(_ event: Event) {
     let d = event.data
     lastActivity = max(lastActivity, event.t)
+    applyWait(event)
     // Hooks fire for a subagent's tool calls too, with its agent_id. They
     // don't change what the main session waits on.
     let fromSubagent = d["agent_id"]?.string != nil
@@ -168,7 +172,7 @@ public enum Attention {
       }
       return Verdict(state: .working, reason: "working (\(minutes(now - (facts.turnStarted ?? now))))")
     }
-    if let note = session.waitNote { return Verdict(state: .waiting, reason: oneLine(note)) }
+    if let verdict = waitVerdict(session, facts) { return verdict }
     if facts.prompts == 0 && facts.lastReply == nil {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }

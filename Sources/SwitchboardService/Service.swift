@@ -72,6 +72,7 @@ public final class Service {
   public func load() throws {
     try writeClaudeSettings()
     for session in try store.sessions() {
+      let session = try upgraded(session)
       var e = Entry(session: session)
       for event in try store.events(session: session.id) {
         e.facts.apply(event)
@@ -93,8 +94,8 @@ public final class Service {
 
   // MARK: Requests
 
-  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals"]
-  static let launches: Set<String> = ["send", "resume", "open"]
+  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals", "resolve-wait"]
+  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait"]
 
   public func handle(_ request: Request) -> Response {
     do {
@@ -157,12 +158,12 @@ public final class Service {
       try update(id) { $0.done = done }
       record(id, done ? "done" : "undone")
       return try JSON(encoding: summary(id))
-    case "wait":
-      let id = try lookup(args)
-      let note = args["note"]?.string
-      try update(id) { $0.waitNote = note }
-      record(id, "wait", ["note": note.map(JSON.string) ?? .null])
-      return try JSON(encoding: summary(id))
+    case "wait", "clear-wait", "resolve-wait":
+      return try waitRequest(op, args)
+    case "clock":
+      return try clockRequest(args)
+    case "note", "remove-note":
+      return try noteRequest(op, args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -294,10 +295,7 @@ public final class Service {
   }
 
   private func create(_ args: NewSession, _ folder: (cwd: String, branch: String?)) throws -> SessionSummary {
-    var id: String
-    repeat {
-      id = "s" + String((0..<5).map { _ in "abcdefghijkmnpqrstuvwxyz23456789".randomElement()! })
-    } while entries[id] != nil
+    let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
       branch: folder.branch, claudeSessionId: UUID().uuidString.lowercased(), model: args.model ?? config.model,
@@ -311,7 +309,7 @@ public final class Service {
     return summary(id)
   }
 
-  private func update(_ id: String, _ change: (inout Session) -> Void) throws {
+  func update(_ id: String, _ change: (inout Session) -> Void) throws {
     guard var session = entries[id]?.session else { throw APIError("no session \(id)") }
     change(&session)
     entries[id]?.session = session
@@ -330,7 +328,7 @@ public final class Service {
   }
 
   /// The two panes' tmux targets. It starts a missing pane, and a shell
-  /// whose shell exited. A dead Claude pane stays dead until `open` or `send`.
+  /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     let shell = paneName(id, .shell)
@@ -603,10 +601,18 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(config.idleStopSeconds) s") }
+          if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
           if live { record(id, "exited") }
+          // A message sent while claude exited waits in `pending` for a launch.
+          // A claude that dies before its SessionStart isn't launched again,
+          // and these launches come at most every 5 s.
+          if let e = entries[id], !e.pending.isEmpty, (e.facts.lastStart ?? 0) >= (e.facts.lastLaunch ?? 0),
+            now - (e.facts.lastLaunch ?? 0) >= 5_000
+          {
+            try? launch(id, prompt: nil)
+          }
         case .starting:
           entries[id]?.unreportedSince = nil
         }
@@ -615,6 +621,7 @@ public final class Service {
           entries[id] = e
         }
       }
+      resolveDueWaits(now: now)
     }
   }
 
@@ -623,7 +630,8 @@ public final class Service {
       e.facts.openQuestion == nil, e.pending.isEmpty
     else { return false }
     let idle = now - e.facts.lastActivity
-    guard idle >= Int64(config.idleStopSeconds) * 1000 else { return false }
+    guard idle >= idleStopMs(id) else { return false }
+    if let sent = e.inFlight, now - sent < Service.inFlightMs { return false }
     // A running subagent's tool calls fire hooks. A subagent with no event
     // for twice the idle time lost its SubagentStop, as when sbd was down.
     guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
@@ -646,7 +654,7 @@ public final class Service {
       state: verdict.state, reason: verdict.reason, since: e.facts.stateSince, lastActivity: e.facts.lastActivity,
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0, lastReply: e.facts.lastReply,
-      waitNote: s.waitNote)
+      waits: s.waits ?? [], notes: s.notes ?? [])
   }
 
   // MARK: Settings

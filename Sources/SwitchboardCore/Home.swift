@@ -59,6 +59,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var claudeArgs: [String] = []
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
+  /// Lets the `clock` request move sbd's clock forward. Only tests set it.
+  public var testClock = false
 
   public init() {}
 
@@ -74,6 +76,7 @@ public struct Config: Codable, Equatable, Sendable {
     shell = try c.decodeIfPresent(String.self, forKey: .shell)
     claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
+    testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
   }
 }
 

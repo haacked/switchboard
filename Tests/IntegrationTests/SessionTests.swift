@@ -50,11 +50,11 @@ import Testing
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     try sbd.waitFor("the prompt to settle") { (try sbd.events(s.id).last.map { nowMs() - $0.t > 1600 }) ?? false }
-    #expect(try sbd.sb("send", s.id, "first --model opus") == "pasted\n")
+    #expect(try sbd.sb("send", s.id, "lag first --model opus") == "pasted\n")
     #expect(try sbd.sb("send", s.id, "second") == "queued\n")
     try sbd.waitFor(s.id, "the second reply", timeout: 20) { $0.lastReply == "Done: second" }
     let prompts = try sbd.events(s.id).filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
-    #expect(prompts == ["hello", "first --model opus", "second"])
+    #expect(prompts == ["hello", "lag first --model opus", "second"])
   }
 
   @Test func deliversAQueuedMessageAfterATurnThatEndsWithoutAStop() throws {

@@ -16,6 +16,19 @@ import Testing
     defer { try? FileManager.default.removeItem(atPath: dir) }
     var s = Session(id: "s1", name: "one", cwd: "/tmp/a", branch: "main", claudeSessionId: "u1", created: 5)
     s.waitNote = "CI"
+    s.waits = [
+      Wait(
+        id: "w1", kind: .botReview, pr: Wait.PullRequest(repository: "PostHog/posthog", number: 1204), who: "ReviewHog",
+        by: .claude, created: 6),
+      Wait(
+        id: "w2", kind: .deploy, pr: Wait.PullRequest(number: 1204), environment: "prod-us", service: "feature-flags",
+        note: "merge when green", created: 7, then: .notify),
+      Wait(
+        id: "w3", kind: .session, session: Wait.SessionTarget(id: "s2", name: "flag-cache"), state: .needsYou,
+        created: 8),
+      Wait(id: "w4", kind: .date, until: 90_000, created: 9),
+    ]
+    s.notes = [Note(id: "n1", text: "ask Alex about the cache", by: .claude, t: 10)]
     do {
       let store = try Store(path: "\(dir)/sb.db")
       try store.save(s)
@@ -34,6 +47,17 @@ import Testing
     try store.delete(session: "s1")
     #expect(try store.sessions().isEmpty)
     #expect(try store.events(session: "s1").isEmpty)
+  }
+
+  @Test func v01SessionRowDecodesWithNoWaitsOrNotes() throws {
+    let row = """
+      {"claudeSessionId": "u1", "created": 5, "cwd": "/tmp/a", "done": false, "id": "s1", "name": "one",
+       "started": true, "waitNote": "CI on #12"}
+      """
+    let s = try JSONCoding.decode(Session.self, from: row)
+    #expect(s.waitNote == "CI on #12")
+    #expect(s.waits == nil)
+    #expect(s.notes == nil)
   }
 }
 

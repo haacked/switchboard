@@ -13,20 +13,23 @@ final class Instance {
     .deletingLastPathComponent()
   static let bin = ProcessInfo.processInfo.environment["SB_BIN_DIR"] ?? root.appendingPathComponent(".build/debug").path
   static let stub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/claude-stub").path
+  static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
 
   let home: Home
   let client: Client
   private var process: Process?
 
   /// The folder is under /tmp, because a Unix socket path can't exceed 103
-  /// bytes. The stop rule runs every 0.2 s, so idle stops come quickly.
-  init(idleStopSeconds: Int = 600) throws {
+  /// bytes. The stop rule runs every 0.2 s, so idle stops come quickly. The
+  /// panes run /bin/sh by default, because a login shell with the user's
+  /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
+  init(idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh") throws {
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     home = Home(path: String(cString: dir))
     let config: JSON = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
-      "worktreeRoot": .string("\(home.path)/worktrees"),
+      "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
     ]
     try config.text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
@@ -65,11 +68,20 @@ final class Instance {
     process = nil
   }
 
-  /// Runs sb with this instance's SB_HOME.
+  /// Runs sb with this instance's SB_HOME. CLAUDECODE and SB_SESSION_ID mark a
+  /// command that Claude runs in a session, so they come only from `env`.
   @discardableResult
-  func sb(_ args: String...) throws -> String {
+  func sb(_ args: String..., env extra: [String: String] = [:]) throws -> String {
+    try sb(args, env: extra)
+  }
+
+  @discardableResult
+  func sb(_ args: [String], env extra: [String: String] = [:]) throws -> String {
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home.path
+    env["CLAUDECODE"] = nil
+    env["SB_SESSION_ID"] = nil
+    env.merge(extra) { $1 }
     let r = try runCommand("\(Instance.bin)/sb", args, env: env)
     guard r.status == 0 else { throw TestError(description: "sb \(args.joined(separator: " ")) failed: \(r.stderr)") }
     return r.stdout
@@ -82,6 +94,10 @@ final class Instance {
   }
 
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
+
+  func advanceClock(_ ms: Int64) throws {
+    _ = try client.call("clock", ["advance": .number(Double(ms))])
+  }
 
   /// Waits for the session to match, and returns it.
   @discardableResult

@@ -9,10 +9,13 @@
 #                    does. Claude Code reports the idle prompt later.
 #   fail ...         ends the turn with StopFailure, as an API error does
 #   clear <uuid>     switches to another conversation, as /clear does
+#   linger <n>       waits n s after SIGTERM before it exits
+#   lag ...          waits 1 s before it reports the prompt, which keeps the
+#                    message in flight
 #   anything else    replies "Done: <prompt>"
 # It records its arguments in $SB_HOME/stub-args.log.
 
-settings='' session='' prompt='' source=startup
+settings='' session='' prompt='' source=startup linger=0
 args=("$@")
 while [ $# -gt 0 ]; do
   case $1 in
@@ -36,6 +39,7 @@ hook() {
 
 turn() {
   local p=$1 reply n
+  case $p in lag*) sleep 1 ;; esac
   hook UserPromptSubmit "$(jq -nc --arg p "$p" '{prompt: $p}')"
   case $p in
   slow*)
@@ -64,6 +68,10 @@ turn() {
     echo "⏺ cleared, now $session"
     return
     ;;
+  linger*)
+    linger=${p#linger }
+    reply="I'll linger $linger s when I stop."
+    ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
   *) reply="Done: $p" ;;
@@ -72,7 +80,7 @@ turn() {
   hook Stop "$(jq -nc --arg r "$reply" '{last_assistant_message: $r}')"
 }
 
-trap 'hook SessionEnd "{\"reason\":\"other\"}"; exit 143' TERM
+trap 'hook SessionEnd "{\"reason\":\"other\"}"; sleep "$linger"; exit 143' TERM
 hook SessionStart "{\"source\":\"$source\"}"
 echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"

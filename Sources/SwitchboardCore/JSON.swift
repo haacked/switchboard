@@ -56,8 +56,10 @@ public enum JSON: Codable, Equatable, Sendable {
     return nil
   }
 
+  /// Nil for a number that isn't a whole number in Int's range. Int(n) would
+  /// stop the process on such a number. A client can send any number.
   public var int: Int? {
-    if case .number(let n) = self { return Int(n) }
+    if case .number(let n) = self { return Int(exactly: n) }
     return nil
   }
 

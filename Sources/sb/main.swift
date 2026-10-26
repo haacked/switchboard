@@ -15,7 +15,15 @@ let usage = """
     stop <session>                stop the session's claude
     resume <session> [--prompt P] resume the session's claude
     done <session>, undone <session>
-    wait <session> <note> | wait <session> --clear
+    wait <session> <note>         wait on something by hand
+    wait [<session>] --kind K [--target T] [--who W] [--env E] [--service S]
+         [--state S] [--until WHEN] [--note N] [--then resume|notify]
+                                  wait on a PR, a deploy, another session, or a
+                                  time. Inside a session, the session is optional
+    wait <session> --clear [--id W]
+    wait <session> --resolve <what happened> [--id W]
+    note <session> [<text>]       add a note, or list the notes
+    note <session> --rm <id>
     rename <session> <name>
     rm <session> [--worktree]     remove the session, and its worktree with --worktree
     attach <session> [--shell]    attach this terminal to the Claude pane or the shell
@@ -29,9 +37,17 @@ let usage = """
     service install|uninstall|status
     version
 
-  A <session> is an id, a unique id prefix, or a unique name. For send, wait,
-  and rename, every word after the session is text, so put --json before the
-  session. SB_HOME picks the state folder (default ~/.sb).
+  A <session> is an id, a unique id prefix, or a unique name. For send, rename,
+  and the text forms of wait and note, every word after the session is text,
+  so put --json before the session. SB_HOME picks the state folder (default
+  ~/.sb).
+
+  Wait kinds: ci, review (needs --who), bot-review, approval, queue, merge, and
+  deploy (--env dev, prod-us, prod-eu, or prod) take a PR as --target, or wait
+  on the session's own PR. session takes another session as --target and a
+  --state (default done). date needs --until (2h, 2026-10-26, or
+  2026-10-26T09:00). manual takes an optional --until that returns it to Needs
+  you. --then notify moves the session to Needs you instead of resuming it.
   """
 
 struct Args {
@@ -42,9 +58,10 @@ struct Args {
   /// After `literalAfter` positional arguments, every argument is text, even
   /// one that starts with --. Flags for those commands go before the session.
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
-    let valued: Set<String> = [
+    let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--until", "--timeout", "--session", "--since",
-    ]
+      "--id", "--resolve", "--rm",
+    ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
       if positional.count >= literalAfter {
@@ -133,6 +150,7 @@ func printSession(_ s: SessionSummary) {
   if let b = s.branch { print("  branch:  \(b)") }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))") }
+  printWaitsAndNotes(s)
 }
 
 func sessionCommand(_ op: String, _ a: Args, extra: [String: JSON] = [:]) {
@@ -270,8 +288,10 @@ guard let command = argv.popFirst() else {
   print(usage)
   exit(0)
 }
-// The text of these commands is everything after the session.
-let a = Args(argv, literalAfter: ["send", "wait", "rename"].contains(command) ? 1 : .max)
+// The text of these commands is everything after the session. `wait` and
+// `note` read flags instead when the word after the session is one.
+var a = Args(argv, literalAfter: ["send", "wait", "rename", "note"].contains(command) ? 1 : .max)
+if ["wait", "note"].contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {
 case "hook":
@@ -300,10 +320,9 @@ case "done":
 case "undone":
   sessionCommand("done", a, extra: ["done": .bool(false)])
 case "wait":
-  let note = a.positional.dropFirst().joined(separator: " ")
-  let clear = note == "--clear" || a.switches.contains("--clear")
-  if !clear && note.isEmpty { die("wait needs a note, or --clear") }
-  sessionCommand("wait", a, extra: ["note": clear ? .null : .string(note)])
+  waitCommand(a)
+case "note":
+  noteCommand(a)
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])

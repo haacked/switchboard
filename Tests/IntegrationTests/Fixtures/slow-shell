@@ -1,0 +1,5 @@
+#!/bin/sh
+# A pane shell that takes 1.5 s to start, as a login shell with a user's setup
+# can. It then runs /bin/sh with the same arguments.
+sleep 1.5
+exec /bin/sh "$@"
