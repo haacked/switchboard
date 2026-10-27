@@ -1,0 +1,22 @@
+state:
+  hoghooks:
+    api_image:
+      sha: sha256:4d08d358644e0f19f5a2db5bd361a90316c17a263b1e8b0adc4f1d4b012a08bb
+    deploy_info:
+      blocked: false
+      commit:
+        author: hpouillot
+        committer: web-flow
+        message: "feat(error-tracking): add zstd compression to symbol_data container format (#51484)\n\nSigned-off-by: Hugues Pouillot <hpouillot@gmail.com>"
+        sha: 064014768781eabb82667f8a1b88809604bab982
+      labels: []
+      repository: PostHog/posthog
+      timestamp: "2026-03-19T09:44:03Z"
+    image:
+      dev: null
+    janitor_image:
+      sha: sha256:f97c5bb606658bd02d9b616c6dffe44ccf90fb3993e6f072b169080609b5c829
+    migrator_image:
+      sha: sha256:4164c95f9cbdf51d7232ed8124ec76252c19b8831a1a77bffacd44da9372b755
+    worker_image:
+      sha: sha256:5e64eac729ee6c26cd87f067e26804ee9005ba78b9fec789a1b6cfd5b12477f8

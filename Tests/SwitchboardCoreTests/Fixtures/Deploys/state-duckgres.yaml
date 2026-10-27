@@ -1,0 +1,46 @@
+state:
+  duckgres:
+    deploy_info:
+      commit:
+        author: fuziontech
+        committer: web-flow
+        message: 'deps: duckdb-go-bindings v0.10505.0-posthog.4 (Brotli CVE-2026-111497) (#1267)'
+        sha: 3da57b65843596d95001cdb3904407b58e22492e
+      dev:
+        author: fuziontech
+        committer: web-flow
+        message: 'deps: duckdb-go-bindings v0.10505.0-posthog.4 (Brotli CVE-2026-111497) (#1267)'
+        sha: 3da57b65843596d95001cdb3904407b58e22492e
+      labels: []
+      prod:
+        author: fuziontech
+        committer: web-flow
+        message: |-
+          fix(admin): admit iceberg fields in warehouse PUT strict-decode (#557)
+
+          PR #554 added the Iceberg fields to ManagedWarehouse (configstore) and
+          to the upsert column allowlist, but missed the strict-decode struct
+          managedWarehouseRequest that gates which top-level keys a PUT body may
+          carry. The doc comment on that struct literally warns: "If you add a
+          field here without a matching tag on ManagedWarehouse, strict decode
+          will accept it and the merge will silently drop it."
+
+          Without this fix, `PUT /orgs/<id>/warehouse` with `{"iceberg":{...}}`
+          returns 400 "unknown field iceberg" — making it impossible to enable
+          Iceberg via admin API on existing warehouses (the whole reason the
+          drift correction in #555 exists).
+
+          Adds the matching test mirroring TestPutWarehouseDisablesPgBouncerWhenSetToFalse.
+
+          Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+        sha: dba33087f2e62629b4bdd2a0318eb71762879e71
+      repository: PostHog/duckgres
+      timestamp: "2026-10-24T12:47:21-07:00"
+    image:
+      dev: 3da57b65843596d95001cdb3904407b58e22492e@sha256:5352d07774585d3c5309c9fff210fef3265725adf6cd32c66c71f481fa366492
+      prod: 3da57b65843596d95001cdb3904407b58e22492e@sha256:5352d07774585d3c5309c9fff210fef3265725adf6cd32c66c71f481fa366492
+      sha: "3da57b65843596d95001cdb3904407b58e22492e@sha256:5352d07774585d3c5309c9fff210fef3265725adf6cd32c66c71f481fa366492"
+    prod_promotion_notifications:
+      channel: C0AS47DHT9D # #alerts-managed-warehouse
+    require_prod_approval: true
+    team: managed-warehouse

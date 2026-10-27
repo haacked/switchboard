@@ -1,0 +1,28 @@
+state:
+  posthog:
+    deploy_info:
+      commit:
+        author: posthog[bot]
+        committer: web-flow
+        message: 'feat(signals): trigger activity summary updates on weighted views (#123218)'
+        sha: ac70ab68b2bba96d0c3c30743bf8e5aff39cd9cf
+      dev:
+        author: posthog[bot]
+        committer: web-flow
+        message: 'feat(signals): trigger activity summary updates on weighted views (#123218)'
+        sha: ac70ab68b2bba96d0c3c30743bf8e5aff39cd9cf
+      labels:
+        - self-driving
+      prod:
+        author: posthog[bot]
+        committer: web-flow
+        message: 'feat(signals): train anomaly detectors into stored model artifacts (#123112)'
+        sha: 053a4f952205e52907bf176a617337993db99286
+      repository: PostHog/posthog
+      timestamp: "2026-10-25T21:42:30Z"
+    image:
+      dev: ac70ab68b2bba96d0c3c30743bf8e5aff39cd9cf@sha256:2d5da82b55caea0f4c41f6f171f4a529d21b0de83f72204fbffc2dfc76096962
+      prod: 053a4f952205e52907bf176a617337993db99286@sha256:8f797db0993a2af3375a27a6a6dc6be3f95ea8d05ebf21a918e7a9f2fbbd6255
+      sha: ac70ab68b2bba96d0c3c30743bf8e5aff39cd9cf@sha256:2d5da82b55caea0f4c41f6f171f4a529d21b0de83f72204fbffc2dfc76096962
+    notifications:
+      channel: C02UK0QA18S # #platform-bots

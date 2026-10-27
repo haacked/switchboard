@@ -1,0 +1,21 @@
+state:
+  ai-gateway-billing:
+    deploy_info:
+      commit:
+        author: brandonleung
+        committer: web-flow
+        message: 'feat(tokens): read scoped token cap and remaining by hash (#581)'
+        sha: cee03eaa9533eb76ee4e91b4921c85effbc2fe73
+      dev:
+        author: brandonleung
+        committer: web-flow
+        message: 'feat(tokens): read scoped token cap and remaining by hash (#581)'
+        sha: cee03eaa9533eb76ee4e91b4921c85effbc2fe73
+      labels: []
+      repository: PostHog/ai-gateway
+      timestamp: "2026-10-23T15:43:47-04:00"
+    image:
+      dev: sha256:c719cc5d32313b60dff9d499e5a3cd9203cdf26c08368c224babc30567a0dacf
+      sha: sha256:c719cc5d32313b60dff9d499e5a3cd9203cdf26c08368c224babc30567a0dacf
+    require_prod_approval: true
+    team: agent-infrastructure

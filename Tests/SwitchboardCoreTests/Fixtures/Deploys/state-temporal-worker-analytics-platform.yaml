@@ -1,0 +1,25 @@
+state:
+  temporal-worker-analytics-platform:
+    deploy_info:
+      commit:
+        author: null
+        committer: null
+        message: ""
+        sha: null
+      dev:
+        author: null
+        committer: null
+        message: ""
+        sha: null
+      labels: []
+      prod:
+        author: jzhu13
+        committer: web-flow
+        message: 'feat(alerts): create and delete alerts that have no source row (#123588)'
+        sha: 363cbcbc7e643e7404de72f84c32e75b3de21789
+      repository: PostHog/posthog
+      timestamp: "2026-10-26T20:36:44Z"
+    image:
+      dev: c636770135a647a0aad6b305291522fd99ee457d@sha256:b749347cd6c267af48a7b4ec95cab64778a7f94221a6e92d4f3983d5e029e0c6
+      prod: 363cbcbc7e643e7404de72f84c32e75b3de21789@sha256:41038cdc508e2ac6ec19716912d67a97db8ca68e6596d128c3edeeeb8225a09b
+      sha: c636770135a647a0aad6b305291522fd99ee457d@sha256:b749347cd6c267af48a7b4ec95cab64778a7f94221a6e92d4f3983d5e029e0c6

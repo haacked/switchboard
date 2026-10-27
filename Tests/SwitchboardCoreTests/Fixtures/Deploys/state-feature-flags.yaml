@@ -1,0 +1,33 @@
+state:
+  feature-flags:
+    canary:
+      enabled: true
+      image: sha-bd924da
+      pr_number: 121648
+      started_at: "2026-10-23T18:09:15Z"
+      started_by: gustavohstrassburger
+      target_environment: dev
+      weight: 5
+    deploy_info:
+      commit:
+        author: Piccirello
+        committer: web-flow
+        message: 'feat(security): log out-of-band interaction domains in the rust guards (#118875)'
+        sha: a706fcc2eda17bb6ebafa270285bc39b7a2db629
+      dev:
+        author: Piccirello
+        committer: web-flow
+        message: 'feat(security): log out-of-band interaction domains in the rust guards (#118875)'
+        sha: a706fcc2eda17bb6ebafa270285bc39b7a2db629
+      labels: []
+      prod:
+        author: Piccirello
+        committer: web-flow
+        message: 'feat(security): log out-of-band interaction domains in the rust guards (#118875)'
+        sha: a706fcc2eda17bb6ebafa270285bc39b7a2db629
+      repository: PostHog/posthog
+      timestamp: "2026-10-24T00:40:34Z"
+    image:
+      dev: sha256:4711f592bd317d739b5768504a55609fbb80fc47a0c33da357124f4edb2cc432
+      prod: sha256:4711f592bd317d739b5768504a55609fbb80fc47a0c33da357124f4edb2cc432
+      sha: sha256:4711f592bd317d739b5768504a55609fbb80fc47a0c33da357124f4edb2cc432

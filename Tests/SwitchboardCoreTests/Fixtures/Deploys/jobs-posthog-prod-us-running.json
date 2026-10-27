@@ -1,0 +1,152 @@
+{
+  "total_count": 21,
+  "jobs": [
+    {
+      "name": "get_changed_apps",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:43:57Z",
+      "completed_at": "2026-10-26T23:44:06Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Dev: Update Image SHA / update_sha",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:54:10Z",
+      "completed_at": "2026-10-26T23:54:23Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Slack: Dev deploy started / Slack: dev deploy started",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:54:24Z",
+      "completed_at": "2026-10-26T23:54:35Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / PostHog/posthog: Mark deployment in progress (dev) / Update deployment status",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:54:24Z",
+      "completed_at": "2026-10-26T23:54:34Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Dev: ArgoCD Sync / sync_argo",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:54:36Z",
+      "completed_at": "2026-10-27T00:10:38Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Dev: Check Posthog Deployment / Check Deployment",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:10:40Z",
+      "completed_at": "2026-10-27T00:11:13Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / PostHog/posthog: Notify PRs deployed (dev) / Notify PRs deployed to dev",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:11:14Z",
+      "completed_at": "2026-10-27T00:11:27Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Dev: Compute combined result",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:11:14Z",
+      "completed_at": "2026-10-27T00:11:23Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / PostHog/posthog: Update deployment status (dev) / Update deployment status",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:11:24Z",
+      "completed_at": "2026-10-27T00:11:35Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Slack: Dev deploy result / Slack: dev deploy result",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:11:24Z",
+      "completed_at": "2026-10-27T00:11:34Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Prod: Update Image SHA / update_sha",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:19:49Z",
+      "completed_at": "2026-10-27T00:20:02Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / PostHog/posthog: Mark deployment in progress (prod-us) / Update deployment status",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:20:03Z",
+      "completed_at": "2026-10-27T00:20:13Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / PostHog/posthog: Mark deployment in progress (prod-eu) / Update deployment status",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:20:03Z",
+      "completed_at": "2026-10-27T00:20:13Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Slack: Prod EU deploy started / Slack: prod-eu deploy started",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:20:03Z",
+      "completed_at": "2026-10-27T00:20:14Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Slack: Prod US deploy started / Slack: prod-us deploy started",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:20:03Z",
+      "completed_at": "2026-10-27T00:20:15Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Prod EU: ArgoCD Sync / sync_argo",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:20:15Z",
+      "completed_at": "2026-10-27T00:31:11Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Prod US: ArgoCD Sync / sync_argo",
+      "status": "in_progress",
+      "conclusion": null,
+      "started_at": "2026-10-27T00:20:16Z",
+      "completed_at": null
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Prod EU: Compute combined result",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:31:13Z",
+      "completed_at": "2026-10-27T00:31:22Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / PostHog/posthog: Notify PRs deployed (prod-eu) / Notify PRs deployed to prod-eu",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:31:12Z",
+      "completed_at": "2026-10-27T00:31:29Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / PostHog/posthog: Update deployment status (prod-eu) / Update deployment status",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:31:23Z",
+      "completed_at": "2026-10-27T00:31:31Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD (posthog) / Slack: Prod EU deploy result / Slack: prod-eu deploy result",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-27T00:31:23Z",
+      "completed_at": "2026-10-27T00:31:33Z"
+    }
+  ]
+}

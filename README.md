@@ -81,3 +81,5 @@ bin/bundle      # build/Switchboard.app
 ```
 
 `spikes/phase0/` holds the Phase 0 tests that measured the Claude Code behaviors this relies on.
+
+`SwitchboardCore/Deploys.swift` reads PostHog's deploy signals for the deploy poller that comes later: the deploy comment on PostHog/posthog PRs, the PostHog/charts state files, and the charts deploy runs' sync jobs.

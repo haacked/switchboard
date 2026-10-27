@@ -1,0 +1,40 @@
+{
+  "total_count": 5,
+  "jobs": [
+    {
+      "name": "get_changed_apps",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-26T23:56:37Z",
+      "completed_at": "2026-10-26T23:56:47Z"
+    },
+    {
+      "name": "Dev: Deploy with ArgoCD (posthog) / Dev: Update Image SHA / update_sha",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "started_at": "2026-10-26T23:56:47Z",
+      "completed_at": "2026-10-27T00:06:07Z"
+    },
+    {
+      "name": "Prod: Deploy with ArgoCD",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-27T00:06:08Z",
+      "completed_at": "2026-10-27T00:06:07Z"
+    },
+    {
+      "name": "Classify deployment failure",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-27T00:06:08Z",
+      "completed_at": "2026-10-27T00:06:07Z"
+    },
+    {
+      "name": "Incident.io: Notify on Failure",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-27T00:06:08Z",
+      "completed_at": "2026-10-27T00:06:08Z"
+    }
+  ]
+}
