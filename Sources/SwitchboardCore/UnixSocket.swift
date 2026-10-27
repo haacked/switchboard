@@ -44,6 +44,13 @@ public enum UnixSocket {
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
   }
 
+  /// Whether the peer closed its end of the connection. It doesn't block.
+  public static func peerClosed(_ fd: Int32) -> Bool {
+    var byte: UInt8 = 0
+    let n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+    return n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+  }
+
   public static func write(_ fd: Int32, _ data: Data) throws {
     try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
       var offset = 0

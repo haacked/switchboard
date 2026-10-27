@@ -40,6 +40,8 @@ public struct SessionFacts: Equatable, Sendable {
   /// The reason line of a wait that resolved with `notify`. The next prompt,
   /// or a new wait, clears it.
   public var waitOutcome: String?
+  /// Open and deferred permission prompts and questions, oldest first.
+  public var cards: [Card] = []
 
   public init() {}
 
@@ -119,6 +121,7 @@ public struct SessionFacts: Equatable, Sendable {
     default:
       break
     }
+    applyCards(event)
   }
 
   private mutating func startTurn(_ t: Int64) {
@@ -128,7 +131,7 @@ public struct SessionFacts: Equatable, Sendable {
     }
   }
 
-  private mutating func endTurn() {
+  mutating func endTurn() {
     turnRunning = false
     turnStarted = nil
     runningTool = nil
@@ -160,6 +163,10 @@ public enum Attention {
 
   public static func evaluate(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict {
     if session.done { return Verdict(state: .done, reason: "marked done") }
+    if let card = facts.cards.first {
+      let reason = card.kind == .permission ? "approve \(card.summary)" : "answer: \(card.summary)"
+      return Verdict(state: .needsYou, reason: oneLine(reason))
+    }
     if let p = facts.openPermission {
       return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
     }

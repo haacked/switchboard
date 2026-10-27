@@ -47,7 +47,15 @@ struct ContentView: View {
         if let s = model.selected {
           SessionView(session: s).id(s.id)
         } else {
-          BoardView()
+          Picker("View", selection: $model.showingBoard) {
+            Text("Queue (\(model.needsYou.count))").tag(false)
+            Text("Board").tag(true)
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .frame(width: 240)
+          .padding(8)
+          if model.showingBoard { BoardView() } else { QueueView() }
         }
       }
     }

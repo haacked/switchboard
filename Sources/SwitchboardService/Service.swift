@@ -35,6 +35,8 @@ public final class Service {
 
   var entries: [String: Entry] = [:]
   var snapshot = Snapshot()
+  /// The PermissionRequest hooks that wait for an answer, by card id.
+  var held: [Int64: HeldRequest] = [:]
 
   /// The panes and processes from one tmux and ps pass.
   struct Snapshot {
@@ -87,6 +89,8 @@ public final class Service {
           break
         }
       }
+      // A restart ended every held request. A deferred question needs none.
+      e.facts.cards.removeAll { !$0.deferred }
       entries[session.id] = e
     }
     snapshot = buildSnapshot()
@@ -94,12 +98,16 @@ public final class Service {
 
   // MARK: Requests
 
-  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals", "resolve-wait"]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait"]
+  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals", "resolve-wait", "answer"]
+  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer"]
 
-  public func handle(_ request: Request) -> Response {
+  /// `hookGone` reports whether the client closed its connection, which a
+  /// held PermissionRequest checks while it waits.
+  public func handle(_ request: Request, hookGone: @escaping () -> Bool = { false }) -> Response {
     do {
       switch request.op {
+      case "hook":
+        return try handleHook(request.args, hookGone: hookGone)
       case "new":
         let args = try JSONCoding.convert(request.args, to: NewSession.self)
         let folder = try prepareFolder(args)
@@ -128,8 +136,6 @@ public final class Service {
     switch op {
     case "ping":
       return ["pid": .number(Double(getpid())), "home": .string(home.path), "version": .string(Version.text)]
-    case "hook":
-      return try hook(args)
     case "ls":
       return try JSON(encoding: summaries())
     case "get":
@@ -177,6 +183,8 @@ public final class Service {
         return try JSON(encoding: store.events(since: Int64(since), session: session, limit: limit))
       }
       return try JSON(encoding: store.events(session: session, limit: limit, newest: true))
+    case "answer":
+      return try answer(args)
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
@@ -199,12 +207,13 @@ public final class Service {
 
   // MARK: Hooks
 
-  private func hook(_ args: JSON) throws -> JSON {
+  /// Records a hook event and returns it, or nil for an unknown session.
+  func hook(_ args: JSON) throws -> Event? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
-      return [:]
+      return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
-    record(id, kind, payload)
+    let event = record(id, kind, payload)
     switch kind {
     case "SessionStart":
       // `/clear` and `/resume` in the pane start another conversation, which
@@ -230,7 +239,7 @@ public final class Service {
     default:
       break
     }
-    return [:]
+    return event
   }
 
   /// Appends an event to the log and folds it into the session's facts.
@@ -247,6 +256,7 @@ public final class Service {
       Attention.track(e.session, &e.facts, now: event.t)
       entries[id] = e
     }
+    releaseCards(id)
     return event
   }
 
@@ -463,8 +473,10 @@ public final class Service {
     }
   }
 
+  /// Defers the session's held questions first, so that their cards stay.
   func stop(_ id: String, reason: String) throws {
     guard case .running(let pid) = claudeState(id) else { throw APIError("\(id) is not running") }
+    deferQuestions(id)
     kill(pid_t(pid), SIGTERM)
     record(id, "stopped", ["reason": .string(reason), "pid": .number(Double(pid))])
   }
@@ -622,6 +634,7 @@ public final class Service {
         }
       }
       resolveDueWaits(now: now)
+      deferQuestions(now: now)
     }
   }
 
@@ -649,12 +662,14 @@ public final class Service {
     let e = entries[id]!
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs())
     let s = e.session
-    return SessionSummary(
+    var summary = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
       state: verdict.state, reason: verdict.reason, since: e.facts.stateSince, lastActivity: e.facts.lastActivity,
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0, lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [])
+    summary.cards = e.facts.cards
+    return summary
   }
 
   // MARK: Settings
@@ -667,9 +682,10 @@ public final class Service {
   /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
   /// with no output when sbd is down, so the session shows no hook errors.
   private func writeClaudeSettings() throws {
-    let handler: JSON = ["type": "command", "command": .string("\(shellQuote(sbPath)) hook"), "timeout": 30]
     var hooks: [String: JSON] = [:]
     for event in Service.hookEvents {
+      let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
+      let handler: JSON = ["type": "command", "command": .string("\(shellQuote(sbPath)) hook"), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]
     }
     let text = JSON.object(["hooks": .object(hooks)]).text

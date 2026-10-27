@@ -14,6 +14,10 @@ final class BoardModel: ObservableObject {
   @Published var actionError: String?
   @Published var selection: String?
   @Published var showingNew = false
+  /// With no session selected, the detail shows the Board instead of the Queue.
+  @Published var showingBoard = false
+  /// The Queue item that the user last moved to.
+  @Published var queueFocus: String?
 
   let client = Client()
   /// Polls run apart from actions, because an action such as `open` or `new`
@@ -27,6 +31,11 @@ final class BoardModel: ObservableObject {
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou } }
 
   var selected: SessionSummary? { sessions.first { $0.id == selection } }
+
+  /// The focused Queue item while it still needs you, else the oldest one.
+  var currentQueueItem: String? {
+    needsYou.contains { $0.id == queueFocus } ? queueFocus : needsYou.first?.id
+  }
 
   func start() {
     guard timer == nil else { return }
@@ -98,6 +107,15 @@ final class BoardModel: ObservableObject {
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
   func send(_ id: String, _ text: String) { perform("send", ["session": .string(id), "text": .string(text)]) }
+
+  /// Answers a card: allow, deny with an optional message, or one answer per question.
+  func answer(_ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil) {
+    var args: [String: JSON] = ["session": .string(card.session), "card": .number(Double(card.id))]
+    if let behavior { args["behavior"] = .string(behavior) }
+    if !message.isEmpty { args["message"] = .string(message) }
+    if let answers { args["answers"] = .array(answers.map(JSON.string)) }
+    perform("answer", args)
+  }
   func remove(_ id: String) {
     if selection == id { selection = nil }
     perform("rm", ["session": .string(id)])
@@ -116,11 +134,15 @@ final class BoardModel: ObservableObject {
     Result { try Client().terminals(id) }
   }
 
-  /// Selects the next session that needs you, after the selected one.
+  /// Moves to the next Queue item while the Queue shows. Otherwise selects
+  /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
     let list = needsYou
     guard !list.isEmpty else { return }
-    if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {
+    if selection == nil && !showingBoard {
+      let i = list.firstIndex { $0.id == currentQueueItem } ?? -1
+      queueFocus = list[(i + 1) % list.count].id
+    } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {
       selection = list[(i + 1) % list.count].id
     } else {
       selection = list[0].id

@@ -12,6 +12,13 @@
 #   linger <n>       waits n s after SIGTERM before it exits
 #   lag ...          waits 1 s before it reports the prompt, which keeps the
 #                    message in flight
+#   perm <command>   asks permission to run a Bash command
+#   pick             asks two questions with AskUserQuestion, the second
+#                    one multi-select
+#   For perm and pick, the PermissionRequest hook runs while a stand-in for
+#   Claude Code's dialog reads a line from the terminal: y allows, and esc
+#   refuses and kills the hook, as Claude Code closes the request. timeout
+#   kills the hook and leaves the dialog open, as the hook's timeout does.
 #   anything else    replies "Done: <prompt>"
 # It records its arguments in $SB_HOME/stub-args.log.
 
@@ -31,11 +38,106 @@ done
 printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
 
-# hook <event> [json fields]
-hook() {
-  jq -nc --arg e "$1" --arg s "$session" --argjson f "${2:-{\}}" '{hook_event_name: $e, session_id: $s} + $f' |
-    sh -c "$hook_cmd" >/dev/null
+# payload <event> [json fields]: a hook payload shaped like claude's.
+payload() {
+  jq -nc --arg e "$1" --arg s "$session" --argjson f "${2:-{\}}" '{hook_event_name: $e, session_id: $s} + $f'
 }
+
+# hook <event> [json fields]
+hook() { payload "$@" | sh -c "$hook_cmd" >/dev/null; }
+
+# dialog <fields>: runs the PermissionRequest hook while the terminal's dialog
+# waits for a line, and prints the first answer: "hook <output>" or
+# "terminal <line>". A hook that prints nothing made no decision, so the
+# dialog keeps waiting. The hook's pid goes to $SB_HOME/held-hook.pid.
+dialog() {
+  local out term hook_pid reader_pid answer=''
+  out=$(mktemp) term=$(mktemp)
+  payload PermissionRequest "$1" | sh -c "exec $hook_cmd" >"$out" &
+  hook_pid=$!
+  echo "$hook_pid" >"$SB_HOME/held-hook.pid"
+  { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
+  reader_pid=$!
+  while [ -z "$answer" ]; do
+    if [ -n "$hook_pid" ] && ! kill -0 "$hook_pid" 2>/dev/null; then
+      [ -s "$out" ] && answer="hook $(cat "$out")"
+      hook_pid=''
+    fi
+    if [ -z "$answer" ] && [ "$(cat "$term")" = timeout ]; then
+      [ -n "$hook_pid" ] && kill "$hook_pid"
+      : >"$term"
+      { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
+      reader_pid=$!
+    fi
+    [ -z "$answer" ] && [ -s "$term" ] && answer="terminal $(cat "$term")"
+    sleep 0.1
+  done
+  kill "$reader_pid" 2>/dev/null
+  [ "$answer" = "terminal esc" ] && [ -n "$hook_pid" ] && kill "$hook_pid"
+  rm -f "$out" "$term"
+  printf '%s' "$answer"
+}
+
+# answered <tool> <input> <answer> [terminal input]: finishes a call that
+# dialog answered. It prints the reply, or nothing when the turn stopped.
+answered() {
+  local tool=$1 input=$2 answer=$3 decision
+  case $answer in
+  "terminal y")
+    input=${4:-$input}
+    ;;
+  "terminal esc")
+    stopped
+    return
+    ;;
+  hook*)
+    decision=$(printf '%s' "${answer#hook }" | jq -c .hookSpecificOutput.decision)
+    case $(jq -r .behavior <<<"$decision") in
+    allow) input=$(jq -c --argjson i "$input" '.updatedInput // $i' <<<"$decision") ;;
+    deny)
+      if [ "$(jq -r .interrupt <<<"$decision")" = true ]; then
+        stopped
+      elif [ "$tool" = AskUserQuestion ]; then
+        echo "Waiting for your answer."
+      else
+        echo "Denied: $(jq -r .message <<<"$decision")"
+      fi
+      return
+      ;;
+    esac
+    ;;
+  esac
+  hook PostToolUse "$(jq -nc --arg t "$tool" --argjson i "$input" '{tool_name: $t, tool_use_id: "c1", tool_input: $i}')"
+  if [ "$tool" = AskUserQuestion ]; then
+    echo "Picked: $(jq -cS .answers <<<"$input")"
+  else
+    echo "Ran $(jq -r .command <<<"$input")"
+  fi
+}
+
+# call_tool <tool> <input> [input after a pick in the terminal]: runs a call
+# that needs permission, and prints the reply, or nothing when the turn
+# stopped.
+call_tool() {
+  local fields
+  fields=$(jq -nc --arg t "$1" --argjson i "$2" '{tool_name: $t, tool_input: $i}')
+  hook PreToolUse "$(jq -c '. + {tool_use_id: "c1"}' <<<"$fields")"
+  answered "$1" "$2" "$(dialog "$fields")" "${3:-}"
+}
+
+# stopped: ends the turn without a Stop, as an interruption does. Claude Code
+# reports the idle prompt later.
+stopped() {
+  echo "⏺ Interrupted" >&2
+  sleep 1
+  hook Notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+}
+
+questions='{"questions":[
+  {"question":"Which fruit?","header":"Fruit","multiSelect":false,
+   "options":[{"label":"apple","description":"A red fruit"},{"label":"cherry","description":"A small fruit"}]},
+  {"question":"Which colors?","header":"Colors","multiSelect":true,
+   "options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}'
 
 turn() {
   local p=$1 reply n
@@ -51,9 +153,7 @@ turn() {
     ;;
   interrupt*)
     hook PreToolUse '{"tool_name":"Bash","tool_use_id":"t2","tool_input":{"command":"sleep 100"}}'
-    echo "⏺ Interrupted"
-    sleep 1
-    hook Notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+    stopped
     return
     ;;
   fail*)
@@ -72,6 +172,15 @@ turn() {
     linger=${p#linger }
     reply="I'll linger $linger s when I stop."
     ;;
+  perm*)
+    reply=$(call_tool Bash "$(jq -nc --arg c "${p#perm }" '{command: $c}')")
+    [ -z "$reply" ] && return
+    ;;
+  pick*)
+    reply=$(call_tool AskUserQuestion "$questions" \
+      "$(jq -c '. + {answers: {"Which fruit?": "apple", "Which colors?": "red"}}' <<<"$questions")")
+    [ -z "$reply" ] && return
+    ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
   *) reply="Done: $p" ;;
@@ -81,6 +190,8 @@ turn() {
 }
 
 trap 'hook SessionEnd "{\"reason\":\"other\"}"; sleep "$linger"; exit 143' TERM
+# The dialog's reader runs in the background, where stdin would be /dev/null.
+exec 3<&0
 hook SessionStart "{\"source\":\"$source\"}"
 echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"

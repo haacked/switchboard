@@ -7,7 +7,6 @@ import SwitchboardCore
 final class SessionViewState: ObservableObject {
   @Published var terminals: Terminals?
   @Published var terminalsError: String?
-  @Published var message = ""
   @Published var confirmingRemove = false
 }
 
@@ -22,6 +21,13 @@ struct SessionView: View {
     VStack(spacing: 0) {
       header
       Divider()
+      if !session.cards.isEmpty {
+        VStack(spacing: 8) {
+          ForEach(session.cards) { CardView(card: $0) }
+        }
+        .padding(8)
+        Divider()
+      }
       if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
@@ -44,16 +50,8 @@ struct SessionView: View {
         ProgressView("Opening terminals…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       Divider()
-      HStack {
-        TextField("Message Claude…", text: $ui.message, axis: .vertical)
-          .lineLimit(1...4)
-          .textFieldStyle(.roundedBorder)
-          .onSubmit(send)
-        Button("Send", action: send)
-          .keyboardShortcut(.return, modifiers: [.command])
-          .disabled(ui.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-      }
-      .padding(8)
+      MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
+        .padding(8)
     }
     .task(id: session.id) {
       let id = session.id
@@ -134,12 +132,5 @@ struct SessionView: View {
       .padding(.horizontal, 8)
       .padding(.vertical, 3)
       .background(.bar)
-  }
-
-  private func send() {
-    let text = ui.message.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
-    model.send(session.id, text)
-    ui.message = ""
   }
 }

@@ -32,15 +32,27 @@ let usage = """
     events [--session S] [--since ID] [--follow]
                                   the newest events, or those after an id
 
+  Permission prompts and questions:
+    cards [<session>]             list the open ones
+    allow [--card N] <session>    allow the session's permission prompt
+    deny [--card N] <session> [message]
+                                  deny it. With a message, Claude reads it and
+                                  goes on. Without one, the turn stops.
+    answer [--card N] <session> <answer>...
+                                  answer the session's question, one answer per
+                                  question in order. Separate the labels of a
+                                  multi-select answer with commas. Text that
+                                  is no option's label goes as typed.
+
   Service:
     ping                          check that sbd answers
     service install|uninstall|status
     version
 
   A <session> is an id, a unique id prefix, or a unique name. For send, rename,
-  and the text forms of wait and note, every word after the session is text,
-  so put --json before the session. SB_HOME picks the state folder (default
-  ~/.sb).
+  deny, answer, and the text forms of wait and note, every word after the
+  session is text, so put --json and --card before the session. SB_HOME picks
+  the state folder (default ~/.sb).
 
   Wait kinds: ci, review (needs --who), bot-review, approval, queue, merge, and
   deploy (--env dev, prod-us, prod-eu, or prod) take a PR as --target, or wait
@@ -60,7 +72,7 @@ struct Args {
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--until", "--timeout", "--session", "--since",
-      "--id", "--resolve", "--rm",
+      "--id", "--resolve", "--rm", "--card",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -171,8 +183,16 @@ func hook() -> Never {
   guard let session = env["SB_SESSION_ID"], let payload = try? JSONCoding.decoder.decode(JSON.self, from: input) else {
     exit(0)
   }
-  // This timeout stays below the 30 s hook timeout in claude-settings.json.
-  _ = try? client.call("hook", ["session": .string(session), "payload": payload], timeout: 25)
+  // The timeout stays below the 30 s hook timeout in claude-settings.json. A
+  // PermissionRequest waits for its card's answer until Claude Code's own
+  // timeout ends the hook.
+  let held = payload["hook_event_name"]?.string == "PermissionRequest"
+  let timeout = held ? TimeInterval(Card.holdSeconds + 60) : 25
+  if let answer = try? client.call("hook", ["session": .string(session), "payload": payload], timeout: timeout),
+    answer.object?.isEmpty == false
+  {
+    print(answer.text)
+  }
   exit(0)
 }
 
@@ -290,7 +310,7 @@ guard let command = argv.popFirst() else {
 }
 // The text of these commands is everything after the session. `wait` and
 // `note` read flags instead when the word after the session is one.
-var a = Args(argv, literalAfter: ["send", "wait", "rename", "note"].contains(command) ? 1 : .max)
+var a = Args(argv, literalAfter: ["send", "wait", "rename", "note", "deny", "answer"].contains(command) ? 1 : .max)
 if ["wait", "note"].contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {
@@ -345,6 +365,10 @@ case "watch":
   watch(a)
 case "events":
   events(a)
+case "cards":
+  cards(a)
+case "allow", "deny", "answer":
+  answer(command, a)
 case "ping":
   let result = call("ping", timeout: 5)
   if a.json {

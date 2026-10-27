@@ -32,7 +32,7 @@ public final class Server {
       if line.isEmpty { continue }
       let response: Response
       if let request = try? JSONCoding.decoder.decode(Request.self, from: line) {
-        response = service.handle(request)
+        response = service.handle(request) { UnixSocket.peerClosed(client) }
       } else {
         response = .failure("can't parse the request")
       }

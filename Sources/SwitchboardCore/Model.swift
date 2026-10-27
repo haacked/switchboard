@@ -109,6 +109,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var lastReply: String?
   public var waits: [Wait]
   public var notes: [Note]
+  /// Open and deferred permission prompts and questions, oldest first.
+  public var cards: [Card] = []
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
