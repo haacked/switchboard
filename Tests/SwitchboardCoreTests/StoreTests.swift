@@ -3,14 +3,15 @@ import Testing
 
 @testable import SwitchboardCore
 
-@Suite struct StoreTests {
-  /// A folder for the database, because WAL mode adds files next to it.
-  func tempFolder() throws -> String {
-    let dir = NSTemporaryDirectory() + "sb-store-\(UUID().uuidString)"
-    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    return dir
-  }
+/// A new folder in the temporary folder. A database needs a folder of its
+/// own, because WAL mode adds files next to it.
+func tempFolder() throws -> String {
+  let dir = NSTemporaryDirectory() + "sb-test-\(UUID().uuidString)"
+  try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+  return dir
+}
 
+@Suite struct StoreTests {
   @Test func sessionsAndEventsRoundTrip() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -29,6 +30,7 @@ import Testing
       Wait(id: "w4", kind: .date, until: 90_000, created: 9),
     ]
     s.notes = [Note(id: "n1", text: "ask Alex about the cache", by: .claude, t: 10)]
+    s.claudeConfigDir = "/Users/me/.claude-personal"
     do {
       let store = try Store(path: "\(dir)/sb.db")
       try store.save(s)
@@ -59,6 +61,33 @@ import Testing
     #expect(s.waits == nil)
     #expect(s.notes == nil)
   }
+
+  @Test func aSessionThatAnOlderSbdStoredHasNoAccount() throws {
+    let json = #"{"id":"s1","name":"one","cwd":"/a","claudeSessionId":"u1","created":5,"started":true,"done":false}"#
+
+    #expect(try JSONCoding.decode(Session.self, from: json).claudeConfigDir == nil)
+  }
+
+  @Test func claudeSessionsRoundTripInIdOrder() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let two = ClaudeSession(
+      id: "u2", name: "fix-ci", cwd: "/w/two", account: "/Users/me/.claude-personal", status: "busy", job: "701cd24a",
+      pid: 57910, seen: 10, repo: "docket", branch: "haacked/two", worktree: true)
+    var one = ClaudeSession(id: "u1", cwd: "/w/one", account: "/Users/me/.claude", seen: 5)
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try store.save(claudeSessions: [two, one])
+      one.seen = 20
+      try store.save(claudeSessions: [two, one])
+    }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.claudeSessions() == [one, two])
+    try store.delete(claudeSession: "u2")
+    #expect(try store.claudeSessions() == [one])
+  }
 }
 
 @Suite struct ConfigTests {
@@ -69,5 +98,16 @@ import Testing
     #expect(c.claude == "claude")
     #expect(c.tickSeconds == 1)
     #expect(c.env["CLAUDE_CONFIG_DIR"] == "~/.claude-personal")
+  }
+
+  /// An empty list names no accounts. Only a missing one means discover them.
+  @Test(
+    arguments: [
+      (#"{"claudeConfigDirs": ["~/.claude", "~/.claude-personal"]}"#, ["~/.claude", "~/.claude-personal"]),
+      (#"{"claudeConfigDirs": []}"#, []),
+      ("{}", nil),
+    ] as [(String, [String]?)])
+  func claudeConfigDirsIsNilOnlyWhenMissing(_ text: String, _ dirs: [String]?) throws {
+    #expect(try JSONCoding.decode(Config.self, from: text).claudeConfigDirs == dirs)
   }
 }

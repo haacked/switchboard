@@ -76,6 +76,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var branchPrefix = ""
   /// The file that `followup import` reads when the request names none.
   public var followupsFile = "~/dev/haacked/notes/PostHog/Followups.md"
+  /// The Claude config folders whose sessions `sb import` lists, or nil for
+  /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
+  public var claudeConfigDirs: [String]?
 
   public init() {}
 
@@ -105,9 +108,15 @@ public struct Config: Codable, Equatable, Sendable {
     repoRoots = try c.decodeIfPresent([String].self, forKey: .repoRoots) ?? d.repoRoots
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
     followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
+    claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
   }
 }
 
 extension String {
   public var expandingTilde: String { (self as NSString).expandingTildeInPath }
+}
+
+public func isDirectory(_ path: String) -> Bool {
+  var isDir: ObjCBool = false
+  return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
 }

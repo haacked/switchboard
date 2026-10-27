@@ -43,6 +43,8 @@ public final class Service {
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   var mcp: [SharedServer] = []
+  /// The Claude sessions that `claude agents` listed, by Claude session id.
+  var remembered: [String: ClaudeSession] = [:]
 
   /// The panes and processes from one tmux and ps pass.
   struct Snapshot {
@@ -99,6 +101,7 @@ public final class Service {
       e.facts.cards.removeAll { !$0.deferred }
       entries[session.id] = e
     }
+    for s in try store.claudeSessions() { remembered[s.id] = s }
     snapshot = buildSnapshot()
     try startMCPServers()
   }
@@ -131,6 +134,10 @@ public final class Service {
         return .success(now)
       case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
         return .success(try followupRequest(request.op, request.args))
+      case "importable":
+        return .success(try JSON(encoding: importList(all: request.args["all"]?.bool ?? false)))
+      case "import":
+        return .success(try JSON(encoding: importSessions(request.args)))
       default:
         break
       }
@@ -285,10 +292,7 @@ public final class Service {
   /// which this creates unless it exists.
   func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?) {
     let path = (args.path as NSString).standardizingPath
-    var isDir: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
-      throw APIError("no folder \(path)")
-    }
+    guard isDirectory(path) else { throw APIError("no folder \(path)") }
     guard let branch = args.branch, !branch.isEmpty else {
       let current = try? gitOutput(path, ["branch", "--show-current"])
       return (path, current?.isEmpty == false ? current : nil)
@@ -352,9 +356,11 @@ public final class Service {
   private func paneEnv(_ id: String) -> [String: String] {
     var env = ["SB_SESSION_ID": id, "SB_HOME": home.path]
     // CLAUDE_CONFIG_DIR picks the Claude account. The panes use sbd's
-    // account unless config.env sets another.
+    // account unless config.env sets another. An imported session resumes
+    // under the account it came from.
     if let dir = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] { env["CLAUDE_CONFIG_DIR"] = dir }
     for (key, value) in config.env { env[key] = value.expandingTilde }
+    if let account = entries[id]?.session.claudeConfigDir { ClaudeAccount.apply(account, to: &env) }
     return env
   }
 

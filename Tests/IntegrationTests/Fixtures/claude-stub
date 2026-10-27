@@ -31,11 +31,22 @@
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
 #   anything else    replies "Done: <prompt>"
-# It records its arguments in $SB_HOME/stub-args.log.
+# `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
+# the test writes, or [] when it can't be read.
+# Each run appends its arguments to $SB_HOME/stub-args.log and its
+# CLAUDE_CONFIG_DIR, empty when unset, to the same line of
+# $SB_HOME/stub-accounts.log.
+
+args=("$@")
+printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
+printf '%s\n' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/stub-accounts.log"
+if [ "${1-}" = agents ]; then
+  cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]'
+  exit 0
+fi
 
 recordings="$(dirname "$0")/claude"
 settings='' mcp_config='' session='' prompt='' source=startup linger=0
-args=("$@")
 while [ $# -gt 0 ]; do
   case $1 in
   --settings) settings=$2 && shift 2 ;;
@@ -48,7 +59,6 @@ while [ $# -gt 0 ]; do
   *) prompt=$1 && shift ;;
   esac
 done
-printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
 request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 

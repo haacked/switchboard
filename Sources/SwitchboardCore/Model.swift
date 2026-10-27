@@ -58,6 +58,9 @@ public struct Session: Codable, Equatable, Sendable {
   public var parent: String?
   /// Set on a follow-up. Until it starts, `cwd` is empty and claude never runs.
   public var followup: Followup?
+  /// The Claude account that an imported session resumes under, or nil for
+  /// the account of sbd and config.env.
+  public var claudeConfigDir: String?
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,

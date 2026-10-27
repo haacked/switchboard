@@ -79,6 +79,14 @@ struct ContentView: View {
     .toolbar {
       ToolbarItem {
         Button {
+          model.showingImport = true
+        } label: {
+          Label("Import Sessions", systemImage: "square.and.arrow.down")
+        }
+        .help("Import Claude sessions that run outside Switchboard (⇧⌘I)")
+      }
+      ToolbarItem {
+        Button {
           model.showingNew = true
         } label: {
           Label("New Session", systemImage: "plus")
@@ -88,6 +96,9 @@ struct ContentView: View {
     }
     .sheet(isPresented: $model.showingNew) {
       NewSessionView().environmentObject(model)
+    }
+    .sheet(isPresented: $model.showingImport) {
+      ImportView().environmentObject(model)
     }
   }
 }
@@ -117,6 +128,7 @@ struct Sidebar: View {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
           Button("Start a Session…") { model.showingNew = true }
+          Button("Import Sessions…") { model.showingImport = true }
         }
       }
     }

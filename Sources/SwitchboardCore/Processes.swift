@@ -51,15 +51,17 @@ public func shellQuote(_ text: String) -> String {
 }
 
 /// The full path of `name`. A name with a slash is checked as given. A name
-/// without one is looked up on PATH, then in Homebrew's and the system's bin
-/// folders.
+/// without one is looked up on PATH, then in ~/.local/bin, where claude
+/// installs itself, then in Homebrew's and the system's bin folders. sbd runs
+/// under launchd, whose PATH holds only the system's folders.
 public func findExecutable(_ name: String) -> String? {
   if name.contains("/") {
     let path = name.expandingTilde
     return FileManager.default.isExecutableFile(atPath: path) ? path : nil
   }
   let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-  for dir in path.split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+  let fallbacks = ["~/.local/bin".expandingTilde, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+  for dir in path.split(separator: ":").map(String.init) + fallbacks {
     let full = "\(dir)/\(name)"
     if FileManager.default.isExecutableFile(atPath: full) { return full }
   }
@@ -94,5 +96,11 @@ public enum Processes {
       return ProcessRow(pid: pid, ppid: ppid, pgid: pgid, command: parts.count > 3 ? String(parts[3]) : "")
     }
     return Dictionary(grouping: rows, by: \.ppid)
+  }
+
+  /// Whether a process with the pid exists. EPERM means it exists and belongs
+  /// to another user.
+  public static func exists(_ pid: Int) -> Bool {
+    kill(pid_t(pid), 0) == 0 || errno == EPERM
   }
 }

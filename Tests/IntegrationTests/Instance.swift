@@ -23,15 +23,22 @@ final class Instance {
   /// bytes. The stop rule runs every 0.2 s, so idle stops come quickly. The
   /// panes run /bin/sh by default, because a login shell with the user's
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
+  /// Each account is a Claude config folder that this creates in the home.
+  /// The config lists only those, so a test never reads the user's accounts.
   init(
-    idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", config extra: [String: JSON] = [:]
+    idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
+    config extra: [String: JSON] = [:]
   ) throws {
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
-    home = Home(path: String(cString: dir))
+    let path = String(cString: dir)
+    home = Home(path: path)
+    let folders = accounts.map { "\(path)/\($0)" }
+    for folder in folders { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
     let config: [String: JSON] = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
+      "claudeConfigDirs": .array(folders.map(JSON.string)),
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
@@ -48,11 +55,17 @@ final class Instance {
 
   var work: String { "\(home.path)/work" }
 
+  /// The CLAUDE_CONFIG_DIR that sbd inherits. No folder exists there.
+  var inheritedAccount: String { "\(home.path)/inherited-account" }
+
   func startSbd() throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sbd")
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home.path
+    // sbd inherits an account, as it does from a user who exports one. A test
+    // can then tell the account that sbd sets from the one it inherited.
+    env["CLAUDE_CONFIG_DIR"] = inheritedAccount
     p.environment = env
     let log = FileHandle(forWritingAtPath: home.log)!
     log.seekToEndOfFile()
@@ -70,8 +83,7 @@ final class Instance {
     process = nil
   }
 
-  /// Runs sb with this instance's SB_HOME. CLAUDECODE and SB_SESSION_ID mark a
-  /// command that Claude runs in a session, so they come only from `env`.
+  /// Runs sb and returns its output. It throws when sb fails.
   @discardableResult
   func sb(_ args: String..., env extra: [String: String] = [:]) throws -> String {
     try sb(args, env: extra)
@@ -79,14 +91,55 @@ final class Instance {
 
   @discardableResult
   func sb(_ args: [String], env extra: [String: String] = [:]) throws -> String {
+    let r = try run(args, env: extra)
+    guard r.status == 0 else { throw TestError(description: "sb \(args.joined(separator: " ")) failed: \(r.stderr)") }
+    return r.stdout
+  }
+
+  /// Runs sb with this instance's SB_HOME, whatever its exit status.
+  /// CLAUDECODE and SB_SESSION_ID mark a command that Claude runs in a
+  /// session, so they come only from `env`.
+  func run(_ args: String...) throws -> CommandResult { try run(args) }
+
+  func run(_ args: [String], env extra: [String: String] = [:]) throws -> CommandResult {
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home.path
     env["CLAUDECODE"] = nil
     env["SB_SESSION_ID"] = nil
     env.merge(extra) { $1 }
-    let r = try runCommand("\(Instance.bin)/sb", args, env: env)
-    guard r.status == 0 else { throw TestError(description: "sb \(args.joined(separator: " ")) failed: \(r.stderr)") }
-    return r.stdout
+    return try runCommand("\(Instance.bin)/sb", args, env: env)
+  }
+
+  /// The full path of an account that `init` created.
+  func account(_ name: String) -> String { "\(home.path)/\(name)" }
+
+  /// The rows that the stub prints for `claude agents --json` in the account.
+  func writeAgents(_ account: String, _ rows: [JSON]) throws {
+    try JSON.array(rows).text.write(toFile: "\(self.account(account))/agents.json", atomically: true, encoding: .utf8)
+  }
+
+  func writeTranscript(_ account: String, _ sessionId: String, _ lines: [JSON]) throws {
+    let dir = "\(self.account(account))/projects/-test"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    try lines.map { $0.text + "\n" }.joined().write(
+      toFile: "\(dir)/\(sessionId).jsonl", atomically: true, encoding: .utf8)
+  }
+
+  /// A git repo in the home, on branch main with one empty commit.
+  func makeRepo(_ name: String = "repo") throws -> String { try Repos.create("\(home.path)/\(name)") }
+
+  /// A linked worktree of the repo on a new branch, in <home>/trees/<repo>/<branch>.
+  func addWorktree(_ repo: String, _ branch: String) throws -> String {
+    let dir = "\(home.path)/trees/\((repo as NSString).lastPathComponent)/\(branch)"
+    try git(repo, "worktree", "add", "-b", branch, dir)
+    return dir
+  }
+
+  @discardableResult
+  func git(_ dir: String, _ args: String...) throws -> String {
+    let r = try runCommand("/usr/bin/git", ["-C", dir] + args)
+    guard r.status == 0 else { throw TestError(description: "git \(args.joined(separator: " ")) failed: \(r.stderr)") }
+    return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   func new(prompt: String? = nil, name: String = "t") throws -> SessionSummary {
@@ -153,9 +206,18 @@ final class Instance {
     throw TestError(description: "timed out waiting for \(what). sbd log:\n\(log)")
   }
 
-  func stubArgs() -> [String] {
-    ((try? String(contentsOfFile: "\(home.path)/stub-args.log", encoding: .utf8)) ?? "").split(separator: "\n").map(
-      String.init)
+  func stubArgs() -> [String] { logLines("stub-args.log") }
+
+  /// Each run of the stub claude, oldest first: its arguments, and its
+  /// CLAUDE_CONFIG_DIR, which is empty when the variable was unset.
+  func stubCalls() -> [(args: String, account: String)] {
+    zip(stubArgs(), logLines("stub-accounts.log")).map { (args: $0, account: $1) }
+  }
+
+  /// The lines of a log that the stub writes in the home, including empty ones.
+  private func logLines(_ name: String) -> [String] {
+    let text = (try? String(contentsOfFile: "\(home.path)/\(name)", encoding: .utf8)) ?? ""
+    return text.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
   }
 
   func events(_ id: String, after: Int64 = 0) throws -> [Event] {

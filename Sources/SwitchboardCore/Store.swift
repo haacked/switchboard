@@ -18,6 +18,7 @@ public final class Store {
     )
     try exec("CREATE INDEX IF NOT EXISTS events_session ON events (session, id)")
     try exec("CREATE TABLE IF NOT EXISTS followup_imports (line TEXT PRIMARY KEY)")
+    try exec("CREATE TABLE IF NOT EXISTS claude_sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
   }
 
   deinit { sqlite3_close(db) }
@@ -35,6 +36,30 @@ public final class Store {
     try query("SELECT json FROM sessions ORDER BY id", []) { row in
       try JSONCoding.decode(Session.self, from: row.text(0))
     }
+  }
+
+  /// Saves the Claude sessions that sbd offers to import, in one transaction.
+  public func save(claudeSessions: [ClaudeSession]) throws {
+    try exec("BEGIN")
+    do {
+      for s in claudeSessions {
+        try run("INSERT OR REPLACE INTO claude_sessions (id, json) VALUES (?, ?)", [s.id, try JSONCoding.encode(s)])
+      }
+      try exec("COMMIT")
+    } catch {
+      try? exec("ROLLBACK")
+      throw error
+    }
+  }
+
+  public func claudeSessions() throws -> [ClaudeSession] {
+    try query("SELECT json FROM claude_sessions ORDER BY id", []) { row in
+      try JSONCoding.decode(ClaudeSession.self, from: row.text(0))
+    }
+  }
+
+  public func delete(claudeSession id: String) throws {
+    try run("DELETE FROM claude_sessions WHERE id = ?", [id])
   }
 
   @discardableResult

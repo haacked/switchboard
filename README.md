@@ -67,6 +67,16 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 
 `import` adds each `- [ ]` line under `## Open`, with its date, repository, and branch, and never changes the file. You can run it again: it skips every line that an earlier import read, including lines whose follow-up you removed.
 
+To bring in Claude sessions that you started elsewhere, press ⇧⌘I in the app or run `sb import`. It lists the sessions that run in a linked git worktree, grouped by repo, from every Claude account: `~/.claude` and each `~/.claude-*` folder that holds a `.claude.json`. `sb import --all` lists every session. Switchboard never stops a claude that runs elsewhere, so exit claude in its terminal, or stop a background job with `claude stop <id>`, and then import the session:
+
+```
+sb import                    # sessions in worktrees; ● marks one that a claude runs now
+sb import --all
+sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
+```
+
+`sbd` remembers each session it lists for a day, so a session still shows after you exit its claude. An imported session keeps its folder and its conversation. Opening it or sending it a message resumes the conversation under the account it came from.
+
 ## Settings
 
 `~/.sb/config.json` holds optional settings. Restart `sbd` after a change (`sb service install` restarts it).
@@ -85,7 +95,7 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 }
 ```
 
-`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
+`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. An imported session uses the account it came from instead. `claudeConfigDirs` lists the Claude accounts whose sessions `sb import` lists, such as `["~/.claude", "~/.claude-personal"]`, where `~/.claude` means Claude's default account. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
 
 ### Shared MCP servers
 
@@ -116,7 +126,6 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 - `sbd` starts the servers before any session, and starts a server again on the same port when it exits. A server that keeps exiting waits longer each time, up to a minute. `sb mcp` lists the servers, and for one that exited, its exit status and last output.
 - A session connects to its MCP servers when `claude` starts. A session that started while a server was down lacks that server until it stops and resumes.
 - The servers have no authentication. Any local process can call them, with whatever token the server holds.
-
 ## How it works
 
 - `sbd` keeps sessions and their event log in SQLite in `~/.sb`. It answers `sb` and the app on `~/.sb/sbd.sock`.

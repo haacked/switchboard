@@ -64,6 +64,12 @@ public struct SessionFacts: Equatable, Sendable {
       live = true
     case "started", "resumed":
       lastLaunch = event.t
+    case "imported":
+      // The transcript's last line, not the import, is the session's last activity.
+      if let t = d["lastActivity"]?.int { lastActivity = Int64(t) }
+      lastReply = d["lastReply"]?.string
+      // A reply means that the user sent a prompt before it.
+      if d["hasReplies"]?.bool == true { prompts = max(prompts, 1) }
     case "SessionEnd", "stopped", "exited":
       live = false
       endTurn()

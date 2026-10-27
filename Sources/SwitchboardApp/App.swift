@@ -26,6 +26,8 @@ struct SwitchboardApp: App {
       CommandGroup(after: .newItem) {
         Button("New Session…") { model.showingNew = true }
           .keyboardShortcut("n")
+        Button("Import Sessions…") { model.showingImport = true }
+          .keyboardShortcut("i", modifiers: [.command, .shift])
       }
       CommandMenu("Session") {
         Button("Next Needing You") { model.selectNextNeedingYou() }

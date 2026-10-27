@@ -190,8 +190,7 @@ import Testing
       "new", ["path": .string(repo), "branch": "haacked/feature", "prompt": "hello"], as: SessionSummary.self)
     #expect(s.cwd == "\(sbd.home.path)/worktrees/repo/haacked/feature")
     #expect(s.branch == "haacked/feature")
-    let branch = try runCommand("/usr/bin/git", ["-C", s.cwd, "branch", "--show-current"])
-    #expect(branch.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "haacked/feature")
+    #expect(try sbd.git(s.cwd, "branch", "--show-current") == "haacked/feature")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     // A folder at the worktree's path that isn't a worktree of this repo is refused.
     try FileManager.default.createDirectory(

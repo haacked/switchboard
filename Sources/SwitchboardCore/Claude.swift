@@ -1,0 +1,213 @@
+import Foundation
+
+/// A Claude account is a Claude config folder. The account picks the
+/// subscription, the settings, and the MCP servers. Claude's default account
+/// is ~/.claude. It runs with CLAUDE_CONFIG_DIR unset. With
+/// CLAUDE_CONFIG_DIR=~/.claude, claude reads ~/.claude/.claude.json instead of
+/// ~/.claude.json, so that is a different account.
+public enum ClaudeAccount {
+  public static var defaultFolder: String { normalize("~/.claude") }
+
+  public static func normalize(_ folder: String) -> String {
+    (folder.expandingTilde as NSString).standardizingPath
+  }
+
+  public static func isDefault(_ folder: String) -> Bool { normalize(folder) == defaultFolder }
+
+  /// Sets CLAUDE_CONFIG_DIR to the folder, or removes it for the default account.
+  public static func apply(_ folder: String, to env: inout [String: String]) {
+    env["CLAUDE_CONFIG_DIR"] = isDefault(folder) ? nil : normalize(folder)
+  }
+
+  /// A command line that runs `command` under the account, for the user to copy.
+  public static func command(_ command: String, in folder: String) -> String {
+    isDefault(folder) ? command : "CLAUDE_CONFIG_DIR=\(shellQuote(normalize(folder))) \(command)"
+  }
+
+  /// The default account, then each ~/.claude-* folder that holds a .claude.json, by name.
+  public static func discover(home: String = NSHomeDirectory()) -> [String] {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: home)) ?? []
+    let others = names.filter { $0.hasPrefix(".claude-") }.sorted().map { "\(home)/\($0)" }.filter {
+      FileManager.default.fileExists(atPath: "\($0)/.claude.json")
+    }
+    return (["\(home)/.claude"] + others).map(normalize)
+  }
+}
+
+/// A Claude session that runs outside Switchboard, from `claude agents --json`.
+/// Switchboard can import it.
+public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
+  /// Claude's session id, which names the conversation's transcript.
+  public var id: String
+  public var name: String?
+  public var cwd: String
+  /// The account's Claude config folder.
+  public var account: String
+  /// idle, busy, or waiting, while a claude runs the session.
+  public var status: String?
+  /// A background session's job id, for `claude stop` and `claude attach`.
+  public var job: String?
+  /// The claude that runs the session, or nil when none does.
+  public var pid: Int?
+  /// When `claude agents` last listed the session, in ms since the epoch.
+  public var seen: Int64
+  /// The folder name of the repo's main checkout, or nil outside git.
+  public var repo: String?
+  public var branch: String?
+  /// True when the folder is a linked worktree of its repo.
+  public var worktree: Bool
+
+  public init(
+    id: String, name: String? = nil, cwd: String, account: String, status: String? = nil, job: String? = nil,
+    pid: Int? = nil, seen: Int64 = 0, repo: String? = nil, branch: String? = nil, worktree: Bool = false
+  ) {
+    self.id = id
+    self.name = name
+    self.cwd = cwd
+    self.account = account
+    self.status = status
+    self.job = job
+    self.pid = pid
+    self.seen = seen
+    self.repo = repo
+    self.branch = branch
+    self.worktree = worktree
+  }
+
+  public var running: Bool { pid != nil }
+
+  /// The name that the session gets on import: its branch in a worktree, else
+  /// Claude's name, else its folder's name.
+  public var title: String { (worktree ? branch : nil) ?? name ?? (cwd as NSString).lastPathComponent }
+
+  /// Whether a claude runs the session, and where, in a few words.
+  public var summary: String {
+    switch (running, job) {
+    case (true, let job?): "background job \(job), \(status ?? "running")"
+    case (true, nil): "\(status ?? "running") in another terminal"
+    case (false, let job?): "background job \(job), stopped"
+    case (false, nil): "exited"
+    }
+  }
+
+  /// A sentence that starts with `label` and says where a claude runs the
+  /// session and how to end that claude before an import. It is nil when no
+  /// claude runs the session.
+  public func whereItRuns(_ label: String) -> String? {
+    guard let pid else { return nil }
+    guard let job else {
+      return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it."
+    }
+    let stop = ClaudeAccount.command("claude stop \(job)", in: account)
+    return "\(label) runs as background job \(job). Stop it with `\(stop)`, then import it."
+  }
+
+  /// Marks the session as one that no claude runs.
+  public mutating func clearProcess() {
+    pid = nil
+    status = nil
+  }
+
+  /// The rows of `claude agents --json` for one account.
+  public static func list(fromAgents text: String, account: String, seen: Int64) throws -> [ClaudeSession] {
+    guard let rows = JSON.parse(text)?.array else {
+      throw APIError("claude agents printed no list of sessions for \(account): \(oneLine(text, max: 200))")
+    }
+    return rows.compactMap { row in
+      guard let id = row["sessionId"]?.string, let cwd = row["cwd"]?.string else { return nil }
+      return ClaudeSession(
+        id: id, name: row["name"]?.string, cwd: cwd, account: account, status: row["status"]?.string,
+        job: row["id"]?.string, pid: row["pid"]?.int, seen: seen)
+    }
+  }
+
+  /// The order of the import list: by repo, with folders outside git last,
+  /// then by branch or name.
+  public static func importOrder(_ a: ClaudeSession, _ b: ClaudeSession) -> Bool {
+    func key(_ s: ClaudeSession) -> [String] {
+      [s.repo == nil ? "1" : "0", s.repo ?? "", s.branch ?? s.name ?? s.cwd, s.id].map { $0.lowercased() }
+    }
+    return key(a).lexicographicallyPrecedes(key(b))
+  }
+}
+
+/// What the end of a Claude transcript says about the conversation.
+public struct TranscriptTail: Equatable, Sendable {
+  /// The text of the main conversation's last assistant message that has text.
+  public var lastReply: String?
+  /// The timestamp of the last line that has one, in ms since the epoch.
+  public var lastActivity: Int64?
+  /// True when the main conversation has an assistant message.
+  public var hasReplies: Bool
+
+  public init(lastReply: String? = nil, lastActivity: Int64? = nil, hasReplies: Bool = false) {
+    self.lastReply = lastReply
+    self.lastActivity = lastActivity
+    self.hasReplies = hasReplies
+  }
+}
+
+public enum Transcript {
+  /// The transcript of a session: <projects>/<folder>/<id>.jsonl. Claude names
+  /// the folder after the session's cwd. This looks in every folder instead of
+  /// encoding the cwd the way Claude does.
+  public static func find(_ sessionId: String, projects: String) -> String? {
+    let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
+    return folders.map { "\(projects)/\($0)/\(sessionId).jsonl" }.first { FileManager.default.fileExists(atPath: $0) }
+  }
+
+  /// Reads the transcript from the end, because transcripts reach 24 MB. Each
+  /// read is twice the size of the one before, so a long line costs few reads.
+  public static func tail(_ path: String) -> TranscriptTail {
+    var tail = TranscriptTail()
+    guard let file = FileHandle(forReadingAtPath: path), var offset = try? file.seekToEnd() else { return tail }
+    defer { try? file.close() }
+    var size: UInt64 = 1 << 16
+    // The start of the chunk after the current one, up to its first newline.
+    // It ends a line that starts in the current chunk. It is empty when that
+    // chunk starts with a newline, which ends the current chunk's last line.
+    var rest = Data()
+    while offset > 0 {
+      let count = min(size, offset)
+      offset -= count
+      size = min(size * 2, 1 << 22)
+      guard (try? file.seek(toOffset: offset)) != nil, let chunk = try? file.read(upToCount: Int(count)) else { break }
+      var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+      rest = offset > 0 ? Data(lines.removeFirst()) : Data()
+      for line in lines.reversed() where !line.isEmpty && read(line, into: &tail) { return tail }
+    }
+    return tail
+  }
+
+  /// Folds one line into the tail, and returns true at the last reply. The
+  /// main conversation's replies are the assistant lines that are not
+  /// sidechains, which hold subagents. An api-request-blob line also carries
+  /// an assistant message, and its type leaves it out.
+  static func read(_ line: Data, into tail: inout TranscriptTail) -> Bool {
+    guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return false }
+    if tail.lastActivity == nil, let t = object["timestamp"]?.string.flatMap(milliseconds) { tail.lastActivity = t }
+    guard object["type"]?.string == "assistant", object["isSidechain"]?.bool != true else { return false }
+    tail.hasReplies = true
+    let content = object["message"]?["content"]
+    let texts =
+      content?.string.map { [$0] }
+      ?? (content?.array ?? []).filter { $0["type"]?.string == "text" }.compactMap { $0["text"]?.string }
+    let text = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return false }
+    tail.lastReply = text
+    return true
+  }
+
+  private static let fractional: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+  }()
+  private static let whole = ISO8601DateFormatter()
+
+  static func milliseconds(_ timestamp: String) -> Int64? {
+    (fractional.date(from: timestamp) ?? whole.date(from: timestamp)).map {
+      Int64(($0.timeIntervalSince1970 * 1000).rounded())
+    }
+  }
+}

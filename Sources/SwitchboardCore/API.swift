@@ -51,6 +51,51 @@ public struct NewSession: Codable, Sendable {
   }
 }
 
+/// The answer to `importable`: the Claude sessions that Switchboard can import.
+public struct ImportList: Codable, Equatable, Sendable {
+  public var sessions: [ClaudeSession]
+  /// How many sessions the list leaves out, because they don't run in a worktree.
+  public var hidden: Int
+
+  public init(sessions: [ClaudeSession], hidden: Int) {
+    self.sessions = sessions
+    self.hidden = hidden
+  }
+
+  /// The runs of sessions with the same repo, which the list's order keeps
+  /// together. Folders outside git form one group.
+  public var groups: [(title: String, sessions: [ClaudeSession])] {
+    var out: [(title: String, sessions: [ClaudeSession])] = []
+    for s in sessions {
+      let title = s.repo ?? "Outside git"
+      if out.last?.title == title { out[out.count - 1].sessions.append(s) } else { out.append((title, [s])) }
+    }
+    return out
+  }
+}
+
+/// Why `import` didn't import the session that a ref names.
+public struct Refusal: Codable, Equatable, Sendable {
+  public var ref: String
+  public var reason: String
+
+  public init(ref: String, reason: String) {
+    self.ref = ref
+    self.reason = reason
+  }
+}
+
+/// The answer to `import`.
+public struct ImportResult: Codable, Sendable {
+  public var imported: [SessionSummary]
+  public var refused: [Refusal]
+
+  public init(imported: [SessionSummary], refused: [Refusal]) {
+    self.imported = imported
+    self.refused = refused
+  }
+}
+
 /// What `send` did with the message.
 public enum Delivery: String, Codable, Sendable {
   /// Pasted into the live session's prompt.
@@ -100,5 +145,15 @@ public final class Client: Sendable {
 
   public func terminals(_ id: String) throws -> Terminals {
     try call("terminals", ["session": .string(id)], as: Terminals.self)
+  }
+
+  public func importable(all: Bool = false) throws -> ImportList {
+    try call("importable", ["all": .bool(all)], as: ImportList.self)
+  }
+
+  public func importSessions(_ refs: [String], name: String? = nil) throws -> ImportResult {
+    var args: [String: JSON] = ["refs": .array(refs.map(JSON.string))]
+    if let name { args["name"] = .string(name) }
+    return try call("import", args, as: ImportResult.self)
   }
 }

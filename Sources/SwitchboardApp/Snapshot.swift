@@ -2,8 +2,9 @@ import AppKit
 import Foundation
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts. SB_SNAPSHOT names a PNG file that the app draws its main
-/// window into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
+/// app starts, and SB_SHEET=import opens the import sheet. SB_SNAPSHOT names a
+/// PNG file that the app draws its main window, or the window's open sheet,
+/// into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
 /// window itself, so this needs no screen recording permission. The drawing
 /// leaves out the window's background, so a snapshot run uses the light
 /// appearance, whose text reads on the white that remains. SwiftTerm draws
@@ -13,6 +14,7 @@ enum Snapshot {
   static func start(_ model: BoardModel) {
     let env = ProcessInfo.processInfo.environment
     if let id = env["SB_SELECT"] { model.selection = id }
+    if env["SB_SHEET"] == "import" { model.showingImport = true }
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
@@ -23,7 +25,8 @@ enum Snapshot {
   }
 
   static func write(to path: String) {
-    guard let view = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView,
+    let window = NSApp.windows.first { $0.isVisible && $0.title == "Switchboard" }
+    guard let view = (window?.attachedSheet ?? window)?.contentView,
       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
     else {
       FileHandle.standardError.write(Data("snapshot: no window to draw\n".utf8))

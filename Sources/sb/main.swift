@@ -26,6 +26,9 @@ let usage = """
     note <session> --rm <id>
     rename <session> <name>
     rm <session> [--worktree]     remove the session, and its worktree with --worktree
+    import [--all]                list the Claude sessions outside Switchboard that
+                                  run in a worktree, or every one with --all
+    import <ref>... [--name N]    import Claude sessions by id, id prefix, or name
     attach <session> [--shell]    attach this terminal to the Claude pane or the shell
     screen <session> [--shell]    print the pane's screen
     watch <session> --until <state> [--timeout S]
@@ -112,8 +115,12 @@ struct Args {
   }
 }
 
-func die(_ message: String) -> Never {
+func warn(_ message: String) {
   FileHandle.standardError.write(Data("sb: \(message)\n".utf8))
+}
+
+func die(_ message: String) -> Never {
+  warn(message)
   exit(1)
 }
 
@@ -183,6 +190,25 @@ func printSession(_ s: SessionSummary) {
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
+}
+
+/// The sessions that `sb import` can import, grouped by repo. ● marks a
+/// session that a claude runs now, which imports once that claude exits.
+func printImportable(_ list: ImportList) {
+  if list.sessions.isEmpty { print("No Claude sessions to import\(list.hidden > 0 ? " in a worktree" : "").") }
+  for (i, group) in list.groups.enumerated() {
+    if i > 0 { print("") }
+    print(group.title.printable)
+    for s in group.sessions {
+      let title = oneLine(s.title, max: 40).padding(toLength: 40, withPad: " ", startingAt: 0)
+      let account = (s.account as NSString).abbreviatingWithTildeInPath
+      print("  \(s.running ? "●" : "○") \(s.id.prefix(8))  \(title)  \(s.summary), \(account)".printable)
+    }
+  }
+  if list.hidden > 0 { print("\n\(list.hidden) more outside a worktree. List them with: sb import --all") }
+  if list.sessions.contains(where: \.running) {
+    print("● claude runs the session now. Exit it there, or stop its background job, then import it.")
+  }
 }
 
 func sessionCommand(_ op: String, _ a: Args, extra: [String: JSON] = [:]) {
@@ -376,6 +402,20 @@ case "send":
 case "rm":
   let result = call("rm", ["session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree"))])
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
+case "import":
+  do {
+    if a.positional.isEmpty {
+      let list = try client.importable(all: a.switches.contains("--all"))
+      if a.json { printJSON(try JSON(encoding: list)) } else { printImportable(list) }
+      exit(0)
+    }
+    let r = try client.importSessions(a.positional, name: a.values["--name"])
+    if a.json { printJSON(try JSON(encoding: r)) } else { r.imported.forEach(printSession) }
+    r.refused.forEach { warn($0.reason.printable) }
+    exit(r.refused.isEmpty ? 0 : 1)
+  } catch {
+    die("\(error)")
+  }
 case "attach":
   attach(a)
 case "screen":

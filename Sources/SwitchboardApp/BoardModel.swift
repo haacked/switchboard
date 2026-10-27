@@ -37,6 +37,7 @@ final class BoardModel: ObservableObject {
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
+  @Published var showingImport = false
 
   let client = Client()
   /// Polls run apart from actions, because an action such as `open` or `new`
@@ -196,6 +197,16 @@ final class BoardModel: ObservableObject {
   /// main thread.
   nonisolated func terminals(_ id: String) -> Result<Terminals, Error> {
     Result { try Client().terminals(id) }
+  }
+
+  /// The Claude sessions that the import sheet offers. It blocks, so it runs
+  /// off the main thread.
+  nonisolated func importable(all: Bool) -> Result<ImportList, Error> {
+    Result { try Client().importable(all: all) }
+  }
+
+  nonisolated func importSessions(_ refs: [String]) -> Result<ImportResult, Error> {
+    Result { try Client().importSessions(refs) }
   }
 
   /// Moves to the next Queue item while the Queue shows. Otherwise selects
