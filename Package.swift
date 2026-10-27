@@ -23,7 +23,8 @@ let package = Package(
       name: "SwitchboardApp",
       dependencies: ["SwitchboardCore", .product(name: "SwiftTerm", package: "SwiftTerm")],
       swiftSettings: swift5),
-    .testTarget(name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"], swiftSettings: swift5),
+    .testTarget(
+      name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"], exclude: ["Fixtures"], swiftSettings: swift5),
     .testTarget(
       name: "IntegrationTests", dependencies: ["SwitchboardCore", "sbd", "sb"],
       exclude: ["Fixtures"], swiftSettings: swift5),

@@ -1,0 +1,12 @@
+[1m[32m#97577 [0m[37mfix(cohorts): keep HogQL property filters out of the operator default [0m[90m(posthog[bot]) [0m
+ Learn more at [4mhttps://app.trunk.io/gh/PostHog/posthog/merge/master/97577
+[0m
+ [94m[49m09-09 22:04:52.434000[39m[49m  [37m[49m  Not Ready[39m[49m  [37m[49m Pull request has been submitted to Merge by Phil Haack. It will be added to the[39m[49m   
+                                     [37m[49mmerge queue once all branch protection rules pass.[39m[49m                                 
+ [94m[49m09-09 23:30:15.165000[39m[49m  [90m[49m  Pending[39m[49m    [37m[49m Pull request has been added to the merge queue.[39m[49m                                   
+ [94m[49m09-09 23:30:24.522000[39m[49m  [90m[49m  Testing[39m[49m    [37m[49m This pull request is currently being tested in a batch (96996[39m[49m                     
+                                     [37m[49m([gh](https://github.com/PostHog/posthog/pull/96996),[39m[49m                              
+                                     [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4fab[39m[49m
+                                     [37m[49m8f3649/96996)), 97577 ([gh](https://github.com/PostHog/posthog/pull/97577),[39m[49m        
+                                     [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4fab[39m[49m
+                                     [37m[49m8f3649/97577))) on [PR 98034](https://github.com/PostHog/posthog/pull/98034)[39m[49m

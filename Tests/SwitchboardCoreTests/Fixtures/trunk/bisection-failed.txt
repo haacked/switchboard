@@ -1,0 +1,57 @@
+[1m[32m#114757 [0m[37mfeat(hogql): run negated person filters as a persons NOT IN [0m[90m(haacked) [0m
+ Learn more at [4mhttps://app.trunk.io/gh/PostHog/posthog/merge/master/114757
+[0m
+ [94m[49m10-14 15:43:14.240000[39m[49m  [37m[49m  Not Ready[39m[49m        [37m[49m Pull request has been submitted to Merge by Phil Haack. It will be added to[39m[49m 
+                                           [37m[49mthe merge queue once all branch protection rules pass.[39m[49m                       
+ [94m[49m10-14 15:43:28.959000[39m[49m  [90m[49m  Pending[39m[49m          [37m[49m Pull request has been added to the merge queue.[39m[49m                             
+ [94m[49m10-14 15:50:04.453000[39m[49m  [90m[49m  Testing[39m[49m          [37m[49m This pull request was tested in a batch (116555[39m[49m                             
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/116555),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/116555)), 114757[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/114757),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/114757)), 116613[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/116613),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/116613))) on [PR[39m[49m                                                
+                                           [37m[49m117126](https://github.com/PostHog/posthog/pull/117126)[39m[49m                      
+ [94m[49m10-14 15:56:20.254000[39m[49m  [90m[49m  Pending Failure[39m[49m  [37m[49m The required check [`Backend CI on Depot / Django Tests Pass on[39m[49m             
+                                           [37m[49mDepot`](https://github.com/PostHog/posthog/runs/115954934252) (Cancelled)[39m[49m    
+                                           [37m[49mfailed. Pull request failed tests and is waiting for all pull requests 2[39m[49m     
+                                           [37m[49mlevels below this one to finish testing.[39m[49m                                     
+ [94m[49m10-14 16:01:23.437000[39m[49m  [90m[49m  Pending[39m[49m          [37m[49m Pull request is waiting to start tests because its target branch (`master`)[39m[49m 
+                                           [37m[49mwas updated outside of the merge queue.[39m[49m                                      
+ [94m[49m10-14 16:02:28.264000[39m[49m  [90m[49m  Testing[39m[49m          [37m[49m This pull request was tested in a batch (115388[39m[49m                             
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/115388),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/115388)), 116555[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/116555),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/116555)), 114757[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/114757),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/114757)), 116613[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/116613),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/116613))) on [PR[39m[49m                                                
+                                           [37m[49m117143](https://github.com/PostHog/posthog/pull/117143)[39m[49m                      
+ [94m[49m10-14 16:08:23.826000[39m[49m  [90m[49m  Pending Failure[39m[49m  [37m[49m The required check [`Backend CI on Depot / Django Tests Pass on[39m[49m             
+                                           [37m[49mDepot`](https://github.com/PostHog/posthog/runs/115960984755) (Cancelled)[39m[49m    
+                                           [37m[49mfailed. Pull request failed tests and is waiting for all pull requests 2[39m[49m     
+                                           [37m[49mlevels below this one to finish testing.[39m[49m                                     
+ [94m[49m10-14 16:20:53.588000[39m[49m  [90m[49m  Pending[39m[49m          [37m[49m Pull request is waiting for tests to start on a bisection of its batch[39m[49m      
+                                           [37m[49mbecause tests failed on it.[39m[49m                                                  
+ [94m[49m10-14 16:22:41.204000[39m[49m  [90m[49m  Testing[39m[49m          [37m[49m This pull request was tested in a batch (116555[39m[49m                             
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/116555),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/116555)), 114757[39m[49m                                                
+                                           [37m[49m([gh](https://github.com/PostHog/posthog/pull/114757),[39m[49m                       
+                                           [37m[49m[trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-[39m[49m
+                                           [37m[49mef4fab8f3649/114757))) on [PR[39m[49m                                                
+                                           [37m[49m117156](https://github.com/PostHog/posthog/pull/117156)[39m[49m                      
+ [94m[49m10-14 16:28:25.442000[39m[49m  [90m[49m  Pending[39m[49m          [37m[49m Pull request is waiting for tests to start on a bisection of its batch[39m[49m      
+                                           [37m[49mbecause tests failed on it.[39m[49m                                                  
+ [94m[49m10-14 16:28:52.673000[39m[49m  [90m[49m  Testing[39m[49m          [37m[49m Tests ran on [PR 117164](https://github.com/PostHog/posthog/pull/117164)[39m[49m    
+ [94m[49m10-14 16:34:29.843000[39m[49m  [31m[49m✖ Failed[39m[49m           [37m[49m Pull request was removed from the merge queue because the following required[39m[49m
+                                           [37m[49mcheck failed: [`Backend CI on Depot / Django Tests Pass on[39m[49m                   
+                                           [37m[49mDepot`](https://github.com/PostHog/posthog/runs/115973822688) (Cancelled).[39m[49m   

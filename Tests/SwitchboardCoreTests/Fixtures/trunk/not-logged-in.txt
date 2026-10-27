@@ -1,0 +1,1 @@
+[1m[31m✖ User not logged in: please run trunk login[0m

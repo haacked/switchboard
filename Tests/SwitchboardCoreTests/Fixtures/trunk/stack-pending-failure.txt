@@ -1,0 +1,59 @@
+#110392 feat(hogql): add opt-in persons join pushdown modifier (haacked) 
+ Learn more at https://app.trunk.io/gh/PostHog/posthog/merge/master/110392
+
+ 10-02 19:08:12.887000    Not Ready         Stack has been submitted to Merge by Phil Haack. It will be added to the    
+                                           merge queue once all branch protection rules pass.                           
+ 10-02 19:08:28.402000    Pending           Stack has been added to the merge queue.                                    
+ 10-02 19:26:52.692000    Testing           This stack was tested in a batch (110392                                    
+                                           ([gh](https://github.com/PostHog/posthog/pull/110392),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110392)), 110967                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/110967),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110967)), 107329                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/107329),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/107329)), 111004                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/111004),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/111004))) on [PR                                                
+                                           111097](https://github.com/PostHog/posthog/pull/111097)                      
+ 10-02 19:42:19.204000    Pending Failure   The required check [`Visual regression tests                                
+                                           pass`](https://github.com/PostHog/posthog/actions/runs/37054167497/job/111000
+                                           151873) (Failure) failed. Stack failed tests and is waiting for all pull     
+                                           requests 2 levels below this one to finish testing.                          
+ 10-02 20:00:54.727000    Pending           Stack is waiting for tests to start on a bisection of its batch because     
+                                           tests failed on it.                                                          
+ 10-02 20:01:12.137000    Testing           This stack was tested in a batch (110392                                    
+                                           ([gh](https://github.com/PostHog/posthog/pull/110392),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110392)), 111004                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/111004),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/111004))) on [PR                                                
+                                           111107](https://github.com/PostHog/posthog/pull/111107)                      
+ 10-02 21:15:19.656000    Pending           Stack is waiting for tests to start on a bisection of its batch because     
+                                           tests failed on it.                                                          
+ 10-02 21:15:39.052000    Testing           Tests ran on [PR 111131](https://github.com/PostHog/posthog/pull/111131)    
+ 10-02 21:33:15.383000    Tests Passed      Stack passed testing during a batch bisection (tested using [PR             
+                                           111131](https://github.com/PostHog/posthog/pull/111131)).                    
+ 10-02 21:33:15.385000    Pending           Stack is re-entering the merge queue because it has passed tests on a       
+                                           bisection of its original batch.                                             
+ 10-02 21:45:37.566000    Testing           This stack was tested in a batch (110392                                    
+                                           ([gh](https://github.com/PostHog/posthog/pull/110392),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110392)), 110696                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/110696),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110696)), 110967                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/110967),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/110967)), 111022                                                
+                                           ([gh](https://github.com/PostHog/posthog/pull/111022),                       
+                                           [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-
+                                           ef4fab8f3649/111022))) on [PR                                                
+                                           111140](https://github.com/PostHog/posthog/pull/111140)                      
+ 10-02 22:01:25.690000    Pending Failure   The required check [`Visual regression tests                                
+                                           pass`](https://github.com/PostHog/posthog/actions/runs/37068730492/job/111047
+                                           542934) (Failure) has failed. Stack failed tests and is waiting for all pull 
+                                           requests 2 levels below this one to finish testing.

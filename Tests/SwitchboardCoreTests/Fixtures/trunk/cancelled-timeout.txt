@@ -1,0 +1,9 @@
+#103277 fix(flags): retry the flag sync on a desynced ClickHouse socket (posthog[bot]) 
+ Learn more at https://app.trunk.io/gh/PostHog/posthog/merge/master/103277
+
+ 09-22 16:28:50.620000    Not Ready   Pull request has been submitted to Merge by Phil Haack. It will be added to the   
+                                     merge queue once all branch protection rules pass and impacted targets have been   
+                                     uploaded.                                                                          
+ 09-23 16:31:07.213000  ✖ Cancelled   Pull request was removed from the merge queue because it was waiting to become    
+                                     mergeable for too long (for example: missing required approvals or checks, or a    
+                                     merge conflict). Submit it again once it's ready to merge.

@@ -1,0 +1,17 @@
+#110487 feat(flags): enable the persons id pushdown for the flag-calls list (haacked) 
+ Learn more at https://app.trunk.io/gh/PostHog/posthog/merge/master/110487
+ 10-02 23:07:40.905000    Not Ready      Stack has been submitted to Merge by Phil Haack. It will be added to the merge 
+                                        queue once all branch protection rules pass and the base branch matches the     
+                                        merge queue branch (master).                                                    
+ 10-02 23:08:00.435000    Pending        Stack has been added to the merge queue.                                       
+ 10-02 23:11:59.378000    Testing        This stack was tested in a batch (111113                                       
+                                        ([gh](https://github.com/PostHog/posthog/pull/111113),                          
+                                        [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4
+                                        fab8f3649/111113)), 110487                                                      
+                                        ([gh](https://github.com/PostHog/posthog/pull/110487),                          
+                                        [trunk](https://app.trunk.io/posthog-inc/merge-queue/3921a8a3-abf7-42ff-b9cf-ef4
+                                        fab8f3649/110487))) on [PR                                                      
+                                        111171](https://github.com/PostHog/posthog/pull/111171)                         
+ 10-02 23:29:49.207000    Tests Passed   Stack passed required tests (tested using [PR                                  
+                                        111171](https://github.com/PostHog/posthog/pull/111171)).                       
+ 10-02 23:30:35.039000  ✔ Merged         Stack has been merged successfully.                                            

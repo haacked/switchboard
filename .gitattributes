@@ -8,3 +8,6 @@
 
 *.png binary
 *.gif binary
+
+# trunk prints CRLF line ends. The parser tests read its output as recorded.
+Tests/SwitchboardCoreTests/Fixtures/trunk/** -text

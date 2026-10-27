@@ -1,0 +1,11 @@
+[1m[32m#108531 [0m[37mchore(replay): pin ml-mirror test clock [0m[90m(rnegron) [0m
+ Learn more at [4mhttps://app.trunk.io/gh/PostHog/posthog/merge/master/108531
+[0m
+ [94m[49m09-29 16:56:28.454000[39m[49m  [37m[49m  Not Ready[39m[49m  [37m[49m Pull request has been submitted to Merge by Raúl Negrón-Otero. It will be added to[39m[49m
+                                     [37m[49mthe merge queue once all branch protection rules pass.[39m[49m                             
+ [94m[49m09-29 17:11:32.518000[39m[49m  [90m[49m  Pending[39m[49m    [37m[49m Pull request has been added to the merge queue.[39m[49m                                   
+ [94m[49m09-29 17:17:11.950000[39m[49m  [90m[49m  Testing[39m[49m    [37m[49m Tests ran on [PR 108554](https://github.com/PostHog/posthog/pull/108554)[39m[49m          
+ [94m[49m09-29 17:32:14.559000[39m[49m  [31m[49m✖ Failed[39m[49m     [37m[49m Pull request was removed from the merge queue because the following required check[39m[49m
+                                     [37m[49mfailed: [`Visual regression tests[39m[49m                                                  
+                                     [37m[49mpass`](https://github.com/PostHog/posthog/actions/runs/36603853950/job/109533729965[39m[49m
+                                     [37m[49m) (Failure).[39m[49m

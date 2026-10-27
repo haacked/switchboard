@@ -1,0 +1,8 @@
+#119876 fix(mcp): keep person targeting when a set repeats a group property (haacked) 
+ Learn more at https://app.trunk.io/gh/PostHog/posthog/merge/master/119876
+
+ 10-19 22:51:36.646000    Not Ready   Pull request has been submitted to Merge by Phil Haack. It will be added to the   
+                                     merge queue once all branch protection rules pass.                                 
+ 10-19 22:51:49.089000    Pending     Pull request has been added to the merge queue.                                   
+ 10-19 22:51:57.959000  ✖ Cancelled   Pull request was removed from the merge queue because it was canceled by Phil     
+                                     Haack.
