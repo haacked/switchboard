@@ -107,9 +107,12 @@ A card waits until you answer it from `sb` or the app, or answer Claude Code's o
 
 ```
 swift build
-bin/test        # unit tests, and integration tests that run a private sbd against a stub claude
-bin/bundle      # build/Switchboard.app
+bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
+bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
+bin/bundle          # build/Switchboard.app
 ```
+
+The stub plays the hook payloads that `bin/test --claude` records in `Tests/IntegrationTests/Fixtures/claude/`. After a Claude Code update, run `bin/test --claude` and read `git diff` on that folder to see what the new version sends.
 
 `spikes/phase0/` holds the Phase 0 tests that measured the Claude Code behaviors this relies on.
 

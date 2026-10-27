@@ -1,0 +1,2 @@
+{"cwd":"{{cwd}}","hook_event_name":"SessionEnd","prompt_id":"{{prompt_id_1}}","reason":"clear","scratchpad_dir":"{{claude_tmp}}/{{encoded_cwd}}/{{session_id}}/scratchpad","session_id":"{{session_id}}","transcript_path":"{{config_dir}}/projects/{{encoded_cwd}}/{{session_id}}.jsonl"}
+{"cwd":"{{cwd}}","hook_event_name":"SessionStart","scratchpad_dir":"{{claude_tmp}}/{{encoded_cwd}}/{{session_id_2}}/scratchpad","session_id":"{{session_id_2}}","source":"clear","transcript_path":"{{config_dir}}/projects/{{encoded_cwd}}/{{session_id_2}}.jsonl"}

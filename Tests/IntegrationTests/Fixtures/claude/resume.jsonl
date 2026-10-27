@@ -1,0 +1,1 @@
+{"context_tokens":0,"cwd":"{{cwd}}","estimated_cache_write_usd":0,"hook_event_name":"SessionStart","prompt_cache_likely_expired":false,"scratchpad_dir":"{{claude_tmp}}/{{encoded_cwd}}/{{session_id}}/scratchpad","seconds_since_last_response":0,"session_id":"{{session_id}}","source":"resume","transcript_path":"{{config_dir}}/projects/{{encoded_cwd}}/{{session_id}}.jsonl"}

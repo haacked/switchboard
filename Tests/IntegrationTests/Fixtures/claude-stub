@@ -1,12 +1,16 @@
 #!/bin/bash
 # A stand-in for claude in sbd's integration tests. It runs the hook command
-# from the settings file for each event, with a payload shaped like claude's,
-# and answers each prompt on its own line:
+# from the settings file with the payloads that the real claude sent in the
+# same step, from claude/<step>.jsonl next to this file, which the real
+# claude tier records. It answers each prompt on its own line:
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
 #   slow <n>         runs a Bash tool call of n seconds
-#   interrupt ...    starts a tool call and ends without a Stop, as Escape
-#                    does. Claude Code reports the idle prompt later.
+#   background <n>   starts a background job of n seconds and ends the turn.
+#                    It reports the job in a turn of its own 0.5 s after the
+#                    job's process exits
+#   interrupt ...    starts a tool call and stops, as Escape does. Claude
+#                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
 #   clear <uuid>     switches to another conversation, as /clear does
 #   linger <n>       waits n s after SIGTERM before it exits
@@ -24,6 +28,7 @@
 #   anything else    replies "Done: <prompt>"
 # It records its arguments in $SB_HOME/stub-args.log.
 
+recordings="$(dirname "$0")/claude"
 settings='' mcp_config='' session='' prompt='' source=startup linger=0
 args=("$@")
 while [ $# -gt 0 ]; do
@@ -85,6 +90,40 @@ dialog() {
   printf '%s' "$answer"
 }
 
+# vars <prompt> <reply> [command]: the values that fill a step's placeholders.
+vars() {
+  jq -nc --arg p "$1" --arg r "$2" --arg c "${3:-}" '{prompt: $p, reply: $r, command: $c, description: $p}'
+}
+
+# emit [vars] [<text> <command>]: runs the hook command with each payload on
+# stdin, and runs the shell command before the first payload that contains
+# the text. Each {{name}} takes its value from the vars, or from this session for
+# its id and folders. The folders that claude keeps in the Claude config
+# folder and in /tmp move into $SB_HOME.
+emit() {
+  local extra=${1:-'{}'} payload paused=''
+  jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --argjson extra "$extra" '
+    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[/.]"; "-")), config_dir: "\($home)/claude",
+      claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
+    | walk(if type == "string" then
+        reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))
+      else . end)' |
+    while IFS= read -r payload; do
+      if [ -n "${2:-}" ] && [ -z "$paused" ] && [[ $payload == *"$2"* ]]; then
+        eval "$3"
+        paused=1
+      fi
+      printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
+    done
+}
+
+# play <step> [vars] [<text> <command>]: emits each payload of the recorded step.
+play() {
+  local step=$1
+  shift
+  emit "$@" <"$recordings/$step.jsonl"
+}
+
 # answered <tool> <input> <answer> [terminal input]: finishes a call that
 # dialog answered. It prints the reply, or nothing when the turn stopped.
 answered() {
@@ -140,6 +179,18 @@ stopped() {
   hook Notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
 }
 
+# asks <prompt> <tool> <input> [input after a pick in the terminal]: plays
+# the recorded turn around a call that needs permission. The turn has no Stop
+# when the call stopped it.
+asks() {
+  local reply
+  head -1 "$recordings/turn.jsonl" | emit "$(vars "$1" "")"
+  reply=$(call_tool "${@:2}")
+  [ -z "$reply" ] && return
+  echo "⏺ $reply"
+  tail -1 "$recordings/turn.jsonl" | emit "$(vars "$1" "$reply")"
+}
+
 questions='{"questions":[
   {"question":"Which fruit?","header":"Fruit","multiSelect":false,
    "options":[{"label":"apple","description":"A red fruit"},{"label":"cherry","description":"A small fruit"}]},
@@ -147,31 +198,34 @@ questions='{"questions":[
    "options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}'
 
 turn() {
-  local p=$1 reply n
+  local p=$1 step=turn reply cmd='' marker='' before='' n
   case $p in lag*) sleep 1 ;; esac
-  hook UserPromptSubmit "$(jq -nc --arg p "$p" '{prompt: $p}')"
   case $p in
   slow*)
     n=${p#slow }
-    hook PreToolUse "{\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"tool_input\":{\"command\":\"sleep $n\"}}"
-    sleep "$n"
-    hook PostToolUse "{\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\",\"tool_input\":{\"command\":\"sleep $n\"}}"
-    reply="Slept $n s."
+    step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
+    ;;
+  background*)
+    n=${p#background }
+    # Claude Code runs each background job in a process group of its own.
+    perl -e 'setpgrp(0, 0); exec @ARGV' sleep "$n" &
+    step=background-job reply="Started a job of $n s." cmd="sleep $n" marker='<task-notification>'
+    before="while kill -0 $! 2>/dev/null; do sleep 0.05; done; sleep 0.5"
     ;;
   interrupt*)
-    hook PreToolUse '{"tool_name":"Bash","tool_use_id":"t2","tool_input":{"command":"sleep 100"}}'
-    stopped
+    play interrupt "$(vars "$p" "" "sleep 100")"
+    echo "⏺ Interrupted"
     return
     ;;
   fail*)
+    head -1 "$recordings/turn.jsonl" | emit "$(vars "$p" "")"
     hook StopFailure '{"error":"rate_limit"}'
     echo "⏺ API Error"
     return
     ;;
   clear*)
-    hook SessionEnd '{"reason":"clear"}'
+    play clear "$(jq -nc --arg n "${p#clear }" '{session_id_2: $n}')"
     session=${p#clear }
-    hook SessionStart '{"source":"clear"}'
     echo "⏺ cleared, now $session"
     return
     ;;
@@ -184,26 +238,26 @@ turn() {
     reply="I'll linger $linger s when I stop."
     ;;
   perm*)
-    reply=$(call_tool Bash "$(jq -nc --arg c "${p#perm }" '{command: $c}')")
-    [ -z "$reply" ] && return
+    asks "$p" Bash "$(jq -nc --arg c "${p#perm }" '{command: $c}')"
+    return
     ;;
   pick*)
-    reply=$(call_tool AskUserQuestion "$questions" \
-      "$(jq -c '. + {answers: {"Which fruit?": "apple", "Which colors?": "red"}}' <<<"$questions")")
-    [ -z "$reply" ] && return
+    asks "$p" AskUserQuestion "$questions" \
+      "$(jq -c '. + {answers: {"Which fruit?": "apple", "Which colors?": "red"}}' <<<"$questions")"
+    return
     ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
   *) reply="Done: $p" ;;
   esac
   echo "⏺ $reply"
-  hook Stop "$(jq -nc --arg r "$reply" '{last_assistant_message: $r}')"
+  play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
 }
 
-trap 'hook SessionEnd "{\"reason\":\"other\"}"; sleep "$linger"; exit 143' TERM
+trap 'play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
-hook SessionStart "{\"source\":\"$source\"}"
+play "$source"
 echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"
 while IFS= read -r line; do

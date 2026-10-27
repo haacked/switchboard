@@ -1,0 +1,1 @@
+{"cwd":"{{cwd}}","hook_event_name":"SessionStart","model":"claude-haiku-5-5","scratchpad_dir":"{{claude_tmp}}/{{encoded_cwd}}/{{session_id}}/scratchpad","session_id":"{{session_id}}","source":"startup","transcript_path":"{{config_dir}}/projects/{{encoded_cwd}}/{{session_id}}.jsonl"}
