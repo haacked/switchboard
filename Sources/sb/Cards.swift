@@ -6,7 +6,9 @@ func cards(_ a: Args) {
   let sessions =
     a.positional.first.map { [summary(call("get", ["session": .string($0)]))] }
     ?? decode(call("ls"), as: [SessionSummary].self)
-  let cards = sessions.flatMap { s in s.cards.map { (name: s.name, card: $0) } }.sorted { $0.card.since < $1.card.since }
+  let cards = sessions.flatMap { s in s.cards.map { (name: s.name, card: $0) } }.sorted {
+    $0.card.since < $1.card.since
+  }
   if a.json {
     printJSON((try? JSON(encoding: cards.map(\.card))) ?? .null)
     return
@@ -15,24 +17,31 @@ func cards(_ a: Args) {
     print("No permission prompts or questions are open.")
     return
   }
+  // Claude chose this text, so control characters print as escapes.
+  func out(_ line: String) { print(line.printable) }
   for (name, card) in cards {
     let head = "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")"
     if card.kind == .permission {
-      print("\(head)  approve \(card.summary)")
+      // `allow` approves the whole call, so the whole call prints.
+      out("\(head)  approve \(card.tool)")
+      for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
       continue
     }
-    print("\(head)  question")
+    out("\(head)  question")
     for q in card.questions {
-      print("      \(q.header.map { "\($0): " } ?? "")\(q.question)\(q.multiSelect ? " (pick any)" : "")")
-      for o in q.options {
-        print("        \(o.label)\(o.description.map { ": \($0)" } ?? "")")
-      }
+      out("      \(q.header.map { "\($0): " } ?? "")\(q.question)\(q.multiSelect ? " (pick any)" : "")")
+      for o in q.options { out("        \(o.label)\(o.description.map { ": \($0)" } ?? "")") }
     }
   }
 }
 
 /// Runs `allow`, `deny`, and `answer`, which answer a session's card.
 func answer(_ command: String, _ a: Args) {
+  // A session that read injected instructions could otherwise approve its
+  // own or another session's tool calls.
+  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
+    die("\(command) answers for you, so it doesn't run inside Claude Code")
+  }
   var args: [String: JSON] = ["session": .string(a.session(command))]
   if let card = a.values["--card"] {
     guard let n = Int(card) else { die("--card needs a card number") }

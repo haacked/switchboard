@@ -30,7 +30,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
 
   /// The message that a deferred question's hook answers with.
   public static let deferMessage =
-    "Switchboard recorded your question and shows it to the user. End your turn now. The answer arrives as your next message."
+    "Switchboard recorded your question and shows it to the user. End your turn now. The user's answer arrives in a later message."
 
   init(_ event: Event) {
     let call = Attention.call(event.data["tool_name"]?.string ?? "", event.data, event.t)
@@ -43,6 +43,32 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     summary = call.summary
     since = call.since
     deferred = false
+  }
+
+  /// What the user approves: a Bash command, or the tool's whole input as
+  /// JSON. The summary cuts both short.
+  public var details: String {
+    if let command = input["command"]?.string { return command }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return (try? encoder.encode(input)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+  }
+
+  /// The card with the given id, or the session's only card. A session with
+  /// several cards needs the id, so an answer never reaches the wrong one.
+  public static func choose(_ number: Int?, from cards: [Card], session: String) throws -> Card {
+    if let number {
+      guard let card = cards.first(where: { $0.id == Int64(number) }) else {
+        throw APIError("\(session) has no open card \(number)")
+      }
+      return card
+    }
+    guard let card = cards.first else { throw APIError("\(session) has no open permission prompt or question") }
+    guard cards.count == 1 else {
+      let ids = cards.map { String($0.id) }.joined(separator: ", ")
+      throw APIError("\(session) has \(cards.count) open cards (\(ids)). Name one with --card")
+    }
+    return card
   }
 
   /// Whether a tool call is this card's. A question pairs by tool alone,
@@ -146,14 +172,14 @@ public enum Decision: Equatable, Sendable {
 extension SessionFacts {
   /// Opens, closes, and defers cards. The table in the answer cards plan
   /// lists what each event does.
-  mutating func applyCards(_ event: Event) {
+  mutating func applyCards(_ event: Event, userPrompt: Bool) {
     let d = event.data
     let tool = d["tool_name"]?.string ?? ""
     let card = d["card"]?.int.flatMap { id in cards.firstIndex { $0.id == Int64(id) } }
     switch event.kind {
-    case "PermissionRequest" where d["agent_id"] == nil:
+    case "PermissionRequest" where !event.fromSubagent:
       cards.append(Card(event))
-    case "PostToolUse" where d["agent_id"] == nil, "PostToolUseFailure" where d["agent_id"] == nil:
+    case "PostToolUse" where !event.fromSubagent, "PostToolUseFailure" where !event.fromSubagent:
       cards.removeAll { !$0.deferred && $0.isCall(tool, d["tool_input"]) }
     case "answered":
       guard let card else { return }
@@ -179,11 +205,29 @@ extension SessionFacts {
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.deferred }
     case "UserPromptSubmit":
-      let fromUser = !Attention.isSubagentResult(d["prompt"]?.string ?? "")
-      cards.removeAll { fromUser || !$0.deferred }
+      // Only the user's own prompt answers a deferred question.
+      cards.removeAll { userPrompt || !$0.deferred }
     default:
       break
     }
+  }
+
+  /// Whether the event is a prompt that the user wrote, not a subagent's
+  /// result or a message that sbd sent on its own. A wait's outcome and the
+  /// answer to a deferred card are such messages. This remembers each one
+  /// from its `sent` event and forgets it when claude reports it.
+  mutating func isUserPrompt(_ event: Event) -> Bool {
+    let text = event.data[event.kind == "sent" ? "text" : "prompt"]?.string ?? ""
+    switch event.kind {
+    case "sent" where event.data["by"]?.string == "sbd":
+      sbdMessages.append(text)
+    case "UserPromptSubmit" where !Attention.isSubagentResult(text):
+      guard let i = sbdMessages.firstIndex(of: text) else { return true }
+      sbdMessages.remove(at: i)
+    default:
+      break
+    }
+    return false
   }
 
   private mutating func closePrompt(_ card: Card) {
@@ -192,5 +236,15 @@ extension SessionFacts {
     } else if let open = openPermission, card.isCall(open.tool, open.input) {
       openPermission = nil
     }
+  }
+}
+
+extension StringProtocol {
+  /// The text with each control character but tab shown as an escape, so
+  /// that printed text can't move the cursor or erase what a terminal shows.
+  public var printable: String {
+    unicodeScalars.map {
+      $0.properties.generalCategory == .control && $0 != "\t" ? "\\u{\(String($0.value, radix: 16))}" : String($0)
+    }.joined()
   }
 }

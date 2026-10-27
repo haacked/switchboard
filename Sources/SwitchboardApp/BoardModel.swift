@@ -18,6 +18,15 @@ final class BoardModel: ObservableObject {
   @Published var showingBoard = false
   /// The Queue item that the user last moved to.
   @Published var queueFocus: String?
+  /// Counts ⌘J presses in the Queue. Each one scrolls to the current item,
+  /// even when ⌘J lands on the item it reached last time.
+  @Published var queueJumps = 0
+  /// Cards whose answer is on its way to sbd. Their views stay disabled
+  /// until sbd replies, so a second click can't answer again.
+  @Published var answering: Set<Int64> = []
+  /// What the user picked or typed on each open card, by card id. The Queue
+  /// and the session view show the same draft.
+  private var drafts: [Int64: CardView.Draft] = [:]
 
   let client = Client()
   /// Polls run apart from actions, because an action such as `open` or `new`
@@ -66,6 +75,8 @@ final class BoardModel: ObservableObject {
         }
       }
       knownStates = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.state) })
+      let open = Set(list.flatMap { $0.cards.map(\.id) })
+      drafts = drafts.filter { open.contains($0.key) }
       loaded = true
       if sessions != list { sessions = list }
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
@@ -84,8 +95,11 @@ final class BoardModel: ObservableObject {
       UNNotificationRequest(identifier: "\(s.id)-\(s.since)", content: content, trigger: nil))
   }
 
-  /// Runs a request off the main thread, then refreshes.
-  func perform(_ op: String, _ args: [String: JSON], then: ((JSON) -> Void)? = nil) {
+  /// Runs a request off the main thread, then refreshes. `finally` runs
+  /// whether the request succeeds or fails.
+  func perform(
+    _ op: String, _ args: [String: JSON], then: ((JSON) -> Void)? = nil, finally: (() -> Void)? = nil
+  ) {
     let client = client
     worker.async {
       let result = Result { try client.call(op, args, timeout: 300) }
@@ -97,6 +111,7 @@ final class BoardModel: ObservableObject {
         case .failure(let error):
           self.actionError = "\(op): \(error)"
         }
+        finally?()
         self.refresh()
       }
     }
@@ -110,11 +125,19 @@ final class BoardModel: ObservableObject {
 
   /// Answers a card: allow, deny with an optional message, or one answer per question.
   func answer(_ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil) {
+    guard answering.insert(card.id).inserted else { return }
     var args: [String: JSON] = ["session": .string(card.session), "card": .number(Double(card.id))]
     if let behavior { args["behavior"] = .string(behavior) }
     if !message.isEmpty { args["message"] = .string(message) }
     if let answers { args["answers"] = .array(answers.map(JSON.string)) }
-    perform("answer", args)
+    perform("answer", args, finally: { self.answering.remove(card.id) })
+  }
+
+  func draft(for card: Card) -> CardView.Draft {
+    if let draft = drafts[card.id] { return draft }
+    let draft = CardView.Draft()
+    drafts[card.id] = draft
+    return draft
   }
   func remove(_ id: String) {
     if selection == id { selection = nil }
@@ -142,6 +165,9 @@ final class BoardModel: ObservableObject {
     if selection == nil && !showingBoard {
       let i = list.firstIndex { $0.id == currentQueueItem } ?? -1
       queueFocus = list[(i + 1) % list.count].id
+      queueJumps += 1
+      // A field in the item that scrolls away would keep the keystrokes.
+      NSApp.keyWindow?.makeFirstResponder(nil)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {
       selection = list[(i + 1) % list.count].id
     } else {

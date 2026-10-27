@@ -37,6 +37,7 @@ while [ $# -gt 0 ]; do
 done
 printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
+request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 
 # payload <event> [json fields]: a hook payload shaped like claude's.
 payload() {
@@ -51,9 +52,9 @@ hook() { payload "$@" | sh -c "$hook_cmd" >/dev/null; }
 # "terminal <line>". A hook that prints nothing made no decision, so the
 # dialog keeps waiting. The hook's pid goes to $SB_HOME/held-hook.pid.
 dialog() {
-  local out term hook_pid reader_pid answer=''
+  local out term hook_pid reader_pid said answer=''
   out=$(mktemp) term=$(mktemp)
-  payload PermissionRequest "$1" | sh -c "exec $hook_cmd" >"$out" &
+  payload PermissionRequest "$1" | sh -c "exec $request_cmd" >"$out" &
   hook_pid=$!
   echo "$hook_pid" >"$SB_HOME/held-hook.pid"
   { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
@@ -63,13 +64,16 @@ dialog() {
       [ -s "$out" ] && answer="hook $(cat "$out")"
       hook_pid=''
     fi
-    if [ -z "$answer" ] && [ "$(cat "$term")" = timeout ]; then
+    # One read per pass, so a line that arrives mid-pass waits for the next.
+    said=$(cat "$term")
+    if [ -z "$answer" ] && [ "$said" = timeout ]; then
       [ -n "$hook_pid" ] && kill "$hook_pid"
       : >"$term"
       { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
       reader_pid=$!
+    elif [ -z "$answer" ] && [ -n "$said" ]; then
+      answer="terminal $said"
     fi
-    [ -z "$answer" ] && [ -s "$term" ] && answer="terminal $(cat "$term")"
     sleep 0.1
   done
   kill "$reader_pid" 2>/dev/null

@@ -56,8 +56,9 @@ extension Service {
       })
   }
 
-  /// Answers each of the session's held requests whose card is gone or
-  /// deferred with an empty body, which Claude Code reads as no decision.
+  /// Drops the session's held requests whose card is gone or deferred. A
+  /// request that has no reply yet gets an empty body, which Claude Code
+  /// reads as no decision.
   func releaseCards(_ id: String) {
     guard !held.isEmpty else { return }
     let open = Set(entries[id]?.facts.cards.filter { !$0.deferred }.map(\.id) ?? [])
@@ -72,14 +73,18 @@ extension Service {
   /// answers with a message to the session.
   func answer(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
-    let card = try openCard(id, args["card"]?.int)
-    var data: [String: JSON] = ["card": .number(Double(card.id)), "behavior": args["behavior"] ?? "allow"]
+    let card = try Card.choose(args["card"]?.int, from: entries[id]?.facts.cards ?? [], session: id)
+    var data: [String: JSON] = ["card": .number(Double(card.id)), "behavior": "allow"]
     let delivery: String
     if let given = args["answers"]?.array {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
       data["answers"] = .array(answers.map(JSON.string))
-      delivery = card.deferred ? try send(id, card.answerMessage(answers)).rawValue : try answerHook(card, card.decision(answers: answers))
+      if card.deferred {
+        delivery = try send(id, card.answerMessage(answers), byUser: false).rawValue
+      } else {
+        delivery = try answerHook(card, card.decision(answers: answers))
+      }
     } else {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
@@ -88,6 +93,7 @@ extension Service {
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
       case "deny":
+        data["behavior"] = "deny"
         data["message"] = message.map(JSON.string)
         delivery = try answerHook(card, .deny(message: message))
       default:
@@ -111,27 +117,19 @@ extension Service {
     return "hook"
   }
 
-  /// The card with the given id, or the session's only card.
-  private func openCard(_ id: String, _ number: Int?) throws -> Card {
-    let cards = entries[id]?.facts.cards ?? []
-    if let number {
-      guard let card = cards.first(where: { $0.id == Int64(number) }) else {
-        throw APIError("\(id) has no open card \(number)")
-      }
-      return card
-    }
-    guard let card = cards.first else { throw APIError("\(id) has no open permission prompt or question") }
-    guard cards.count == 1 else {
-      throw APIError("\(id) has \(cards.count) open cards (\(cards.map { String($0.id) }.joined(separator: ", "))). Name one with --card")
-    }
-    return card
-  }
-
-  /// Defers every held question that has been open for the stop rule's wait.
-  func deferQuestions(now: Int64) {
-    for (card, request) in heldQuestions() where now - card.since >= idleStopMs(card.session) {
+  /// Defers each held question that has been open for `idleStopSeconds`,
+  /// unless a terminal shows its session. The stop rule then leaves claude
+  /// running, so a deferral would only close the dialog the user reads.
+  func deferDueQuestions(now: Int64) {
+    let wait = Int64(config.idleStopSeconds) * 1000
+    for (card, request) in heldQuestions() where now - card.since >= wait && !attached(card.session) {
       deferQuestion(card, request)
     }
+  }
+
+  /// Whether a terminal shows the session's Claude pane.
+  func attached(_ id: String) -> Bool {
+    (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0
   }
 
   /// Defers the session's held questions at once, so that its claude can

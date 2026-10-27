@@ -86,6 +86,9 @@ public struct Event: Codable, Equatable, Sendable {
     self.kind = kind
     self.data = data
   }
+
+  /// Hooks fire for a subagent's tool calls too, with its agent_id.
+  public var fromSubagent: Bool { data["agent_id"]?.string != nil }
 }
 
 /// What `sb ls` and the GUI show for a session.
@@ -110,12 +113,16 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var waits: [Wait]
   public var notes: [Note]
   /// Open and deferred permission prompts and questions, oldest first.
-  public var cards: [Card] = []
+  public var cards: [Card]
+  /// True while Claude Code shows a permission or question dialog, with or
+  /// without a card. Without a card, only the terminal can answer it.
+  public var openPrompt: Bool
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
     state: AttentionState, reason: String, since: Int64, lastActivity: Int64, live: Bool,
-    claudePid: Int?, attached: Bool, lastReply: String?, waits: [Wait], notes: [Note]
+    claudePid: Int?, attached: Bool, lastReply: String?, waits: [Wait], notes: [Note], cards: [Card] = [],
+    openPrompt: Bool = false
   ) {
     self.id = id
     self.name = name
@@ -133,6 +140,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
     self.lastReply = lastReply
     self.waits = waits
     self.notes = notes
+    self.cards = cards
+    self.openPrompt = openPrompt
   }
 }
 

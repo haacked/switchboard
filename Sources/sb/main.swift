@@ -50,7 +50,7 @@ let usage = """
     version
 
   A <session> is an id, a unique id prefix, or a unique name. For send, rename,
-  deny, answer, and the text forms of wait and note, every word after the
+  and the text forms of wait, note, deny, and answer, every word after the
   session is text, so put --json and --card before the session. SB_HOME picks
   the state folder (default ~/.sb).
 
@@ -148,20 +148,21 @@ func printTable(_ sessions: [SessionSummary]) {
     let name = oneLine(s.name, max: nameWidth)
     print(
       "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reason)"
+        .printable
     )
   }
 }
 
 func printSession(_ s: SessionSummary) {
-  print("\(s.id)  \(s.name)")
-  print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))")
+  print("\(s.id)  \(s.name)".printable)
+  print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))".printable)
   print(
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
   print("  folder:  \(s.cwd)")
   if let b = s.branch { print("  branch:  \(b)") }
   print("  claude session: \(s.claudeSessionId)")
-  if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))") }
+  if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
 }
 
@@ -240,7 +241,7 @@ func events(_ a: Args) -> Never {
         let detail =
           e.data["tool_name"]?.string ?? e.data["prompt"]?.string ?? e.data["last_assistant_message"]?.string ?? e.data[
             "text"]?.string ?? ""
-        print("\(e.id)  \(e.session)  \(e.kind)  \(oneLine(detail, max: 80))")
+        print("\(e.id)  \(e.session)  \(e.kind)  \(oneLine(detail, max: 80))".printable)
       }
       since = Int(e.id)
     }
@@ -308,10 +309,12 @@ guard let command = argv.popFirst() else {
   print(usage)
   exit(0)
 }
-// The text of these commands is everything after the session. `wait` and
-// `note` read flags instead when the word after the session is one.
-var a = Args(argv, literalAfter: ["send", "wait", "rename", "note", "deny", "answer"].contains(command) ? 1 : .max)
-if ["wait", "note"].contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
+// The text of these commands is everything after the session. All but
+// `send` and `rename` read flags instead when the word after the session is
+// one.
+let flagsAfterSession = ["wait", "note", "deny", "answer"]
+var a = Args(argv, literalAfter: (["send", "rename"] + flagsAfterSession).contains(command) ? 1 : .max)
+if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {
 case "hook":

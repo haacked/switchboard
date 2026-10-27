@@ -54,9 +54,39 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "perm rm -rf build")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
-    try sbd.sb("deny", s.id)
-    let after = try sbd.waitFor(s.id, "the end of the turn") { $0.state != .working && $0.cards.isEmpty }
+    // A flag after the session is a flag, not the message.
+    try sbd.sb("deny", s.id, "--json")
+    // The stub reports the idle prompt after an interruption, and a reply after a message.
+    try sbd.waitFor("the idle prompt") {
+      try sbd.events(s.id).contains { $0.data["notification_type"] == "idle_prompt" }
+    }
+    let after = try sbd.get(s.id)
+    #expect(after.lastReply == nil)
     #expect(after.reason == "read its last reply and decide what's next")
+  }
+
+  @Test func refusesToAnswerInsideClaudeCode() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "perm touch x")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    #expect(throws: TestError.self) { try sbd.sb("allow", s.id, env: ["CLAUDECODE": "1"]) }
+    #expect(try sbd.cards().count == 1)
+  }
+
+  @Test func listsTheWholeCallThatAllowApproves() throws {
+    let sbd = try Instance()
+    let command = "cd /tmp/one/two/three && touch a-file-whose-name-runs-past-fifty-characters.txt"
+    let s = try sbd.new(prompt: "perm \(command)")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    #expect(try sbd.sb("cards").contains("      \(command)\n"))
+  }
+
+  @Test func holdsThePermissionRequestHookForADay() throws {
+    let sbd = try Instance()
+    let settings = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings, encoding: .utf8)))
+    let timeout = { (event: String) in settings["hooks"]?[event]?.array?.first?["hooks"]?.array?.first?["timeout"] }
+    #expect(timeout("PermissionRequest") == .number(Double(Card.holdSeconds)))
+    #expect(timeout("Stop") == 30)
   }
 
   @Test func answersTwoQuestionsWithTheChosenLabels() throws {
@@ -146,6 +176,44 @@ extension Instance {
     let stopped = try sbd.waitFor(s.id, "the stop") { !$0.live }
     #expect(stopped.cards.map(\.deferred) == [true])
     #expect(try sbd.sb("answer", s.id, "cherry", "red") == "resumed\n")
+  }
+
+  @Test func keepsAQuestionHeldInASessionWithAnOpenWait() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    try sbd.sb("send", s.id, "pick")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    // A session with an open wait stops 2 s after its turn. A question waits for idleStopSeconds.
+    sleep(3)
+    #expect(try sbd.get(s.id).cards.map(\.deferred) == [false])
+  }
+
+  @Test func keepsAQuestionHeldWhileATerminalShowsTheSession() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let detach = try sbd.attach(s.id)
+    try sbd.waitFor(s.id, "the attached flag") { $0.attached }
+    try sbd.sb("send", s.id, "pick")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    sleep(3)
+    #expect(try sbd.get(s.id).cards.map(\.deferred) == [false])
+    detach()
+    try sbd.waitFor(s.id, "the deferral after detaching") { $0.cards.first?.deferred == true }
+  }
+
+  @Test func aWaitsMessageLeavesADeferredQuestion() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let s = try sbd.new(prompt: "pick")
+    try sbd.waitFor(s.id, "the deferred card") { $0.cards.first?.deferred == true }
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    try sbd.sb("wait", s.id, "--resolve", "#1190 merged")
+    try sbd.waitFor(s.id, "the wait's message") { $0.lastReply?.hasPrefix("Done: Switchboard: ") == true }
+    let after = try sbd.get(s.id)
+    #expect(after.cards.map(\.deferred) == [true])
+    #expect(after.reason == "answer: Which fruit?")
   }
 
   @Test func keepsADeferredQuestionAcrossARestartOfSbd() throws {

@@ -42,16 +42,19 @@ public struct SessionFacts: Equatable, Sendable {
   public var waitOutcome: String?
   /// Open and deferred permission prompts and questions, oldest first.
   public var cards: [Card] = []
+  /// Messages that sbd sent on its own, such as a wait's outcome, until
+  /// claude reports each one as a prompt.
+  public var sbdMessages: [String] = []
 
   public init() {}
 
   public mutating func apply(_ event: Event) {
     let d = event.data
     lastActivity = max(lastActivity, event.t)
-    applyWait(event)
-    // Hooks fire for a subagent's tool calls too, with its agent_id. They
-    // don't change what the main session waits on.
-    let fromSubagent = d["agent_id"]?.string != nil
+    let userPrompt = isUserPrompt(event)
+    applyWait(event, userPrompt: userPrompt)
+    // A subagent's tool calls don't change what the main session waits on.
+    let fromSubagent = event.fromSubagent
     let tool = d["tool_name"]?.string ?? ""
     switch event.kind {
     case "SessionStart":
@@ -66,7 +69,7 @@ public struct SessionFacts: Equatable, Sendable {
       endTurn()
       subagents = []
     case "UserPromptSubmit":
-      if !Attention.isSubagentResult(d["prompt"]?.string ?? "") { prompts += 1 }
+      if userPrompt { prompts += 1 }
       startTurn(event.t)
       runningTool = nil
       openPermission = nil
@@ -121,7 +124,7 @@ public struct SessionFacts: Equatable, Sendable {
     default:
       break
     }
-    applyCards(event)
+    applyCards(event, userPrompt: userPrompt)
   }
 
   private mutating func startTurn(_ t: Int64) {

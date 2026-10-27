@@ -405,7 +405,9 @@ public final class Service {
     return now - start >= 1500
   }
 
-  func send(_ id: String, _ text: String) throws -> Delivery {
+  /// `byUser` is false for a message that sbd sends on its own, which can't
+  /// answer a deferred question.
+  func send(_ id: String, _ text: String, byUser: Bool = true) throws -> Delivery {
     guard entries[id] != nil else { throw APIError("no session \(id)") }
     let delivery: Delivery
     let now = nowMs()
@@ -423,7 +425,9 @@ public final class Service {
       delivery = .queued
       deliverPending(id, after: 0.2)
     }
-    record(id, "sent", ["text": .string(text), "delivery": .string(delivery.rawValue)])
+    var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
+    if !byUser { data["by"] = "sbd" }
+    record(id, "sent", .object(data))
     return delivery
   }
 
@@ -634,7 +638,7 @@ public final class Service {
         }
       }
       resolveDueWaits(now: now)
-      deferQuestions(now: now)
+      deferDueQuestions(now: now)
     }
   }
 
@@ -648,7 +652,7 @@ public final class Service {
     // A running subagent's tool calls fire hooks. A subagent with no event
     // for twice the idle time lost its SubagentStop, as when sbd was down.
     guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
-    guard (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) == 0 else { return false }
+    guard !attached(id) else { return false }
     return !hasBackgroundJob(pid)
   }
 
@@ -662,14 +666,13 @@ public final class Service {
     let e = entries[id]!
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs())
     let s = e.session
-    var summary = SessionSummary(
+    return SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
       state: verdict.state, reason: verdict.reason, since: e.facts.stateSince, lastActivity: e.facts.lastActivity,
       live: e.facts.live, claudePid: snapshot.claudePids[id],
-      attached: (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0, lastReply: e.facts.lastReply,
-      waits: s.waits ?? [], notes: s.notes ?? [])
-    summary.cards = e.facts.cards
-    return summary
+      attached: attached(id), lastReply: e.facts.lastReply,
+      waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
+      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil)
   }
 
   // MARK: Settings

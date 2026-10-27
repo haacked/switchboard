@@ -25,8 +25,8 @@ struct QueueView: View {
           }
           .padding()
         }
-        .onChange(of: model.queueFocus) { _, id in
-          if let id { withAnimation { proxy.scrollTo(id, anchor: .top) } }
+        .onChange(of: model.queueJumps) {
+          if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id, anchor: .top) } }
         }
       }
     }
@@ -45,13 +45,17 @@ struct QueueItem: View {
         SessionRow(session: session)
         Button("Open") { model.selection = session.id }
       }
-      if session.cards.isEmpty {
+      if !session.cards.isEmpty {
+        ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+      } else if session.openPrompt {
+        // A message would only queue behind the open dialog.
+        Text("Claude Code's dialog waits in the terminal. Open the session to answer it.")
+          .foregroundStyle(.secondary)
+      } else {
         if let last = session.lastReply {
           Text(last).font(.callout).lineLimit(8).textSelection(.enabled)
         }
         MessageField(session: session.id)
-      } else {
-        ForEach(session.cards) { CardView(card: $0) }
       }
     }
     .padding(12)

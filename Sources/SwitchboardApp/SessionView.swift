@@ -22,10 +22,15 @@ struct SessionView: View {
       header
       Divider()
       if !session.cards.isEmpty {
-        VStack(spacing: 8) {
-          ForEach(session.cards) { CardView(card: $0) }
+        // A card with several questions would otherwise squeeze out the terminals.
+        ScrollView {
+          VStack(spacing: 8) {
+            ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+          }
+          .padding(8)
         }
-        .padding(8)
+        .frame(maxHeight: 360)
+        .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
       if let terminals = ui.terminals {

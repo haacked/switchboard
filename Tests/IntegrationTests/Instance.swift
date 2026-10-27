@@ -95,6 +95,21 @@ final class Instance {
 
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
 
+  /// Attaches a control-mode tmux client to the session's Claude pane, which
+  /// counts as a terminal that shows the session. It returns a function that
+  /// detaches the client.
+  func attach(_ id: String) throws -> () -> Void {
+    let terminals = try client.terminals(id)
+    let attached = Process()
+    attached.executableURL = URL(fileURLWithPath: terminals.tmux)
+    attached.arguments = ["-S", terminals.socket, "-C", "attach-session", "-t", "=\(terminals.claude)"]
+    let input = Pipe()
+    attached.standardInput = input
+    attached.standardOutput = FileHandle.nullDevice
+    try attached.run()
+    return { input.fileHandleForWriting.write(Data("detach-client\n".utf8)) }
+  }
+
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
   }

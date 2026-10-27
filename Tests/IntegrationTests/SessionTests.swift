@@ -123,20 +123,11 @@ import Testing
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    let terminals = try sbd.client.terminals(s.id)
-    // A control-mode client counts as an attached terminal.
-    let client = Process()
-    client.executableURL = URL(fileURLWithPath: terminals.tmux)
-    client.arguments = ["-S", terminals.socket, "-C", "attach-session", "-t", "=\(terminals.claude)"]
-    let input = Pipe()
-    client.standardInput = input
-    client.standardOutput = FileHandle.nullDevice
-    try client.run()
-    defer { client.terminate() }
+    let detach = try sbd.attach(s.id)
     try sbd.waitFor(s.id, "the attached flag") { $0.attached }
     sleep(4)
     #expect(try sbd.get(s.id).live)
-    input.fileHandleForWriting.write(Data("detach-client\n".utf8))
+    detach()
     try sbd.waitFor(s.id, "the idle stop after detaching", timeout: 15) { !$0.live }
   }
 

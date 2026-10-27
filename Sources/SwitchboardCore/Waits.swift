@@ -350,11 +350,11 @@ public func shortId(_ prefix: String, taken: some Collection<String> = [String](
 
 extension SessionFacts {
   /// Folds the wait events into the facts. `apply` calls it for every event.
-  mutating func applyWait(_ event: Event) {
+  mutating func applyWait(_ event: Event, userPrompt: Bool) {
     switch event.kind {
     case "wait":
       waitOutcome = nil
-    case "UserPromptSubmit" where !Attention.isSubagentResult(event.data["prompt"]?.string ?? ""):
+    case "UserPromptSubmit" where userPrompt:
       waitOutcome = nil
     case "wait-resolved":
       guard let json = event.data["wait"], let wait = try? JSONCoding.convert(json, to: Wait.self),

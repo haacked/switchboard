@@ -14,12 +14,13 @@ struct CardView: View {
 
   @EnvironmentObject var model: BoardModel
   let card: Card
-  @StateObject private var draft = Draft()
+  @ObservedObject var draft: Draft
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if card.kind == .permission { permission } else { questions }
     }
+    .disabled(model.answering.contains(card.id))
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(RoundedRectangle(cornerRadius: 8).fill(AttentionState.needsYou.color.opacity(0.07)))
@@ -33,7 +34,7 @@ struct CardView: View {
         Text(description).foregroundStyle(.secondary)
       }
       ScrollView {
-        Text(details)
+        Text(card.details)
           .font(.body.monospaced())
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -57,14 +58,6 @@ struct CardView: View {
   }
 
   private func deny() { model.answer(card, behavior: "deny", message: draft.message) }
-
-  /// What the user approves: a Bash command, or the tool's input as JSON.
-  private var details: String {
-    if let command = card.input["command"]?.string { return command }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    return (try? encoder.encode(card.input)).map { String(decoding: $0, as: UTF8.self) } ?? ""
-  }
 
   private var questions: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -92,6 +85,7 @@ struct CardView: View {
             } label: {
               HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: icon(i, option.label, multiSelect: q.multiSelect))
+                  .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                   Text(option.label)
                   if let description = option.description {
@@ -102,6 +96,7 @@ struct CardView: View {
               .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(draft.picks[i]?.contains(option.label) == true ? .isSelected : [])
           }
           TextField(
             "Or type an answer",
