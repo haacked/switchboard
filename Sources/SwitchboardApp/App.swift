@@ -36,7 +36,7 @@ struct SwitchboardApp: App {
           .disabled(model.selected?.live != true)
         Button("Resume Claude") { model.selection.map(model.resume) }
           .keyboardShortcut("r", modifiers: [.command, .shift])
-          .disabled(model.selected == nil || model.selected?.live == true)
+          .disabled(model.selected == nil || model.selected?.live == true || model.selected?.isNotStarted == true)
         Button(model.selected?.state == .done ? "Mark Not Done" : "Mark Done") {
           if let s = model.selected { model.setDone(s.id, s.state != .done) }
         }

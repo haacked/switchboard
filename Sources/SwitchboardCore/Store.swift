@@ -17,6 +17,7 @@ public final class Store {
       "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, t INTEGER NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL)"
     )
     try exec("CREATE INDEX IF NOT EXISTS events_session ON events (session, id)")
+    try exec("CREATE TABLE IF NOT EXISTS followup_imports (line TEXT PRIMARY KEY)")
   }
 
   deinit { sqlite3_close(db) }
@@ -64,6 +65,16 @@ public final class Store {
         id: row.int(0), session: row.text(1), t: row.int(2), kind: row.text(3), data: JSON.parse(row.text(4)) ?? .null)
     }
     return newest ? rows.reversed() : rows
+  }
+
+  /// Records that an import read this line of Followups.md. Removing the
+  /// follow-up keeps the row, so a later import still skips the line.
+  public func recordImport(_ line: String) throws {
+    try run("INSERT OR IGNORE INTO followup_imports (line) VALUES (?)", [line])
+  }
+
+  public func importedLines() throws -> Set<String> {
+    Set(try query("SELECT line FROM followup_imports", []) { $0.text(0) })
   }
 
   // MARK: SQLite

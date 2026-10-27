@@ -91,12 +91,7 @@ struct SessionView: View {
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 8) {
           Text(session.name).font(.title3.bold())
-          Text(session.state.title)
-            .font(.caption.bold())
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(session.state.color.opacity(0.18)))
-            .foregroundStyle(session.state.color)
+          StateBadge(state: session.state)
           Text(session.live ? "claude running" : "claude stopped")
             .font(.caption)
             .foregroundStyle(.secondary)

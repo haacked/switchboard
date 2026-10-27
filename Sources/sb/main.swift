@@ -44,6 +44,19 @@ let usage = """
                                   multi-select answer with commas. Text that
                                   is no option's label goes as typed.
 
+  Follow-ups, sessions that haven't started:
+    followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
+                 [--after owner/name#N] [--link URL] [--parent S]
+                                  add one. Without --repo, the current folder's
+                                  GitHub repo. --on and --after move it to Needs
+                                  you when the time passes or the PR merges
+    followup ls                   list follow-ups that haven't started
+    followup start <f> [--path FOLDER] [--branch B] [--base REF]
+                                  make its worktree and start claude with its text
+    followup rm <f>               remove a follow-up that hasn't started
+    followup import [--file F]    add the open items of Followups.md that no
+                                  earlier import read
+
   Service:
     ping                          check that sbd answers
     mcp                           list the shared MCP servers that sbd runs
@@ -74,6 +87,7 @@ struct Args {
     let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--until", "--timeout", "--session", "--since",
       "--id", "--resolve", "--rm", "--card",
+      "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -157,6 +171,7 @@ func printTable(_ sessions: [SessionSummary]) {
 func printSession(_ s: SessionSummary) {
   print("\(s.id)  \(s.name)".printable)
   print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))".printable)
+  if s.isNotStarted { return printFollowup(s) }
   print(
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
@@ -322,7 +337,7 @@ case "hook":
   hook()
 case "ls", "list":
   let result = call("ls")
-  if a.json { printJSON(result) } else { printTable(decode(result, as: [SessionSummary].self)) }
+  if a.json { printJSON(result) } else { printSessionList(decode(result, as: [SessionSummary].self)) }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
   let folder = URL(fileURLWithPath: path.expandingTilde).path
@@ -375,6 +390,8 @@ case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":
   mcp(a)
+case "followup", "followups":
+  followup(a)
 case "ping":
   let result = call("ping", timeout: 5)
   if a.json {

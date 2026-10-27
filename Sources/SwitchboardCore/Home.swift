@@ -68,6 +68,12 @@ public struct Config: Codable, Equatable, Sendable {
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
   public var mcpServers: [String: MCPServer] = [:]
+  /// Local checkouts by `owner/name`, for repositories outside `repoRoots`.
+  public var repos: [String: String] = [:]
+  /// Folders that hold checkouts at <root>/<owner>/<name>.
+  public var repoRoots: [String] = ["~/dev"]
+  /// Goes before a branch name that `followup start` makes from a title.
+  public var branchPrefix = ""
 
   public init() {}
 
@@ -93,6 +99,9 @@ public struct Config: Codable, Equatable, Sendable {
         logLine("skipping MCP server \(name): \(error)")
       }
     }
+    repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? d.repos
+    repoRoots = try c.decodeIfPresent([String].self, forKey: .repoRoots) ?? d.repoRoots
+    branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
   }
 }
 

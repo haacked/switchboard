@@ -26,6 +26,12 @@ final class BoardModel: ObservableObject {
   @Published var answering: Set<Int64> = []
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
+  /// The sidebar sections that the user collapsed. Follow-ups that haven't
+  /// started can number in the hundreds, so their section starts collapsed.
+  @Published var collapsed: Set<AttentionState> = [.notStarted]
+  /// Follow-ups that haven't started, which `ls` leaves out. They change
+  /// only through actions and triggers, so the app reads them every 5 s.
+  @Published var followups: [SessionSummary] = []
   private var drafts: [Int64: CardView.Draft] = [:]
 
   let client = Client()
@@ -36,10 +42,18 @@ final class BoardModel: ObservableObject {
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
   private var loaded = false
+  private var followupsRead = Date.distantPast
 
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou } }
 
-  var selected: SessionSummary? { sessions.first { $0.id == selection } }
+  /// The sessions and the follow-ups that haven't started. A follow-up that
+  /// started or fired since the last read of follow-ups shows once.
+  var board: [SessionSummary] {
+    let ids = Set(sessions.map(\.id))
+    return sessions + followups.filter { !ids.contains($0.id) }
+  }
+
+  var selected: SessionSummary? { board.first { $0.id == selection } }
 
   /// The focused Queue item while it still needs you, else the oldest one.
   var currentQueueItem: String? {
@@ -57,28 +71,37 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  func refresh() {
+  func refresh(followups: Bool = false) {
     let client = client
+    let readFollowups = followups || Date().timeIntervalSince(followupsRead) >= 5
+    if readFollowups { followupsRead = Date() }
     poller.async {
       let result = Result { try client.sessions() }
-      Task { @MainActor in self.apply(result) }
+      let more = readFollowups ? try? client.call("followup-ls", as: [SessionSummary].self) : nil
+      Task { @MainActor in self.apply(result, followups: more) }
     }
   }
 
-  private func apply(_ result: Result<[SessionSummary], Error>) {
+  private func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
     switch result {
     case .success(let list):
       unreachable = nil
+      if let more, followups != more { followups = more }
       if loaded {
         for s in list where s.state == .needsYou && knownStates[s.id] != .needsYou && knownStates[s.id] != nil {
+          // A follow-up that starts passes through Needs you until its first
+          // prompt. Only a follow-up that fired and is still unstarted notifies.
+          if knownStates[s.id] == .notStarted && !s.isNotStarted { continue }
           notify(s)
         }
       }
-      knownStates = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.state) })
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
-      loaded = true
       if sessions != list { sessions = list }
+      // A follow-up that fires moves from the follow-ups into `ls`. The known
+      // states include the follow-ups, so that move notifies.
+      knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
+      loaded = true
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
     case .failure(let error):
       unreachable = "\(error)"
@@ -112,7 +135,7 @@ final class BoardModel: ObservableObject {
           self.actionError = "\(op): \(error)"
         }
         finally?()
-        self.refresh()
+        self.refresh(followups: true)
       }
     }
   }

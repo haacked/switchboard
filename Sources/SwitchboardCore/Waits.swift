@@ -74,7 +74,7 @@ public struct Wait: Codable, Equatable, Sendable {
       var number = text.trimmingCharacters(in: .whitespaces)
       if let url = URL(string: number), url.scheme == "https" || url.scheme == "http" {
         let parts = url.path.split(separator: "/").map(String.init)
-        guard parts.count >= 4, parts[2] == "pull" else { return nil }
+        guard url.host?.lowercased() == "github.com", parts.count >= 4, parts[2] == "pull" else { return nil }
         repository = "\(parts[0])/\(parts[1])"
         number = parts[3]
       } else if let hash = number.lastIndex(of: "#") {

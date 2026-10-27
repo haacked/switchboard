@@ -124,7 +124,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
     "", "abc", "#", "0", "-3", "12a", "owner#12", "a/b/c#1", "https://github.com/PostHog/posthog/issues/12",
     "#0", "PostHog/posthog#0", "PostHog/posthog#-3", "PostHog/posthog#", "/posthog#12", "PostHog/#12",
     "https://github.com/PostHog/posthog/pull/", "https://github.com/PostHog/posthog/pull/0",
-    "https://github.com/PostHog/posthog/pull/12a",
+    "https://github.com/PostHog/posthog/pull/12a", "https://gitlab.com/PostHog/posthog/pull/12",
   ])
   func refusesWhatIsNotAPR(_ text: String) {
     #expect(Wait.PullRequest(parsing: text) == nil)

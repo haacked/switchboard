@@ -10,7 +10,22 @@ extension AttentionState {
     case .working: .green
     case .done: .gray
     case .stale: .brown
+    case .notStarted: .teal
     }
+  }
+}
+
+/// The state's title in a capsule of its color.
+struct StateBadge: View {
+  let state: AttentionState
+
+  var body: some View {
+    Text(state.title)
+      .font(.caption.bold())
+      .padding(.horizontal, 6)
+      .padding(.vertical, 2)
+      .background(Capsule().fill(state.color.opacity(0.18)))
+      .foregroundStyle(state.color)
   }
 }
 
@@ -44,7 +59,9 @@ struct ContentView: View {
           .padding(8)
           .background(.orange.opacity(0.12))
         }
-        if let s = model.selected {
+        if let s = model.selected, let f = s.followup, f.started == nil {
+          FollowupView(session: s, followup: f).id(s.id)
+        } else if let s = model.selected {
           SessionView(session: s).id(s.id)
         } else {
           Picker("View", selection: $model.showingBoard) {
@@ -81,9 +98,9 @@ struct Sidebar: View {
   var body: some View {
     List(selection: $model.selection) {
       ForEach(AttentionState.allCases, id: \.self) { state in
-        let group = model.sessions.filter { $0.state == state }
+        let group = model.board.filter { $0.state == state }
         if !group.isEmpty {
-          Section {
+          Section(isExpanded: model.expanded(state)) {
             ForEach(group) { s in SessionRow(session: s).tag(s.id) }
           } header: {
             HStack {
@@ -96,7 +113,7 @@ struct Sidebar: View {
       }
     }
     .overlay {
-      if model.sessions.isEmpty && model.unreachable == nil {
+      if model.board.isEmpty && model.unreachable == nil {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
           Button("Start a Session…") { model.showingNew = true }
@@ -157,7 +174,7 @@ struct BoardView: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    let columns = AttentionState.allCases.filter { state in model.sessions.contains { $0.state == state } }
+    let columns = AttentionState.allCases.filter { state in model.board.contains { $0.state == state } }
     if columns.isEmpty {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -172,8 +189,8 @@ struct BoardView: View {
             VStack(alignment: .leading, spacing: 8) {
               Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
               ScrollView {
-                VStack(spacing: 8) {
-                  ForEach(model.sessions.filter { $0.state == state }) { s in
+                LazyVStack(spacing: 8) {
+                  ForEach(model.board.filter { $0.state == state }) { s in
                     Button {
                       model.selection = s.id
                     } label: {

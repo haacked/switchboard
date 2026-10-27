@@ -185,15 +185,7 @@ import Testing
 
   @Test func createsAWorktreeForANewBranch() throws {
     let sbd = try Instance()
-    let repo = "\(sbd.home.path)/repo"
-    try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-    let commit = [
-      "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m",
-      "first",
-    ]
-    for args in [["init", "-q", "-b", "main"], commit] {
-      #expect(try runCommand("/usr/bin/git", ["-C", repo] + args).status == 0)
-    }
+    let repo = try Repos.create("\(sbd.home.path)/repo")
     let s = try sbd.client.call(
       "new", ["path": .string(repo), "branch": "haacked/feature", "prompt": "hello"], as: SessionSummary.self)
     #expect(s.cwd == "\(sbd.home.path)/worktrees/repo/haacked/feature")

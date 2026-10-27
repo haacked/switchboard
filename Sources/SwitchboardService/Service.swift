@@ -128,9 +128,15 @@ public final class Service {
         if request.args["advance"] != nil { tick() }
         return .success(now)
       default:
-        break
+        if let result = try followupRequest(request.op, request.args) { return .success(result) }
       }
-      if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
+      if Service.launches.contains(request.op),
+        let id = try? queue.sync(execute: {
+          let id = try lookup(request.args)
+          try refuseNotStarted(entries[id]!.session)
+          return id
+        })
+      {
         settle(id)
       }
       if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
@@ -151,7 +157,7 @@ public final class Service {
     case "ping":
       return ["pid": .number(Double(getpid())), "home": .string(home.path), "version": .string(Version.text)]
     case "ls":
-      return try JSON(encoding: summaries())
+      return try JSON(encoding: summaries().filter { $0.state != .notStarted })
     case "get":
       return try JSON(encoding: summary(try lookup(args)))
     case "terminals":
@@ -279,7 +285,7 @@ public final class Service {
   /// The folder a new session runs in, and its branch. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
   /// which this creates unless it exists.
-  private func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?) {
+  func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?) {
     let path = (args.path as NSString).standardizingPath
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
@@ -301,8 +307,7 @@ public final class Service {
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
       return (dir, branch)
     }
-    let exists =
-      (try? runCommand(git, ["-C", path, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?.status == 0
+    let exists = branchExists(path, branch)
     try FileManager.default.createDirectory(
       atPath: (dir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
     _ = try gitOutput(
@@ -310,7 +315,11 @@ public final class Service {
     return (dir, branch)
   }
 
-  private func gitOutput(_ cwd: String, _ args: [String]) throws -> String {
+  func branchExists(_ repo: String, _ branch: String) -> Bool {
+    (try? runCommand(git, ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?.status == 0
+  }
+
+  func gitOutput(_ cwd: String, _ args: [String]) throws -> String {
     let r = try runCommand(git, ["-C", cwd] + args)
     guard r.status == 0 else {
       throw APIError("git \(args.joined(separator: " ")): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
@@ -355,6 +364,7 @@ public final class Service {
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    try refuseNotStarted(session)
     let shell = paneName(id, .shell)
     switch snapshot.panes[shell] {
     case nil:
@@ -376,6 +386,7 @@ public final class Service {
   /// exits. tmux keeps the dead pane's last screen until the next launch.
   func launch(_ id: String, prompt: String?) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    try refuseNotStarted(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
     var args = [config.claude]
     args += session.started ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
@@ -504,11 +515,13 @@ public final class Service {
   /// Stops claude, removes the worktree when asked, then closes the panes and
   /// forgets the session. git runs off the state queue, because removing a
   /// worktree with large ignored folders can take a while. A failed removal
-  /// leaves the session and its panes in place.
-  private func remove(_ args: JSON) throws -> JSON {
+  /// leaves the session and its panes in place. `allowed` can refuse the
+  /// session before anything changes.
+  func remove(_ args: JSON, allowed: (Session) throws -> Void = { _ in }) throws -> JSON {
     let fresh = buildSnapshot()
     let session: Session = try queue.sync {
       let id = try lookup(args)
+      try allowed(entries[id]!.session)
       install(fresh)
       if case .running(let pid) = claudeState(id) { kill(pid_t(pid), SIGTERM) }
       return entries[id]!.session
@@ -519,6 +532,8 @@ public final class Service {
       removed = true
     }
     try queue.sync {
+      // The session can change while git runs, such as a follow-up that starts.
+      if let current = entries[session.id]?.session { try allowed(current) }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
       entries[session.id] = nil
@@ -658,6 +673,7 @@ public final class Service {
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
+      readyDueFollowups(now: now)
     }
   }
 
@@ -687,13 +703,20 @@ public final class Service {
     let e = entries[id]!
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs())
     let s = e.session
-    return SessionSummary(
+    var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
       state: verdict.state, reason: verdict.reason, since: e.facts.stateSince, lastActivity: e.facts.lastActivity,
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: attached(id), lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil)
+    out.parent = s.parent
+    out.followup = s.followup
+    out.created = s.created
+    // A follow-up has been Not started since it was added, which for an
+    // imported one is the date of its line.
+    if verdict.state == .notStarted { out.since = s.created }
+    return out
   }
 
   // MARK: Settings

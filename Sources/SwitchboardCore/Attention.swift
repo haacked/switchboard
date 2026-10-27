@@ -166,6 +166,7 @@ public enum Attention {
 
   public static func evaluate(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict {
     if session.done { return Verdict(state: .done, reason: "marked done") }
+    if let verdict = followupVerdict(session) { return verdict }
     if let card = facts.cards.first {
       let reason = card.kind == .permission ? "approve \(card.summary)" : "answer: \(card.summary)"
       return Verdict(state: .needsYou, reason: oneLine(reason))

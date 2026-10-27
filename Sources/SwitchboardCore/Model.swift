@@ -8,6 +8,8 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
   case working
   case done
   case stale
+  /// A follow-up that hasn't started.
+  case notStarted = "not_started"
 
   public var title: String {
     switch self {
@@ -17,6 +19,7 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
     case .working: "Working"
     case .done: "Done"
     case .stale: "Stale"
+    case .notStarted: "Not started"
     }
   }
 
@@ -51,6 +54,10 @@ public struct Session: Codable, Equatable, Sendable {
   public var waits: [Wait]?
   /// Nil in a session that an older sbd stored.
   public var notes: [Note]?
+  /// The session that added this one, such as the session that captured a follow-up.
+  public var parent: String?
+  /// Set on a follow-up. Until it starts, `cwd` is empty and claude never runs.
+  public var followup: Followup?
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,
@@ -117,6 +124,11 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True while Claude Code shows a permission or question dialog, with or
   /// without a card. Without a card, only the terminal can answer it.
   public var openPrompt: Bool
+  public var parent: String?
+  public var followup: Followup?
+  /// When the session was added, in ms since the epoch. An imported
+  /// follow-up was added on the date of its line.
+  public var created: Int64?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
