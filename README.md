@@ -33,7 +33,7 @@ sb done <session>
 sb events --follow
 ```
 
-A session is an id, a unique id prefix, or a unique name. `sb send` pastes into a live idle session, queues the message while a turn runs, and resumes a stopped session with the message as its first prompt.
+A session is an id, a unique id prefix, or a unique name. `sb send` pastes into a live idle session, queues the message while a turn runs, and resumes a stopped session with the message as its first prompt. The paste also submits anything you typed but didn't send in that session's Claude terminal.
 
 ## Settings
 
@@ -56,6 +56,7 @@ A session is an id, a unique id prefix, or a unique name. `sb send` pastes into 
 - `sbd` keeps sessions and their event log in SQLite in `~/.sb`. It answers `sb` and the app on `~/.sb/sbd.sock`.
 - A private tmux server on `~/.sb/tmux.sock` holds every terminal, so the app can quit without touching a session. The Claude pane runs only `claude`. When `claude` exits, the pane keeps its last screen until `sbd` starts it again.
 - Every session gets Claude Code hooks that run `sb hook`, which forwards each event to `sbd`. The state and the reason come from those events, following the rules of the `/sessions` skill.
+- `sb send` pastes into a live session with bracketed paste, so Claude Code treats the message as typed by you. A write to Claude Code's inbox socket would reach Claude as a message from another Claude session, which Claude doesn't take as your approval.
 - `sbd` stops a session's `claude` with SIGTERM when the session has been idle for `idleStopSeconds`, has no open prompt, no background job or subagent, and no terminal showing it.
 
 ## Develop
