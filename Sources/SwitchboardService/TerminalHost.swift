@@ -91,9 +91,19 @@ final class TerminalHost {
     return rows
   }
 
+  /// The value of a tmux format for the pane, or nil when the pane is missing.
+  func display(_ name: String, _ format: String) -> String? {
+    (try? run(["display-message", "-p", "-t", "=\(name):", format]))?.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   /// Whether the pane's program exited, or nil when the pane is missing.
   func isDead(_ name: String) -> Bool? {
-    (try? run(["display-message", "-p", "-t", "=\(name):", "#{pane_dead}"])).map { $0.hasPrefix("1") }
+    display(name, "#{pane_dead}").map { $0 == "1" }
+  }
+
+  /// How the pane's program ended, such as "status 3" or "signal kill".
+  func exitText(_ name: String) -> String? {
+    display(name, "#{?pane_dead_signal,signal #{pane_dead_signal},status #{pane_dead_status}}")
   }
 
   /// Starts a pane in its own tmux session. With no command, the pane runs
@@ -141,8 +151,22 @@ final class TerminalHost {
     try run(["send-keys", "-t", target, "Enter"])
   }
 
-  /// The visible screen as text, with wrapped lines joined.
-  func screen(_ name: String) throws -> String {
-    try run(["capture-pane", "-p", "-J", "-t", "=\(name):"])
+  /// The visible screen as text, with wrapped lines joined. `history` adds
+  /// that many lines of scrollback above it.
+  func screen(_ name: String, history: Int = 0) throws -> String {
+    try run(["capture-pane", "-p", "-J"] + (history > 0 ? ["-S", "-\(history)"] : []) + ["-t", "=\(name):"])
+  }
+
+  /// The last `count` lines that the pane's program printed, without the
+  /// line that tmux adds when the program exits.
+  func lastLines(_ name: String, _ count: Int) -> [String]? {
+    guard let text = try? screen(name, history: 200) else { return nil }
+    let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+      .filter { !$0.isEmpty && !$0.hasPrefix("Pane is dead (") }
+    return lines.isEmpty ? nil : Array(lines.suffix(count))
+  }
+
+  func clearHistory(_ name: String) {
+    _ = try? run(["clear-history", "-t", "=\(name):"])
   }
 }

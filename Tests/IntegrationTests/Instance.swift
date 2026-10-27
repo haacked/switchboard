@@ -23,15 +23,17 @@ final class Instance {
   /// bytes. The stop rule runs every 0.2 s, so idle stops come quickly. The
   /// panes run /bin/sh by default, because a login shell with the user's
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
-  init(idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh") throws {
+  init(
+    idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", config extra: [String: JSON] = [:]
+  ) throws {
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     home = Home(path: String(cString: dir))
-    let config: JSON = [
+    let config: [String: JSON] = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
     ]
-    try config.text.write(toFile: home.config, atomically: true, encoding: .utf8)
+    try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
     client = Client(home: home)
     try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
@@ -119,9 +121,15 @@ final class Instance {
   func waitFor(_ id: String, _ what: String, timeout: Double = 15, _ match: (SessionSummary) -> Bool) throws
     -> SessionSummary
   {
-    var last: SessionSummary?
+    try waitFor(what, timeout: timeout, fetch: { try get(id) }, until: match)
+  }
+
+  /// Waits until a fetched value matches, and returns it. A fetch that
+  /// throws or returns nil counts as no match.
+  func waitFor<T>(_ what: String, timeout: Double = 15, fetch: () throws -> T?, until match: (T) -> Bool) throws -> T {
+    var last: T?
     try waitFor(what, timeout: timeout) {
-      last = try? get(id)
+      last = (try? fetch()) ?? nil
       return last.map(match) ?? false
     }
     return last!

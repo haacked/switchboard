@@ -19,14 +19,17 @@
 #   Claude Code's dialog reads a line from the terminal: y allows, and esc
 #   refuses and kills the hook, as Claude Code closes the request. timeout
 #   kills the hook and leaves the dialog open, as the hook's timeout does.
+#   mcp <name>       fetches that server's URL from the --mcp-config file and
+#                    replies "MCP <name>: <answer>"
 #   anything else    replies "Done: <prompt>"
 # It records its arguments in $SB_HOME/stub-args.log.
 
-settings='' session='' prompt='' source=startup linger=0
+settings='' mcp_config='' session='' prompt='' source=startup linger=0
 args=("$@")
 while [ $# -gt 0 ]; do
   case $1 in
   --settings) settings=$2 && shift 2 ;;
+  --mcp-config) mcp_config=$2 && shift 2 ;;
   --session-id) session=$2 && shift 2 ;;
   --resume) session=$2 source=resume && shift 2 ;;
   --model | --permission-mode) shift 2 ;;
@@ -171,6 +174,10 @@ turn() {
     hook SessionStart '{"source":"clear"}'
     echo "⏺ cleared, now $session"
     return
+    ;;
+  mcp\ *)
+    url=$(jq -r --arg n "${p#mcp }" '.mcpServers[$n].url' "$mcp_config")
+    reply="MCP ${p#mcp }: $(curl -s --max-time 2 "$url" || echo "no answer from $url")"
     ;;
   linger*)
     linger=${p#linger }

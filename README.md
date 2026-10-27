@@ -39,6 +39,7 @@ sb cards                     # open permission prompts and questions
 sb allow <session>
 sb deny <session> Use the Makefile instead.
 sb answer <session> cherry "red, blue"
+sb mcp                       # the shared MCP servers
 ```
 
 A session is an id, a unique id prefix, or a unique name. `sb send` pastes into a live idle session, queues the message while a turn runs, and resumes a stopped session with the message as its first prompt. The paste also submits anything you typed but didn't send in that session's Claude terminal.
@@ -63,10 +64,40 @@ A card waits until you answer it from `sb` or the app, or answer Claude Code's o
 
 `env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
 
+### Shared MCP servers
+
+`mcpServers` lists local MCP servers that `sbd` runs once on 127.0.0.1 and shares with every session, instead of each session starting its own copies:
+
+```json
+{
+  "mcpServers": {
+    "grafana": {
+      "type": "http",
+      "command": "~/dev/posthog/posthog/tools/infra-scripts/mcp/mcp-grafana-wrapper.sh",
+      "args": ["-t", "streamable-http", "-address", "127.0.0.1:{port}", "-disable-write"],
+      "env": {"GRAFANA_REGION": "us", "MCP_GRAFANA_BIN": "~/go/bin/mcp-grafana"}
+    },
+    "posthog-db": {
+      "type": "sse",
+      "command": "~/.local/bin/postgres-mcp",
+      "args": ["--access-mode=restricted", "--transport", "sse", "--sse-host", "127.0.0.1", "--sse-port", "{port}"],
+      "env": {"DATABASE_URI": "postgresql://posthog:posthog@localhost:5432/posthog"}
+    }
+  }
+}
+```
+
+- `type` is `http` (streamable HTTP) or `sse`. `sbd` replaces `{port}` in `args` and `env` with a port that it picks and keeps, or with `port` when you set one. `path` overrides the URL path, which is `/mcp` for `http` and `/sse` for `sse`.
+- tmux starts the command with your shell, so it gets the PATH that your shell sets for a non-interactive command, such as in `~/.zshenv`. A full path doesn't depend on that.
+- Every session gets `--mcp-config ~/.sb/mcp-config.json`. A server there replaces the server with the same name in your Claude config, and the session keeps its other servers, such as remote ones, the claude.ai connectors, and a project's `.mcp.json` servers.
+- `sbd` starts the servers before any session, and starts a server again on the same port when it exits. A server that keeps exiting waits longer each time, up to a minute. `sb mcp` lists the servers, and for one that exited, its exit status and last output.
+- A session connects to its MCP servers when `claude` starts. A session that started while a server was down lacks that server until it stops and resumes.
+- The servers have no authentication. Any local process can call them, with whatever token the server holds.
+
 ## How it works
 
 - `sbd` keeps sessions and their event log in SQLite in `~/.sb`. It answers `sb` and the app on `~/.sb/sbd.sock`.
-- A private tmux server on `~/.sb/tmux.sock` holds every terminal, so the app can quit without touching a session. The Claude pane runs only `claude`. When `claude` exits, the pane keeps its last screen until `sbd` starts it again.
+- A private tmux server on `~/.sb/tmux.sock` holds every terminal and every shared MCP server, so the app can quit, and `sbd` can restart, without touching a session. The Claude pane runs only `claude`. When `claude` exits, the pane keeps its last screen until `sbd` starts it again.
 - Every session gets Claude Code hooks that run `sb hook`, which forwards each event to `sbd`. The state and the reason come from those events, following the rules of the `/sessions` skill.
 - `sb send` pastes into a live session with bracketed paste, so Claude Code treats the message as typed by you. A write to Claude Code's inbox socket would reach Claude as a message from another Claude session, which Claude doesn't take as your approval.
 - `sbd` stops a session's `claude` with SIGTERM when the session has been idle for `idleStopSeconds` (2 s with an open wait), has no open prompt, no background job or subagent, and no terminal showing it.

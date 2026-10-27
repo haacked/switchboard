@@ -46,6 +46,7 @@ let usage = """
 
   Service:
     ping                          check that sbd answers
+    mcp                           list the shared MCP servers that sbd runs
     service install|uninstall|status
     version
 
@@ -372,6 +373,8 @@ case "cards":
   cards(a)
 case "allow", "deny", "answer":
   answer(command, a)
+case "mcp":
+  mcp(a)
 case "ping":
   let result = call("ping", timeout: 5)
   if a.json {

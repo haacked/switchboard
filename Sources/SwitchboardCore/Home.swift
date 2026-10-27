@@ -18,6 +18,10 @@ public struct Home: Sendable {
   public var claudeSettings: String { "\(path)/claude-settings.json" }
   public var config: String { "\(path)/config.json" }
   public var log: String { "\(path)/sbd.log" }
+  /// The --mcp-config file that every session gets, which lists the shared MCP servers.
+  public var mcpConfig: String { "\(path)/mcp-config.json" }
+  /// Where sbd writes each shared MCP server's launcher script.
+  public var mcpFolder: String { "\(path)/mcp" }
 
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
@@ -61,6 +65,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var env: [String: String] = [:]
   /// Lets the `clock` request move sbd's clock forward. Only tests set it.
   public var testClock = false
+  /// The MCP servers that sbd runs once and shares with every session, by
+  /// the name that sessions see.
+  public var mcpServers: [String: MCPServer] = [:]
 
   public init() {}
 
@@ -77,6 +84,7 @@ public struct Config: Codable, Equatable, Sendable {
     claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
+    mcpServers = try c.decodeIfPresent([String: MCPServer].self, forKey: .mcpServers) ?? d.mcpServers
   }
 }
 

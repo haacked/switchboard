@@ -37,6 +37,7 @@ public final class Service {
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
+  var mcp: [SharedServer] = []
 
   /// The panes and processes from one tmux and ps pass.
   struct Snapshot {
@@ -94,6 +95,7 @@ public final class Service {
       entries[session.id] = e
     }
     snapshot = buildSnapshot()
+    try startMCPServers()
   }
 
   // MARK: Requests
@@ -111,6 +113,7 @@ public final class Service {
       case "new":
         let args = try JSONCoding.convert(request.args, to: NewSession.self)
         let folder = try prepareFolder(args)
+        awaitMCPServers()
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
       case "rm":
         return .success(try remove(request.args))
@@ -120,6 +123,7 @@ public final class Service {
       if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
         settle(id)
       }
+      if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request.args) }
       // A request that acts on claude decides from the current processes,
       // so it takes a new snapshot. Other requests use the tick's.
       let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
@@ -189,6 +193,8 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try host.screen(paneName(id, pane)))
+    case "mcp":
+      return try JSON(encoding: mcpStatus())
     default:
       throw APIError("unknown request \(op)")
     }
@@ -366,6 +372,7 @@ public final class Service {
     var args = [config.claude]
     args += session.started ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     args += ["--settings", home.claudeSettings]
+    args += mcpArgs
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
     // `--` keeps a prompt that starts with a dash from reading as an option.
@@ -391,7 +398,8 @@ public final class Service {
     snapshot.claudePids[id] = nil
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
-    record(id, session.started ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null])
+    record(
+      id, session.started ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening])
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
@@ -524,7 +532,8 @@ public final class Service {
     s.panes = host.panes()
     s.children = Processes.byParent()
     let program = (config.claude as NSString).lastPathComponent
-    for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
+    for (name, pane) in s.panes where name.hasSuffix("-claude") && !name.hasPrefix(Service.mcpPanePrefix) && !pane.dead
+    {
       if let pid = Service.findClaude(below: pane.pid, program: program, in: s.children) {
         s.claudePids[String(name.dropLast("-claude".count))] = pid
       }
@@ -552,7 +561,7 @@ public final class Service {
   /// Marks a pane that sbd just started as alive until the next snapshot, so
   /// a second request can't start it again. A snapshot that began before
   /// this can no longer replace it.
-  private func markStarting(_ name: String) {
+  func markStarting(_ name: String) {
     snapshot.panes[name] = PaneRow(pid: 0, dead: false, clients: snapshot.panes[name]?.clients ?? 0)
     snapshot.taken = nowMs()
   }
@@ -601,6 +610,7 @@ public final class Service {
     queue.sync {
       install(fresh)
       let now = nowMs()
+      superviseMCPServers(now: now)
       for id in entries.keys.sorted() {
         let live = entries[id]?.facts.live ?? false
         switch claudeState(id) {
