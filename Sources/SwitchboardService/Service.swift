@@ -45,6 +45,7 @@ public final class Service {
   var mcp: [SharedServer] = []
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
+  var github: GitHubPoller?
 
   /// The panes and processes from one tmux and ps pass.
   struct Snapshot {
@@ -104,6 +105,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     snapshot = buildSnapshot()
     try startMCPServers()
+    github = GitHubPoller(service: self, settings: config.github)
   }
 
   // MARK: Requests
@@ -138,6 +140,9 @@ public final class Service {
         return .success(try JSON(encoding: importList(all: request.args["all"]?.bool ?? false)))
       case "import":
         return .success(try JSON(encoding: importSessions(request.args)))
+      case "poll":
+        // A poll waits on GitHub, so it runs off the state queue.
+        return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
       default:
         break
       }
@@ -347,7 +352,7 @@ public final class Service {
 
   func paneName(_ id: String, _ pane: Pane) -> String { "\(id)-\(pane.rawValue)" }
 
-  private func paneEnv(_ id: String) -> [String: String] {
+  func paneEnv(_ id: String) -> [String: String] {
     var env = ["SB_SESSION_ID": id, "SB_HOME": home.path]
     // CLAUDE_CONFIG_DIR picks the Claude account. The panes use sbd's
     // account unless config.env sets another. An imported session resumes
@@ -730,7 +735,7 @@ public final class Service {
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: attached(id), lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
-      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil)
+      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init))
     out.parent = s.parent
     out.followup = s.followup
     out.created = s.created

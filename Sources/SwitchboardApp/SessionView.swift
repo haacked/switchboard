@@ -97,6 +97,9 @@ struct SessionView: View {
             .foregroundStyle(.secondary)
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+        if let pr = session.pr, let url = URL(string: pr.url) {
+          Link(pr.line, destination: url).font(.caption)
+        }
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
           .font(.caption)
           .foregroundStyle(.tertiary)

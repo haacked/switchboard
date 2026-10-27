@@ -1,0 +1,1394 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4824,
+      "resetAt": "2026-10-25T23:16:11Z"
+    },
+    "nodes": [
+      {
+        "id": "PR_kwDODg-Tdc8AAAABKXWYeg",
+        "number": 122953,
+        "url": "https://github.com/PostHog/posthog/pull/122953",
+        "title": "fix(cdp): count parked lookup failures toward the dead-letter breaker",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "haacked/cdp-dlq-breaker-counts-lookups",
+        "headRefOid": "89918967ababc0def2d9c2d50d3a5069ea799dc0",
+        "baseRefName": "master",
+        "mergeable": "UNKNOWN",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "repository": {
+          "nameWithOwner": "PostHog/posthog",
+          "defaultBranchRef": {
+            "name": "master"
+          }
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "skip-inkeep-docs"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T23:30:00Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T23:31:12Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T02:38:45Z"
+            },
+            {
+              "author": {
+                "login": "parameterai"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T02:53:38Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T03:23:59Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T21:25:33Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": [
+              {
+                "number": 1
+              }
+            ]
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBZM8A",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-23T23:29:49Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBZWrg",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-23T23:30:02Z",
+              "lastEditedAt": "2026-10-25T21:38:22Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBlIDw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-23T23:45:43Z",
+              "lastEditedAt": "2026-10-25T21:51:06Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQgVPg",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-25T02:50:57Z",
+              "lastEditedAt": "2026-10-25T21:40:15Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQ7HFw",
+              "author": {
+                "__typename": "User",
+                "login": "haacked"
+              },
+              "createdAt": "2026-10-25T03:44:45Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBZM8A",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-23T23:29:49Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBZWrg",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-23T23:30:02Z",
+              "lastEditedAt": "2026-10-25T21:38:22Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfBlIDw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-23T23:45:43Z",
+              "lastEditedAt": "2026-10-25T21:51:06Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQgVPg",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-25T02:50:57Z",
+              "lastEditedAt": "2026-10-25T21:40:15Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQ7HFw",
+              "author": {
+                "__typename": "User",
+                "login": "haacked"
+              },
+              "createdAt": "2026-10-25T03:44:45Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDOJsIKrs8AAAABKhgNxg",
+        "number": 18303,
+        "url": "https://github.com/PostHog/charts/pull/18303",
+        "title": "chore(cdp): document lookup records in the dead-letter runbook",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "haacked/cdp-dlq-runbook-lookup-step",
+        "headRefOid": "04e3f33e9804c4ff6fbd57f41ebd75e6c1e50547",
+        "baseRefName": "main",
+        "mergeable": "MERGEABLE",
+        "reviewDecision": "APPROVED",
+        "repository": {
+          "nameWithOwner": "PostHog/charts",
+          "defaultBranchRef": {
+            "name": "main"
+          }
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "stamphog"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-25T20:56:17Z",
+              "commit": {
+                "oid": "04e3f33e9804c4ff6fbd57f41ebd75e6c1e50547"
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T02:49:45Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "DISMISSED",
+              "submittedAt": "2026-10-25T03:31:36Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "DISMISSED",
+              "submittedAt": "2026-10-25T03:56:47Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T03:58:37Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "DISMISSED",
+              "submittedAt": "2026-10-25T04:20:09Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-25T20:56:17Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": []
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOJsIKrs8AAAABfQYpDA",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-25T02:35:54Z",
+              "lastEditedAt": "2026-10-25T21:01:31Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOJsIKrs8AAAABfQZFMQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-25T02:36:45Z",
+              "lastEditedAt": "2026-10-25T20:57:36Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOJsIKrs8AAAABfQYpDA",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-25T02:35:54Z",
+              "lastEditedAt": "2026-10-25T21:01:31Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOJsIKrs8AAAABfQZFMQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-25T02:36:45Z",
+              "lastEditedAt": "2026-10-25T20:57:36Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDODg-Tdc8AAAABKWMoSw",
+        "number": 122896,
+        "url": "https://github.com/PostHog/posthog/pull/122896",
+        "title": "feat(mcp): return condition_id from experiment tools",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "haacked/mcp-experiment-condition-ids",
+        "headRefOid": "f57bc1ee40d8361716f04f3bb176d5b3b403281c",
+        "baseRefName": "master",
+        "mergeable": "UNKNOWN",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "repository": {
+          "nameWithOwner": "PostHog/posthog",
+          "defaultBranchRef": {
+            "name": "master"
+          }
+        },
+        "labels": {
+          "nodes": []
+        },
+        "latestOpinionatedReviews": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T21:13:56Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T21:15:44Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "DISMISSED",
+              "submittedAt": "2026-10-24T00:17:35Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-25T03:13:53Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": [
+              {
+                "number": 1
+              }
+            ]
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABe_kU3w",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-23T21:15:41Z",
+              "lastEditedAt": "2026-10-25T03:13:37Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfB0cdA",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-24T00:05:21Z",
+              "lastEditedAt": "2026-10-24T00:07:01Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfCDouw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-24T00:26:23Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQrqdw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-25T03:13:28Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABe_kU3w",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-23T21:15:41Z",
+              "lastEditedAt": "2026-10-25T03:13:37Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfB0cdA",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-24T00:05:21Z",
+              "lastEditedAt": "2026-10-24T00:07:01Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfCDouw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-24T00:26:23Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfQrqdw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-25T03:13:28Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDOFbb7KM70tBuL",
+        "number": 1209,
+        "url": "https://github.com/PostHog/requests-for-comments-internal/pull/1209",
+        "title": "RFC: Move flag evaluation events out of the events table",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "posthog-code/flag-evaluations-table",
+        "headRefOid": "c7c8e3031c48f7faf3151bdf846f038e00af603f",
+        "baseRefName": "main",
+        "mergeable": "MERGEABLE",
+        "reviewDecision": "CHANGES_REQUESTED",
+        "repository": {
+          "nameWithOwner": "PostHog/requests-for-comments-internal",
+          "defaultBranchRef": {
+            "name": "main"
+          }
+        },
+        "labels": {
+          "nodes": []
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "benjackwhite"
+              },
+              "state": "CHANGES_REQUESTED",
+              "submittedAt": "2026-08-04T07:31:31Z",
+              "commit": {
+                "oid": "33c547cbe8c34ff6cac5a0733b316da22f641c39"
+              }
+            },
+            {
+              "author": {
+                "login": "nickbest-ph"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-07-29T17:45:38Z",
+              "commit": {
+                "oid": "33c547cbe8c34ff6cac5a0733b316da22f641c39"
+              }
+            },
+            {
+              "author": {
+                "login": "eli-r-ph"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-07-28T23:44:39Z",
+              "commit": {
+                "oid": "33c547cbe8c34ff6cac5a0733b316da22f641c39"
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "mjwarren3"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-22T17:36:44Z"
+            },
+            {
+              "author": {
+                "login": "mjwarren3"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-22T17:45:33Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-22T18:00:06Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-22T19:08:22Z"
+            },
+            {
+              "author": {
+                "login": "z0br0wn"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-22T19:41:25Z"
+            },
+            {
+              "author": {
+                "login": "benjackwhite"
+              },
+              "state": "CHANGES_REQUESTED",
+              "submittedAt": "2026-07-23T08:14:09Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-23T18:55:42Z"
+            },
+            {
+              "author": {
+                "login": "eli-r-ph"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-07-28T23:44:39Z"
+            },
+            {
+              "author": {
+                "login": "nickbest-ph"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-07-29T17:45:38Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-07-31T00:22:02Z"
+            },
+            {
+              "author": {
+                "login": "benjackwhite"
+              },
+              "state": "CHANGES_REQUESTED",
+              "submittedAt": "2026-08-04T07:31:31Z"
+            },
+            {
+              "author": {
+                "login": "jose-sequeira"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T08:00:46Z"
+            },
+            {
+              "author": {
+                "login": "jose-sequeira"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T08:05:03Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T17:18:21Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T17:23:54Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T17:25:48Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-04T20:11:59Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-24T18:45:05Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-24T18:45:59Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-08-24T19:45:22Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": []
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMKMMEQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-07-28T23:44:46Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMjqyYQ",
+              "author": {
+                "__typename": "User",
+                "login": "haacked"
+              },
+              "createdAt": "2026-07-31T00:23:00Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMjq5OA",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-07-31T00:23:14Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMKMMEQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-07-28T23:44:46Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMjqyYQ",
+              "author": {
+                "__typename": "User",
+                "login": "haacked"
+              },
+              "createdAt": "2026-07-31T00:23:00Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            },
+            {
+              "id": "IC_kwDOFbb7KM8AAAABMjq5OA",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-07-31T00:23:14Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDOD4evDM8AAAABHcbdjA",
+        "number": 20992,
+        "url": "https://github.com/PostHog/posthog.com/pull/20992",
+        "title": "docs(flags): document where PostHog stores flag calls",
+        "state": "OPEN",
+        "isDraft": false,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "haacked/flag-calls-move-docs",
+        "headRefOid": "f2ea91e80208dcdfd93c862fd217bdff5775a6cd",
+        "baseRefName": "master",
+        "mergeable": "MERGEABLE",
+        "reviewDecision": null,
+        "repository": {
+          "nameWithOwner": "PostHog/posthog.com",
+          "defaultBranchRef": {
+            "name": "master"
+          }
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "docs"
+            },
+            {
+              "name": "content"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "gewenyu99"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-13T23:10:13Z",
+              "commit": {
+                "oid": "3e026481e8142bb2bbc29079333f1db5e860c52d"
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "gewenyu99"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-12T15:08:40Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-13T22:51:32Z"
+            },
+            {
+              "author": {
+                "login": "gewenyu99"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-13T23:10:13Z"
+            },
+            {
+              "author": {
+                "login": "gewenyu99"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-13T23:12:20Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T15:36:34Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T15:39:53Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T16:28:17Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T19:20:10Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T20:02:50Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-14T20:24:34Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T18:26:41Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": [
+              {
+                "number": 224
+              }
+            ]
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeqi4w",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:46:59Z",
+              "lastEditedAt": "2026-10-23T18:37:01Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeuS4A",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:52:49Z",
+              "lastEditedAt": "2026-10-23T18:19:50Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeyj2Q",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:59:27Z",
+              "lastEditedAt": "2026-10-23T18:32:12Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeqi4w",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:46:59Z",
+              "lastEditedAt": "2026-10-23T18:37:01Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeuS4A",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:52:49Z",
+              "lastEditedAt": "2026-10-23T18:19:50Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDOD4evDM8AAAABaeyj2Q",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-09T00:59:27Z",
+              "lastEditedAt": "2026-10-23T18:32:12Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDOQXvSnc8AAAABKo4i1A",
+        "number": 189,
+        "url": "https://github.com/haacked/review-code/pull/189",
+        "title": "Isolate eval review state and freeze benchmark PR descriptions",
+        "state": "OPEN",
+        "isDraft": true,
+        "mergedAt": null,
+        "closedAt": null,
+        "headRefName": "haacked/better-hogql-reviews",
+        "headRefOid": "bb1e367917f85444b8b832747aff67b815cde10f",
+        "baseRefName": "main",
+        "mergeable": "MERGEABLE",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "repository": {
+          "nameWithOwner": "haacked/review-code",
+          "defaultBranchRef": {
+            "name": "main"
+          }
+        },
+        "labels": {
+          "nodes": []
+        },
+        "latestOpinionatedReviews": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": []
+          }
+        },
+        "firstComments": {
+          "nodes": []
+        },
+        "lastComments": {
+          "nodes": []
+        }
+      },
+      {
+        "id": "PR_kwDODg-Tdc8AAAABKD3FTQ",
+        "number": 122179,
+        "url": "https://github.com/PostHog/posthog/pull/122179",
+        "title": "fix(groups): stop the groups list query from running out of memory",
+        "state": "MERGED",
+        "isDraft": false,
+        "mergedAt": "2026-10-23T21:57:32Z",
+        "closedAt": "2026-10-23T21:57:32Z",
+        "headRefName": "posthog/groups-list-two-phase-dedup",
+        "headRefOid": "189c31fc88b1b719e17b5b4bbc15b1834caf1279",
+        "baseRefName": "master",
+        "mergeable": "UNKNOWN",
+        "reviewDecision": "APPROVED",
+        "repository": {
+          "nameWithOwner": "PostHog/posthog",
+          "defaultBranchRef": {
+            "name": "master"
+          }
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "stamphog"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-23T18:50:05Z",
+              "commit": {
+                "oid": "189c31fc88b1b719e17b5b4bbc15b1834caf1279"
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-22T18:33:02Z"
+            },
+            {
+              "author": {
+                "login": "haacked"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-23T18:23:11Z"
+            },
+            {
+              "author": {
+                "login": "stamphog"
+              },
+              "state": "APPROVED",
+              "submittedAt": "2026-10-23T18:50:05Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "FAILURE"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": {
+          "associatedPullRequests": {
+            "nodes": [
+              {
+                "number": 1
+              }
+            ]
+          }
+        },
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABei9jZw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T15:44:27Z",
+              "lastEditedAt": "2026-10-23T21:57:35Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABei9xJQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-22T15:44:37Z",
+              "lastEditedAt": "2026-10-23T18:46:45Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABejgvfA",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T16:11:06Z",
+              "lastEditedAt": "2026-10-23T19:03:24Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABe8w5MQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-23T18:28:38Z",
+              "lastEditedAt": "2026-10-23T18:30:48Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfAhApw",
+              "author": {
+                "__typename": "Bot",
+                "login": "deployment-status-posthog"
+              },
+              "createdAt": "2026-10-23T22:20:27Z",
+              "lastEditedAt": "2026-10-23T22:34:45Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABei9jZw",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T15:44:27Z",
+              "lastEditedAt": "2026-10-23T21:57:35Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABei9xJQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-22T15:44:37Z",
+              "lastEditedAt": "2026-10-23T18:46:45Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABejgvfA",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T16:11:06Z",
+              "lastEditedAt": "2026-10-23T19:03:24Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABe8w5MQ",
+              "author": {
+                "__typename": "Bot",
+                "login": "parameterai"
+              },
+              "createdAt": "2026-10-23T18:28:38Z",
+              "lastEditedAt": "2026-10-23T18:30:48Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABfAhApw",
+              "author": {
+                "__typename": "Bot",
+                "login": "deployment-status-posthog"
+              },
+              "createdAt": "2026-10-23T22:20:27Z",
+              "lastEditedAt": "2026-10-23T22:34:45Z",
+              "includesCreatedEdit": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "PR_kwDODg-Tdc8AAAABJ8lAUA",
+        "number": 121847,
+        "url": "https://github.com/PostHog/posthog/pull/121847",
+        "title": "fix(cohorts): bump the store stamp when a replay mark from another topic first lands",
+        "state": "CLOSED",
+        "isDraft": true,
+        "mergedAt": null,
+        "closedAt": "2026-10-22T16:24:56Z",
+        "headRefName": "haacked/cohort-store-stamp-other-topic-marks",
+        "headRefOid": "2d8ad82c72ad72f191c82e0e44f27401ca112c07",
+        "baseRefName": "haacked/cohort-processor-per-topic-offsets",
+        "mergeable": "CONFLICTING",
+        "reviewDecision": null,
+        "repository": {
+          "nameWithOwner": "PostHog/posthog",
+          "defaultBranchRef": {
+            "name": "master"
+          }
+        },
+        "labels": {
+          "nodes": [
+            {
+              "name": "feature/cohorts"
+            },
+            {
+              "name": "team/feature-flags"
+            }
+          ]
+        },
+        "latestOpinionatedReviews": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "copilot-pull-request-reviewer"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-22T05:13:55Z"
+            },
+            {
+              "author": {
+                "login": "posthog"
+              },
+              "state": "COMMENTED",
+              "submittedAt": "2026-10-22T05:15:44Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "state": "SUCCESS"
+                }
+              }
+            }
+          ]
+        },
+        "baseRef": null,
+        "firstComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABeX5gew",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-22T05:13:53Z",
+              "lastEditedAt": "2026-10-22T05:15:53Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABeYMJPg",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T05:36:44Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        },
+        "lastComments": {
+          "nodes": [
+            {
+              "id": "IC_kwDODg-Tdc8AAAABeX5gew",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              },
+              "createdAt": "2026-10-22T05:13:53Z",
+              "lastEditedAt": "2026-10-22T05:15:53Z",
+              "includesCreatedEdit": true
+            },
+            {
+              "id": "IC_kwDODg-Tdc8AAAABeYMJPg",
+              "author": {
+                "__typename": "Bot",
+                "login": "trunk-io"
+              },
+              "createdAt": "2026-10-22T05:36:44Z",
+              "lastEditedAt": null,
+              "includesCreatedEdit": false
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -49,12 +49,21 @@ public struct SessionFacts: Equatable, Sendable {
   /// Messages that sbd sent on its own, such as a wait's outcome, until
   /// claude reports each one as a prompt.
   public var sbdMessages: [String] = []
+  /// The session's PR, as the GitHub poller last read it.
+  public var pr: PullRequest?
+  /// The PR's comments from `GitHub.bodyAuthors`, with their bodies.
+  public var prComments: [PRComment] = []
+  /// The uncommitted files in the folder, which the poller counts once the
+  /// PR has merged or closed.
+  public var dirty: Int?
 
   public init() {}
 
   public mutating func apply(_ event: Event) {
     let d = event.data
-    lastActivity = max(lastActivity, event.t)
+    // The poller's events report on GitHub and the folder, not on the
+    // session, so they don't hold off the idle stop or the Stale state.
+    if event.kind != "pr" && event.kind != "worktree" { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.
@@ -132,6 +141,11 @@ public struct SessionFacts: Equatable, Sendable {
       if let id = d["agent_id"]?.string { subagents.insert(id) }
     case "SubagentStop":
       if let id = d["agent_id"]?.string { subagents.remove(id) }
+    case "pr":
+      pr = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
+      prComments = d["comments"].flatMap { try? JSONCoding.convert($0, to: [PRComment].self) } ?? []
+    case "worktree":
+      dirty = d["dirty"]?.int
     default:
       break
     }
@@ -169,8 +183,8 @@ public enum ReplyKind: Equatable, Sendable {
 }
 
 /// The attention rules. They follow the `/sessions` skill
-/// (`~/.dotfiles/ai/skills/sessions/SKILL.md`) for the facts that hooks and
-/// sb provide. They have no PR, CI, or merge queue rules.
+/// (`~/.dotfiles/ai/skills/sessions/SKILL.md`) for the facts that hooks, sb,
+/// and the GitHub poller provide. They have no CI or merge queue rules.
 public enum Attention {
   static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs
@@ -188,6 +202,7 @@ public enum Attention {
     if let q = facts.openQuestion {
       return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
     }
+    if let v = finishedPR(session, facts) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {
         return Verdict(state: .working, reason: oneLine("\(tool.summary) (\(minutes(now - tool.since)))"))
@@ -198,6 +213,7 @@ public enum Attention {
     if facts.prompts == 0 && facts.lastReply == nil {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
+    if let v = openPR(facts) { return v }
     if now - facts.lastActivity > staleAfterMs {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }

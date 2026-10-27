@@ -79,6 +79,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// The Claude config folders whose sessions `sb import` lists, or nil for
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
+  public var github = GitHubSettings()
 
   public init() {}
 
@@ -109,6 +110,7 @@ public struct Config: Codable, Equatable, Sendable {
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
     followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
+    github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
   }
 }
 

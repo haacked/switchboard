@@ -63,6 +63,7 @@ final class Instance {
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
   /// Each account is a Claude config folder that this creates in the home.
   /// The config lists only those, so a test never reads the user's accounts.
+  /// The GitHub poller runs only when a test asks.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
     inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
@@ -87,7 +88,7 @@ final class Instance {
     let config: [String: JSON] = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
-      "claudeConfigDirs": .array(folders.map(JSON.string)),
+      "claudeConfigDirs": .array(folders.map(JSON.string)), "github": ["pollSeconds": 0],
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
