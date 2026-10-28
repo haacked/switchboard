@@ -50,6 +50,15 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(f.pr == nil)
   }
 
+  @Test func prEventWithoutCommentsKeepsTheComments() throws {
+    let f = facts([
+      try prEvent(1, samplePR(), comments: [trunkComment()]),
+      event("pr", 2, ["pr": try JSON(encoding: samplePR(checks: "SUCCESS"))]),
+    ])
+
+    #expect(f.prComments == [trunkComment()])
+  }
+
   @Test func prEventWithoutAPRClearsTheComments() throws {
     let f = facts([try prEvent(1, samplePR(), comments: [trunkComment()]), event("pr", 2, ["pr": .null])])
 

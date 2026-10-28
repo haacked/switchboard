@@ -6,9 +6,9 @@ extension Attention {
   /// or a wait's outcome comes first, because a session can wait on its
   /// merged PR's deploy.
   static func finishedPR(_ session: Session, _ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.state != .open, let dirty = facts.dirty, session.waits?.isEmpty ?? true,
-      facts.waitOutcome == nil
-    else { return nil }
+    guard let pr = facts.pr, pr.state != .open, let dirty = facts.dirty, waitVerdict(session, facts) == nil else {
+      return nil
+    }
     let what = "#\(pr.number) \(pr.state == .merged ? "merged" : "closed")"
     if dirty == 0 {
       return Verdict(state: .done, reason: "\(what); archive the worktree\(facts.turnRunning ? " once it stops" : "")")

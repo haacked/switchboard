@@ -57,13 +57,16 @@ public struct SessionFacts: Equatable, Sendable {
   /// PR has merged or closed.
   public var dirty: Int?
 
+  /// The kinds of the events that the pollers record. They report on GitHub
+  /// and the folder, not on the session, so they don't hold off the idle stop
+  /// or the Stale state.
+  static let observedKinds: Set<String> = ["pr", "worktree"]
+
   public init() {}
 
   public mutating func apply(_ event: Event) {
     let d = event.data
-    // The poller's events report on GitHub and the folder, not on the
-    // session, so they don't hold off the idle stop or the Stale state.
-    if event.kind != "pr" && event.kind != "worktree" { lastActivity = max(lastActivity, event.t) }
+    if !SessionFacts.observedKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.
@@ -143,7 +146,13 @@ public struct SessionFacts: Equatable, Sendable {
       if let id = d["agent_id"]?.string { subagents.remove(id) }
     case "pr":
       pr = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
-      prComments = d["comments"].flatMap { try? JSONCoding.convert($0, to: [PRComment].self) } ?? []
+      // A pr event carries the comments only when they changed. An event
+      // without a PR clears them.
+      if let comments = d["comments"] {
+        prComments = (try? JSONCoding.convert(comments, to: [PRComment].self)) ?? []
+      } else if pr == nil {
+        prComments = []
+      }
     case "worktree":
       dirty = d["dirty"]?.int
     default:

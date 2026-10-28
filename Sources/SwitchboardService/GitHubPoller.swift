@@ -224,8 +224,10 @@ final class GitHubPoller {
     if t.path == nil {
       if projects[root] == nil { projects[root] = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [] }
       let folders = t.folder.map { [$0] } ?? projects[root]!.map { "\(root)/\($0)" }
-      t.folder = folders.first { FileManager.default.fileExists(atPath: "\($0)/\(name)") } ?? t.folder
-      t.path = t.folder.map { "\($0)/\(name)" }.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+      if let folder = folders.first(where: { FileManager.default.fileExists(atPath: "\($0)/\(name)") }) {
+        t.folder = folder
+        t.path = "\(folder)/\(name)"
+      }
     }
     guard let path = t.path, let file = FileHandle(forReadingAtPath: path) else { return }
     defer { try? file.close() }
@@ -294,8 +296,11 @@ final class GitHubPoller {
           prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
     }
     var stacked: [String] = []
+    var gone: Set<String> = []
     for chunk in GitHub.chunks(ids) {
-      let (read, gone) = GitHub.parseStatus(try request(GitHub.statusQuery, idsVariable(chunk), stats: &stats), chunk)
+      let (read, notFound) = GitHub.parseStatus(
+        try request(GitHub.statusQuery, idsVariable(chunk), stats: &stats), chunk)
+      gone.formUnion(notFound)
       for (parsed, comments) in read {
         var pr = parsed
         // Only the base query reads the merged base. A PR whose base query
@@ -305,15 +310,15 @@ final class GitHubPoller {
         if pr.base != pr.defaultBranch { stacked.append(pr.id) }
       }
       stats.polled += read.count
-      for (id, var t) in tracked {
-        if let prId = t.branch.prId, gone.contains(prId) {
-          t.branch.prId = nil
-          t.branch.lookedUp = now
-        }
-        if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
-        if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
-        tracked[id] = t
+    }
+    for (id, var t) in tracked {
+      if let prId = t.branch.prId, gone.contains(prId) {
+        t.branch.prId = nil
+        t.branch.lookedUp = now
       }
+      if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
+      if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
+      tracked[id] = t
     }
     for chunk in GitHub.chunks(stacked) {
       let response = try request(GitHub.baseQuery, idsVariable(chunk), stats: &stats)
@@ -431,8 +436,9 @@ final class GitHubPoller {
           shown.mergeable = last.mergeable
         }
         if shown != s.facts.pr || kept != s.facts.prComments {
-          event(
-            s.id, "pr", ["pr": (try? JSON(encoding: shown)) ?? .null, "comments": (try? JSON(encoding: kept)) ?? []])
+          var data: [String: JSON] = ["pr": (try? JSON(encoding: shown)) ?? .null]
+          if kept != s.facts.prComments { data["comments"] = (try? JSON(encoding: kept)) ?? [] }
+          event(s.id, "pr", .object(data))
           changed = true
         }
       }
