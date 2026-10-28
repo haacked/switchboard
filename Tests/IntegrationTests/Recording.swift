@@ -1,5 +1,6 @@
 import Foundation
 import SwitchboardCore
+import Testing
 
 /// The hook payloads that the real claude sent for one step of a session,
 /// such as a turn or a resume. Fixtures/claude/<step>.jsonl holds one payload
@@ -131,9 +132,7 @@ enum Recording {
 extension Instance {
   /// The session's hook events after the event id `after`, oldest first.
   func hooks(_ id: String, after: Int64 = 0) throws -> [Event] {
-    try client.call(
-      "events", ["session": .string(id), "since": .number(Double(after)), "limit": 10_000], as: [Event].self
-    ).filter { $0.data["hook_event_name"] != nil }
+    try events(id, after: after).filter { $0.data["hook_event_name"] != nil }
   }
 
   /// The hook payloads of one step: the session's hook events after the event
@@ -145,5 +144,13 @@ extension Instance {
   /// The session's newest event.
   func lastEvent(_ id: String) throws -> Event? {
     try client.call("events", ["session": .string(id), "limit": 1], as: [Event].self).last
+  }
+
+  /// The id of the newest event, which marks where a step starts.
+  func lastEventId(_ id: String) throws -> Int64 { try lastEvent(id)?.id ?? 0 }
+
+  /// The id of the last hook event before the first prompt.
+  func startupEnd(_ id: String) throws -> Int64 {
+    try #require(try hooks(id).first { $0.kind == "UserPromptSubmit" }).id - 1
   }
 }

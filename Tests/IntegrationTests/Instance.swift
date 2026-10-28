@@ -150,7 +150,8 @@ final class Instance {
       String.init)
   }
 
-  func events(_ id: String) throws -> [Event] {
-    try client.call("events", ["session": .string(id), "since": 0, "limit": 10_000], as: [Event].self)
+  func events(_ id: String, after: Int64 = 0) throws -> [Event] {
+    try client.call(
+      "events", ["session": .string(id), "since": .number(Double(after)), "limit": 10_000], as: [Event].self)
   }
 }

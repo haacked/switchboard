@@ -21,8 +21,8 @@ struct ClaudeTests {
     #expect(submit.data["prompt"]?.string == prompt)
     try c.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
 
-    // The header names the session's Remote Control link, and the transcript
-    // records the connection as a bridge-session line.
+    // With Remote Control on, the header shows " · /rc" and the transcript has
+    // a bridge-session line. The work folder's settings turn it off.
     let screen = try c.screen(s.id)
     #expect(screen.contains("Claude Code v"))
     #expect(!screen.contains(" · /rc"))
@@ -30,7 +30,7 @@ struct ClaudeTests {
     #expect(!transcript.split(separator: "\n").contains { JSON.parse(String($0))?["type"] == "bridge-session" })
 
     try c.settle(s.id)
-    let mark = try c.lastEventId(s.id)
+    let mark = try c.sbd.lastEventId(s.id)
     let text = "Reply with \(c.nonce)-B and nothing else."
     #expect(try c.sbd.sb("send", s.id, text) == "pasted\n")
     try c.waitFor(s.id, "the pasted message's reply") { $0.lastReply?.contains("\(c.nonce)-B") == true }
@@ -44,7 +44,7 @@ struct ClaudeTests {
     let s = try c.sbd.new(prompt: "Reply with READY and nothing else.")
     try c.waitFor(s.id, "the first reply") { $0.lastReply != nil }
     try c.settle(s.id)
-    let mark = try c.lastEventId(s.id)
+    let mark = try c.sbd.lastEventId(s.id)
     // tmux strips a trailing semicolon from a command argument, and an Enter
     // inside a paste must not submit the message early.
     let first = "Reply with \(c.nonce)-A and nothing else.\nThis second line is part of the same message;"
@@ -74,7 +74,7 @@ struct ClaudeTests {
     #expect(pre.data["tool_input"]?["command"]?.string == command)
     #expect(post.t - pre.t >= 4000)
     try c.settle(s.id)
-    try c.record("tool", s.id, after: try c.startupEnd(s.id), prompts: [prompt], commands: [command])
+    try c.record("tool", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 
   @Test func marksAPermissionPromptUntilTheTerminalAnswersIt() throws {
@@ -97,7 +97,7 @@ struct ClaudeTests {
     let post = try #require(try c.sbd.hooks(s.id).first { $0.kind == "PostToolUse" })
     #expect(post.data["tool_input"] == request.data["tool_input"])
     try c.settle(s.id)
-    try c.record("permission", s.id, after: try c.startupEnd(s.id), prompts: [prompt], commands: [command])
+    try c.record("permission", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 
   @Test func marksAQuestionUntilTheTerminalAnswersIt() throws {
@@ -128,7 +128,7 @@ struct ClaudeTests {
       try c.sbd.hooks(s.id).first { $0.kind == "PostToolUse" && $0.data["tool_name"] == "AskUserQuestion" })
     #expect(post.data["tool_response"]?["answers"]?[text]?.string?.lowercased() == "cherry")
     try c.settle(s.id)
-    try c.record("question", s.id, after: try c.startupEnd(s.id), prompts: [prompt])
+    try c.record("question", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt])
   }
 
   @Test func stopsAnIdleSessionAndResumesTheConversation() throws {
@@ -163,7 +163,7 @@ struct ClaudeTests {
     let s = try c.sbd.new(prompt: "Reply with OK and nothing else.")
     try c.waitFor(s.id, "the first reply") { $0.lastReply != nil }
     try c.settle(s.id)
-    let mark = try c.lastEventId(s.id)
+    let mark = try c.sbd.lastEventId(s.id)
     #expect(try c.sbd.sb("send", s.id, "/clear") == "pasted\n")
     let start = try c.waitForHook(s.id, "SessionStart", after: mark)
     #expect(start.data["source"]?.string == "clear")
@@ -178,9 +178,9 @@ struct ClaudeTests {
 
     try c.sbd.sb("stop", s.id)
     try c.waitFor(s.id, "the stop") { $0.claudePid == nil }
-    let resumed = try c.lastEventId(s.id)
+    let beforeResume = try c.sbd.lastEventId(s.id)
     try c.sbd.sb("send", s.id, "Reply with \(c.nonce) and nothing else.")
-    let again = try c.waitForHook(s.id, "SessionStart", after: resumed)
+    let again = try c.waitForHook(s.id, "SessionStart", after: beforeResume)
     #expect(again.data["session_id"]?.string == next)
     try c.waitFor(s.id, "the reply in the new conversation") { $0.lastReply?.contains(c.nonce) == true }
   }
@@ -207,8 +207,8 @@ struct ClaudeTests {
     let stopped = try #require(try c.sbd.events(s.id).first { $0.kind == "stopped" })
     try #require(stopped.id > notice.id)
     try c.record(
-      "background-job", s.id, after: try c.startupEnd(s.id), through: stopped.id, prompts: [prompt], commands: [command]
-    )
+      "background-job", s.id, after: try c.sbd.startupEnd(s.id), through: stopped.id, prompts: [prompt],
+      commands: [command])
   }
 
   /// The subagent's tool call outlasts the launch turn, so the hooks come in
@@ -233,7 +233,7 @@ struct ClaudeTests {
     try c.waitForHook(s.id, "SubagentStop", after: start.id) { $0.data["agent_id"]?.string == agent }
     try c.waitForHook(s.id, "Stop", after: result.id)
     try c.settle(s.id)
-    try c.record("subagent", s.id, after: try c.startupEnd(s.id), prompts: [prompt], commands: [command])
+    try c.record("subagent", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 
   @Test func sendsNoHookAfterEscapeInterruptsATurn() throws {
@@ -242,7 +242,7 @@ struct ClaudeTests {
     let prompt = "Run exactly this command with the Bash tool: \(command)\nThen reply with DONE and nothing else."
     let s = try c.sbd.new(prompt: prompt)
     try c.waitFor(s.id, "the tool call") { $0.state == .working && $0.reason.contains("slow.sh") }
-    let mark = try c.lastEventId(s.id)
+    let mark = try c.sbd.lastEventId(s.id)
     try c.press(s.id, "Escape")
     // Phase 0 saw idle_prompt 60 s after a Stop. After Escape, no Stop,
     // PostToolUseFailure, or idle_prompt comes.
@@ -255,6 +255,6 @@ struct ClaudeTests {
     withKnownIssue("sbd ends a turn only on a hook. The fix reads the status from `claude agents --json`.") {
       #expect(state != .working)
     }
-    try c.record("interrupt", s.id, after: try c.startupEnd(s.id), prompts: [prompt], commands: [command])
+    try c.record("interrupt", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 }

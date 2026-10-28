@@ -13,6 +13,10 @@ import Testing
     commands: [String] = [], sourceLocation: SourceLocation = #_sourceLocation
   ) throws {
     let payloads = try sbd.stepPayloads(id, after: after, through: through)
+    // The stub leaves only the ids that claude assigns as placeholders.
+    let unfilled = payloads.flatMap { $0.text.matches(of: #/\{\{([a-z_]+?)(_[0-9]+)?\}\}/#).map { String($0.1) } }
+      .filter { !["prompt_id", "tool_use_id", "task_id"].contains($0) }
+    #expect(unfilled.isEmpty, "the stub's \(step) step left \(unfilled) unfilled", sourceLocation: sourceLocation)
     let context = Recording.Context(
       cwd: [sbd.work], home: NSHomeDirectory(), nonce: "", prompts: prompts, commands: commands)
     let played = Recording.normalize(payloads, context).map(\.text)
@@ -24,16 +28,16 @@ import Testing
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    let submit = try #require(try sbd.events(s.id).first { $0.kind == "UserPromptSubmit" })
-    try expectRecorded("startup", sbd, s.id, after: 0, through: submit.id - 1)
-    try expectRecorded("turn", sbd, s.id, after: submit.id - 1, prompts: ["hello"])
+    let startupEnd = try sbd.startupEnd(s.id)
+    try expectRecorded("startup", sbd, s.id, after: 0, through: startupEnd)
+    try expectRecorded("turn", sbd, s.id, after: startupEnd, prompts: ["hello"])
 
-    var mark = try sbd.lastEvent(s.id)?.id ?? 0
+    var mark = try sbd.lastEventId(s.id)
     try sbd.sb("send", s.id, "slow 1")
     try sbd.waitFor(s.id, "the tool call's reply") { $0.lastReply == "Slept 1 s." }
     try expectRecorded("tool", sbd, s.id, after: mark, prompts: ["slow 1"], commands: ["sleep 1"])
 
-    mark = try sbd.lastEvent(s.id)?.id ?? 0
+    mark = try sbd.lastEventId(s.id)
     let next = UUID().uuidString.lowercased()
     try sbd.sb("send", s.id, "clear \(next)")
     try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
@@ -54,11 +58,10 @@ import Testing
     let sbd = try Instance()
     let s = try sbd.new(prompt: "background 1")
     try sbd.waitFor("the job's report", timeout: 30) { try sbd.events(s.id).filter { $0.kind == "Stop" }.count == 2 }
-    let submit = try #require(try sbd.events(s.id).first { $0.kind == "UserPromptSubmit" })
     try expectRecorded(
-      "background-job", sbd, s.id, after: submit.id - 1, prompts: ["background 1"], commands: ["sleep 1"])
+      "background-job", sbd, s.id, after: try sbd.startupEnd(s.id), prompts: ["background 1"], commands: ["sleep 1"])
 
-    let mark = try sbd.lastEvent(s.id)?.id ?? 0
+    let mark = try sbd.lastEventId(s.id)
     try sbd.sb("send", s.id, "interrupt it")
     try sbd.waitFor(s.id, "the interrupted tool call") { $0.reason.hasPrefix("`sleep 100`") }
     try expectRecorded("interrupt", sbd, s.id, after: mark, prompts: ["interrupt it"], commands: ["sleep 100"])

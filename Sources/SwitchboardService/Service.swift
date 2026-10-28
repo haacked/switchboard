@@ -30,7 +30,7 @@ public final class Service {
     var inFlight: Int64?
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
-    var jobSeen: Int64 = 0
+    var lastJobSeen: Int64 = 0
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -629,7 +629,7 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          if hasBackgroundJob(pid) { entries[id]?.jobSeen = now }
+          if hasBackgroundJob(pid) { entries[id]?.lastJobSeen = now }
           if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
@@ -662,7 +662,7 @@ public final class Service {
     else { return false }
     // A background job's process exits up to 1.3 s before claude starts the
     // turn that reports it, so the wait starts again when the job exits.
-    let idle = now - max(e.facts.lastActivity, e.jobSeen)
+    let idle = now - max(e.facts.lastActivity, e.lastJobSeen)
     guard idle >= idleStopMs(id) else { return false }
     if let sent = e.inFlight, now - sent < Service.inFlightMs { return false }
     // A running subagent's tool calls fire hooks. A subagent with no event

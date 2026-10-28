@@ -122,14 +122,6 @@ final class ClaudeInstance {
     }
   }
 
-  /// The id of the newest event, which marks where a step starts.
-  func lastEventId(_ id: String) throws -> Int64 { try sbd.lastEvent(id)?.id ?? 0 }
-
-  /// The id of the last hook event before the first prompt.
-  func startupEnd(_ id: String) throws -> Int64 {
-    try #require(try sbd.hooks(id).first { $0.kind == "UserPromptSubmit" }).id - 1
-  }
-
   // MARK: The terminal
 
   func screen(_ id: String) throws -> String { try sbd.client.call("screen", ["session": .string(id)]).string ?? "" }

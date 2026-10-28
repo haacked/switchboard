@@ -23,6 +23,8 @@
 #   Claude Code's dialog reads a line from the terminal: y allows, and esc
 #   refuses and kills the hook, as Claude Code closes the request. timeout
 #   kills the hook and leaves the dialog open, as the hook's timeout does.
+#   perm and pick build their tool payloads by hand. The stub does not play
+#   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
 #   anything else    replies "Done: <prompt>"
@@ -103,7 +105,7 @@ vars() {
 emit() {
   local extra=${1:-'{}'} payload paused=''
   jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --argjson extra "$extra" '
-    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[/.]"; "-")), config_dir: "\($home)/claude",
+    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: "\($home)/claude",
       claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
     | walk(if type == "string" then
         reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))
