@@ -14,8 +14,9 @@ import Testing
   ) throws {
     let payloads = try sbd.stepPayloads(id, after: after, through: through)
     // The stub leaves only the ids that claude assigns as placeholders.
+    let ids = Set(Recording.keyPlaceholders.values).subtracting(Recording.unnumbered)
     let unfilled = payloads.flatMap { $0.text.matches(of: #/\{\{([a-z_]+?)(_[0-9]+)?\}\}/#).map { String($0.1) } }
-      .filter { !["prompt_id", "tool_use_id", "task_id"].contains($0) }
+      .filter { !ids.contains($0) }
     #expect(unfilled.isEmpty, "the stub's \(step) step left \(unfilled) unfilled", sourceLocation: sourceLocation)
     let context = Recording.Context(
       cwd: [sbd.work], home: NSHomeDirectory(), nonce: "", prompts: prompts, commands: commands)
