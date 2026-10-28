@@ -106,7 +106,7 @@ extension Instance {
     ])
     let broken = try sbd.waitForServer("broken", "two restarts") { $0.restarts >= 2 }
     #expect(broken.lastExit == "status 3")
-    #expect(broken.lastOutput?.last?.hasPrefix("cannot start on ") == true)
+    #expect(broken.lastOutput == ["cannot start on \(try #require(URLComponents(string: broken.url)?.port))"])
     let start = Date()
     let s = try sbd.new(prompt: "hello")
     #expect(Date().timeIntervalSince(start) < 5)

@@ -11,7 +11,8 @@ public struct MCPServer: Codable, Equatable, Sendable {
 
   public var type: Transport
   public var command: String
-  /// sbd replaces `{port}` in the arguments and in `env` with the server's port.
+  /// sbd replaces `{port}` in `command`, the arguments, and `env` with the
+  /// server's port.
   public var args: [String]
   public var env: [String: String]
   /// A fixed port, or nil for one that sbd picks and keeps.
@@ -74,8 +75,10 @@ public struct MCPServer: Codable, Equatable, Sendable {
         problems[name] = "its port \(port) is not between 1 and 65535"
       } else if let port = server.port, let other = fixed[port] {
         problems[name] = "its port \(port) is also the port of \(other)"
-      } else if server.port == nil && !(server.args + server.env.values).contains(where: { $0.contains("{port}") }) {
-        problems[name] = "it has no port and no {port} in its args or env"
+      } else if server.port == nil
+        && !([server.command] + server.args + server.env.values).contains(where: { $0.contains("{port}") })
+      {
+        problems[name] = "it has no port and no {port} in its command, args, or env"
       } else if let port = server.port {
         fixed[port] = name
       }

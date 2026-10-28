@@ -84,7 +84,15 @@ public struct Config: Codable, Equatable, Sendable {
     claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
-    mcpServers = try c.decodeIfPresent([String: MCPServer].self, forKey: .mcpServers) ?? d.mcpServers
+    // This skips a server that doesn't decode, such as a stdio one copied from
+    // a Claude config. Throwing would make sbd ignore all of config.json.
+    for (name, value) in try c.decodeIfPresent([String: JSON].self, forKey: .mcpServers) ?? [:] {
+      do {
+        mcpServers[name] = try JSONCoding.convert(value, to: MCPServer.self)
+      } catch {
+        logLine("skipping MCP server \(name): \(error)")
+      }
+    }
   }
 }
 

@@ -129,7 +129,7 @@ final class Instance {
   func waitFor<T>(_ what: String, timeout: Double = 15, fetch: () throws -> T?, until match: (T) -> Bool) throws -> T {
     var last: T?
     try waitFor(what, timeout: timeout) {
-      last = (try? fetch()) ?? nil
+      last = try? fetch()
       return last.map(match) ?? false
     }
     return last!

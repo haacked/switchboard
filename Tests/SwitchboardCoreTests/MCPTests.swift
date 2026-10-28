@@ -17,6 +17,19 @@ import Testing
     #expect(try JSONCoding.decode(Config.self, from: "{}").mcpServers.isEmpty)
   }
 
+  @Test func skipsAServerThatDoesntDecodeAndKeepsTheRestOfTheConfig() throws {
+    let c = try JSONCoding.decode(
+      Config.self,
+      from: #"""
+        {"env": {"CLAUDE_CONFIG_DIR": "/x"}, "mcpServers": {
+          "db": {"type": "sse", "command": "/bin/db"},
+          "fs": {"type": "stdio", "command": "/bin/fs"},
+          "bare": {"command": "/bin/bare"}}}
+        """#)
+    #expect(c.env == ["CLAUDE_CONFIG_DIR": "/x"])
+    #expect(Array(c.mcpServers.keys) == ["db"])
+  }
+
   @Test func urlUsesTheTransportsPathUnlessOneIsSet() {
     #expect(MCPServer(type: .http, command: "x").url(port: 4100) == "http://127.0.0.1:4100/mcp")
     #expect(MCPServer(type: .sse, command: "x").url(port: 4100) == "http://127.0.0.1:4100/sse")

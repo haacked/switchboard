@@ -119,8 +119,7 @@ extension Service {
           guard let id = try? lookup(args), claudeState(id) == .stopped else { return [] }
         }
         let now = nowMs()
-        return mcp.indices.filter { mcpState(mcp[$0]) == .starting && now - mcp[$0].started < Service.mcpStartMs }
-          .map { ($0, mcp[$0].port, mcp[$0].started) }
+        return mcp.indices.filter { mcpStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
       }
       if starting.isEmpty { return }
       let open = starting.filter { LocalPort.accepts($0.port) }
@@ -129,6 +128,11 @@ extension Service {
       usleep(50_000)
     }
   }
+
+  /// Whether any server started less than `mcpStartMs` ago and doesn't
+  /// accept connections yet. While one does, `tick` doesn't launch claude
+  /// itself, as `awaitMCPServers` makes a request's launch wait.
+  func mcpStarting(now: Int64) -> Bool { mcp.contains { mcpStarting($0, now: now) } }
 
   func mcpStatus() -> [MCPServerStatus] {
     mcp.map { s in
@@ -144,6 +148,10 @@ extension Service {
   private func mcpState(_ server: SharedServer) -> MCPServerStatus.State {
     if server.restartAt != nil || !mcpPaneAlive(server) { return .exited }
     return server.listening ? .running : .starting
+  }
+
+  private func mcpStarting(_ server: SharedServer, now: Int64) -> Bool {
+    mcpState(server) == .starting && now - server.started < Service.mcpStartMs
   }
 
   private func mcpScriptPath(_ server: SharedServer) -> String { "\(home.mcpFolder)/\(server.name).sh" }

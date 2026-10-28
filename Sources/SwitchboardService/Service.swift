@@ -635,7 +635,7 @@ public final class Service {
           // A claude that dies before its SessionStart isn't launched again,
           // and these launches come at most every 5 s.
           if let e = entries[id], !e.pending.isEmpty, (e.facts.lastStart ?? 0) >= (e.facts.lastLaunch ?? 0),
-            now - (e.facts.lastLaunch ?? 0) >= 5_000
+            now - (e.facts.lastLaunch ?? 0) >= 5_000, !mcpStarting(now: now)
           {
             try? launch(id, prompt: nil)
           }
@@ -647,7 +647,8 @@ public final class Service {
           entries[id] = e
         }
       }
-      resolveDueWaits(now: now)
+      // A resolved `resume` wait can launch claude.
+      if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
     }
   }
