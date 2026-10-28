@@ -16,7 +16,7 @@ extension Service {
   /// worktree, or with `all`, every one.
   func importList(all: Bool) throws -> ImportList {
     let listed = try importCandidates()
-    let candidates = withFolders(queue.sync { listed.filter { owner(of: $0.id) == nil } })
+    let candidates = withGitFacts(queue.sync { listed.filter { owner(of: $0.id) == nil } })
     let shown = all ? candidates : candidates.filter(\.worktree)
     return ImportList(sessions: shown.sorted(by: ClaudeSession.importOrder), hidden: candidates.count - shown.count)
   }
@@ -43,9 +43,9 @@ extension Service {
         }
       }
     }
-    let sessions = withFolders(chosen.map(\.session))
+    let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
-      Transcript.find(s.id, projects: "\(s.account)/projects").map(Transcript.tail) ?? TranscriptTail()
+      Transcript.find(s.id, projects: "\(s.account)/projects").map(Transcript.tail)
     }
     let imported: [SessionSummary] = try queue.sync {
       try chosen.indices.compactMap { i in
@@ -99,8 +99,9 @@ extension Service {
   /// Remembers the listed sessions that Switchboard doesn't have, forgets the
   /// ones that left the list more than a day ago, and returns the listed ones
   /// with the remembered ones that left it. A remembered session counts as
-  /// exited only when its account was listed, because the claude of an
-  /// account that sbd no longer lists may still run it.
+  /// exited only when sbd ran `claude agents` in its account this time. sbd
+  /// doesn't ask an account that the config no longer names. That account's
+  /// claude may still run the session.
   private func remember(_ listed: [ClaudeSession], from accounts: Set<String>, now: Int64) -> [ClaudeSession] {
     let owned = Set(entries.values.map(\.session.claudeSessionId))
     let fresh = listed.filter { !owned.contains($0.id) }
@@ -156,12 +157,15 @@ extension Service {
   /// Records a Switchboard session for the Claude session, without starting
   /// claude. Opening the session or sending it a message resumes the
   /// conversation under its account. Its repo stays nil, because sbd didn't
-  /// create its worktree. `rm --worktree` then leaves the worktree.
-  private func adopt(_ c: ClaudeSession, name: String?, tail: TranscriptTail) throws -> SessionSummary {
+  /// create its worktree. `rm --worktree` then leaves the worktree. Claude
+  /// writes no transcript before a session's first prompt. `--resume` fails
+  /// for such a session, so its first launch uses `--session-id` instead.
+  private func adopt(_ c: ClaudeSession, name: String?, tail found: TranscriptTail?) throws -> SessionSummary {
+    let tail = found ?? TranscriptTail()
     let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: name ?? c.title, cwd: c.cwd, branch: c.branch, claudeSessionId: c.id, created: nowMs())
-    session.started = true
+    session.started = found != nil
     session.claudeConfigDir = c.account
     entries[id] = Entry(session: session)
     try store.save(session)
@@ -177,9 +181,9 @@ extension Service {
 
   /// Adds each session's repo, its branch, and whether its folder is a linked
   /// worktree. git runs once for each folder.
-  private func withFolders(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
+  private func withGitFacts(_ sessions: [ClaudeSession]) -> [ClaudeSession] {
     let folders = Array(Set(sessions.map(\.cwd)))
-    let facts = Dictionary(uniqueKeysWithValues: zip(folders, concurrentMap(folders, gitFolder)))
+    let facts = Dictionary(uniqueKeysWithValues: zip(folders, concurrentMap(folders, gitFacts)))
     return sessions.map { s in
       var s = s
       (s.repo, s.branch, s.worktree) = facts[s.cwd] ?? (nil, nil, false)
@@ -190,7 +194,7 @@ extension Service {
   /// A folder's repo, its branch, and whether it is a linked worktree, whose
   /// git folder differs from the repo's common one. A folder outside git has
   /// none of them.
-  private func gitFolder(_ cwd: String) -> (repo: String?, branch: String?, worktree: Bool) {
+  private func gitFacts(_ cwd: String) -> (repo: String?, branch: String?, worktree: Bool) {
     let args = ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD"]
     let lines = (try? gitOutput(cwd, args))?.split(separator: "\n").map(String.init) ?? []
     guard lines.count == 3 else { return (nil, nil, false) }

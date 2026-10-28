@@ -17,6 +17,9 @@ struct ImportView: View {
     /// Why the last import left sessions out, or why it failed.
     @Published var problems: [String] = []
     @Published var busy = false
+    /// Closing the sheet doesn't stop an import. Cancel stays disabled until
+    /// the import ends.
+    @Published var importing = false
   }
 
   @EnvironmentObject var model: BoardModel
@@ -29,6 +32,7 @@ struct ImportView: View {
         Text("Import Sessions").font(.title2.bold())
         Spacer()
         Button {
+          form.problems = []
           load()
         } label: {
           Label("Reload", systemImage: "arrow.clockwise")
@@ -58,6 +62,7 @@ struct ImportView: View {
         Spacer()
         Button("Cancel", role: .cancel) { dismiss() }
           .keyboardShortcut(.cancelAction)
+          .disabled(form.importing)
         Button(form.selected.count > 1 ? "Import \(form.selected.count) Sessions" : "Import", action: importSelected)
           .keyboardShortcut(.defaultAction)
           .disabled(form.selected.isEmpty || form.busy)
@@ -66,7 +71,10 @@ struct ImportView: View {
     .padding(20)
     .frame(width: 760, height: 600)
     .onAppear(perform: load)
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in load() }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      form.problems = []
+      load()
+    }
   }
 
   @ViewBuilder private var content: some View {
@@ -89,19 +97,22 @@ struct ImportView: View {
               ImportRow(session: s, selected: selection(s))
             }
           } header: {
-            let open = group.sessions.filter { !$0.running }.map(\.id)
+            let selectable = group.sessions.filter { !$0.running }.map(\.id)
+            let allSelected = !selectable.isEmpty && selectable.allSatisfy(form.selected.contains)
+            let label = allSelected ? "Deselect All" : "Select All"
             HStack {
               Text(group.title)
               Spacer()
-              Button(open.allSatisfy(form.selected.contains) ? "Deselect All" : "Select All") {
-                if open.allSatisfy(form.selected.contains) {
-                  form.selected.subtract(open)
+              Button(label) {
+                if allSelected {
+                  form.selected.subtract(selectable)
                 } else {
-                  form.selected.formUnion(open)
+                  form.selected.formUnion(selectable)
                 }
               }
               .buttonStyle(.link)
-              .disabled(open.isEmpty)
+              .disabled(selectable.isEmpty)
+              .accessibilityLabel("\(label) in \(group.title)")
             }
           }
         }
@@ -142,9 +153,11 @@ struct ImportView: View {
     let refs = form.list?.sessions.map(\.id).filter(form.selected.contains) ?? []
     let model = model
     form.busy = true
+    form.importing = true
     Task {
       let result = await Task.detached { model.importSessions(refs) }.value
       form.busy = false
+      form.importing = false
       model.refresh()
       switch result {
       case .success(let r):
@@ -169,7 +182,7 @@ struct ImportRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
-      Toggle("", isOn: $selected)
+      Toggle("Import \(session.title)", isOn: $selected)
         .toggleStyle(.checkbox)
         .labelsHidden()
         .disabled(session.running)

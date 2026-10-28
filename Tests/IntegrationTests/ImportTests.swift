@@ -133,16 +133,21 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let tree = try sbd.addWorktree(repo, "haacked/one")
     let detached = "\(sbd.home.path)/trees/docket/detached"
     try sbd.git(repo, "worktree", "add", "--detach", detached)
+    let bare = "\(sbd.home.path)/bare/docket.git"
+    try sbd.git(sbd.home.path, "clone", "-q", "--bare", repo, bare)
+    let bareTree = "\(sbd.home.path)/trees/bare/haacked/two"
+    try sbd.git(bare, "worktree", "add", "-b", "haacked/two", bareTree)
     for folder in ["\(repo)/Sources", "\(tree)/Sources"] {
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     }
-    let (inTree, inMain, inDetached) = (newId(), newId(), newId())
+    let (inTree, inMain, inDetached, inBareTree) = (newId(), newId(), newId(), newId())
     try sbd.writeAgents(
       "A",
       [
         agent(inTree, cwd: "\(tree)/Sources", job: "00000001"),
         agent(inMain, cwd: "\(repo)/Sources", job: "00000002"),
         agent(inDetached, cwd: detached, job: "00000003"),
+        agent(inBareTree, cwd: bareTree, job: "00000004"),
       ])
     let expected = [
       ClaudeSession(
@@ -150,6 +155,9 @@ private func reasons(_ result: ImportResult) -> [String: String] {
         worktree: true),
       ClaudeSession(id: inMain, cwd: "\(repo)/Sources", account: a, job: "00000002", repo: "docket", branch: "main"),
       ClaudeSession(id: inDetached, cwd: detached, account: a, job: "00000003", repo: "docket", worktree: true),
+      ClaudeSession(
+        id: inBareTree, cwd: bareTree, account: a, job: "00000004", repo: "docket", branch: "haacked/two",
+        worktree: true),
     ]
 
     let found = unseen(try sbd.client.importable(all: true).sessions)
@@ -210,6 +218,11 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
   @Test func importsASessionThatNoClaudeRunsAndResumesItUnderItsAccount() throws {
     let sbd = try Instance(accounts: ["A"])
+    var config = try #require(JSON.parse(try String(contentsOfFile: sbd.home.config, encoding: .utf8))?.object)
+    config["env"] = ["CLAUDE_CONFIG_DIR": .string("\(sbd.home.path)/env-account")]
+    try JSON.object(config).text.write(toFile: sbd.home.config, atomically: true, encoding: .utf8)
+    sbd.stopSbd()
+    try sbd.startSbd()
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/parser")
     let id = newId()
     try sbd.writeAgents("A", [agent(id, cwd: tree, name: "parser-work", job: "0badf00d")])
@@ -243,6 +256,18 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let resume = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
     #expect(resume.args == "--resume \(id) --settings \(sbd.home.claudeSettings) -- run them")
     #expect(resume.account == sbd.account("A"))
+  }
+
+  @Test func startsAnImportedSessionThatHasNoTranscriptWithItsId() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "unprompted", job: "0badf00d")])
+    let s = try #require(try sbd.client.importSessions([id]).imported.first)
+
+    #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
+    try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
+    let start = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
+    #expect(start.args == "--session-id \(id) --settings \(sbd.home.claudeSettings) -- begin")
   }
 
   @Test func namesAnImportedSessionByItsBranchElseClaudesNameElseItsFolder() throws {
@@ -386,12 +411,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let own = try sbd.new(name: "own")
     let id = newId()
     let prefix = String(id.prefix(8))
-    try sbd.writeAgents(
-      "A",
-      [
-        agent(id, cwd: sbd.work, name: "notes", job: "0badf00d"),
-        agent(own.claudeSessionId, cwd: sbd.work, name: "mine"),
-      ])
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "notes", job: "0badf00d")])
     let first = try #require(try sbd.client.importSessions([id]).imported.first)
     let expected: [String: String] = [
       id: "\(id) is already in Switchboard as \(first.id)",
@@ -411,8 +431,25 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let id = newId()
     try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "notes", job: "0badf00d")])
 
-    _ = try sbd.client.importSessions([id, "notes"])
+    let result = try sbd.client.importSessions([id, "notes"])
 
+    #expect(result.refused.isEmpty)
+    #expect(result.imported.map(\.claudeSessionId) == [id])
+    #expect(try sbd.client.sessions().filter { $0.claudeSessionId == id }.count == 1)
+  }
+
+  @Test func importsASessionOnceWhenTwoRequestsRaceForIt() async throws {
+    let sbd = try Instance(accounts: ["A"])
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "notes", job: "0badf00d")])
+    let client = sbd.client
+
+    async let first = Task.detached { try client.importSessions([id]) }.value
+    async let second = Task.detached { try client.importSessions([id]) }.value
+    let results = try await [first, second]
+
+    #expect(results.flatMap(\.imported).count == 1)
+    #expect(results.flatMap(\.refused).count == 1)
     #expect(try sbd.client.sessions().filter { $0.claudeSessionId == id }.count == 1)
   }
 

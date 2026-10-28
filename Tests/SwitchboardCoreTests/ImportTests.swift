@@ -317,7 +317,8 @@ private let otherAccountForms = ["~/.claude-personal", "~/.claudex", "~/.claude/
         {"pid": 57911, "cwd": "/b", "kind": "background", "startedAt": 1792962894692, "sessionId": "u2",
          "name": "fix-ci", "status": "idle", "id": "701cd24a", "state": "blocked"},
         {"cwd": "/c", "kind": "background", "startedAt": 1792962894692, "sessionId": "u3", "id": "9f3e0b12",
-         "state": "stopped"}
+         "state": "stopped"},
+        {"pid": 1, "kind": "interactive"}
       ]
       """
 
