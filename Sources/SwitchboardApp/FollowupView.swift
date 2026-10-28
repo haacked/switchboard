@@ -1,6 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
+/// See SessionViewState for why this isn't `@State`.
 final class FollowupViewState: ObservableObject {
   @Published var confirmingRemove = false
 }
@@ -24,10 +25,10 @@ struct FollowupView: View {
           Text(session.reason).foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Start") { model.startFollowup(session.id) }
+        StartButton(session: session)
           .buttonStyle(.borderedProminent)
           .keyboardShortcut(.return, modifiers: [.command])
-          .help("Make the worktree and start claude with this prompt")
+        if followup.repository != nil { StartButton(session: session, inFolder: true) }
         Button(session.state == .done ? "Not Done" : "Done") { model.setDone(session.id, session.state != .done) }
         Button(role: .destructive) {
           ui.confirmingRemove = true
@@ -66,7 +67,7 @@ struct FollowupView: View {
     }
     .padding(16)
     .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove) {
-      Button("Remove Follow-up", role: .destructive) { model.removeFollowup(session.id) }
+      Button("Remove Follow-up", role: .destructive) { model.remove(session.id) }
     } message: {
       Text("An import of Followups.md won't add it again.")
     }
@@ -80,17 +81,26 @@ struct FollowupView: View {
   }
 }
 
-extension BoardModel {
-  func expanded(_ state: AttentionState) -> Binding<Bool> {
-    Binding(
-      get: { !self.collapsed.contains(state) },
-      set: { if $0 { self.collapsed.remove(state) } else { self.collapsed.insert(state) } })
-  }
+/// Starts the follow-up in its repository's checkout. A follow-up with no
+/// repository asks for the folder to start in.
+struct StartButton: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+  /// Asks for the folder even when the follow-up has a repository, for a
+  /// checkout that sbd can't find.
+  var inFolder = false
 
-  func startFollowup(_ id: String) { perform("followup-start", ["session": .string(id)]) }
-
-  func removeFollowup(_ id: String) {
-    if selection == id { selection = nil }
-    perform("followup-rm", ["session": .string(id)])
+  var body: some View {
+    let starting = model.starting.contains(session.id)
+    let asksForFolder = inFolder || session.followup?.repository == nil
+    Button(starting ? "Starting…" : asksForFolder ? "Start in…" : "Start") {
+      if !asksForFolder {
+        model.startFollowup(session.id)
+      } else if let path = chooseFolder(message: "Choose the checkout to start the follow-up in") {
+        model.startFollowup(session.id, path: path)
+      }
+    }
+    .disabled(starting)
+    .help("Make the worktree and start claude with the follow-up's prompt")
   }
 }

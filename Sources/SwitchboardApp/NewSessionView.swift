@@ -52,11 +52,7 @@ struct NewSessionView: View {
   }
 
   private func choose() {
-    let panel = NSOpenPanel()
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.directoryURL = URL(fileURLWithPath: folder.expandingTilde)
-    if panel.runModal() == .OK, let url = panel.url { folder = url.path }
+    if let path = chooseFolder(at: folder) { folder = path }
   }
 
   private func start() {
@@ -69,4 +65,14 @@ struct NewSessionView: View {
         path: folder.expandingTilde, branch: optional(form.branch), name: optional(form.name),
         prompt: optional(form.prompt)))
   }
+}
+
+/// Asks for a folder, or returns nil when the user cancels.
+func chooseFolder(message: String? = nil, at start: String? = nil) -> String? {
+  let panel = NSOpenPanel()
+  panel.canChooseDirectories = true
+  panel.canChooseFiles = false
+  if let message { panel.message = message }
+  if let start { panel.directoryURL = URL(fileURLWithPath: start.expandingTilde) }
+  return panel.runModal() == .OK ? panel.url?.path : nil
 }

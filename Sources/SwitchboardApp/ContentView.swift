@@ -100,7 +100,7 @@ struct Sidebar: View {
       ForEach(AttentionState.allCases, id: \.self) { state in
         let group = model.board.filter { $0.state == state }
         if !group.isEmpty {
-          Section(isExpanded: model.expanded(state)) {
+          Section(isExpanded: expanded(state)) {
             ForEach(group) { s in SessionRow(session: s).tag(s.id) }
           } header: {
             HStack {
@@ -120,6 +120,12 @@ struct Sidebar: View {
         }
       }
     }
+  }
+
+  private func expanded(_ state: AttentionState) -> Binding<Bool> {
+    Binding(
+      get: { !model.collapsed.contains(state) },
+      set: { if $0 { model.collapsed.remove(state) } else { model.collapsed.insert(state) } })
   }
 }
 
@@ -197,8 +203,8 @@ struct BoardView: View {
                       VStack(alignment: .leading, spacing: 4) {
                         Text(s.name).fontWeight(.medium).lineLimit(1)
                         Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                        Text("\(s.live ? "running" : "stopped") · \(ago(s.since))").font(.caption2).foregroundStyle(
-                          .tertiary)
+                        Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
+                          .font(.caption2).foregroundStyle(.tertiary)
                       }
                       .frame(maxWidth: .infinity, alignment: .leading)
                       .padding(10)

@@ -32,19 +32,21 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
 
   @Test func readsTheOpenItemsOnly() {
     let items = Followup.openItems(file, zone: utc)
-    #expect(items.map(\.prompt) == [
-      "Move the lookups into one script. More text.",
-      "Archived rows stay visible ([PR #21](https://github.com/haacked/docket/pull/21))",
-      "Check the dashboards.",
-      "Should we have code protections on the flag service",
-    ])
+    #expect(
+      items.map(\.prompt) == [
+        "Move the lookups into one script. More text.",
+        "Archived rows stay visible ([PR #21](https://github.com/haacked/docket/pull/21))",
+        "Check the dashboards.",
+        "Should we have code protections on the flag service",
+      ])
     #expect(items.map(\.repository) == ["haacked/dotfiles", "haacked/docket", nil, nil])
     #expect(items.map(\.sourceBranch) == ["haacked/standup-archive-gate", nil, nil, nil])
     #expect(items[0].added == 1_792_800_000_000)
     #expect(items[3].added == nil)
     #expect(
       items[0].key
-        == "2026-10-24 · [haacked/dotfiles · haacked/standup-archive-gate] Move the lookups into one script. More text.")
+        == "2026-10-24 · [haacked/dotfiles · haacked/standup-archive-gate] Move the lookups into one script. More text."
+    )
     #expect(items[3].key == "Should we have code protections on the flag service")
   }
 
@@ -56,7 +58,8 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
   }
 
   @Test func readsAFileWithWindowsLineEndings() {
-    let items = Followup.openItems("## Open\r\n- [ ] 2026-10-24 · [a/b] One.\r\n- [ ] Two.\r\n## Archive\r\n", zone: utc)
+    let items = Followup.openItems(
+      "## Open\r\n- [ ] 2026-10-24 · [a/b] One.\r\n- [ ] Two.\r\n## Archive\r\n", zone: utc)
     #expect(items.map(\.prompt) == ["One.", "Two."])
   }
 
@@ -90,13 +93,20 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
     #expect(
       Followup.firstLink("See ([PR #21](https://github.com/haacked/docket/pull/21)) and https://x.dev")
         == "https://github.com/haacked/docket/pull/21")
-    #expect(Followup.firstLink("Read https://claude.ai/artifact/TqWK5kL5. Then decide.") == "https://claude.ai/artifact/TqWK5kL5")
+    #expect(
+      Followup.firstLink("Read https://claude.ai/artifact/TqWK5kL5. Then decide.")
+        == "https://claude.ai/artifact/TqWK5kL5")
     #expect(Followup.firstLink("no link here") == nil)
   }
 
   @Test func slugs() {
     #expect(Followup.slug("Fix the flaky `foo_test.py` test!") == "fix-the-flaky-foo-test-py-test")
-    #expect(Followup.slug("Move the standup's mechanical PR lookups into one gather script") == "move-the-standup-s-mechanical-pr-lookups-into-one")
+    #expect(
+      Followup.slug("Move the standup's mechanical PR lookups into one gather script")
+        == "move-the-standup-s-mechanical-pr-lookups-into-one")
+    #expect(
+      Followup.slug("Move the standups mechanical PR lookups into one gathering script")
+        == "move-the-standups-mechanical-pr-lookups-into-one")
     #expect(Followup.slug("…") == "")
   }
 
@@ -116,6 +126,7 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
     "https://github.com/a", "/Users/me/repo", "https://evil.dev/github.com/acme/widgets.git",
     "https://git.corp/mirrors/github.com/acme/widgets", "/Users/me/src/github.com/acme/widgets",
     "git@evil.dev:github.com/acme/widgets.git", "https://github.com/../..", "https://github.com/a/b/c",
+    "https://evil.dev#@github.com/a/b", "https://evil.dev?@github.com/a/b", "https://evil.dev\\@github.com/a/b",
   ])
   func remotesElsewhereHaveNoRepository(_ remote: String) {
     #expect(Followup.repository(remote: remote) == nil)
@@ -156,7 +167,8 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
     let at = Wait.parseTime("2026-10-30 09:00", now: 0)!
     var dated = Followup(prompt: "x", trigger: .date(at))
     dated.ready = at
-    #expect(Attention.evaluate(followup(dated), SessionFacts(), now: at).reason == "ready to start: 2026-10-30 09:00 passed")
+    #expect(
+      Attention.evaluate(followup(dated), SessionFacts(), now: at).reason == "ready to start: 2026-10-30 09:00 passed")
   }
 
   @Test func aFollowupMarkedDoneIsDone() {
@@ -167,8 +179,9 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
     var f = Followup(prompt: "x")
     f.started = 1
     let s = followup(f)
-    #expect(!s.isNotStarted)
-    #expect(Attention.evaluate(s, SessionFacts(), now: 2) == Verdict(state: .needsYou, reason: "give it a first prompt"))
+    #expect(!s.waitsToStart)
+    #expect(
+      Attention.evaluate(s, SessionFacts(), now: 2) == Verdict(state: .needsYou, reason: "give it a first prompt"))
   }
 
   @Test func notStartedIsTheLastColumn() {

@@ -1,8 +1,6 @@
 import Foundation
 import SwitchboardCore
 
-let defaultFollowupsFile = "~/dev/haacked/notes/PostHog/Followups.md"
-
 func followup(_ a: Args) {
   let words = a.positional.dropFirst()
   switch a.positional.first {
@@ -43,13 +41,13 @@ func followup(_ a: Args) {
     let result = call("followup-rm", ["session": .string(followupRef(a, "rm"))])
     if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
   case "import":
-    let file = URL(fileURLWithPath: (a.values["--file"] ?? defaultFollowupsFile).expandingTilde).path
-    let result = call("followup-import", ["file": .string(file)])
+    let file = a.values["--file"].map { URL(fileURLWithPath: $0.expandingTilde).path }
+    let result = call("followup-import", file.map { ["file": .string($0)] } ?? [:])
     if a.json {
       printJSON(result)
     } else {
       let count = result["imported"]?.array?.count ?? 0
-      print("Imported \(count == 1 ? "1 follow-up" : "\(count) follow-ups") from \(file).")
+      print("Imported \(count == 1 ? "1 follow-up" : "\(count) follow-ups") from \(result["file"]?.string ?? "").")
       if let skipped = result["skipped"]?.int, skipped > 0 {
         print("Skipped \(skipped == 1 ? "1 line" : "\(skipped) lines") that an earlier import read.")
       }
@@ -60,12 +58,15 @@ func followup(_ a: Args) {
 }
 
 /// Prints the sessions by state, and how many follow-ups haven't started,
-/// which `ls` leaves out.
+/// which `ls` leaves out. An older sbd without `followup-ls` prints no count.
 func printSessionList(_ sessions: [SessionSummary]) {
   printTable(sessions)
-  let followups = decode(call("followup-ls"), as: [SessionSummary].self).filter { $0.state == .notStarted }.count
+  let listed = try? client.call("followup-ls", as: [SessionSummary].self)
+  let followups = (listed ?? []).filter { $0.state == .notStarted }.count
   if followups > 0 {
-    print("\n\(followups) \(followups == 1 ? "follow-up hasn't" : "follow-ups haven't") started. sb followup ls lists them.")
+    print(
+      "\n\(followups) \(followups == 1 ? "follow-up hasn't" : "follow-ups haven't") started. sb followup ls lists them."
+    )
   }
 }
 

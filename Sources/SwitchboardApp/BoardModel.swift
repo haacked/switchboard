@@ -24,14 +24,17 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
-  /// What the user picked or typed on each open card, by card id. The Queue
-  /// and the session view show the same draft.
+  /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
+  /// disabled until sbd replies, because making a worktree can take seconds.
+  @Published var starting: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
   /// Follow-ups that haven't started, which `ls` leaves out. They change
   /// only through actions and triggers, so the app reads them every 5 s.
   @Published var followups: [SessionSummary] = []
+  /// What the user picked or typed on each open card, by card id. The Queue
+  /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
 
   let client = Client()
@@ -47,7 +50,8 @@ final class BoardModel: ObservableObject {
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou } }
 
   /// The sessions and the follow-ups that haven't started. A follow-up that
-  /// started or fired since the last read of follow-ups shows once.
+  /// started or fired since the last read of follow-ups is in both lists, and
+  /// the board shows the copy from `ls`.
   var board: [SessionSummary] {
     let ids = Set(sessions.map(\.id))
     return sessions + followups.filter { !ids.contains($0.id) }
@@ -91,7 +95,7 @@ final class BoardModel: ObservableObject {
         for s in list where s.state == .needsYou && knownStates[s.id] != .needsYou && knownStates[s.id] != nil {
           // A follow-up that starts passes through Needs you until its first
           // prompt. Only a follow-up that fired and is still unstarted notifies.
-          if knownStates[s.id] == .notStarted && !s.isNotStarted { continue }
+          if knownStates[s.id] == .notStarted && !s.waitsToStart { continue }
           notify(s)
         }
       }
@@ -162,9 +166,21 @@ final class BoardModel: ObservableObject {
     drafts[card.id] = draft
     return draft
   }
+  /// A follow-up that hasn't started goes through `followup-rm`, which
+  /// refuses it if it started since the board last read it.
   func remove(_ id: String) {
+    let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }
-    perform("rm", ["session": .string(id)])
+    perform(followup ? "followup-rm" : "rm", ["session": .string(id)])
+  }
+
+  /// `path` is the checkout to start in, for a follow-up whose checkout sbd
+  /// can't find.
+  func startFollowup(_ id: String, path: String? = nil) {
+    guard starting.insert(id).inserted else { return }
+    var args: [String: JSON] = ["session": .string(id)]
+    if let path { args["path"] = .string(path) }
+    perform("followup-start", args, finally: { self.starting.remove(id) })
   }
 
   func create(_ args: NewSession) {

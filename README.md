@@ -58,7 +58,7 @@ sb followup add "Retarget the stack onto main." --after PostHog/posthog#1204
 sb followup ls
 sb followup start <f>        # makes the worktree and starts claude with the prompt
 sb followup rm <f>
-sb followup import           # reads ~/dev/haacked/notes/PostHog/Followups.md
+sb followup import           # reads followupsFile, ~/dev/haacked/notes/PostHog/Followups.md by default
 ```
 
 Without `--repo`, `add` takes the repository from the current folder's GitHub remote. Inside a session, the session becomes the follow-up's parent. `--on` and `--after` move the follow-up to Needs you, with "ready to start", when the time passes or the PR merges. A follow-up never starts on its own. The merge trigger fires once the GitHub poller lands.
@@ -80,11 +80,12 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
   "env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"},
   "repos": {"haacked/dotfiles": "~/.dotfiles"},
   "repoRoots": ["~/dev"],
-  "branchPrefix": "haacked/"
+  "branchPrefix": "haacked/",
+  "followupsFile": "~/dev/haacked/notes/PostHog/Followups.md"
 }
 ```
 
-`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
+`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
 
 ### Shared MCP servers
 

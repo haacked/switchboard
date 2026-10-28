@@ -2,20 +2,18 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  /// Runs a follow-up request, or returns nil for any other request. Each one
-  /// takes the state queue itself, because `add` and `start` run git first.
-  func followupRequest(_ op: String, _ args: JSON) throws -> JSON? {
+  /// The follow-up requests. Each one takes the state queue itself, because
+  /// `add` and `start` run git first.
+  func followupRequest(_ op: String, _ args: JSON) throws -> JSON {
     switch op {
     case "followup-add":
       return try JSON(encoding: addFollowup(args))
     case "followup-ls":
-      return try JSON(encoding: queue.sync { summaries().filter(\.isNotStarted) })
+      return try JSON(encoding: queue.sync { summaries().filter(\.waitsToStart) })
     case "followup-start":
       return try JSON(encoding: startFollowup(args))
     case "followup-rm":
-      return try remove(args) { session in
-        guard session.isNotStarted else { throw APIError("\(session.id) has started. sb rm removes a session") }
-      }
+      return try removeFollowup(args)
     case "followup-import":
       return try importFollowups(args)
     case "pr-merged":
@@ -24,7 +22,7 @@ extension Service {
       }
       return try JSON(encoding: pullRequestMerged(pr))
     default:
-      return nil
+      throw APIError("unknown request \(op)")
     }
   }
 
@@ -55,7 +53,8 @@ extension Service {
       let parent = try args["parent"]?.string.map { try lookup(["session": .string($0)]) }
       var session = Session(
         id: shortId("s", taken: entries.keys), name: args["title"]?.string ?? Followup.title(prompt), cwd: "",
-        branch: args["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 }, claudeSessionId: UUID().uuidString.lowercased(),
+        branch: args["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 },
+        claudeSessionId: UUID().uuidString.lowercased(),
         model: args["model"]?.string, created: now)
       session.parent = parent
       session.followup = Followup(
@@ -75,10 +74,12 @@ extension Service {
   /// The repository and branch of a folder: the `owner/name` of its
   /// `upstream` remote, else its `origin` remote, on github.com.
   private func gitContext(_ cwd: String) -> (String?, String?) {
-    let repository = ["upstream", "origin"].lazy.compactMap { try? self.gitOutput(cwd, ["remote", "get-url", $0]) }
-      .compactMap(Followup.repository(remote:)).first
+    guard
+      let repository = ["upstream", "origin"].lazy.compactMap({ try? self.gitOutput(cwd, ["remote", "get-url", $0]) })
+        .compactMap(Followup.repository(remote:)).first
+    else { return (nil, nil) }
     let branch = try? gitOutput(cwd, ["branch", "--show-current"])
-    return (repository, repository == nil || branch?.isEmpty != false ? nil : branch)
+    return (repository, branch?.isEmpty == false ? branch : nil)
   }
 
   private func makeTrigger(on: String?, after: String?, _ repository: String?, now: Int64) throws
@@ -106,28 +107,23 @@ extension Service {
 
   /// Makes the follow-up's worktree and launches claude there with its
   /// prompt. git runs off the state queue. The session keeps its id. While
-  /// git runs, the follow-up counts as started, so `followup rm`, another
-  /// start, and its trigger leave it alone. A failure puts it back.
+  /// git runs, `starting` holds the id, so `rm`, `followup rm`, another start,
+  /// and the trigger leave the follow-up alone.
   func startFollowup(_ args: JSON) throws -> SessionSummary {
     let session: Session = try queue.sync {
       let id = try lookup(args)
       let s = entries[id]!.session
-      guard s.isNotStarted else { throw APIError("\(id) isn't a follow-up that waits to start") }
-      entries[id]!.session.followup!.started = nowMs()
+      guard s.waitsToStart else { throw APIError("\(id) isn't a follow-up that waits to start") }
+      guard starting.insert(id).inserted else { throw APIError("\(id) is starting") }
       return s
     }
-    do {
-      return try start(session, args)
-    } catch {
-      queue.sync {
-        if entries[session.id]?.session.cwd.isEmpty == true { entries[session.id]!.session.followup!.started = nil }
-      }
-      throw error
-    }
+    defer { _ = queue.sync { starting.remove(session.id) } }
+    return try start(session, args)
   }
 
   private func start(_ session: Session, _ args: JSON) throws -> SessionSummary {
-    let repo = try args["path"]?.string.map { ($0.expandingTilde as NSString).standardizingPath }
+    let repo =
+      try args["path"]?.string.map { ($0.expandingTilde as NSString).standardizingPath }
       ?? checkout(of: session.followup?.repository)
     let named = [args["branch"]?.string, session.branch].compactMap { $0 }.first { !$0.isEmpty }
     let branch = named ?? config.branchPrefix + Followup.slug(session.name)
@@ -141,7 +137,6 @@ extension Service {
     }
     let folder = try prepareFolder(NewSession(path: repo, branch: branch, base: args["base"]?.string))
     return try queue.sync {
-      guard entries[session.id] != nil else { throw APIError("\(session.id) was removed while its worktree was made") }
       try update(session.id) { s in
         s.cwd = folder.cwd
         s.branch = folder.branch
@@ -152,6 +147,19 @@ extension Service {
       record(session.id, "followup-started", ["cwd": .string(folder.cwd), "branch": .string(branch)])
       try launch(session.id, prompt: session.followup?.prompt)
       return summary(session.id)
+    }
+  }
+
+  /// Removes a follow-up that hasn't started. It has no panes, folder, or
+  /// worktree, so only its row and events go.
+  private func removeFollowup(_ args: JSON) throws -> JSON {
+    try queue.sync {
+      let id = try lookup(args)
+      guard entries[id]!.session.waitsToStart else { throw APIError("\(id) has started. sb rm removes a session") }
+      guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      entries[id] = nil
+      try store.delete(session: id)
+      return ["removed": .string(id)]
     }
   }
 
@@ -213,7 +221,7 @@ extension Service {
   }
 
   private func waitsToFire(_ session: Session) -> Bool {
-    session.isNotStarted && !session.done && session.followup?.ready == nil
+    session.waitsToStart && !session.done && session.followup?.ready == nil && !starting.contains(session.id)
   }
 
   private func markReady(_ id: String, now: Int64) {
@@ -232,7 +240,7 @@ extension Service {
   /// Adds a follow-up for each open item of a Followups.md file that no
   /// earlier import read. The file stays as it is.
   func importFollowups(_ args: JSON) throws -> JSON {
-    guard let file = args["file"]?.string else { throw APIError("followup-import needs a file") }
+    let file = args["file"]?.string ?? config.followupsFile.expandingTilde
     let text: String
     do {
       text = try String(contentsOfFile: file, encoding: .utf8)
@@ -241,9 +249,12 @@ extension Service {
     }
     let now = nowMs()
     let items = Followup.openItems(text).map { item in
-      (item, Followup.title(item.prompt), Followup(
-        prompt: item.prompt, repository: item.repository, sourceBranch: item.sourceBranch,
-        link: Followup.firstLink(item.prompt)))
+      (
+        item, Followup.title(item.prompt),
+        Followup(
+          prompt: item.prompt, repository: item.repository, sourceBranch: item.sourceBranch,
+          link: Followup.firstLink(item.prompt))
+      )
     }
     return try queue.sync {
       var seen = try store.importedLines()
@@ -257,7 +268,10 @@ extension Service {
         try store.recordImport(item.key)
         imported.append(summary(session.id))
       }
-      return ["imported": try JSON(encoding: imported), "skipped": .number(Double(items.count - imported.count))]
+      return [
+        "file": .string(file), "imported": try JSON(encoding: imported),
+        "skipped": .number(Double(items.count - imported.count)),
+      ]
     }
   }
 }

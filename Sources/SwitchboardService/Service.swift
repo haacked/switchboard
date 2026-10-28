@@ -37,6 +37,8 @@ public final class Service {
   static let inFlightMs: Int64 = 10_000
 
   var entries: [String: Entry] = [:]
+  /// The follow-ups whose worktree `followup start` is making.
+  var starting: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -127,16 +129,12 @@ public final class Service {
         let now = try queue.sync { try clockRequest(request.args) }
         if request.args["advance"] != nil { tick() }
         return .success(now)
+      case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
+        return .success(try followupRequest(request.op, request.args))
       default:
-        if let result = try followupRequest(request.op, request.args) { return .success(result) }
+        break
       }
-      if Service.launches.contains(request.op),
-        let id = try? queue.sync(execute: {
-          let id = try lookup(request.args)
-          try refuseNotStarted(entries[id]!.session)
-          return id
-        })
-      {
+      if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
         settle(id)
       }
       if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
@@ -515,13 +513,13 @@ public final class Service {
   /// Stops claude, removes the worktree when asked, then closes the panes and
   /// forgets the session. git runs off the state queue, because removing a
   /// worktree with large ignored folders can take a while. A failed removal
-  /// leaves the session and its panes in place. `allowed` can refuse the
-  /// session before anything changes.
-  func remove(_ args: JSON, allowed: (Session) throws -> Void = { _ in }) throws -> JSON {
+  /// leaves the session and its panes in place.
+  private func remove(_ args: JSON) throws -> JSON {
     let fresh = buildSnapshot()
     let session: Session = try queue.sync {
       let id = try lookup(args)
-      try allowed(entries[id]!.session)
+      // The start would otherwise leave its new worktree behind.
+      guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       install(fresh)
       if case .running(let pid) = claudeState(id) { kill(pid_t(pid), SIGTERM) }
       return entries[id]!.session
@@ -532,8 +530,10 @@ public final class Service {
       removed = true
     }
     try queue.sync {
-      // The session can change while git runs, such as a follow-up that starts.
-      if let current = entries[session.id]?.session { try allowed(current) }
+      // A follow-up can start between the two steps.
+      guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
+        throw APIError("\(session.id) started while it was being removed")
+      }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
       entries[session.id] = nil

@@ -16,12 +16,21 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
   }
 }
 
+/// What a request on another thread returned.
+final class Outcome<T>: @unchecked Sendable {
+  var result: Result<T, Error>?
+  let done = DispatchSemaphore(value: 0)
+}
+
 @Suite(.timeLimit(.minutes(2))) struct FollowupTests {
   @Test func addsListsAndRemovesAFollowupThatNeverRuns() throws {
     let sbd = try Instance()
     let parent = try sbd.new(name: "parent")
     let out = try sbd.sb(
-      ["followup", "add", "--json", "--repo", "acme/widgets", "--link", "https://x.dev/1", "Fix the cache. It reads twice."],
+      [
+        "followup", "add", "--json", "--repo", "acme/widgets", "--link", "https://x.dev/1",
+        "Fix the cache. It reads twice.",
+      ],
       env: ["SB_SESSION_ID": parent.id])
     let f = try JSONCoding.decode(SessionSummary.self, from: out)
     #expect(f.state == .notStarted)
@@ -42,11 +51,15 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
     #expect(table.contains("1 follow-up hasn't started"))
     #expect(try sbd.sb("get", f.id).contains("prompt:  Fix the cache. It reads twice."))
 
+    // A refusal that waited for the missing pane to settle would take 5 s.
     let refused = Date()
     for op in ["open", "send", "resume", "terminals"] {
       #expect(failure(sbd, op, ["session": .string(f.id), "text": "hi"]).contains("hasn't started"))
     }
-    #expect(Date().timeIntervalSince(refused) < 2)
+    #expect(Date().timeIntervalSince(refused) < 5)
+    #expect(failure(sbd, "wait", ["session": .string(f.id), "kind": "manual"]).contains("hasn't started"))
+    _ = try sbd.client.call("note", ["session": .string(f.id), "text": "Ask Ana first."])
+    #expect(try sbd.sb("get", f.id).contains("Ask Ana first."))
     #expect(sbd.stubArgs().count == 1)
     #expect(failure(sbd, "followup-rm", ["session": .string(parent.id)]).contains("has started"))
     #expect(failure(sbd, "followup-start", ["session": .string(parent.id)]).contains("isn't a follow-up"))
@@ -71,14 +84,61 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
     try sbd.waitFor(f.id, "the follow-up's first turn") { $0.lastReply == "Done: Fix the cache. It reads twice." }
     #expect(
       sbd.stubArgs()
-        == ["--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings) -- Fix the cache. It reads twice."])
+        == ["--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings) -- Fix the cache. It reads twice."]
+    )
     #expect(try sbd.events(f.id).prefix(3).map(\.kind) == ["followup", "followup-started", "started"])
     #expect(failure(sbd, "followup-start", ["session": .string(f.id)]).contains("isn't a follow-up"))
 
     // A branch made from a title is new work, so a start refuses one that exists.
     let same = try add(sbd, ["prompt": "Fix the cache. Again.", "repository": "acme/widgets"])
-    #expect(failure(sbd, "followup-start", ["session": .string(same.id)]).contains("branch haacked/fix-the-cache exists"))
+    #expect(
+      failure(sbd, "followup-start", ["session": .string(same.id)]).contains("branch haacked/fix-the-cache exists"))
     #expect(try sbd.get(same.id).state == .notStarted)
+
+    let named = try add(sbd, ["prompt": "Name it.", "repository": "acme/widgets", "branch": "feature/x"])
+    let started = try sbd.client.call("followup-start", ["session": .string(named.id)], as: SessionSummary.self)
+    #expect(started.branch == "feature/x")
+    #expect(started.cwd == "\(sbd.home.path)/worktrees/widgets/feature/x")
+  }
+
+  @Test func leavesAFollowupAloneWhileItsWorktreeIsMade() throws {
+    let repos = try Repos()
+    let repo = try repos.make("acme/widgets")
+    // git runs post-checkout in the new worktree, and the hook holds the
+    // start until the test removes the gate file, or for at most 30 s.
+    let gate = "\(repos.root)/gate"
+    FileManager.default.createFile(atPath: gate, contents: nil)
+    defer { try? FileManager.default.removeItem(atPath: gate) }
+    let hook = "\(repo)/.git/hooks/post-checkout"
+    try "#!/bin/sh\ni=0\nwhile [ -e '\(gate)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
+      .write(toFile: hook, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+    let sbd = try Instance(config: ["repoRoots": [.string(repos.root)]])
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets", "on": "1h"])
+    let folder = "\(sbd.home.path)/worktrees/widgets/fix-the-cache"
+    let started = Outcome<SessionSummary>()
+    DispatchQueue.global().async {
+      started.result = Result {
+        try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)], as: SessionSummary.self)
+      }
+      started.done.signal()
+    }
+    try sbd.waitFor("git to make \(folder)") { FileManager.default.fileExists(atPath: folder) }
+
+    for op in ["followup-start", "followup-rm", "rm"] {
+      #expect(failure(sbd, op, ["session": .string(f.id)]).contains("is starting"))
+    }
+    #expect(try sbd.client.call("followup-ls", as: [SessionSummary].self).map(\.state) == [.notStarted])
+    #expect(try sbd.client.sessions().isEmpty)
+    // The trigger's time passes while git runs, and two ticks of 0.2 s leave it alone.
+    try sbd.advanceClock(3_600_000)
+    usleep(400_000)
+    #expect(try sbd.events(f.id).map(\.kind) == ["followup"])
+
+    try FileManager.default.removeItem(atPath: gate)
+    #expect(started.done.wait(timeout: .now() + 30) == .success)
+    #expect(try started.result?.get().cwd == folder)
+    #expect(try sbd.client.call("followup-ls", as: [SessionSummary].self).isEmpty)
   }
 
   @Test func findsTheCheckoutAndRefusesOneWithAnotherRemote() throws {
@@ -96,6 +156,10 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
     #expect(
       failure(sbd, "followup-start", ["session": .string(widget.id)])
         .contains("has no remote on github.com for acme/widgets"))
+    // A fork's upstream names the repository, not its origin.
+    _ = try runCommand(
+      "/usr/bin/git", ["-C", other, "remote", "add", "upstream", "https://github.com/acme/widgets.git"])
+    #expect(try add(sbd, ["prompt": "From the fork.", "cwd": .string(other)]).followup?.repository == "acme/widgets")
     let missing = try add(sbd, ["prompt": "Fix it.", "repository": "nobody/nothing"])
     #expect(failure(sbd, "followup-start", ["session": .string(missing.id)]).contains("can't find a checkout"))
     let loose = try add(sbd, ["prompt": "Look into it."])
@@ -123,12 +187,19 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
     let f = try add(sbd, ["prompt": "Check the rollout.", "repository": "acme/widgets", "on": "1h"])
     #expect(f.state == .notStarted)
     #expect(f.reason.hasPrefix("acme/widgets · ready at "))
-    try sbd.advanceClock(3_600_000)
+    let done = try add(sbd, ["prompt": "Check it again.", "on": "1h"])
+    _ = try sbd.client.call("done", ["session": .string(done.id)])
+    // A minute before the time, two ticks of 0.2 s leave the trigger alone.
+    try sbd.advanceClock(3_540_000)
+    usleep(400_000)
+    #expect(try sbd.get(f.id).state == .notStarted)
+    try sbd.advanceClock(60_000)
     let ready = try sbd.waitFor(f.id, "the trigger") { $0.state == .needsYou }
+    #expect(try sbd.get(done.id).followup?.ready == nil)
     #expect(ready.reason.hasPrefix("ready to start: ") && ready.reason.hasSuffix(" passed"))
     #expect(ready.followup?.ready != nil)
     #expect(try sbd.events(f.id).map(\.kind) == ["followup", "followup-ready"])
-    #expect(try sbd.client.sessions().map(\.id) == [f.id])
+    #expect(try sbd.client.sessions().map(\.id).sorted() == [done.id, f.id].sorted())
     #expect(sbd.stubArgs().isEmpty)
   }
 
@@ -156,8 +227,9 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
   }
 
   @Test func importsOpenItemsOnceAndKeepsThemAcrossARestart() throws {
-    let sbd = try Instance()
-    let file = "\(sbd.home.path)/Followups.md"
+    let notes = try Repos()
+    let file = "\(notes.root)/Followups.md"
+    let sbd = try Instance(config: ["followupsFile": .string(file)])
     let text = """
       # Followups
 
@@ -174,25 +246,30 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
 
       """
     try text.write(toFile: file, atomically: true, encoding: .utf8)
-    let first = try JSONCoding.decode(JSON.self, from: try sbd.sb("followup", "import", "--json", "--file", file))
+    let first = try JSONCoding.decode(JSON.self, from: try sbd.sb("followup", "import", "--json"))
+    #expect(first["file"]?.string == file)
     #expect(first["imported"]?.array?.count == 3)
     #expect(first["skipped"]?.int == 0)
     #expect(try String(contentsOfFile: file, encoding: .utf8) == text)
 
     let listed = try sbd.client.call("followup-ls", as: [SessionSummary].self)
-    #expect(listed.map(\.name) == [
-      "Archived rows stay visible (PR #21)", "Move the lookups into one script",
-      "Should we have code protections on the flag service",
-    ])
+    #expect(
+      listed.map(\.name) == [
+        "Archived rows stay visible (PR #21)", "Move the lookups into one script",
+        "Should we have code protections on the flag service",
+      ])
     #expect(listed.map(\.reason) == ["haacked/docket", "haacked/dotfiles", "no repository"])
     #expect(listed[0].followup?.link == "https://github.com/haacked/docket/pull/21")
     #expect(listed[1].followup?.sourceBranch == "haacked/standup-archive-gate")
     #expect(listed[1].since == Wait.parseTime("2026-10-24", now: 0))
-    #expect(try sbd.sb("followup", "import", "--file", file) == "Imported 0 follow-ups from \(file).\nSkipped 3 lines that an earlier import read.\n")
+    #expect(
+      try sbd.sb("followup", "import", "--file", file)
+        == "Imported 0 follow-ups from \(file).\nSkipped 3 lines that an earlier import read.\n")
 
     // A removed follow-up stays skipped. A new line imports.
     try sbd.sb("followup", "rm", listed[0].id)
-    let added = text.replacingOccurrences(of: "## Open\n\n", with: "## Open\n\n- [ ] 2026-10-26 · [acme/widgets] A new one.\n")
+    let added = text.replacingOccurrences(
+      of: "## Open\n\n", with: "## Open\n\n- [ ] 2026-10-26 · [acme/widgets] A new one.\n")
     try added.write(toFile: file, atomically: true, encoding: .utf8)
     let third = try JSONCoding.decode(JSON.self, from: try sbd.sb("followup", "import", "--json", "--file", file))
     #expect(third["imported"]?.array?.compactMap { $0["name"]?.string } == ["A new one"])

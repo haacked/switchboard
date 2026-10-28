@@ -171,7 +171,10 @@ func printTable(_ sessions: [SessionSummary]) {
 func printSession(_ s: SessionSummary) {
   print("\(s.id)  \(s.name)".printable)
   print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))".printable)
-  if s.isNotStarted { return printFollowup(s) }
+  if s.waitsToStart {
+    printFollowup(s)
+    return printWaitsAndNotes(s)
+  }
   print(
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )

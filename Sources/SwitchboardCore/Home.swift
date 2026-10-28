@@ -74,6 +74,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var repoRoots: [String] = ["~/dev"]
   /// Goes before a branch name that `followup start` makes from a title.
   public var branchPrefix = ""
+  /// The file that `followup import` reads when the request names none.
+  public var followupsFile = "~/dev/haacked/notes/PostHog/Followups.md"
 
   public init() {}
 
@@ -102,6 +104,7 @@ public struct Config: Codable, Equatable, Sendable {
     repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? d.repos
     repoRoots = try c.decodeIfPresent([String].self, forKey: .repoRoots) ?? d.repoRoots
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
+    followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
   }
 }
 

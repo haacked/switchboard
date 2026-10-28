@@ -81,7 +81,7 @@ extension Followup {
     var path: Substring
     if let scheme = remote.range(of: "://") {
       let rest = remote[scheme.upperBound...]
-      let authority = rest.prefix { $0 != "/" }
+      let authority = rest.prefix { !"/?#\\".contains($0) }
       host = authority.split(separator: "@").last.map { $0.split(separator: ":").first ?? $0 } ?? ""
       path = rest.dropFirst(authority.count)
     } else {
@@ -201,12 +201,13 @@ extension Followup {
 }
 
 extension Session {
-  /// True for a follow-up that hasn't started, which has no folder and no claude.
-  public var isNotStarted: Bool { followup != nil && followup?.started == nil }
+  /// True for a follow-up that hasn't started, which has no folder and no
+  /// claude. It stays true after its trigger fires, while it shows in Needs you.
+  public var waitsToStart: Bool { followup != nil && followup?.started == nil }
 }
 
 extension SessionSummary {
-  public var isNotStarted: Bool { followup != nil && followup?.started == nil }
+  public var waitsToStart: Bool { followup != nil && followup?.started == nil }
 }
 
 extension Attention {

@@ -45,9 +45,9 @@ struct QueueItem: View {
         SessionRow(session: session)
         Button("Open") { model.selection = session.id }
       }
-      if session.isNotStarted {
+      if session.waitsToStart {
         // A follow-up whose trigger fired has no claude to message yet.
-        Button("Start") { model.startFollowup(session.id) }
+        StartButton(session: session)
       } else if !session.cards.isEmpty {
         ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
       } else if session.openPrompt {

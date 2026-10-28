@@ -15,6 +15,7 @@ extension Service {
     let open = entries[id]?.session.waits ?? []
     switch op {
     case "wait":
+      try refuseNotStarted(entries[id]!.session)
       let request = try JSONCoding.convert(args, to: WaitRequest.self)
       let wait = try request.makeWait(id: shortId("w", taken: open.map(\.id)), waiter: id, now: nowMs()) { ref in
         let other = try lookup(["session": .string(ref)])
