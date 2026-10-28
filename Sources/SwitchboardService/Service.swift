@@ -123,7 +123,7 @@ public final class Service {
       if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
         settle(id)
       }
-      if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request.args) }
+      if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
       // A request that acts on claude decides from the current processes,
       // so it takes a new snapshot. Other requests use the tick's.
       let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil

@@ -26,8 +26,8 @@ struct SharedServer {
 extension Service {
   static let mcpPanePrefix = "mcp-"
 
-  /// The requests that start claude when the session's claude is stopped.
-  /// `new` always starts claude, so it waits once its folder exists.
+  /// The requests that can start claude in an existing session. `new` always
+  /// starts claude, so it waits once its folder exists.
   static let waitsForMCP = launches.union(["terminals"])
 
   /// How long a launch waits for a server that started and doesn't accept
@@ -107,16 +107,15 @@ extension Service {
   /// Waits up to `mcpStartMs` for each server that started less than
   /// `mcpStartMs` ago and doesn't accept connections yet. claude connects to
   /// its MCP servers only when it starts. A session that starts before a
-  /// server listens lacks that server until it stops and resumes. With
-  /// request args that name a session, it waits only while that session's
-  /// claude is stopped, because only then can the request start it. It runs
-  /// off the state queue.
-  func awaitMCPServers(for args: JSON? = nil) {
+  /// server listens lacks that server until it stops and resumes. With a
+  /// request, it waits only while the request can start claude in the session
+  /// it names. It runs off the state queue.
+  func awaitMCPServers(for request: Request? = nil) {
     let deadline = Date().addingTimeInterval(Double(Service.mcpStartMs) / 1000)
     while Date() < deadline {
       let starting: [(index: Int, port: Int, run: Int64)] = queue.sync {
-        if let args {
-          guard let id = try? lookup(args), claudeState(id) == .stopped else { return [] }
+        if let request {
+          guard let id = try? lookup(request.args), canLaunch(request.op, id) else { return [] }
         }
         let now = nowMs()
         return mcp.indices.filter { isStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
@@ -148,6 +147,12 @@ extension Service {
   private func mcpState(_ server: SharedServer) -> MCPServerStatus.State {
     if server.restartAt != nil || !mcpPaneAlive(server) { return .exited }
     return server.listening ? .running : .starting
+  }
+
+  /// `terminals` starts claude only in a missing Claude pane. It leaves a
+  /// dead pane dead. The other requests start claude whenever it is stopped.
+  private func canLaunch(_ op: String, _ id: String) -> Bool {
+    op == "terminals" ? snapshot.panes[paneName(id, .claude)] == nil : claudeState(id) == .stopped
   }
 
   private func isStarting(_ server: SharedServer, now: Int64) -> Bool {

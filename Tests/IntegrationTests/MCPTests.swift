@@ -22,6 +22,18 @@ extension Instance {
     try waitFor(what, timeout: timeout, fetch: { try mcpServers().first { $0.name == name } }, until: match)
   }
 
+  /// Stops the session's claude and waits for tmux to show its pane dead,
+  /// which comes a moment after the session stops being live. A server
+  /// killed after this restarts in a tick whose snapshot has the dead pane.
+  func stopClaude(_ id: String) throws {
+    try sb("stop", id)
+    let tmux = try #require(findExecutable("tmux"))
+    try waitFor("the Claude pane to die") {
+      try runCommand(tmux, ["-S", home.tmuxSocket, "display", "-p", "-t", "=\(id)-claude:", "#{pane_dead}"]).stdout
+        == "1\n"
+    }
+  }
+
   func waitForRunning(_ name: String) throws -> MCPServerStatus {
     try waitForServer(name, "\(name) to accept connections") { $0.state == .running && $0.pid != nil }
   }
@@ -82,6 +94,34 @@ extension Instance {
     try sbd.sb("send", s.id, "while it starts")
     #expect(Date().timeIntervalSince(start) < 2)
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: while it starts" }
+  }
+
+  @Test func aSendThatResumesASessionWaitsForAStartingServer() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let slow = try sbd.waitForRunning("slow")
+    try sbd.stopClaude(s.id)
+    kill(pid_t(slow.pid!), SIGKILL)
+    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    try sbd.sb("send", s.id, "mcp slow")
+    let restarted = try sbd.waitForRunning("slow")
+    try sbd.waitFor(s.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
+    #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func terminalsDoNotWaitForAStartingServerWhenTheyLeaveClaudeStopped() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let slow = try sbd.waitForRunning("slow")
+    try sbd.stopClaude(s.id)
+    kill(pid_t(slow.pid!), SIGKILL)
+    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    let start = Date()
+    _ = try sbd.client.terminals(s.id)
+    #expect(Date().timeIntervalSince(start) < 2)
+    #expect(try !sbd.get(s.id).live)
   }
 
   @Test func restartsAServerThatExitsOnTheSamePort() throws {
