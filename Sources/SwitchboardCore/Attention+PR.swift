@@ -42,7 +42,7 @@ extension Attention {
     if pr.changesRequestedBy.isEmpty && pr.reviewDecision == "CHANGES_REQUESTED" {
       return Verdict(state: .needsYou, reason: "address the requested changes on \(n)")
     }
-    if pr.queue == TrunkQueueState.removed.rawValue {
+    if pr.queue == .removed {
       return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue")
     }
     guard pr.isApproved else { return nil }
@@ -52,7 +52,7 @@ extension Attention {
       // A repo without Trunk has no trunk-io comments, and its PRs merge directly.
       let trunk = facts.prComments.contains { $0.author == TrunkComments.author }
       return Verdict(state: .needsYou, reason: oneLine("\(trunk ? "enqueue" : "merge") \(n)\(by)"))
-    case "unknown":
+    case .unknown:
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
     default:
       return nil

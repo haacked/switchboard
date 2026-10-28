@@ -118,7 +118,7 @@ cmd_run() {
     ;;
   bodies)
     local meta
-    meta=$(ls -d "$runs/$set-$n-meta-c$n-"* 2>/dev/null | tail -1)
+    meta=$(ls -d "$runs/$set-$n-meta-c$n-"* 2>/dev/null | tail -1 || true)
     [ -n "$meta" ] || { echo "run $set $n meta first, in one chunk" >&2; exit 1; }
     query=$body_query ids=$(comment_ids "$meta/response-1.json")
     chunk=$(jq length <<<"$ids")
@@ -171,7 +171,7 @@ run_requests() {
 # then runs it as a one-chunk run.
 cmd_resolve() {
   local set=$1 n=$2 reps=${3:-3} meta dir
-  meta=$(ls -d "$runs/$set-100-meta-c10-"* 2>/dev/null | tail -1)
+  meta=$(ls -d "$runs/$set-100-meta-c10-"* 2>/dev/null | tail -1 || true)
   [ -n "$meta" ] || { echo "run $set 100 meta 3 10 first" >&2; exit 1; }
   dir="$runs/$set-$n-resolve-c$n-$(date +%H%M%S)"
   mkdir -p "$dir"

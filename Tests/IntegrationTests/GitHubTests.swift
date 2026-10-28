@@ -47,15 +47,18 @@ extension Instance {
     if let stub = Transcript.find(s.claudeSessionId, account: claudeConfig, cwd: s.cwd) {
       try FileManager.default.removeItem(atPath: stub)
     }
-    let folder = "\(claudeConfig)/projects/-somewhere-else"
-    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+      atPath: (transcript(s) as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
     let lines = [
       #"{"type":"user","message":{"content":"héllo ✓"}}"#,
       #"{"type":"pr-link","sessionId":"x","prNumber":189,"prUrl":"https://github.com/haacked/review-code/pull/189","prRepository":"haacked/review-code","timestamp":"2026-10-25T20:00:00Z"}"#,
     ]
-    try (lines.joined(separator: "\n") + "\n").write(
-      toFile: "\(folder)/\(s.claudeSessionId).jsonl", atomically: true, encoding: .utf8)
+    try (lines.joined(separator: "\n") + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
     return s
+  }
+
+  func transcript(_ s: SessionSummary) -> String {
+    "\(claudeConfig)/projects/-somewhere-else/\(s.claudeSessionId).jsonl"
   }
 }
 
@@ -79,6 +82,7 @@ extension Instance {
     #expect(
       try sbd.sb("get", s.id).contains(
         "pr:      #18303 Approved, checks success  https://github.com/PostHog/charts/pull/18303"))
+    try sbd.poll(all: true)
     #expect(try sbd.events(s.id).filter { $0.kind == "pr" }.count == 1)
   }
 
@@ -94,8 +98,13 @@ extension Instance {
       return try sbd.get(s.id).reason
     }
     #expect(try reason { $0["mergeable"] = "CONFLICTING" } == "rebase; #18303 conflicts with its base")
+    // GitHub answers UNKNOWN while it computes mergeability again, as after
+    // the base moved. A push changes the head commit, which can fix the conflict.
+    #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with its base")
+    #expect(try reason { $0["headRefOid"] = "pushed" } == "merge #18303, approved by stamphog")
     #expect(
       try reason {
+        $0["headRefOid"] = head
         $0["mergeable"] = "MERGEABLE"
         $0["reviewDecision"] = "CHANGES_REQUESTED"
         $0["latestOpinionatedReviews"] = [
@@ -109,9 +118,15 @@ extension Instance {
           "target": ["oid": "b1"], "associatedPullRequests": ["nodes": [["number": 18000, "headRefOid": "b1"]]],
         ]
       } == "retarget #18303; its base #18000 merged")
+    github.fail(18303, in: .base)
+    #expect(try reason { _ in } == "retarget #18303; its base #18000 merged")
     let merged = try reason { $0["state"] = "MERGED" }
     #expect(merged == "#18303 merged; archive the worktree")
     #expect(try sbd.get(s.id).state == .done)
+    #expect(try sbd.get(s.id).markedDone == false)
+    // The count comes first, so the merged PR is never judged by an older count.
+    let poller = try sbd.events(s.id).filter { $0.kind == "pr" || $0.kind == "worktree" }
+    #expect(poller.suffix(2).map(\.kind) == ["worktree", "pr"])
     let file = "\(s.cwd)/notes.txt"
     try "x".write(toFile: file, atomically: true, encoding: .utf8)
     try sbd.poll(all: true)
@@ -129,6 +144,36 @@ extension Instance {
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: after the merge" }
     try sbd.poll()
     #expect(try sbd.get(s.id).reason == "#18303 merged; commit or discard the uncommitted changes")
+    try sbd.sb("done", s.id)
+    #expect(try sbd.get(s.id).markedDone == true)
+    try sbd.sb("undone", s.id)
+    #expect(try sbd.get(s.id).markedDone == false)
+  }
+
+  @Test func findsTheBranchsNewPRAfterItsPRCloses() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    github.change(122953) { $0["state"] = "CLOSED" }
+    github.change(122896) { $0["headRefName"] = "haacked/cdp-dlq-breaker-counts-lookups" }
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).reason == "#122953 closed; archive the worktree")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+  }
+
+  @Test func followsTheSessionToAnotherBranch() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
   }
 
   @Test func findsThePRFromThePRLinkInTheTranscript() throws {
@@ -142,6 +187,14 @@ extension Instance {
     #expect(after.reason == "read its last reply and decide what's next")
     #expect(github.requests.map(\.kind) == ["lookup", "status"])
     #expect(github.requests.first?.ids == ["haacked/review-code#189"])
+
+    let file = try #require(FileHandle(forWritingAtPath: sbd.transcript(s)))
+    try file.seekToEnd()
+    try file.write(
+      contentsOf: Data((#"{"type":"pr-link","prNumber":18303,"prRepository":"PostHog/charts"}"# + "\n").utf8))
+    try file.close()
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
   @Test func readsPendingPRsAndChangedCommentsAgain() throws {
@@ -174,7 +227,27 @@ extension Instance {
     let event = try sbd.events(pending.id).last { $0.kind == "pr" }
     let comments = event?.data["comments"]?.array ?? []
     #expect(comments.contains { $0["body"]?.string == "Testing in the queue" })
-    #expect(try sbd.get(pending.id).pr?.queue == "queued")
+    #expect(try sbd.get(pending.id).pr?.queue == .queued)
+
+    try sbd.advanceClock(300_000)
+    let idle = github.requests.count
+    try sbd.poll()
+    #expect(github.requests.dropFirst(idle).filter { $0.kind == "status" }.flatMap(\.ids).count == 2)
+  }
+
+  @Test func readsACommentBodyThatFailedToLoadAgain() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    let control = try #require(github.pr(122953)["firstComments"]?["nodes"]?.array?.first?["id"]?.string)
+    github.fail(comment: control)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.queue == .unknown)
+    github.recover(comment: control)
+    let before = github.requests.count
+    try sbd.poll()
+    #expect(github.requests.dropFirst(before).filter { $0.kind == "bodies" }.flatMap(\.ids) == [control])
+    #expect(try sbd.get(s.id).pr?.queue == nil)
   }
 
   @Test func dropsAPRThatGitHubNoLongerReturns() throws {
@@ -188,6 +261,9 @@ extension Instance {
     let count = github.requests.count
     try sbd.poll()
     #expect(github.requests.count == count)
+    try sbd.advanceClock(300_000)
+    try sbd.poll()
+    #expect(github.requests.dropFirst(count).map(\.kind) == ["lookup"])
   }
 
   @Test func keepsAPRThatGitHubFailedToReturn() throws {
@@ -251,6 +327,9 @@ extension Instance {
     #expect(try sbd.poll()["requests"]?.int == 0)
     #expect(github.requests.count == 1)
     #expect(try sbd.get(s.id).pr == nil)
+    try sbd.advanceClock(601_000)
+    #expect((try sbd.poll()["requests"]?.int ?? 0) > 0)
+    #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
   @Test func getsANewTokenAfterA401() throws {

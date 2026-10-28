@@ -217,7 +217,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   @Test func approvedPRWhoseQueueStatusDidNotLoadNeedsAQueueCheck() throws {
-    let p = samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: "unknown")
+    let p = samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .unknown)
     let f = try prFacts(p, comments: [trunkComment()])
 
     #expect(
@@ -225,7 +225,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         == Verdict(state: .needsYou, reason: "check whether Trunk queued #42; its queue status did not load"))
   }
 
-  @Test(arguments: [samplePR(queue: "removed"), samplePR(reviewDecision: "APPROVED", queue: "removed")])
+  @Test(arguments: [samplePR(queue: .removed), samplePR(reviewDecision: "APPROVED", queue: .removed)])
   func prThatTrunkRemovedNeedsYou(_ pr: PullRequest) throws {
     let f = try prFacts(pr, comments: [trunkComment()])
 
@@ -260,8 +260,8 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     samplePR(draft: true, reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")]),
     samplePR(reviewDecision: "REVIEW_REQUIRED"),
     samplePR(
-      reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: "testing"),
-    samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: "merged"),
+      reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .testing),
+    samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .merged),
     samplePR(),
   ])
   func openPRWithNothingToDoFiresNoRule(_ pr: PullRequest) throws {

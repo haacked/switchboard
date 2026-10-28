@@ -8,7 +8,8 @@ let samplePRHead = "head1"
 func samplePR(
   state: PRState = .open, draft: Bool = false, headSha: String = samplePRHead, base: String = "main",
   defaultBranch: String? = "main", mergeable: String? = "MERGEABLE", reviewDecision: String? = nil,
-  verdicts: [Review] = [], reviews: [Review] = [], checks: String? = nil, mergedBase: Int? = nil, queue: String? = nil
+  verdicts: [Review] = [], reviews: [Review] = [], checks: String? = nil, mergedBase: Int? = nil,
+  queue: TrunkQueueState? = nil
 ) -> PullRequest {
   PullRequest(
     id: "PR_42", number: 42, url: "https://github.com/acme/widgets/pull/42", repo: "acme/widgets", state: state,

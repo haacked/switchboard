@@ -14,7 +14,7 @@ open ~/Applications/Switchboard.app
 
 `bin/install` builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
 
-It needs macOS 14 or later, the Xcode Command Line Tools (Swift 6.4), `tmux` (`brew install tmux`), and Claude Code signed in with your subscription. Sessions run the unmodified `claude` CLI. Switchboard never calls the Claude API.
+It needs macOS 14 or later, the Xcode Command Line Tools (Swift 6.4), `tmux` (`brew install tmux`), `gh` signed in with `gh auth login` (`brew install gh`), and Claude Code signed in with your subscription. Sessions run the unmodified `claude` CLI. Switchboard never calls the Claude API.
 
 ## Use
 
@@ -76,7 +76,7 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 
 `import` adds each `- [ ]` line under `## Open`, with its date, repository, and branch, and never changes the file. You can run it again: it skips every line that an earlier import read, including lines whose follow-up you removed.
 
-`sbd` finds each session's PR on GitHub: the PR of the branch the session's folder has checked out, or else the last PR that Claude Code linked in the session's transcript. `sb get` shows it, and the session's state follows it. A merged or closed PR with a clean folder is Done. A PR that conflicts with its base, has changes requested, is approved but not queued, was removed from Trunk's merge queue, or targets a branch whose PR merged puts the session in Needs you with the next step. `sb poll` asks GitHub now instead of waiting for the next poll.
+`sbd` finds each session's PR on GitHub: the PR of the branch the session's folder has checked out, or else the last PR that Claude Code linked in the session's transcript. `sb get` shows it, and the session's state follows it. A merged or closed PR with a clean folder is Done. A PR that conflicts with its base, has changes requested, is approved but not queued, was removed from Trunk's merge queue, or targets a branch whose PR merged puts the session in Needs you with the next step. `sb poll` runs the next poll now, and `sb poll --all` reads every PR, due or not.
 
 ## Settings
 
@@ -97,7 +97,7 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 }
 ```
 
-`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. An imported session uses the account it came from instead. `claudeConfigDirs` lists the Claude accounts whose sessions `sb import` lists, such as `["~/.claude", "~/.claude-personal"]`, where `~/.claude` means Claude's default account. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `github` sets how often a PR polls: every `pollSeconds` while its checks run, every `idlePollSeconds` otherwise. Its `gh` and `url` pick the `gh` that gives the token and the API to ask. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
+`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. An imported session uses the account it came from instead. `claudeConfigDirs` lists the Claude accounts whose sessions `sb import` lists, such as `["~/.claude", "~/.claude-personal"]`, where `~/.claude` means Claude's default account. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `github` sets how often a PR polls: every `pollSeconds` while its checks run, every `idlePollSeconds` otherwise. `"pollSeconds": 0` turns off the poll timer, so `sbd` asks GitHub only when you run `sb poll`. Its `gh` picks the `gh` that gives the token. Its `url`, the GitHub API base, exists for the tests. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
 
 ### Shared MCP servers
 

@@ -81,6 +81,10 @@ import Testing
     #expect(GitHub.branch(head: head) == branch)
   }
 
+  @Test func remoteHeadFileNamesTheRemotesDefaultBranch() {
+    #expect(GitHub.branch(head: "ref: refs/remotes/origin/master\n", under: "refs/remotes/origin/") == "master")
+  }
+
   @Test func gitConfigOutputGivesValuesByKey() {
     let text =
       "remote.origin.url git@github.com:PostHog/posthog.git\nbranch.haacked/X.remote origin\nremote.empty.url\n"
@@ -102,14 +106,15 @@ import Testing
   static let testing = comment("trunk-io[bot]", "⏳ Running tests in the merge queue")
   static let deploy = comment("deployment-status-posthog[bot]", "Running tests")
 
-  @Test(arguments: [
-    ([deploy, control, testing], "testing"),
-    ([control, comment("trunk-io[bot]", "Removed from the merge queue")], "removed"),
-    ([deploy, control], nil),
-    ([deploy, comment("trunk-io", "⏳ Running tests in the merge queue")], nil),
-    ([control, comment("trunk-io[bot]", nil)], "unknown"),
-  ])
-  func openPRTakesTheQueueStateOfItsTrunkComments(_ comments: [PRComment], _ queue: String?) {
+  @Test(
+    arguments: [
+      ([deploy, control, testing], .testing),
+      ([control, comment("trunk-io[bot]", "Removed from the merge queue")], .removed),
+      ([deploy, control], nil),
+      ([deploy, comment("trunk-io", "⏳ Running tests in the merge queue")], nil),
+      ([control, comment("trunk-io[bot]", nil)], .unknown),
+    ] as [([PRComment], TrunkQueueState?)])
+  func openPRTakesTheQueueStateOfItsTrunkComments(_ comments: [PRComment], _ queue: TrunkQueueState?) {
     let open = PullRequest(id: "a", number: 1, url: "", repo: "a/b")
 
     #expect(GitHub.queueStatus(of: open, comments) == queue)
@@ -182,6 +187,20 @@ import Testing
 
     #expect(prs.map(\.pr.number) == [18303])
     #expect(gone == ["PR_gone"])
+  }
+
+  @Test func bodiesGiveTheCommentsAndTheIdsThatAreNotFound() throws {
+    let node = try #require(GitHubFixtures.bodyNodes.first)
+    let id = try #require(node["id"]?.string)
+    let response: JSON = [
+      "data": ["nodes": [node, .null, .null]],
+      "errors": [["type": "NOT_FOUND", "path": ["nodes", 1]], ["type": "INTERNAL", "path": ["nodes", 2]]],
+    ]
+
+    let (comments, gone) = GitHub.parseBodies(response, [id, "IC_deleted", "IC_failed"])
+
+    #expect(comments.map(\.id) == [id])
+    #expect(gone == ["IC_deleted"])
   }
 
   static let now = 1_800_000_000.0

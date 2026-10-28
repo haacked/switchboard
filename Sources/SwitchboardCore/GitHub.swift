@@ -14,6 +14,13 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
   /// had no PR.
   public var idlePollSeconds: Double = 300
 
+  /// A timer cycle can start a few ms less than one period after the last
+  /// one. Each interval therefore ends half a timer period early, so a PR
+  /// that is due at a tick polls at that tick and not at the next one.
+  var slackMs: Int64 { Int64(pollSeconds * 500) }
+  public var pendingMs: Int64 { Int64(pollSeconds * 1000) - slackMs }
+  public var idleMs: Int64 { Int64(idlePollSeconds * 1000) - slackMs }
+
   public init() {}
 
   public init(from decoder: Decoder) throws {
@@ -39,6 +46,10 @@ public enum PRKey: Hashable, Sendable {
 /// about 3 s, and 100 PRs in one request pass GitHub's 10 s limit.
 public enum GitHub {
   public static let chunkSize = 20
+  /// The chunk size of the lookup and body queries, which ask for little per
+  /// item. Phase 0 test 6 looked up 100 branches for 1 point in under 2 s.
+  /// `nodes(ids:)` takes at most 100 ids.
+  public static let lightChunkSize = 100
 
   /// The authors whose comment bodies the poller reads: Trunk's queue status
   /// and PostHog's deploy table. Only a GitHub App's login ends in [bot], so
@@ -128,9 +139,20 @@ public enum GitHub {
   public static func parseStatus(_ response: JSON, _ ids: [String]) -> (
     prs: [(pr: PullRequest, comments: [PRComment])], gone: Set<String>
   ) {
+    ((response["data"]?["nodes"]?.array ?? []).compactMap(parsePR), notFoundNodes(response, ids))
+  }
+
+  /// The comments of a body response, and the ids that GitHub reports
+  /// NOT_FOUND, as for a deleted comment. A node that failed in another way
+  /// is in neither.
+  public static func parseBodies(_ response: JSON, _ ids: [String]) -> (comments: [PRComment], gone: Set<String>) {
+    ((response["data"]?["nodes"]?.array ?? []).compactMap(parseComment), notFoundNodes(response, ids))
+  }
+
+  /// The ids whose node in a `nodes(ids:)` response failed with NOT_FOUND.
+  static func notFoundNodes(_ response: JSON, _ ids: [String]) -> Set<String> {
     let errors = errorTypes(response)
-    let gone = ids.indices.filter { errors["nodes.\($0)"] == notFound }.map { ids[$0] }
-    return ((response["data"]?["nodes"]?.array ?? []).compactMap(parsePR), Set(gone))
+    return Set(ids.indices.filter { errors["nodes.\($0)"] == notFound }.map { ids[$0] })
   }
 
   /// The number of the PR that merged from the base branch, when nothing
@@ -315,7 +337,8 @@ public enum GitHub {
   public static func branchKey(branch: String, config: [String: String], remoteHead: (String) -> String?) -> PRKey? {
     let b = "branch.\(branch)"
     var push = config["\(b).pushremote"] ?? config["remote.pushdefault"] ?? config["\(b).remote"] ?? "origin"
-    var upstream = config["\(b).merge"].map { String($0.dropFirst($0.hasPrefix("refs/heads/") ? 11 : 0)) } ?? branch
+    let heads = "refs/heads/"
+    var upstream = config["\(b).merge"].map { String($0.dropFirst($0.hasPrefix(heads) ? heads.count : 0)) } ?? branch
     // "." means that the branch tracks a local branch.
     if push == "." {
       push = "origin"
@@ -337,18 +360,17 @@ public enum GitHub {
     return .branch(repo: baseRepo, branch: upstream, owner: String(head.split(separator: "/")[0]))
   }
 
-  /// The `TrunkQueueState` that an open PR's trunk-io comments show, or
-  /// "unknown" when the body of one of them didn't load. A merged stack's
-  /// lower PRs keep Trunk's "queued" replies, so a merged or closed PR has no
-  /// state.
-  public static func queueStatus(of pr: PullRequest, _ comments: [PRComment]) -> String? {
+  /// The Trunk queue state that an open PR's trunk-io comments show, or
+  /// unknown when the body of one of them didn't load. A merged stack's lower
+  /// PRs keep Trunk's "queued" replies, so a merged or closed PR has no state.
+  public static func queueStatus(of pr: PullRequest, _ comments: [PRComment]) -> TrunkQueueState? {
     guard pr.state == .open else { return nil }
     var trunk: [TrunkComment] = []
     for c in comments where c.author == TrunkComments.author {
-      guard let body = c.body else { return "unknown" }
+      guard let body = c.body else { return .unknown }
       trunk.append(TrunkComment(author: c.author, body: body, edited: c.edited))
     }
-    return TrunkComments.state(trunk)?.rawValue
+    return TrunkComments.state(trunk)
   }
 
   /// Whether `interval` ms have passed since `since`, or `since` is nil.

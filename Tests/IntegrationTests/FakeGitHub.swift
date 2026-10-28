@@ -21,6 +21,11 @@ final class FakeGitHub {
     var body: String
   }
 
+  /// The two queries that ask for PR nodes.
+  enum PRQuery: String {
+    case status, base
+  }
+
   static let fixtures = Instance.root.appendingPathComponent("Tests/IntegrationTests/Fixtures").path
 
   private let fd: Int32
@@ -28,8 +33,10 @@ final class FakeGitHub {
   private let lock = NSLock()
   private var prs: [String: [String: JSON]] = [:]
   private var bodies: [String: JSON] = [:]
-  /// PRs whose node answers null with an error other than NOT_FOUND.
-  private var failing: Set<Int> = []
+  /// The PRs whose node answers null with an error other than NOT_FOUND,
+  /// by the query that fails, and the comments whose body node does.
+  private var failingPRs: [PRQuery: Set<Int>] = [:]
+  private var failingComments: Set<String> = []
   private var log: [Request] = []
   private var queued: [Reply] = []
 
@@ -100,9 +107,19 @@ final class FakeGitHub {
     lock.withLock { prs = prs.filter { $0.value["number"]?.int != number } }
   }
 
-  /// Makes the PR's node fail with an internal error, as GitHub sometimes does.
-  func fail(_ number: Int) {
-    lock.withLock { _ = failing.insert(number) }
+  /// Makes the PR's node in a status or base query fail with an internal
+  /// error, as GitHub sometimes does.
+  func fail(_ number: Int, in query: PRQuery = .status) {
+    lock.withLock { _ = failingPRs[query, default: []].insert(number) }
+  }
+
+  /// Makes the comment's node in a body query fail with an internal error.
+  func fail(comment id: String) {
+    lock.withLock { _ = failingComments.insert(id) }
+  }
+
+  func recover(comment id: String) {
+    lock.withLock { _ = failingComments.remove(id) }
   }
 
   /// Gives a comment a new body and edit time, both in its PR's comment lists
@@ -175,24 +192,31 @@ final class FakeGitHub {
       var errors: [JSON] = []
       let kind: String
       var ids: [String] = []
-      if query.contains("... on PullRequest") {
-        // The status and base queries both get the whole recorded node.
-        kind = query.contains("reviews(") ? "status" : "base"
-        ids = variables["ids"]?.array?.compactMap(\.string) ?? []
-        data["nodes"] = .array(
+      // A `nodes(ids:)` answer: NOT_FOUND for an unknown id, and INTERNAL
+      // for a failing one.
+      func nodes(_ node: (String) -> JSON?, failing: (String) -> Bool) -> JSON {
+        .array(
           ids.enumerated().map { i, id in
-            let pr = prs[id]
-            let type = pr == nil ? "NOT_FOUND" : failing.contains(pr?["number"]?.int ?? 0) ? "INTERNAL" : nil
-            guard let pr, type == nil else {
+            let found = node(id)
+            let type = found == nil ? "NOT_FOUND" : failing(id) ? "INTERNAL" : nil
+            guard let found, type == nil else {
               errors.append(["type": .string(type!), "path": ["nodes", .number(Double(i))], "message": "Failed"])
               return .null
             }
-            return .object(pr)
+            return found
           })
+      }
+      if query.contains("... on PullRequest") {
+        // The status and base queries both get the whole recorded node.
+        let prQuery: PRQuery = query.contains("reviews(") ? .status : .base
+        kind = prQuery.rawValue
+        ids = variables["ids"]?.array?.compactMap(\.string) ?? []
+        let failing = failingPRs[prQuery, default: []]
+        data["nodes"] = nodes({ prs[$0].map(JSON.object) }, failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
       } else if query.contains("... on IssueComment") {
         kind = "bodies"
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
-        data["nodes"] = .array(ids.map { bodies[$0] ?? .null })
+        data["nodes"] = nodes({ bodies[$0] }, failing: failingComments.contains)
       } else {
         kind = "lookup"
         var i = 0

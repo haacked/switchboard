@@ -381,6 +381,24 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 }
 
 @Suite struct GitHubPolling {
+  @Test func pollIntervalsEndHalfATimerPeriodEarly() {
+    var settings = GitHubSettings()
+    settings.pollSeconds = 30
+    settings.idlePollSeconds = 300
+
+    #expect(settings.pendingMs == 15_000)
+    #expect(settings.idleMs == 285_000)
+  }
+
+  @Test func pollIntervalsWithoutATimerAreExact() {
+    var settings = GitHubSettings()
+    settings.pollSeconds = 0
+    settings.idlePollSeconds = 300
+
+    #expect(settings.pendingMs == 0)
+    #expect(settings.idleMs == 300_000)
+  }
+
   @Test(arguments: [(0, [Int]()), (1, [1]), (20, [20]), (21, [20, 1]), (45, [20, 20, 5])])
   func chunksHoldAtMostTheChunkSize(_ count: Int, _ sizes: [Int]) {
     #expect(GitHub.chunks(Array(0..<count)).map(\.count) == sizes)

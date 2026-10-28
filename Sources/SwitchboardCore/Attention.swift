@@ -184,7 +184,8 @@ public enum ReplyKind: Equatable, Sendable {
 
 /// The attention rules. They follow the `/sessions` skill
 /// (`~/.dotfiles/ai/skills/sessions/SKILL.md`) for the facts that hooks, sb,
-/// and the GitHub poller provide. They have no CI or merge queue rules.
+/// and the GitHub poller provide. They have no CI rules, and no rule for a PR
+/// that Trunk's queue holds.
 public enum Attention {
   static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs

@@ -29,7 +29,7 @@ struct FollowupView: View {
           .buttonStyle(.borderedProminent)
           .keyboardShortcut(.return, modifiers: [.command])
         if followup.repository != nil { StartButton(session: session, inFolder: true) }
-        Button(session.state == .done ? "Not Done" : "Done") { model.setDone(session.id, session.state != .done) }
+        Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
         Button(role: .destructive) {
           ui.confirmingRemove = true
         } label: {

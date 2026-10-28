@@ -28,15 +28,15 @@ final class GitHubPoller {
     var transcript: Transcript
     /// When the poller last counted the uncommitted files of a finished PR's
     /// folder, and the session's last activity at that time.
-    var counted: (at: Int64, activity: Int64, pr: String)?
+    var counted: (at: Int64, activity: Int64, prId: String)?
     /// The PR that the event log held when this sbd first saw the session. It
     /// stays the session's PR until the branch's lookup answers, so a restart
     /// keeps the PR of a session whose HEAD is detached or whose conversation
     /// `/clear` replaced.
-    var recorded: String?
+    var recordedPRId: String?
 
     /// The branch's PR comes first, then the transcript's.
-    var prId: String? { branch.pr ?? transcript.pr ?? recorded }
+    var prId: String? { branch.prId ?? transcript.prId ?? recordedPRId }
   }
 
   /// The folder's branch and its PR.
@@ -51,7 +51,7 @@ final class GitHubPoller {
     /// The session's branch in its GitHub repo, or nil outside one.
     var key: PRKey?
     /// The node id of the branch's PR.
-    var pr: String?
+    var prId: String?
     /// When the poller last looked the key up. nil until the first lookup.
     var lookedUp: Int64?
   }
@@ -65,7 +65,7 @@ final class GitHubPoller {
     var path: String?
     var offset = 0
     var link: PRKey?
-    var pr: String?
+    var prId: String?
     var lookedUp = false
   }
 
@@ -90,9 +90,6 @@ final class GitHubPoller {
     self.service = service
     self.settings = settings
   }
-
-  var pendingMs: Int64 { Int64(settings.pollSeconds * 1000) }
-  var idleMs: Int64 { Int64(settings.idlePollSeconds * 1000) }
 
   func start() {
     guard settings.pollSeconds > 0 else { return }
@@ -154,7 +151,7 @@ final class GitHubPoller {
   /// Reads the session's branch and the new lines of its transcript.
   private func refreshLocal(_ s: Watched, all: Bool, now: Int64, shared: inout Shared) {
     var t =
-      tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recorded: s.facts.pr?.id)
+      tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
     refreshBranch(&t.branch, cwd: s.cwd, all: all, now: now, configs: &shared.configs)
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
@@ -176,7 +173,7 @@ final class GitHubPoller {
   ) {
     let read = { (path: String) in try? String(contentsOfFile: path, encoding: .utf8) }
     var head = b.gitDir.flatMap { read("\($0)/HEAD") }
-    if head == nil && (all || GitHub.elapsed(since: b.gitDirRead, idleMs, now: now)) {
+    if head == nil && (all || GitHub.elapsed(since: b.gitDirRead, settings.idleMs, now: now)) {
       let dirs = git(cwd, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])?
         .split(separator: "\n").map(String.init)
       b.gitDir = dirs?.first
@@ -208,7 +205,7 @@ final class GitHubPoller {
     }
     if key != b.key {
       b.key = key
-      b.pr = nil
+      b.prId = nil
       b.lookedUp = nil
     }
   }
@@ -240,7 +237,7 @@ final class GitHubPoller {
     t.offset += consumed
     if let link, link != t.link {
       t.link = link
-      t.pr = nil
+      t.prId = nil
       t.lookedUp = false
     }
   }
@@ -254,8 +251,10 @@ final class GitHubPoller {
     var keys: Set<PRKey> = []
     for t in tracked.values {
       if let key = t.branch.key {
-        let closed = t.branch.pr.flatMap { prs[$0]?.pr.state } == .closed
-        if (t.branch.pr == nil || closed) && (all || GitHub.elapsed(since: t.branch.lookedUp, idleMs, now: now)) {
+        let closed = t.branch.prId.flatMap { prs[$0]?.pr.state } == .closed
+        if (t.branch.prId == nil || closed)
+          && (all || GitHub.elapsed(since: t.branch.lookedUp, settings.idleMs, now: now))
+        {
           keys.insert(key)
         }
       }
@@ -263,19 +262,19 @@ final class GitHubPoller {
     }
     guard !keys.isEmpty else { return }
     var found: [PRKey: String?] = [:]
-    for chunk in GitHub.chunks(Array(keys), size: 100) {
+    for chunk in GitHub.chunks(Array(keys), size: GitHub.lightChunkSize) {
       let (query, variables) = GitHub.lookupQuery(chunk)
       found.merge(GitHub.parseLookup(try request(query, variables, stats: &stats), chunk)) { $1 }
     }
     stats.lookups = keys.count
     for (id, var t) in tracked {
       if let key = t.branch.key, let result = found[key] {
-        t.branch.pr = result
+        t.branch.prId = result
         t.branch.lookedUp = now
-        t.recorded = nil
+        t.recordedPRId = nil
       }
       if let link = t.transcript.link, let result = found[link] {
-        t.transcript.pr = result
+        t.transcript.prId = result
         t.transcript.lookedUp = true
       }
       tracked[id] = t
@@ -290,23 +289,29 @@ final class GitHubPoller {
   /// in another way keeps what the poller last read.
   private func readPRs(all: Bool, now: Int64, stats: inout Stats) throws {
     let ids = Set(tracked.values.compactMap(\.prId)).sorted().filter {
-      all || GitHub.isDue(prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: pendingMs, idleMs: idleMs)
+      all
+        || GitHub.isDue(
+          prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
     }
     var stacked: [String] = []
     for chunk in GitHub.chunks(ids) {
       let (read, gone) = GitHub.parseStatus(try request(GitHub.statusQuery, idsVariable(chunk), stats: &stats), chunk)
-      for (pr, comments) in read {
+      for (parsed, comments) in read {
+        var pr = parsed
+        // Only the base query reads the merged base. A PR whose base query
+        // fails keeps the merged base that the poller last read.
+        if let last = prs[pr.id]?.pr, last.base == pr.base { pr.mergedBase = last.mergedBase }
         prs[pr.id] = (pr, comments.filter { GitHub.bodyAuthors.contains($0.author) }, now)
         if pr.base != pr.defaultBranch { stacked.append(pr.id) }
       }
       stats.polled += read.count
       for (id, var t) in tracked {
-        if let pr = t.branch.pr, gone.contains(pr) {
-          t.branch.pr = nil
+        if let prId = t.branch.prId, gone.contains(prId) {
+          t.branch.prId = nil
           t.branch.lookedUp = now
         }
-        if let pr = t.transcript.pr, gone.contains(pr) { t.transcript.pr = nil }
-        if let pr = t.recorded, gone.contains(pr) { t.recorded = nil }
+        if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
+        if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
         tracked[id] = t
       }
     }
@@ -316,21 +321,19 @@ final class GitHubPoller {
         prs[id]?.pr.mergedBase = base
       }
     }
-    // A body that the poller read after its PR can carry a newer edit time.
-    // A deleted comment has no body. Neither is read again until the PR's
-    // copy of the comment changes. A body that failed to load is read again
-    // at the next poll.
+    // A body that the poller read after its PR's status can carry a newer
+    // edit time. A comment that GitHub reports NOT_FOUND, as after a
+    // deletion, keeps the status response's copy, which has no body. The
+    // poller reads either again only when a status response shows a newer
+    // edit time. A body that failed in another way is read again at the next
+    // poll.
     let stale = prs.values.flatMap(\.comments).filter { c in
       bodies[c.id].map { ($0.editedAt ?? "") < (c.editedAt ?? "") } ?? true
     }
-    for chunk in GitHub.chunks(stale.map(\.id), size: 100) {
-      let response = try request(GitHub.bodyQuery, idsVariable(chunk), stats: &stats)
-      let read = (response["data"]?["nodes"]?.array ?? []).compactMap(GitHub.parseComment)
+    for chunk in GitHub.chunks(stale.map(\.id), size: GitHub.lightChunkSize) {
+      let (read, gone) = GitHub.parseBodies(try request(GitHub.bodyQuery, idsVariable(chunk), stats: &stats), chunk)
       for comment in read { bodies[comment.id] = comment }
-      let returned = Set(read.map(\.id))
-      for comment in stale where chunk.contains(comment.id) && !returned.contains(comment.id) {
-        bodies[comment.id] = comment
-      }
+      for comment in stale where gone.contains(comment.id) { bodies[comment.id] = comment }
     }
   }
 
@@ -398,18 +401,35 @@ final class GitHubPoller {
 
   // MARK: Events
 
-  /// Records the session's PR when it changed, and the folder's count of
-  /// uncommitted files once the PR has merged or closed. Returns whether it
-  /// recorded a `pr` event.
+  /// Records the folder's count of uncommitted files once the PR has merged
+  /// or closed, and the session's PR when it changed. The count comes first,
+  /// so the attention rules never judge a finished PR by the count of the
+  /// session's previous PR. Returns whether it recorded a `pr` event.
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
     guard var t = tracked[s.id] else { return false }
     defer { tracked[s.id] = t }
+    if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open, shouldCount(t, s, pr.id, all, now) {
+      // Without the optional index lock, the count can't make a git commit
+      // in the session fail.
+      let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"]).map { $0.split(separator: "\n").count }
+      t.counted = (now, s.facts.lastActivity, pr.id)
+      if dirty != s.facts.dirty { event(s.id, "worktree", ["dirty": dirty.map { .number(Double($0)) } ?? .null]) }
+    }
     var changed = false
     if let id = t.prId {
       if let (pr, comments, _) = prs[id] {
         let kept = comments.map { bodies[$0.id] ?? $0 }
         var shown = pr
         shown.queue = GitHub.queueStatus(of: pr, kept)
+        // GitHub answers UNKNOWN while it computes mergeability again, as
+        // after the base branch moved. The session keeps the last answer for
+        // the same head commit, so a conflict doesn't leave Needs you and
+        // come back.
+        if pr.mergeable == "UNKNOWN", let last = s.facts.pr, last.id == pr.id, last.headSha == pr.headSha,
+          last.mergeable != nil
+        {
+          shown.mergeable = last.mergeable
+        }
         if shown != s.facts.pr || kept != s.facts.prComments {
           event(
             s.id, "pr", ["pr": (try? JSON(encoding: shown)) ?? .null, "comments": (try? JSON(encoding: kept)) ?? []])
@@ -424,13 +444,6 @@ final class GitHubPoller {
       event(s.id, "pr", ["pr": .null, "comments": []])
       changed = true
     }
-    if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open, shouldCount(t, s, pr.id, all, now) {
-      // Without the optional index lock, the count can't make a git commit
-      // in the session fail.
-      let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"]).map { $0.split(separator: "\n").count }
-      t.counted = (now, s.facts.lastActivity, pr.id)
-      if dirty != s.facts.dirty { event(s.id, "worktree", ["dirty": dirty.map { .number(Double($0)) } ?? .null]) }
-    }
     return changed
   }
 
@@ -438,10 +451,10 @@ final class GitHubPoller {
   /// session's next activity, and once per idle interval while it is dirty.
   /// `git status` takes 0.1 to 0.3 s in a large repo, so a clean or missing
   /// folder isn't counted again on its own.
-  private func shouldCount(_ t: Tracked, _ s: Watched, _ pr: String, _ all: Bool, _ now: Int64) -> Bool {
-    guard !all, let counted = t.counted, counted.pr == pr else { return true }
+  private func shouldCount(_ t: Tracked, _ s: Watched, _ prId: String, _ all: Bool, _ now: Int64) -> Bool {
+    guard !all, let counted = t.counted, counted.prId == prId else { return true }
     if s.facts.lastActivity > counted.activity { return true }
-    return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, idleMs, now: now)
+    return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
   }
 
   private func event(_ id: String, _ kind: String, _ data: JSON) {

@@ -82,17 +82,16 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var mergedBase: Int?
   public var mergedAt: String?
   public var closedAt: String?
-  /// The `TrunkQueueState` that the trunk-io comments show, such as
-  /// "testing". It is "unknown" when the PR has trunk-io comments that sbd
-  /// can't read, and nil when no comment shows a state.
-  public var queue: String?
+  /// The Trunk queue state that the trunk-io comments show, and nil when no
+  /// comment shows one.
+  public var queue: TrunkQueueState?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
     draft: Bool = false, head: String = "", headSha: String = "", base: String = "main",
     defaultBranch: String? = "main", mergeable: String? = "MERGEABLE", reviewDecision: String? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
-    mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: String? = nil
+    mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil
   ) {
     self.id = id
     self.number = number
@@ -168,7 +167,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var status: String
   public var checks: String?
   public var mergeable: String?
-  public var queue: String?
+  public var queue: TrunkQueueState?
 
   public init(_ pr: PullRequest) {
     number = pr.number

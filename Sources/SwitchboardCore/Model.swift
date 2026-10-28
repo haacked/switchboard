@@ -135,12 +135,15 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// follow-up was added on the date of its line.
   public var created: Int64?
   public var pr: PRSummary?
+  /// True when `sb done` or the app marked the session done. A merged or
+  /// closed PR can put a session in Done without it.
+  public var markedDone: Bool
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
     state: AttentionState, reason: String, since: Int64, lastActivity: Int64, live: Bool,
     claudePid: Int?, attached: Bool, lastReply: String?, waits: [Wait], notes: [Note], cards: [Card] = [],
-    openPrompt: Bool = false, pr: PRSummary? = nil
+    openPrompt: Bool = false, pr: PRSummary? = nil, markedDone: Bool = false
   ) {
     self.id = id
     self.name = name
@@ -161,6 +164,7 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
     self.cards = cards
     self.openPrompt = openPrompt
     self.pr = pr
+    self.markedDone = markedDone
   }
 }
 

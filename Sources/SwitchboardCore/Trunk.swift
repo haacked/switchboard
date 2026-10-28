@@ -19,9 +19,17 @@ public enum TrunkQueueState: String, Codable, Sendable {
   /// Out of the queue without a merge: its tests failed, it conflicted, it
   /// waited too long to become mergeable, or someone cancelled it.
   case removed
+  /// sbd couldn't read the body of every trunk-io comment, so it can't tell
+  /// the state. Only `GitHub.queueStatus` gives it.
+  case unknown
 
-  /// Whether Trunk still holds the PR.
-  public var isQueued: Bool { self != .merged && self != .removed }
+  /// Whether Trunk still holds the PR. false when sbd can't tell.
+  public var isQueued: Bool {
+    switch self {
+    case .submitted, .pending, .testing, .passed, .failing, .queued: true
+    case .merged, .removed, .unknown: false
+    }
+  }
 }
 
 /// What `trunk merge status <N>` prints about a pull request: a header and a

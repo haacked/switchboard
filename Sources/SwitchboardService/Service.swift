@@ -735,7 +735,8 @@ public final class Service {
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: attached(id), lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
-      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init))
+      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
+      markedDone: s.done)
     out.parent = s.parent
     out.followup = s.followup
     out.created = s.created
