@@ -119,7 +119,7 @@ extension Service {
           guard let id = try? lookup(args), claudeState(id) == .stopped else { return [] }
         }
         let now = nowMs()
-        return mcp.indices.filter { mcpStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
+        return mcp.indices.filter { isStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
       }
       if starting.isEmpty { return }
       let open = starting.filter { LocalPort.accepts($0.port) }
@@ -132,7 +132,7 @@ extension Service {
   /// Whether any server started less than `mcpStartMs` ago and doesn't
   /// accept connections yet. While one does, `tick` doesn't launch claude
   /// itself, as `awaitMCPServers` makes a request's launch wait.
-  func mcpStarting(now: Int64) -> Bool { mcp.contains { mcpStarting($0, now: now) } }
+  func mcpStarting(now: Int64) -> Bool { mcp.contains { isStarting($0, now: now) } }
 
   func mcpStatus() -> [MCPServerStatus] {
     mcp.map { s in
@@ -150,7 +150,7 @@ extension Service {
     return server.listening ? .running : .starting
   }
 
-  private func mcpStarting(_ server: SharedServer, now: Int64) -> Bool {
+  private func isStarting(_ server: SharedServer, now: Int64) -> Bool {
     mcpState(server) == .starting && now - server.started < Service.mcpStartMs
   }
 
