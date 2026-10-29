@@ -195,12 +195,12 @@ func printSession(_ s: SessionSummary) {
 /// The sessions that `sb import` can import, grouped by repo. ● marks a
 /// session that a claude runs now, which imports once that claude exits.
 func printImportable(_ list: ImportList) {
+  let titleWidth = 40
   if list.sessions.isEmpty { print("No Claude sessions to import\(list.hidden > 0 ? " in a worktree" : "").") }
   for (i, group) in list.groups.enumerated() {
     if i > 0 { print("") }
     print(group.title.printable)
     for s in group.sessions {
-      let titleWidth = 40
       let title = oneLine(s.title, max: titleWidth).padding(toLength: titleWidth, withPad: " ", startingAt: 0)
       let account = (s.account as NSString).abbreviatingWithTildeInPath
       print("  \(s.running ? "●" : "○") \(s.idPrefix)  \(title)  \(s.summary), \(account)".printable)

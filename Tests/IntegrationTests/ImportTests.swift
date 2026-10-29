@@ -427,6 +427,28 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(reasons(again) == expected)
   }
 
+  @Test func refusesAConversationThatTwoSwitchboardSessionsHold() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let first = try sbd.new(prompt: "hello")
+    let second = try sbd.new(prompt: "hello")
+    try sbd.waitFor(second.id, "the first reply") { $0.lastReply == "Done: hello" }
+    // `/clear` or `/resume` in a pane can switch it to another session's conversation.
+    let id = first.claudeSessionId
+    try sbd.sb("send", second.id, "clear \(id)")
+    try sbd.waitFor(second.id, "the shared conversation") { $0.claudeSessionId == id }
+    let prefix = String(id.prefix(8))
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "shared", job: "0badf00d")])
+
+    #expect(try sbd.client.importable(all: true).sessions.isEmpty)
+    // A ref to a conversation that claude doesn't list finds its owner by the ref.
+    try sbd.writeAgents("A", [])
+    let result = try sbd.client.importSessions([id, prefix])
+    #expect(result.imported.isEmpty)
+    for (ref, reason) in reasons(result) {
+      #expect(reason.hasPrefix("\(ref) is already in Switchboard as "))
+    }
+  }
+
   @Test func importsASessionOnceWhenTwoRefsInOneRequestNameIt() throws {
     let sbd = try Instance(accounts: ["A"])
     let id = newId()

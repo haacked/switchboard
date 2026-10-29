@@ -49,12 +49,11 @@ extension Service {
     }
     var imported: [SessionSummary] = []
     try queue.sync {
-      for (i, session) in sessions.enumerated() {
-        let ref = chosen[i].ref
+      for ((ref, session), tail) in zip(zip(chosen.map(\.ref), sessions), tails) {
         if let error = alreadyImported(ref, id: session.id) {
           refused.append(Refusal(ref: ref, reason: error.description))
         } else {
-          imported.append(try adopt(session, name: name, tail: tails[i]))
+          imported.append(try adopt(session, name: name, tail: tail))
         }
       }
     }
@@ -146,13 +145,14 @@ extension Service {
     return .success(c)
   }
 
-  /// The Switchboard session whose conversation `id` names: a Claude session
-  /// id, or a unique prefix of one.
+  /// A Switchboard session whose conversation `id` names. `id` is a Claude
+  /// session id, or a prefix that only one conversation has. A `/clear` or
+  /// `/resume` in a pane can switch a session to another session's
+  /// conversation. Two sessions can then hold one conversation, and this
+  /// returns either of them.
   private func owner(of id: String) -> String? {
-    let sessions = entries.values.map(\.session)
-    if let exact = sessions.first(where: { $0.claudeSessionId == id }) { return exact.id }
-    let ids = sessions.filter { $0.claudeSessionId.hasPrefix(id) }.map(\.id)
-    return ids.count == 1 ? ids[0] : nil
+    let owners = entries.values.map(\.session).filter { $0.claudeSessionId.hasPrefix(id) }
+    return Set(owners.map(\.claudeSessionId)).count == 1 ? owners.first?.id : nil
   }
 
   private func alreadyImported(_ ref: String, id: String) -> APIError? {
