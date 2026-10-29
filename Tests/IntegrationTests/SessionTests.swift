@@ -107,17 +107,46 @@ import Testing
     // tmux keeps the environment that a pane was created with, as when an
     // earlier sbd ran under another account or with another config.env.
     let t = try sbd.client.terminals(s.id)
-    func tmux(_ args: String...) throws -> Int32 { try runCommand(t.tmux, ["-S", t.socket] + args).status }
-    #expect(try tmux("set-environment", "-t", "=\(t.claude)", "CLAUDE_CONFIG_DIR", "\(sbd.home.path)/earlier") == 0)
-    #expect(try tmux("set-environment", "-t", "=\(t.claude)", "REMOVED_FROM_CONFIG", "1") == 0)
-    try sbd.sb("stop", s.id)
-    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
-
-    try sbd.sb("send", s.id, "again")
-    try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
+    let pane = "=\(t.claude)"
+    #expect(try tmux(t, "set-environment", "-t", pane, "CLAUDE_CONFIG_DIR", "\(sbd.home.path)/earlier").status == 0)
+    #expect(try tmux(t, "set-environment", "-t", pane, "REMOVED_FROM_CONFIG", "1").status == 0)
+    // tmux copies SSH_AUTH_SOCK from each terminal that attaches, as from an
+    // SSH login with a forwarded agent.
+    #expect(try tmux(t, "set-environment", "-t", pane, "SSH_AUTH_SOCK", "/tmp/forwarded-agent").status == 0)
+    try restartWithAMessage(sbd, s.id)
     #expect(sbd.stubCalls().last?.account == "")
-    #expect(try tmux("show-environment", "-t", "=\(t.claude)", "REMOVED_FROM_CONFIG") != 0)
-    #expect(try tmux("show-environment", "-t", "=\(t.claude)", "SB_SESSION_ID") == 0)
+    #expect(try tmux(t, "show-environment", "-t", pane, "REMOVED_FROM_CONFIG").status != 0)
+    #expect(try tmux(t, "show-environment", "-t", pane, "SB_SESSION_ID").status == 0)
+    #expect(
+      try tmux(t, "show-environment", "-t", pane, "SSH_AUTH_SOCK").stdout == "SSH_AUTH_SOCK=/tmp/forwarded-agent\n")
+  }
+
+  @Test func restartsClaudeWithSbdsAgentAfterATerminalWithoutOneAttached() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let t = try sbd.client.terminals(s.id)
+    // A terminal without SSH_AUTH_SOCK, as the app's, marks it for removal.
+    #expect(try tmux(t, "set-environment", "-t", "=\(t.claude)", "-r", "SSH_AUTH_SOCK").status == 0)
+    try restartWithAMessage(sbd, s.id)
+    // With neither a value nor a mark, claude gets sbd's own agent.
+    #expect(try tmux(t, "show-environment", "-t", "=\(t.claude)", "SSH_AUTH_SOCK").status != 0)
+  }
+
+  @Test func restartsClaudeWithoutAnAgentThatConfigEnvNoLongerSets() throws {
+    let sbd = try Instance()
+    try sbd.restart(setting: "env", to: ["SSH_AUTH_SOCK": "/tmp/config-agent"])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.restart(setting: "env", to: [:])
+    try restartWithAMessage(sbd, s.id)
+    let t = try sbd.client.terminals(s.id)
+    #expect(try tmux(t, "show-environment", "-t", "=\(t.claude)", "SSH_AUTH_SOCK").status != 0)
+  }
+
+  /// Runs tmux on sbd's server.
+  private func tmux(_ t: Terminals, _ args: String...) throws -> CommandResult {
+    try runCommand(t.tmux, ["-S", t.socket] + args)
   }
 
   @Test func resumesAConversationWhoseClaudeRanWithNoHooks() throws {
@@ -166,14 +195,27 @@ import Testing
   private func expectResumeAfterAReply(_ sbd: Instance, under account: String) throws {
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    try sbd.sb("stop", s.id)
-    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
-
-    try sbd.sb("send", s.id, "again")
-    try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
+    try restartWithAMessage(sbd, s.id)
     let resume = try #require(sbd.stubCalls().last)
     #expect(resume.args.hasPrefix("--resume \(s.claudeSessionId) "))
     #expect(resume.account == account)
+  }
+
+  /// Stops the session's claude, then sends a message, which starts claude
+  /// again, and waits for its reply.
+  private func restartWithAMessage(_ sbd: Instance, _ id: String) throws {
+    try sbd.sb("stop", id)
+    try sbd.waitFor(id, "claude to exit") { !$0.live }
+    try sbd.sb("send", id, "again")
+    try sbd.waitFor(id, "the second reply") { $0.lastReply == "Done: again" }
+  }
+
+  @Test func logsAPromptWithANewlineAsOneStubRun() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "first\nsecond")
+    try sbd.waitFor(s.id, "claude") { $0.live }
+    #expect(
+      sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- first\nsecond"])
   }
 
   @Test func resumesTheConversationThatClearStarted() throws {
@@ -208,7 +250,7 @@ import Testing
     try sbd.waitFor(s.id, "the semicolon") { $0.lastReply == "Done: fix the bug;" }
     // In copy mode, Enter goes to tmux instead of claude.
     let t = try sbd.client.terminals(s.id)
-    #expect(try runCommand(t.tmux, ["-S", t.socket, "copy-mode", "-t", "=\(t.claude):"]).status == 0)
+    #expect(try tmux(t, "copy-mode", "-t", "=\(t.claude):").status == 0)
     try sbd.sb("send", s.id, "after copy mode")
     try sbd.waitFor(s.id, "the reply after copy mode") { $0.lastReply == "Done: after copy mode" }
   }

@@ -138,7 +138,7 @@ extension Service {
     }
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
-    let label = c.name ?? String(c.id.prefix(8))
+    let label = c.name ?? c.idPrefix
     if let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }
     return .success(c)

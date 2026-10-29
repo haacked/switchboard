@@ -184,7 +184,7 @@ struct ImportRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
-      Toggle("Import \(session.title)", isOn: $selected)
+      Toggle("Import \(session.title) \(session.idPrefix)", isOn: $selected)
         .toggleStyle(.checkbox)
         .labelsHidden()
         .disabled(session.running)
@@ -196,7 +196,7 @@ struct ImportRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        Text("\(session.summary) · \((session.cwd as NSString).abbreviatingWithTildeInPath)")
+        Text("\(session.idPrefix) · \(session.summary) · \((session.cwd as NSString).abbreviatingWithTildeInPath)")
           .font(.caption)
           .foregroundStyle(.secondary)
           .lineLimit(1)

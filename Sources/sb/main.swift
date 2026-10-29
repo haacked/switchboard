@@ -202,7 +202,7 @@ func printImportable(_ list: ImportList) {
     for s in group.sessions {
       let title = oneLine(s.title, max: 40).padding(toLength: 40, withPad: " ", startingAt: 0)
       let account = (s.account as NSString).abbreviatingWithTildeInPath
-      print("  \(s.running ? "●" : "○") \(s.id.prefix(8))  \(title)  \(s.summary), \(account)".printable)
+      print("  \(s.running ? "●" : "○") \(s.idPrefix)  \(title)  \(s.summary), \(account)".printable)
     }
   }
   if list.hidden > 0 { print("\n\(list.hidden) more outside a worktree. List them with: sb import --all") }

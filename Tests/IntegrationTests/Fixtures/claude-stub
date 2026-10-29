@@ -40,13 +40,13 @@
 # Without CLAUDE_CONFIG_DIR, the transcript would go to the user's ~/.claude,
 # so the stub then neither writes nor checks one.
 # With STUB_HOOKS=off it runs no hooks, as when every hook fails.
-# Each run appends its arguments to $SB_HOME/stub-args.log and its
-# CLAUDE_CONFIG_DIR, empty when unset, to the same line of
-# $SB_HOME/stub-accounts.log.
+# Each run appends a record to $SB_HOME/stub-calls.log: its CLAUDE_CONFIG_DIR,
+# empty when unset, a tab, its arguments, and a NUL. One write keeps the two
+# values of a run together when stubs run at once. A NUL ends the record,
+# because a prompt can hold a newline.
 
 args=("$@")
-printf '%s\n' "${args[*]}" >>"$SB_HOME/stub-args.log"
-printf '%s\n' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/stub-accounts.log"
+printf '%s\t%s\0' "${CLAUDE_CONFIG_DIR-}" "${args[*]}" >>"$SB_HOME/stub-calls.log"
 if [ "${1-}" = agents ]; then
   cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]'
   exit 0

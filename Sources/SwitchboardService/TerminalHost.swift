@@ -113,25 +113,42 @@ final class TerminalHost {
   }
 
   /// Starts a pane in its own tmux session. With no command, the pane runs
-  /// the login shell.
+  /// the login shell. tmux stores `env` in the session for later respawns.
+  /// tmux also copies the variables that its `update-environment` option
+  /// names from each terminal that attaches. This removes those names from
+  /// the session again. A value that the session holds for one of them then
+  /// came from a terminal.
   func create(_ name: String, cwd: String, env: [String: String], command: String? = nil) throws {
     try run(
       ["new-session", "-d", "-s", name, "-x", "200", "-y", "50", "-c", cwd] + envArgs(env)
         + (command.map { [$0] } ?? []))
+    let copied = try copiedFromTerminals()
+    for key in env.keys where copied.contains(key) { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
   }
 
   /// Starts a dead pane again, with the command or the login shell. tmux
-  /// refuses when the pane's program still runs. The new program also gets
-  /// the variables that `create` stored in the pane's tmux session. So this
-  /// first unsets each one that `env` lacks, which leaves the server's own
-  /// environment for that name.
+  /// refuses when the pane's program still runs. The new program gets the
+  /// variables that the pane's tmux session holds. This unsets each one that
+  /// `env` lacks, except a value that tmux copied from a terminal, such as a
+  /// forwarded SSH_AUTH_SOCK. A terminal that lacks a copied variable, as the
+  /// app's does, marks it for removal. This clears the mark when sbd has the
+  /// variable.
   func respawn(_ name: String, cwd: String, env: [String: String], command: String?) throws {
-    // show-environment prints -NAME for a variable that is already marked for removal.
-    let held = try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n").compactMap { line in
-      line.hasPrefix("-") ? nil : line.split(separator: "=", maxSplits: 1).first.map(String.init)
+    let copied = try copiedFromTerminals()
+    for line in try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n") {
+      // show-environment prints -NAME for a variable that is marked for removal.
+      let marked = line.hasPrefix("-")
+      let key = String((marked ? line.dropFirst() : line).prefix { $0 != "=" })
+      guard env[key] == nil else { continue }
+      let stale = marked ? baseEnv[key] != nil : !copied.contains(key)
+      if stale { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
     }
-    for key in held where env[key] == nil { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
     try run(["respawn-pane", "-t", "=\(name):", "-c", cwd] + envArgs(env) + (command.map { [$0] } ?? []))
+  }
+
+  /// The variables that tmux copies from each terminal that attaches.
+  private func copiedFromTerminals() throws -> Set<String> {
+    Set(try run(["show-options", "-gv", "update-environment"]).split(separator: "\n").map(String.init))
   }
 
   private func envArgs(_ env: [String: String]) -> [String] {

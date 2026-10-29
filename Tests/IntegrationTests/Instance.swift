@@ -68,6 +68,8 @@ final class Instance {
     // sbd inherits an account, as it does from a user who exports one. A test
     // can then tell the account that sbd sets from the one it inherited.
     env["CLAUDE_CONFIG_DIR"] = inheritedAccount
+    // A fixed agent lets a test tell sbd's own SSH agent from a terminal's.
+    env["SSH_AUTH_SOCK"] = "\(home.path)/sbd-agent.sock"
     p.environment = env
     let log = FileHandle(forWritingAtPath: home.log)!
     log.seekToEndOfFile()
@@ -217,18 +219,17 @@ final class Instance {
     throw TestError(description: "timed out waiting for \(what). sbd log:\n\(log)")
   }
 
-  func stubArgs() -> [String] { logLines("stub-args.log") }
+  func stubArgs() -> [String] { stubCalls().map(\.args) }
 
   /// Each run of the stub claude, oldest first: its arguments, and its
   /// CLAUDE_CONFIG_DIR, which is empty when the variable was unset.
   func stubCalls() -> [(args: String, account: String)] {
-    zip(stubArgs(), logLines("stub-accounts.log")).map { (args: $0, account: $1) }
-  }
-
-  /// The lines of a log that the stub writes in the home, including empty ones.
-  private func logLines(_ name: String) -> [String] {
-    let text = (try? String(contentsOfFile: "\(home.path)/\(name)", encoding: .utf8)) ?? ""
-    return text.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+    let text = (try? String(contentsOfFile: "\(home.path)/stub-calls.log", encoding: .utf8)) ?? ""
+    // The text after the last NUL is empty, or a record that the stub is writing.
+    return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().map { record in
+      let fields = record.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+      return (args: String(fields[1]), account: String(fields[0]))
+    }
   }
 
   func events(_ id: String, after: Int64 = 0) throws -> [Event] {

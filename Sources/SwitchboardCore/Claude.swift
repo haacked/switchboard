@@ -82,6 +82,9 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// Claude's name, else its folder's name.
   public var title: String { (worktree ? branch : nil) ?? name ?? (cwd as NSString).lastPathComponent }
 
+  /// The id's first 8 characters, which tell apart two sessions with one title.
+  public var idPrefix: String { String(id.prefix(8)) }
+
   /// Whether a claude runs the session, and where, in a few words.
   public var summary: String {
     switch (running, job) {
