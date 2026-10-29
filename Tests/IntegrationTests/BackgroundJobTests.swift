@@ -8,7 +8,7 @@ import Testing
   /// creates $SB_HOME/report. sbd runs the stop rule only when the test moves
   /// the clock, so the test runs it once in that gap, 600 s after the last hook.
   @Test func waitsForTheTurnThatReportsABackgroundJob() throws {
-    let sbd = try Instance(config: ["tickSeconds": 3600])
+    let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
     let s = try sbd.new(prompt: "background 100 held")
     try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
     try sbd.advanceClock(600_000)
