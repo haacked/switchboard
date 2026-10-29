@@ -149,10 +149,10 @@ extension Service {
     return server.listening ? .running : .starting
   }
 
-  /// `terminals` starts claude only in a missing Claude pane. It leaves a
-  /// dead pane dead. The other requests start claude whenever it is stopped.
+  /// Whether the request `op` can start claude in the session. Requests other
+  /// than `terminals` start claude whenever it is stopped.
   private func canLaunch(_ op: String, _ id: String) -> Bool {
-    op == "terminals" ? snapshot.panes[paneName(id, .claude)] == nil : claudeState(id) == .stopped
+    op == "terminals" ? terminalsStartsClaude(id) : claudeState(id) == .stopped
   }
 
   private func isStarting(_ server: SharedServer, now: Int64) -> Bool {

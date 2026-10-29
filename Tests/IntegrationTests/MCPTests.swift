@@ -110,6 +110,33 @@ extension Instance {
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
+  @Test func aWaitThatResumesASessionWaitsForAStartingServer() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let a = try sbd.new(prompt: "hello", name: "a")
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try sbd.waitFor(a.id, "a's first reply") { $0.lastReply == "Done: hello" }
+    try sbd.waitFor(b.id, "b's first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
+    try sbd.waitFor(a.id, "the stop", timeout: 10) { !$0.live }
+    let slow = try sbd.waitForRunning("slow")
+    kill(pid_t(slow.pid!), SIGKILL)
+    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    // `done` doesn't launch claude itself. The tick resolves the wait and launches it.
+    try sbd.sb("done", b.id)
+    try sbd.waitFor(a.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: b to reach Done: it did." }
+    #expect(try sbd.events(a.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func aLaunchStopsWaitingForAServerThatStartedMoreThanTenSecondsAgo() throws {
+    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", delay: 60)]])
+    try sbd.waitForServer("stuck", "the server to start") { $0.state == .starting }
+    try sbd.advanceClock(11_000)
+    let start = Date()
+    let s = try sbd.new(prompt: "hello")
+    #expect(Date().timeIntervalSince(start) < 5)
+    #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == [])
+  }
+
   @Test func terminalsDoNotWaitForAStartingServerWhenTheyLeaveClaudeStopped() throws {
     let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
     let s = try sbd.new(prompt: "hello")
@@ -169,7 +196,9 @@ extension Instance {
     let failed = try sbd.waitForServer("grafana", "a failed start") { $0.lastExit?.hasPrefix("can't start") == true }
     #expect(failed.state == .exited)
     sleep(3)
-    #expect(try sbd.mcpServers().first!.restarts <= 4)
+    #expect((1...4).contains(try sbd.mcpServers().first!.restarts))
+    chmod(sbd.home.mcpFolder, 0o700)
+    try sbd.waitForRunning("grafana")
   }
 
   @Test func keepsServersAcrossARestartOfSbdUnlessTheirConfigChanged() throws {
