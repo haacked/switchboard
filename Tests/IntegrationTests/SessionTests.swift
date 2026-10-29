@@ -150,8 +150,9 @@ import Testing
 
     try sbd.sb("send", s.id, "again")
     try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
-    #expect(sbd.stubCalls().last?.args.hasPrefix("--resume \(s.claudeSessionId) ") == true)
-    #expect(sbd.stubCalls().last?.account == account)
+    let resume = try #require(sbd.stubCalls().last)
+    #expect(resume.args.hasPrefix("--resume \(s.claudeSessionId) "))
+    #expect(resume.account == account)
   }
 
   @Test func resumesTheConversationThatClearStarted() throws {
