@@ -140,7 +140,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// The PR's `git pr` words. The review decision picks them, or the
   /// reviewers' verdicts do when the base branch requires no review.
-  public var reviewStatus: PRStatus {
+  public var status: PRStatus {
     switch state {
     case .merged: return .merged
     case .closed: return .closed
@@ -157,10 +157,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     }
   }
 
-  public var status: String { reviewStatus.rawValue }
-
   /// Whether the PR is open, not a draft, and approved.
-  public var isApproved: Bool { reviewStatus == .approved }
+  public var isApproved: Bool { status == .approved }
 
   public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
 
@@ -185,8 +183,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var repo: String
   public var title: String
   public var state: PRState
-  /// The words of `git pr`, such as Approved or Changes requested.
-  public var status: String
+  public var status: PRStatus
   public var checks: String?
   public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
@@ -204,5 +201,5 @@ public struct PRSummary: Codable, Equatable, Sendable {
   }
 
   /// The PR in one line, such as "#18303 Approved, checks success".
-  public var line: String { "#\(number) \(status)\(checks.map { ", checks \($0.lowercased())" } ?? "")" }
+  public var line: String { "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")" }
 }

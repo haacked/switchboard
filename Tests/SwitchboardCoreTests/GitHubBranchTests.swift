@@ -141,7 +141,7 @@ import Testing
     var none = pr
     none.checks = nil
     #expect(PRSummary(none).line == "#18303 Approved")
-    #expect(PRSummary(pr).status == "Approved")
+    #expect(PRSummary(pr).status == .approved)
   }
 
   @Test(arguments: [

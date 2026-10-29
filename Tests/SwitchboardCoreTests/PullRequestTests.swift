@@ -36,7 +36,7 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
     (samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED")]), "Approved"),
   ])
   func statusFollowsTheStateThenTheReviewDecision(_ pr: PullRequest, _ status: String) {
-    #expect(pr.status == status)
+    #expect(pr.status.rawValue == status)
   }
 
   @Test(arguments: [
@@ -49,7 +49,7 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
     ([], "Not approved"),
   ])
   func statusWithoutAReviewDecisionFollowsTheVerdicts(_ verdicts: [Review], _ status: String) {
-    #expect(samplePR(reviewDecision: nil, verdicts: verdicts).status == status)
+    #expect(samplePR(reviewDecision: nil, verdicts: verdicts).status.rawValue == status)
   }
 
   @Test func approversAreTheSortedAuthorsOfApprovals() {
