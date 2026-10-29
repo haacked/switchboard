@@ -17,9 +17,7 @@ extension Instance {
 
   /// Whether the PermissionRequest hook that the stub ran last still runs.
   func heldHookRuns() -> Bool {
-    guard let text = try? String(contentsOfFile: "\(home.path)/held-hook.pid", encoding: .utf8),
-      let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
-    else { return false }
+    guard let pid = stubPid("held-hook.pid") else { return false }
     return kill(pid, 0) == 0
   }
 }

@@ -6,9 +6,12 @@
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
 #   slow <n>         runs a Bash tool call of n seconds
-#   background <n>   starts a background job of n seconds and ends the turn.
+#   background <n> [held]
+#                    starts a background job of n seconds and ends the turn.
 #                    It reports the job in a turn of its own 0.5 s after the
-#                    job's process exits
+#                    job's process exits. With held, the report also waits
+#                    until $SB_HOME/report exists. The job's pid goes to
+#                    $SB_HOME/job.pid
 #   interrupt ...    starts a tool call and stops, as Escape does. Claude
 #                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
@@ -203,7 +206,7 @@ questions='{"questions":[
    "options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}'
 
 turn() {
-  local p=$1 step=turn reply cmd='' marker='' before='' n
+  local p=$1 step=turn reply cmd='' marker='' before='' n job held
   case $p in lag*) sleep 1 ;; esac
   case $p in
   slow*)
@@ -211,11 +214,18 @@ turn() {
     step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
     ;;
   background*)
-    n=${p#background }
-    # Claude Code runs each background job in a process group of its own.
-    perl -e 'setpgrp(0, 0); exec @ARGV' sleep "$n" &
+    read -r n held <<<"${p#background }"
+    rm -f "$SB_HOME/job.pid"
+    # Claude Code runs each background job in a process group of its own,
+    # and its spawn returns after the job is in that group. perl writes the
+    # job's pid once the job is there, and the turn waits for that.
+    perl -e 'setpgrp(0, 0); open(my $f, ">", shift) or die; print $f $$; close $f; exec @ARGV' \
+      "$SB_HOME/job.pid" sleep "$n" &
+    job=$!
+    while kill -0 $job 2>/dev/null && [ ! -s "$SB_HOME/job.pid" ]; do sleep 0.01; done
     step=background-job reply="Started a job of $n s." cmd="sleep $n" marker='<task-notification>'
-    before="while kill -0 $! 2>/dev/null; do sleep 0.05; done; sleep 0.5"
+    before="while kill -0 $job 2>/dev/null; do sleep 0.05; done; sleep 0.5"
+    [ "$held" = held ] && before="$before; until [ -e '$SB_HOME/report' ]; do sleep 0.05; done"
     ;;
   interrupt*)
     play interrupt "$(vars "$p" "" "sleep 100")"

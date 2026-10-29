@@ -26,7 +26,7 @@ import Testing
   }
 
   @Test func playsTheRecordedSteps() throws {
-    let sbd = try Instance(idleStopSeconds: 2)
+    let sbd = try Instance()
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let startupEnd = try sbd.startupEnd(s.id)
@@ -44,6 +44,8 @@ import Testing
     try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
     try expectRecorded("clear", sbd, s.id, after: mark)
 
+    // The session stops only after the clock passes the 600 s idle wait.
+    try sbd.advanceClock(600_000)
     try sbd.waitFor(s.id, "the idle stop") { !$0.live }
     let stopped = try #require(try sbd.events(s.id).last { $0.kind == "stopped" })
     try sbd.sb("send", s.id, "again")

@@ -112,8 +112,15 @@ final class Instance {
     return { input.fileHandleForWriting.write(Data("detach-client\n".utf8)) }
   }
 
+  /// sbd runs the stop rule and the waits at the new time before it replies.
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
+  }
+
+  /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
+  func stubPid(_ file: String) -> pid_t? {
+    guard let text = try? String(contentsOfFile: "\(home.path)/\(file)", encoding: .utf8) else { return nil }
+    return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
   }
 
   /// Waits for the session to match, and returns it.

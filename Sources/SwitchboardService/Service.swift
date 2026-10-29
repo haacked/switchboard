@@ -120,6 +120,13 @@ public final class Service {
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
       case "rm":
         return .success(try remove(request.args))
+      // An advance runs a tick, so the stop rule and the waits see the new
+      // time before the reply. `tick` takes the state queue itself, so
+      // `clock` runs here and not in `dispatch`.
+      case "clock":
+        let now = try queue.sync { try clockRequest(request.args) }
+        if request.args["advance"] != nil { tick() }
+        return .success(now)
       default:
         break
       }
@@ -173,8 +180,6 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "wait", "clear-wait", "resolve-wait":
       return try waitRequest(op, args)
-    case "clock":
-      return try clockRequest(args)
     case "note", "remove-note":
       return try noteRequest(op, args)
     case "rename":
