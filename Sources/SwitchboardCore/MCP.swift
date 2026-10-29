@@ -95,15 +95,17 @@ public struct MCPServer: Codable, Equatable, Sendable {
   }
 
   /// A port for each server: its fixed port, else its port in `previous`
-  /// when no other server took it, else a port from `freePort` that no other
-  /// server has. A server that `freePort` can't serve is left out.
+  /// when `canKeep` allows it and no other server took it, else a port from
+  /// `freePort` that no other server has. A server that `freePort` can't
+  /// serve is left out.
   public static func assignPorts(
-    _ servers: [String: MCPServer], previous: [String: Int], freePort: () -> Int?
+    _ servers: [String: MCPServer], previous: [String: Int], canKeep: (_ name: String, _ port: Int) -> Bool,
+    freePort: () -> Int?
   ) -> [String: Int] {
     var ports = servers.compactMapValues(\.port)
     let names = servers.keys.sorted()
     for name in names where ports[name] == nil {
-      if let port = previous[name], !ports.values.contains(port) { ports[name] = port }
+      if let port = previous[name], !ports.values.contains(port), canKeep(name, port) { ports[name] = port }
     }
     for name in names where ports[name] == nil {
       while let port = freePort() {

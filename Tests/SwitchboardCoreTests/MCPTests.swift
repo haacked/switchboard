@@ -109,10 +109,13 @@ import Testing
       "new": MCPServer(type: .http, command: "x", args: ["{port}"]),
       // Its previous port is now another server's configured port.
       "moved": MCPServer(type: .http, command: "x", args: ["{port}"]),
+      // canKeep refuses its previous port, as when another program holds it.
+      "taken": MCPServer(type: .http, command: "x", args: ["{port}"]),
     ]
-    var free = [4300, 4100, 4301].makeIterator()
+    var free = [4300, 4100, 4301, 4302].makeIterator()
     let ports = MCPServer.assignPorts(
-      servers, previous: ["fixed": 4000, "kept": 4200, "moved": 4100], freePort: { free.next() })
-    #expect(ports == ["fixed": 4100, "kept": 4200, "moved": 4300, "new": 4301])
+      servers, previous: ["fixed": 4000, "kept": 4200, "moved": 4100, "taken": 4400],
+      canKeep: { name, _ in name != "taken" }, freePort: { free.next() })
+    #expect(ports == ["fixed": 4100, "kept": 4200, "moved": 4300, "new": 4301, "taken": 4302])
   }
 }

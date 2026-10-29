@@ -191,11 +191,7 @@ extension Instance {
     try sbd.tmux("kill-server")
     // Another program takes the port while sbd is down, as one can while the Mac restarts.
     let port = try #require(URLComponents(string: first.url)?.port)
-    var holder: Int32 = -1
-    try sbd.waitFor("the server to free its port") {
-      holder = listenOnLoopback(port)
-      return holder >= 0
-    }
+    let holder = try sbd.waitFor("the server to free its port", fetch: { listenOnLoopback(port) }, until: { _ in true })
     defer { close(holder) }
     try sbd.startSbd()
     let second = try sbd.waitForRunning("grafana")
@@ -309,17 +305,17 @@ extension Instance {
   }
 }
 
-/// A socket that listens on 127.0.0.1 at the port, or -1 when another socket
+/// A socket that listens on 127.0.0.1 at the port, or nil when another socket
 /// holds the port.
-private func listenOnLoopback(_ port: Int) -> Int32 {
+private func listenOnLoopback(_ port: Int) -> Int32? {
   let fd = socket(AF_INET, SOCK_STREAM, 0)
-  guard fd >= 0 else { return -1 }
+  guard fd >= 0 else { return nil }
   var on: Int32 = 1
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
   var addr = sockaddr_in()
   addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
   addr.sin_family = sa_family_t(AF_INET)
-  addr.sin_port = in_port_t(UInt16(port)).bigEndian
+  addr.sin_port = in_port_t(UInt16(exactly: port) ?? 0).bigEndian
   addr.sin_addr.s_addr = inet_addr("127.0.0.1")
   let bound = withUnsafePointer(to: &addr) {
     $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -328,7 +324,7 @@ private func listenOnLoopback(_ port: Int) -> Int32 {
   }
   guard bound, listen(fd, 1) == 0 else {
     close(fd)
-    return -1
+    return nil
   }
   return fd
 }

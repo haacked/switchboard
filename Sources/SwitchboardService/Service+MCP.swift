@@ -55,10 +55,10 @@ extension Service {
     // A server keeps its port from the last run while it still runs there.
     // Otherwise it keeps the port only if no other program took it, such as
     // while the Mac restarted.
-    let previous = (written.map(MCPServer.ports(inClaudeConfig:)) ?? [:]).filter { name, port in
-      snapshot.panes[Service.mcpPanePrefix + name]?.dead == false || LocalPort.canBind(port)
-    }
-    let ports = MCPServer.assignPorts(valid, previous: previous, freePort: LocalPort.free)
+    let ports = MCPServer.assignPorts(
+      valid, previous: written.map(MCPServer.ports(inClaudeConfig:)) ?? [:],
+      canKeep: { name, port in mcpPaneAlive(Service.mcpPanePrefix + name) || LocalPort.canBind(port) },
+      freePort: LocalPort.free)
     mcp = ports.keys.sorted().map { SharedServer(name: $0, config: valid[$0]!, port: ports[$0]!) }
     let panes = Set(mcp.map(\.pane))
     for pane in snapshot.panes.keys where pane.hasPrefix(Service.mcpPanePrefix) && !panes.contains(pane) {
@@ -74,7 +74,7 @@ extension Service {
     let now = nowMs()
     for i in mcp.indices {
       let server = mcp[i]
-      if mcpPaneAlive(server),
+      if mcpPaneAlive(server.pane),
         (try? String(contentsOfFile: mcpScriptPath(server), encoding: .utf8)) == mcpScript(server)
       {
         mcp[i].started = now
@@ -91,7 +91,7 @@ extension Service {
   func superviseMCPServers(now: Int64) {
     for i in mcp.indices {
       let server = mcp[i]
-      if mcpPaneAlive(server) {
+      if mcpPaneAlive(server.pane) {
         mcp[i].restartAt = nil
         if !server.listening && LocalPort.accepts(server.port) { markListening(i, run: server.started) }
         continue
@@ -154,10 +154,10 @@ extension Service {
     }
   }
 
-  private func mcpPaneAlive(_ server: SharedServer) -> Bool { snapshot.panes[server.pane]?.dead == false }
+  private func mcpPaneAlive(_ pane: String) -> Bool { snapshot.panes[pane]?.dead == false }
 
   private func mcpState(_ server: SharedServer) -> MCPServerStatus.State {
-    if server.restartAt != nil || !mcpPaneAlive(server) { return .exited }
+    if server.restartAt != nil || !mcpPaneAlive(server.pane) { return .exited }
     return server.listening ? .running : .starting
   }
 
@@ -249,33 +249,37 @@ enum LocalPort {
 
   /// Whether a server could listen on the port now. It sets SO_REUSEADDR, as
   /// servers do, so a port that only closed connections hold counts as free.
-  static func canBind(_ port: Int) -> Bool {
+  static func canBind(_ port: Int) -> Bool { withBoundSocket(port, reuseAddress: true) { _ in true } ?? false }
+
+  /// A port that the OS picks among those that no socket holds now.
+  static func free() -> Int? {
+    withBoundSocket(0, reuseAddress: false) { fd in
+      var addr = sockaddr_in()
+      var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+      let named = withUnsafeMutablePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) == 0 }
+      }
+      return named ? Int(UInt16(bigEndian: addr.sin_port)) : nil
+    }
+  }
+
+  /// Binds a new socket to 127.0.0.1 at the port and passes it to `body`, or
+  /// returns nil when the bind fails. It closes the socket afterward.
+  private static func withBoundSocket<T>(_ port: Int, reuseAddress: Bool, _ body: (Int32) -> T?) -> T? {
     let fd = socket(AF_INET, SOCK_STREAM, 0)
-    guard fd >= 0 else { return false }
+    guard fd >= 0 else { return nil }
     defer { close(fd) }
-    var on: Int32 = 1
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+    if reuseAddress {
+      var on: Int32 = 1
+      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+    }
     var addr = loopback(port)
-    return withUnsafePointer(to: &addr) {
+    let bound = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
         bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
       }
     }
-  }
-
-  /// A port that the OS picks among those that no socket holds now.
-  static func free() -> Int? {
-    let fd = socket(AF_INET, SOCK_STREAM, 0)
-    guard fd >= 0 else { return nil }
-    defer { close(fd) }
-    var addr = loopback(0)
-    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-    let bound = withUnsafeMutablePointer(to: &addr) {
-      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-        bind(fd, $0, length) == 0 && getsockname(fd, $0, &length) == 0
-      }
-    }
-    return bound ? Int(UInt16(bigEndian: addr.sin_port)) : nil
+    return bound ? body(fd) : nil
   }
 
   private static func loopback(_ port: Int) -> sockaddr_in {
