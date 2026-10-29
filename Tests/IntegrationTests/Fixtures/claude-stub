@@ -92,9 +92,10 @@ hook() {
 # dialog <fields>: runs the PermissionRequest hook while the terminal's dialog
 # waits for a line, and prints the first answer: "hook <output>" or
 # "terminal <line>". A hook that prints nothing made no decision, so the
-# dialog keeps waiting. The hook's pid goes to $SB_HOME/held-hook.pid.
+# dialog keeps waiting. It prints nothing when the terminal closes, as when
+# the pane dies. The hook's pid goes to $SB_HOME/held-hook.pid.
 dialog() {
-  local out term hook_pid reader_pid said answer=''
+  local out term hook_pid reader_pid open said answer=''
   out=$(mktemp) term=$(mktemp)
   payload PermissionRequest "$1" | sh -c "exec $request_cmd" >"$out" &
   hook_pid=$!
@@ -106,9 +107,16 @@ dialog() {
       [ -s "$out" ] && answer="hook $(cat "$out")"
       hook_pid=''
     fi
+    # The reader exits without a line when the terminal closes. The check
+    # comes before the read, so a line that the reader wrote before it
+    # exited counts.
+    kill -0 "$reader_pid" 2>/dev/null && open=1 || open=''
     # One read per pass, so a line that arrives mid-pass waits for the next.
     said=$(cat "$term")
-    if [ -z "$answer" ] && [ "$said" = timeout ]; then
+    # An empty line leaves a newline in the file, so it does not count.
+    if [ -z "$answer" ] && [ -z "$open" ] && [ ! -s "$term" ]; then
+      break
+    elif [ -z "$answer" ] && [ "$said" = timeout ]; then
       [ -n "$hook_pid" ] && kill "$hook_pid"
       : >"$term"
       { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
@@ -119,7 +127,7 @@ dialog() {
     sleep 0.1
   done
   kill "$reader_pid" 2>/dev/null
-  [ "$answer" = "terminal esc" ] && [ -n "$hook_pid" ] && kill "$hook_pid"
+  case $answer in "terminal esc" | '') [ -n "$hook_pid" ] && kill "$hook_pid" ;; esac
   rm -f "$out" "$term"
   printf '%s' "$answer"
 }
@@ -164,10 +172,12 @@ play() {
 event() { jq -c --arg e "$2" 'select(.hook_event_name == $e)' "$recordings/$1.jsonl"; }
 
 # answered <tool> <input> <answer> [terminal input]: finishes a call that
-# dialog answered. It prints the reply, or nothing when the turn stopped.
+# dialog answered. It prints the reply, or nothing when the turn stopped or
+# the terminal closed.
 answered() {
   local tool=$1 input=$2 answer=$3 decision
   case $answer in
+  '') return ;;
   "terminal y")
     input=${4:-$input}
     ;;

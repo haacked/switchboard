@@ -7,13 +7,35 @@ struct TestError: Error, CustomStringConvertible {
 }
 
 /// A private sbd for one test, with its own SB_HOME, tmux server, and stub
-/// claude (Fixtures/claude-stub).
+/// claude (Fixtures/claude-stub). Fixtures/reap ends the processes that the
+/// home started: deinit runs it, and so does a watcher process after this
+/// test process exits, as when it crashes or is killed.
 final class Instance {
   static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent()
   static let bin = ProcessInfo.processInfo.environment["SB_BIN_DIR"] ?? root.appendingPathComponent(".build/debug").path
   static let stub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/claude-stub").path
   static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
+  static let reap = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/reap").path
+
+  /// Runs once per test process, before the first home. It reaps the homes of
+  /// earlier test processes that exited without a reap, then starts the
+  /// watcher for this one.
+  private static let watcher: Void = {
+    _ = try? runCommand(reap, ["--orphans"])
+    try? watch(getpid())
+  }()
+
+  /// Starts a process that reaps the homes that `pid` made after `pid` exits.
+  static func watch(_ pid: pid_t) throws {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: reap)
+    p.arguments = ["--watch", String(pid)]
+    p.standardInput = FileHandle.nullDevice
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try p.run()
+  }
 
   let home: Home
   let client: Client
@@ -42,10 +64,12 @@ final class Instance {
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
     inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
   ) throws {
+    _ = Instance.watcher
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     let path = String(cString: dir)
     home = Home(path: path)
+    try String(getpid()).write(toFile: "\(home.path)/owner.pid", atomically: true, encoding: .utf8)
     switch inheriting {
     case .scratch: inheritedAccount = "\(path)/inherited-account"
     case .unset: inheritedAccount = nil
@@ -70,9 +94,9 @@ final class Instance {
   }
 
   deinit {
-    stopSbd()
-    if let tmux = findExecutable("tmux") { _ = try? runCommand(tmux, ["-S", home.tmuxSocket, "kill-server"]) }
-    try? FileManager.default.removeItem(atPath: home.path)
+    var env = ProcessInfo.processInfo.environment
+    env["SB_HOME"] = home.path
+    _ = try? runCommand(Instance.reap, [], env: env)
   }
 
   var work: String { "\(home.path)/work" }
@@ -84,6 +108,8 @@ final class Instance {
   func startSbd() throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sbd")
+    // reap finds sbd by the home in its arguments.
+    p.arguments = ["--home", home.path]
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home.path
     // sbd inherits an account, as it does from a user who exports one. A test

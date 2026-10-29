@@ -1,0 +1,56 @@
+#!/bin/sh
+# Ends every process that a test's private home started, then removes the
+# home. A process belongs to a home when its arguments name a path in it:
+# sbd's --home, the tmux server's socket, and the stub's --settings. The
+# stub's subshells keep its arguments. $home/owner.pid holds the pid of the
+# test process that made the home.
+#   reap                reaps $SB_HOME. The home is not an argument, so this
+#                       script's own arguments never match it.
+#   reap --orphans      reaps each /tmp/sbt.* home whose test process exited
+#   reap --watch <pid>  waits for the test process to exit, then reaps the
+#                       homes that it made. It ignores SIGINT and SIGHUP, so
+#                       a Ctrl-C that ends the tests does not end it.
+# A home without owner.pid can belong to a run that is still going, so only
+# `reap` with SB_HOME reaps it.
+
+reap_home() {
+  # Only a path that mkdtemp made from /tmp/sbt.XXXXXX passes. Any other
+  # path, such as an empty one, could match far more processes.
+  suffix=${1#/tmp/sbt.}
+  case $suffix in "$1" | *[!A-Za-z0-9]*) suffix='' ;; esac
+  if [ ${#suffix} -ne 6 ]; then
+    echo "reap: $1 is not a test home" >&2
+    return 1
+  fi
+  pattern="$(printf '%s' "$1" | sed 's/[.]/\\./g')(/| |\$)"
+  # A process that forks during a pass, such as sbd starting tmux, escapes
+  # that pass.
+  n=0
+  while pkill -KILL -f "$pattern" && [ $n -lt 20 ]; do
+    n=$((n + 1))
+    sleep 0.1
+  done
+  rm -rf "$1"
+}
+
+# reap_owned <test>: reaps each home whose test process passes the test.
+reap_owned() {
+  for home in /tmp/sbt.*; do
+    owner=$(cat "$home/owner.pid" 2>/dev/null)
+    if [ -n "$owner" ] && "$1" "$owner"; then reap_home "$home"; fi
+  done
+}
+
+exited() { ! kill -0 "$1" 2>/dev/null; }
+
+case ${1:-} in
+--orphans) reap_owned exited ;;
+--watch)
+  trap '' INT HUP
+  watched=$2
+  while kill -0 "$watched" 2>/dev/null; do sleep 1; done
+  is_watched() { [ "$1" = "$watched" ]; }
+  reap_owned is_watched
+  ;;
+*) reap_home "$SB_HOME" ;;
+esac
