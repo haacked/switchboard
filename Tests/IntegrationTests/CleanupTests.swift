@@ -35,7 +35,7 @@ func reaped(_ home: String) -> Bool {
     let t = try sbd.client.terminals(s.id)
     #expect(try runCommand(t.tmux, ["-S", t.socket, "kill-server"]).status == 0)
     try sbd.waitFor("the stub to exit") { processes(matching: sbd.home.claudeSettings).isEmpty }
-    #expect(!sbd.heldHookRuns())
+    try sbd.waitFor("the held hook to end") { !sbd.heldHookRuns() }
   }
 
   @Test func deinitEndsEveryProcessOfTheHome() throws {
@@ -43,6 +43,7 @@ func reaped(_ home: String) -> Bool {
     _ = try sbd!.newInADialog()
     let home = sbd!.home.path
     #expect(!processes(of: home).isEmpty)
+    #expect(!processes(matching: "/sbd --home \(home)$").isEmpty)
     sbd = nil
     #expect(reaped(home))
   }
@@ -56,6 +57,11 @@ func reaped(_ home: String) -> Bool {
     try owner.run()
     try sbd.home.setOwner(owner.processIdentifier)
     try Instance.watch(owner.processIdentifier)
+    // The pause lets the watcher finish its first sweep. The reap below then
+    // comes from its sweep after the owner exits.
+    usleep(500_000)
+    #expect(!processes(of: sbd.home.path).isEmpty)
+    #expect(FileManager.default.fileExists(atPath: sbd.home.path))
     kill(owner.processIdentifier, SIGKILL)
     try sbd.waitFor("the reap") { reaped(sbd.home.path) }
   }
@@ -63,10 +69,17 @@ func reaped(_ home: String) -> Bool {
   @Test func reapsTheHomesOfEarlierRunsWhoseTestProcessExited() throws {
     let sbd = try Instance()
     _ = try sbd.newInADialog()
+    let live = try Instance()
+    let unowned = try Instance()
+    try FileManager.default.removeItem(atPath: "\(unowned.home.path)/owner.pid")
     let owner = try runProcess("/usr/bin/true")
     try sbd.home.setOwner(owner)
     #expect(try runCommand(Instance.reap, ["--orphans"]).status == 0)
     #expect(reaped(sbd.home.path))
+    for spared in [live, unowned] {
+      #expect(!processes(of: spared.home.path).isEmpty)
+      #expect(FileManager.default.fileExists(atPath: spared.home.path))
+    }
   }
 
   @Test(arguments: ["/tmp/sbt.", "/var/sbt.abcdef", "/tmp/sbt.ab-def", "/tmp/sbt.ab/def", "/tmp/sbt.abcdefg"])
@@ -78,7 +91,7 @@ func reaped(_ home: String) -> Bool {
     decoy.arguments = ["-c", "while :; do sleep 0.1; done", "\(path)/decoy"]
     try decoy.run()
     defer { decoy.terminate() }
-    #expect(try Instance.reap(path).status != 0)
+    #expect(try Instance.reapHome(path).status != 0)
     #expect(decoy.isRunning)
   }
 }

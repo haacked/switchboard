@@ -109,11 +109,12 @@ dialog() {
     fi
     # The reader exits without a line when the terminal closes. The check
     # comes before the read, so a line that the reader wrote before it
-    # exited counts.
+    # exited still becomes the answer.
     kill -0 "$reader_pid" 2>/dev/null && open=1 || open=''
     # One read per pass, so a line that arrives mid-pass waits for the next.
     said=$(cat "$term")
-    # An empty line leaves a newline in the file, so it does not count.
+    # An empty line leaves a newline in the file, so the dialog does not take
+    # it for a closed terminal.
     if [ -z "$answer" ] && [ -z "$open" ] && [ ! -s "$term" ]; then
       break
     elif [ -z "$answer" ] && [ "$said" = timeout ]; then

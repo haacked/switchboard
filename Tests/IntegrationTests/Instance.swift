@@ -97,12 +97,12 @@ final class Instance {
   }
 
   deinit {
-    _ = try? Instance.reap(home.path)
+    _ = try? Instance.reapHome(home.path)
   }
 
   /// Runs Fixtures/reap on the home.
   @discardableResult
-  static func reap(_ home: String) throws -> CommandResult {
+  static func reapHome(_ home: String) throws -> CommandResult {
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home
     return try runCommand(reap, [], env: env)
