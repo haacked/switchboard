@@ -22,9 +22,10 @@ extension Instance {
     return s
   }
 
-  func reaped() -> Bool {
-    processes(of: home.path).isEmpty && !FileManager.default.fileExists(atPath: home.path)
-  }
+}
+
+func reaped(_ home: String) -> Bool {
+  processes(of: home).isEmpty && !FileManager.default.fileExists(atPath: home)
 }
 
 @Suite(.timeLimit(.minutes(2))) struct CleanupTests {
@@ -43,8 +44,7 @@ extension Instance {
     let home = sbd!.home.path
     #expect(!processes(of: home).isEmpty)
     sbd = nil
-    #expect(processes(of: home).isEmpty)
-    #expect(!FileManager.default.fileExists(atPath: home))
+    #expect(reaped(home))
   }
 
   @Test func reapsTheHomesOfATestProcessAfterItExits() throws {
@@ -54,19 +54,19 @@ extension Instance {
     owner.executableURL = URL(fileURLWithPath: "/bin/sleep")
     owner.arguments = ["60"]
     try owner.run()
-    try String(owner.processIdentifier).write(toFile: "\(sbd.home.path)/owner.pid", atomically: true, encoding: .utf8)
+    try sbd.home.setOwner(owner.processIdentifier)
     try Instance.watch(owner.processIdentifier)
     kill(owner.processIdentifier, SIGKILL)
-    try sbd.waitFor("the reap") { sbd.reaped() }
+    try sbd.waitFor("the reap") { reaped(sbd.home.path) }
   }
 
   @Test func reapsTheHomesOfEarlierRunsWhoseTestProcessExited() throws {
     let sbd = try Instance()
     _ = try sbd.newInADialog()
     let owner = try runProcess("/usr/bin/true")
-    try String(owner).write(toFile: "\(sbd.home.path)/owner.pid", atomically: true, encoding: .utf8)
+    try sbd.home.setOwner(owner)
     #expect(try runCommand(Instance.reap, ["--orphans"]).status == 0)
-    #expect(sbd.reaped())
+    #expect(reaped(sbd.home.path))
   }
 
   @Test(arguments: ["/tmp/sbt.", "/var/sbt.abcdef", "/tmp/sbt.ab-def", "/tmp/sbt.ab/def", "/tmp/sbt.abcdefg"])
@@ -78,9 +78,7 @@ extension Instance {
     decoy.arguments = ["-c", "while :; do sleep 0.1; done", "\(path)/decoy"]
     try decoy.run()
     defer { decoy.terminate() }
-    var env = ProcessInfo.processInfo.environment
-    env["SB_HOME"] = path
-    #expect(try runCommand(Instance.reap, [], env: env).status != 0)
+    #expect(try Instance.reap(path).status != 0)
     #expect(decoy.isRunning)
   }
 }

@@ -6,6 +6,13 @@ struct TestError: Error, CustomStringConvertible {
   let description: String
 }
 
+extension Home {
+  /// Names the test process that owns the home, for Fixtures/reap.
+  func setOwner(_ pid: pid_t) throws {
+    try String(pid).write(toFile: "\(path)/owner.pid", atomically: true, encoding: .utf8)
+  }
+}
+
 /// A private sbd for one test, with its own SB_HOME, tmux server, and stub
 /// claude (Fixtures/claude-stub). Fixtures/reap ends the processes that the
 /// home started: deinit runs it, and so does a watcher process after this
@@ -18,15 +25,11 @@ final class Instance {
   static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
   static let reap = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/reap").path
 
-  /// Runs once per test process, before the first home. It reaps the homes of
-  /// earlier test processes that exited without a reap, then starts the
-  /// watcher for this one.
-  private static let watcher: Void = {
-    _ = try? runCommand(reap, ["--orphans"])
-    try? watch(getpid())
-  }()
+  /// Runs once per test process, before the first home.
+  private static let watcher: Void = { try? watch(getpid()) }()
 
-  /// Starts a process that reaps the homes that `pid` made after `pid` exits.
+  /// Starts a process that reaps the homes of test processes that exited,
+  /// both now and after `pid` exits.
   static func watch(_ pid: pid_t) throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: reap)
@@ -69,7 +72,7 @@ final class Instance {
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     let path = String(cString: dir)
     home = Home(path: path)
-    try String(getpid()).write(toFile: "\(home.path)/owner.pid", atomically: true, encoding: .utf8)
+    try home.setOwner(getpid())
     switch inheriting {
     case .scratch: inheritedAccount = "\(path)/inherited-account"
     case .unset: inheritedAccount = nil
@@ -94,9 +97,15 @@ final class Instance {
   }
 
   deinit {
+    _ = try? Instance.reap(home.path)
+  }
+
+  /// Runs Fixtures/reap on the home.
+  @discardableResult
+  static func reap(_ home: String) throws -> CommandResult {
     var env = ProcessInfo.processInfo.environment
-    env["SB_HOME"] = home.path
-    _ = try? runCommand(Instance.reap, [], env: env)
+    env["SB_HOME"] = home
+    return try runCommand(reap, [], env: env)
   }
 
   var work: String { "\(home.path)/work" }
