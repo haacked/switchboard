@@ -113,12 +113,15 @@ import Testing
     // tmux copies SSH_AUTH_SOCK from each terminal that attaches, as from an
     // SSH login with a forwarded agent.
     #expect(try tmux(t, "set-environment", "-t", pane, "SSH_AUTH_SOCK", "/tmp/forwarded-agent").status == 0)
+    // tmux lists each line of a value with a newline as a line of its own.
+    #expect(try tmux(t, "set-environment", "-t", pane, "TWO_LINES", "first\n=second").status == 0)
     try restartWithAMessage(sbd, s.id)
-    #expect(sbd.stubCalls().last?.account == "")
+    let run = try #require(sbd.stubCalls().last)
+    #expect(run.account == "")
+    #expect(run.agent == "/tmp/forwarded-agent")
     #expect(try tmux(t, "show-environment", "-t", pane, "REMOVED_FROM_CONFIG").status != 0)
+    #expect(try tmux(t, "show-environment", "-t", pane, "TWO_LINES").status != 0)
     #expect(try tmux(t, "show-environment", "-t", pane, "SB_SESSION_ID").status == 0)
-    #expect(
-      try tmux(t, "show-environment", "-t", pane, "SSH_AUTH_SOCK").stdout == "SSH_AUTH_SOCK=/tmp/forwarded-agent\n")
   }
 
   @Test func restartsClaudeWithSbdsAgentAfterATerminalWithoutOneAttached() throws {
@@ -129,8 +132,7 @@ import Testing
     // A terminal without SSH_AUTH_SOCK, as the app's, marks it for removal.
     #expect(try tmux(t, "set-environment", "-t", "=\(t.claude)", "-r", "SSH_AUTH_SOCK").status == 0)
     try restartWithAMessage(sbd, s.id)
-    // With neither a value nor a mark, claude gets sbd's own agent.
-    #expect(try tmux(t, "show-environment", "-t", "=\(t.claude)", "SSH_AUTH_SOCK").status != 0)
+    #expect(sbd.stubCalls().last?.agent == sbd.sbdAgent)
   }
 
   @Test func restartsClaudeWithoutAnAgentThatConfigEnvNoLongerSets() throws {
@@ -140,8 +142,7 @@ import Testing
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     try sbd.restart(setting: "env", to: [:])
     try restartWithAMessage(sbd, s.id)
-    let t = try sbd.client.terminals(s.id)
-    #expect(try tmux(t, "show-environment", "-t", "=\(t.claude)", "SSH_AUTH_SOCK").status != 0)
+    #expect(sbd.stubCalls().last?.agent == sbd.sbdAgent)
   }
 
   /// Runs tmux on sbd's server.

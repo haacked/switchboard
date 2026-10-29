@@ -427,6 +427,32 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(reasons(again) == expected)
   }
 
+  @Test func importsSeveralSessionsInOneRequestEachFromItsOwnTranscript() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let (one, two) = (newId(), newId())
+    let (folderOne, folderTwo) = ("\(sbd.work)/one", "\(sbd.work)/two")
+    for folder in [folderOne, folderTwo] {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    }
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(one, cwd: folderOne, name: "one", job: "00000001"),
+        agent(two, cwd: folderTwo, name: "two", job: "00000002"),
+      ])
+    let now = secondsNow()
+    try sbd.writeTranscript("A", one, [transcriptLine("assistant", "Want me to run the tests?", at: now - 30_000)])
+    try sbd.writeTranscript("A", two, [transcriptLine("assistant", "Which database should I use?", at: now - 30_000)])
+
+    let result = try sbd.client.importSessions([two, "nope", one])
+
+    #expect(reasons(result) == ["nope": "no Claude session matches nope"])
+    #expect(result.imported.map(\.claudeSessionId) == [two, one])
+    #expect(result.imported.map(\.cwd) == [folderTwo, folderOne])
+    #expect(
+      result.imported.map(\.reason) == ["answer: Which database should I use?", "offered: Want me to run the tests?"])
+  }
+
   @Test func refusesAConversationThatTwoSwitchboardSessionsHold() throws {
     let sbd = try Instance(accounts: ["A"])
     let first = try sbd.new(prompt: "hello")

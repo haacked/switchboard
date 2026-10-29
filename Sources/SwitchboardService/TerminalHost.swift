@@ -139,7 +139,11 @@ final class TerminalHost {
       // show-environment prints -NAME for a variable that is marked for removal.
       let marked = line.hasPrefix("-")
       let key = String((marked ? line.dropFirst() : line).prefix { $0 != "=" })
-      guard env[key] == nil else { continue }
+      // tmux prints a value with a newline over several lines. This skips a
+      // further line that doesn't start with a variable name.
+      guard key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil, env[key] == nil else {
+        continue
+      }
       let stale = marked ? baseEnv[key] != nil : !copied.contains(key)
       if stale { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
     }

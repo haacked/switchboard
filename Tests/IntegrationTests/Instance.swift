@@ -60,6 +60,9 @@ final class Instance {
 
   var work: String { "\(home.path)/work" }
 
+  /// The SSH_AUTH_SOCK that sbd runs with.
+  var sbdAgent: String { "\(home.path)/sbd-agent.sock" }
+
   func startSbd() throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sbd")
@@ -69,7 +72,7 @@ final class Instance {
     // can then tell the account that sbd sets from the one it inherited.
     env["CLAUDE_CONFIG_DIR"] = inheritedAccount
     // A fixed agent lets a test tell sbd's own SSH agent from a terminal's.
-    env["SSH_AUTH_SOCK"] = "\(home.path)/sbd-agent.sock"
+    env["SSH_AUTH_SOCK"] = sbdAgent
     p.environment = env
     let log = FileHandle(forWritingAtPath: home.log)!
     log.seekToEndOfFile()
@@ -221,14 +224,15 @@ final class Instance {
 
   func stubArgs() -> [String] { stubCalls().map(\.args) }
 
-  /// Each run of the stub claude, oldest first: its arguments, and its
-  /// CLAUDE_CONFIG_DIR, which is empty when the variable was unset.
-  func stubCalls() -> [(args: String, account: String)] {
+  /// Each run of the stub claude, oldest first: its CLAUDE_CONFIG_DIR, its
+  /// SSH_AUTH_SOCK, and its arguments. A variable that was unset reads as
+  /// empty.
+  func stubCalls() -> [(account: String, agent: String, args: String)] {
     let text = (try? String(contentsOfFile: "\(home.path)/stub-calls.log", encoding: .utf8)) ?? ""
     // The text after the last NUL is empty, or a record that the stub is writing.
     return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().map { record in
-      let fields = record.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
-      return (args: String(fields[1]), account: String(fields[0]))
+      let fields = record.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+      return (account: fields[0], agent: fields[1], args: fields[2])
     }
   }
 

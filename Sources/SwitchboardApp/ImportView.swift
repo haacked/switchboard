@@ -147,6 +147,7 @@ struct ImportView: View {
         form.selected.formIntersection(list.sessions.filter { !$0.running }.map(\.id))
       case .failure(let error):
         form.error = "\(error)"
+        AccessibilityNotification.Announcement("Can't list the sessions: \(error)").post()
       }
     }
   }
