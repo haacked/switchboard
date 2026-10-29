@@ -87,7 +87,7 @@ A card waits until you answer it from `sb` or the app, or answer Claude Code's o
 }
 ```
 
-- `type` is `http` (streamable HTTP) or `sse`. `sbd` replaces `{port}` in `command`, `args`, and `env` with a port that it picks and keeps, or with `port` when you set one. `path` overrides the URL path, which is `/mcp` for `http` and `/sse` for `sse`.
+- `type` is `http` (streamable HTTP) or `sse`. `sbd` replaces `{port}` in `command`, `args`, and `env` with a port that it picks and keeps, or with `port` when you set one. It picks a new port when another program took the old one while the server wasn't running. `path` overrides the URL path, which is `/mcp` for `http` and `/sse` for `sse`.
 - tmux starts the command with your shell, so it gets the PATH that your shell sets for a non-interactive command, such as in `~/.zshenv`. A full path doesn't depend on that.
 - Every session gets `--mcp-config ~/.sb/mcp-config.json`. A server there replaces the server with the same name in your Claude config, and the session keeps its other servers, such as remote ones, the claude.ai connectors, and a project's `.mcp.json` servers.
 - `sbd` starts the servers before any session, and starts a server again on the same port when it exits. A server that keeps exiting waits longer each time, up to a minute. `sb mcp` lists the servers, and for one that exited, its exit status and last output.

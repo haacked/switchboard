@@ -52,8 +52,13 @@ extension Service {
     }
     let valid = config.mcpServers.filter { problems[$0.key] == nil }
     let written = (try? String(contentsOfFile: home.mcpConfig, encoding: .utf8)).flatMap(JSON.parse)
-    let ports = MCPServer.assignPorts(
-      valid, previous: written.map(MCPServer.ports(inClaudeConfig:)) ?? [:], freePort: LocalPort.free)
+    // A server keeps its port from the last run while it still runs there.
+    // Otherwise it keeps the port only if no other program took it, such as
+    // while the Mac restarted.
+    let previous = (written.map(MCPServer.ports(inClaudeConfig:)) ?? [:]).filter { name, port in
+      snapshot.panes[Service.mcpPanePrefix + name]?.dead == false || LocalPort.canBind(port)
+    }
+    let ports = MCPServer.assignPorts(valid, previous: previous, freePort: LocalPort.free)
     mcp = ports.keys.sorted().map { SharedServer(name: $0, config: valid[$0]!, port: ports[$0]!) }
     let panes = Set(mcp.map(\.pane))
     for pane in snapshot.panes.keys where pane.hasPrefix(Service.mcpPanePrefix) && !panes.contains(pane) {
@@ -240,6 +245,22 @@ enum LocalPort {
     var length = socklen_t(MemoryLayout<Int32>.size)
     getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length)
     return error == 0
+  }
+
+  /// Whether a server could listen on the port now. It sets SO_REUSEADDR, as
+  /// servers do, so a port that only closed connections hold counts as free.
+  static func canBind(_ port: Int) -> Bool {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    guard fd >= 0 else { return false }
+    defer { close(fd) }
+    var on: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+    var addr = loopback(port)
+    return withUnsafePointer(to: &addr) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+      }
+    }
   }
 
   /// A port that the OS picks among those that no socket holds now.

@@ -172,6 +172,39 @@ extension Instance {
     #expect(try !sbd.get(s.id).live)
   }
 
+  @Test func terminalsWaitForAStartingServerWhenTheyStartClaude() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let slow = try sbd.waitForRunning("slow")
+    try sbd.stopClaude(s.id)
+    try sbd.tmux("kill-session", "-t", "=\(s.id)-claude")
+    try sbd.restartServer(slow)
+    _ = try sbd.client.terminals(s.id)
+    #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func movesAServerOffASavedPortThatAnotherProgramTook() throws {
+    let sbd = try Instance(config: ["mcpServers": ["grafana": Instance.stubServer("grafana")]])
+    let first = try sbd.waitForRunning("grafana")
+    sbd.stopSbd()
+    try sbd.tmux("kill-server")
+    // Another program takes the port while sbd is down, as one can while the Mac restarts.
+    let port = try #require(URLComponents(string: first.url)?.port)
+    var holder: Int32 = -1
+    try sbd.waitFor("the server to free its port") {
+      holder = listenOnLoopback(port)
+      return holder >= 0
+    }
+    defer { close(holder) }
+    try sbd.startSbd()
+    let second = try sbd.waitForRunning("grafana")
+    #expect(second.url != first.url)
+    #expect(second.restarts == 0)
+    let s = try sbd.new(prompt: "mcp grafana")
+    try sbd.waitFor(s.id, "the call to grafana") { $0.lastReply == "MCP grafana: grafana \(second.pid!)" }
+  }
+
   @Test func restartsAServerThatExitsOnTheSamePort() throws {
     let sbd = try Instance(config: ["mcpServers": ["grafana": Instance.stubServer("grafana")]])
     let first = try sbd.waitForRunning("grafana")
@@ -248,4 +281,28 @@ extension Instance {
     #expect(try sbd.mcpServers().map(\.name) == ["changed", "kept"])
     try sbd.waitFor("the removed server to exit") { kill(pid_t(removed.pid!), 0) != 0 }
   }
+}
+
+/// A socket that listens on 127.0.0.1 at the port, or -1 when another socket
+/// holds the port.
+private func listenOnLoopback(_ port: Int) -> Int32 {
+  let fd = socket(AF_INET, SOCK_STREAM, 0)
+  guard fd >= 0 else { return -1 }
+  var on: Int32 = 1
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
+  var addr = sockaddr_in()
+  addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+  addr.sin_family = sa_family_t(AF_INET)
+  addr.sin_port = in_port_t(UInt16(port)).bigEndian
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+  let bound = withUnsafePointer(to: &addr) {
+    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+      bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+    }
+  }
+  guard bound, listen(fd, 1) == 0 else {
+    close(fd)
+    return -1
+  }
+  return fd
 }
