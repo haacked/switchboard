@@ -110,6 +110,15 @@ final class Instance {
     return try runCommand("\(Instance.bin)/sb", args, env: env)
   }
 
+  /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
+  func restart(setting key: String, to value: JSON) throws {
+    var config = try #require(JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object)
+    config[key] = value
+    try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
+    stopSbd()
+    try startSbd()
+  }
+
   /// The full path of an account that `init` created.
   func account(_ name: String) -> String { "\(home.path)/\(name)" }
 

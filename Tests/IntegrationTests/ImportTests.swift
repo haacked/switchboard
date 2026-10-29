@@ -167,11 +167,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
   @Test func listsTheDefaultAccountWithClaudeConfigDirUnset() throws {
     let sbd = try Instance(accounts: ["A"])
-    var config = try #require(JSON.parse(try String(contentsOfFile: sbd.home.config, encoding: .utf8))?.object)
-    config["claudeConfigDirs"] = JSON.array(["~/.claude", .string(sbd.account("A"))])
-    try JSON.object(config).text.write(toFile: sbd.home.config, atomically: true, encoding: .utf8)
-    sbd.stopSbd()
-    try sbd.startSbd()
+    try sbd.restart(setting: "claudeConfigDirs", to: JSON.array(["~/.claude", .string(sbd.account("A"))]))
 
     _ = try sbd.client.importable()
 
@@ -185,11 +181,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let id = newId()
     try sbd.writeAgents("B", [agent(id, cwd: sbd.work, name: "elsewhere", pid: Int(getpid()), status: "idle")])
     #expect(try sbd.client.importable(all: true).sessions.map(\.id) == [id])
-    var config = try #require(JSON.parse(try String(contentsOfFile: sbd.home.config, encoding: .utf8))?.object)
-    config["claudeConfigDirs"] = JSON.array([.string(sbd.account("A"))])
-    try JSON.object(config).text.write(toFile: sbd.home.config, atomically: true, encoding: .utf8)
-    sbd.stopSbd()
-    try sbd.startSbd()
+    try sbd.restart(setting: "claudeConfigDirs", to: JSON.array([.string(sbd.account("A"))]))
 
     let listed = try sbd.client.importable(all: true).sessions
     let result = try sbd.client.importSessions(["elsewhere"])
@@ -218,11 +210,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
   @Test func importsASessionThatNoClaudeRunsAndResumesItUnderItsAccount() throws {
     let sbd = try Instance(accounts: ["A"])
-    var config = try #require(JSON.parse(try String(contentsOfFile: sbd.home.config, encoding: .utf8))?.object)
-    config["env"] = ["CLAUDE_CONFIG_DIR": .string("\(sbd.home.path)/env-account")]
-    try JSON.object(config).text.write(toFile: sbd.home.config, atomically: true, encoding: .utf8)
-    sbd.stopSbd()
-    try sbd.startSbd()
+    try sbd.restart(setting: "env", to: ["CLAUDE_CONFIG_DIR": .string("\(sbd.home.path)/env-account")])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/parser")
     let id = newId()
     try sbd.writeAgents("A", [agent(id, cwd: tree, name: "parser-work", job: "0badf00d")])

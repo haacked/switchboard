@@ -50,6 +50,20 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
     #expect(tail == TranscriptTail(lastReply: "Want me to push?", lastActivity: 1_792_922_405_250, hasReplies: true))
   }
 
+  @Test func tailReadsAReplyWhoseContentIsAStringAndAWholeSecondTimestamp() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let reply: JSON = [
+      "type": "assistant", "isSidechain": false, "timestamp": "2026-10-25T10:00:05Z",
+      "message": ["role": "assistant", "content": "Want me to push?"],
+    ]
+    let path = try writeTranscript([userLine("Go.", at: "2026-10-25T10:00:00.000Z"), reply], in: dir)
+
+    let tail = Transcript.tail(path)
+
+    #expect(tail == TranscriptTail(lastReply: "Want me to push?", lastActivity: 1_792_922_405_000, hasReplies: true))
+  }
+
   @Test func tailKeepsTwoLinesApartWhenAReadStartsAtTheNewlineBetweenThem() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -350,6 +364,35 @@ private let otherAccountForms = ["~/.claude-personal", "~/.claudex", "~/.claude/
   @Test func aSessionRunsOnlyWhileItHasAPid() {
     #expect(ClaudeSession(id: "u1", cwd: "/a", account: Self.account, pid: 57910).running)
     #expect(!ClaudeSession(id: "u1", cwd: "/a", account: Self.account).running)
+  }
+
+  @Test(arguments: [
+    (
+      ClaudeSession(id: "u1", cwd: "/a", account: ClaudeSessionTests.account, status: "busy", job: "j1", pid: 1),
+      "background job j1, busy"
+    ),
+    (
+      ClaudeSession(id: "u1", cwd: "/a", account: ClaudeSessionTests.account, status: "idle", pid: 1),
+      "idle in another terminal"
+    ),
+    (ClaudeSession(id: "u1", cwd: "/a", account: ClaudeSessionTests.account, job: "j1"), "background job j1, stopped"),
+    (ClaudeSession(id: "u1", cwd: "/a", account: ClaudeSessionTests.account), "exited"),
+  ])
+  func summarySaysWhetherAndWhereAClaudeRunsTheSession(_ session: ClaudeSession, _ summary: String) {
+    #expect(session.summary == summary)
+  }
+
+  @Test func groupsKeepEachRepoTogetherAndPutFoldersOutsideGitInOneGroup() {
+    let docketA = ClaudeSession(id: "u1", cwd: "/a", account: Self.account, repo: "docket")
+    let docketB = ClaudeSession(id: "u2", cwd: "/b", account: Self.account, repo: "docket")
+    let notesA = ClaudeSession(id: "u3", cwd: "/c", account: Self.account, repo: "notes")
+    let outsideA = ClaudeSession(id: "u4", cwd: "/d", account: Self.account)
+    let outsideB = ClaudeSession(id: "u5", cwd: "/e", account: Self.account)
+
+    let groups = ImportList(sessions: [docketA, docketB, notesA, outsideA, outsideB], hidden: 0).groups
+
+    #expect(groups.map(\.title) == ["docket", "notes", "Outside git"])
+    #expect(groups.map { $0.sessions.map(\.id) } == [["u1", "u2"], ["u3"], ["u4", "u5"]])
   }
 }
 

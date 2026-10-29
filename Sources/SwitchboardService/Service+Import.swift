@@ -61,8 +61,9 @@ extension Service {
 
   /// The sessions that `claude agents` lists now, and the remembered ones that
   /// have left the list, which no claude runs. The listed ones include those
-  /// that Switchboard has, so that a ref to one by Claude's name says so. It
-  /// runs claude off the state queue.
+  /// that Switchboard has, so that a ref to one by Claude's name gets the
+  /// refusal that it is already in Switchboard. It runs claude off the state
+  /// queue.
   func importCandidates() throws -> [ClaudeSession] {
     let now = nowMs()
     let accounts = self.accounts

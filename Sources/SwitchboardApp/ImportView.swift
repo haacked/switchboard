@@ -166,11 +166,13 @@ struct ImportView: View {
         if r.refused.isEmpty {
           dismiss()
         } else {
+          AccessibilityNotification.Announcement(form.problems.joined(separator: " ")).post()
           form.selected = []
           load()
         }
       case .failure(let error):
         form.problems = ["\(error)"]
+        AccessibilityNotification.Announcement("Import failed: \(error)").post()
       }
     }
   }

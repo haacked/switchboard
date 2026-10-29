@@ -51,7 +51,9 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var pid: Int?
   /// When `claude agents` last listed the session, in ms since the epoch.
   public var seen: Int64
-  /// The folder name of the repo's main checkout, or nil outside git.
+  /// The folder name of the repo's main checkout, or nil outside git. sbd sets
+  /// `repo`, `branch`, and `worktree` with git after `claude agents` lists the
+  /// session. They are nil and false until then.
   public var repo: String?
   public var branch: String?
   /// True when the folder is a linked worktree of its repo.
@@ -157,7 +159,8 @@ public enum Transcript {
   }
 
   /// Reads the transcript from the end, because transcripts reach 24 MB. Each
-  /// read is twice the size of the one before, so a long line costs few reads.
+  /// read is twice the size of the one before, up to 4 MB, so a long line
+  /// costs few reads.
   public static func tail(_ path: String) -> TranscriptTail {
     var tail = TranscriptTail()
     guard let file = FileHandle(forReadingAtPath: path), var offset = try? file.seekToEnd() else { return tail }
@@ -174,7 +177,9 @@ public enum Transcript {
       guard (try? file.seek(toOffset: offset)) != nil, let chunk = try? file.read(upToCount: Int(count)) else { break }
       var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
-      for line in lines.reversed() where !line.isEmpty && read(line, into: &tail) { return tail }
+      for line in lines.reversed() where !line.isEmpty {
+        if read(line, into: &tail) { return tail }
+      }
     }
     return tail
   }
