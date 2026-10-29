@@ -196,7 +196,8 @@ extension Service {
     let args = ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD"]
     let lines = (try? gitOutput(cwd, args))?.split(separator: "\n").map(String.init) ?? []
     guard lines.count == 3 else { return (nil, nil, false) }
-    return (Service.repoName(commonDir: lines[1]), lines[2] == "HEAD" ? nil : lines[2], lines[0] != lines[1])
+    let (gitDir, commonDir, head) = (lines[0], lines[1], lines[2])
+    return (Service.repoName(commonDir: commonDir), head == "HEAD" ? nil : head, gitDir != commonDir)
   }
 
   /// The folder name of the main checkout, whose common git folder is its
