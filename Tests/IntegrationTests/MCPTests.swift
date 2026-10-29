@@ -219,6 +219,31 @@ extension Instance {
     try sbd.waitFor(s.id, "the call to the restarted server") { $0.lastReply == "MCP grafana: grafana \(second.pid!)" }
   }
 
+  @Test func restartsAServerWhoseTmuxSessionIsGone() throws {
+    let sbd = try Instance(config: ["mcpServers": ["grafana": Instance.stubServer("grafana")]])
+    let first = try sbd.waitForRunning("grafana")
+    try sbd.tmux("kill-session", "-t", "=mcp-grafana")
+    let second = try sbd.waitForServer("grafana", "the recreated server") {
+      $0.state == .running && $0.pid != nil && $0.pid != first.pid
+    }
+    #expect(second.lastExit == "its tmux session is gone")
+    #expect(second.url == first.url)
+  }
+
+  @Test func aQueuedMessageWaitsForAStartingServer() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
+    let s = try sbd.new(prompt: "slow 10")
+    let working = try sbd.waitFor(s.id, "the turn") { $0.state == .working && $0.claudePid != nil }
+    #expect(try sbd.sb("send", s.id, "mcp slow") == "queued\n")
+    // This moves sbd's clock past the 5 s that it keeps between a session's launches.
+    try sbd.advanceClock(5_000)
+    try sbd.restartServer(try sbd.waitForRunning("slow"))
+    kill(pid_t(working.claudePid!), SIGKILL)
+    let restarted = try sbd.waitForRunning("slow")
+    try sbd.waitFor(s.id, "the queued call") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
+    #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
+  }
+
   @Test func backsOffAServerThatKeepsExiting() throws {
     let sbd = try Instance(config: [
       "mcpServers": [
@@ -240,7 +265,7 @@ extension Instance {
 
   @Test func backsOffAServerThatSbdCantStart() throws {
     let sbd = try Instance(config: ["mcpServers": ["grafana": Instance.stubServer("grafana")]])
-    try sbd.waitForRunning("grafana")
+    let first = try sbd.waitForRunning("grafana")
     sbd.stopSbd()
     try sbd.tmux("kill-server")
     // sbd can't write the launcher script into a folder that it can't write to.
@@ -249,6 +274,7 @@ extension Instance {
     try sbd.startSbd()
     let failed = try sbd.waitForServer("grafana", "a failed start") { $0.lastExit?.hasPrefix("can't start") == true }
     #expect(failed.state == .exited)
+    #expect(failed.url == first.url)
     sleep(3)
     #expect((1...4).contains(try sbd.mcpServers().first!.restarts))
     chmod(sbd.home.mcpFolder, 0o700)

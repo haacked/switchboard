@@ -94,7 +94,7 @@ final class TerminalHost {
   /// The value of a tmux format for the pane, or nil when the pane is missing.
   /// For a missing pane, tmux prints an empty line and exits 0. The formats
   /// here print something for every pane, so an empty value means missing.
-  func display(_ name: String, _ format: String) -> String? {
+  private func display(_ name: String, _ format: String) -> String? {
     let value = (try? run(["display-message", "-p", "-t", "=\(name):", format]))?
       .trimmingCharacters(in: .whitespacesAndNewlines)
     return value?.isEmpty == false ? value : nil
