@@ -30,6 +30,10 @@ public struct SessionFacts: Equatable, Sendable {
   public var lastActivity: Int64 = 0
   /// When claude last reported SessionStart.
   public var lastStart: Int64?
+  /// The transcript that the last SessionStart named, in the account that
+  /// claude runs under. Claude creates the file at the conversation's first
+  /// prompt.
+  public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
   /// Subagents that started and have not stopped.
@@ -60,6 +64,7 @@ public struct SessionFacts: Equatable, Sendable {
     case "SessionStart":
       live = true
       lastStart = event.t
+      transcriptPath = d["transcript_path"]?.string
     case "running":
       live = true
     case "started", "resumed":

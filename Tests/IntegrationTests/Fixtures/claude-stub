@@ -34,7 +34,8 @@
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read.
 # Like claude, it writes a line to the conversation's transcript in
-# $CLAUDE_CONFIG_DIR/projects/stub for each prompt and for clear. --resume
+# $CLAUDE_CONFIG_DIR/projects/stub for each prompt and for clear. Each hook
+# payload names that transcript in transcript_path. --resume
 # fails when no transcript exists, and --session-id fails when one does.
 # Without CLAUDE_CONFIG_DIR, the transcript would go to the user's ~/.claude,
 # so the stub then neither writes nor checks one.
@@ -68,9 +69,12 @@ done
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
 request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 
-# payload <event> [json fields]: a hook payload shaped like claude's.
+# payload <event> [json fields]: a hook payload shaped like claude's. It names
+# the transcript, as claude's does, even before the file exists.
 payload() {
-  jq -nc --arg e "$1" --arg s "$session" --argjson f "${2:-{\}}" '{hook_event_name: $e, session_id: $s} + $f'
+  jq -nc --arg e "$1" --arg s "$session" --arg t "${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/projects/stub/$session.jsonl}" \
+    --argjson f "${2:-{\}}" \
+    '{hook_event_name: $e, session_id: $s} + (if $t == "" then {} else {transcript_path: $t} end) + $f'
 }
 
 # transcript <text>: appends a line to the conversation's transcript.

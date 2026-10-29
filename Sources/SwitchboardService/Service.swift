@@ -421,14 +421,21 @@ public final class Service {
     record(id, resume ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening])
   }
 
-  /// Whether the session's conversation has a transcript in the account that
-  /// its pane runs claude under. `--resume` fails without one. Claude writes
-  /// none before the conversation's first prompt, so a claude that exits
-  /// before one leaves a conversation that only `--session-id` can start. A
-  /// session that sbd never started claude for has none, so the search skips
-  /// it.
+  /// Whether the session's conversation has a transcript. `--resume` fails
+  /// without one. Claude writes none before the conversation's first prompt,
+  /// so a claude that exits before one leaves a conversation that only
+  /// `--session-id` can start. SessionStart names the transcript in the
+  /// account that claude runs under. A shell profile or a wrapper can pick
+  /// that account. Before a SessionStart for the conversation, as for an
+  /// imported one, this looks in the account that the pane sets. A session
+  /// that sbd never started claude for has none.
   private func hasTranscript(_ session: Session) -> Bool {
     guard session.started else { return false }
+    if let path = entries[session.id]?.facts.transcriptPath,
+      (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
+    {
+      return FileManager.default.fileExists(atPath: path)
+    }
     let account = paneEnv(session.id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
     return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) != nil
   }

@@ -143,6 +143,27 @@ import Testing
     let sbd = try Instance()
     let account = "\(sbd.home.path)/env-account"
     try sbd.restart(setting: "env", to: ["CLAUDE_CONFIG_DIR": .string(account)])
+    try expectResumeAfterAReply(sbd, under: account)
+  }
+
+  @Test func resumesAConversationThatAWrapperRunsUnderAnotherAccount() throws {
+    let sbd = try Instance()
+    let account = "\(sbd.home.path)/wrapper-account"
+    // sbd finds claude's process by the name of the claude command, so the
+    // wrapper has the stub's name.
+    let wrapper = "\(sbd.home.path)/bin/claude-stub"
+    try FileManager.default.createDirectory(atPath: "\(sbd.home.path)/bin", withIntermediateDirectories: true)
+    try "#!/bin/sh\nCLAUDE_CONFIG_DIR='\(account)' exec '\(Instance.stub)' \"$@\"\n".write(
+      toFile: wrapper, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper)
+    try sbd.restart(setting: "claude", to: .string(wrapper))
+    try expectResumeAfterAReply(sbd, under: account)
+  }
+
+  /// Stops a new session's claude after its first reply and sends the session
+  /// another message. It expects claude to resume the conversation under the
+  /// account.
+  private func expectResumeAfterAReply(_ sbd: Instance, under account: String) throws {
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("stop", s.id)
