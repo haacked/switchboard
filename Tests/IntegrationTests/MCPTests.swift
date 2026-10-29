@@ -22,15 +22,18 @@ extension Instance {
     try waitFor(what, timeout: timeout, fetch: { try mcpServers().first { $0.name == name } }, until: match)
   }
 
+  /// Runs tmux on this instance's tmux server.
+  @discardableResult
+  func tmux(_ args: String...) throws -> CommandResult {
+    try runCommand(try #require(findExecutable("tmux")), ["-S", home.tmuxSocket] + args)
+  }
+
   /// Stops the session's claude and waits for tmux to show its pane dead,
-  /// which comes a moment after the session stops being live. A server
-  /// killed after this restarts in a tick whose snapshot has the dead pane.
+  /// which comes a moment after the session stops being live.
   func stopClaude(_ id: String) throws {
     try sb("stop", id)
-    let tmux = try #require(findExecutable("tmux"))
     try waitFor("the Claude pane to die") {
-      try runCommand(tmux, ["-S", home.tmuxSocket, "display", "-p", "-t", "=\(id)-claude:", "#{pane_dead}"]).stdout
-        == "1\n"
+      try tmux("display", "-p", "-t", "=\(id)-claude:", "#{pane_dead}").stdout == "1\n"
     }
   }
 
@@ -38,11 +41,18 @@ extension Instance {
     try waitForServer(name, "\(name) to accept connections") { $0.state == .running && $0.pid != nil }
   }
 
-  /// Replaces mcpServers in config.json, which sbd reads when it starts.
-  func setMCPServers(_ servers: JSON) throws {
-    var config = JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object ?? [:]
-    config["mcpServers"] = servers
-    try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
+  /// Kills the server and waits for sbd to start it again.
+  func restartServer(_ server: MCPServerStatus) throws {
+    kill(pid_t(server.pid!), SIGKILL)
+    try waitForServer(server.name, "\(server.name) to start again") {
+      $0.state == .starting && $0.restarts == server.restarts + 1
+    }
+  }
+
+  /// Replaces these keys in config.json, which sbd reads when it starts.
+  func setConfig(_ values: [String: JSON]) throws {
+    let config = JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object ?? [:]
+    try JSON.object(config.merging(values) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
   }
 }
 
@@ -88,8 +98,7 @@ extension Instance {
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
-    kill(pid_t(slow.pid!), SIGKILL)
-    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    try sbd.restartServer(slow)
     let start = Date()
     try sbd.sb("send", s.id, "while it starts")
     #expect(Date().timeIntervalSince(start) < 2)
@@ -102,11 +111,25 @@ extension Instance {
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
     try sbd.stopClaude(s.id)
-    kill(pid_t(slow.pid!), SIGKILL)
-    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    try sbd.restartServer(slow)
     try sbd.sb("send", s.id, "mcp slow")
     let restarted = try sbd.waitForRunning("slow")
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
+    #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func aSendWaitsForAStartingServerBeforeATickSeesClaudeStop() throws {
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow")]])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    sbd.stopSbd()
+    // Without ticks, sbd's snapshot changes only when a request takes a new one.
+    // The changed server starts again when sbd starts.
+    try sbd.setConfig(["tickSeconds": 3600, "mcpServers": ["slow": Instance.stubServer("slow", delay: 5)]])
+    try sbd.startSbd()
+    try sbd.stopClaude(s.id)
+    try sbd.sb("send", s.id, "mcp slow")
+    try sbd.waitFor(s.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
@@ -119,8 +142,7 @@ extension Instance {
     try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
     try sbd.waitFor(a.id, "the stop", timeout: 10) { !$0.live }
     let slow = try sbd.waitForRunning("slow")
-    kill(pid_t(slow.pid!), SIGKILL)
-    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    try sbd.restartServer(slow)
     // `done` doesn't launch claude itself. The tick resolves the wait and launches it.
     try sbd.sb("done", b.id)
     try sbd.waitFor(a.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: b to reach Done: it did." }
@@ -143,8 +165,7 @@ extension Instance {
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
     try sbd.stopClaude(s.id)
-    kill(pid_t(slow.pid!), SIGKILL)
-    try sbd.waitForServer("slow", "the restarted server") { $0.state == .starting && $0.restarts == 1 }
+    try sbd.restartServer(slow)
     let start = Date()
     _ = try sbd.client.terminals(s.id)
     #expect(Date().timeIntervalSince(start) < 2)
@@ -188,7 +209,7 @@ extension Instance {
     let sbd = try Instance(config: ["mcpServers": ["grafana": Instance.stubServer("grafana")]])
     try sbd.waitForRunning("grafana")
     sbd.stopSbd()
-    try runCommand(try #require(findExecutable("tmux")), ["-S", sbd.home.tmuxSocket, "kill-server"])
+    try sbd.tmux("kill-server")
     // sbd can't write the launcher script into a folder that it can't write to.
     chmod(sbd.home.mcpFolder, 0o500)
     defer { chmod(sbd.home.mcpFolder, 0o700) }
@@ -198,6 +219,8 @@ extension Instance {
     sleep(3)
     #expect((1...4).contains(try sbd.mcpServers().first!.restarts))
     chmod(sbd.home.mcpFolder, 0o700)
+    // This moves sbd's clock past the backoff, so the next tick starts the server.
+    try sbd.advanceClock(60_000)
     try sbd.waitForRunning("grafana")
   }
 
@@ -212,7 +235,9 @@ extension Instance {
     let changed = try sbd.waitForRunning("changed")
     let removed = try sbd.waitForRunning("removed")
     sbd.stopSbd()
-    try sbd.setMCPServers(["kept": Instance.stubServer("kept"), "changed": Instance.stubServer("changed", delay: 0.1)])
+    try sbd.setConfig([
+      "mcpServers": ["kept": Instance.stubServer("kept"), "changed": Instance.stubServer("changed", delay: 0.1)]
+    ])
     try sbd.startSbd()
     let keptAfter = try sbd.waitForRunning("kept")
     let changedAfter = try sbd.waitForRunning("changed")

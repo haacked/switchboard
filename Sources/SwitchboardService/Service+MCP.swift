@@ -108,15 +108,22 @@ extension Service {
   /// `mcpStartMs` ago and doesn't accept connections yet. claude connects to
   /// its MCP servers only when it starts. A session that starts before a
   /// server listens lacks that server until it stops and resumes. With a
-  /// request, it waits only while the request can start claude in the session
+  /// request, it waits only when the request can start claude in the session
   /// it names. It runs off the state queue.
   func awaitMCPServers(for request: Request? = nil) {
+    if let request {
+      guard let id = queue.sync(execute: { mcpStarting(now: nowMs()) ? try? lookup(request.args) : nil }) else {
+        return
+      }
+      // This asks tmux, because the tick's snapshot can still show a Claude
+      // pane that has died since. `terminals` starts claude only in a missing
+      // pane. The other requests start it in a dead or missing pane.
+      let dead = host.isDead(paneName(id, .claude))
+      guard request.op == "terminals" ? dead == nil : dead != false else { return }
+    }
     let deadline = Date().addingTimeInterval(Double(Service.mcpStartMs) / 1000)
     while Date() < deadline {
       let starting: [(index: Int, port: Int, run: Int64)] = queue.sync {
-        if let request {
-          guard let id = try? lookup(request.args), canLaunch(request.op, id) else { return [] }
-        }
         let now = nowMs()
         return mcp.indices.filter { isStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
       }
@@ -147,12 +154,6 @@ extension Service {
   private func mcpState(_ server: SharedServer) -> MCPServerStatus.State {
     if server.restartAt != nil || !mcpPaneAlive(server) { return .exited }
     return server.listening ? .running : .starting
-  }
-
-  /// Whether the request `op` can start claude in the session. Requests other
-  /// than `terminals` start claude whenever it is stopped.
-  private func canLaunch(_ op: String, _ id: String) -> Bool {
-    op == "terminals" ? terminalsStartsClaude(id) : claudeState(id) == .stopped
   }
 
   private func isStarting(_ server: SharedServer, now: Int64) -> Bool {

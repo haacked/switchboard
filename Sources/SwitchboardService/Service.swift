@@ -358,12 +358,9 @@ public final class Service {
     default:
       break
     }
-    if terminalsStartsClaude(id) { try launch(id, prompt: nil) }
+    if snapshot.panes[paneName(id, .claude)] == nil { try launch(id, prompt: nil) }
     return Terminals(tmux: host.tmux, socket: host.socket, claude: paneName(id, .claude), shell: shell)
   }
-
-  /// `terminals` starts claude only in a missing Claude pane.
-  func terminalsStartsClaude(_ id: String) -> Bool { snapshot.panes[paneName(id, .claude)] == nil }
 
   /// Starts claude in the session's Claude pane. The first launch starts a
   /// new conversation. Each later launch resumes it. `prompt` becomes the
@@ -535,10 +532,7 @@ public final class Service {
     s.panes = host.panes()
     s.children = Processes.byParent()
     let program = (config.claude as NSString).lastPathComponent
-    // A shared MCP server named like x-claude runs in the pane mcp-x-claude,
-    // which ends in -claude like a session's Claude pane.
-    for (name, pane) in s.panes where name.hasSuffix("-claude") && !name.hasPrefix(Service.mcpPanePrefix) && !pane.dead
-    {
+    for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
       if let pid = Service.findClaude(below: pane.pid, program: program, in: s.children) {
         s.claudePids[String(name.dropLast("-claude".count))] = pid
       }
