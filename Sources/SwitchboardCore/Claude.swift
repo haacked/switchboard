@@ -185,7 +185,7 @@ public enum Transcript {
       var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
       for line in lines.reversed() where !line.isEmpty {
-        if read(line, into: &tail) { return tail }
+        if fold(line, into: &tail) { return tail }
       }
     }
     return tail
@@ -195,7 +195,7 @@ public enum Transcript {
   /// main conversation's replies are the assistant lines that are not
   /// sidechains, which hold subagents. An api-request-blob line also carries
   /// an assistant message, and its type leaves it out.
-  static func read(_ line: Data, into tail: inout TranscriptTail) -> Bool {
+  static func fold(_ line: Data, into tail: inout TranscriptTail) -> Bool {
     guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return false }
     if tail.lastActivity == nil, let t = object["timestamp"]?.string.flatMap(milliseconds) { tail.lastActivity = t }
     guard object["type"]?.string == "assistant", object["isSidechain"]?.bool != true else { return false }

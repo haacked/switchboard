@@ -126,6 +126,7 @@ final class TerminalHost {
   /// first unsets each one that `env` lacks, which leaves the server's own
   /// environment for that name.
   func respawn(_ name: String, cwd: String, env: [String: String], command: String?) throws {
+    // show-environment prints -NAME for a variable that is already marked for removal.
     let held = try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n").compactMap { line in
       line.hasPrefix("-") ? nil : line.split(separator: "=", maxSplits: 1).first.map(String.init)
     }

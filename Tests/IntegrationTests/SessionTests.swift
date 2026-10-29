@@ -139,6 +139,21 @@ import Testing
     #expect(sbd.stubArgs().last?.hasPrefix("--resume \(s.claudeSessionId) ") == true)
   }
 
+  @Test func resumesAConversationUnderTheAccountThatConfigEnvSets() throws {
+    let sbd = try Instance()
+    let account = "\(sbd.home.path)/env-account"
+    try sbd.restart(setting: "env", to: ["CLAUDE_CONFIG_DIR": .string(account)])
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
+
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
+    #expect(sbd.stubCalls().last?.args.hasPrefix("--resume \(s.claudeSessionId) ") == true)
+    #expect(sbd.stubCalls().last?.account == account)
+  }
+
   @Test func resumesTheConversationThatClearStarted() throws {
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")

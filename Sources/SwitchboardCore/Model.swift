@@ -46,8 +46,8 @@ public struct Session: Codable, Equatable, Sendable {
   /// Milliseconds since the epoch.
   public var created: Int64
   /// True once sbd has started claude for the session, or imported it. Until
-  /// then the conversation has no transcript. A transcript may still not exist after that, because
-  /// claude writes none before the first prompt.
+  /// then the conversation has no transcript. A transcript may still not
+  /// exist after that, because claude writes none before the first prompt.
   public var started: Bool
   public var done: Bool
   /// v0.1's free-text wait. `Service.load` turns it into a manual wait.
