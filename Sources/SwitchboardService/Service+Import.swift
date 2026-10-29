@@ -47,13 +47,15 @@ extension Service {
     let tails = concurrentMap(sessions) { s in
       Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
     }
-    let imported: [SessionSummary] = try queue.sync {
-      try chosen.indices.compactMap { i in
-        if let error = alreadyImported(chosen[i].ref, id: sessions[i].id) {
-          refused.append(Refusal(ref: chosen[i].ref, reason: error.description))
-          return nil
+    var imported: [SessionSummary] = []
+    try queue.sync {
+      for (i, session) in sessions.enumerated() {
+        let ref = chosen[i].ref
+        if let error = alreadyImported(ref, id: session.id) {
+          refused.append(Refusal(ref: ref, reason: error.description))
+        } else {
+          imported.append(try adopt(session, name: name, tail: tails[i]))
         }
-        return try adopt(sessions[i], name: name, tail: tails[i])
       }
     }
     return ImportResult(imported: imported, refused: refused)
@@ -147,7 +149,9 @@ extension Service {
   /// The Switchboard session whose conversation `id` names: a Claude session
   /// id, or a unique prefix of one.
   private func owner(of id: String) -> String? {
-    let ids = entries.values.filter { $0.session.claudeSessionId.hasPrefix(id) }.map(\.session.id)
+    let sessions = entries.values.map(\.session)
+    if let exact = sessions.first(where: { $0.claudeSessionId == id }) { return exact.id }
+    let ids = sessions.filter { $0.claudeSessionId.hasPrefix(id) }.map(\.id)
     return ids.count == 1 ? ids[0] : nil
   }
 

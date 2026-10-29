@@ -200,7 +200,8 @@ func printImportable(_ list: ImportList) {
     if i > 0 { print("") }
     print(group.title.printable)
     for s in group.sessions {
-      let title = oneLine(s.title, max: 40).padding(toLength: 40, withPad: " ", startingAt: 0)
+      let titleWidth = 40
+      let title = oneLine(s.title, max: titleWidth).padding(toLength: titleWidth, withPad: " ", startingAt: 0)
       let account = (s.account as NSString).abbreviatingWithTildeInPath
       print("  \(s.running ? "●" : "○") \(s.idPrefix)  \(title)  \(s.summary), \(account)".printable)
     }

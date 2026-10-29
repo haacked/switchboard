@@ -131,8 +131,8 @@ final class TerminalHost {
   /// variables that the pane's tmux session holds. This unsets each one that
   /// `env` lacks, except a value that tmux copied from a terminal, such as a
   /// forwarded SSH_AUTH_SOCK. A terminal that lacks a copied variable, as the
-  /// app's does, marks it for removal. This clears the mark when sbd has the
-  /// variable.
+  /// app's does, marks it for removal. This clears the mark when the tmux
+  /// server's environment has the variable, such as sbd's own SSH_AUTH_SOCK.
   func respawn(_ name: String, cwd: String, env: [String: String], command: String?) throws {
     let copied = try copiedFromTerminals()
     for line in try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n") {

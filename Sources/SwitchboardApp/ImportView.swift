@@ -64,7 +64,7 @@ struct ImportView: View {
           .disabled(form.activity == .importing)
         Button(form.selected.count > 1 ? "Import \(form.selected.count) Sessions" : "Import", action: importSelected)
           .keyboardShortcut(.defaultAction)
-          .disabled(form.selected.isEmpty || form.busy)
+          .disabled(form.selected.isEmpty || form.busy || form.error != nil)
       }
     }
     .padding(20)
