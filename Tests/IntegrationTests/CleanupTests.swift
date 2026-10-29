@@ -92,7 +92,7 @@ func reaped(_ home: String) -> Bool {
     try decoy.run()
     defer { decoy.terminate() }
     #expect(try Instance.reapHome(path).status != 0)
-    #expect(decoy.isRunning)
+    #expect(processes(of: path).contains(String(decoy.processIdentifier)))
   }
 }
 
