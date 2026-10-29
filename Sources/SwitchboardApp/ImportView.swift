@@ -46,11 +46,7 @@ struct ImportView: View {
       .fixedSize(horizontal: false, vertical: true)
       content
       ForEach(form.problems, id: \.self) { problem in
-        Label {
-          Text(problem).textSelection(.enabled)
-        } icon: {
-          Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-        }
+        WarningLabel(problem)
       }
       HStack {
         if let list = form.list, form.all || list.hidden > 0 {
@@ -205,12 +201,8 @@ struct ImportRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
         if let runs = session.whereItRuns("It") {
-          Label {
-            Text(runs).textSelection(.enabled)
-          } icon: {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-          }
-          .font(.caption)
+          WarningLabel(runs)
+            .font(.caption)
         }
       }
     }
@@ -218,5 +210,20 @@ struct ImportRow: View {
     .opacity(session.running ? 0.75 : 1)
     .contentShape(Rectangle())
     .onTapGesture { if !session.running { selected.toggle() } }
+  }
+}
+
+/// Selectable text after an orange warning icon.
+struct WarningLabel: View {
+  let text: String
+
+  init(_ text: String) { self.text = text }
+
+  var body: some View {
+    Label {
+      Text(text).textSelection(.enabled)
+    } icon: {
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+    }
   }
 }

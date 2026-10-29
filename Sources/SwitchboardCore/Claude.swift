@@ -14,6 +14,13 @@ public enum ClaudeAccount {
 
   public static func isDefault(_ folder: String) -> Bool { normalize(folder) == defaultFolder }
 
+  /// Whether a Claude account lives in the folder. The default account keeps
+  /// its .claude.json in the home folder. Every other account keeps it in its
+  /// own folder.
+  public static func holdsAccount(_ folder: String) -> Bool {
+    isDefault(folder) || FileManager.default.fileExists(atPath: "\(normalize(folder))/.claude.json")
+  }
+
   /// Sets CLAUDE_CONFIG_DIR to the folder, or removes it for the default account.
   public static func apply(_ folder: String, to env: inout [String: String]) {
     env["CLAUDE_CONFIG_DIR"] = isDefault(folder) ? nil : normalize(folder)
@@ -27,9 +34,7 @@ public enum ClaudeAccount {
   /// The default account, then each ~/.claude-* folder that holds a .claude.json, by name.
   public static func discover(home: String = NSHomeDirectory()) -> [String] {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: home)) ?? []
-    let others = names.filter { $0.hasPrefix(".claude-") }.sorted().map { "\(home)/\($0)" }.filter {
-      FileManager.default.fileExists(atPath: "\($0)/.claude.json")
-    }
+    let others = names.filter { $0.hasPrefix(".claude-") }.sorted().map { "\(home)/\($0)" }.filter(holdsAccount)
     return (["\(home)/.claude"] + others).map(normalize)
   }
 }
