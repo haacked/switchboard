@@ -117,9 +117,13 @@ extension Service {
   /// it names. It runs off the state queue.
   func awaitMCPServers(for request: Request? = nil) {
     if let request {
-      guard let id = queue.sync(execute: { mcpStarting(now: nowMs()) ? try? lookup(request.args) : nil }) else {
-        return
+      // A follow-up that waits to start refuses every request that starts claude.
+      let id: String? = queue.sync {
+        guard mcpStarting(now: nowMs()), let id = try? lookup(request.args), !entries[id]!.session.waitsToStart
+        else { return nil }
+        return id
       }
+      guard let id else { return }
       // This asks tmux, because the tick's snapshot can still show a Claude
       // pane that has died since. `terminals` starts claude only in a missing
       // pane. The other requests start it in a dead or missing pane.

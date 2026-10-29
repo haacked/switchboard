@@ -106,9 +106,10 @@ extension Service {
   // MARK: Starting
 
   /// Makes the follow-up's worktree and launches claude there with its
-  /// prompt. git runs off the state queue. The session keeps its id. While
-  /// git runs, `starting` holds the id, so `rm`, `followup rm`, another start,
-  /// and the trigger leave the follow-up alone.
+  /// prompt. git and the wait for shared MCP servers run off the state queue.
+  /// The session keeps its id. Until claude launches, `starting` holds the id,
+  /// so `rm`, `followup rm`, another start, and the trigger leave the
+  /// follow-up alone.
   func startFollowup(_ args: JSON) throws -> SessionSummary {
     let session: Session = try queue.sync {
       let id = try lookup(args)
@@ -136,6 +137,7 @@ extension Service {
       }
     }
     let folder = try prepareFolder(NewSession(path: repo, branch: branch, base: args["base"]?.string))
+    awaitMCPServers()
     return try queue.sync {
       try update(session.id) { s in
         s.cwd = folder.cwd

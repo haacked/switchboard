@@ -37,7 +37,7 @@ public final class Service {
   static let inFlightMs: Int64 = 10_000
 
   var entries: [String: Entry] = [:]
-  /// The follow-ups whose worktree `followup start` is making.
+  /// The follow-ups that `followup start` is starting.
   var starting: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.

@@ -101,6 +101,29 @@ final class Outcome<T>: @unchecked Sendable {
     #expect(started.cwd == "\(sbd.home.path)/worktrees/widgets/feature/x")
   }
 
+  @Test func refusesRequestsWithoutWaitingForASharedServerThatIsStarting() throws {
+    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", delay: 60)]])
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
+    // A request waits up to 10 s for a starting server only when it can start claude.
+    for op in ["open", "send", "resume", "terminals"] {
+      let asked = Date()
+      #expect(failure(sbd, op, ["session": .string(f.id), "text": "hi"]).contains("hasn't started"))
+      #expect(Date().timeIntervalSince(asked) < 5, "\(op)")
+    }
+  }
+
+  @Test func aStartWaitsForASharedServerThatIsStarting() throws {
+    let repos = try Repos()
+    try repos.make("acme/widgets")
+    let sbd = try Instance(config: [
+      "repoRoots": [.string(repos.root)], "mcpServers": ["slow": Instance.stubServer("slow", delay: 3)],
+    ])
+    let f = try add(sbd, ["prompt": "mcp slow", "repository": "acme/widgets"])
+    _ = try sbd.client.call("followup-start", ["session": .string(f.id)])
+    try sbd.waitFor(f.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
+    #expect(try sbd.events(f.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
+  }
+
   @Test func leavesAFollowupAloneWhileItsWorktreeIsMade() throws {
     let repos = try Repos()
     let repo = try repos.make("acme/widgets")
