@@ -6,11 +6,19 @@
 # folder to the compiler when it exists.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if [ "${1:-}" = --claude ]; then
-  export SB_TEST_CLAUDE=1
-  shift
-fi
 plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
 args=()
 if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
+if [ "${1:-}" = --claude ]; then
+  export SB_TEST_CLAUDE=1
+  shift
+  # The real tests rewrite the recordings that the stub tests play, so the
+  # real tests run first, on their own.
+  if [ $# -eq 0 ]; then
+    status=0
+    swift test ${args[@]+"${args[@]}"} --filter ClaudeTests || status=$?
+    swift test ${args[@]+"${args[@]}"} --skip ClaudeTests || status=$?
+    exit "$status"
+  fi
+fi
 exec swift test ${args[@]+"${args[@]}"} "$@"
