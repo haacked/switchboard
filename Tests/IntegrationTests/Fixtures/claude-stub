@@ -33,6 +33,12 @@
 #   anything else    replies "Done: <prompt>"
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read.
+# Like claude, it writes a line to the conversation's transcript in
+# $CLAUDE_CONFIG_DIR/projects/stub for each prompt and for clear. --resume
+# fails when no transcript exists, and --session-id fails when one does.
+# Without CLAUDE_CONFIG_DIR, the transcript would go to the user's ~/.claude,
+# so the stub then neither writes nor checks one.
+# With STUB_HOOKS=off it runs no hooks, as when every hook fails.
 # Each run appends its arguments to $SB_HOME/stub-args.log and its
 # CLAUDE_CONFIG_DIR, empty when unset, to the same line of
 # $SB_HOME/stub-accounts.log.
@@ -67,8 +73,19 @@ payload() {
   jq -nc --arg e "$1" --arg s "$session" --argjson f "${2:-{\}}" '{hook_event_name: $e, session_id: $s} + $f'
 }
 
+# transcript <text>: appends a line to the conversation's transcript.
+transcript() {
+  [ -n "${CLAUDE_CONFIG_DIR-}" ] || return 0
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/stub"
+  jq -nc --arg t "$1" '{type: "user", message: {role: "user", content: $t}}' \
+    >>"$CLAUDE_CONFIG_DIR/projects/stub/$session.jsonl"
+}
+
 # hook <event> [json fields]
-hook() { payload "$@" | sh -c "$hook_cmd" >/dev/null; }
+hook() {
+  [ "${STUB_HOOKS-}" = off ] && return 0
+  payload "$@" | sh -c "$hook_cmd" >/dev/null
+}
 
 # dialog <fields>: runs the PermissionRequest hook while the terminal's dialog
 # waits for a line, and prints the first answer: "hook <output>" or
@@ -130,7 +147,7 @@ emit() {
       eval "$3"
       paused=1
     fi
-    printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
+    [ "${STUB_HOOKS-}" = off ] || printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
   done <<<"$payloads"
 }
 
@@ -220,6 +237,7 @@ questions='{"questions":[
 turn() {
   local p=$1 step=turn reply cmd='' marker='' before='' n job held
   case $p in lag*) sleep 1 ;; esac
+  transcript "$p"
   case $p in
   slow*)
     n=${p#slow }
@@ -253,6 +271,7 @@ turn() {
   clear*)
     play clear "$(jq -nc --arg n "${p#clear }" '{session_id_2: $n}')"
     session=${p#clear }
+    transcript /clear
     echo "⏺ cleared, now $session"
     return
     ;;
@@ -281,6 +300,13 @@ turn() {
   play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
 }
 
+if [ -n "${CLAUDE_CONFIG_DIR-}" ]; then
+  ls "$CLAUDE_CONFIG_DIR"/projects/*/"$session.jsonl" >/dev/null 2>&1 && found=yes || found=no
+  case $source:$found in
+  startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
+  resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
+  esac
+fi
 trap 'play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0

@@ -45,7 +45,7 @@ extension Service {
     }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
-      Transcript.find(s.id, projects: "\(s.account)/projects").map(Transcript.tail)
+      Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
     }
     let imported: [SessionSummary] = try queue.sync {
       try chosen.indices.compactMap { i in
@@ -158,15 +158,12 @@ extension Service {
   /// Records a Switchboard session for the Claude session, without starting
   /// claude. Opening the session or sending it a message resumes the
   /// conversation under its account. Its repo stays nil, because sbd didn't
-  /// create its worktree. `rm --worktree` then leaves the worktree. Claude
-  /// writes no transcript before a session's first prompt. `--resume` fails
-  /// for such a session, so its first launch uses `--session-id` instead.
-  private func adopt(_ c: ClaudeSession, name: String?, tail found: TranscriptTail?) throws -> SessionSummary {
-    let tail = found ?? TranscriptTail()
+  /// create its worktree. `rm --worktree` then leaves the worktree.
+  private func adopt(_ c: ClaudeSession, name: String?, tail: TranscriptTail) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: name ?? c.title, cwd: c.cwd, branch: c.branch, claudeSessionId: c.id, created: nowMs())
-    session.started = found != nil
+    session.started = true
     session.claudeConfigDir = c.account
     entries[id] = Entry(session: session)
     try store.save(session)

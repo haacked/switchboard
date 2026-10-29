@@ -88,6 +88,57 @@ import Testing
     #expect(sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- - fix A")
   }
 
+  @Test func startsAConversationThatClaudeLeftBeforeItsFirstPromptWithItsId() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude to start") { $0.live }
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
+
+    #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
+    try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
+    #expect(sbd.stubArgs().last == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- begin")
+  }
+
+  @Test func restartsClaudeWithoutTheVariablesThatItsTmuxSessionKeptFromAnEarlierStart() throws {
+    let sbd = try Instance(inheritsAccount: false)
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    // tmux keeps the environment that a pane was created with, as when an
+    // earlier sbd ran under another account or with another config.env.
+    let t = try sbd.client.terminals(s.id)
+    func tmux(_ args: String...) throws -> Int32 { try runCommand(t.tmux, ["-S", t.socket] + args).status }
+    #expect(try tmux("set-environment", "-t", "=\(t.claude)", "CLAUDE_CONFIG_DIR", "\(sbd.home.path)/earlier") == 0)
+    #expect(try tmux("set-environment", "-t", "=\(t.claude)", "REMOVED_FROM_CONFIG", "1") == 0)
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
+
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
+    #expect(sbd.stubCalls().last?.account == "")
+    #expect(try tmux("show-environment", "-t", "=\(t.claude)", "REMOVED_FROM_CONFIG") != 0)
+    #expect(try tmux("show-environment", "-t", "=\(t.claude)", "SB_SESSION_ID") == 0)
+  }
+
+  @Test func resumesAConversationWhoseClaudeRanWithNoHooks() throws {
+    let sbd = try Instance()
+    try sbd.restart(setting: "env", to: ["STUB_HOOKS": "off"])
+    let s = try sbd.new(prompt: "hello")
+    // sbd counts a claude that runs for 10 s with no SessionStart as live.
+    try sbd.waitFor(s.id, "claude counted as live") {
+      try? sbd.advanceClock(11_000)
+      return $0.live
+    }
+    let transcript = "\(sbd.inheritedAccount ?? "")/projects/stub/\(s.claudeSessionId).jsonl"
+    try sbd.waitFor("the first turn's transcript") { FileManager.default.fileExists(atPath: transcript) }
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
+
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor("the second launch") { sbd.stubArgs().count == 2 }
+    #expect(sbd.stubArgs().last?.hasPrefix("--resume \(s.claudeSessionId) ") == true)
+  }
+
   @Test func resumesTheConversationThatClearStarted() throws {
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")

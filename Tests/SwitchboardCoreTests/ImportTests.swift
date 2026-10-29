@@ -208,7 +208,22 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
       atPath: "\(projects)/-Users-me-a/\(UUID().uuidString.lowercased()).jsonl", contents: nil)
     FileManager.default.createFile(atPath: "\(projects)/-Users-me-b/\(id).jsonl", contents: nil)
 
-    #expect(Transcript.find(id, projects: projects) == "\(projects)/-Users-me-b/\(id).jsonl")
+    #expect(Transcript.find(id, account: dir, cwd: "/Users/me/c") == "\(projects)/-Users-me-b/\(id).jsonl")
+  }
+
+  @Test func findLooksInTheFolderThatClaudeNamesAfterTheCwdFirst() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let projects = "\(dir)/projects"
+    let id = UUID().uuidString.lowercased()
+    for folder in ["-Users-me-a", "-Users-me-dev-my-app-x"] {
+      try FileManager.default.createDirectory(atPath: "\(projects)/\(folder)", withIntermediateDirectories: true)
+      FileManager.default.createFile(atPath: "\(projects)/\(folder)/\(id).jsonl", contents: nil)
+    }
+
+    #expect(
+      Transcript.find(id, account: dir, cwd: "/Users/me/dev/my.app_x")
+        == "\(projects)/-Users-me-dev-my-app-x/\(id).jsonl")
   }
 
   @Test func findIsNilWhenNoProjectFolderHoldsTheSession() throws {
@@ -219,9 +234,9 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
     try FileManager.default.createDirectory(atPath: "\(projects)/-Users-me-a", withIntermediateDirectories: true)
     FileManager.default.createFile(atPath: "\(projects)/-Users-me-a/\(id).jsonl", contents: nil)
 
-    #expect(Transcript.find(UUID().uuidString.lowercased(), projects: projects) == nil)
-    #expect(Transcript.find(String(id.prefix(8)), projects: projects) == nil)
-    #expect(Transcript.find(id, projects: "\(dir)/missing") == nil)
+    #expect(Transcript.find(UUID().uuidString.lowercased(), account: dir, cwd: "/Users/me/a") == nil)
+    #expect(Transcript.find(String(id.prefix(8)), account: dir, cwd: "/Users/me/a") == nil)
+    #expect(Transcript.find(id, account: "\(dir)/missing", cwd: "/Users/me/a") == nil)
   }
 }
 

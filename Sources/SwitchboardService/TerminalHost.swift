@@ -121,8 +121,15 @@ final class TerminalHost {
   }
 
   /// Starts a dead pane again, with the command or the login shell. tmux
-  /// refuses when the pane's program still runs.
+  /// refuses when the pane's program still runs. The new program also gets
+  /// the variables that `create` stored in the pane's tmux session. So this
+  /// first unsets each one that `env` lacks, which leaves the server's own
+  /// environment for that name.
   func respawn(_ name: String, cwd: String, env: [String: String], command: String?) throws {
+    let held = try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n").compactMap { line in
+      line.hasPrefix("-") ? nil : line.split(separator: "=", maxSplits: 1).first.map(String.init)
+    }
+    for key in held where env[key] == nil { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
     try run(["respawn-pane", "-t", "=\(name):", "-c", cwd] + envArgs(env) + (command.map { [$0] } ?? []))
   }
 

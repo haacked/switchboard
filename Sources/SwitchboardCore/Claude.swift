@@ -150,10 +150,17 @@ public struct TranscriptTail: Equatable, Sendable {
 }
 
 public enum Transcript {
-  /// The transcript of a session: <projects>/<folder>/<id>.jsonl. Claude names
-  /// the folder after the session's cwd. This looks in every folder instead of
-  /// encoding the cwd the way Claude does.
-  public static func find(_ sessionId: String, projects: String) -> String? {
+  /// The transcript of a session: <account>/projects/<folder>/<id>.jsonl.
+  /// Claude names the folder after the session's cwd, with each character
+  /// other than an ASCII letter or digit replaced by "-". Claude shortens a
+  /// long path in a way that this doesn't reproduce. A symlink can also change
+  /// the cwd. So when that folder lacks the transcript, this looks in every
+  /// folder.
+  public static func find(_ sessionId: String, account: String, cwd: String) -> String? {
+    let projects = "\(account)/projects"
+    let folder = String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
+    let named = "\(projects)/\(folder)/\(sessionId).jsonl"
+    if FileManager.default.fileExists(atPath: named) { return named }
     let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
     return folders.map { "\(projects)/\($0)/\(sessionId).jsonl" }.first { FileManager.default.fileExists(atPath: $0) }
   }

@@ -244,19 +244,13 @@ public final class Service {
       // `/clear` and `/resume` in the pane start another conversation, which
       // the next resume has to open.
       let current = payload["session_id"]?.string ?? session.claudeSessionId
-      if !session.started || current != session.claudeSessionId {
-        try update(id) {
-          $0.started = true
-          $0.claudeSessionId = current
-        }
-      }
+      if current != session.claudeSessionId { try update(id) { $0.claudeSessionId = current } }
       refreshSoon()
       // A message that arrived while claude was starting waits until claude
       // has drawn its prompt. 1.5 s covers the redraws that Phase 0 measured.
       deliverPending(id, after: 1.5)
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
-      if !session.started { try update(id) { $0.started = true } }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -384,16 +378,18 @@ public final class Service {
     return Terminals(tmux: host.tmux, socket: host.socket, claude: paneName(id, .claude), shell: shell)
   }
 
-  /// Starts claude in the session's Claude pane. The first launch starts a
-  /// new conversation. Each later launch resumes it. `prompt` becomes the
-  /// first prompt. The pane runs only claude, so the pane dies when claude
-  /// exits. tmux keeps the dead pane's last screen until the next launch.
+  /// Starts claude in the session's Claude pane. A launch resumes the
+  /// conversation when its transcript exists, and starts it otherwise.
+  /// `prompt` becomes the first prompt. The pane runs only claude, so the pane
+  /// dies when claude exits. tmux keeps the dead pane's last screen until the
+  /// next launch.
   func launch(_ id: String, prompt: String?) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try refuseNotStarted(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
+    let resume = hasTranscript(session)
     var args = [config.claude]
-    args += session.started ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
+    args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     args += ["--settings", home.claudeSettings]
     args += mcpArgs
     if let model = session.model { args += ["--model", model] }
@@ -418,11 +414,23 @@ public final class Service {
         name, "Claude stopped. Switchboard resumes it when you open the session or send it a message.")
     }
     markStarting(name)
+    if !session.started { try update(id) { $0.started = true } }
     snapshot.claudePids[id] = nil
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
-    record(
-      id, session.started ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening])
+    record(id, resume ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening])
+  }
+
+  /// Whether the session's conversation has a transcript in the account that
+  /// its pane runs claude under. `--resume` fails without one. Claude writes
+  /// none before the conversation's first prompt, so a claude that exits
+  /// before one leaves a conversation that only `--session-id` can start. A
+  /// session that sbd never started claude for has none, so the search skips
+  /// it.
+  private func hasTranscript(_ session: Session) -> Bool {
+    guard session.started else { return false }
+    let account = paneEnv(session.id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
+    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) != nil
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's

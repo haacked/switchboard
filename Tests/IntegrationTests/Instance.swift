@@ -17,6 +17,9 @@ final class Instance {
 
   let home: Home
   let client: Client
+  /// The CLAUDE_CONFIG_DIR that sbd inherits, or nil for Claude's default
+  /// account. Only the stub's transcripts go there.
+  let inheritedAccount: String?
   private var process: Process?
 
   /// The folder is under /tmp, because a Unix socket path can't exceed 103
@@ -25,14 +28,16 @@ final class Instance {
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
   /// Each account is a Claude config folder that this creates in the home.
   /// The config lists only those, so a test never reads the user's accounts.
+  /// Without `inheritsAccount`, sbd runs under Claude's default account.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
-    config extra: [String: JSON] = [:]
+    inheritsAccount: Bool = true, config extra: [String: JSON] = [:]
   ) throws {
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     let path = String(cString: dir)
     home = Home(path: path)
+    inheritedAccount = inheritsAccount ? "\(path)/inherited-account" : nil
     let folders = accounts.map { "\(path)/\($0)" }
     for folder in folders { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
     let config: [String: JSON] = [
@@ -54,9 +59,6 @@ final class Instance {
   }
 
   var work: String { "\(home.path)/work" }
-
-  /// The CLAUDE_CONFIG_DIR that sbd inherits. No folder exists there.
-  var inheritedAccount: String { "\(home.path)/inherited-account" }
 
   func startSbd() throws {
     let p = Process()
