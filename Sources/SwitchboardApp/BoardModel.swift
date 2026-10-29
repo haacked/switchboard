@@ -14,6 +14,8 @@ final class BoardModel: ObservableObject {
   @Published var actionError: String?
   @Published var selection: String?
   @Published var showingNew = false
+  @Published var showingImport = false
+  var presentingSheet: Bool { showingNew || showingImport }
   /// With no session selected, the detail shows the Board instead of the Queue.
   @Published var showingBoard = false
   /// The Queue item that the user last moved to.
@@ -37,7 +39,6 @@ final class BoardModel: ObservableObject {
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
-  @Published var showingImport = false
 
   let client = Client()
   /// Polls run apart from actions, because an action such as `open` or `new`

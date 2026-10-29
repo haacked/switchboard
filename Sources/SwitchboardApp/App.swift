@@ -24,12 +24,14 @@ struct SwitchboardApp: App {
     .defaultSize(width: 1400, height: 900)
     .commands {
       CommandGroup(after: .newItem) {
+        // A sheet blocks the window's buttons but not the menu bar. Without
+        // the check, a menu command opens a second sheet over the first.
         Button("New Session…") { model.showingNew = true }
           .keyboardShortcut("n")
-          .disabled(model.showingImport)
+          .disabled(model.presentingSheet)
         Button("Import Sessions…") { model.showingImport = true }
           .keyboardShortcut("i", modifiers: [.command, .shift])
-          .disabled(model.showingNew)
+          .disabled(model.presentingSheet)
       }
       CommandMenu("Session") {
         Button("Next Needing You") { model.selectNextNeedingYou() }
