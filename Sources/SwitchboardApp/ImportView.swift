@@ -16,10 +16,12 @@ struct ImportView: View {
     @Published var error: String?
     /// Why the last import left sessions out, or why it failed.
     @Published var problems: [String] = []
-    @Published var busy = false
-    /// Closing the sheet doesn't stop an import. Cancel stays disabled until
-    /// the import ends.
-    @Published var importing = false
+    /// The request that the sheet waits for. Closing the sheet doesn't stop an
+    /// import, so Cancel stays disabled while one runs.
+    @Published var activity: Activity?
+    var busy: Bool { activity != nil }
+
+    enum Activity { case listing, importing }
   }
 
   @EnvironmentObject var model: BoardModel
@@ -31,10 +33,7 @@ struct ImportView: View {
       HStack {
         Text("Import Sessions").font(.title2.bold())
         Spacer()
-        Button {
-          form.problems = []
-          load()
-        } label: {
+        Button(action: reload) {
           Label("Reload", systemImage: "arrow.clockwise")
         }
         .keyboardShortcut("r")
@@ -62,7 +61,7 @@ struct ImportView: View {
         Spacer()
         Button("Cancel", role: .cancel) { dismiss() }
           .keyboardShortcut(.cancelAction)
-          .disabled(form.importing)
+          .disabled(form.activity == .importing)
         Button(form.selected.count > 1 ? "Import \(form.selected.count) Sessions" : "Import", action: importSelected)
           .keyboardShortcut(.defaultAction)
           .disabled(form.selected.isEmpty || form.busy)
@@ -71,10 +70,7 @@ struct ImportView: View {
     .padding(20)
     .frame(width: 760, height: 600)
     .onAppear(perform: load)
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-      form.problems = []
-      load()
-    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in reload() }
   }
 
   @ViewBuilder private var content: some View {
@@ -129,15 +125,21 @@ struct ImportView: View {
       })
   }
 
+  /// Clears the last import's problems and lists the sessions again.
+  private func reload() {
+    form.problems = []
+    load()
+  }
+
   /// Lists the sessions, unless a listing or an import is already running.
   private func load() {
     guard !form.busy else { return }
     let all = form.all
     let model = model
-    form.busy = true
+    form.activity = .listing
     Task {
       let result = await Task.detached { model.importable(all: all) }.value
-      form.busy = false
+      form.activity = nil
       switch result {
       case .success(let list):
         form.list = list
@@ -152,12 +154,10 @@ struct ImportView: View {
   private func importSelected() {
     let refs = form.list?.sessions.map(\.id).filter(form.selected.contains) ?? []
     let model = model
-    form.busy = true
-    form.importing = true
+    form.activity = .importing
     Task {
       let result = await Task.detached { model.importSessions(refs) }.value
-      form.busy = false
-      form.importing = false
+      form.activity = nil
       model.refresh()
       switch result {
       case .success(let r):

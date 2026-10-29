@@ -14,12 +14,12 @@ private func userLine(_ content: JSON, at time: String) -> JSON {
   ["type": "user", "isSidechain": false, "timestamp": .string(time), "message": ["role": "user", "content": content]]
 }
 
-private func assistantLine(_ blocks: [JSON], at time: String, type: String = "assistant", sidechain: Bool = false)
+private func assistantLine(_ content: JSON, at time: String, type: String = "assistant", sidechain: Bool = false)
   -> JSON
 {
   [
     "type": .string(type), "isSidechain": .bool(sidechain), "timestamp": .string(time),
-    "message": ["role": "assistant", "content": .array(blocks)],
+    "message": ["role": "assistant", "content": content],
   ]
 }
 
@@ -53,10 +53,7 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
   @Test func tailReadsAReplyWhoseContentIsAStringAndAWholeSecondTimestamp() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
-    let reply: JSON = [
-      "type": "assistant", "isSidechain": false, "timestamp": "2026-10-25T10:00:05Z",
-      "message": ["role": "assistant", "content": "Want me to push?"],
-    ]
+    let reply = assistantLine("Want me to push?", at: "2026-10-25T10:00:05Z")
     let path = try writeTranscript([userLine("Go.", at: "2026-10-25T10:00:00.000Z"), reply], in: dir)
 
     let tail = Transcript.tail(path)
