@@ -93,7 +93,8 @@ final class TerminalHost {
 
   /// The value of a tmux format for the pane, or nil when the pane is missing.
   /// For a missing pane, tmux prints the format with every value empty and
-  /// exits 0. Every pane has a `#{pane_id}`, so an empty one means missing.
+  /// exits 0. Every pane's `#{pane_id}` starts with `%`, so a line that
+  /// doesn't start with one means the pane is missing.
   private func display(_ name: String, _ format: String) -> String? {
     guard let line = try? run(["display-message", "-p", "-t", "=\(name):", "#{pane_id}:\(format)"]),
       line.hasPrefix("%"), let colon = line.firstIndex(of: ":")
