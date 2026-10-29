@@ -4,11 +4,15 @@ import Testing
 
 extension Instance {
   /// A private sbd whose poller asks `github`, with the stub gh. Polls run
-  /// only when a test asks. These tests need no fast process checks, so sbd
-  /// ticks once a second instead of running ps five times a second.
-  static func withGitHub(_ github: FakeGitHub) throws -> Instance {
+  /// only when a test asks, unless `pollSeconds` starts the poller's timer.
+  /// These tests need no fast process checks, so sbd ticks once a second
+  /// instead of running ps five times a second.
+  static func withGitHub(_ github: FakeGitHub, pollSeconds: Double = 0) throws -> Instance {
     try Instance(config: [
-      "github": ["gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url), "pollSeconds": 0],
+      "github": [
+        "gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url),
+        "pollSeconds": .number(pollSeconds),
+      ],
       "tickSeconds": 1,
     ])
   }
@@ -55,6 +59,14 @@ extension Instance {
     ]
     try (lines.joined(separator: "\n") + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
     return s
+  }
+
+  /// Writes a transcript for `s` whose one line links `repo`#`number`.
+  func link(_ s: SessionSummary, _ repo: String, _ number: Int) throws {
+    try FileManager.default.createDirectory(
+      atPath: (transcript(s) as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    let line = #"{"type":"pr-link","prNumber":\#(number),"prRepository":"\#(repo)"}"#
+    try (line + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
   }
 
   func transcript(_ s: SessionSummary) -> String {
@@ -122,6 +134,7 @@ extension Instance {
       } == "retarget #18303; its base #18000 merged")
     github.fail(18303, in: .base)
     #expect(try reason { _ in } == "retarget #18303; its base #18000 merged")
+    #expect(try reason { $0["baseRefName"] = "main" } == "address the changes that alice requested on #18303")
     let merged = try reason { $0["state"] = "MERGED" }
     #expect(merged == "#18303 merged; archive the worktree")
     #expect(try sbd.get(s.id).state == .done)
@@ -146,6 +159,14 @@ extension Instance {
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: after the merge" }
     try sbd.poll()
     #expect(try sbd.get(s.id).reason == "#18303 merged; commit or discard the uncommitted changes")
+    // A commit from the user's own shell fires no hook, so a dirty folder is
+    // counted again once per idle interval.
+    try FileManager.default.removeItem(atPath: file)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).state == .needsYou)
+    try sbd.advanceClock(300_000)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).state == .done)
     try sbd.sb("done", s.id)
     #expect(try sbd.get(s.id).markedDone == true)
     try sbd.sb("undone", s.id)
@@ -176,6 +197,36 @@ extension Instance {
     try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
     try sbd.poll()
     #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  @Test func dropsTheLinkedPROfAnEarlierBranch() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.link(s, "PostHog/posthog", 122953)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  @Test func prefersTheBranchsPRToTheLinkedPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.link(s, "haacked/review-code", 189)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  @Test func pollsOnItsTimer() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, pollSeconds: 1)
+    let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.waitFor(s.id, "the timer's poll") { $0.pr?.number == 18303 }
   }
 
   @Test func findsThePRFromThePRLinkInTheTranscript() throws {

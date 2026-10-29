@@ -7,7 +7,7 @@ let samplePRHead = "head1"
 
 func samplePR(
   state: PRState = .open, draft: Bool = false, headSha: String = samplePRHead, base: String = "main",
-  defaultBranch: String? = "main", mergeable: String? = "MERGEABLE", reviewDecision: String? = nil,
+  defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
   verdicts: [Review] = [], reviews: [Review] = [], checks: String? = nil, mergedBase: Int? = nil,
   queue: TrunkQueueState? = nil
 ) -> PullRequest {
@@ -24,16 +24,16 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
 
 @Suite struct PullRequestTests {
   @Test(arguments: [
-    (samplePR(state: .merged, reviewDecision: "APPROVED"), "Merged"),
+    (samplePR(state: .merged, reviewDecision: .approved), "Merged"),
     (samplePR(state: .merged, draft: true), "Merged"),
-    (samplePR(state: .closed, reviewDecision: "APPROVED"), "Closed"),
+    (samplePR(state: .closed, reviewDecision: .approved), "Closed"),
     (samplePR(state: .closed, draft: true), "Closed"),
-    (samplePR(draft: true, reviewDecision: "APPROVED"), "Draft"),
-    (samplePR(reviewDecision: "APPROVED"), "Approved"),
-    (samplePR(reviewDecision: "CHANGES_REQUESTED"), "Changes requested"),
-    (samplePR(reviewDecision: "REVIEW_REQUIRED"), "Review required"),
-    (samplePR(reviewDecision: "REVIEW_REQUIRED", verdicts: [sampleVerdict("alice", "APPROVED")]), "Review required"),
-    (samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED")]), "Approved"),
+    (samplePR(draft: true, reviewDecision: .approved), "Draft"),
+    (samplePR(reviewDecision: .approved), "Approved"),
+    (samplePR(reviewDecision: .changesRequested), "Changes requested"),
+    (samplePR(reviewDecision: .reviewRequired), "Review required"),
+    (samplePR(reviewDecision: .reviewRequired, verdicts: [sampleVerdict("alice", "APPROVED")]), "Review required"),
+    (samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED")]), "Approved"),
   ])
   func statusFollowsTheStateThenTheReviewDecision(_ pr: PullRequest, _ status: String) {
     #expect(pr.status == status)
@@ -81,19 +81,19 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
   @Test(arguments: [
     (samplePR(checks: "PENDING"), true),
     (samplePR(checks: "EXPECTED"), true),
-    (samplePR(mergeable: "UNKNOWN", checks: "SUCCESS"), true),
-    (samplePR(mergeable: "UNKNOWN", checks: nil), true),
+    (samplePR(mergeable: .unknown, checks: "SUCCESS"), true),
+    (samplePR(mergeable: .unknown, checks: nil), true),
     (samplePR(draft: true, checks: "PENDING"), true),
     (samplePR(checks: "SUCCESS"), false),
     (samplePR(checks: "FAILURE"), false),
     (samplePR(checks: "ERROR"), false),
-    (samplePR(mergeable: "CONFLICTING", checks: "SUCCESS"), false),
+    (samplePR(mergeable: .conflicting, checks: "SUCCESS"), false),
     (samplePR(checks: nil), false),
     (samplePR(mergeable: nil, checks: "SUCCESS"), false),
     (samplePR(mergeable: nil, checks: nil), false),
-    (samplePR(state: .merged, mergeable: "UNKNOWN", checks: "PENDING"), false),
+    (samplePR(state: .merged, mergeable: .unknown, checks: "PENDING"), false),
     (samplePR(state: .closed, checks: "EXPECTED"), false),
-    (samplePR(state: .closed, mergeable: "UNKNOWN"), false),
+    (samplePR(state: .closed, mergeable: .unknown), false),
   ])
   func isPendingOnlyWhileAnOpenPRWillChange(_ pr: PullRequest, _ pending: Bool) {
     #expect(pr.isPending == pending)

@@ -26,7 +26,7 @@ extension Attention {
     if let base = pr.mergedBase {
       return Verdict(state: .needsYou, reason: "retarget \(n); its base #\(base) merged")
     }
-    if pr.mergeable == "CONFLICTING" {
+    if pr.mergeable == .conflicting {
       return Verdict(state: .needsYou, reason: "rebase; \(n) conflicts with its base")
     }
     // A push after the review moves the head commit, and the PR then waits
@@ -39,7 +39,7 @@ extension Attention {
       return Verdict(
         state: .needsYou, reason: oneLine("address the changes that \(names(current)) requested on \(n)"))
     }
-    if pr.changesRequestedBy.isEmpty && pr.reviewDecision == "CHANGES_REQUESTED" {
+    if pr.changesRequestedBy.isEmpty && pr.reviewDecision == .changesRequested {
       return Verdict(state: .needsYou, reason: "address the requested changes on \(n)")
     }
     if pr.queue == .removed {

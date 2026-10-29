@@ -136,7 +136,7 @@ import Testing
   @Test func summaryLineNamesTheStatusAndChecks() {
     let pr = PullRequest(
       id: "PR_1", number: 18303, url: "https://github.com/PostHog/charts/pull/18303", repo: "PostHog/charts",
-      reviewDecision: "APPROVED", checks: "SUCCESS")
+      reviewDecision: .approved, checks: "SUCCESS")
     #expect(PRSummary(pr).line == "#18303 Approved, checks success")
     var none = pr
     none.checks = nil
@@ -145,10 +145,10 @@ import Testing
   }
 
   @Test(arguments: [
-    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", reviewDecision: "APPROVED"), true),
-    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", draft: true, reviewDecision: "APPROVED"), false),
-    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: .merged, reviewDecision: "APPROVED"), false),
-    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", reviewDecision: "REVIEW_REQUIRED"), false),
+    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", reviewDecision: .approved), true),
+    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", draft: true, reviewDecision: .approved), false),
+    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: .merged, reviewDecision: .approved), false),
+    (PullRequest(id: "a", number: 1, url: "", repo: "a/b", reviewDecision: .reviewRequired), false),
   ])
   func isApprovedOnlyForAnOpenApprovedPR(_ pr: PullRequest, _ approved: Bool) {
     #expect(pr.isApproved == approved)

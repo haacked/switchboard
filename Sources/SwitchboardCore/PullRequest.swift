@@ -6,6 +6,30 @@ public enum PRState: String, Codable, Sendable {
   case closed = "CLOSED"
 }
 
+public enum Mergeable: String, Codable, Sendable {
+  case mergeable = "MERGEABLE"
+  case conflicting = "CONFLICTING"
+  /// GitHub hasn't computed the mergeability yet.
+  case unknown = "UNKNOWN"
+}
+
+public enum ReviewDecision: String, Codable, Sendable {
+  case approved = "APPROVED"
+  case changesRequested = "CHANGES_REQUESTED"
+  case reviewRequired = "REVIEW_REQUIRED"
+}
+
+/// The words of `git pr` for a PR's state and review.
+public enum PRStatus: String, Codable, Sendable {
+  case merged = "Merged"
+  case closed = "Closed"
+  case draft = "Draft"
+  case approved = "Approved"
+  case changesRequested = "Changes requested"
+  case reviewRequired = "Review required"
+  case notApproved = "Not approved"
+}
+
 /// A review of a PR, or a reviewer's last verdict.
 public struct Review: Codable, Equatable, Sendable {
   public var author: String
@@ -63,11 +87,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var headSha: String
   public var base: String
   public var defaultBranch: String?
-  /// MERGEABLE, CONFLICTING, or UNKNOWN.
-  public var mergeable: String?
-  /// APPROVED, CHANGES_REQUESTED, or REVIEW_REQUIRED. GitHub leaves it nil
-  /// when the base branch requires no review.
-  public var reviewDecision: String?
+  public var mergeable: Mergeable?
+  /// GitHub leaves it nil when the base branch requires no review.
+  public var reviewDecision: ReviewDecision?
   /// Each reviewer's last approval or change request.
   public var verdicts: [Review]
   /// The last 20 reviews, oldest first.
@@ -89,7 +111,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
     draft: Bool = false, head: String = "", headSha: String = "", base: String = "main",
-    defaultBranch: String? = "main", mergeable: String? = "MERGEABLE", reviewDecision: String? = nil,
+    defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil
   ) {
@@ -116,29 +138,29 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.queue = queue
   }
 
-  /// The words of `git pr`: Merged, Closed, Draft, Approved, Changes
-  /// requested, Review required, or Not approved.
-  public var status: String {
+  /// The PR's `git pr` words. The review decision picks them, or the
+  /// reviewers' verdicts do when the base branch requires no review.
+  public var reviewStatus: PRStatus {
     switch state {
-    case .merged: return "Merged"
-    case .closed: return "Closed"
+    case .merged: return .merged
+    case .closed: return .closed
     case .open: break
     }
-    if draft { return "Draft" }
+    if draft { return .draft }
     switch reviewDecision {
-    case "APPROVED": return "Approved"
-    case "CHANGES_REQUESTED": return "Changes requested"
-    case "REVIEW_REQUIRED": return "Review required"
-    default:
-      if !changesRequestedBy.isEmpty { return "Changes requested" }
-      return approvers.isEmpty ? "Not approved" : "Approved"
+    case .approved: return .approved
+    case .changesRequested: return .changesRequested
+    case .reviewRequired: return .reviewRequired
+    case nil:
+      if !changesRequestedBy.isEmpty { return .changesRequested }
+      return approvers.isEmpty ? .notApproved : .approved
     }
   }
 
-  /// Whether the PR is open, not a draft, and approved. The review decision
-  /// decides, or the reviewers' verdicts when the base branch requires no
-  /// review.
-  public var isApproved: Bool { status == "Approved" }
+  public var status: String { reviewStatus.rawValue }
+
+  /// Whether the PR is open, not a draft, and approved.
+  public var isApproved: Bool { reviewStatus == .approved }
 
   public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
 
@@ -151,7 +173,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// GitHub hasn't computed its mergeability yet. A merged or closed PR is
   /// never pending.
   public var isPending: Bool {
-    state == .open && (checks == "PENDING" || checks == "EXPECTED" || mergeable == "UNKNOWN")
+    state == .open && (checks == "PENDING" || checks == "EXPECTED" || mergeable == .unknown)
   }
 }
 
@@ -166,7 +188,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// The words of `git pr`, such as Approved or Changes requested.
   public var status: String
   public var checks: String?
-  public var mergeable: String?
+  public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
 
   public init(_ pr: PullRequest) {

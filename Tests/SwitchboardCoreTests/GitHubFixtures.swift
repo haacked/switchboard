@@ -36,8 +36,8 @@ enum GitHubFixtures {
       headSha: "89918967ababc0def2d9c2d50d3a5069ea799dc0",
       base: "master",
       defaultBranch: "master",
-      mergeable: "UNKNOWN",
-      reviewDecision: "REVIEW_REQUIRED",
+      mergeable: .unknown,
+      reviewDecision: .reviewRequired,
       verdicts: [],
       reviews: [
         Review(author: "copilot-pull-request-reviewer", state: "COMMENTED", submittedAt: "2026-10-23T23:30:00Z"),
@@ -64,8 +64,8 @@ enum GitHubFixtures {
       headSha: "04e3f33e9804c4ff6fbd57f41ebd75e6c1e50547",
       base: "main",
       defaultBranch: "main",
-      mergeable: "MERGEABLE",
-      reviewDecision: "APPROVED",
+      mergeable: .mergeable,
+      reviewDecision: .approved,
       verdicts: [
         Review(
           author: "stamphog", state: "APPROVED", submittedAt: "2026-10-25T20:56:17Z",
@@ -96,8 +96,8 @@ enum GitHubFixtures {
       headSha: "f57bc1ee40d8361716f04f3bb176d5b3b403281c",
       base: "master",
       defaultBranch: "master",
-      mergeable: "UNKNOWN",
-      reviewDecision: "REVIEW_REQUIRED",
+      mergeable: .unknown,
+      reviewDecision: .reviewRequired,
       verdicts: [],
       reviews: [
         Review(author: "copilot-pull-request-reviewer", state: "COMMENTED", submittedAt: "2026-10-23T21:13:56Z"),
@@ -122,8 +122,8 @@ enum GitHubFixtures {
       headSha: "c7c8e3031c48f7faf3151bdf846f038e00af603f",
       base: "main",
       defaultBranch: "main",
-      mergeable: "MERGEABLE",
-      reviewDecision: "CHANGES_REQUESTED",
+      mergeable: .mergeable,
+      reviewDecision: .changesRequested,
       verdicts: [
         Review(
           author: "benjackwhite", state: "CHANGES_REQUESTED", submittedAt: "2026-08-04T07:31:31Z",
@@ -174,7 +174,7 @@ enum GitHubFixtures {
       headSha: "f2ea91e80208dcdfd93c862fd217bdff5775a6cd",
       base: "master",
       defaultBranch: "master",
-      mergeable: "MERGEABLE",
+      mergeable: .mergeable,
       reviewDecision: nil,
       verdicts: [
         Review(
@@ -211,8 +211,8 @@ enum GitHubFixtures {
       headSha: "bb1e367917f85444b8b832747aff67b815cde10f",
       base: "main",
       defaultBranch: "main",
-      mergeable: "MERGEABLE",
-      reviewDecision: "REVIEW_REQUIRED",
+      mergeable: .mergeable,
+      reviewDecision: .reviewRequired,
       verdicts: [],
       reviews: [],
       labels: [],
@@ -232,8 +232,8 @@ enum GitHubFixtures {
       headSha: "189c31fc88b1b719e17b5b4bbc15b1834caf1279",
       base: "master",
       defaultBranch: "master",
-      mergeable: "UNKNOWN",
-      reviewDecision: "APPROVED",
+      mergeable: .unknown,
+      reviewDecision: .approved,
       verdicts: [
         Review(
           author: "stamphog", state: "APPROVED", submittedAt: "2026-10-23T18:50:05Z",
@@ -261,7 +261,7 @@ enum GitHubFixtures {
       headSha: "2d8ad82c72ad72f191c82e0e44f27401ca112c07",
       base: "haacked/cohort-processor-per-topic-offsets",
       defaultBranch: "master",
-      mergeable: "CONFLICTING",
+      mergeable: .conflicting,
       reviewDecision: nil,
       verdicts: [],
       reviews: [

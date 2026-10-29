@@ -318,6 +318,15 @@ final class GitHubPoller {
       }
       if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
       if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
+      // A linked PR from another branch of the branch's repo belongs to the
+      // session's earlier work. It no longer counts once GitHub answers that
+      // the current branch has no PR. A linked PR in another repo still counts.
+      if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key,
+        let linked = t.transcript.prId.flatMap({ prs[$0]?.pr }),
+        linked.repo.lowercased() == repo.lowercased(), linked.head != branch
+      {
+        t.transcript.prId = nil
+      }
       tracked[id] = t
     }
     for chunk in GitHub.chunks(stacked) {
@@ -430,7 +439,7 @@ final class GitHubPoller {
         // after the base branch moved. The session keeps the last answer for
         // the same head commit, so a conflict doesn't leave Needs you and
         // come back.
-        if pr.mergeable == "UNKNOWN", let last = s.facts.pr, last.id == pr.id, last.headSha == pr.headSha,
+        if pr.mergeable == .unknown, let last = s.facts.pr, last.id == pr.id, last.headSha == pr.headSha,
           last.mergeable != nil
         {
           shown.mergeable = last.mergeable

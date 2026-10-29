@@ -33,9 +33,9 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
 @Suite struct PRFacts {
   @Test func prEventSetsThePR() throws {
-    let f = facts([try prEvent(1, samplePR(reviewDecision: "APPROVED"), comments: [trunkComment()])])
+    let f = facts([try prEvent(1, samplePR(reviewDecision: .approved), comments: [trunkComment()])])
 
-    #expect(f.pr == samplePR(reviewDecision: "APPROVED"))
+    #expect(f.pr == samplePR(reviewDecision: .approved))
   }
 
   @Test func prEventSetsTheComments() throws {
@@ -149,7 +149,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
   @Test(arguments: PRAttention.finished)
   func finishedPRWithUncountedChangesFiresNoRule(_ state: PRState, _ word: String) throws {
-    let f = try prFacts(samplePR(state: state, mergeable: "CONFLICTING"), dirty: nil)
+    let f = try prFacts(samplePR(state: state, mergeable: .conflicting), dirty: nil)
 
     #expect(Attention.evaluate(session(), f, now: Self.now) == readTheReply)
   }
@@ -163,7 +163,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
   @Test(arguments: [
     (samplePR(base: "haacked/parent", mergedBase: 41), "retarget #42; its base #41 merged"),
-    (samplePR(mergeable: "CONFLICTING"), "rebase; #42 conflicts with its base"),
+    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with its base"),
     (
       samplePR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)]),
       "address the changes that alice requested on #42"
@@ -180,30 +180,30 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
       ),
       "address the changes that alice and bob requested on #42"
     ),
-    (samplePR(reviewDecision: "CHANGES_REQUESTED"), "address the requested changes on #42"),
+    (samplePR(reviewDecision: .changesRequested), "address the requested changes on #42"),
     (
-      samplePR(reviewDecision: "CHANGES_REQUESTED", verdicts: [sampleVerdict("bob", "APPROVED", on: samplePRHead)]),
+      samplePR(reviewDecision: .changesRequested, verdicts: [sampleVerdict("bob", "APPROVED", on: samplePRHead)]),
       "address the requested changes on #42"
     ),
     (
-      samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")]),
+      samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]),
       "merge #42, approved by alice"
     ),
     (samplePR(reviewDecision: nil, verdicts: [sampleVerdict("alice", "APPROVED")]), "merge #42, approved by alice"),
     (
       samplePR(
-        reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED")]),
+        reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED")]),
       "merge #42, approved by alice and bob"
     ),
     (
       samplePR(
-        reviewDecision: "APPROVED",
+        reviewDecision: .approved,
         verdicts: [
           sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED"), sampleVerdict("carol", "APPROVED"),
         ]),
       "merge #42, approved by alice and bob and carol"
     ),
-    (samplePR(reviewDecision: "APPROVED"), "merge #42"),
+    (samplePR(reviewDecision: .approved), "merge #42"),
   ])
   func openPRNeedsYou(_ pr: PullRequest, _ reason: String) throws {
     let f = try prFacts(pr)
@@ -220,13 +220,13 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let comments = [
       PRComment(id: "IC_gh", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:00Z"), trunkComment(),
     ]
-    let f = try prFacts(samplePR(reviewDecision: "APPROVED", verdicts: verdicts), comments: comments)
+    let f = try prFacts(samplePR(reviewDecision: .approved, verdicts: verdicts), comments: comments)
 
     #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: .needsYou, reason: reason))
   }
 
   @Test func approvedPRWhoseQueueStatusDidNotLoadNeedsAQueueCheck() throws {
-    let p = samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .unknown)
+    let p = samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], queue: .unknown)
     let f = try prFacts(p, comments: [trunkComment()])
 
     #expect(
@@ -234,7 +234,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         == Verdict(state: .needsYou, reason: "check whether Trunk queued #42; its queue status did not load"))
   }
 
-  @Test(arguments: [samplePR(queue: .removed), samplePR(reviewDecision: "APPROVED", queue: .removed)])
+  @Test(arguments: [samplePR(queue: .removed), samplePR(reviewDecision: .approved, queue: .removed)])
   func prThatTrunkRemovedNeedsYou(_ pr: PullRequest) throws {
     let f = try prFacts(pr, comments: [trunkComment()])
 
@@ -250,7 +250,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         id: "IC_dp", author: "deployment-status-posthog[bot]", createdAt: "2026-10-24T00:00:00Z", body: "deployed"),
     ]
     let f = try prFacts(
-      samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
+      samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
@@ -259,18 +259,18 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
   @Test(arguments: [
     samplePR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: "older")]),
-    samplePR(reviewDecision: "CHANGES_REQUESTED", verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: "older")]),
+    samplePR(reviewDecision: .changesRequested, verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: "older")]),
     samplePR(
-      reviewDecision: "CHANGES_REQUESTED",
+      reviewDecision: .changesRequested,
       verdicts: [
         sampleVerdict("alice", "CHANGES_REQUESTED", on: "older"),
         sampleVerdict("bob", "CHANGES_REQUESTED", on: "oldest"),
       ]),
-    samplePR(draft: true, reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")]),
-    samplePR(reviewDecision: "REVIEW_REQUIRED"),
+    samplePR(draft: true, reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]),
+    samplePR(reviewDecision: .reviewRequired),
     samplePR(
-      reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .testing),
-    samplePR(reviewDecision: "APPROVED", verdicts: [sampleVerdict("alice", "APPROVED")], queue: .merged),
+      reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], queue: .testing),
+    samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], queue: .merged),
     samplePR(),
   ])
   func openPRWithNothingToDoFiresNoRule(_ pr: PullRequest) throws {
@@ -291,18 +291,18 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   static let everyRule = samplePR(
-    base: "haacked/parent", mergeable: "CONFLICTING", reviewDecision: "APPROVED",
+    base: "haacked/parent", mergeable: .conflicting, reviewDecision: .approved,
     verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead), sampleVerdict("bob", "APPROVED")],
     mergedBase: 41)
 
   @Test(arguments: [
     (PRAttention.everyRule, "retarget #42; its base #41 merged"),
     (
-      samplePR(mergeable: "CONFLICTING", reviewDecision: "APPROVED", verdicts: PRAttention.everyRule.verdicts),
+      samplePR(mergeable: .conflicting, reviewDecision: .approved, verdicts: PRAttention.everyRule.verdicts),
       "rebase; #42 conflicts with its base"
     ),
     (
-      samplePR(reviewDecision: "APPROVED", verdicts: PRAttention.everyRule.verdicts),
+      samplePR(reviewDecision: .approved, verdicts: PRAttention.everyRule.verdicts),
       "address the changes that alice requested on #42"
     ),
   ])
@@ -313,7 +313,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   @Test func openPRRuleWinsOverStale() throws {
-    let f = try prFacts(samplePR(mergeable: "CONFLICTING"))
+    let f = try prFacts(samplePR(mergeable: .conflicting))
 
     #expect(
       Attention.evaluate(session(), f, now: Attention.staleAfterMs + 10)
@@ -321,7 +321,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   @Test func openPRRuleWinsOverAnOffer() throws {
-    let f = try prFacts(samplePR(mergeable: "CONFLICTING"), reply: "Want me to push?")
+    let f = try prFacts(samplePR(mergeable: .conflicting), reply: "Want me to push?")
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
@@ -329,20 +329,20 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   @Test func openWaitWinsOverAConflictingPR() throws {
-    let f = try prFacts(samplePR(mergeable: "CONFLICTING"))
+    let f = try prFacts(samplePR(mergeable: .conflicting))
 
     #expect(
       Attention.evaluate(session(wait: "CI on #42"), f, now: Self.now) == Verdict(state: .waiting, reason: "CI on #42"))
   }
 
   @Test func runningTurnWinsOverAConflictingPR() throws {
-    let f = try prFacts(samplePR(mergeable: "CONFLICTING"), then: runningTurn)
+    let f = try prFacts(samplePR(mergeable: .conflicting), then: runningTurn)
 
     #expect(Attention.evaluate(session(), f, now: Self.now).state == .working)
   }
 
   @Test func sessionWithoutAPromptStillNeedsOne() throws {
-    let f = facts([event("SessionStart", 0), try prEvent(1, samplePR(mergeable: "CONFLICTING"))])
+    let f = facts([event("SessionStart", 0), try prEvent(1, samplePR(mergeable: .conflicting))])
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now) == Verdict(state: .needsYou, reason: "give it a first prompt"))

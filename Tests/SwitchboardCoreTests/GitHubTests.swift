@@ -443,7 +443,7 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 
   @Test(arguments: [(30_000, false), (300_000, true)] as [(Int64, Bool)])
   func mergedPRWithRunningChecksPollsAsSettled(_ elapsed: Int64, _ due: Bool) {
-    #expect(isDue(samplePR(state: .merged, mergeable: "UNKNOWN", checks: "PENDING"), polledAgo: elapsed) == due)
+    #expect(isDue(samplePR(state: .merged, mergeable: .unknown, checks: "PENDING"), polledAgo: elapsed) == due)
   }
 }
 
