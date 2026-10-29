@@ -208,6 +208,19 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(reasons(result) == ["old": "no Claude session matches old"])
   }
 
+  @Test func remembersASessionForADayAfterTheLastListingThatShowedIt() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "notes")])
+    _ = try sbd.client.importable(all: true)
+    try sbd.advanceClock(day - hour)
+    _ = try sbd.client.importable(all: true)
+    try sbd.writeAgents("A", [])
+    try sbd.advanceClock(2 * hour)
+
+    #expect(try sbd.client.importable(all: true).sessions.map(\.id) == [id])
+  }
+
   @Test func importsASessionThatNoClaudeRunsAndResumesItUnderItsAccount() throws {
     let sbd = try Instance(accounts: ["A"])
     try sbd.restart(setting: "env", to: ["CLAUDE_CONFIG_DIR": .string("\(sbd.home.path)/env-account")])
