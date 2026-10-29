@@ -104,22 +104,24 @@ vars() {
 # stdin, and runs the shell command before the first payload that contains
 # the text. Each {{name}} takes its value from the vars, or from this session for
 # its id and folders. The folders that claude keeps in the Claude config
-# folder and in /tmp move into $SB_HOME.
+# folder and in /tmp move into $SB_HOME. The loop runs in this shell and
+# not in a pipeline's subshell, so a SIGKILL also stops the hooks that remain.
 emit() {
-  local extra=${1:-'{}'} payload paused=''
-  jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --argjson extra "$extra" '
+  local extra=${1:-'{}'} payload paused='' payloads
+  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --argjson extra "$extra" '
     ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: "\($home)/claude",
       claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
     | walk(if type == "string" then
         reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))
-      else . end)' |
-    while IFS= read -r payload; do
-      if [ -n "${2:-}" ] && [ -z "$paused" ] && [[ $payload == *"$2"* ]]; then
-        eval "$3"
-        paused=1
-      fi
-      printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
-    done
+      else . end)')
+  while IFS= read -r payload; do
+    [ -z "$payload" ] && continue
+    if [ -n "${2:-}" ] && [ -z "$paused" ] && [[ $payload == *"$2"* ]]; then
+      eval "$3"
+      paused=1
+    fi
+    printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
+  done <<<"$payloads"
 }
 
 # play <step> [vars] [<text> <command>]: emits each payload of the recorded step.

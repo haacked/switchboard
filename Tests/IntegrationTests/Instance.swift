@@ -112,7 +112,8 @@ final class Instance {
     return { input.fileHandleForWriting.write(Data("detach-client\n".utf8)) }
   }
 
-  /// sbd runs the stop rule and the waits at the new time before it replies.
+  /// sbd runs a tick at the new time before it replies. The tick resolves
+  /// due waits only when no shared MCP server is starting.
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
   }

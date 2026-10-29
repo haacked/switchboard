@@ -69,4 +69,18 @@ import Testing
     try sbd.waitFor(s.id, "the interrupted tool call") { $0.reason.hasPrefix("`sleep 100`") }
     try expectRecorded("interrupt", sbd, s.id, after: mark, prompts: ["interrupt it"], commands: ["sleep 100"])
   }
+
+  /// A claude that dies mid-turn sends no more hooks, so no process that runs
+  /// the stub may outlive it.
+  @Test func aKilledStubSendsNoMoreHooks() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "slow 20")
+    let working = try sbd.waitFor(s.id, "the tool call") { $0.state == .working && $0.claudePid != nil }
+    try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
+    kill(pid_t(working.claudePid!), SIGKILL)
+    try sbd.waitFor("the stub's processes to exit") {
+      try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
+        .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+    }
+  }
 }
