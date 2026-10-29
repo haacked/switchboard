@@ -52,11 +52,11 @@ final class Outcome<T>: @unchecked Sendable {
     #expect(try sbd.sb("get", f.id).contains("prompt:  Fix the cache. It reads twice."))
 
     // A refusal that waited for the missing pane to settle would take 5 s.
-    let refused = Date()
     for op in ["open", "send", "resume", "terminals"] {
+      let asked = Date()
       #expect(failure(sbd, op, ["session": .string(f.id), "text": "hi"]).contains("hasn't started"))
+      #expect(Date().timeIntervalSince(asked) < 5, "\(op)")
     }
-    #expect(Date().timeIntervalSince(refused) < 5)
     #expect(failure(sbd, "wait", ["session": .string(f.id), "kind": "manual"]).contains("hasn't started"))
     _ = try sbd.client.call("note", ["session": .string(f.id), "text": "Ask Ana first."])
     #expect(try sbd.sb("get", f.id).contains("Ask Ana first."))
@@ -123,7 +123,12 @@ final class Outcome<T>: @unchecked Sendable {
       }
       started.done.signal()
     }
-    try sbd.waitFor("git to make \(folder)") { FileManager.default.fileExists(atPath: folder) }
+    // git is slow when many tests run it at once. A start that ends before
+    // git makes the folder fails with its own error.
+    try sbd.waitFor("git to make \(folder)", timeout: 60) {
+      if let result = started.result { _ = try result.get() }
+      return FileManager.default.fileExists(atPath: folder)
+    }
 
     for op in ["followup-start", "followup-rm", "rm"] {
       #expect(failure(sbd, op, ["session": .string(f.id)]).contains("is starting"))
@@ -174,6 +179,13 @@ final class Outcome<T>: @unchecked Sendable {
     let slugged = try sbd.client.call(
       "followup-start", ["session": .string(again.id), "path": .string(other), "branch": ""], as: SessionSummary.self)
     #expect(slugged.cwd == "\(sbd.home.path)/worktrees/widgets/look-again")
+    // A title with no ASCII letters makes no branch name, so the start
+    // refuses rather than run in the checkout.
+    let blank = try add(sbd, ["prompt": "…"])
+    #expect(
+      failure(sbd, "followup-start", ["session": .string(blank.id), "path": .string(other)])
+        .contains("can't make a branch name"))
+    #expect(try sbd.get(blank.id).state == .notStarted)
 
     // Without a repository, add takes the folder's GitHub remote and branch.
     let here = try add(sbd, ["prompt": "From a folder.", "cwd": .string(dotfiles)])

@@ -139,7 +139,7 @@ struct SessionRow: View {
         .frame(width: 8, height: 8)
         .opacity(session.live ? 1 : 0.35)
         .padding(.top, 5)
-        .help(session.live ? "claude is running" : "claude is stopped")
+        .help(session.waitsToStart ? "not started" : session.live ? "claude is running" : "claude is stopped")
       VStack(alignment: .leading, spacing: 2) {
         HStack {
           Text(session.name).fontWeight(.medium).lineLimit(1)

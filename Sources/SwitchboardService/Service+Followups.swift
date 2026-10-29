@@ -142,6 +142,7 @@ extension Service {
         s.branch = folder.branch
         s.repo = repo
         s.model = s.model ?? config.model
+        s.done = false
         s.followup?.started = nowMs()
       }
       record(session.id, "followup-started", ["cwd": .string(folder.cwd), "branch": .string(branch)])

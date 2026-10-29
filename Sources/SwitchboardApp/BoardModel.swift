@@ -30,8 +30,9 @@ final class BoardModel: ObservableObject {
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
-  /// Follow-ups that haven't started, which `ls` leaves out. They change
-  /// only through actions and triggers, so the app reads them every 5 s.
+  /// Follow-ups that wait to start, from `followup-ls`. `ls` also lists the
+  /// ones whose trigger fired. They change only through actions and
+  /// triggers, so the app reads them every 5 s.
   @Published var followups: [SessionSummary] = []
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
@@ -49,9 +50,10 @@ final class BoardModel: ObservableObject {
 
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou } }
 
-  /// The sessions and the follow-ups that haven't started. A follow-up that
-  /// started or fired since the last read of follow-ups is in both lists, and
-  /// the board shows the copy from `ls`.
+  /// The sessions and the follow-ups that wait to start. A follow-up whose
+  /// trigger fired is in both lists until it starts. A follow-up that started
+  /// since the last read of follow-ups is in both lists for up to 5 s. The
+  /// board shows the copy from `ls`.
   var board: [SessionSummary] {
     let ids = Set(sessions.map(\.id))
     return sessions + followups.filter { !ids.contains($0.id) }
@@ -102,8 +104,8 @@ final class BoardModel: ObservableObject {
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       if sessions != list { sessions = list }
-      // A follow-up that fires moves from the follow-ups into `ls`. The known
-      // states include the follow-ups, so that move notifies.
+      // A follow-up that fires appears in `ls` as Needs you. The known states
+      // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
       loaded = true
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
