@@ -200,6 +200,13 @@ public struct PRSummary: Codable, Equatable, Sendable {
     queue = pr.queue
   }
 
+  /// The PR's page, or nil unless `url` is https. Any local process can
+  /// record a `pr` event, and the app opens this link when the user clicks it.
+  public var link: URL? {
+    guard let url = URL(string: url), url.scheme?.lowercased() == "https" else { return nil }
+    return url
+  }
+
   /// The PR in one line, such as "#18303 Approved, checks success".
   public var line: String { "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")" }
 }

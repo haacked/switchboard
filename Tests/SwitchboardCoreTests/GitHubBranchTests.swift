@@ -127,6 +127,41 @@ import Testing
     #expect(GitHub.queueStatus(of: pr, [Self.control, Self.testing]) == nil)
   }
 
+  static func mergeable(_ mergeable: Mergeable?, id: String = "a", head: String = "h1") -> PullRequest {
+    PullRequest(id: id, number: 1, url: "", repo: "a/b", headSha: head, mergeable: mergeable)
+  }
+
+  @Test(
+    arguments: [
+      (mergeable(.unknown), mergeable(.conflicting), Mergeable.conflicting),
+      (mergeable(.unknown), mergeable(.conflicting, head: "h0"), .unknown),
+      (mergeable(.unknown), mergeable(.conflicting, id: "b"), .unknown),
+      (mergeable(.unknown), mergeable(nil), .unknown),
+      (mergeable(.unknown), nil, .unknown),
+      (mergeable(.mergeable), mergeable(.conflicting), .mergeable),
+    ] as [(PullRequest, PullRequest?, Mergeable)])
+  func unknownMergeabilityKeepsTheLastAnswerForTheSameHead(_ pr: PullRequest, _ last: PullRequest?, _ shown: Mergeable)
+  {
+    #expect(GitHub.shown(pr, [], last: last).mergeable == shown)
+  }
+
+  @Test func shownPRTakesTheQueueStateOfItsComments() {
+    #expect(GitHub.shown(Self.mergeable(.mergeable), [Self.control, Self.testing], last: nil).queue == .testing)
+  }
+
+  @Test(arguments: [
+    ("https://github.com/PostHog/charts/pull/18303", true),
+    ("HTTPS://github.com/PostHog/charts/pull/18303", true),
+    ("http://github.com/PostHog/charts/pull/18303", false),
+    ("file:///tmp/run.command", false),
+    ("/tmp/run.command", false),
+    ("", false),
+  ])
+  func linkIsOnlyAnHTTPSURL(_ url: String, _ linked: Bool) {
+    let pr = PullRequest(id: "a", number: 1, url: url, repo: "a/b")
+    #expect((PRSummary(pr).link != nil) == linked)
+  }
+
   @Test func elapsedCountsFromTheLastTime() {
     #expect(GitHub.elapsed(since: nil, 1000, now: 0))
     #expect(!GitHub.elapsed(since: 1000, 1000, now: 1999))
@@ -218,6 +253,7 @@ import Testing
       (429, ["retry-after": "30", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1800000300"], "{}", true, 300),
       (403, [:], #"{"message":"Resource protected by organization SAML enforcement."}"#, false, nil),
       (200, ["x-ratelimit-remaining": "4000"], #"{"data":{}}"#, false, nil),
+      (200, ["retry-after": "30"], #"{"data":{}}"#, false, nil),
       (502, [:], "<html>", false, nil),
     ] as [(Int, [String: String], String, Bool, Double?)])
   func rateLimitSaysWhetherAndHowLongToWait(

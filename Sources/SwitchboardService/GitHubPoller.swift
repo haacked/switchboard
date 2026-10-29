@@ -30,9 +30,10 @@ final class GitHubPoller {
     /// folder, and the session's last activity at that time.
     var counted: (at: Int64, activity: Int64, prId: String)?
     /// The PR that the event log held when this sbd first saw the session. It
-    /// stays the session's PR until the branch's lookup answers, so a restart
-    /// keeps the PR of a session whose HEAD is detached or whose conversation
-    /// `/clear` replaced.
+    /// keeps a restart from losing the PR of a session whose HEAD is detached
+    /// or whose conversation `/clear` replaced. The poller drops it when the
+    /// branch's lookup finds a PR. It also drops it when the lookup finds none
+    /// and the recorded PR is in the branch's repo with another head branch.
     var recordedPRId: String?
 
     /// The branch's PR comes first, then the transcript's.
@@ -273,7 +274,7 @@ final class GitHubPoller {
       if let key = t.branch.key, let result = found[key] {
         t.branch.prId = result
         t.branch.lookedUp = now
-        t.recordedPRId = nil
+        if result != nil { t.recordedPRId = nil }
       }
       if let link = t.transcript.link, let result = found[link] {
         t.transcript.prId = result
@@ -318,14 +319,17 @@ final class GitHubPoller {
       }
       if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
       if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
-      // A linked PR from another branch of the branch's repo belongs to the
-      // session's earlier work. It no longer counts once GitHub answers that
-      // the current branch has no PR. A linked PR in another repo still counts.
-      if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key,
-        let linked = t.transcript.prId.flatMap({ prs[$0]?.pr }),
-        linked.repo.lowercased() == repo.lowercased(), linked.head != branch
-      {
-        t.transcript.prId = nil
+      // A linked or recorded PR from another branch of the branch's repo
+      // belongs to the session's earlier work. It no longer counts once
+      // GitHub answers that the current branch has no PR. A PR in another
+      // repo still counts.
+      if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
+        let earlier = { (id: String?) -> Bool in
+          guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
+          return pr.repo.lowercased() == repo.lowercased() && pr.head != branch
+        }
+        if earlier(t.transcript.prId) { t.transcript.prId = nil }
+        if earlier(t.recordedPRId) { t.recordedPRId = nil }
       }
       tracked[id] = t
     }
@@ -433,17 +437,7 @@ final class GitHubPoller {
     if let id = t.prId {
       if let (pr, comments, _) = prs[id] {
         let kept = comments.map { bodies[$0.id] ?? $0 }
-        var shown = pr
-        shown.queue = GitHub.queueStatus(of: pr, kept)
-        // GitHub answers UNKNOWN while it computes mergeability again, as
-        // after the base branch moved. The session keeps the last answer for
-        // the same head commit, so a conflict doesn't leave Needs you and
-        // come back.
-        if pr.mergeable == .unknown, let last = s.facts.pr, last.id == pr.id, last.headSha == pr.headSha,
-          last.mergeable != nil
-        {
-          shown.mergeable = last.mergeable
-        }
+        let shown = GitHub.shown(pr, kept, last: s.facts.pr)
         if shown != s.facts.pr || kept != s.facts.prComments {
           var data: [String: JSON] = ["pr": (try? JSON(encoding: shown)) ?? .null]
           if kept != s.facts.prComments { data["comments"] = (try? JSON(encoding: kept)) ?? [] }

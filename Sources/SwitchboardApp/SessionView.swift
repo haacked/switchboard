@@ -97,7 +97,7 @@ struct SessionView: View {
             .foregroundStyle(.secondary)
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-        if let pr = session.pr, let url = URL(string: pr.url) {
+        if let pr = session.pr, let url = pr.link {
           Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
         }
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))

@@ -205,10 +205,11 @@ public enum GitHub {
     let spent = headers["x-ratelimit-remaining"] == "0"
     let reset = spent ? headers["x-ratelimit-reset"].flatMap(Double.init).map { max(0, $0 - now) } : nil
     let retry = [headers["retry-after"].flatMap(Double.init), reset].compactMap { $0 }.max()
+    let refused = status == 403 || status == 429
     let limited =
       response?["errors"]?.array?.contains { $0["type"]?.string == "RATE_LIMITED" } == true
-      || (status == 403 || status == 429) && (retry != nil || message.contains("rate limit"))
-    return (limited, limited || spent ? retry ?? 60 : nil)
+      || (refused && (retry != nil || message.contains("rate limit")))
+    return (limited, (limited || spent) ? (retry ?? 60) : nil)
   }
 
   /// GitHub reports a deleted account's author as null and shows it as ghost.
@@ -372,6 +373,20 @@ public enum GitHub {
       trunk.append(TrunkComment(author: c.author, body: body, edited: c.edited))
     }
     return TrunkComments.state(trunk)
+  }
+
+  /// The PR as its session shows it, with the queue state that its comments
+  /// give. GitHub answers UNKNOWN while it computes mergeability again, as
+  /// after the base branch moved. The PR then keeps the mergeability that
+  /// `last` showed for the same head commit, so a conflict doesn't leave
+  /// Needs you and come back.
+  public static func shown(_ pr: PullRequest, _ comments: [PRComment], last: PullRequest?) -> PullRequest {
+    var shown = pr
+    shown.queue = queueStatus(of: pr, comments)
+    if pr.mergeable == .unknown, let last, last.id == pr.id, last.headSha == pr.headSha, let kept = last.mergeable {
+      shown.mergeable = kept
+    }
+    return shown
   }
 
   /// Whether `interval` ms have passed since `since`, or `since` is nil.

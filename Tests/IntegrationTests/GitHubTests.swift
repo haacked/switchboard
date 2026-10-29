@@ -46,27 +46,30 @@ extension Instance {
   func sessionWithAPRLink() throws -> SessionSummary {
     let s = try new(prompt: "hello")
     try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    // The stub wrote the transcript in the cwd's folder. The poller would
-    // find that copy instead of this one when its folder lists first.
-    if let stub = Transcript.find(s.claudeSessionId, account: claudeConfig, cwd: s.cwd) {
-      try FileManager.default.removeItem(atPath: stub)
-    }
-    try FileManager.default.createDirectory(
-      atPath: (transcript(s) as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-    let lines = [
-      #"{"type":"user","message":{"content":"héllo ✓"}}"#,
-      #"{"type":"pr-link","sessionId":"x","prNumber":189,"prUrl":"https://github.com/haacked/review-code/pull/189","prRepository":"haacked/review-code","timestamp":"2026-10-25T20:00:00Z"}"#,
-    ]
-    try (lines.joined(separator: "\n") + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
+    try writeTranscript(
+      s,
+      [
+        #"{"type":"user","message":{"content":"héllo ✓"}}"#,
+        #"{"type":"pr-link","sessionId":"x","prNumber":189,"prUrl":"https://github.com/haacked/review-code/pull/189","prRepository":"haacked/review-code","timestamp":"2026-10-25T20:00:00Z"}"#,
+      ])
     return s
   }
 
   /// Writes a transcript for `s` whose one line links `repo`#`number`.
   func link(_ s: SessionSummary, _ repo: String, _ number: Int) throws {
+    try writeTranscript(s, [#"{"type":"pr-link","prNumber":\#(number),"prRepository":"\#(repo)"}"#])
+  }
+
+  /// Replaces the transcript that the stub wrote in the cwd's folder with
+  /// one at `transcript(s)`. The poller would find the stub's copy instead
+  /// when its folder lists first.
+  func writeTranscript(_ s: SessionSummary, _ lines: [String]) throws {
+    if let stub = Transcript.find(s.claudeSessionId, account: claudeConfig, cwd: s.cwd) {
+      try FileManager.default.removeItem(atPath: stub)
+    }
     try FileManager.default.createDirectory(
       atPath: (transcript(s) as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-    let line = #"{"type":"pr-link","prNumber":\#(number),"prRepository":"\#(repo)"}"#
-    try (line + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
+    try (lines.joined(separator: "\n") + "\n").write(toFile: transcript(s), atomically: true, encoding: .utf8)
   }
 
   func transcript(_ s: SessionSummary) -> String {
@@ -393,6 +396,39 @@ extension Instance {
     try sbd.poll()
     #expect(github.requests.map(\.authorization) == ["bearer token-1", "bearer token-2", "bearer token-2"])
     #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  /// A session on a branch without a PR keeps the PR that its conversation
+  /// linked in another repo, also after `/clear` and a restart of sbd.
+  @Test func keepsALinkedPRFromAnotherRepoAfterClearAndARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.link(s, "haacked/review-code", 189)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    let next = UUID().uuidString.lowercased()
+    try sbd.sb("send", s.id, "clear \(next)")
+    try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// A restart doesn't keep the PR of a branch that the session left while
+  /// sbd was stopped.
+  @Test func dropsTheRecordedPROfAnEarlierBranchAfterARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    sbd.stopSbd()
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr == nil)
   }
 
   @Test func keepsThePRAcrossARestartOfSbd() throws {
