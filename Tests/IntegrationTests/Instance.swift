@@ -39,7 +39,10 @@ final class Instance {
     home = Home(path: path)
     inheritedAccount = inheritsAccount ? "\(path)/inherited-account" : nil
     let folders = accounts.map { "\(path)/\($0)" }
-    for folder in folders { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
+    for folder in folders {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      FileManager.default.createFile(atPath: "\(folder)/.claude.json", contents: Data("{}".utf8))
+    }
     let config: [String: JSON] = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),

@@ -144,8 +144,9 @@ final class TerminalHost {
       guard key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil, env[key] == nil else {
         continue
       }
-      let stale = marked ? baseEnv[key] != nil : !copied.contains(key)
-      if stale { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
+      let hidesServerValue = marked && baseEnv[key] != nil
+      let leftFromEarlierStart = !marked && !copied.contains(key)
+      if hidesServerValue || leftFromEarlierStart { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
     }
     try run(["respawn-pane", "-t", "=\(name):", "-c", cwd] + envArgs(env) + (command.map { [$0] } ?? []))
   }

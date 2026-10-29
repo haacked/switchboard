@@ -46,9 +46,11 @@ struct ImportView: View {
       .fixedSize(horizontal: false, vertical: true)
       content
       ForEach(form.problems, id: \.self) { problem in
-        Label(problem, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange)
-          .textSelection(.enabled)
+        Label {
+          Text(problem).textSelection(.enabled)
+        } icon: {
+          Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
       }
       HStack {
         if let list = form.list, form.all || list.hidden > 0 {
@@ -203,7 +205,12 @@ struct ImportRow: View {
           .lineLimit(1)
           .truncationMode(.middle)
         if let runs = session.whereItRuns("It") {
-          Text(runs).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+          Label {
+            Text(runs).textSelection(.enabled)
+          } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+          }
+          .font(.caption)
         }
       }
     }

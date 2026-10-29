@@ -69,7 +69,10 @@ extension Service {
     let now = nowMs()
     let accounts = self.accounts
     let listed = try listAgents(accounts, now: now)
-    return queue.sync { remember(listed, from: Set(accounts), now: now) }
+    return queue.sync {
+      remember(listed, now: now)
+      return listed + exitedSessions(notIn: listed, accounts: Set(accounts))
+    }
   }
 
   /// The sessions that `claude agents --json` lists in each account. A row
@@ -81,6 +84,11 @@ extension Service {
     }
     let lists = concurrentMap(accounts) { account in
       Result { () throws -> [ClaudeSession] in
+        // claude creates a missing config folder and lists nothing. This refuses before claude runs.
+        if !ClaudeAccount.isDefault(account) && !FileManager.default.fileExists(atPath: "\(account)/.claude.json") {
+          throw APIError(
+            "\(account) holds no Claude account (no .claude.json). Check claudeConfigDirs in \(home.config)")
+        }
         var env = ProcessInfo.processInfo.environment
         ClaudeAccount.apply(account, to: &env)
         let r = try runCommand(claude, ["agents", "--json"], env: env)
@@ -98,27 +106,31 @@ extension Service {
     return Array(byId.values)
   }
 
-  /// Remembers the listed sessions that Switchboard doesn't have, forgets the
-  /// ones that left the list more than a day ago, and returns the listed ones
-  /// with the remembered ones that left it. A remembered session counts as
-  /// exited only when sbd ran `claude agents` in its account this time. sbd
-  /// doesn't ask an account that the config no longer names. That account's
-  /// claude may still run the session.
-  private func remember(_ listed: [ClaudeSession], from accounts: Set<String>, now: Int64) -> [ClaudeSession] {
+  /// Remembers the listed sessions that Switchboard doesn't have, and forgets
+  /// the ones that left the list more than a day ago.
+  private func remember(_ listed: [ClaudeSession], now: Int64) {
     let owned = Set(entries.values.map(\.session.claudeSessionId))
     let fresh = listed.filter { !owned.contains($0.id) }
     for s in fresh { remembered[s.id] = s }
     do { try store.save(claudeSessions: fresh) } catch { logLine("can't remember Claude sessions: \(error)") }
     let ids = Set(listed.map(\.id))
     for s in remembered.values where !ids.contains(s.id) && now - s.seen > Service.rememberMs { forget(s.id) }
-    let exited = remembered.values.filter {
+  }
+
+  /// The remembered sessions that left the list, which no claude runs. A
+  /// remembered session counts as exited only when sbd ran `claude agents` in
+  /// its account this time. sbd doesn't ask an account that the config no
+  /// longer names. That account's claude may still run the session.
+  private func exitedSessions(notIn listed: [ClaudeSession], accounts: Set<String>) -> [ClaudeSession] {
+    let owned = Set(entries.values.map(\.session.claudeSessionId))
+    let ids = Set(listed.map(\.id))
+    return remembered.values.filter {
       !ids.contains($0.id) && !owned.contains($0.id) && accounts.contains($0.account)
     }.map { s in
       var s = s
       s.clearProcess()
       return s
     }
-    return listed + exited
   }
 
   private func forget(_ claudeSessionId: String) {

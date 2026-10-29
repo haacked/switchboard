@@ -427,6 +427,17 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(reasons(again) == expected)
   }
 
+  @Test func refusesToListAnAccountFolderThatHoldsNoClaudeAccount() throws {
+    let sbd = try Instance()
+    let folder = "\(sbd.home.path)/no-account"
+    try sbd.restart(setting: "claudeConfigDirs", to: [.string(folder)])
+
+    let error = try #require(throws: APIError.self) { try sbd.client.importable() }
+
+    #expect(error.description.hasPrefix("\(folder) holds no Claude account"))
+    #expect(!sbd.stubCalls().contains { $0.args.hasPrefix("agents") })
+  }
+
   @Test func importsSeveralSessionsInOneRequestEachFromItsOwnTranscript() throws {
     let sbd = try Instance(accounts: ["A"])
     let (one, two) = (newId(), newId())

@@ -62,8 +62,8 @@ public struct ImportList: Codable, Equatable, Sendable {
     self.hidden = hidden
   }
 
-  /// The runs of sessions with the same repo, which the list's order keeps
-  /// together. Folders outside git form one group.
+  /// Groups each stretch of consecutive sessions that share a repo, which the
+  /// list's order keeps together. Folders outside git form one group.
   public var groups: [(title: String, sessions: [ClaudeSession])] {
     var out: [(title: String, sessions: [ClaudeSession])] = []
     for s in sessions {
