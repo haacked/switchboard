@@ -118,4 +118,15 @@ import Testing
       canKeep: { name, _ in name != "taken" }, freePort: { free.next() })
     #expect(ports == ["fixed": 4100, "kept": 4200, "moved": 4300, "new": 4301, "taken": 4302])
   }
+
+  @Test func leavesOutAServerWhenNoFreePortIsLeft() {
+    let servers = [
+      "fixed": MCPServer(type: .http, command: "x", port: 4100),
+      "new": MCPServer(type: .http, command: "x", args: ["{port}"]),
+    ]
+    // The only free port is the one that "fixed" already has.
+    var free = [4100].makeIterator()
+    let ports = MCPServer.assignPorts(servers, previous: [:], canKeep: { _, _ in true }, freePort: { free.next() })
+    #expect(ports == ["fixed": 4100])
+  }
 }
