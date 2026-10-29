@@ -126,6 +126,9 @@ play() {
   emit "$@" <"$recordings/$step.jsonl"
 }
 
+# event <step> <event>: the payloads of one hook event in the recorded step.
+event() { jq -c --arg e "$2" 'select(.hook_event_name == $e)' "$recordings/$1.jsonl"; }
+
 # answered <tool> <input> <answer> [terminal input]: finishes a call that
 # dialog answered. It prints the reply, or nothing when the turn stopped.
 answered() {
@@ -186,11 +189,11 @@ stopped() {
 # when the call stopped it.
 asks() {
   local reply
-  head -1 "$recordings/turn.jsonl" | emit "$(vars "$1" "")"
+  event turn UserPromptSubmit | emit "$(vars "$1" "")"
   reply=$(call_tool "${@:2}")
   [ -z "$reply" ] && return
   echo "⏺ $reply"
-  tail -1 "$recordings/turn.jsonl" | emit "$(vars "$1" "$reply")"
+  event turn Stop | emit "$(vars "$1" "$reply")"
 }
 
 questions='{"questions":[
@@ -220,7 +223,7 @@ turn() {
     return
     ;;
   fail*)
-    head -1 "$recordings/turn.jsonl" | emit "$(vars "$p" "")"
+    event turn UserPromptSubmit | emit "$(vars "$p" "")"
     hook StopFailure '{"error":"rate_limit"}'
     echo "⏺ API Error"
     return
