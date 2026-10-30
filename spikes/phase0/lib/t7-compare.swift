@@ -4,7 +4,7 @@ import Foundation
 /// recorded `trunk merge status` output. A row holds what the timeline
 /// parser read, how many timeline rows the output shows, and how many of
 /// the parsed links hold a space, which a wrong join of a wrapped line
-/// leaves. When the run also recorded the PR's comments, the row adds the
+/// leaves. When the run also recorded the PR's comments with their times, the row adds the
 /// state from Trunk's comments, whether both parsers say that Trunk holds
 /// the PR, and where Trunk's comments sit among the PR's comments.
 /// t7-trunk.sh compiles it together with SwitchboardCore's sources.
@@ -40,22 +40,22 @@ import Foundation
       }
       var columns = [name, trunk] + parsed + [meta["ms"]?.int.map(String.init) ?? ""]
       let data = read("\(dir)/\(name).json")
-      if let nodes = data["comments"]?.array {
+      if let nodes = data["comments"]?.array, nodes.allSatisfy({ $0["createdAt"]?.string != nil }) {
         let comments = nodes.map { c in
           let login = c["author"]?["login"]?.string ?? ""
           let bot = c["author"]?["__typename"]?.string == "Bot"
-          return TrunkComment(
-            author: bot ? "\(login)[bot]" : login, body: c["body"]?.string ?? "",
-            edited: c["includesCreatedEdit"]?.bool ?? false)
+          return PRComment(
+            id: c["id"]?.string ?? "", author: bot ? "\(login)[bot]" : login, createdAt: c["createdAt"]?.string ?? "",
+            editedAt: c["lastEditedAt"]?.string, edited: c["includesCreatedEdit"]?.bool ?? false,
+            body: c["body"]?.string ?? "")
         }
         let prState = data["pr"]?["state"]?.string ?? ""
-        let fromComments = TrunkComments.state(comments)
-        // Only an open PR can be in the queue. A PR below the top of a merged
-        // stack keeps the reply that says it is queued.
-        let commentsQueued = prState == "OPEN" && fromComments?.isQueued == true
+        let pr = PullRequest(id: "", number: 0, url: "", repo: "", state: PRState(rawValue: prState) ?? .open)
+        let fromComments = TrunkComments.state(of: pr, comments)
+        let commentsQueued = fromComments?.isQueued == true
         let fromTrunk = comments.indices.filter { comments[$0].author == TrunkComments.author }
-        let status = fromTrunk.last { comments[$0].edited && TrunkComments.statusState(comments[$0].body) != nil }
-        let reply = fromTrunk.last { !comments[$0].edited && TrunkComments.replyState(comments[$0].body) != nil }
+        let status = fromTrunk.last { comments[$0].edited && TrunkComments.statusState(comments[$0].body ?? "") != nil }
+        let reply = fromTrunk.last { !comments[$0].edited && TrunkComments.replyState(comments[$0].body ?? "") != nil }
         columns += [
           prState, fromComments?.rawValue ?? "none", trunkQueued == commentsQueued ? "yes" : "NO",
           String(comments.count),

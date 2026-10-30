@@ -362,19 +362,6 @@ public enum GitHub {
     return .branch(repo: baseRepo, branch: upstream, owner: String(head.split(separator: "/")[0]))
   }
 
-  /// The Trunk queue state that an open PR's trunk-io comments show, or
-  /// unknown when the body of one of them didn't load. A merged stack's lower
-  /// PRs keep Trunk's "queued" replies, so a merged or closed PR has no state.
-  public static func queueStatus(of pr: PullRequest, _ comments: [PRComment]) -> TrunkQueueState? {
-    guard pr.state == .open else { return nil }
-    var trunk: [TrunkComment] = []
-    for c in comments where c.author == TrunkComments.author {
-      guard let body = c.body else { return .unknown }
-      trunk.append(TrunkComment(author: c.author, body: body, edited: c.edited))
-    }
-    return TrunkComments.state(trunk)
-  }
-
   /// The PR as its session shows it, with the queue state that its comments
   /// give. GitHub answers UNKNOWN while it computes mergeability again, as
   /// after the base branch moved. The PR then keeps the mergeability that
@@ -382,7 +369,7 @@ public enum GitHub {
   /// Needs you and come back.
   public static func shown(_ pr: PullRequest, _ comments: [PRComment], last: PullRequest?) -> PullRequest {
     var shown = pr
-    shown.queue = queueStatus(of: pr, comments)
+    shown.queue = TrunkComments.state(of: pr, comments)
     if pr.mergeable == .unknown, let last, last.id == pr.id, last.headSha == pr.headSha, let kept = last.mergeable {
       shown.mergeable = kept
     }

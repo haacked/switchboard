@@ -106,27 +106,6 @@ import Testing
   static let testing = comment("trunk-io[bot]", "⏳ Running tests in the merge queue")
   static let deploy = comment("deployment-status-posthog[bot]", "Running tests")
 
-  @Test(
-    arguments: [
-      ([deploy, control, testing], .testing),
-      ([control, comment("trunk-io[bot]", "Removed from the merge queue")], .removed),
-      ([deploy, control], nil),
-      ([deploy, comment("trunk-io", "⏳ Running tests in the merge queue")], nil),
-      ([control, comment("trunk-io[bot]", nil)], .unknown),
-    ] as [([PRComment], TrunkQueueState?)])
-  func openPRTakesTheQueueStateOfItsTrunkComments(_ comments: [PRComment], _ queue: TrunkQueueState?) {
-    let open = PullRequest(id: "a", number: 1, url: "", repo: "a/b")
-
-    #expect(GitHub.queueStatus(of: open, comments) == queue)
-  }
-
-  @Test(arguments: [PRState.merged, .closed])
-  func finishedPRHasNoQueueState(_ state: PRState) {
-    let pr = PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: state)
-
-    #expect(GitHub.queueStatus(of: pr, [Self.control, Self.testing]) == nil)
-  }
-
   static func mergeable(_ mergeable: Mergeable?, id: String = "a", head: String = "h1") -> PullRequest {
     PullRequest(id: id, number: 1, url: "", repo: "a/b", headSha: head, mergeable: mergeable)
   }

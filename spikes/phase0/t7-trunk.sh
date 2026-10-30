@@ -64,7 +64,7 @@ comments_query='query($owner: String!, $repo: String!, $pr: Int!, $endCursor: St
     state
     comments(first: 100, after: $endCursor) {
       pageInfo { hasNextPage endCursor }
-      nodes { author { __typename login } body includesCreatedEdit }
+      nodes { id author { __typename login } createdAt lastEditedAt body includesCreatedEdit }
     } } } }'
 
 cmd_record() {

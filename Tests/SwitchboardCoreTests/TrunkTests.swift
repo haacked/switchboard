@@ -247,20 +247,31 @@ let trunkAlreadyQueued = "This PR is already queued as a stacked merge. Cancel i
 let trunkError = "An error occurred while submitting your PR to the queue: `Something went wrong. Please try again`"
 let trunkMerged = "😎 Merged successfully - [details](https://app.trunk.io/x)."
 
-/// Trunk's comment that it edits in place into the queue status.
-func status(_ body: String) -> TrunkComment { TrunkComment(author: "trunk-io[bot]", body: body, edited: true) }
+let trunkTime = "2026-10-25T00:00:00Z"
+
+/// Trunk's comment that it edits in place into the queue status. `at` is the time of the last edit.
+func status(_ body: String, at: String = trunkTime) -> PRComment {
+  PRComment(
+    id: "S_\(body.hashValue)_\(at)", author: "trunk-io[bot]", createdAt: "2026-10-24T00:00:00Z", editedAt: at,
+    edited: true, body: body)
+}
 /// A comment that Trunk posts and never edits.
-func reply(_ body: String) -> TrunkComment { TrunkComment(author: "trunk-io[bot]", body: body, edited: false) }
+func reply(_ body: String, at: String = trunkTime) -> PRComment {
+  PRComment(id: "R_\(body.hashValue)_\(at)", author: "trunk-io[bot]", createdAt: at, edited: false, body: body)
+}
+func queue(_ comments: [PRComment], _ state: PRState = .open) -> TrunkQueueState? {
+  TrunkComments.state(of: PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: state), comments)
+}
 
 /// The comment cases come from git-pr's tests (`~/.dotfiles/bin/lib/test-git-pr.sh`), whose jq this parser ports.
 @Suite struct TrunkCommentTests {
   @Test func commentsThatNameNoQueueState() {
-    #expect(TrunkComments.state([]) == nil)
-    #expect(TrunkComments.state([status(trunkControl), status(trunkAnalytics)]) == nil)
-    #expect(TrunkComments.state([reply(trunkError)]) == nil)
-    #expect(TrunkComments.state([reply(trunkControl)]) == nil)
+    #expect(queue([]) == nil)
+    #expect(queue([status(trunkControl), status(trunkAnalytics)]) == nil)
+    #expect(queue([reply(trunkError)]) == nil)
+    #expect(queue([reply(trunkControl)]) == nil)
     // Only a status's first line names the state.
-    #expect(TrunkComments.state([status(trunkControl + "\n" + trunkSubmitted)]) == nil)
+    #expect(queue([status(trunkControl + "\n" + trunkSubmitted)]) == nil)
   }
 
   @Test(arguments: [
@@ -278,40 +289,71 @@ func reply(_ body: String) -> TrunkComment { TrunkComment(author: "trunk-io[bot]
     (trunkMerged, .merged),
   ])
   func eachStatusNamesAState(body: String, state: TrunkQueueState) {
-    #expect(TrunkComments.state([status(body)]) == state)
+    #expect(queue([status(body)]) == state)
   }
 
   @Test func aLaterReplyKeepsTheStatus() {
-    #expect(TrunkComments.state([status(trunkSubmitted), reply(trunkError)]) == .submitted)
-    #expect(TrunkComments.state([status(trunkPassed), reply(trunkAlreadyQueued)]) == .passed)
+    #expect(queue([status(trunkSubmitted), reply(trunkError)]) == .submitted)
+    #expect(queue([status(trunkPassed), reply(trunkAlreadyQueued)]) == .passed)
   }
 
   @Test func onlyTheFirstLineOfAStatusWithCRLFLineEndsNamesTheState() {
-    #expect(TrunkComments.state([status(trunkReentering + "\r\n" + trunkFailed)]) == .queued)
+    #expect(queue([status(trunkReentering + "\r\n" + trunkFailed)]) == .queued)
   }
 
   @Test func theLastStatusWins() {
-    #expect(TrunkComments.state([status(trunkFailed), status(trunkSubmitted)]) == .submitted)
+    #expect(
+      queue([status(trunkFailed, at: "2026-10-25T01:00:00Z"), status(trunkSubmitted, at: "2026-10-25T02:00:00Z")])
+        == .submitted)
+    #expect(
+      queue([status(trunkSubmitted, at: "2026-10-25T01:00:00Z"), status(trunkFailed, at: "2026-10-25T02:00:00Z")])
+        == .removed)
   }
 
   @Test func stackRepliesNameAState() {
-    #expect(TrunkComments.state([reply(trunkStackPosted)]) == .submitted)
-    #expect(TrunkComments.state([reply(trunkInStack)]) == .queued)
-    #expect(TrunkComments.state([reply(trunkInStack), reply(trunkStackFailed)]) == .removed)
-    #expect(TrunkComments.state([reply(trunkInStack), reply(trunkStackCancelled)]) == .removed)
-    #expect(TrunkComments.state([reply(trunkInStack), reply(trunkStackReturned)]) == .pending)
-    #expect(TrunkComments.state([reply(trunkInStack), reply(trunkStackUnknown)]) == .queued)
+    #expect(queue([reply(trunkStackPosted)]) == .submitted)
+    #expect(queue([reply(trunkInStack)]) == .queued)
+    #expect(queue([reply(trunkInStack), reply(trunkStackFailed)]) == .removed)
+    #expect(queue([reply(trunkInStack), reply(trunkStackCancelled)]) == .removed)
+    #expect(queue([reply(trunkInStack), reply(trunkStackReturned)]) == .pending)
+    #expect(queue([reply(trunkInStack), reply(trunkStackUnknown)]) == .queued)
   }
 
-  @Test func aQueuedStateOutranksARemovalFromTheOtherKind() {
-    #expect(TrunkComments.state([status(trunkTesting), reply(trunkStackFailed)]) == .testing)
-    #expect(TrunkComments.state([status(trunkFailed), reply(trunkInStack)]) == .queued)
-    #expect(TrunkComments.state([status(trunkFailed), reply(trunkInStack), reply(trunkStackCancelled)]) == .removed)
+  @Test func theNewerOfTheStatusAndTheReplyWins() {
+    let early = "2026-10-25T01:00:00Z"
+    let late = "2026-10-25T02:00:00Z"
+    #expect(queue([status(trunkTesting, at: early), reply(trunkStackFailed, at: late)]) == .removed)
+    #expect(queue([status(trunkFailed, at: early), reply(trunkInStack, at: late)]) == .queued)
+    #expect(queue([reply(trunkStackFailed, at: early), status(trunkTesting, at: late)]) == .testing)
+    #expect(queue([reply(trunkInStack, at: early), status(trunkFailed, at: late)]) == .removed)
+    #expect(
+      queue([
+        status(trunkFailed, at: early), reply(trunkInStack, at: late),
+        reply(trunkStackCancelled, at: "2026-10-25T03:00:00Z"),
+      ]) == .removed)
+  }
+
+  @Test func theEditTimeOrdersAStatusPostedBeforeTheReply() {
+    let posted = status(trunkTesting, at: "2026-10-25T03:00:00Z")
+    #expect(queue([posted, reply(trunkStackFailed, at: "2026-10-25T02:00:00Z")]) == .testing)
   }
 
   @Test func onlyTrunkSetsTheState() {
-    #expect(TrunkComments.state([TrunkComment(author: "someone", body: trunkSubmitted, edited: true)]) == nil)
+    #expect(
+      queue([PRComment(id: "a", author: "someone", createdAt: trunkTime, edited: true, body: trunkSubmitted)]) == nil)
     // GraphQL gives a bot's login without the [bot] suffix that GitHub forbids in a user's login.
-    #expect(TrunkComments.state([TrunkComment(author: "trunk-io", body: trunkSubmitted, edited: true)]) == nil)
+    #expect(
+      queue([PRComment(id: "a", author: "trunk-io", createdAt: trunkTime, edited: true, body: trunkSubmitted)]) == nil)
+  }
+
+  @Test(arguments: [PRState.merged, .closed])
+  func finishedPRHasNoQueueState(_ state: PRState) {
+    #expect(queue([status(trunkTesting), reply(trunkInStack)], state) == nil)
+    #expect(queue([PRComment(id: "a", author: "trunk-io[bot]", createdAt: trunkTime, edited: true)], state) == nil)
+  }
+
+  @Test func anUnloadedTrunkBodyMakesTheStateUnknown() {
+    let unloaded = PRComment(id: "a", author: "trunk-io[bot]", createdAt: trunkTime, edited: true)
+    #expect(queue([status(trunkTesting), unloaded]) == .unknown)
   }
 }
