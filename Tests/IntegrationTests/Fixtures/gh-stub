@@ -1,0 +1,7 @@
+#!/bin/bash
+# A stand-in for gh in sbd's integration tests. `gh auth token` prints
+# token-<n>, where n counts the calls, so a test can tell a new token from the
+# first. It records each call in $SB_HOME/gh-calls.log.
+printf '%s\n' "$*" >>"$SB_HOME/gh-calls.log"
+[ "$1 $2" = "auth token" ] || exit 1
+echo "token-$(wc -l <"$SB_HOME/gh-calls.log" | tr -d ' ')"

@@ -54,6 +54,7 @@ for sig in [SIGTERM, SIGINT] {
 }
 
 server.run()
+service.startPollers()
 let ticker = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "sbd.tick"))
 ticker.schedule(deadline: .now() + service.tickSeconds, repeating: service.tickSeconds)
 ticker.setEventHandler { service.tick() }

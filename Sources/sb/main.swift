@@ -61,6 +61,8 @@ let usage = """
                                   earlier import read
 
   Service:
+    poll [--all]                  ask GitHub about the sessions' PRs now; --all
+                                  reads every PR, not only those due
     ping                          check that sbd answers
     mcp                           list the shared MCP servers that sbd runs
     service install|uninstall|status
@@ -187,6 +189,7 @@ func printSession(_ s: SessionSummary) {
   )
   print("  folder:  \(s.cwd)")
   if let b = s.branch { print("  branch:  \(b)") }
+  if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
@@ -436,6 +439,16 @@ case "mcp":
   mcp(a)
 case "followup", "followups":
   followup(a)
+case "poll":
+  let result = call("poll", ["all": .bool(a.switches.contains("--all"))], timeout: 300)
+  if a.json {
+    printJSON(result)
+  } else {
+    let n = { (key: String) in result[key]?.int ?? 0 }
+    print(
+      "read \(n("polled")) PRs and looked up \(n("lookups")) in \(n("requests")) requests for \(n("points")) points")
+    if let error = result["error"]?.string { die(error) }
+  }
 case "ping":
   let result = call("ping", timeout: 5)
   if a.json {

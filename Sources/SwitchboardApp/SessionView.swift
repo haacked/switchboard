@@ -97,6 +97,9 @@ struct SessionView: View {
             .foregroundStyle(.secondary)
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+        if let pr = session.pr, let url = pr.link {
+          Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
+        }
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
           .font(.caption)
           .foregroundStyle(.tertiary)
@@ -112,7 +115,7 @@ struct SessionView: View {
         } else {
           Button("Resume") { model.resume(session.id) }
         }
-        Button(session.state == .done ? "Not Done" : "Done") { model.setDone(session.id, session.state != .done) }
+        Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
         Button(role: .destructive) {
           ui.confirmingRemove = true
         } label: {
