@@ -206,6 +206,78 @@ public struct Wait: Codable, Equatable, Sendable {
     }
   }
 
+  /// What happened, when this PR kind of wait can resolve from the PR as the
+  /// poller read it, or nil while the wait stays open. A wait that names a PR
+  /// that merged or closed first resolves too, since nothing else would end it.
+  /// The `queue` and `deploy` kinds wait for other pollers.
+  ///
+  /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR.
+  /// - `review` and `bot-review`: a review that was submitted after the wait was
+  ///   set, by `who`, or by any app when a `bot-review` wait has no `who`. The
+  ///   outcome names the newest one.
+  /// - `approval`: `who`'s last verdict is an approval, or the PR is approved
+  ///   when there is no `who`. It holds at any time, since an approval is a
+  ///   state.
+  /// - `merge`: the PR merged or closed.
+  public func resolution(of pr: SwitchboardCore.PullRequest) -> String? {
+    let ended: String? =
+      switch pr.state {
+      case .open: nil
+      case .merged: kind == .merge ? "it merged" : "the PR merged first"
+      case .closed: kind == .merge ? "it closed without merging" : "the PR closed first"
+      }
+    switch kind {
+    case .merge:
+      return ended
+    case .ci:
+      switch pr.checks {
+      case "SUCCESS": return "the checks passed"
+      case "FAILURE", "ERROR": return "the checks failed"
+      default: return ended
+      }
+    case .review, .botReview:
+      let verbs = ["APPROVED": "approved", "CHANGES_REQUESTED": "requested changes", "COMMENTED": "reviewed"]
+      let newest = pr.reviews.last { r in
+        guard verbs[r.state] != nil, let at = r.submittedAt.flatMap(Transcript.milliseconds), at > created else {
+          return false
+        }
+        if let who { return Wait.sameLogin(r.author, who) }
+        return kind == .botReview && r.bot == true
+      }
+      return newest.flatMap { r in verbs[r.state].map { "\(r.author) \($0)" } } ?? ended
+    case .approval:
+      if let who {
+        return pr.verdicts.first { $0.state == "APPROVED" && Wait.sameLogin($0.author, who) }
+          .map { "\($0.author) approved" } ?? ended
+      }
+      guard pr.isApproved else { return ended }
+      return pr.approvers.isEmpty ? "the PR is approved" : "approved by " + pr.approvers.joined(separator: ", ")
+    case .queue, .deploy, .session, .date, .manual:
+      return nil
+    }
+  }
+
+  /// Whether the PR merged or closed before this wait was set, or at a time
+  /// that GitHub didn't give.
+  public func finishedBeforeSet(_ pr: SwitchboardCore.PullRequest) -> Bool {
+    guard pr.state != .open else { return false }
+    guard let at = (pr.state == .merged ? pr.mergedAt : pr.closedAt).flatMap(Transcript.milliseconds) else {
+      return true
+    }
+    return at < created
+  }
+
+  /// GitHub's REST API shows a GitHub App's login with `[bot]`, and its
+  /// GraphQL API without.
+  static func sameLogin(_ a: String, _ b: String) -> Bool {
+    func bare(_ login: String) -> String {
+      var s = login.lowercased()
+      if s.hasPrefix("@") { s.removeFirst() }
+      return s.hasSuffix("[bot]") ? String(s.dropLast(5)) : s
+    }
+    return bare(a) == bare(b)
+  }
+
   /// A time in the local format that the summaries use, `yyyy-MM-dd HH:mm`.
   /// Attention calls it on every tick, so it formats the parts itself. A
   /// DateFormatter costs about 30 times as much to build.

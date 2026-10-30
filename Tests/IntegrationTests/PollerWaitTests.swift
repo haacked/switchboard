@@ -1,0 +1,258 @@
+import Foundation
+import SwitchboardCore
+import Testing
+
+extension FakeGitHub {
+  func checks(_ number: Int, _ state: String) {
+    change(number) { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": .string(state)]]]]] }
+  }
+
+  /// Adds a review to the PR's last reviews, and to its verdicts when `verdict`.
+  func review(
+    _ number: Int, by login: String, _ state: String, at time: String, bot: Bool = false, verdict: Bool = false
+  ) {
+    let node: JSON = [
+      "author": ["login": .string(login), "__typename": bot ? "Bot" : "User"], "state": .string(state),
+      "submittedAt": .string(time), "commit": ["oid": "abc"],
+    ]
+    change(number) { pr in
+      for key in verdict ? ["reviews", "latestOpinionatedReviews"] : ["reviews"] {
+        pr[key] = ["nodes": .array((pr[key]?["nodes"]?.array ?? []) + [node])]
+      }
+    }
+  }
+}
+
+/// A GitHub timestamp `seconds` from now.
+func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(seconds)) }
+
+/// Polls resolve waits on the PR kinds, and merge triggers fire, through
+/// `sb poll` against the fake GitHub.
+@Suite(.timeLimit(.minutes(2))) struct PollerWaitTests {
+  static let charts = "PostHog/charts"
+  static let branch = "haacked/cdp-dlq-runbook-lookup-step"
+
+  /// A session on the branch of PostHog/charts#18303, whose PR the poller has read.
+  func chartsSession(_ sbd: Instance) throws -> SessionSummary {
+    let s = try sbd.session(in: PollerWaitTests.charts, branch: PollerWaitTests.branch)
+    try sbd.poll()
+    return s
+  }
+
+  func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws {
+    try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: \(message)" }
+    #expect(try sbd.get(s.id).waits.isEmpty)
+  }
+
+  @Test func aCIWaitResumesTheSessionOnceTheChecksPass() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    github.checks(18303, "PENDING")
+    try sbd.sb("wait", s.id, "--kind", "ci", "--note", "then merge")
+    let open = try sbd.poll()
+    #expect(open["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.checks(18303, "SUCCESS")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed. Your note: then merge.")
+  }
+
+  @Test func aCIWaitThatNotifiesMovesToNeedsYouWhenTheChecksFail() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    github.checks(18303, "PENDING")
+    try sbd.sb("wait", s.id, "--kind", "ci", "--then", "notify")
+    github.checks(18303, "FAILURE")
+    try sbd.poll()
+    try sbd.poll()
+    let after = try sbd.get(s.id)
+    #expect(after.state == .needsYou)
+    #expect(after.reason == "CI on the session's PR: the checks failed")
+    #expect(after.waits.isEmpty)
+  }
+
+  @Test func aWaitIgnoresTheStateThePollerReadBeforeItWasSet() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    // The poller read SUCCESS before the wait. The next poll reads the PR again
+    // because the wait is newer than the last read, so a push that started new
+    // checks keeps the wait open.
+    github.checks(18303, "PENDING")
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+    #expect(github.requests.filter { $0.kind == "status" }.count == 2)
+  }
+
+  @Test func aCIWaitNeedsTwoReadsOfTheSameHeadCommit() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    // The first read shows SUCCESS for the old head, as GitHub can just after a push.
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    github.change(18303) { $0["headRefOid"] = "pushed-commit" }
+    github.checks(18303, "PENDING")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    github.checks(18303, "FAILURE")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
+  }
+
+  @Test func aWaitStaysOpenWhenTheReadAfterItFails() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge")
+    github.change(18303) {
+      $0["state"] = "MERGED"
+      $0["mergedAt"] = .string(stamp(60))
+    }
+    github.fail(18303)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  @Test func aWaitIgnoresAnEarlierPROfAReusedBranch() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "posthog/groups-list-two-phase-dedup")
+    try sbd.poll()
+    try sbd.sb("wait", s.id, "--kind", "merge")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  @Test func aDoneSessionIsNotResumedByAResolution() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge")
+    try sbd.sb("done", s.id)
+    github.change(18303) {
+      $0["state"] = "MERGED"
+      $0["mergedAt"] = .string(stamp(60))
+    }
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  @Test func aReviewWaitNeedsANewReviewByTheReviewer() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    github.review(18303, by: "alex", "APPROVED", at: "2020-01-01T00:00:00Z")
+    try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
+    try sbd.poll()
+    github.review(18303, by: "sam", "APPROVED", at: stamp(60))
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.review(18303, by: "alex", "CHANGES_REQUESTED", at: stamp(60))
+    try sbd.poll()
+    try resumed(sbd, s, with: "a review from alex on the session's PR: alex requested changes.")
+  }
+
+  @Test func aBotReviewWaitResolvesOnAReviewFromAnApp() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "bot-review")
+    github.review(18303, by: "alex", "COMMENTED", at: stamp(60))
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.review(18303, by: "greptile-apps", "COMMENTED", at: stamp(60), bot: true)
+    try sbd.poll()
+    try resumed(sbd, s, with: "a bot review on the session's PR: greptile-apps reviewed.")
+  }
+
+  @Test func anApprovalWaitResolvesOnceTheApproverApproves() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.sb("wait", s.id, "--kind", "approval", "--who", "alex")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.review(122953, by: "alex", "APPROVED", at: stamp(60), verdict: true)
+    try sbd.poll()
+    try resumed(sbd, s, with: "approval from alex on the session's PR: alex approved.")
+  }
+
+  @Test func aMergeWaitResolvesWhenThePRMerges() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.change(18303) {
+      $0["state"] = "MERGED"
+      $0["mergedAt"] = .string(stamp(60))
+    }
+    try sbd.poll()
+    try resumed(sbd, s, with: "the session's PR to merge: it merged.")
+  }
+
+  @Test func aWaitOnAnotherPRInTheSessionsRepoPollsThatPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "#122179")
+    let result = try sbd.poll()
+    #expect(result["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "#122179 to merge: it merged.")
+  }
+
+  @Test func aWaitOnAPRInAnotherRepoWorksFromASessionWithoutAPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("wait", s.id, "--kind", "ci", "--target", "https://github.com/PostHog/charts/pull/18303")
+    try sbd.poll()
+    try sbd.poll()
+    try resumed(sbd, s, with: "CI on PostHog/charts#18303: the checks passed.")
+    #expect(github.requests.contains { $0.kind == "lookup" && $0.ids == ["PostHog/charts#18303"] })
+  }
+
+  @Test func aWaitOnAPRThatCantBeFoundStaysOpen() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "PostHog/charts#9")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  @Test func queueAndDeployWaitsWaitForTheirOwnPollers() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.sb("wait", s.id, "--kind", "queue", "--target", "#122179")
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--target", "#122179")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).waits.count == 2)
+    #expect(!github.requests.contains { $0.kind == "lookup" && $0.ids == ["PostHog/posthog#122179"] })
+  }
+
+  @Test func aMergeTriggerFiresWhenThePollSeesThePRMerge() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let open = try add(
+      sbd, ["prompt": "Clean up.", "repository": "PostHog/posthog", "after": "PostHog/posthog#122953"])
+    let merged = try add(
+      sbd, ["prompt": "Retarget.", "repository": "PostHog/posthog", "after": "PostHog/posthog#122179"])
+    try sbd.poll()
+    #expect(try sbd.get(open.id).state == .notStarted)
+    #expect(try sbd.get(merged.id).reason == "ready to start: PostHog/posthog#122179 merged")
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll()
+    #expect(try sbd.get(open.id).reason == "ready to start: PostHog/posthog#122953 merged")
+    #expect(try sbd.events(open.id).filter { $0.kind == "followup-ready" }.count == 1)
+  }
+}
