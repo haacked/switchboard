@@ -32,7 +32,9 @@
 #                    replies "MCP <name>: <answer>"
 #   anything else    replies "Done: <prompt>"
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
-# the test writes, or [] when it can't be read.
+# the test writes, or [] when it can't be read. It adds a row for each session
+# that is in the middle of an interrupt or a slow tool call, which are the
+# turns whose status the real claude reports as idle and busy.
 # Like claude, it writes a line to the conversation's transcript for each
 # prompt and for clear, at the transcript_path that the hook payloads name.
 # --resume fails when no transcript exists, and --session-id fails when one
@@ -46,7 +48,13 @@
 args=("$@")
 printf '%s\t%s\t%s\0' "${CLAUDE_CONFIG_DIR-}" "${SSH_AUTH_SOCK-}" "${args[*]}" >>"$SB_HOME/stub-calls.log"
 if [ "${1-}" = agents ]; then
-  cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]'
+  listed=$(cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]')
+  rows=("${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}"/status/*)
+  if [ -e "${rows[0]}" ]; then
+    jq -c --slurpfile r <(cat "${rows[@]}") '. + $r' <<<"$listed"
+  else
+    echo "$listed"
+  fi
   exit 0
 fi
 config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
@@ -81,6 +89,19 @@ payload() {
 transcript() {
   mkdir -p "$project"
   jq -nc --arg t "$1" '{type: "user", message: {role: "user", content: $t}}' >>"$project/$session.jsonl"
+}
+
+# status <idle|busy>: what `claude agents` reports for this session, or
+# nothing without an argument.
+status() {
+  mkdir -p "$config_dir/status"
+  if [ -n "${1-}" ]; then
+    jq -nc --arg s "$session" --arg c "$PWD" --arg t "$1" --argjson p $$ \
+      '{sessionId: $s, cwd: $c, status: $t, pid: $p}' >"$config_dir/status/.$session" &&
+      mv "$config_dir/status/.$session" "$config_dir/status/$session"
+  else
+    rm -f "$config_dir/status/$session"
+  fi
 }
 
 # hook <event> [json fields]
@@ -221,12 +242,12 @@ call_tool() {
   answered "$1" "$2" "$(dialog "$fields")" "${3:-}"
 }
 
-# stopped: ends the turn without a Stop, as an interruption does. Claude Code
-# reports the idle prompt later.
+# stopped: ends the turn without a Stop or any other hook, as Escape does at a
+# permission dialog and as a hook's deny with interrupt does. sbd finds out
+# from `claude agents`.
 stopped() {
   echo "⏺ Interrupted" >&2
-  sleep 1
-  hook Notification '{"notification_type":"idle_prompt","message":"Claude is waiting for your input"}'
+  status idle
 }
 
 # asks <prompt> <tool> <input> [input after a pick in the terminal]: plays
@@ -251,9 +272,11 @@ turn() {
   local p=$1 step=turn reply cmd='' marker='' before='' n job held
   case $p in lag*) sleep 1 ;; esac
   transcript "$p"
+  status
   case $p in
   slow*)
     n=${p#slow }
+    status busy
     step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
     ;;
   background*)
@@ -272,6 +295,7 @@ turn() {
     ;;
   interrupt*)
     play interrupt "$(vars "$p" "" "sleep 100")"
+    status idle
     echo "⏺ Interrupted"
     return
     ;;
@@ -311,6 +335,7 @@ turn() {
   esac
   echo "⏺ $reply"
   play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
+  status
 }
 
 ls "$config_dir"/projects/*/"$session.jsonl" >/dev/null 2>&1 && found=yes || found=no

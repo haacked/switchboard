@@ -54,13 +54,9 @@ extension Instance {
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     // A flag after the session is a flag, not the message.
     try sbd.sb("deny", s.id, "--json")
-    // The stub reports the idle prompt after an interruption, and a reply after a message.
-    try sbd.waitFor("the idle prompt") {
-      try sbd.events(s.id).contains { $0.data["notification_type"] == "idle_prompt" }
-    }
-    let after = try sbd.get(s.id)
+    // The stub sends no hook after an interruption, and a reply after a message.
+    let after = try sbd.waitFor(s.id, "the end of the turn") { $0.reason == "read its last reply and decide what's next" }
     #expect(after.lastReply == nil)
-    #expect(after.reason == "read its last reply and decide what's next")
   }
 
   @Test func refusesToAnswerInsideClaudeCode() throws {

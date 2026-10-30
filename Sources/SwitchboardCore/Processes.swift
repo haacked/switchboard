@@ -7,10 +7,11 @@ public struct CommandResult: Sendable {
 }
 
 /// Runs a program and waits for it. `env` replaces the environment when set.
+/// With `timeout`, the program gets SIGTERM after that many seconds.
 @discardableResult
-public func runCommand(_ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil) throws
-  -> CommandResult
-{
+public func runCommand(
+  _ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil, timeout: Double? = nil
+) throws -> CommandResult {
   let p = Process()
   p.executableURL = URL(fileURLWithPath: executable)
   p.arguments = args
@@ -22,6 +23,9 @@ public func runCommand(_ executable: String, _ args: [String], env: [String: Str
   let stdin = input.map { _ in Pipe() }
   p.standardInput = stdin ?? FileHandle.nullDevice
   try p.run()
+  let kill = DispatchWorkItem { if p.isRunning { p.terminate() } }
+  defer { kill.cancel() }
+  if let timeout { DispatchQueue(label: "runCommand.timeout").asyncAfter(deadline: .now() + timeout, execute: kill) }
   if let stdin, let input {
     stdin.fileHandleForWriting.write(input)
     try? stdin.fileHandleForWriting.close()

@@ -33,6 +33,7 @@ public final class Service {
     var lastJobSeen: Int64 = 0
     /// How many events `facts` includes.
     var events = 0
+    var turnProbe = TurnProbe()
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -439,7 +440,7 @@ public final class Service {
     {
       return FileManager.default.fileExists(atPath: path)
     }
-    let account = paneEnv(session.id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
+    let account = claudeAccount(of: session.id)
     return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) != nil
   }
 
@@ -484,7 +485,7 @@ public final class Service {
   /// it. When claude is idle but its SessionStart is under 1.5 s old, or a
   /// message is still in flight, this tries again when that wait ends.
   /// Otherwise the next SessionStart or end of a turn tries again.
-  private func deliverPending(_ id: String, after delay: Double) {
+  func deliverPending(_ id: String, after delay: Double) {
     guard entries[id]?.pending.isEmpty == false else { return }
     queue.asyncAfter(deadline: .now() + delay) { [self] in
       guard let e = entries[id], !e.pending.isEmpty else { return }
@@ -700,6 +701,7 @@ public final class Service {
       readyDueFollowups(now: now)
       compactSnapshots()
     }
+    endIdleTurns()
   }
 
   func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {

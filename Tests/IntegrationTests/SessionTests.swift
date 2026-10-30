@@ -63,11 +63,52 @@ import Testing
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("send", s.id, "interrupt it")
     try sbd.waitFor(s.id, "the interrupted turn") { $0.state == .working }
+    try sbd.waitForStubStatus(s, "idle")
     #expect(try sbd.sb("send", s.id, "after the interrupt") == "queued\n")
-    // Claude Code sends no hook after Escape, so no event tells sbd that the turn ended.
-    withKnownIssue("sbd ends a turn only on a hook. The fix reads the status from `claude agents --json`.") {
-      try sbd.waitFor(s.id, "the queued message's reply", timeout: 5) { $0.lastReply == "Done: after the interrupt" }
-    }
+    // Claude Code sends no hook after Escape. Once the turn has been quiet for
+    // 10 s, sbd asks `claude agents` and finds the session idle.
+    try sbd.advanceClock(11_000)
+    try sbd.waitFor(s.id, "the queued message's reply", timeout: 5) { $0.lastReply == "Done: after the interrupt" }
+  }
+
+  @Test func keepsTheTurnOfALongToolCallAndChecksLessOftenEachTime() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "slow 60")
+    try sbd.waitFor(s.id, "the tool call") { $0.state == .working }
+    try sbd.waitForStubStatus(s, "busy")
+    func checks() -> Int { sbd.stubCalls().filter { $0.args == "agents --json" }.count }
+    #expect(checks() == 0)
+    // A periodic tick can start the check, so the log may lag the advance.
+    try sbd.advanceClock(11_000)
+    try sbd.waitFor("the first check") { checks() == 1 }
+    #expect(try sbd.get(s.id).state == .working)
+    // The second check waits 20 s after the first.
+    try sbd.advanceClock(15_000)
+    #expect(checks() == 1)
+    try sbd.advanceClock(5_000)
+    try sbd.waitFor("the second check") { checks() == 2 }
+    #expect(try sbd.get(s.id).state == .working)
+  }
+
+  @Test func asksOnceForSeveralInterruptedSessionsInOneAccount() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(prompt: "interrupt a")
+    let b = try sbd.new(prompt: "interrupt b")
+    let ra = try sbd.waitFor(a.id, "the first turn") { $0.state == .working }
+    let rb = try sbd.waitFor(b.id, "the second turn") { $0.state == .working }
+    try sbd.waitForStubStatus(ra, "idle")
+    try sbd.waitForStubStatus(rb, "idle")
+    try sbd.advanceClock(11_000)
+    for s in [a, b] { try sbd.waitFor(s.id, "the end of the turn") { $0.state != .working } }
+    #expect(sbd.stubCalls().filter { $0.args == "agents --json" }.count == 1)
+  }
+
+  @Test func doesNotAskAboutASessionThatStoppedNormally() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
+    try sbd.advanceClock(120_000)
+    #expect(!sbd.stubCalls().contains { $0.args == "agents --json" })
   }
 
   @Test func endsATurnThatFailsWithoutAStop() throws {

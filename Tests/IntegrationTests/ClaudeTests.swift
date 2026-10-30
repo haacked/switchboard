@@ -100,6 +100,23 @@ struct ClaudeTests {
     try c.record("permission", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 
+  @Test func endsATurnThatEscapeCancelsAtAPermissionDialogWithoutAHook() throws {
+    let c = try ClaudeInstance(ask: ["Bash(touch:*)"])
+    let command = "touch \(c.nonce).txt"
+    let prompt = "Run exactly this command with the Bash tool: \(command)\nThen reply with DONE and nothing else."
+    let s = try c.sbd.new(prompt: prompt)
+    try c.waitFor(s.id, "the permission prompt") { $0.reason.hasPrefix("approve") }
+    let mark = try c.sbd.lastEventId(s.id)
+    try c.press(s.id, "Escape")
+    // The request's hook ends. No Notification, Stop, or PostToolUseFailure
+    // follows. `claude agents` reports the session idle.
+    let ended = try c.waitFor(s.id, "the end of the turn", timeout: 40) { !$0.reason.hasPrefix("approve") }
+    #expect(ended.state == .needsYou)
+    #expect(ended.cards.isEmpty)
+    #expect(try c.sbd.hooks(s.id, after: mark).map(\.kind) == [])
+    #expect(!FileManager.default.fileExists(atPath: "\(c.sbd.work)/\(c.nonce).txt"))
+  }
+
   @Test func marksAQuestionUntilTheTerminalAnswersIt() throws {
     let c = try ClaudeInstance()
     let prompt =
@@ -245,16 +262,14 @@ struct ClaudeTests {
     let mark = try c.sbd.lastEventId(s.id)
     try c.press(s.id, "Escape")
     // Phase 0 saw idle_prompt 60 s after a Stop. After Escape, no Stop,
-    // PostToolUseFailure, or idle_prompt comes.
+    // PostToolUseFailure, or idle_prompt comes. sbd ends the turn when
+    // `claude agents` reports the session idle.
     sleep(70)
     #expect(try c.sbd.hooks(s.id, after: mark).map(\.kind) == [])
     let agents = JSON.parse(try runCommand(c.claude, ["agents", "--json"]).stdout)?.array ?? []
     let row = agents.first { $0["sessionId"]?.string == s.claudeSessionId }
     #expect(row?["status"] == "idle")
-    let state = try c.sbd.get(s.id).state
-    withKnownIssue("sbd ends a turn only on a hook. The fix reads the status from `claude agents --json`.") {
-      #expect(state != .working)
-    }
+    #expect(try c.sbd.get(s.id).state != .working)
     try c.record("interrupt", s.id, after: try c.sbd.startupEnd(s.id), prompts: [prompt], commands: [command])
   }
 }

@@ -91,13 +91,7 @@ extension Service {
           throw APIError(
             "\(account) holds no Claude account (no .claude.json). Check claudeConfigDirs in \(home.config)")
         }
-        var env = ProcessInfo.processInfo.environment
-        ClaudeAccount.apply(account, to: &env)
-        let r = try runCommand(claude, ["agents", "--json"], env: env)
-        guard r.status == 0 else {
-          throw APIError("claude agents failed for \(account): \(oneLine(r.stderr, max: 200))")
-        }
-        return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: now)
+        return try agentRows(claude, account: account, seen: now)
       }
     }
     var byId: [String: ClaudeSession] = [:]
@@ -106,6 +100,18 @@ extension Service {
       if byId[s.id]?.running != true { byId[s.id] = s }
     }
     return Array(byId.values)
+  }
+
+  /// The rows of `claude agents --json` under one account. With `timeout`,
+  /// a claude that hangs fails the call.
+  func agentRows(_ claude: String, account: String, seen: Int64, timeout: Double? = nil) throws -> [ClaudeSession] {
+    var env = ProcessInfo.processInfo.environment
+    ClaudeAccount.apply(account, to: &env)
+    let r = try runCommand(claude, ["agents", "--json"], env: env, timeout: timeout)
+    guard r.status == 0 else {
+      throw APIError("claude agents failed for \(account): \(oneLine(r.stderr, max: 200))")
+    }
+    return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: seen)
   }
 
   /// Remembers the listed sessions that Switchboard doesn't own, and forgets
@@ -225,7 +231,7 @@ extension Service {
 }
 
 /// Maps the items on concurrent threads and keeps their order.
-private func concurrentMap<T, U>(_ items: [T], _ transform: (T) -> U) -> [U] {
+func concurrentMap<T, U>(_ items: [T], _ transform: (T) -> U) -> [U] {
   var results = [U?](repeating: nil, count: items.count)
   let lock = NSLock()
   DispatchQueue.concurrentPerform(iterations: items.count) { i in

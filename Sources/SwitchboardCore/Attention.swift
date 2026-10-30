@@ -128,8 +128,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
           openPermission = ToolCall(tool: "prompt", summary: d["message"]?.string ?? "a prompt", since: event.t)
         }
       case "idle_prompt":
-        // A turn that the user interrupted with Escape or No ends without a
-        // Stop. Claude Code reports the idle prompt 60 s later.
+        // Claude Code reports the idle prompt 60 s after a Stop. It sends none
+        // after Escape.
         endTurn()
       default:
         break
@@ -137,8 +137,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "Stop":
       endTurn()
       lastReply = d["last_assistant_message"]?.string
-    case "StopFailure":
-      // An API or usage limit error ends the turn without a Stop.
+    case "StopFailure", "idle":
+      // An API or usage limit error ends the turn without a Stop. So does
+      // Escape, which sbd finds out from `claude agents` and records as idle.
       endTurn()
     case "SubagentStart":
       if let id = d["agent_id"]?.string { subagents.insert(id) }

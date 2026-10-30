@@ -241,6 +241,17 @@ final class Instance {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
   }
 
+  /// Waits until the stub reports the session to `claude agents` with the status.
+  func waitForStubStatus(_ s: SessionSummary, _ status: String) throws {
+    try waitFor("the stub to report \(status)") {
+      let files = FileManager.default.enumerator(atPath: home.path)?.compactMap { $0 as? String } ?? []
+      return files.contains {
+        $0.hasSuffix("/status/\(s.claudeSessionId)")
+          && (try? String(contentsOfFile: "\(home.path)/\($0)", encoding: .utf8))?.contains("\"\(status)\"") == true
+      }
+    }
+  }
+
   /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
   func stubPid(_ file: String) -> pid_t? {
     guard let text = try? String(contentsOfFile: "\(home.path)/\(file)", encoding: .utf8) else { return nil }
