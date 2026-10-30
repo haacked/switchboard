@@ -19,6 +19,7 @@ public final class Store {
     try exec("CREATE INDEX IF NOT EXISTS events_session ON events (session, id)")
     try exec("CREATE TABLE IF NOT EXISTS followup_imports (line TEXT PRIMARY KEY)")
     try exec("CREATE TABLE IF NOT EXISTS claude_sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
+    try exec("CREATE TABLE IF NOT EXISTS snapshots (session TEXT PRIMARY KEY, json TEXT NOT NULL)")
   }
 
   deinit { sqlite3_close(db) }
@@ -30,6 +31,28 @@ public final class Store {
   public func delete(session id: String) throws {
     try run("DELETE FROM sessions WHERE id = ?", [id])
     try run("DELETE FROM events WHERE session = ?", [id])
+    try run("DELETE FROM snapshots WHERE session = ?", [id])
+  }
+
+  /// The snapshot that `Snapshots` saved for the session, as JSON text.
+  public func snapshot(session id: String) throws -> String? {
+    try query("SELECT json FROM snapshots WHERE session = ?", [id]) { $0.text(0) }.first
+  }
+
+  public func save(snapshot json: String, session id: String) throws {
+    // A saver that finishes after the session's removal must not leave a row.
+    try run(
+      "INSERT OR REPLACE INTO snapshots (session, json) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ?)",
+      [id, json, id])
+  }
+
+  /// Removes the snapshots of sessions that no longer exist.
+  public func pruneSnapshots() throws {
+    try exec("DELETE FROM snapshots WHERE session NOT IN (SELECT id FROM sessions)")
+  }
+
+  public func hasEvent(_ id: Int64, session: String) throws -> Bool {
+    !(try query("SELECT 1 FROM events WHERE id = ? AND session = ?", [id, session]) { $0.int(0) }).isEmpty
   }
 
   public func sessions() throws -> [Session] {

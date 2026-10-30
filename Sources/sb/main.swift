@@ -63,6 +63,9 @@ let usage = """
   Service:
     poll [--all]                  ask GitHub about the sessions' PRs now; --all
                                   reads every PR, not only those due
+    snapshots [--write]           show how the last start built each session,
+                                  from a snapshot or a full replay; --write
+                                  first saves a snapshot of every session
     ping                          check that sbd answers
     mcp                           list the shared MCP servers that sbd runs
     service install|uninstall|status
@@ -448,6 +451,15 @@ case "poll":
     print(
       "read \(n("polled")) PRs and looked up \(n("lookups")) in \(n("requests")) requests for \(n("points")) points")
     if let error = result["error"]?.string { die(error) }
+  }
+case "snapshots":
+  let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)
+  if a.json {
+    printJSON(result)
+  } else {
+    for row in result.array ?? [] {
+      print("\(row["session"]?.string ?? "")  \(row["loaded"]?.string ?? "")")
+    }
   }
 case "ping":
   let result = call("ping", timeout: 5)
