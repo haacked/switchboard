@@ -48,6 +48,16 @@ A wait says what a session waits on. Its kind is `ci`, `review`, `bot-review`, `
 
 A card waits until you answer it from `sb` or the app, or answer Claude Code's own dialog in the terminal. `sb deny` with a message lets Claude read it and go on. Without one, the turn stops, as No does in the terminal. `sb answer` takes one answer per question, in order. A multi-select answer separates its labels with commas, and text that names no option is a typed answer. A question that stays open for `idleStopSeconds` while no terminal shows its session is deferred: Claude ends its turn, `sbd` stops `claude` on its normal schedule, and your answer resumes the session. `sb cards` prints the whole tool call that `sb allow` approves. `sb allow`, `deny`, and `answer` refuse to run when `CLAUDECODE` is set, as it is for every command that Claude runs. That keeps a session that follows injected instructions from approving tool calls with `sb`, though a process that clears the variable gets past the check.
 
+To bring in Claude sessions that you started elsewhere, press ⇧⌘I in the app or run `sb import`. It lists the sessions that run in a linked git worktree, grouped by repo, from every Claude account: `~/.claude` and each `~/.claude-*` folder that holds a `.claude.json`. `sb import --all` lists every session. Switchboard never stops a claude that runs elsewhere, so exit claude in its terminal, or stop a background job with `claude stop <id>`, and then import the session:
+
+```
+sb import                    # sessions in worktrees; ● marks one that a claude runs now
+sb import --all
+sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
+```
+
+`sbd` remembers each session it lists for a day, so a session still shows after you exit its claude. An imported session keeps its folder and its conversation. Opening it or sending it a message resumes the conversation under the account it came from.
+
 ### Follow-ups
 
 A follow-up is a session that hasn't started: a title, a prompt, a GitHub repository, and where it came from. It has no worktree and no `claude` until you start it, and it sits in the Not started column, which the sidebar keeps collapsed.
@@ -66,16 +76,6 @@ Without `--repo`, `add` takes the repository from the current folder's GitHub re
 `start` finds the repository's checkout in `repos`, else at `~/dev/<owner>/<name>`, and refuses a folder whose remotes don't include the repository on github.com. `--path` picks the folder instead. The branch is `branchPrefix` plus a slug of the title, unless `--branch` names one.
 
 `import` adds each `- [ ]` line under `## Open`, with its date, repository, and branch, and never changes the file. You can run it again: it skips every line that an earlier import read, including lines whose follow-up you removed.
-
-To bring in Claude sessions that you started elsewhere, press ⇧⌘I in the app or run `sb import`. It lists the sessions that run in a linked git worktree, grouped by repo, from every Claude account: `~/.claude` and each `~/.claude-*` folder that holds a `.claude.json`. `sb import --all` lists every session. Switchboard never stops a claude that runs elsewhere, so exit claude in its terminal, or stop a background job with `claude stop <id>`, and then import the session:
-
-```
-sb import                    # sessions in worktrees; ● marks one that a claude runs now
-sb import --all
-sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
-```
-
-`sbd` remembers each session it lists for a day, so a session still shows after you exit its claude. An imported session keeps its folder and its conversation. Opening it or sending it a message resumes the conversation under the account it came from.
 
 ## Settings
 
@@ -126,6 +126,7 @@ sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
 - `sbd` starts the servers before any session, and starts a server again on the same port when it exits. A server that keeps exiting waits longer each time, up to a minute. `sb mcp` lists the servers, and for one that exited, its exit status and last output.
 - A session connects to its MCP servers when `claude` starts. A session that started while a server was down lacks that server until it stops and resumes.
 - The servers have no authentication. Any local process can call them, with whatever token the server holds.
+
 ## How it works
 
 - `sbd` keeps sessions and their event log in SQLite in `~/.sb`. It answers `sb` and the app on `~/.sb/sbd.sock`.

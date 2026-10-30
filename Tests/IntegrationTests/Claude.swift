@@ -41,6 +41,7 @@ final class ClaudeInstance {
     // runs its Bash tool in that shell.
     sbd = try Instance(
       idleStopSeconds: idleStopSeconds, shell: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+      inheriting: .runner,
       config: [
         "claude": .string(claude), "model": "haiku",
         "claudeArgs": ["--strict-mcp-config", "--permission-mode", "manual"],

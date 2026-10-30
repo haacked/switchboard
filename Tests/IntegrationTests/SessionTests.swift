@@ -101,7 +101,7 @@ import Testing
   }
 
   @Test func restartsClaudeWithoutTheVariablesThatItsTmuxSessionKeptFromAnEarlierStart() throws {
-    let sbd = try Instance(inheritsAccount: false)
+    let sbd = try Instance(inheriting: .unset)
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     // tmux keeps the environment that a pane was created with, as when an
@@ -126,6 +126,14 @@ import Testing
     #expect(try tmux(t, "show-environment", "-t", pane, "REMOVED_FROM_CONFIG").status != 0)
     #expect(try tmux(t, "show-environment", "-t", pane, "TWO_LINES").status != 0)
     #expect(try tmux(t, "show-environment", "-t", pane, "SB_SESSION_ID").status == 0)
+  }
+
+  @Test func runsClaudeUnderTheTestRunnersAccountForTheRealClaudeTier() throws {
+    let sbd = try Instance(inheriting: .runner)
+    // Without a prompt, the stub writes no transcript in the runner's account.
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude") { $0.live }
+    #expect(sbd.stubCalls().last?.account == ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? "")
   }
 
   @Test func restartsClaudeWithSbdsAgentAfterAForwardedAgentWentAway() throws {
