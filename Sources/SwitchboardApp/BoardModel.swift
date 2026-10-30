@@ -50,7 +50,15 @@ final class BoardModel: ObservableObject {
   private var loaded = false
   private var followupsRead = Date.distantPast
 
-  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou } }
+  /// The Manager is pinned in the sidebar, so the Queue leaves it out.
+  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && $0.manager != true } }
+
+  var manager: SessionSummary? { sessions.first { $0.manager == true } }
+
+  /// The Manager, then the sessions it started and theirs, each under its parent.
+  var managerTree: [SessionTree.Row] {
+    manager.map { SessionTree.subtree(of: $0.id, in: sessions) } ?? []
+  }
 
   /// The sessions and the follow-ups that wait to start. A follow-up whose
   /// trigger fired is in both lists until it starts. A follow-up that started
@@ -145,6 +153,13 @@ final class BoardModel: ObservableObject {
         finally?()
         self.refresh(followups: true)
       }
+    }
+  }
+
+  /// Starts the Manager, or opens it, and selects it.
+  func openManager() {
+    perform("manager", [:]) { value in
+      if let id = value["id"]?.string { self.selection = id }
     }
   }
 

@@ -23,6 +23,9 @@ public struct Home: Sendable {
   /// Where sbd writes each shared MCP server's launcher script.
   public var mcpFolder: String { "\(path)/mcp" }
 
+  /// The folder that the Manager session runs in.
+  public var managerFolder: String { "\(path)/manager" }
+
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
 

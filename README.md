@@ -58,6 +58,14 @@ sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
 
 `sbd` remembers each session it lists for a day, so a session still shows after you exit its claude. An imported session keeps its folder and its conversation. Opening it or sending it a message resumes the conversation under the account it came from.
 
+### The Manager
+
+`sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app pins it at the top of the sidebar, with the sessions it started under it. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
+
+sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
+
+`sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
+
 ### Follow-ups
 
 A follow-up is a session that hasn't started: a title, a prompt, a GitHub repository, and where it came from. It has no worktree and no `claude` until you start it, and it sits in the Not started column, which the sidebar keeps collapsed.

@@ -37,10 +37,12 @@ public struct NewSession: Codable, Sendable {
   public var name: String?
   public var prompt: String?
   public var model: String?
+  /// The session that starts this one. An id that sbd doesn't know is ignored.
+  public var parent: String?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, prompt: String? = nil,
-    model: String? = nil
+    model: String? = nil, parent: String? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -48,6 +50,7 @@ public struct NewSession: Codable, Sendable {
     self.name = name
     self.prompt = prompt
     self.model = model
+    self.parent = parent
   }
 }
 
