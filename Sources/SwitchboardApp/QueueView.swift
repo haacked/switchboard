@@ -1,73 +1,99 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The sessions that need you, oldest first. A session with a permission
-/// prompt or a question shows its card. The others show their last reply and
-/// a field for a reply.
 struct QueueView: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    if model.needsYou.isEmpty {
+    if model.triage.isEmpty && model.currentQueueItem == nil {
       VStack(spacing: 12) {
         Image(systemName: "checkmark.circle").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Nothing needs you").foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
-      let current = model.currentQueueItem
-      ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 12) {
-            ForEach(model.needsYou) { s in
-              QueueItem(session: s, current: s.id == current).id(s.id)
-            }
-          }
-          .padding()
-        }
-        .onChange(of: model.queueJumps) {
-          if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id, anchor: .top) } }
+      HSplitView {
+        TriageList()
+          .frame(minWidth: 200, idealWidth: 280, maxWidth: 420)
+        if let id = model.currentQueueItem, let session = model.sessions.first(where: { $0.id == id }) {
+          TriageDetail(session: session).id(session.id)
+            .frame(minWidth: 340, maxWidth: .infinity)
+        } else {
+          Text("Pick an item").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
     }
   }
 }
 
-struct QueueItem: View {
+/// One row for each session that needs you, then one for each that Claude
+/// can continue. No Claude output appears here, only what the user does.
+struct TriageList: View {
+  @EnvironmentObject var model: BoardModel
+
+  var body: some View {
+    let items = model.triage
+    let current = model.currentQueueItem
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 2) {
+          ForEach([AttentionState.needsYou, .canContinue], id: \.self) { state in
+            let group = items.filter { $0.state == state }
+            if !group.isEmpty {
+              Text("\(state.title) (\(group.count))")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+              ForEach(group) { s in
+                TriageRow(session: s, current: s.id == current).id(s.id)
+              }
+            }
+          }
+        }
+        .padding(.vertical, 6)
+      }
+      .onChange(of: model.queueJumps) {
+        if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id) } }
+      }
+    }
+  }
+}
+
+struct TriageRow: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  /// The item that ⌘J moves on from.
   let current: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top) {
-        SessionRow(session: session)
-        Button("Open") { model.selection = session.id }
+    let item = session.triage
+    HStack(alignment: .top, spacing: 8) {
+      Circle()
+        .fill(session.state.color)
+        .frame(width: 8, height: 8)
+        .padding(.top, 5)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(item?.title ?? session.reason).fontWeight(.medium).lineLimit(2)
+        Text(
+          [session.repo.map { ($0 as NSString).lastPathComponent }, session.name, ago(session.since)]
+            .compactMap { $0 }.joined(separator: " · ")
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
       }
-      if session.waitsToStart {
-        // A follow-up whose trigger fired has no claude to message yet.
-        StartButton(session: session)
-      } else if !session.cards.isEmpty {
-        ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
-      } else if session.openPrompt {
-        // A message would only queue behind the open dialog.
-        Text("Claude Code's dialog waits in the terminal. Open the session to answer it.")
-          .foregroundStyle(.secondary)
-      } else {
-        if let last = session.lastReply {
-          Text(last).font(.callout).lineLimit(8).textSelection(.enabled)
-        }
-        MessageField(session: session.id)
-      }
+      Spacer(minLength: 0)
     }
-    .padding(12)
-    .background(RoundedRectangle(cornerRadius: 10).fill(current ? Color.accentColor.opacity(0.06) : Color.clear))
-    .overlay(
-      RoundedRectangle(cornerRadius: 10)
-        .stroke(current ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: current ? 2 : 1)
-    )
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(RoundedRectangle(cornerRadius: 8).fill(current ? Color.accentColor.opacity(0.14) : Color.clear))
+    .padding(.horizontal, 6)
     .contentShape(Rectangle())
-    .simultaneousGesture(TapGesture().onEnded { model.queueFocus = session.id })
+    .onTapGesture { model.queueFocus = session.id }
+    .accessibilityElement(children: .combine)
+    .accessibilityAddTraits(current ? .isSelected : [])
   }
 }

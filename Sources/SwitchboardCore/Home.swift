@@ -86,6 +86,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// How many new events a session collects before sbd saves a snapshot of its
   /// state. 0 turns snapshots off, and sbd replays every event at start.
   public var snapshotEvery = 500
+  public var triage = TriageSettings()
 
   public init() {}
 
@@ -118,6 +119,7 @@ public struct Config: Codable, Equatable, Sendable {
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery
+    triage = try c.decodeIfPresent(TriageSettings.self, forKey: .triage) ?? d.triage
   }
 }
 

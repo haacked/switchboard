@@ -89,6 +89,8 @@ final class Instance {
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
       "claudeConfigDirs": .array(folders.map(JSON.string)), "github": ["pollSeconds": 0],
+      // Tests that read the stub's arguments don't expect the nudge in them.
+      "triage": ["systemPrompt": ""],
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)

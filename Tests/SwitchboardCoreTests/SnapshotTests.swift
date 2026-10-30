@@ -68,6 +68,30 @@ import Testing
     #expect(again.outcome == .snapshot(tail: 0))
   }
 
+  @Test func aTriageSummaryComesBackFromTheSnapshotAndFromTheTail() throws {
+    let (store, dir) = try store()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try store.save(session)
+    try store.append(Event(session: "s1", t: 1000, kind: "UserPromptSubmit", data: ["prompt": "go"]))
+    let stop = try store.append(
+      Event(session: "s1", t: 2000, kind: "Stop", data: ["last_assistant_message": "Which database should I use?"]))
+    // The snapshot holds the Stop, and the summary arrives in the tail.
+    try Snapshots.refresh(store, session, build: "b1")
+    let summary = Event(
+      session: "s1", t: 3000, kind: "triage",
+      data: ["stop": .number(Double(stop.id)), "title": "Pick a database", "kind": "decision", "summary": "Which one.", "options": []])
+    try store.append(summary)
+    let fromTail = try Snapshots.refresh(store, session, build: "b1")
+    #expect(fromTail.outcome == .snapshot(tail: 1))
+    #expect(fromTail.snapshot.replay.facts.triage?.title == "Pick a database")
+    #expect(fromTail.snapshot.replay == (try fullReplay(store, session)))
+    // The snapshot now holds the summary, and a later prompt drops it.
+    try store.append(Event(session: "s1", t: 4000, kind: "UserPromptSubmit", data: ["prompt": "Use Postgres."]))
+    let after = try Snapshots.refresh(store, session, build: "b1")
+    #expect(after.snapshot.replay.facts.triage == nil)
+    #expect(after.snapshot.replay == (try fullReplay(store, session)))
+  }
+
   @Test func theReplayKeepsQueuedMessagesAndCards() throws {
     let (store, dir) = try store()
     defer { try? FileManager.default.removeItem(atPath: dir) }

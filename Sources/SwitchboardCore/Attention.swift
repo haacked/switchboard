@@ -56,11 +56,16 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
+  /// The id of the last Stop event, which keys the turn's triage summary.
+  public var lastStop: Int64 = 0
+  /// The summary of the turn that ended at `lastStop`, once a `triage` event
+  /// recorded it.
+  public var triage: TriageSummary?
 
-  /// The kinds of the events that the pollers record. They report on GitHub
-  /// and the folder, not on the session, so they don't hold off the idle stop
-  /// or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree"]
+  /// The kinds of the events that the pollers and the summaries record. They
+  /// report on GitHub, the folder, and a reply, not on the session. They do
+  /// not hold off the idle stop or the Stale state.
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage"]
 
   public init() {}
 
@@ -160,6 +165,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       break
     }
     applyCards(event, userPrompt: userPrompt)
+    applyTriage(event)
   }
 
   private mutating func startTurn(_ t: Int64) {
@@ -228,11 +234,7 @@ public enum Attention {
     if now - facts.lastActivity > staleAfterMs {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    switch classify(facts.lastReply ?? "") {
-    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"))
-    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"))
-    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
-    }
+    return replyVerdict(facts.lastReply ?? "")
   }
 
   /// Evaluates the session at `now`, and records in `facts` when its state

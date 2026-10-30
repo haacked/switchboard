@@ -45,6 +45,12 @@ public final class Service {
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
+  let triageJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.triage"
+    jobs.maxConcurrentOperationCount = 2
+    return jobs
+  }()
   var mcp: [SharedServer] = []
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
@@ -102,6 +108,8 @@ public final class Service {
     snapshot = buildSnapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
+    // A summary that was running when sbd stopped never finished.
+    for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github)
   }
@@ -141,6 +149,8 @@ public final class Service {
         return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
       case "import":
         return .success(try JSON(encoding: importSessions(request.args)))
+      case "triage", "choose", "reply":
+        return try triageRequest(request.op, request.args)
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
@@ -261,6 +271,7 @@ public final class Service {
       entries[id]?.inFlight = nil
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
+      if kind == "Stop" { summarizeTurn(id) }
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
       deliverPending(id, after: 0.5)
     default:
@@ -404,6 +415,7 @@ public final class Service {
     args += mcpArgs
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
+    if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
     let dir = home.sessionFolder(id)
@@ -745,6 +757,7 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
+    out.triage = Triage.item(e.facts, verdict)
     out.parent = s.parent
     out.manager = s.manager
     out.followup = s.followup

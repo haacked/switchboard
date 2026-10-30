@@ -18,7 +18,7 @@ It needs macOS 14 or later, the Xcode Command Line Tools (Swift 6.4), `tmux` (`b
 
 ## Use
 
-In the app, press ⌘N to start a session. Pick a folder, or a repo plus a branch to get a new worktree in `~/dev/worktrees/<repo>/<branch>`, and give it a first prompt. The sidebar sorts sessions into Needs you, Claude can continue, Waiting, Working, Done, and Stale, with a reason for each. Select a session to get its Claude terminal and its shell side by side. With no session selected, the Queue lists the sessions that need you, oldest first, and ⌘J moves to the next one. A permission prompt or an `AskUserQuestion` question shows there, and above the session's terminals, as a card that you answer without opening the session. With a session selected, ⌘J jumps to the next session that needs you. The menu bar shows how many sessions need you, and a notification fires when one starts to.
+In the app, press ⌘N to start a session. Pick a folder, or a repo plus a branch to get a new worktree in `~/dev/worktrees/<repo>/<branch>`, and give it a first prompt. The sidebar sorts sessions into Needs you, Claude can continue, Waiting, Working, Done, and Stale, with a reason for each. Select a session to get its Claude terminal and its shell side by side. With no session selected, the Queue shows the triage list (see Triage), and ⌘J moves to the next item. A permission prompt or an `AskUserQuestion` question shows there, and above the session's terminals, as a card that you answer without opening the session. With a session selected, ⌘J jumps to the next session that needs you. The menu bar shows how many sessions need you, and a notification fires when one starts to.
 
 Everything in the app also works from `sb`, and every command takes `--json`:
 
@@ -39,6 +39,10 @@ sb allow <session>
 sb deny <session> Use the Makefile instead.
 sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
+sb triage                    # what needs you, in the order to go through it
+sb next                      # the first item
+sb choose <session> 1        # click an option, by number or label
+sb reply <session>           # the session's last reply, as Markdown
 ```
 
 A session is an id, a unique id prefix, or a unique name. `sb send` pastes into a live idle session, queues the message while a turn runs, and resumes a stopped session with the message as its first prompt. The paste also submits anything you typed but didn't send in that session's Claude terminal.
@@ -65,6 +69,21 @@ sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
 `sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
+
+### Triage
+
+Each session that needs you, or that Claude can continue, gets one item: a title that says what you do, a kind (`decision`, `question`, `approval`, `review`, `action`, or `info`), a two-sentence summary, and options. `sb triage` lists them in the order to go through them, and `sb next` prints the first. The same item is `triage` in `sb ls --json` and `sb get --json`, with a `source`:
+
+- `card`: a held permission prompt or `AskUserQuestion` question. Allow and Deny, or the question's options.
+- `rule`: the reason that a PR rule, a wait, or a follow-up gives, such as "Rebase: #1204 conflicts with its base".
+- `summary`: when a turn ends in prose, sbd runs `claude -p` with Haiku, no tools, no MCP servers, and no saved session, under the session's own account, and records a `triage` event. It runs once per turn, two at a time, with a 60 s timeout.
+- `fallback`: the last paragraph of the reply, with no options, until the summary arrives or when it fails.
+
+The order is: a held prompt or question; a decision, question, or approval from a summary; PR actions; finished work to review; Claude can continue. The oldest comes first in each group.
+
+`sb choose <session> <option>` does what a click does: it answers the session's card, or sends the option's message. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, and `systemPrompt` (empty turns the nudge off).
+
+In the app, the Queue shows the list on the left. The right side shows the selected session's summary, its option buttons (or its card), its last reply as formatted Markdown, and a field that messages the session itself. The Terminal button shows the session's terminals in place of the summary.
 
 ### Follow-ups
 
