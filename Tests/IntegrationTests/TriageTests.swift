@@ -169,9 +169,8 @@ extension Instance {
     let s = try sbd.new(prompt: "perm rm -rf build")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     try sbd.sb("choose", s.id, "2")
-    try sbd.waitFor("the idle prompt") {
-      try sbd.events(s.id).contains { $0.data["notification_type"] == "idle_prompt" }
-    }
+    // The stub sends no hook after an interruption.
+    try sbd.waitFor(s.id, "the end of the turn") { $0.reason == "read its last reply and decide what's next" }
     #expect(try sbd.cards().isEmpty)
   }
 
