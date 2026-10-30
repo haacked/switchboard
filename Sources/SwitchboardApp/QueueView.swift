@@ -14,10 +14,10 @@ struct QueueView: View {
     } else {
       HSplitView {
         TriageList()
-          .frame(minWidth: 260, idealWidth: 330, maxWidth: 480)
+          .frame(minWidth: 200, idealWidth: 280, maxWidth: 420)
         if let id = model.currentQueueItem, let session = model.sessions.first(where: { $0.id == id }) {
           TriageDetail(session: session).id(session.id)
-            .frame(minWidth: 420, maxWidth: .infinity)
+            .frame(minWidth: 340, maxWidth: .infinity)
         } else {
           Text("Pick an item").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         }

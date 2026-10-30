@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, and SB_SHEET=import opens the import sheet. SB_SNAPSHOT names a
+/// app starts, SB_QUEUE focuses a session's item in the Queue, and SB_SHEET=import opens the import sheet. SB_SNAPSHOT names a
 /// PNG file that the app draws its main window, or the window's open sheet,
 /// into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
 /// window itself, so this needs no screen recording permission. The drawing
@@ -14,6 +14,7 @@ enum Snapshot {
   static func start(_ model: BoardModel) {
     let env = ProcessInfo.processInfo.environment
     if let id = env["SB_SELECT"] { model.selection = id }
+    if let id = env["SB_QUEUE"] { model.queueFocus = id }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: .aqua)
