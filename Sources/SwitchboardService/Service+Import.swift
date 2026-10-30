@@ -13,12 +13,12 @@ extension Service {
   var accounts: [String] { (config.claudeConfigDirs ?? ClaudeAccount.discover()).map(ClaudeAccount.normalize) }
 
   /// The sessions that Switchboard doesn't have and that run in a linked
-  /// worktree, or with `all`, every one.
-  func importList(all: Bool) throws -> ImportList {
+  /// worktree, or with `all`, every one. With `repo`, only the sessions of the
+  /// repo with that name.
+  func importList(all: Bool, repo: String?) throws -> ImportList {
     let listed = try importCandidates()
     let candidates = withGitFacts(queue.sync { listed.filter { owner(of: $0.id) == nil } })
-    let shown = all ? candidates : candidates.filter(\.worktree)
-    return ImportList(sessions: shown.sorted(by: ClaudeSession.importOrder), hidden: candidates.count - shown.count)
+    return ImportList.make(from: candidates, all: all, repo: repo)
   }
 
   /// Imports the sessions that the refs name. A ref is a Claude session id, a

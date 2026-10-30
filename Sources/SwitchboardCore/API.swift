@@ -55,11 +55,26 @@ public struct NewSession: Codable, Sendable {
 public struct ImportList: Codable, Equatable, Sendable {
   public var sessions: [ClaudeSession]
   /// How many sessions the list leaves out, because they don't run in a worktree.
+  /// With a repo filter, it counts only that repo's sessions.
   public var hidden: Int
+  /// Every repo that has a session to import, whatever the repo filter, sorted.
+  public var repos: [String]
 
-  public init(sessions: [ClaudeSession], hidden: Int) {
+  public init(sessions: [ClaudeSession], hidden: Int, repos: [String]) {
     self.sessions = sessions
     self.hidden = hidden
+    self.repos = repos
+  }
+
+  /// The list of the candidates that Switchboard doesn't have: the sessions in
+  /// a linked worktree, or with `all` every one, and only those of the repo
+  /// named exactly `repo` when it is set.
+  public static func make(from candidates: [ClaudeSession], all: Bool, repo: String?) -> ImportList {
+    let inRepo = repo == nil ? candidates : candidates.filter { $0.repo == repo }
+    let shown = all ? inRepo : inRepo.filter(\.worktree)
+    return ImportList(
+      sessions: shown.sorted(by: ClaudeSession.importOrder), hidden: inRepo.count - shown.count,
+      repos: Set(candidates.compactMap(\.repo)).sorted())
   }
 
   /// Groups each stretch of consecutive sessions that share a repo, which the
@@ -147,8 +162,10 @@ public final class Client: Sendable {
     try call("terminals", ["session": .string(id)], as: Terminals.self)
   }
 
-  public func importable(all: Bool = false) throws -> ImportList {
-    try call("importable", ["all": .bool(all)], as: ImportList.self)
+  public func importable(all: Bool = false, repo: String? = nil) throws -> ImportList {
+    var args: [String: JSON] = ["all": .bool(all)]
+    if let repo { args["repo"] = .string(repo) }
+    return try call("importable", args, as: ImportList.self)
   }
 
   public func importSessions(_ refs: [String], name: String? = nil) throws -> ImportResult {

@@ -47,11 +47,12 @@ A wait says what a session waits on. Its kind is `ci`, `review`, `bot-review`, `
 
 A card waits until you answer it from `sb` or the app, or answer Claude Code's own dialog in the terminal. `sb deny` with a message lets Claude read it and go on. Without one, the turn stops, as No does in the terminal. `sb answer` takes one answer per question, in order. A multi-select answer separates its labels with commas, and text that names no option is a typed answer. A question that stays open for `idleStopSeconds` while no terminal shows its session is deferred: Claude ends its turn, `sbd` stops `claude` on its normal schedule, and your answer resumes the session. `sb cards` prints the whole tool call that `sb allow` approves. `sb allow`, `deny`, and `answer` refuse to run when `CLAUDECODE` is set, as it is for every command that Claude runs. That keeps a session that follows injected instructions from approving tool calls with `sb`, though a process that clears the variable gets past the check.
 
-To bring in Claude sessions that you started elsewhere, press ⇧⌘I in the app or run `sb import`. It lists the sessions that run in a linked git worktree, grouped by repo, from every Claude account: `~/.claude` and each `~/.claude-*` folder that holds a `.claude.json`. `sb import --all` lists every session. Switchboard never stops a claude that runs elsewhere, so exit claude in its terminal, or stop a background job with `claude stop <id>`, and then import the session:
+To bring in Claude sessions that you started elsewhere, press ⇧⌘I in the app or run `sb import`. It lists the sessions that run in a linked git worktree, grouped by repo, from every Claude account: `~/.claude` and each `~/.claude-*` folder that holds a `.claude.json`. `sb import --all` lists every session. `--repo <name>` lists only the sessions of the repo with that name (the folder name of its main checkout), alone or with `--all`, and fails when no session to import belongs to it. The sheet has a Repo picker for the same filter. Switchboard never stops a claude that runs elsewhere, so exit claude in its terminal, or stop a background job with `claude stop <id>`, and then import the session:
 
 ```
 sb import                    # sessions in worktrees; ● marks one that a claude runs now
 sb import --all
+sb import --repo switchboard  # one repo; add --all for its sessions outside a worktree
 sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
 ```
 

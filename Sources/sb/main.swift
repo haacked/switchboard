@@ -26,8 +26,9 @@ let usage = """
     note <session> --rm <id>
     rename <session> <name>
     rm <session> [--worktree]     remove the session, and its worktree with --worktree
-    import [--all]                list the Claude sessions outside Switchboard that
-                                  run in a worktree, or every one with --all
+    import [--all] [--repo R]     list the Claude sessions outside Switchboard that
+                                  run in a worktree, or every one with --all, and
+                                  only those of the repo named R with --repo
     import <ref>... [--name N]    import Claude sessions by id, id prefix, or name
     attach <session> [--shell]    attach this terminal to the Claude pane or the shell
     screen <session> [--shell]    print the pane's screen
@@ -200,7 +201,7 @@ func printSession(_ s: SessionSummary) {
 
 /// The sessions that `sb import` can import, grouped by repo. ● marks a
 /// session that a claude runs now, which imports once that claude exits.
-func printImportable(_ list: ImportList) {
+func printImportable(_ list: ImportList, repo: String? = nil) {
   let titleWidth = 40
   if list.sessions.isEmpty { print("No Claude sessions to import\(list.hidden > 0 ? " in a worktree" : "").") }
   for (i, group) in list.groups.enumerated() {
@@ -212,7 +213,11 @@ func printImportable(_ list: ImportList) {
       print("  \(s.running ? "●" : "○") \(s.idPrefix)  \(title)  \(s.summary), \(account)".printable)
     }
   }
-  if list.hidden > 0 { print("\n\(list.hidden) more outside a worktree. List them with: sb import --all") }
+  if list.hidden > 0 {
+    let plain = repo?.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil
+    let command = "sb import --all" + (repo.map { " --repo \(plain ? $0 : shellQuote($0))" } ?? "")
+    print("\n\(list.hidden) more outside a worktree. List them with: \(command)".printable)
+  }
   if list.sessions.contains(where: \.running) {
     print("● claude runs the session now. Exit it there, or stop its background job, then import it.")
   }
@@ -411,11 +416,18 @@ case "rm":
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "import":
   do {
+    let repo = a.values["--repo"]
     if a.positional.isEmpty {
-      let list = try client.importable(all: a.switches.contains("--all"))
-      if a.json { printJSON(try JSON(encoding: list)) } else { printImportable(list) }
+      let list = try client.importable(all: a.switches.contains("--all"), repo: repo)
+      if let repo, !list.repos.contains(repo) {
+        let known =
+          list.repos.isEmpty ? "No repo has one." : "Repos with sessions: \(list.repos.joined(separator: ", "))."
+        die("no Claude session to import in a repo named \(repo). \(known)".printable)
+      }
+      if a.json { printJSON(try JSON(encoding: list)) } else { printImportable(list, repo: repo) }
       exit(0)
     }
+    if repo != nil { die("--repo narrows the listing, so it does not go with a session to import") }
     let r = try client.importSessions(a.positional, name: a.values["--name"])
     if a.json { printJSON(try JSON(encoding: r)) } else { r.imported.forEach(printSession) }
     r.refused.forEach { warn($0.reason.printable) }
