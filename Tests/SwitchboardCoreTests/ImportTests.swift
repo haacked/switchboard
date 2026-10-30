@@ -401,7 +401,7 @@ private let otherAccountForms = ["~/.claude-personal", "~/.claudex", "~/.claude/
     let outsideA = ClaudeSession(id: "u4", cwd: "/d", account: Self.account)
     let outsideB = ClaudeSession(id: "u5", cwd: "/e", account: Self.account)
 
-    let groups = ImportList(sessions: [docketA, docketB, notesA, outsideA, outsideB], hidden: 0).groups
+    let groups = ImportList(sessions: [docketA, docketB, notesA, outsideA, outsideB], hidden: 0, repos: []).groups
 
     #expect(groups.map(\.title) == ["docket", "notes", "Outside git"])
     #expect(groups.map { $0.sessions.map(\.id) } == [["u1", "u2"], ["u3"], ["u4", "u5"]])
@@ -479,5 +479,57 @@ private func importedEvent(at t: Int64, reply: String?, activity: Int64?, hasRep
     ])
 
     #expect(Attention.evaluate(session(), f, now: later + 1000).state == .stale)
+  }
+}
+
+@Suite struct ImportListFilterTests {
+  private func session(_ id: String, repo: String?, worktree: Bool) -> ClaudeSession {
+    ClaudeSession(id: id, name: id, cwd: "/work/\(id)", account: "/a", repo: repo, branch: id, worktree: worktree)
+  }
+
+  private var candidates: [ClaudeSession] {
+    [
+      session("a1", repo: "switchboard", worktree: true),
+      session("a2", repo: "switchboard", worktree: false),
+      session("b1", repo: "docket", worktree: true),
+      session("b2", repo: "docket", worktree: false),
+      session("b3", repo: "docket", worktree: false),
+      session("c1", repo: nil, worktree: false),
+    ]
+  }
+
+  @Test func withoutARepoTheWorktreeViewHidesEverySessionOutsideAWorktree() {
+    let list = ImportList.make(from: candidates, all: false, repo: nil)
+
+    #expect(list.sessions.map(\.id) == ["b1", "a1"])
+    #expect(list.hidden == 4)
+  }
+
+  @Test func aRepoKeepsOnlyItsSessionsAndHidesOnlyItsOwnOutsideAWorktree() {
+    let list = ImportList.make(from: candidates, all: false, repo: "docket")
+
+    #expect(list.sessions.map(\.id) == ["b1"])
+    #expect(list.hidden == 2)
+  }
+
+  @Test func aRepoWithAllListsEveryOneOfItsSessions() {
+    let list = ImportList.make(from: candidates, all: true, repo: "docket")
+
+    #expect(list.sessions.map(\.id) == ["b1", "b2", "b3"])
+    #expect(list.hidden == 0)
+  }
+
+  @Test func reposListsEachRepoOnceInOrderWhateverTheFilterAndLeavesOutFoldersOutsideGit() {
+    #expect(ImportList.make(from: candidates, all: false, repo: nil).repos == ["docket", "switchboard"])
+    #expect(ImportList.make(from: candidates, all: true, repo: "docket").repos == ["docket", "switchboard"])
+    #expect(ImportList.make(from: candidates, all: true, repo: "nope").repos == ["docket", "switchboard"])
+  }
+
+  @Test(arguments: ["Docket", "dock", "docket/", ""])
+  func aRepoMatchesOnlyByExactName(_ repo: String) {
+    let list = ImportList.make(from: candidates, all: true, repo: repo)
+
+    #expect(list.sessions.isEmpty)
+    #expect(list.hidden == 0)
   }
 }

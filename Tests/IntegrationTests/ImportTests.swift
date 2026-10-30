@@ -528,4 +528,117 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.run("import", "one", "two", "--name", "both").status == 1)
     #expect(try sbd.client.sessions().isEmpty)
   }
+
+  @Test func repoNarrowsTheListingToOneRepoAndCountsOnlyItsHiddenSessions() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let board = try sbd.makeRepo("switchboard")
+    let boardTree = try sbd.addWorktree(board, "haacked/one")
+    let docket = try sbd.makeRepo("docket")
+    let docketTree = try sbd.addWorktree(docket, "haacked/two")
+    let (inTree, inMain, other, otherMain, plain) = (newId(), newId(), newId(), newId(), newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(inTree, cwd: boardTree, name: "board-one", job: "00000001"),
+        agent(inMain, cwd: board, name: "board-main", job: "00000002"),
+        agent(other, cwd: docketTree, name: "docket-two", job: "00000003"),
+        agent(otherMain, cwd: docket, name: "docket-main", job: "00000004"),
+        agent(plain, cwd: sbd.work, name: "scratch", job: "00000005"),
+      ])
+
+    let worktrees = try JSONCoding.decode(ImportList.self, from: sbd.sb("import", "--repo", "switchboard", "--json"))
+    let every = try JSONCoding.decode(
+      ImportList.self, from: sbd.sb("import", "--all", "--repo", "switchboard", "--json"))
+    let text = try sbd.sb("import", "--repo", "switchboard")
+    let viaClient = try sbd.client.importable(repo: "switchboard")
+
+    #expect(worktrees.sessions.map(\.id) == [inTree])
+    #expect(worktrees.hidden == 1)
+    #expect(worktrees.repos == ["docket", "switchboard"])
+    #expect(every.sessions.map(\.id) == [inTree, inMain])
+    #expect(every.hidden == 0)
+    #expect(viaClient.sessions.map(\.id) == [inTree])
+    #expect(text.contains("haacked/one"))
+    #expect(!text.contains("haacked/two"))
+    #expect(text.contains("sb import --all --repo switchboard"))
+  }
+
+  @Test func repoMatchesTheNameExactlyAndNamesTheReposThatHaveSessionsWhenNoneMatch() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo("switchboard"), "haacked/one")
+    try sbd.writeAgents("A", [agent(newId(), cwd: tree, name: "board-one", job: "00000001")])
+
+    for repo in ["Switchboard", "switch", "nope"] {
+      let r = try sbd.run("import", "--repo", repo)
+      #expect(r.status == 1)
+      #expect(r.stderr.contains("no Claude session to import in a repo named \(repo)"))
+      #expect(r.stderr.contains("switchboard"))
+      #expect(r.stdout.isEmpty)
+      let json = try sbd.run("import", "--all", "--repo", repo, "--json")
+      #expect(json.status == 1)
+      #expect(json.stdout.isEmpty)
+    }
+  }
+
+  @Test func repoWithNoSessionsAnywhereSaysSo() throws {
+    let sbd = try Instance(accounts: ["A"])
+    try sbd.writeAgents("A", [])
+
+    let r = try sbd.run("import", "--repo", "switchboard")
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("no Claude session to import in a repo named switchboard"))
+    #expect(r.stderr.contains("No repo has one."))
+  }
+
+  @Test func repoNameWithASpaceIsQuotedInTheHintSoThatTheHintRuns() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let main = try sbd.makeRepo("my repo")
+    try sbd.writeAgents("A", [agent(newId(), cwd: main, name: "spaced-main", job: "00000001")])
+
+    let hint = try sbd.sb("import", "--repo", "my repo")
+    let all = try sbd.run("import", "--all", "--repo", "my repo", "--json")
+
+    #expect(hint.contains("sb import --all --repo 'my repo'"))
+    #expect(all.status == 0)
+    #expect(try JSONCoding.decode(ImportList.self, from: all.stdout).sessions.count == 1)
+  }
+
+  @Test func repoWithSessionsOnlyOutsideAWorktreeListsNoneAndPointsToAll() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let main = try sbd.makeRepo("switchboard")
+    try sbd.writeAgents("A", [agent(newId(), cwd: main, name: "board-main", job: "00000001")])
+
+    let r = try sbd.run("import", "--repo", "switchboard")
+
+    #expect(r.status == 0)
+    #expect(r.stdout.contains("sb import --all --repo switchboard"))
+  }
+
+  @Test func repoDoesNotAcceptRefsAndLeavesImportByRefAlone() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo("switchboard"), "haacked/one")
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: tree, name: "board-one", job: "00000001")])
+
+    let r = try sbd.run("import", id, "--repo", "switchboard")
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("--repo"))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.client.importSessions([id]).imported.count == 1)
+  }
+
+  @Test func repoSkipsTheSessionsThatSwitchboardAlreadyHas() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo("switchboard"), "haacked/one")
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: tree, name: "board-one", job: "00000001")])
+    try sbd.client.importSessions([id])
+
+    let r = try sbd.run("import", "--repo", "switchboard")
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("no Claude session to import in a repo named switchboard"))
+  }
 }

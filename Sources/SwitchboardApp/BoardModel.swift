@@ -202,8 +202,8 @@ final class BoardModel: ObservableObject {
 
   /// The Claude sessions that the import sheet offers. It blocks, so it runs
   /// off the main thread.
-  nonisolated func importable(all: Bool) -> Result<ImportList, Error> {
-    Result { try Client().importable(all: all) }
+  nonisolated func importable(all: Bool, repo: String?) -> Result<ImportList, Error> {
+    Result { try Client().importable(all: all, repo: repo) }
   }
 
   nonisolated func importSessions(_ refs: [String]) -> Result<ImportResult, Error> {

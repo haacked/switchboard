@@ -12,6 +12,8 @@ struct ImportView: View {
   final class Form: ObservableObject {
     @Published var list: ImportList?
     @Published var all = false
+    /// The repo whose sessions the sheet lists, or nil for every repo.
+    @Published var repo: String?
     @Published var selected: Set<String> = []
     @Published var error: String?
     /// Why the last import left sessions out, or why it failed.
@@ -37,6 +39,13 @@ struct ImportView: View {
           Label("Reload", systemImage: "arrow.clockwise")
         }
         .keyboardShortcut("r")
+        .disabled(form.busy)
+      }
+      if let repos = form.list?.repos, !repos.isEmpty {
+        Picker("Repo", selection: repoSelection) {
+          Text("All Repos").tag(String?.none)
+          ForEach(repos, id: \.self) { Text($0).tag(String?.some($0)) }
+        }
         .disabled(form.busy)
       }
       Text(
@@ -78,7 +87,7 @@ struct ImportView: View {
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if let list = form.list, list.sessions.isEmpty {
-      Text(list.hidden > 0 ? "No Claude sessions in a worktree to import" : "No Claude sessions to import")
+      Text((list.hidden > 0 ? "No Claude sessions in a worktree to import" : "No Claude sessions to import") + inRepo)
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if form.list == nil {
@@ -115,6 +124,17 @@ struct ImportView: View {
     }
   }
 
+  private var repoSelection: Binding<String?> {
+    Binding(
+      get: { form.repo },
+      set: { repo in
+        form.repo = repo
+        load()
+      })
+  }
+
+  private var inRepo: String { form.repo.map { " in \($0)" } ?? "" }
+
   private func selection(_ s: ClaudeSession) -> Binding<Bool> {
     Binding(
       get: { form.selected.contains(s.id) },
@@ -132,15 +152,20 @@ struct ImportView: View {
   /// Lists the sessions, unless a listing or an import is already running.
   private func load() {
     guard !form.busy else { return }
-    let all = form.all
+    let (all, repo) = (form.all, form.repo)
     let model = model
     form.activity = .listing
     Task {
-      let result = await Task.detached { model.importable(all: all) }.value
+      let result = await Task.detached { model.importable(all: all, repo: repo) }.value
       form.activity = nil
       switch result {
       case .success(let list):
         form.list = list
+        // The last session of the repo left, so no session of it remains to pick.
+        if let repo, !list.repos.contains(repo) {
+          form.repo = nil
+          return load()
+        }
         form.error = nil
         form.selected.formIntersection(list.sessions.filter { !$0.running }.map(\.id))
       case .failure(let error):

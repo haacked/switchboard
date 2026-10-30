@@ -131,7 +131,8 @@ public final class Service {
       case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
         return .success(try followupRequest(request.op, request.args))
       case "importable":
-        return .success(try JSON(encoding: importList(all: request.args["all"]?.bool ?? false)))
+        let all = request.args["all"]?.bool ?? false
+        return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
       case "import":
         return .success(try JSON(encoding: importSessions(request.args)))
       case "poll":
