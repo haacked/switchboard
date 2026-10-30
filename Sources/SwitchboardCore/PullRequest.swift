@@ -38,12 +38,17 @@ public struct Review: Codable, Equatable, Sendable {
   public var submittedAt: String?
   /// The commit that the review was made on. Only a verdict carries it.
   public var commit: String?
+  /// True when a GitHub App wrote the review. nil for a person.
+  public var bot: Bool?
 
-  public init(author: String, state: String, submittedAt: String? = nil, commit: String? = nil) {
+  public init(
+    author: String, state: String, submittedAt: String? = nil, commit: String? = nil, bot: Bool? = nil
+  ) {
     self.author = author
     self.state = state
     self.submittedAt = submittedAt
     self.commit = commit
+    self.bot = bot
   }
 }
 

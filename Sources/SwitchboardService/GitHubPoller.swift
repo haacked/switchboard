@@ -15,12 +15,17 @@ final class GitHubPoller {
   private var token: String?
   /// After GitHub's rate limit, no request goes out before this time.
   private var pausedUntil: Int64 = 0
-  private var tracked: [String: Tracked] = [:]
+  var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id, with their comments from
   /// `GitHub.bodyAuthors`.
-  private var prs: [String: (pr: PullRequest, comments: [PRComment], polled: Int64)] = [:]
+  var prs: [String: (pr: PullRequest, comments: [PRComment], polled: Int64)] = [:]
   /// Comment bodies by comment id. A comment whose edit time changed is read again.
   private var bodies: [String: PRComment] = [:]
+  /// The PRs that waits and merge triggers name, by the key they were looked up with.
+  var targets: [PRKey: Target] = [:]
+  /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
+  /// when a later read shows the same head commit and outcome.
+  var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -70,6 +75,13 @@ final class GitHubPoller {
     var lookedUp = false
   }
 
+  /// The node id of a PR that an open wait or a merge trigger names, and when
+  /// the poller last looked it up.
+  struct Target {
+    var prId: String?
+    var lookedUp: Int64
+  }
+
   /// A session as the poll sees it.
   struct Watched {
     var id: String
@@ -79,12 +91,14 @@ final class GitHubPoller {
     var facts: SessionFacts
   }
 
-  private struct Stats: Encodable {
+  struct Stats: Encodable {
     var lookups = 0
     var polled = 0
     var requests = 0
     var points = 0
     var changed = 0
+    var resolved = 0
+    var merged = 0
   }
 
   init(service: Service, settings: GitHubSettings) {
@@ -122,15 +136,18 @@ final class GitHubPoller {
     tracked = tracked.filter { ids.contains($0.key) }
     var shared = Shared()
     for s in sessions { refreshLocal(s, all: all, now: now, shared: &shared) }
+    let interest = interests()
+    targets = targets.filter { interest.keys.contains($0.key) }
     do {
-      try lookUp(all: all, now: now, stats: &stats)
-      try readPRs(all: all, now: now, stats: &stats)
+      try lookUp(all: all, now: now, interest: interest, stats: &stats)
+      try readPRs(all: all, now: now, waited: waitedOn(interest), interest: interest, stats: &stats)
     } catch {
       failure = "\(error)"
       logLine("github: \(error)")
     }
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
-    let kept = Set(tracked.values.compactMap(\.prId))
+    resolveWaits(interest, stats: &stats)
+    let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
@@ -250,7 +267,7 @@ final class GitHubPoller {
   /// Looks up the node ids of the branches with no known PR, and of new
   /// pr-link lines. A branch with no PR is looked up again after the idle
   /// interval, and so is a branch whose PR closed unmerged.
-  private func lookUp(all: Bool, now: Int64, stats: inout Stats) throws {
+  private func lookUp(all: Bool, now: Int64, interest: Interest, stats: inout Stats) throws {
     var keys: Set<PRKey> = []
     for t in tracked.values {
       if let key = t.branch.key {
@@ -263,6 +280,13 @@ final class GitHubPoller {
       }
       if let link = t.transcript.link, !t.transcript.lookedUp { keys.insert(link) }
     }
+    for key in interest.keys
+    where all
+      || targets[key].map({ $0.prId == nil && GitHub.elapsed(since: $0.lookedUp, settings.idleMs, now: now) })
+        ?? true
+    {
+      keys.insert(key)
+    }
     guard !keys.isEmpty else { return }
     var found: [PRKey: String?] = [:]
     for chunk in GitHub.chunks(Array(keys), size: GitHub.lightChunkSize) {
@@ -270,6 +294,7 @@ final class GitHubPoller {
       found.merge(GitHub.parseLookup(try request(query, variables, stats: &stats), chunk)) { $1 }
     }
     stats.lookups = keys.count
+    for key in interest.keys { if let result = found[key] { targets[key] = Target(prId: result, lookedUp: now) } }
     for (id, var t) in tracked {
       if let key = t.branch.key, let result = found[key] {
         t.branch.prId = result
@@ -290,11 +315,17 @@ final class GitHubPoller {
   /// that GitHub reports NOT_FOUND, as after a deletion, leaves its sessions,
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
-  private func readPRs(all: Bool, now: Int64, stats: inout Stats) throws {
-    let ids = Set(tracked.values.compactMap(\.prId)).sorted().filter {
-      all
+  private func readPRs(all: Bool, now: Int64, waited: [String: Int64], interest: Interest, stats: inout Stats)
+    throws
+  {
+    // A PR with an open wait polls like a pending one. It also polls at once
+    // when the wait is newer than the last read, since that read can't show
+    // what happened after the wait was set.
+    let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {
+      all || (waited[$0] ?? 0) > (prs[$0]?.polled ?? 0)
         || GitHub.isDue(
-          prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
+          prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs,
+          idleMs: waited[$0] == nil ? settings.idleMs : settings.pendingMs)
     }
     var stacked: [String] = []
     var gone: Set<String> = []
@@ -332,6 +363,9 @@ final class GitHubPoller {
         if earlier(t.recordedPRId) { t.recordedPRId = nil }
       }
       tracked[id] = t
+    }
+    for (key, target) in targets {
+      if let prId = target.prId, gone.contains(prId) { targets[key] = Target(prId: nil, lookedUp: now) }
     }
     for chunk in GitHub.chunks(stacked) {
       let response = try request(GitHub.baseQuery, idsVariable(chunk), stats: &stats)

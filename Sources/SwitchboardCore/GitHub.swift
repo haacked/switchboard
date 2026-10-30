@@ -67,8 +67,8 @@ public enum GitHub {
           headRefName headRefOid baseRefName mergeable reviewDecision
           repository { nameWithOwner defaultBranchRef { name } }
           labels(first: 20) { nodes { name } }
-          latestOpinionatedReviews(first: 20) { nodes { author { login } state submittedAt commit { oid } } }
-          reviews(last: 20) { nodes { author { login } state submittedAt } }
+          latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt commit { oid } } }
+          reviews(last: 20) { nodes { author { __typename login } state submittedAt } }
           commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
           firstComments: comments(first: 5) { nodes { ...comment } }
           lastComments: comments(last: 20) { nodes { ...comment } }
@@ -114,7 +114,7 @@ public enum GitHub {
     let review = { (n: JSON) in
       Review(
         author: login(n["author"]), state: n["state"]?.string ?? "", submittedAt: n["submittedAt"]?.string,
-        commit: n["commit"]?["oid"]?.string)
+        commit: n["commit"]?["oid"]?.string, bot: n["author"]?["__typename"]?.string == "Bot" ? true : nil)
     }
     let pr = PullRequest(
       id: id, number: number, url: node["url"]?.string ?? "", repo: node["repository"]?["nameWithOwner"]?.string ?? "",
