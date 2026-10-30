@@ -31,6 +31,8 @@ public final class Service {
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
     var lastJobSeen: Int64 = 0
+    /// How many events `facts` includes.
+    var events = 0
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -46,6 +48,7 @@ public final class Service {
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
+  let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
   struct Snapshot {
@@ -72,6 +75,7 @@ public final class Service {
     self.store = try Store(path: home.database)
     self.host = try TerminalHost(home: home, config: config)
     self.sbPath = sbPath
+    self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     guard let git = findExecutable("git") else { throw APIError("can't find git") }
     self.git = git
   }
@@ -82,24 +86,14 @@ public final class Service {
   /// event log, and writes the hook settings that every session's claude gets.
   public func load() throws {
     try writeClaudeSettings()
+    try store.pruneSnapshots()
     for session in try store.sessions() {
       let session = try upgraded(session)
+      let replay = try replayed(session)
       var e = Entry(session: session)
-      for event in try store.events(session: session.id) {
-        e.facts.apply(event)
-        Attention.track(session, &e.facts, now: event.t)
-        let text = event.data["text"]?.string ?? ""
-        switch event.kind {
-        case "sent" where event.data["delivery"]?.string == Delivery.queued.rawValue, "requeued":
-          e.pending.append(text)
-        case "delivered":
-          if let i = e.pending.firstIndex(of: text) { e.pending.remove(at: i) }
-        default:
-          break
-        }
-      }
-      // A restart ended every held request. A deferred question needs none.
-      e.facts.cards.removeAll { !$0.deferred }
+      e.facts = replay.facts
+      e.pending = replay.pending
+      e.events = replay.events
       entries[session.id] = e
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
@@ -219,6 +213,8 @@ public final class Service {
       return .string(try host.screen(paneName(id, pane)))
     case "mcp":
       return try JSON(encoding: mcpStatus())
+    case "snapshots":
+      return try snapshotRequest(args)
     default:
       throw APIError("unknown request \(op)")
     }
@@ -278,6 +274,7 @@ public final class Service {
     if var e = entries[id] {
       e.facts.apply(event)
       Attention.track(e.session, &e.facts, now: event.t)
+      e.events += 1
       entries[id] = e
     }
     releaseCards(id)
@@ -700,6 +697,7 @@ public final class Service {
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
       readyDueFollowups(now: now)
+      compactSnapshots()
     }
   }
 

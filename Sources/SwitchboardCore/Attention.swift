@@ -2,7 +2,7 @@ import Foundation
 
 /// A tool call that the main session waits on: a running tool, a permission
 /// prompt, or a question.
-public struct ToolCall: Equatable, Sendable {
+public struct ToolCall: Codable, Equatable, Sendable {
   public var tool: String
   public var summary: String
   /// Milliseconds since the epoch.
@@ -15,7 +15,7 @@ public struct ToolCall: Equatable, Sendable {
 
 /// What a session's events say about it. sbd applies each event as it
 /// arrives. At startup, sbd applies the whole event log again.
-public struct SessionFacts: Equatable, Sendable {
+public struct SessionFacts: Codable, Equatable, Sendable {
   /// True from claude's SessionStart until claude ends or exits.
   public var live = false
   public var turnRunning = false
