@@ -16,4 +16,15 @@ import Testing
     }
     #expect(statuses == Array(repeating: 0, count: count))
   }
+
+  @Test(.timeLimit(.minutes(1))) func endsACommandThatOutlastsItsTimeout() throws {
+    let start = Date()
+    let r = try runCommand("/bin/sleep", ["30"], timeout: 0.3)
+    #expect(r.status != 0)
+    #expect(Date().timeIntervalSince(start) < 10)
+  }
+
+  @Test func leavesACommandThatFinishesInTimeAlone() throws {
+    #expect(try runCommand("/bin/echo", ["hi"], timeout: 30).stdout == "hi\n")
+  }
 }

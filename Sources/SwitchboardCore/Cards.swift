@@ -197,11 +197,10 @@ extension SessionFacts {
       closePrompt(cards[card])
     case "card_closed":
       // A hook that timed out closes too. Claude Code's dialog then stays
-      // open, so the prompt stays open until the idle prompt that follows No
-      // or Escape.
+      // open, so the prompt stays open until the turn ends after No or Escape.
       guard let card else { return }
       cards.remove(at: card)
-    case "Stop", "StopFailure", "SessionEnd", "stopped", "exited",
+    case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.deferred }
     case "UserPromptSubmit":

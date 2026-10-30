@@ -131,6 +131,7 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
   @Test(arguments: [
     event("StopFailure", 3, ["error": "rate_limit"]),
     event("Notification", 3, ["notification_type": "idle_prompt"]),
+    event("idle", 3),
   ])
   func aTurnEndsWithoutAStop(_ end: Event) {
     let f = facts([
