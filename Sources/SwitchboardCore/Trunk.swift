@@ -20,7 +20,7 @@ public enum TrunkQueueState: String, Codable, Sendable {
   /// waited too long to become mergeable, or someone cancelled it.
   case removed
   /// sbd couldn't read the body of every trunk-io comment, so it can't tell
-  /// the state. Only `GitHub.queueStatus` gives it.
+  /// the state. Only `TrunkComments.state` gives it.
   case unknown
 
   /// Whether Trunk still holds the PR. false when sbd can't tell.
@@ -184,33 +184,18 @@ public struct TrunkTimeline: Equatable, Sendable {
   }
 }
 
-/// A comment on a pull request.
-public struct TrunkComment: Equatable, Sendable {
-  /// The login as GitHub's REST API gives it. A GitHub App comments as
-  /// `<app>[bot]`. GraphQL leaves out the suffix. A caller adds it for an
-  /// author whose `__typename` is `Bot`. GitHub forbids brackets in a user's
-  /// login, which keeps any user from passing for Trunk.
-  public var author: String
-  public var body: String
-  /// GitHub's `includesCreatedEdit`: whether someone edited the comment
-  /// after it was created.
-  public var edited: Bool
-
-  public init(author: String, body: String, edited: Bool) {
-    self.author = author
-    self.body = body
-    self.edited = edited
-  }
-}
-
 /// Reads the queue state from the comments that Trunk posts on a pull
 /// request. It ports the jq in git-pr (`~/.dotfiles/bin/git-pr`).
 public enum TrunkComments {
   public static let author = "trunk-io[bot]"
 
-  /// The PR's queue state, or nil when no Trunk comment names one. Only an
-  /// open PR's state says whether Trunk holds it. A PR below the top of a
-  /// merged stack keeps the reply that says it is queued.
+  /// The queue state that an open PR's trunk-io comments show, or nil when
+  /// none names one or the PR isn't open. A merged stack's lower PRs keep
+  /// Trunk's "queued" replies, so only an open PR's state says whether Trunk
+  /// holds it. The state is `.unknown` when the body of a trunk-io comment
+  /// didn't load. A login must end in `[bot]`, which GitHub forbids in a
+  /// user's login, so no user can pass for Trunk. GraphQL leaves the suffix
+  /// out, and the poller adds it for an author whose `__typename` is `Bot`.
   ///
   /// Trunk posts a control comment on each PR and edits that comment in place
   /// into the queue status. Its first line names the state. Trunk posts
@@ -219,17 +204,19 @@ public enum TrunkComments {
   /// each PR below it gets a reply when the stack enters the queue and again
   /// when the stack fails, is cancelled, or returns to waiting.
   ///
-  /// Nothing orders the newest status against the newest reply. Trunk runs a
-  /// PR through one queue run at a time and ends each run with a removal or a
-  /// merge. Any other state from either kind therefore outranks a removal
-  /// from the other.
-  public static func state(_ comments: [TrunkComment]) -> TrunkQueueState? {
-    let trunk = comments.filter { $0.author == author }
-    let found = [
-      trunk.filter(\.edited).compactMap { statusState($0.body) }.last,
-      trunk.filter { !$0.edited }.compactMap { replyState($0.body) }.last,
-    ].compactMap { $0 }
-    return found.first { $0 != .removed } ?? found.first
+  /// The newest comment that names a state wins. A status counts from its
+  /// last edit and a reply from its creation. Comments with the same time
+  /// count in the order given.
+  public static func state(of pr: PullRequest, _ comments: [PRComment]) -> TrunkQueueState? {
+    guard pr.state == .open else { return nil }
+    var newest: (at: String, state: TrunkQueueState)?
+    for c in comments where c.author == author {
+      guard let body = c.body else { return .unknown }
+      guard let named = c.edited ? statusState(body) : replyState(body) else { continue }
+      let at = c.editedAt ?? c.createdAt
+      if newest.map({ $0.at <= at }) ?? true { newest = (at, named) }
+    }
+    return newest?.state
   }
 
   /// The state that an edited status comment names. The control comment and
