@@ -112,16 +112,49 @@ import Testing
     #expect(try tmux(t, "set-environment", "-t", pane, "REMOVED_FROM_CONFIG", "1").status == 0)
     // tmux copies SSH_AUTH_SOCK from each terminal that attaches, as from an
     // SSH login with a forwarded agent.
-    #expect(try tmux(t, "set-environment", "-t", pane, "SSH_AUTH_SOCK", "/tmp/forwarded-agent").status == 0)
+    let forwarded = "\(sbd.home.path)/forwarded-agent.sock"
+    FileManager.default.createFile(atPath: forwarded, contents: nil)
+    #expect(try tmux(t, "set-environment", "-t", pane, "SSH_AUTH_SOCK", forwarded).status == 0)
     // tmux lists each line of a value with a newline as a line of its own.
-    #expect(try tmux(t, "set-environment", "-t", pane, "TWO_LINES", "first\n=second").status == 0)
+    #expect(
+      try tmux(t, "set-environment", "-t", pane, "TWO_LINES", "first\n=second\nSSH_AUTH_SOCK=\(sbd.home.path)/gone")
+        .status == 0)
     try restartWithAMessage(sbd, s.id)
     let run = try #require(sbd.stubCalls().last)
     #expect(run.account == "")
-    #expect(run.agent == "/tmp/forwarded-agent")
+    #expect(run.agent == forwarded)
     #expect(try tmux(t, "show-environment", "-t", pane, "REMOVED_FROM_CONFIG").status != 0)
     #expect(try tmux(t, "show-environment", "-t", pane, "TWO_LINES").status != 0)
     #expect(try tmux(t, "show-environment", "-t", pane, "SB_SESSION_ID").status == 0)
+  }
+
+  @Test func restartsClaudeWithSbdsAgentAfterAForwardedAgentWentAway() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let t = try sbd.client.terminals(s.id)
+    // An SSH login's forwarded agent leaves no socket once the login ends.
+    let gone = "\(sbd.home.path)/ended-login-agent.sock"
+    #expect(try tmux(t, "set-environment", "-t", "=\(t.claude)", "SSH_AUTH_SOCK", gone).status == 0)
+    // sbd starts again with another agent, and the tmux server keeps running.
+    sbd.sbdAgent = "\(sbd.home.path)/next-sbd-agent.sock"
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try restartWithAMessage(sbd, s.id)
+    #expect(sbd.stubCalls().last?.agent == sbd.sbdAgent)
+  }
+
+  @Test func restartsClaudeWithTheAgentOfTheSbdThatRunsNow() throws {
+    let sbd = try Instance()
+    FileManager.default.createFile(atPath: sbd.sbdAgent, contents: nil)
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    // sbd starts again with another agent, while the first one's socket still exists.
+    sbd.sbdAgent = "\(sbd.home.path)/next-sbd-agent.sock"
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try restartWithAMessage(sbd, s.id)
+    #expect(sbd.stubCalls().last?.agent == sbd.sbdAgent)
   }
 
   @Test func restartsClaudeWithSbdsAgentAfterATerminalWithoutOneAttached() throws {

@@ -38,6 +38,7 @@ final class Instance {
     let path = String(cString: dir)
     home = Home(path: path)
     inheritedAccount = inheritsAccount ? "\(path)/inherited-account" : nil
+    sbdAgent = "\(path)/sbd-agent.sock"
     let folders = accounts.map { "\(path)/\($0)" }
     for folder in folders {
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
@@ -63,8 +64,9 @@ final class Instance {
 
   var work: String { "\(home.path)/work" }
 
-  /// The SSH_AUTH_SOCK that sbd runs with.
-  var sbdAgent: String { "\(home.path)/sbd-agent.sock" }
+  /// The SSH_AUTH_SOCK that sbd runs with. A test changes it before it starts
+  /// sbd again.
+  var sbdAgent: String
 
   func startSbd() throws {
     let p = Process()

@@ -33,12 +33,28 @@ final class TerminalHost {
     // another Claude session, out of the sessions that sbd starts.
     let env = ProcessInfo.processInfo.environment
     var base: [String: String] = ["TERM": "xterm-256color", "SHELL": shell, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-    for key in ["HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "SSH_AUTH_SOCK"] {
+    for key in TerminalHost.inherited {
       if let value = env[key] { base[key] = value }
     }
     base["LANG"] = base["LANG"] ?? "en_US.UTF-8"
     self.baseEnv = base
     try TerminalHost.configText.write(toFile: conf, atomically: true, encoding: .utf8)
+    syncServer()
+  }
+
+  /// The variables that panes get from sbd's own environment.
+  private static let inherited = ["HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "SSH_AUTH_SOCK"]
+
+  /// A tmux server outlives the sbd that started it and keeps that sbd's
+  /// environment. A pane gets the server's value of each variable that its
+  /// session lacks. So this gives a running server this sbd's values. tmux
+  /// refuses when no server runs, and the next new-session starts one with
+  /// them.
+  private func syncServer() {
+    let commands = Set(baseEnv.keys).union(TerminalHost.inherited).sorted().map { key in
+      ["set-environment", "-g"] + (baseEnv[key].map { [key, $0] } ?? ["-u", key])
+    }
+    _ = try? run(Array(commands.joined(separator: [";"])))
   }
 
   /// The server's options. The panes have no status line, because the app
@@ -115,12 +131,13 @@ final class TerminalHost {
   /// Starts a pane in its own tmux session. With no command, the pane runs
   /// the login shell. tmux stores `env` in the session for later respawns.
   /// tmux also copies the variables that its `update-environment` option
-  /// names from each terminal that attaches. This removes those names from
-  /// the session again. A value that the session holds for one of them then
-  /// came from a terminal.
+  /// names from each terminal that attaches. `-E` keeps it from copying them
+  /// from sbd's own client. This removes those names in `env` from the
+  /// session again. A value that the session holds for one of them then came
+  /// from a terminal.
   func create(_ name: String, cwd: String, env: [String: String], command: String? = nil) throws {
     try run(
-      ["new-session", "-d", "-s", name, "-x", "200", "-y", "50", "-c", cwd] + envArgs(env)
+      ["new-session", "-d", "-E", "-s", name, "-x", "200", "-y", "50", "-c", cwd] + envArgs(env)
         + (command.map { [$0] } ?? []))
     let copied = try copiedFromTerminals()
     for key in env.keys where copied.contains(key) { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
@@ -128,27 +145,41 @@ final class TerminalHost {
 
   /// Starts a dead pane again, with the command or the login shell. tmux
   /// refuses when the pane's program still runs. The new program gets the
-  /// variables that the pane's tmux session holds. This unsets each one that
-  /// `env` lacks, except a value that tmux copied from a terminal, such as a
-  /// forwarded SSH_AUTH_SOCK. A terminal that lacks a copied variable, as the
-  /// app's does, marks it for removal. This clears the mark when the tmux
-  /// server's environment has the variable, such as sbd's own SSH_AUTH_SOCK.
+  /// variables that the pane's tmux session holds, and the server's value of
+  /// each one that the session lacks. This unsets each one that `env` lacks,
+  /// except a value that tmux copied from a terminal, such as a forwarded
+  /// SSH_AUTH_SOCK.
   func respawn(_ name: String, cwd: String, env: [String: String], command: String?) throws {
     let copied = try copiedFromTerminals()
     for line in try run(["show-environment", "-t", "=\(name)"]).split(separator: "\n") {
       // show-environment prints -NAME for a variable that is marked for removal.
-      let marked = line.hasPrefix("-")
-      let key = String((marked ? line.dropFirst() : line).prefix { $0 != "=" })
+      let key = String((line.hasPrefix("-") ? line.dropFirst() : line).prefix { $0 != "=" })
       // tmux prints a value with a newline over several lines. This skips a
       // further line that doesn't start with a variable name.
-      guard key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil, env[key] == nil else {
-        continue
-      }
-      let hidesServerValue = marked && baseEnv[key] != nil
-      let leftFromEarlierStart = !marked && !copied.contains(key)
-      if hidesServerValue || leftFromEarlierStart { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
+      guard key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil, env[key] == nil,
+        !copied.contains(key)
+      else { continue }
+      try run(["set-environment", "-t", "=\(name)", "-u", key])
+    }
+    for key in copied.sorted() where baseEnv[key] != nil && env[key] == nil && fallsBack(key, in: name) {
+      try run(["set-environment", "-t", "=\(name)", "-u", key])
     }
     try run(["respawn-pane", "-t", "=\(name):", "-c", cwd] + envArgs(env) + (command.map { [$0] } ?? []))
+  }
+
+  /// Whether the pane's session should drop its value of a variable that tmux
+  /// copies from terminals and that sbd also has, so that the pane gets sbd's
+  /// value. A terminal without the variable, as the app's, leaves a mark that
+  /// removes it. A forwarded agent's socket goes away when its SSH login ends.
+  /// This asks for the variable by name, because a line of the full listing
+  /// can belong to another variable's multi-line value.
+  private func fallsBack(_ key: String, in name: String) -> Bool {
+    guard let held = try? run(["show-environment", "-t", "=\(name)", key]) else { return false }
+    if held.hasPrefix("-") { return true }
+    guard key == "SSH_AUTH_SOCK" else { return false }
+    var path = Array(held.utf8.dropFirst(key.utf8.count + 1))
+    if path.last == UInt8(ascii: "\n") { path.removeLast() }
+    return !FileManager.default.fileExists(atPath: String(decoding: path, as: UTF8.self))
   }
 
   /// The variables that tmux copies from each terminal that attaches.
