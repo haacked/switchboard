@@ -33,12 +33,11 @@
 #   anything else    replies "Done: <prompt>"
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read.
-# Like claude, it writes a line to the conversation's transcript in
-# $CLAUDE_CONFIG_DIR/projects/stub for each prompt and for clear. Each hook
-# payload names that transcript in transcript_path. --resume
-# fails when no transcript exists, and --session-id fails when one does.
-# Without CLAUDE_CONFIG_DIR, the transcript would go to the user's ~/.claude,
-# so the stub then neither writes nor checks one.
+# Like claude, it writes a line to the conversation's transcript for each
+# prompt and for clear, at the transcript_path that the hook payloads name.
+# --resume fails when no transcript exists, and --session-id fails when one
+# does. Without CLAUDE_CONFIG_DIR, claude would use the user's ~/.claude, so
+# the stub uses $SB_HOME/claude instead.
 # With STUB_HOOKS=off it runs no hooks, as when every hook fails.
 # Each run appends one record to $SB_HOME/stub-calls.log in one write:
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK and the arguments, split by tabs. A NUL
@@ -50,6 +49,9 @@ if [ "${1-}" = agents ]; then
   cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]'
   exit 0
 fi
+config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
+# Claude names a project's folder after its cwd, as emit fills {{encoded_cwd}}.
+project="$config_dir/projects/$(jq -rn --arg c "$PWD" '$c | gsub("[^A-Za-z0-9]"; "-")')"
 
 recordings="$(dirname "$0")/claude"
 settings='' mcp_config='' session='' prompt='' source=startup linger=0
@@ -71,17 +73,14 @@ request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 # payload <event> [json fields]: a hook payload shaped like claude's. It names
 # the transcript, as claude's does, even before the file exists.
 payload() {
-  jq -nc --arg e "$1" --arg s "$session" --arg t "${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/projects/stub/$session.jsonl}" \
-    --argjson f "${2:-{\}}" \
-    '{hook_event_name: $e, session_id: $s} + (if $t == "" then {} else {transcript_path: $t} end) + $f'
+  jq -nc --arg e "$1" --arg s "$session" --arg t "$project/$session.jsonl" --argjson f "${2:-{\}}" \
+    '{hook_event_name: $e, session_id: $s, transcript_path: $t} + $f'
 }
 
 # transcript <text>: appends a line to the conversation's transcript.
 transcript() {
-  [ -n "${CLAUDE_CONFIG_DIR-}" ] || return 0
-  mkdir -p "$CLAUDE_CONFIG_DIR/projects/stub"
-  jq -nc --arg t "$1" '{type: "user", message: {role: "user", content: $t}}' \
-    >>"$CLAUDE_CONFIG_DIR/projects/stub/$session.jsonl"
+  mkdir -p "$project"
+  jq -nc --arg t "$1" '{type: "user", message: {role: "user", content: $t}}' >>"$project/$session.jsonl"
 }
 
 # hook <event> [json fields]
@@ -133,13 +132,13 @@ vars() {
 # emit [vars] [<text> <command>]: runs the hook command with each payload on
 # stdin, and runs the shell command before the first payload that contains
 # the text. Each {{name}} takes its value from the vars, or from this session for
-# its id and folders. The folders that claude keeps in the Claude config
-# folder and in /tmp move into $SB_HOME. The loop runs in this shell and
+# its id and folders. The Claude config folder is $config_dir, and the
+# folders that claude keeps in /tmp move into $SB_HOME. The loop runs in this shell and
 # not in a pipeline's subshell, so a SIGKILL also stops the hooks that remain.
 emit() {
   local extra=${1:-'{}'} payload paused='' payloads
-  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --argjson extra "$extra" '
-    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: "\($home)/claude",
+  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --arg config "$config_dir" --argjson extra "$extra" '
+    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: $config,
       claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
     | walk(if type == "string" then
         reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))
@@ -303,13 +302,11 @@ turn() {
   play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
 }
 
-if [ -n "${CLAUDE_CONFIG_DIR-}" ]; then
-  ls "$CLAUDE_CONFIG_DIR"/projects/*/"$session.jsonl" >/dev/null 2>&1 && found=yes || found=no
-  case $source:$found in
-  startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
-  resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
-  esac
-fi
+ls "$config_dir"/projects/*/"$session.jsonl" >/dev/null 2>&1 && found=yes || found=no
+case $source:$found in
+startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
+resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
+esac
 trap 'play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0

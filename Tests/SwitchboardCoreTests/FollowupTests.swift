@@ -192,7 +192,7 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
 
 @Suite struct FollowupStore {
   @Test func importedLinesOutliveTheirSession() throws {
-    let dir = try StoreTests().tempFolder()
+    let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
     var s = followup(Followup(prompt: "x", repository: "a/b", trigger: .date(9)))
     s.parent = "s0"

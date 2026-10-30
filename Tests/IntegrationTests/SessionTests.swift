@@ -192,8 +192,10 @@ import Testing
       try? sbd.advanceClock(11_000)
       return $0.live
     }
-    let transcript = "\(sbd.inheritedAccount ?? "")/projects/stub/\(s.claudeSessionId).jsonl"
-    try sbd.waitFor("the first turn's transcript") { FileManager.default.fileExists(atPath: transcript) }
+    let account = try #require(sbd.inheritedAccount)
+    try sbd.waitFor("the first turn's transcript") {
+      Transcript.find(s.claudeSessionId, account: account, cwd: sbd.work) != nil
+    }
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "claude to exit") { !$0.live }
 
