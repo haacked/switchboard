@@ -58,6 +58,8 @@ public struct Session: Codable, Equatable, Sendable {
   public var notes: [Note]?
   /// The session that added this one, such as the session that captured a follow-up.
   public var parent: String?
+  /// True for the Manager, the one session that manages the others.
+  public var manager: Bool?
   /// Set on a follow-up. Until it starts, `cwd` is empty and claude never runs.
   public var followup: Followup?
   /// The Claude account that an imported session resumes under, or nil for
@@ -130,6 +132,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// without a card. Without a card, only the terminal can answer it.
   public var openPrompt: Bool
   public var parent: String?
+  /// True for the Manager.
+  public var manager: Bool?
   public var followup: Followup?
   /// When the session was added, in ms since the epoch. An imported
   /// follow-up was added on the date of its line.

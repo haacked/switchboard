@@ -48,6 +48,7 @@ public final class Service {
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
+  var parentNotices = ParentNotices()
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -98,6 +99,8 @@ public final class Service {
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
     snapshot = buildSnapshot()
+    seedParentMarks(now: nowMs())
+    try? refreshManagerGuide()
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github)
   }
@@ -119,6 +122,8 @@ public final class Service {
         let folder = try prepareFolder(args)
         awaitMCPServers()
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
+      case "manager":
+        return managerRequest()
       case "rm":
         return .success(try remove(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
@@ -325,13 +330,14 @@ public final class Service {
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  private func create(_ args: NewSession, _ folder: (cwd: String, branch: String?)) throws -> SessionSummary {
+  func create(_ args: NewSession, _ folder: (cwd: String, branch: String?)) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
       branch: folder.branch, claudeSessionId: UUID().uuidString.lowercased(), model: args.model ?? config.model,
       created: nowMs())
     if args.branch?.isEmpty == false { session.repo = (args.path as NSString).standardizingPath }
+    session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
@@ -697,6 +703,7 @@ public final class Service {
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
       readyDueFollowups(now: now)
+      notifyParents(now: now)
       compactSnapshots()
     }
   }
@@ -736,6 +743,7 @@ public final class Service {
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
     out.parent = s.parent
+    out.manager = s.manager
     out.followup = s.followup
     out.created = s.created
     // A follow-up has been Not started since it was added, which for an

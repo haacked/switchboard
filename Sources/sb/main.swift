@@ -9,6 +9,8 @@ let usage = """
     new <folder> [--branch B] [--base REF] [--name N] [--prompt P] [--model M]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch
+    manager                       start the Manager, a session that manages the others,
+                                  or open it
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
     open <session>                resume the session if its claude is stopped
@@ -379,8 +381,12 @@ case "new":
   let folder = URL(fileURLWithPath: path.expandingTilde).path
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
-    prompt: a.values["--prompt"], model: a.values["--model"])
+    prompt: a.values["--prompt"], model: a.values["--model"],
+    parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
+  if a.json { printJSON(result) } else { printSession(summary(result)) }
+case "manager":
+  let result = call("manager", timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "get", "show":
   sessionCommand("get", a)
