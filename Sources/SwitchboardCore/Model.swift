@@ -142,6 +142,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when `sb done` or the app marked the session done. A merged or
   /// closed PR can put a session in Done without it.
   public var markedDone: Bool
+  /// What the session needs from the user, or nil when it needs nothing.
+  public var triage: TriageItem?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

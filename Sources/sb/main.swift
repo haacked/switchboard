@@ -38,6 +38,15 @@ let usage = """
     events [--session S] [--since ID] [--follow]
                                   the newest events, or those after an id
 
+  What needs you:
+    triage                        the sessions that need you or that Claude can
+                                  continue, in the order to go through them, each
+                                  with a title, a summary, and options
+    next                          the first of them
+    choose <session> <option>     click an option, by number or label: answer the
+                                  session's prompt, or send its message
+    reply <session>               the session's last reply, as Markdown
+
   Permission prompts and questions:
     cards [<session>]             list the open ones
     allow [--card N] <session>    allow the session's permission prompt
@@ -372,7 +381,7 @@ guard let command = argv.popFirst() else {
 // `send` and `rename` read flags instead when the word after the session is
 // one.
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
-var a = Args(argv, literalAfter: (["send", "rename"] + flagsAfterSession).contains(command) ? 1 : .max)
+var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {
@@ -454,6 +463,14 @@ case "events":
   events(a)
 case "cards":
   cards(a)
+case "triage":
+  triage(a)
+case "next":
+  next(a)
+case "choose":
+  choose(a)
+case "reply":
+  replyCommand(a)
 case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":

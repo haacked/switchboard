@@ -23,6 +23,13 @@ final class BoardModel: ObservableObject {
   /// Counts ⌘J presses in the Queue. Each one scrolls to the current item,
   /// even when ⌘J lands on the item it reached last time.
   @Published var queueJumps = 0
+  /// The right pane of the Queue shows the session's terminals instead of its summary.
+  @Published var showingTerminal = false
+  /// The last reply of the sessions the Queue showed, read from their
+  /// transcripts, by session id.
+  @Published var replies: [String: String] = [:]
+  /// Options whose click is on its way to sbd, as "<session>/<number>".
+  @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
@@ -60,6 +67,8 @@ final class BoardModel: ObservableObject {
     manager.map { SessionTree.subtree(of: $0.id, in: sessions) } ?? []
   }
 
+  var triage: [SessionSummary] { Triage.order(sessions) }
+
   /// The sessions and the follow-ups that wait to start. A follow-up whose
   /// trigger fired is in both lists until it starts. A follow-up that started
   /// since the last read of follow-ups is in both lists for up to 5 s. The
@@ -71,9 +80,11 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
-  /// The focused Queue item while it still needs you, else the oldest one.
+  /// The focused Queue session while it exists, else the first item. A session
+  /// that the user just answered leaves the list while it works, and the
+  /// right pane stays on it to show its next reply.
   var currentQueueItem: String? {
-    needsYou.contains { $0.id == queueFocus } ? queueFocus : needsYou.first?.id
+    sessions.contains { $0.id == queueFocus } ? queueFocus : triage.first?.id
   }
 
   func start() {
@@ -128,7 +139,7 @@ final class BoardModel: ObservableObject {
     guard Bundle.main.bundleIdentifier != nil else { return }
     let content = UNMutableNotificationContent()
     content.title = "\(s.name) needs you"
-    content.body = s.reason
+    content.body = s.triage?.title ?? s.reason
     content.userInfo = ["session": s.id]
     UNUserNotificationCenter.current().add(
       UNNotificationRequest(identifier: "\(s.id)-\(s.since)", content: content, trigger: nil))
@@ -177,6 +188,26 @@ final class BoardModel: ObservableObject {
     if !message.isEmpty { args["message"] = .string(message) }
     if let answers { args["answers"] = .array(answers.map(JSON.string)) }
     perform("answer", args, finally: { self.answering.remove(card.id) })
+  }
+
+  func choose(_ session: String, ref: String, option number: Int) {
+    let key = "\(session)/\(number)"
+    guard choosing.insert(key).inserted else { return }
+    perform(
+      "choose", ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)],
+      finally: { self.choosing.remove(key) })
+  }
+
+  /// Reads the session's last reply from its transcript, which can be large,
+  /// so off the main thread.
+  func loadReply(_ session: String) {
+    let client = client
+    poller.async {
+      let text = try? client.call("reply", ["session": .string(session)])["reply"]?.string
+      Task { @MainActor in
+        if let text, self.replies[session] != text { self.replies[session] = text }
+      }
+    }
   }
 
   func draft(for card: Card) -> CardView.Draft {
@@ -228,7 +259,7 @@ final class BoardModel: ObservableObject {
   /// Moves to the next Queue item while the Queue shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
-    let list = needsYou
+    let list = selection == nil && !showingBoard ? triage : needsYou
     guard !list.isEmpty else { return }
     if selection == nil && !showingBoard {
       let i = list.firstIndex { $0.id == currentQueueItem } ?? -1

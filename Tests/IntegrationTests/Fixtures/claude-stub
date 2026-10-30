@@ -31,6 +31,13 @@
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
 #   anything else    replies "Done: <prompt>"
+# `claude -p ...` is the summary call. It reads the prompt on stdin and prints
+# the JSON that claude prints with --output-format json: a decision with two
+# options for a reply that holds "Postgres or SQLite", an approval with one for
+# "Want me to", and info otherwise. A reply that holds FAIL-SUMMARY makes it
+# exit 1, and SLOW-SUMMARY makes it hang. It appends the arguments to
+# $SB_HOME/summary-calls.log, and keeps the last prompt in
+# $SB_HOME/summary-input.txt.
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read. It adds a row for each session
 # that is in the middle of an interrupt or a slow tool call, which are the
@@ -46,6 +53,28 @@
 # ends the record, because a prompt can hold a newline.
 
 args=("$@")
+if [ "${1-}" = -p ]; then
+  input=$(cat)
+  printf '%s\0' "${args[*]}" >>"$SB_HOME/summary-calls.log"
+  printf '%s' "$input" >"$SB_HOME/summary-input.txt"
+  case $input in
+  *FAIL-SUMMARY*) echo "summary failed" >&2 && exit 1 ;;
+  *SLOW-SUMMARY*) exec sleep 30 ;;
+  esac
+  reply=${input#*<reply>}
+  reply=${reply%</reply>*}
+  case $reply in
+  *"Postgres or SQLite"*)
+    out='{"title":"Pick a database","kind":"decision","summary":"It asks which database to use.","options":[{"label":"Postgres","detail":"Already in use","message":"Use Postgres.","recommended":true},{"label":"SQLite","message":"Use SQLite."}]}'
+    ;;
+  *"Want me to"*)
+    out='{"title":"Run the tests","kind":"approval","summary":"It wrote the parser and offers to run the tests.","options":[{"label":"Run the tests","message":"Yes, run the tests.","recommended":true}]}'
+    ;;
+  *) out='{"title":"Read the reply","kind":"info","summary":"It finished.","options":[]}' ;;
+  esac
+  jq -nc --argjson o "$out" '{type: "result", subtype: "success", is_error: false, result: ($o | tojson), structured_output: $o}'
+  exit 0
+fi
 printf '%s\t%s\t%s\0' "${CLAUDE_CONFIG_DIR-}" "${SSH_AUTH_SOCK-}" "${args[*]}" >>"$SB_HOME/stub-calls.log"
 if [ "${1-}" = agents ]; then
   listed=$(cat "${CLAUDE_CONFIG_DIR-}/agents.json" 2>/dev/null || echo '[]')
@@ -69,7 +98,7 @@ while [ $# -gt 0 ]; do
   --mcp-config) mcp_config=$2 && shift 2 ;;
   --session-id) session=$2 && shift 2 ;;
   --resume) session=$2 source=resume && shift 2 ;;
-  --model | --permission-mode) shift 2 ;;
+  --model | --permission-mode | --append-system-prompt) shift 2 ;;
   --) prompt=${2:-} && break ;;
   --*) shift ;;
   *) prompt=$1 && shift ;;
@@ -102,6 +131,13 @@ status() {
   else
     rm -f "$config_dir/status/$session"
   fi
+}
+
+# reply_line <text>: appends the assistant's reply to the transcript.
+reply_line() {
+  mkdir -p "$project"
+  jq -nc --arg t "$1" \
+    '{type: "assistant", message: {role: "assistant", content: [{type: "text", text: $t}]}}' >>"$project/$session.jsonl"
 }
 
 # hook <event> [json fields]
@@ -259,6 +295,7 @@ asks() {
   reply=$(call_tool "${@:2}")
   [ -z "$reply" ] && return
   echo "⏺ $reply"
+  reply_line "$reply"
   event turn Stop | emit "$(vars "$1" "$reply")"
 }
 
@@ -334,6 +371,7 @@ turn() {
   *) reply="Done: $p" ;;
   esac
   echo "⏺ $reply"
+  reply_line "$reply"
   play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
   status
 }

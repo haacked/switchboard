@@ -65,7 +65,7 @@ struct ContentView: View {
           SessionView(session: s).id(s.id)
         } else {
           Picker("View", selection: $model.showingBoard) {
-            Text("Queue (\(model.needsYou.count))").tag(false)
+            Text("Queue (\(model.triage.count))").tag(false)
             Text("Board").tag(true)
           }
           .pickerStyle(.segmented)
