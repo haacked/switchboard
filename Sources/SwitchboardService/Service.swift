@@ -55,6 +55,8 @@ public final class Service {
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
+  /// The account that `sb account use` chose, or nil before the first use.
+  var chosenAccount: String?
   var parentNotices = ParentNotices()
   let keeper: SnapshotKeeper
 
@@ -94,6 +96,7 @@ public final class Service {
   /// event log, and writes the hook settings that every session's claude gets.
   public func load() throws {
     try writeClaudeSettings()
+    loadChosenAccount()
     try store.pruneSnapshots()
     for session in try store.sessions() {
       let session = try upgraded(session)
@@ -228,6 +231,8 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try host.screen(paneName(id, pane)))
+    case "accounts", "account-use":
+      return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())
     case "snapshots":
@@ -351,6 +356,7 @@ public final class Service {
       created: nowMs())
     if args.branch?.isEmpty == false { session.repo = (args.path as NSString).standardizingPath }
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+    session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
@@ -370,9 +376,9 @@ public final class Service {
 
   func paneEnv(_ id: String) -> [String: String] {
     var env = ["SB_SESSION_ID": id, "SB_HOME": home.path]
-    // CLAUDE_CONFIG_DIR picks the Claude account. The panes use sbd's
-    // account unless config.env sets another. An imported session resumes
-    // under the account it came from.
+    // CLAUDE_CONFIG_DIR picks the Claude account. A session runs under the
+    // account it recorded. A session without one, stored by an older sbd,
+    // uses sbd's account unless config.env sets another.
     if let dir = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] { env["CLAUDE_CONFIG_DIR"] = dir }
     for (key, value) in config.env { env[key] = value.expandingTilde }
     if let account = entries[id]?.session.claudeConfigDir { ClaudeAccount.apply(account, to: &env) }
@@ -762,6 +768,7 @@ public final class Service {
     out.manager = s.manager
     out.followup = s.followup
     out.created = s.created
+    out.account = s.claudeConfigDir
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

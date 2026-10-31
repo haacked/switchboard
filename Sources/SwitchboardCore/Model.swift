@@ -62,8 +62,9 @@ public struct Session: Codable, Equatable, Sendable {
   public var manager: Bool?
   /// Set on a follow-up. Until it starts, `cwd` is empty and claude never runs.
   public var followup: Followup?
-  /// The Claude account that an imported session resumes under, or nil for
-  /// the account of sbd and config.env.
+  /// The Claude account that the session's claude runs under. Every session
+  /// that sbd creates or imports has one. It is nil in a session that an
+  /// older sbd stored, which uses the account of sbd and config.env.
   public var claudeConfigDir: String?
 
   public init(
@@ -144,6 +145,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var markedDone: Bool
   /// What the session needs from the user, or nil when it needs nothing.
   public var triage: TriageItem?
+  /// The Claude account's folder, or nil when the session never recorded one.
+  public var account: String?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

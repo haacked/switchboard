@@ -62,6 +62,12 @@ sb import 26275b06 6d2c57eb  # by Claude session id, id prefix, or name
 
 `sbd` remembers each session it lists for a day, so a session still shows after you exit its claude. An imported session keeps its folder and its conversation. Opening it or sending it a message resumes the conversation under the account it came from.
 
+### Accounts
+
+Each session runs `claude` under one Claude account, a config folder such as `~/.claude` or `~/.claude-personal`. A session keeps its account for life, because its transcript lives in that folder. `sb account` lists the accounts that hold a login and marks the active one. `sb account use <name|folder>` makes it the account for new sessions, and the app's toolbar menu does the same. The name of `~/.claude-personal` is `personal`, and the name of `~/.claude` is `default`. The choice survives a restart of sbd.
+
+A session that another session starts (`sb new` or `sb followup add` inside a session) uses its parent's account, whatever is active. `--account` on `sb new` and `sb followup add` picks another. A follow-up with no parent takes the active account when it starts.
+
 ### The Manager
 
 `sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app pins it at the top of the sidebar, with the sessions it started under it. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.

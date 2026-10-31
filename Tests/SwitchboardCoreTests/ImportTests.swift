@@ -307,6 +307,29 @@ private let otherAccountForms = ["~/.claude-personal", "~/.claudex", "~/.claude/
         == #"CLAUDE_CONFIG_DIR='/Volumes/My Disk/Bob'\''s claude' claude stop x"#)
   }
 
+  @Test func namesAreShortForTheDefaultAndTheDashedFolders() {
+    #expect(ClaudeAccount.name("~/.claude") == "default")
+    #expect(ClaudeAccount.name("~/.claude-personal") == "personal")
+    #expect(ClaudeAccount.name("/work/accounts/acme") == "acme")
+  }
+
+  @Test func resolveTakesANameOrAFolderThatHoldsAnAccountAndRefusesTheRest() throws {
+    let home = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    let known = [".claude-personal", ".claude-work"].map { "\(home)/\($0)" }
+    for folder in known + ["\(home)/other", "\(home)/empty"] {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    }
+    for folder in known + ["\(home)/other"] {
+      FileManager.default.createFile(atPath: "\(folder)/.claude.json", contents: Data("{}".utf8))
+    }
+
+    #expect(try ClaudeAccount.resolve("work", among: known) == known[1])
+    #expect(try ClaudeAccount.resolve("\(home)/other/", among: known) == "\(home)/other")
+    #expect(throws: APIError.self) { try ClaudeAccount.resolve("nobody", among: known) }
+    #expect(throws: APIError.self) { try ClaudeAccount.resolve("\(home)/empty", among: known) }
+  }
+
   @Test func discoverFindsTheDefaultAccountAndEachDashedFolderThatHoldsAConfig() throws {
     let home = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: home) }

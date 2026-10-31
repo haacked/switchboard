@@ -10,6 +10,8 @@ struct NewSessionView: View {
     @Published var branch = ""
     @Published var name = ""
     @Published var prompt = ""
+    /// The folder of the chosen account, or empty for the active one.
+    @Published var account = ""
   }
 
   @EnvironmentObject var model: BoardModel
@@ -27,6 +29,12 @@ struct NewSessionView: View {
         }
         TextField("Branch", text: $form.branch, prompt: Text("optional: makes a worktree of the folder's repo"))
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
+        if model.accounts.count > 1 {
+          Picker("Account", selection: $form.account) {
+            Text("Active (\(model.accounts.first(where: \.active)?.name ?? "default"))").tag("")
+            ForEach(model.accounts) { Text($0.name).tag($0.folder) }
+          }
+        }
         VStack(alignment: .leading) {
           Text("First prompt")
           TextEditor(text: $form.prompt)
@@ -63,7 +71,7 @@ struct NewSessionView: View {
     model.create(
       NewSession(
         path: folder.expandingTilde, branch: optional(form.branch), name: optional(form.name),
-        prompt: optional(form.prompt)))
+        prompt: optional(form.prompt), account: optional(form.account)))
   }
 }
 

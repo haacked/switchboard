@@ -39,10 +39,13 @@ public struct NewSession: Codable, Sendable {
   public var model: String?
   /// The session that starts this one. An id that sbd doesn't know is ignored.
   public var parent: String?
+  /// The Claude account, by name or folder. Without it, the session uses its
+  /// parent's account, else the active account.
+  public var account: String?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, prompt: String? = nil,
-    model: String? = nil, parent: String? = nil
+    model: String? = nil, parent: String? = nil, account: String? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -51,6 +54,25 @@ public struct NewSession: Codable, Sendable {
     self.prompt = prompt
     self.model = model
     self.parent = parent
+    self.account = account
+  }
+}
+
+/// One Claude account, as `accounts` reports it.
+public struct AccountInfo: Codable, Equatable, Sendable, Identifiable {
+  public var name: String
+  public var folder: String
+  /// True for the account that new sessions without a parent use.
+  public var active: Bool
+  /// How many sessions run under the account.
+  public var sessions: Int
+  public var id: String { folder }
+
+  public init(name: String, folder: String, active: Bool, sessions: Int) {
+    self.name = name
+    self.folder = folder
+    self.active = active
+    self.sessions = sessions
   }
 }
 
@@ -169,6 +191,14 @@ public final class Client: Sendable {
     var args: [String: JSON] = ["all": .bool(all)]
     if let repo { args["repo"] = .string(repo) }
     return try call("importable", args, as: ImportList.self)
+  }
+
+  public func accounts() throws -> [AccountInfo] {
+    try call("accounts", as: [AccountInfo].self)
+  }
+
+  public func useAccount(_ ref: String) throws -> [AccountInfo] {
+    try call("account-use", ["account": .string(ref)], as: [AccountInfo].self)
   }
 
   public func importSessions(_ refs: [String], name: String? = nil) throws -> ImportResult {

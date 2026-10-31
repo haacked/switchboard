@@ -31,6 +31,27 @@ public enum ClaudeAccount {
     isDefault(folder) ? command : "CLAUDE_CONFIG_DIR=\(shellQuote(normalize(folder))) \(command)"
   }
 
+  /// A short name for the account: "default" for ~/.claude, else the folder
+  /// name without its ".claude-" prefix.
+  public static func name(_ folder: String) -> String {
+    let last = (normalize(folder) as NSString).lastPathComponent
+    if isDefault(folder) { return "default" }
+    return last.hasPrefix(".claude-") ? String(last.dropFirst(".claude-".count)) : last
+  }
+
+  /// The account folder that `ref` names: a short name from `name`, or a
+  /// folder. Throws when no known account matches, or when the folder holds no
+  /// account.
+  public static func resolve(_ ref: String, among known: [String]) throws -> String {
+    if let match = known.first(where: { name($0) == ref }) { return normalize(match) }
+    let folder = normalize(ref)
+    guard holdsAccount(folder) else {
+      let names = known.map(name).joined(separator: ", ")
+      throw APIError("\(ref) is no Claude account (no .claude.json in \(folder)). Known accounts: \(names)")
+    }
+    return folder
+  }
+
   /// The default account, then each ~/.claude-* folder that holds a .claude.json, by name.
   public static func discover(home: String = NSHomeDirectory()) -> [String] {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: home)) ?? []

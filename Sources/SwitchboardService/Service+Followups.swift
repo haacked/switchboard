@@ -57,6 +57,13 @@ extension Service {
         claudeSessionId: UUID().uuidString.lowercased(),
         model: args["model"]?.string, created: now)
       session.parent = parent
+      // A follow-up added by a session stays in that session's account.
+      // Without a parent, it takes the active account when it starts.
+      if let ref = args["account"]?.string {
+        session.claudeConfigDir = try resolveAccount(ref)
+      } else if let parent {
+        session.claudeConfigDir = claudeAccount(of: parent)
+      }
       session.followup = Followup(
         prompt: prompt, repository: repository, sourceBranch: sourceBranch,
         link: args["link"]?.string ?? Followup.firstLink(prompt), trigger: trigger)
@@ -144,6 +151,7 @@ extension Service {
         s.branch = folder.branch
         s.repo = repo
         s.model = s.model ?? config.model
+        s.claudeConfigDir = s.claudeConfigDir ?? activeAccount
         s.done = false
         s.followup?.started = nowMs()
       }
