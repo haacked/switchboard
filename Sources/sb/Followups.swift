@@ -10,7 +10,7 @@ func followup(_ a: Args) {
     var args: [String: JSON] = ["prompt": .string(text)]
     let flags = [
       "--title": "title", "--repo": "repository", "--branch": "branch", "--on": "on", "--after": "after",
-      "--link": "link", "--model": "model",
+      "--link": "link", "--model": "model", "--account": "account",
     ]
     for (flag, key) in flags {
       if let value = a.values[flag] { args[key] = .string(value) }

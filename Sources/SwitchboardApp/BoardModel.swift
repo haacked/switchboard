@@ -43,6 +43,8 @@ final class BoardModel: ObservableObject {
   /// ones whose trigger fired. They change only through actions and
   /// triggers, so the app reads them every 5 s.
   @Published var followups: [SessionSummary] = []
+  /// The Claude accounts, read with the follow-ups.
+  @Published var accounts: [AccountInfo] = []
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
@@ -105,7 +107,11 @@ final class BoardModel: ObservableObject {
     poller.async {
       let result = Result { try client.sessions() }
       let more = readFollowups ? try? client.call("followup-ls", as: [SessionSummary].self) : nil
-      Task { @MainActor in self.apply(result, followups: more) }
+      let accounts = readFollowups ? try? client.accounts() : nil
+      Task { @MainActor in
+        if let accounts, self.accounts != accounts { self.accounts = accounts }
+        self.apply(result, followups: more)
+      }
     }
   }
 
@@ -165,6 +171,11 @@ final class BoardModel: ObservableObject {
         self.refresh(followups: true)
       }
     }
+  }
+
+  /// Makes new sessions run under the account.
+  func useAccount(_ folder: String) {
+    perform("account-use", ["account": .string(folder)])
   }
 
   /// Starts the Manager, or opens it, and selects it.

@@ -7,8 +7,12 @@ let usage = """
   Sessions:
     ls                            list sessions by state
     new <folder> [--branch B] [--base REF] [--name N] [--prompt P] [--model M]
-                                  start a session in the folder, or in a new
-                                  worktree of its repo with --branch
+        [--account A]             start a session in the folder, or in a new
+                                  worktree of its repo with --branch. It runs
+                                  under the account A, else its parent's, else
+                                  the active account
+    account                       list the Claude accounts and the active one
+    account use <name|folder>     run new sessions under this account
     manager                       start the Manager, a session that manages the others,
                                   or open it
     get <session>                 show one session
@@ -61,7 +65,7 @@ let usage = """
 
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
-                 [--after owner/name#N] [--link URL] [--parent S]
+                 [--after owner/name#N] [--link URL] [--parent S] [--account A]
                                   add one. Without --repo, the current folder's
                                   GitHub repo. --on and --after move it to Needs
                                   you when the time passes or the PR merges
@@ -105,7 +109,7 @@ struct Args {
   /// one that starts with --. Flags for those commands go before the session.
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
-      "--branch", "--base", "--name", "--prompt", "--model", "--until", "--timeout", "--session", "--since",
+      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session", "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
     ]).union(waitFlags.keys)
@@ -203,6 +207,7 @@ func printSession(_ s: SessionSummary) {
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
   print("  folder:  \(s.cwd)")
+  if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
   print("  claude session: \(s.claudeSessionId)")
@@ -396,9 +401,12 @@ case "new":
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
     prompt: a.values["--prompt"], model: a.values["--model"],
-    parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil)
+    parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
+    account: a.values["--account"])
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
+case "account", "accounts":
+  account(a)
 case "manager":
   let result = call("manager", timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }

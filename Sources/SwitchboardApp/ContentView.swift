@@ -78,6 +78,23 @@ struct ContentView: View {
     }
     .toolbar {
       ToolbarItem {
+        if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
+          Menu {
+            ForEach(model.accounts) { account in
+              Button {
+                model.useAccount(account.folder)
+              } label: {
+                Text("\(account.name) (\(account.sessions))")
+                if account.active { Image(systemName: "checkmark") }
+              }
+            }
+          } label: {
+            Label(active.name, systemImage: "person.crop.circle")
+          }
+          .help("The Claude account for new sessions without a parent. Spawned sessions use their parent's.")
+        }
+      }
+      ToolbarItem {
         Button {
           model.showingImport = true
         } label: {

@@ -17,6 +17,8 @@ public struct Home: Sendable {
   public var tmuxConfig: String { "\(path)/tmux.conf" }
   public var claudeSettings: String { "\(path)/claude-settings.json" }
   public var config: String { "\(path)/config.json" }
+  /// The folder of the account that `sb account use` chose, or no file.
+  public var activeAccount: String { "\(path)/account" }
   public var log: String { "\(path)/sbd.log" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
   public var mcpConfig: String { "\(path)/mcp-config.json" }
