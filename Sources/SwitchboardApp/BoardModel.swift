@@ -178,9 +178,6 @@ final class BoardModel: ObservableObject {
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
       loaded = true
-      // A removal that fails after it removed the session, as a kept branch does, skips the
-      // closure that clears the selection.
-      if let id = selection, !board.contains(where: { $0.id == id }) { selection = nil }
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
     case .failure(let error):
       let problem = "\(error)"

@@ -293,4 +293,36 @@ extension Instance {
     try refusesTheBranchAfterTheWorktreeIsRemoved(
       "git -C \"$REPO\" branch -D \(Self.mergedBranch) >/dev/null", error: "no longer exists")
   }
+
+  /// Makes every delete from `table` fail, as a store that is read-only or full would.
+  private func blockDeletes(from table: String, _ sbd: Instance) throws {
+    let r = try runCommand(
+      "/usr/bin/sqlite3",
+      [
+        sbd.home.database,
+        "CREATE TRIGGER block_\(table) BEFORE DELETE ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
+      ])
+    #expect(r.status == 0)
+  }
+
+  /// The store refuses the delete, so sbd refuses before it stops claude or removes the worktree.
+  private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    try blockDeletes(from: table, sbd)
+    let r = try (branch ? sbd.deleteSessionAndBranch(s.id) : sbd.deleteSession(s.id))
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("store is read-only"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+  }
+
+  @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheSession() throws {
+    try refusesWhenTheStoreCannotDelete("sessions", branch: false)
+  }
+
+  @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheEvents() throws {
+    try refusesWhenTheStoreCannotDelete("events", branch: true)
+  }
 }

@@ -34,6 +34,14 @@ public final class Store {
     try run("DELETE FROM snapshots WHERE session = ?", [id])
   }
 
+  /// Throws unless `delete(session:)` would succeed now. It runs the deletes in a
+  /// transaction that it rolls back.
+  public func checkDeletable(session id: String) throws {
+    try exec("BEGIN IMMEDIATE")
+    defer { try? exec("ROLLBACK") }
+    try delete(session: id)
+  }
+
   /// The snapshot that `Snapshots` saved for the session, as JSON text.
   public func snapshot(session id: String) throws -> String? {
     try query("SELECT json FROM snapshots WHERE session = ?", [id]) { $0.text(0) }.first
