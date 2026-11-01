@@ -178,7 +178,7 @@ extension Service {
   /// Records a Switchboard session for the Claude session, without starting
   /// claude. Opening the session or sending it a message resumes the
   /// conversation under its account. Its repo stays nil, because sbd didn't
-  /// create its worktree. `rm --worktree` then leaves the worktree.
+  /// create its worktree. `rm --worktree` then refuses and removes nothing.
   private func adopt(_ c: ClaudeSession, name: String?, tail: TranscriptTail) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
     var session = Session(

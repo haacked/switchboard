@@ -571,28 +571,25 @@ public final class Service {
   /// folder, because Claude Code has no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
-    let (found, mergedPR): (Session, Bool) = try queue.sync {
+    let (session, mergedPR, sharedWith): (Session, Bool, String?) = try queue.sync {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       let entry = entries[id]!
-      return (entry.session, entry.facts.pr?.state == .merged)
+      let shared = entries.values.first { $0.session.id != id && $0.session.cwd == entry.session.cwd }
+      return (entry.session, entry.facts.pr?.state == .merged, shared?.session.id)
     }
-    if removesWorktree { try checkWorktreeIsLossless(found, mergedPR: mergedPR) }
+    var repo: String?
+    if removesWorktree { repo = try checkWorktreeIsLossless(session, mergedPR: mergedPR, sharedWith: sharedWith) }
     let fresh = buildSnapshot()
-    let session: Session = try queue.sync {
-      guard let current = entries[found.id]?.session, !starting.contains(found.id) else {
-        throw APIError("\(found.id) changed while it was being removed")
+    try queue.sync {
+      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
+        throw APIError("\(session.id) changed while it was being removed")
       }
       install(fresh)
-      if case .running(let pid) = claudeState(found.id) { kill(pid_t(pid), SIGTERM) }
-      return current
+      if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    var removed = false
-    if removesWorktree {
-      _ = try gitOutput(session.repo!, ["worktree", "remove", session.cwd])
-      removed = true
-    }
+    if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
@@ -604,19 +601,23 @@ public final class Service {
       try store.delete(session: session.id)
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
-    return ["removed": .string(session.id), "worktree_removed": .bool(removed)]
+    return ["removed": .string(session.id), "worktree_removed": .bool(repo != nil)]
   }
 
-  /// Throws unless the session's folder is a linked worktree of the repo that
-  /// `new` made it from, has no uncommitted file, and has no commit that is
-  /// missing from every remote branch. A merged PR stands for its commits,
-  /// because a squash merge leaves them on no remote branch. Any git failure
-  /// refuses the removal.
-  private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool) throws {
+  /// Returns the session's repo, or throws unless the session's folder is a
+  /// linked worktree of the repo that `new` made it from, no other session runs
+  /// in it, it has no uncommitted file, and HEAD is on a remote branch. With a
+  /// merged PR, HEAD may instead be on a local branch, because a squash merge
+  /// leaves the commits on no remote branch and `worktree remove` keeps the
+  /// branch. Any git failure refuses the removal.
+  private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool, sharedWith: String?) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
+    }
+    if let sharedWith {
+      throw APIError("\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree.")
     }
     let linked = try worktreePaths(repo).dropFirst()
     let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
@@ -624,16 +625,19 @@ public final class Service {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     // The flag keeps status from taking the index lock while claude commits.
-    let changed = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"]).split(separator: "\n").count
+    let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
+    let changed = status.split(separator: "\n").count
     guard changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
     }
-    guard !mergedPR else { return }
-    let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+    let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
+    let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not"] + kept)
     guard unpushed == "0" else {
       throw APIError(
-        "\(session.cwd) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first.")
+        "\(session.cwd) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
+      )
     }
+    return repo
   }
 
   // MARK: Processes and the stop rule

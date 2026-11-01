@@ -149,7 +149,7 @@ struct Sidebar: View {
       }
     }
     .confirmationDialog(
-      "Delete \(deleting?.name ?? "this session")?", isPresented: confirmingDelete, presenting: deleting
+      "Delete \(deleting?.name ?? "this session")?", isPresented: isConfirmingDelete, presenting: deleting
     ) { session in
       Button("Delete Session and Worktree", role: .destructive) { model.delete(session.id) }
     } message: { session in
@@ -170,7 +170,7 @@ struct Sidebar: View {
 
   private var deleting: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
 
-  private var confirmingDelete: Binding<Bool> {
+  private var isConfirmingDelete: Binding<Bool> {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
 

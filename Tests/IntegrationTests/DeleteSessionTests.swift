@@ -42,7 +42,7 @@ extension Instance {
     let terminals = try sbd.client.terminals(s.id)
     #expect(try sbd.deleteSession(s.id).status == 0)
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
-    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd) == false)
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains("/worktrees/repo/haacked/feature") == false)
     #expect(try sbd.client.sessions().isEmpty)
     #expect(!FileManager.default.fileExists(atPath: sbd.home.sessionFolder(s.id)))
     #expect(
@@ -132,5 +132,34 @@ extension Instance {
     #expect(r.stderr.contains("is not a worktree of"))
     #expect(FileManager.default.fileExists(atPath: keep))
     #expect(try sbd.client.sessions().map(\.id) == [s.id])
+  }
+
+  @Test func refusesACommitOnADetachedHeadEvenWithAMergedPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let repo = try Repos.create("\(sbd.home.path)/posthog", origin: "https://github.com/PostHog/posthog.git")
+    let s = try sbd.worktreeSession(repo, branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.commit(s.cwd, "a.txt")
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not on a pushed branch"))
+    #expect(try sbd.intact(s))
+  }
+
+  @Test func refusesAWorktreeThatAnotherSessionRunsIn() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let first = try sbd.worktreeSession(repo)
+    let second = try sbd.worktreeSession(repo)
+    #expect(second.cwd == first.cwd)
+    let r = try sbd.deleteSession(first.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("also runs in"))
+    #expect(try sbd.intact(first))
+    try sbd.sb("rm", second.id)
+    #expect(try sbd.deleteSession(first.id).status == 0)
   }
 }

@@ -28,7 +28,7 @@ public enum Manager {
     - `sb wait --kind session --target other-work --state done --note "test the branch"` resumes you when a session that you did not start reaches the state. Sessions you start tell you themselves.
     - `sb note fix-cache "stacked on #1190"` adds a note to a session.
     - `sb done fix-cache` marks a session done.
-    - `sb rm fix-cache --worktree` removes a session and its worktree. It does not delete the branch.
+    - `sb rm fix-cache --worktree` removes a session and its worktree. It does not delete the branch. It refuses a worktree with uncommitted files, or with commits that are on no remote branch unless the PR merged. After the user agrees to lose that work, run `sb rm fix-cache` and then `git worktree remove --force <cwd>`.
     - `sb events --session fix-cache` shows what happened in a session.
 
     ## Messages from Switchboard
@@ -37,6 +37,6 @@ public enum Manager {
 
     ## Testing branches together
 
-    Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Remove that session when you finish.
+    Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Its merge commits are on no remote, so remove that session with `sb rm` and then `git worktree remove --force <cwd>` when you finish.
     """
 }
