@@ -183,6 +183,7 @@ swift build
 bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/bundle          # build/Switchboard.app
+bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
 ```
 
 The app draws its terminals with SwiftTerm. An experimental libghostty backend needs full Xcode and `mise` with zig 0.15.2 (`mise install zig@0.15.2`). `bin/build-ghostty` builds libghostty from the commit in `ghostty.pin` in about a minute, and `SB_GHOSTTY=1 swift build` links it. Then `SB_TERMINAL=ghostty` picks it when the app starts. It loads `~/.config/ghostty/config`, and `SB_GHOSTTY_CONFIG=<file>` adds more settings, such as `window-vsync = false` on a Mac whose displays are asleep. `bin/test` never builds it. See `plans/libghostty.md` next to the design plan.
