@@ -36,12 +36,35 @@ import Testing
     #expect(model.selection == "a")
   }
 
-  @Test func keepsASelectionThatNoRefreshHasListedYet() {
-    // `create` selects the new session before a refresh lists it.
+  @Test func keepsAnUnlistedSelectionThatCreateJustMade() {
     let model = model(["a"])
-    model.selection = "new"
+    model.selectUnlisted("new")
     model.apply(.success([summary("a")]), followups: nil)
     #expect(model.selection == "new")
+  }
+
+  @Test func clearsACreatedSelectionOnceItWasListedAndRemoved() {
+    let model = model(["a"])
+    model.selectUnlisted("new")
+    model.apply(.success([summary("a"), summary("new")]), followups: nil)
+    model.apply(.success([summary("a")]), followups: nil)
+    #expect(model.selection == nil)
+  }
+
+  @Test func clearsASelectionThatWasNeverListed() {
+    // A click on the notification of a session that sbd has since removed.
+    let model = model(["a"])
+    model.selection = "gone"
+    model.apply(.success([summary("a")]), followups: nil)
+    #expect(model.selection == nil)
+  }
+
+  @Test func keepsAFollowupSelectionWhileTheFollowupListStillHoldsIt() {
+    let model = model(["a"])
+    model.apply(.success([summary("a")]), followups: [summary("f", state: .notStarted)])
+    model.selection = "f"
+    model.apply(.success([summary("a")]), followups: nil)
+    #expect(model.selection == "f")
   }
 
   @Test func nextNeedingYouWithAStaleSelectionActsAsWithNone() {
