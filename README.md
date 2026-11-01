@@ -28,6 +28,7 @@ Everything in the app also works from `sb`, and every command takes `--json`:
 
 ```
 sb new ~/dev/myrepo --branch haacked/fix-thing --prompt "Fix the flaky test in foo_test.py"
+sb new ~/dev/myrepo --worktree --name "Fix the flaky test"   # names the branch itself
 sb ls
 sb send <session> "Yes, push it."
 sb attach <session>          # this terminal shows the Claude pane; --shell for the shell
@@ -140,7 +141,7 @@ A session whose turn has ended, and whose PR waits only on a review, is in Waiti
 }
 ```
 
-`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. An imported session uses the account it came from instead. `claudeConfigDirs` lists the Claude accounts whose sessions `sb import` lists, such as `["~/.claude", "~/.claude-personal"]`, where `~/.claude` means Claude's default account. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `followupsFile` is the file that `sb followup import` reads without `--file`. `github` sets how often a PR polls: every `pollSeconds` while its checks run, every `idlePollSeconds` otherwise. `"pollSeconds": 0` turns off the poll timer, so `sbd` asks GitHub only when you run `sb poll`. Its `gh` picks the `gh` that gives the token. Its `url`, the GitHub API base, exists for the tests. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
+`env` sets variables in both panes, so `CLAUDE_CONFIG_DIR` there picks the Claude account for every session. An imported session uses the account it came from instead. `claudeConfigDirs` lists the Claude accounts whose sessions `sb import` lists, such as `["~/.claude", "~/.claude-personal"]`, where `~/.claude` means Claude's default account. `repos` and `repoRoots` tell `sb followup start` where checkouts live: `repoRoots` folders hold them at `<root>/<owner>/<name>`, and `repos` names the rest. `branchPrefix` goes before the branch name that `sb followup start` makes from a title, and before the name that `sb new --worktree` and the New Session dialog make when no branch is given. `followupsFile` is the file that `sb followup import` reads without `--file`. `github` sets how often a PR polls: every `pollSeconds` while its checks run, every `idlePollSeconds` otherwise. `"pollSeconds": 0` turns off the poll timer, so `sbd` asks GitHub only when you run `sb poll`. Its `gh` picks the `gh` that gives the token. Its `url`, the GitHub API base, exists for the tests. `SB_HOME` moves the whole state folder, which is how the tests run a private `sbd`.
 
 ### Shared MCP servers
 

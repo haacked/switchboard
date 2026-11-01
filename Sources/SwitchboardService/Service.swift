@@ -130,7 +130,13 @@ public final class Service {
       case "hook":
         return try handleHook(request.args, hookGone: hookGone)
       case "new":
-        let args = try JSONCoding.convert(request.args, to: NewSession.self)
+        var args = try JSONCoding.convert(request.args, to: NewSession.self)
+        if args.worktree == true, (args.branch ?? "").isEmpty {
+          let repo = (args.path as NSString).standardizingPath
+          args.branch = NewSession.freeAutoBranch(
+            prefix: config.branchPrefix, name: args.name,
+            exists: { branchOrFolderTaken(repo, $0) })
+        }
         let folder = try prepareFolder(args)
         awaitMCPServers()
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
@@ -312,6 +318,21 @@ public final class Service {
 
   // MARK: Sessions
 
+  /// The main checkout of the repo at `path` and the folder that a worktree of
+  /// it on `branch` gets.
+  func worktreeLocation(_ path: String, _ branch: String) throws -> (main: String, dir: String) {
+    // The first worktree names the main checkout, whose folder name names the repo.
+    let main = try worktreePaths(path).first ?? path
+    return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
+  }
+
+  /// Whether `branch` exists in the repo at `path`, or the folder for a worktree on it does.
+  func branchOrFolderTaken(_ path: String, _ branch: String) -> Bool {
+    if branchExists(path, branch) { return true }
+    guard let location = try? worktreeLocation(path, branch) else { return false }
+    return FileManager.default.fileExists(atPath: location.dir)
+  }
+
   /// The folder a new session runs in, and its branch. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
   /// which this creates unless it exists.
@@ -323,9 +344,7 @@ public final class Service {
       return (path, current?.isEmpty == false ? current : nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreePaths(path).first ?? path
-    let dir = "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)"
+    let (main, dir) = try worktreeLocation(path, branch)
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
