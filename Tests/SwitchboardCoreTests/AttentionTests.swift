@@ -107,6 +107,34 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 5).state == .canContinue)
   }
 
+  @Test func turnEndedWithASubagentRunningIsWorking() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("SubagentStart", 1, ["agent_id": "a1"]),
+      event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .working, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func subagentStopReturnsTheSessionToTheReplyVerdict() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("SubagentStart", 1, ["agent_id": "a1"]),
+      event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
+      event("SubagentStop", 3, ["agent_id": "a1"]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4).state == .needsYou)
+  }
+
+  @Test func subagentThatWentQuietNoLongerHoldsTheSession() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("SubagentStart", 1, ["agent_id": "a1"]),
+      event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 2 + Attention.subagentQuietMs + 1).state == .needsYou)
+  }
+
   @Test func subagentResultPromptsDontCountAsPrompts() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "<agent-message from=\"a1\"> [Subagent hand-back] done"]),

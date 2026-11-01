@@ -70,13 +70,14 @@ extension Attention {
     return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
   }
 
-  /// Whether an open, ready PR needs a look after a review wait ended: a
-  /// reviewer answered and none is left, or a check failed. A PR event does
-  /// not count as session activity, so without this the idle time would move
-  /// the session to Stale.
+  /// Whether an open, ready PR needs the user after a review wait ended or
+  /// when none began: a check failed, or GitHub asks nobody for a review, so
+  /// nobody is reviewing it. A queued PR is excluded, because Trunk acts on
+  /// it. A PR event does not count as session activity, so without this the
+  /// idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
     guard let pr = facts.pr, pr.state == .open, !pr.draft else { return false }
-    return pr.checksFailed || (pr.reviewRequests == [] && !pr.reviews.isEmpty)
+    return pr.checksFailed || (pr.reviewRequests == [] && pr.queue == nil)
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }

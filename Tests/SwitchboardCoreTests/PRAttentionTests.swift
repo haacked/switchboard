@@ -517,6 +517,12 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
   }
 
+  @Test func unreviewedPRWithNoRequestedReviewerNeedsYouEvenAfterTheSessionWentIdle() throws {
+    let f = try prFacts(samplePR(reviews: [], reviewRequests: []))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+  }
+
   @Test(arguments: ["FAILURE", "ERROR"])
   func failingChecksNeedYouEvenAfterTheSessionWentIdle(_ checks: String) throws {
     let f = try prFacts(samplePR(checks: checks, reviewRequests: Self.alex))
@@ -528,7 +534,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let cases: [PullRequest] = [
       samplePR(draft: true, reviews: Self.commented, reviewRequests: []),
       samplePR(draft: true, checks: "FAILURE"),
-      samplePR(reviews: [], reviewRequests: []),
+      samplePR(reviews: [], queue: .pending, reviewRequests: []),
       samplePR(reviews: Self.commented, reviewRequests: nil),
     ]
     for pr in cases {
