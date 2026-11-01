@@ -37,12 +37,12 @@ struct SessionView: View {
         HSplitView {
           VStack(spacing: 0) {
             paneLabel("Claude")
-            TerminalPane(command: terminals.attachCommand(.claude))
+            SessionTerminal(terminals: terminals, pane: .claude)
           }
           .frame(minWidth: 480, idealWidth: 760)
           VStack(spacing: 0) {
             paneLabel("Shell")
-            TerminalPane(command: terminals.attachCommand(.shell))
+            SessionTerminal(terminals: terminals, pane: .shell)
           }
           .frame(minWidth: 240, idealWidth: 360)
         }

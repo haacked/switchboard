@@ -16,6 +16,7 @@ enum Snapshot {
     if let id = env["SB_SELECT"] { model.selection = id }
     if let id = env["SB_QUEUE"] { model.queueFocus = id }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
+    TerminalSelfTest.start(model)
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
