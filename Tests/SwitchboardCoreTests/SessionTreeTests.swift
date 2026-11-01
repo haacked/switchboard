@@ -15,6 +15,10 @@ import Testing
     SessionTree.rows(sessions).map { String(repeating: ">", count: $0.depth) + $0.session.id }
   }
 
+  func subtreeLayout(_ root: String, _ sessions: [SessionSummary]) -> [String] {
+    SessionTree.subtree(of: root, in: sessions).map { String(repeating: ">", count: $0.depth) + $0.id }
+  }
+
   @Test func putsChildrenUnderTheirParent() {
     let list = [
       summary("a"), summary("x"), summary("b", parent: "a"), summary("c", parent: "b"), summary("d", parent: "a"),
@@ -43,10 +47,6 @@ import Testing
     ]
     #expect(subtreeLayout("m", list) == ["m", ">b", ">>c"])
     #expect(SessionTree.subtree(of: "none", in: list).isEmpty)
-  }
-
-  func subtreeLayout(_ root: String, _ sessions: [SessionSummary]) -> [String] {
-    SessionTree.subtree(of: root, in: sessions).map { String(repeating: ">", count: $0.depth) + $0.id }
   }
 
   @Test func aDoneChildLeavesTheSubtree() {
