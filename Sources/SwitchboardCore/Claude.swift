@@ -84,10 +84,14 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var branch: String?
   /// True when the folder is a linked worktree of its repo.
   public var worktree: Bool
+  /// The pids of the other claudes that run the session, which accounts other
+  /// than this row's list. Nil when this row's claude is the only one.
+  public var otherPids: [Int]?
 
   public init(
     id: String, name: String? = nil, cwd: String, account: String, status: String? = nil, job: String? = nil,
-    pid: Int? = nil, seen: Int64 = 0, repo: String? = nil, branch: String? = nil, worktree: Bool = false
+    pid: Int? = nil, seen: Int64 = 0, repo: String? = nil, branch: String? = nil, worktree: Bool = false,
+    otherPids: [Int]? = nil
   ) {
     self.id = id
     self.name = name
@@ -100,12 +104,17 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
     self.repo = repo
     self.branch = branch
     self.worktree = worktree
+    self.otherPids = otherPids
   }
 
   public var running: Bool { pid != nil }
 
+  /// The pid of every claude that runs the session.
+  public var livePids: [Int] { (pid.map { [$0] } ?? []) + (otherPids ?? []) }
+
   /// True when an interactive claude runs the session and waits at its prompt.
-  /// Exiting that claude loses no turn.
+  /// Exiting that claude loses no turn. When several claudes run the session,
+  /// the row that `keepRank` picks stands for all of them.
   public var stoppable: Bool { pid != nil && job == nil && status == "idle" }
 
   /// Which of two rows for one session to keep: 2 for a claude that runs and
@@ -149,6 +158,7 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public mutating func clearProcess() {
     pid = nil
     status = nil
+    otherPids = nil
   }
 
   /// The rows of `claude agents --json` for one account.

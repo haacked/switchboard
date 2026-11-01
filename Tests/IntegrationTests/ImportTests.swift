@@ -489,6 +489,39 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(first.isRunning && second.isRunning)
   }
 
+  @Test func stopKeepsEveryPidOfASessionThatTwoAccountsListWithDifferentPids() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/pids")
+    let (busy1, busy2, idle1, idle2) = (try stubClaude(), try stubClaude(), try stubClaude(), try stubClaude())
+    defer { for p in [busy1, busy2, idle1, idle2] where p.isRunning { p.terminate() } }
+    func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
+    let (busy, stale, both) = (newId(), newId(), newId())
+    // "busy" runs in two claudes. A stale idle row "stale" holds the pid of the second.
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(busy, cwd: tree, name: "busy", pid: pid(busy1), status: "busy"),
+        agent(stale, cwd: tree, name: "stale", pid: pid(busy2), status: "idle"),
+        agent(both, cwd: tree, name: "both", pid: pid(idle1), status: "idle"),
+      ])
+    try sbd.writeAgents(
+      "B",
+      [
+        agent(busy, cwd: tree, name: "busy", pid: pid(busy2), status: "busy"),
+        agent(both, cwd: tree, name: "both", pid: pid(idle2), status: "idle"),
+      ])
+
+    let result = try sbd.client.importSessions(["busy", "stale", "both"], stop: ["busy", "stale", "both"])
+
+    // "both" is idle in two claudes, so import exits both before it imports the session.
+    #expect(result.imported.map(\.claudeSessionId) == [both])
+    #expect(Set(reasons(result).keys) == ["busy", "stale"])
+    idle1.waitUntilExit()
+    idle2.waitUntilExit()
+    #expect(idle1.terminationReason == .uncaughtSignal && idle2.terminationReason == .uncaughtSignal)
+    #expect(busy1.isRunning && busy2.isRunning)
+  }
+
   @Test func stopRefusesAnIdleSessionWhosePidAnotherListedSessionThatIsBusyShares() throws {
     let sbd = try Instance(accounts: ["A", "B"])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/shared")

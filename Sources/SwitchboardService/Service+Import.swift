@@ -89,9 +89,10 @@ extension Service {
 
   /// The sessions that `claude agents --json` lists in each account. A row
   /// whose process is gone counts as a session that no claude runs. When two
-  /// accounts list a session, the row whose claude runs wins. A row whose
-  /// claude can't be stopped wins over one whose claude can, so that `stop`
-  /// never exits a claude that another account lists as busy.
+  /// accounts list a session, the row whose claude runs wins, and it keeps the
+  /// pids of both rows' claudes. A row whose claude can't be stopped wins over
+  /// one whose claude can, so that `stop` never exits a claude that another
+  /// account lists as busy.
   private func listAgents(_ accounts: [String], now: Int64) throws -> [ClaudeSession] {
     guard let claude = findExecutable(config.claude) else {
       throw APIError("can't find \(config.claude). Set \"claude\" in \(home.config)")
@@ -109,7 +110,14 @@ extension Service {
     var byId: [String: ClaudeSession] = [:]
     for var s in try lists.flatMap({ try $0.get() }) {
       if let pid = s.pid, !Processes.exists(pid) { s.clearProcess() }
-      if byId[s.id].map({ $0.running && $0.keepRank >= s.keepRank }) != true { byId[s.id] = s }
+      guard let existing = byId[s.id], existing.running else {
+        byId[s.id] = s
+        continue
+      }
+      var (winner, loser) = s.keepRank > existing.keepRank ? (s, existing) : (existing, s)
+      let others = Set(winner.livePids + loser.livePids).subtracting(winner.pid.map { [$0] } ?? [])
+      winner.otherPids = others.isEmpty ? nil : others.sorted()
+      byId[s.id] = winner
     }
     return Array(byId.values)
   }
@@ -156,25 +164,30 @@ extension Service {
     }
   }
 
-  /// Sends SIGTERM to the claude that runs the session, and waits up to five
-  /// seconds for it to exit. Returns why it didn't exit, or nil once it has.
-  /// It sends nothing unless a fresh process list shows a claude command at
-  /// the pid, which is neither sbd nor the claude of a Switchboard session.
-  /// `claude agents` can list a pid that another process has reused.
+  /// Sends SIGTERM to every claude that runs the session, and waits up to five
+  /// seconds for them to exit. Returns why one didn't exit, or nil once all
+  /// have. It sends nothing unless a fresh process list shows, for each pid, a
+  /// claude command that is neither sbd nor the claude of a Switchboard
+  /// session. `claude agents` can list a pid that another process has reused.
   private func exitClaude(of s: ClaudeSession, in snapshot: Snapshot) -> String? {
-    guard let pid = s.pid else { return nil }
-    guard pid > 1, pid != Int(getpid()), pid <= Int(Int32.max) else { return refuseToSignal(s, pid) }
-    if !Processes.exists(pid) { return nil }
+    let pids = s.livePids
+    if let bad = pids.first(where: { $0 <= 1 || $0 == Int(getpid()) || $0 > Int(Int32.max) }) {
+      return refuseToSignal(s, bad)
+    }
+    let alive = pids.filter(Processes.exists)
     let program = (config.claude as NSString).lastPathComponent
     let rows = snapshot.children.values.joined()
-    let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
-    guard isClaude, !snapshot.claudePids.values.contains(pid) else { return refuseToSignal(s, pid) }
-    kill(pid_t(pid), SIGTERM)
+    for pid in alive {
+      let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
+      if !isClaude || snapshot.claudePids.values.contains(pid) { return refuseToSignal(s, pid) }
+    }
+    for pid in alive { kill(pid_t(pid), SIGTERM) }
     for _ in 0..<50 {
-      if !Processes.exists(pid) { return nil }
+      if alive.allSatisfy({ !Processes.exists($0) }) { return nil }
       Thread.sleep(forTimeInterval: 0.1)
     }
-    return "\(s.name ?? s.idPrefix)'s claude (pid \(pid)) didn't exit after SIGTERM. Exit it there, then import it."
+    let stuck = alive.first(where: Processes.exists) ?? alive[0]
+    return "\(s.name ?? s.idPrefix)'s claude (pid \(stuck)) didn't exit after SIGTERM. Exit it there, then import it."
   }
 
   private func refuseToSignal(_ s: ClaudeSession, _ pid: Int) -> String {
@@ -183,7 +196,8 @@ extension Service {
 
   /// The candidate that the ref names, or why it can't be imported. With
   /// `stop`, an idle interactive session passes although a claude runs it,
-  /// unless a listed session that is not stoppable shares its pid.
+  /// unless a listed session that is not stoppable runs in a claude that also
+  /// runs this one.
   private func resolve(_ ref: String, in candidates: [ClaudeSession], stop: Bool) -> Result<ClaudeSession, APIError> {
     let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
     guard matches.count == 1 else {
@@ -195,7 +209,9 @@ extension Service {
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
     let label = c.name ?? c.idPrefix
-    let sharesBusyPid = candidates.contains { $0.id != c.id && $0.pid == c.pid && !$0.stoppable }
+    let sharesBusyPid = candidates.contains {
+      $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
+    }
     if !(stop && c.stoppable && !sharesBusyPid), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }
     return .success(c)
