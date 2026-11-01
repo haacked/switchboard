@@ -19,4 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
-      - run: bin/test --filter '^(SwitchboardCoreTests|SwitchboardAppTests)\.'
+      - run: brew install tmux
+      - run: tmux -V
+      - run: bin/test
