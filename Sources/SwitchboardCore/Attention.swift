@@ -232,7 +232,7 @@ public enum Attention {
     }
     if let v = openPR(facts) { return v }
     if let v = awaitingReview(facts) { return v }
-    if now - facts.lastActivity > staleAfterMs {
+    if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
     return replyVerdict(facts.lastReply ?? "")

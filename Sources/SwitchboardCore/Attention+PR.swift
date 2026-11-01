@@ -72,5 +72,14 @@ extension Attention {
     return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
   }
 
+  /// Whether an open, ready PR needs a look after a review wait ended: a
+  /// reviewer answered and none is left to ask, or a check failed. A session
+  /// in this state stays out of Stale, because a PR event does not count as
+  /// session activity and the idle time would otherwise hide the PR.
+  static func needsPRAction(_ facts: SessionFacts) -> Bool {
+    guard let pr = facts.pr, pr.state == .open, !pr.draft else { return false }
+    return pr.checks == "FAILURE" || pr.checks == "ERROR" || (pr.reviewRequests == [] && !pr.reviews.isEmpty)
+  }
+
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
 }

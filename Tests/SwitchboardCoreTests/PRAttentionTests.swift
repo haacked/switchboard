@@ -508,4 +508,33 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(Attention.evaluate(session(), f, now: Attention.staleAfterMs + 10) == Self.waits)
   }
+
+  private static let stale = Attention.staleAfterMs + 10
+  private static let commented = [Review(author: "alex", state: "COMMENTED")]
+
+  @Test func answeredReviewNeedsYouEvenAfterTheSessionWentIdle() throws {
+    let f = try prFacts(samplePR(reviews: Self.commented, reviewRequests: []))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+  }
+
+  @Test(arguments: ["FAILURE", "ERROR"])
+  func failingChecksNeedYouEvenAfterTheSessionWentIdle(_ checks: String) throws {
+    let f = try prFacts(samplePR(checks: checks, reviewRequests: Self.alex))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+  }
+
+  @Test func idleSessionStaysStaleWhenNoPRActionIsOutstanding() throws {
+    let cases: [PullRequest] = [
+      samplePR(draft: true, reviews: Self.commented, reviewRequests: []),
+      samplePR(draft: true, checks: "FAILURE"),
+      samplePR(reviews: [], reviewRequests: []),
+      samplePR(reviews: Self.commented, reviewRequests: nil),
+    ]
+    for pr in cases {
+      let f = try prFacts(pr)
+      #expect(Attention.evaluate(session(), f, now: Self.stale).state == .stale)
+    }
+  }
 }
