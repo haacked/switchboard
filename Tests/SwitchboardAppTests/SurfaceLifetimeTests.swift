@@ -38,6 +38,11 @@ import Testing
     #expect(rules.displayWoke() == nil)
   }
 
+  @Test func keepsTheSurfaceOfAViewThatEntersAWindowThatIsNotVisible() {
+    var rules = live()
+    #expect(rules.enteredWindow(windowIsVisible: false) == nil)
+  }
+
   @Test func createsTheSurfaceOfAViewThatEnteredAClosedWindowWhenTheWindowIsShown() {
     var rules = SurfaceLifetime()
     _ = rules.enteredWindow(windowIsVisible: false)

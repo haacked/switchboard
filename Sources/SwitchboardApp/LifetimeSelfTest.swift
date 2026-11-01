@@ -13,6 +13,7 @@
   /// - `minimize`: minimizes the window, then restores it.
   /// - `select-while-closed`: selects another session while the window is closed, then shows the window.
   /// - `resize-while-closed`: resizes the window while it is closed, then shows it.
+  /// - `select-while-minimized`, `select-while-hidden`: select another session while the window is minimized or the app is hidden, then restore.
   /// - `reparent`: takes the surface views out of the window and puts them back.
   /// - `watch`: reports every 3 s for two minutes, while a script sleeps and wakes the displays.
   /// - `wake`: posts the screens-did-wake notification with surfaces open.
@@ -62,6 +63,20 @@
           await settle("resized while closed")
           window.makeKeyAndOrderFront(nil)
           await settle("shown again")
+        case "select-while-minimized":
+          window.miniaturize(nil)
+          await settle("minimized")
+          model.selection = model.sessions.dropFirst().first?.id
+          await settle("selected another session while minimized")
+          window.deminiaturize(nil)
+          await settle("restored")
+        case "select-while-hidden":
+          NSApp.hide(nil)
+          await settle("hidden")
+          model.selection = model.sessions.dropFirst().first?.id
+          await settle("selected another session while hidden")
+          NSApp.unhide(nil)
+          await settle("unhidden")
         case "reparent":
           // What a rebuilt HSplitView does to its panes: the views leave the window and come back.
           let views = surfaceViews()

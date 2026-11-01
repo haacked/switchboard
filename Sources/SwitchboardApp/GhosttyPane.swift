@@ -145,7 +145,7 @@
 
     // MARK: Surface lifetime
 
-    /// SB_GHOSTTY_KEEP=1 keeps every surface alive after its view leaves the window, to measure what hidden surfaces cost.
+    /// SB_GHOSTTY_KEEP=1 keeps every surface alive instead of freeing it, to measure what hidden surfaces cost.
     static let keepsHiddenSurfaces = getenv("SB_GHOSTTY_KEEP") != nil
 
     private var lifetime = SurfaceLifetime()
@@ -156,27 +156,26 @@
       super.viewDidMoveToWindow()
       stopObserving()
       guard let window else { return perform(lifetime.leftWindow()) }
-      let notifications = NotificationCenter.default
-      observers.append(
-        (notifications, observe(notifications, NSWindow.willCloseNotification, window) { $0.lifetime.windowClosed() }))
+      observe(NSWindow.willCloseNotification, object: window) { $0.lifetime.windowClosed() }
       visibility = window.observe(\.isVisible) { [weak self] window, _ in
         guard window.isVisible else { return }
         MainActor.assumeIsolated { if let self { self.perform(self.lifetime.windowShown()) } }
       }
       // A create fails while every display sleeps, so it is tried again when one wakes.
-      let workspace = NSWorkspace.shared.notificationCenter
-      observers.append(
-        (workspace, observe(workspace, NSWorkspace.screensDidWakeNotification, nil) { $0.lifetime.displayWoke() }))
+      observe(NSWorkspace.screensDidWakeNotification, in: NSWorkspace.shared.notificationCenter) {
+        $0.lifetime.displayWoke()
+      }
       perform(lifetime.enteredWindow(windowIsVisible: window.isVisible))
     }
 
     private func observe(
-      _ center: NotificationCenter, _ name: Notification.Name, _ object: AnyObject?,
+      _ name: Notification.Name, in center: NotificationCenter = .default, object: AnyObject? = nil,
       _ event: @escaping (GhosttySurfaceView) -> SurfaceLifetime.Action?
-    ) -> NSObjectProtocol {
-      center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+    ) {
+      let token = center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { if let self { self.perform(event(self)) } }
       }
+      observers.append((center, token))
     }
 
     private func stopObserving() {
@@ -225,8 +224,7 @@
       ghostty_surface_set_focus(surface, window?.firstResponder === self)
     }
 
-    /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd. The view stays alive until
-    /// the free finishes, because the surface holds the view's address.
+    /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd.
     private func freeSurface() {
       guard !Self.keepsHiddenSurfaces, let surface else { return }
       self.surface = nil
@@ -234,11 +232,8 @@
       // The surface's layer calls into the surface's renderer when Core Animation redraws it.
       wantsLayer = false
       layer = nil
-      // The free stays on the main queue because libghostty's surface list has no lock. It blocks for about 16 ms.
-      DispatchQueue.main.async {
-        ghostty_surface_free(surface)
-        withExtendedLifetime(self) {}
-      }
+      // The free runs on the main thread because libghostty's surface list has no lock. It blocks for about 16 ms.
+      ghostty_surface_free(surface)
     }
 
     /// Called when SwiftUI removes the view.

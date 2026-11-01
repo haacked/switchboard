@@ -14,7 +14,7 @@ struct SurfaceLifetime {
   private var createIfMissing: Action? { hasSurface ? nil : .create }
   private var freeIfHeld: Action? { hasSurface ? .free : nil }
 
-  /// A view that enters a window that isn't visible waits for `windowShown()`, so a closed window holds no surface.
+  /// A view that enters a window that isn't visible creates no surface until `windowShown()`. A view that already holds a surface keeps it.
   mutating func enteredWindow(windowIsVisible: Bool) -> Action? {
     inWindow = true
     windowIsClosed = !windowIsVisible
