@@ -129,7 +129,7 @@ final class BoardModel: ObservableObject {
       }
   }
 
-  private func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
+  func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
     switch result {
     case .success(let list):
       // Assigning a @Published property republishes even an equal value. A
@@ -148,6 +148,11 @@ final class BoardModel: ObservableObject {
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       if !sameShown(sessions, list) { sessions = list }
+      // A selection that no refresh has listed yet is a session that `create`
+      // just made, so only a selection that was listed and has gone is stale.
+      if let id = selection, knownStates[id] != nil, !board.contains(where: { $0.id == id }) {
+        selection = nil
+      }
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
