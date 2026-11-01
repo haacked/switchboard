@@ -110,13 +110,15 @@ new_session() {
 }
 
 # What the stand-in receives, in order: a b c, Return, Ctrl-C, Option-b, Up,
-# Down, Left, Backspace, Escape, Tab, Shift-Tab, x, and a bracketed paste of
-# two lines. Two things differ between terminals, so each has its accepted
-# forms. Shift-Tab is ESC [ Z from Ghostty, and a plain tab from SwiftTerm
-# today (the check also takes ESC [ Z for when that changes). A pasted newline
-# is a line feed from SwiftTerm, and a terminal may send a carriage return.
+# Down, Left, Backspace, Escape, Tab, Shift-Tab, x, a dead key followed by e
+# (é), and a bracketed paste of two lines. Marked text and modifier keys on
+# their own send nothing. Two things differ between terminals, so each has its
+# accepted forms. Shift-Tab is ESC [ Z from Ghostty, and a plain tab from
+# SwiftTerm today (the check also takes ESC [ Z for when that changes). A
+# pasted newline is a line feed from SwiftTerm, and a terminal may send a
+# carriage return.
 expected() { # <Shift-Tab bytes> <newline byte>
-  echo "61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 $1 78 1b 5b 32 30 30 7e" \
+  echo "61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 $1 78 c3 a9 1b 5b 32 30 30 7e" \
     "70 61 73 74 65 20 6c 69 6e 65 20 6f 6e 65 $2 70 61 73 74 65 20 6c 69 6e 65 20 74 77 6f $2 1b 5b 32 30 31 7e"
 }
 accepted=()
