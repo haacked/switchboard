@@ -118,7 +118,10 @@ final class BoardModel: ObservableObject {
   private func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
     switch result {
     case .success(let list):
-      unreachable = nil
+      // Assigning a @Published property republishes even an equal value. A
+      // refresh every second would redraw the views each time, and a redraw
+      // resets the hover delay before a tooltip shows.
+      if unreachable != nil { unreachable = nil }
       if let more, followups != more { followups = more }
       if loaded {
         for s in list where s.state == .needsYou && knownStates[s.id] != .needsYou && knownStates[s.id] != nil {
