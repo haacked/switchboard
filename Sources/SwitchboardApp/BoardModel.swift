@@ -140,7 +140,8 @@ final class BoardModel: ObservableObject {
       loaded = true
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
     case .failure(let error):
-      unreachable = "\(error)"
+      let problem = "\(error)"
+      if unreachable != problem { unreachable = problem }
     }
   }
 
