@@ -585,10 +585,11 @@ public final class Service {
       return (entry.session, entry.facts.pr, shared?.session.id)
     }
     var repo: String?
+    var branch: (name: String, tip: String)?
     if removesWorktree {
       repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
     }
-    if removesBranch { try checkBranchIsMerged(session, pr: pr) }
+    if removesBranch { branch = try checkBranchIsMerged(session, pr: pr) }
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -598,8 +599,9 @@ public final class Service {
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
     if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
-    // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses and only -D deletes it.
-    if removesBranch, let repo, let branch = session.branch { _ = try gitOutput(repo, ["branch", "-D", branch]) }
+    // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
+    // Passing the checked tip makes git refuse when a commit landed after the check.
+    if let repo, let branch { _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip]) }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
@@ -612,23 +614,25 @@ public final class Service {
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     return [
-      "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(removesBranch),
+      "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branch != nil),
     ]
   }
 
-  /// Throws unless the worktree has the session's branch checked out and its
-  /// tip is the head of the session's merged PR. A branch with no merged PR may
+  /// Returns the session's branch and its tip, or throws unless the worktree has the branch
+  /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
-  private func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws {
+  private func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
     guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
       throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
     }
     guard let pr, pr.state == .merged, pr.head == branch else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    guard try gitOutput(session.cwd, ["rev-parse", "HEAD"]) == pr.headSha else {
+    let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
+    guard tip == pr.headSha else {
       throw APIError("\(branch) has commits that are not in its merged PR \(pr.url). Keep the branch.")
     }
+    return (branch, tip)
   }
 
   /// Returns the session's repo, or throws unless the session's folder is a

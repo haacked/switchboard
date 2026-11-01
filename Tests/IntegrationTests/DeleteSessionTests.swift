@@ -184,7 +184,8 @@ extension Instance {
   }
 
   @Test func deletesTheBranchOfAMergedPR() throws {
-    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
     let r = try sbd.deleteSessionAndBranch(s.id)
     #expect(r.status == 0)
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
@@ -206,7 +207,8 @@ extension Instance {
   }
 
   @Test func refusesToDeleteTheBranchWithoutTheWorktree() throws {
-    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
     let r = try sbd.run(["rm", s.id, "--delete-branch"])
     #expect(r.status != 0)
     #expect(r.stderr.contains("Remove the worktree too"))
@@ -215,11 +217,25 @@ extension Instance {
   }
 
   @Test func refusesToDeleteTheBranchOfACommitAfterTheMerge() throws {
-    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
     try sbd.commit(s.cwd, "b.txt")
     let r = try sbd.deleteSessionAndBranch(s.id)
     #expect(r.status != 0)
     #expect(r.stderr.contains("not in its merged PR"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") != "")
+  }
+
+  @Test func refusesToDeleteTheBranchOfADetachedWorktree() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    try sbd.commit(s.cwd, "b.txt")
+    try sbd.git(s.cwd, "checkout", "-q", "--detach", "HEAD~1")
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("checked out"))
     #expect(try sbd.intact(s))
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") != "")

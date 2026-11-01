@@ -90,7 +90,14 @@ struct SessionView: View {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
       if session.repo != nil {
-        Toggle(isOn: $ui.deleteWorktree) {
+        Toggle(
+          isOn: Binding(
+            get: { ui.deleteWorktree },
+            set: {
+              ui.deleteWorktree = $0
+              if !$0 { ui.deleteBranch = false }
+            })
+        ) {
           Text("Delete the worktree \(session.cwd)")
         }
         .help(
