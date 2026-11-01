@@ -423,12 +423,16 @@ import Testing
     let s = try sbd.client.call(
       "new", ["path": .string(repo), "name": "Fix it", "worktree": true], as: SessionSummary.self)
     let branch = try #require(s.branch)
-    #expect(branch.range(of: #"^haacked/fix-it-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
+    #expect(branch == "haacked/fix-it")
     #expect(s.cwd == "\(sbd.home.path)/worktrees/repo/\(branch)")
     #expect(try sbd.git(s.cwd, "branch", "--show-current") == branch)
     let cli = try sbd.sb("new", repo, "--worktree", "--name", "From cli", "--json")
     let fromCli = try JSONDecoder().decode(SessionSummary.self, from: Data(cli.utf8))
-    #expect(fromCli.branch?.hasPrefix("haacked/from-cli-") == true)
+    #expect(fromCli.branch == "haacked/from-cli")
+    // A name that a branch already has gets a suffix.
+    let again = try sbd.client.call(
+      "new", ["path": .string(repo), "name": "Fix it", "worktree": true], as: SessionSummary.self)
+    #expect(again.branch?.range(of: #"^haacked/fix-it-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
     // A typed branch is used as typed, without the prefix.
     let typed = try sbd.client.call(
       "new", ["path": .string(repo), "branch": "feature", "worktree": true], as: SessionSummary.self)

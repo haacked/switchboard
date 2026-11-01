@@ -36,7 +36,7 @@ public struct NewSession: Codable, Sendable {
   public var base: String?
   public var name: String?
   /// Makes a worktree even without a `branch`. The branch is then
-  /// `Config.branchPrefix` and `autoBranch(name:)`.
+  /// `Config.branchPrefix` and a slug of `name`, with a random suffix when that branch exists.
   public var worktree: Bool?
   public var prompt: String?
   public var model: String?
@@ -63,25 +63,19 @@ public struct NewSession: Codable, Sendable {
 }
 
 extension NewSession {
-  /// A branch name for a worktree that the user didn't name: the slug of `name`,
-  /// then a random suffix that makes a match with an existing branch unlikely.
-  /// `freeAutoBranch` checks for one.
-  public static func autoBranch(
-    name: String?, suffix: String = randomSuffix()
-  ) -> String {
-    let slug = Followup.slug(name ?? "", max: 40)
-    return "\(slug.isEmpty ? "session" : slug)-\(suffix)"
-  }
-
   public static func randomSuffix() -> String { String(UUID().uuidString.lowercased().prefix(4)) }
 
-  /// The first `autoBranch` name, with `prefix`, for which `exists` is false.
+  /// A branch name for a worktree that the user didn't name: `prefix` and the
+  /// slug of `name`, or "session" when the slug is empty. A name for which
+  /// `exists` is true gets a random suffix, redrawn until `exists` is false.
   public static func freeAutoBranch(
     prefix: String, name: String?, exists: (String) -> Bool,
     suffix: () -> String = randomSuffix
   ) -> String {
-    var branch: String
-    repeat { branch = prefix + autoBranch(name: name, suffix: suffix()) } while exists(branch)
+    let slug = Followup.slug(name ?? "", max: 40)
+    let stem = prefix + (slug.isEmpty ? "session" : slug)
+    var branch = stem
+    while exists(branch) { branch = "\(stem)-\(suffix())" }
     return branch
   }
 }
