@@ -256,7 +256,7 @@ public enum Attention {
       return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
     // A question still needs the user's answer while a job runs.
-    if facts.jobs > 0, case let kind = classify(facts.lastReply ?? ""), !kind.isQuestion {
+    if facts.jobs > 0, !classify(facts.lastReply ?? "").isQuestion {
       return Verdict(
         state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
     }

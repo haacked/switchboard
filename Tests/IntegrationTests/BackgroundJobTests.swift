@@ -27,8 +27,8 @@ import Testing
     try sbd.waitFor(s.id, "the idle stop") { !$0.live }
   }
 
-  /// sbd finds a job in the process list when the tick runs, so each step
-  /// moves the clock by 1 ms to run it.
+  /// sbd finds a job in the process list when the tick runs. Each step moves
+  /// the clock by 1 ms to run the tick.
   @Test func sessionWaitsWhileItsBackgroundJobRuns() throws {
     let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
     let s = try sbd.new(prompt: "background 100 held")

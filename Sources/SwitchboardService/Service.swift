@@ -789,13 +789,11 @@ public final class Service {
     }
   }
 
-  /// Background work is running when a child of claude leads its own process
-  /// group, as a background Bash job does.
+  /// The number of background jobs. A job is a child of claude that leads its
+  /// own process group, as a background Bash job does.
   func backgroundJobs(_ pid: Int) -> Int {
     (snapshot.children[pid] ?? []).filter { $0.pgid == $0.pid }.count
   }
-
-  func hasBackgroundJob(_ pid: Int) -> Bool { backgroundJobs(pid) > 0 }
 
   /// Records each claude that exited or started without a hook, and stops
   /// idle sessions. sbd calls it every `tickSeconds`.
@@ -823,7 +821,7 @@ public final class Service {
           }
           let jobs = backgroundJobs(pid)
           if jobs > 0 { entries[id]?.lastJobSeen = now }
-          // A running turn outranks the job rule, so the count waits for the turn's end.
+          // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false, jobs != entries[id]?.facts.jobs {
             record(id, "job", ["count": .number(Double(jobs))])
           }
@@ -870,7 +868,7 @@ public final class Service {
     // for twice the idle time lost its SubagentStop, as when sbd was down.
     guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
     guard !attached(id) else { return false }
-    return !hasBackgroundJob(pid)
+    return backgroundJobs(pid) == 0
   }
 
   // MARK: Summaries
