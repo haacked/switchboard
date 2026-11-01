@@ -58,6 +58,9 @@ final class BoardModel: ObservableObject {
   private let worker = DispatchQueue(label: "switchboard.actions")
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
+  /// The session that `create` or `openManager` selected before a refresh
+  /// listed it.
+  private var pendingSelection: String?
   private var loaded = false
   private var followupsRead = Date.distantPast
 
@@ -107,14 +110,25 @@ final class BoardModel: ObservableObject {
     let readFollowups = followups || Date().timeIntervalSince(followupsRead) >= 5
     if readFollowups { followupsRead = Date() }
     poller.async {
-      let result = Result { try client.sessions() }
-      let more = readFollowups ? try? client.call("followup-ls", as: [SessionSummary].self) : nil
+      let (result, more) = Self.read(
+        sessions: client.sessions,
+        followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         self.apply(result, followups: more)
       }
     }
+  }
+
+  /// Reads the follow-ups, then the sessions. sbd moves a follow-up from
+  /// `followup-ls` to `ls` in one step, so this order lists it in at least one
+  /// of the two.
+  static func read(
+    sessions: () throws -> [SessionSummary], followups: (() throws -> [SessionSummary])?
+  ) -> (Result<[SessionSummary], Error>, [SessionSummary]?) {
+    let more = followups.flatMap { try? $0() }
+    return (Result { try sessions() }, more)
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
@@ -129,7 +143,7 @@ final class BoardModel: ObservableObject {
       }
   }
 
-  private func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
+  func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
     switch result {
     case .success(let list):
       // Assigning a @Published property republishes even an equal value. A
@@ -148,6 +162,9 @@ final class BoardModel: ObservableObject {
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       if !sameShown(sessions, list) { sessions = list }
+      let listed = Set(board.map(\.id))
+      if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
+      if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
@@ -199,8 +216,14 @@ final class BoardModel: ObservableObject {
   /// Starts the Manager, or opens it, and selects it.
   func openManager() {
     perform("manager", [:]) { value in
-      if let id = value["id"]?.string { self.selection = id }
+      if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
+  }
+
+  /// Selects a session that sbd just made, which the next refresh lists.
+  func selectUnlisted(_ id: String) {
+    selection = id
+    pendingSelection = id
   }
 
   func open(_ id: String) { perform("open", ["session": .string(id)]) }
@@ -276,7 +299,7 @@ final class BoardModel: ObservableObject {
   func create(_ args: NewSession) {
     guard let json = try? JSON(encoding: args).object else { return }
     perform("new", json) { value in
-      if let id = value["id"]?.string { self.selection = id }
+      if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
   }
 
