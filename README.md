@@ -76,7 +76,7 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
-`sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
+`sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent. A child that reaches Done leaves the Manager's list and shows only in the Done group; its children that are not Done stay in the list, under the nearest ancestor that is not Done, and the child returns to the list if it leaves Done. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
 
 ### Triage
 
