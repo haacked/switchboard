@@ -40,6 +40,8 @@ let package = Package(
     .testTarget(
       name: "SwitchboardCoreTests", dependencies: ["SwitchboardCore"], exclude: ["Fixtures"], swiftSettings: swift5),
     .testTarget(
+      name: "SwitchboardServiceTests", dependencies: ["SwitchboardService", "SwitchboardCore"], swiftSettings: swift5),
+    .testTarget(
       name: "SwitchboardAppTests", dependencies: ["SwitchboardApp", "SwitchboardCore"], swiftSettings: swift5),
     .testTarget(
       name: "IntegrationTests", dependencies: ["SwitchboardCore", "sbd", "sb"],
