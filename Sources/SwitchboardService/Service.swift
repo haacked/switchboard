@@ -317,11 +317,8 @@ public final class Service {
       return (path, current?.isEmpty == false ? current : nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    // The first line of `worktree list` names the main checkout, whose
-    // folder name names the repo.
-    let main =
-      try gitOutput(path, ["worktree", "list", "--porcelain"]).split(separator: "\n").first
-      .map { String($0.dropFirst("worktree ".count)) } ?? path
+    // The first worktree names the main checkout, whose folder name names the repo.
+    let main = try worktreePaths(path).first ?? path
     let dir = "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)"
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -334,6 +331,12 @@ public final class Service {
     _ = try gitOutput(
       path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"])
     return (dir, branch)
+  }
+
+  /// The repo's worktrees, starting with the main checkout.
+  func worktreePaths(_ repo: String) throws -> [String] {
+    try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
+      .filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
   }
 
   func branchExists(_ repo: String, _ branch: String) -> Bool {
@@ -572,7 +575,8 @@ public final class Service {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
-      return (entries[id]!.session, entries[id]!.facts.pr?.state == .merged)
+      let entry = entries[id]!
+      return (entry.session, entry.facts.pr?.state == .merged)
     }
     if removesWorktree { try checkWorktreeIsLossless(found, mergedPR: mergedPR) }
     let fresh = buildSnapshot()
@@ -614,21 +618,21 @@ public final class Service {
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
-    let linked = try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
-      .filter { $0.hasPrefix("worktree ") }.dropFirst().map { String($0.dropFirst("worktree ".count)) }
+    let linked = try worktreePaths(repo).dropFirst()
     let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
     guard linked.contains(where: { real($0) == real(session.cwd) }) else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
-    let changed = try gitOutput(session.cwd, ["status", "--porcelain"]).split(separator: "\n").count
+    // The flag keeps status from taking the index lock while claude commits.
+    let changed = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"]).split(separator: "\n").count
     guard changed == 0 else {
-      throw APIError("\(session.cwd) has \(changed) uncommitted \(changed == 1 ? "file" : "files"). Commit or discard them first.")
+      throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
     }
     guard !mergedPR else { return }
     let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
     guard unpushed == "0" else {
       throw APIError(
-        "\(session.cwd) has \(unpushed) \(unpushed == "1" ? "commit that is" : "commits that are") not on a pushed branch and not in a merged PR. Push \(unpushed == "1" ? "it" : "them") first.")
+        "\(session.cwd) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first.")
     }
   }
 

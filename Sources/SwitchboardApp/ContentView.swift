@@ -154,7 +154,7 @@ struct Sidebar: View {
       Button("Delete Session and Worktree", role: .destructive) { model.delete(session.id) }
     } message: { session in
       Text(
-        "This stops claude, closes both terminals, and deletes the session, its events, and its worktree \(session.cwd). The branch and the conversation's transcript stay. Switchboard refuses if the worktree has uncommitted files or commits that aren't pushed."
+        "This stops claude, closes both terminals, and deletes the session, its events, and its worktree \(session.cwd). The branch and the conversation's transcript stay."
       )
     }
     .overlay {
