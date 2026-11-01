@@ -111,7 +111,9 @@ struct SessionView: View {
           .disabled(!ui.deleteWorktree)
           .help("Refuses unless the session's PR is merged and the branch has no commit after it.")
         }
-        Text("A refusal removes nothing and shows the reason.").font(.caption).foregroundStyle(.secondary)
+        Text(
+          "A refusal removes nothing and shows the reason. If the branch fails its check again after the worktree is removed, the worktree and session are removed and the branch is kept."
+        ).font(.caption).foregroundStyle(.secondary)
       } else {
         Text("The folder stays.")
       }

@@ -288,8 +288,9 @@ final class BoardModel: ObservableObject {
   /// Removes the session and its worktree. sbd refuses, and removes nothing,
   /// when the worktree has uncommitted files, has commits that are on no remote
   /// branch, or isn't one that sbd made. With `branch`, it also deletes the
-  /// local branch, and sbd refuses unless the session's PR is merged. The error
-  /// shows in the banner.
+  /// local branch, and sbd refuses unless the session's PR is merged. When the
+  /// branch fails its check after the worktree is gone, sbd removes the session
+  /// and keeps the branch. The error shows in the banner.
   func delete(_ id: String, branch: Bool = false) {
     perform("rm", ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]) { _ in
       if self.selection == id { self.selection = nil }

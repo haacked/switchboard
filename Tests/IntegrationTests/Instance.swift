@@ -117,6 +117,9 @@ final class Instance {
   /// sbd again.
   var sbdAgent: String
 
+  /// Extra environment for the sbd that `startSbd` starts.
+  var sbdEnvironment: [String: String] = [:]
+
   func startSbd() throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sbd")
@@ -129,6 +132,7 @@ final class Instance {
     env["CLAUDE_CONFIG_DIR"] = inheritedAccount
     // A fixed agent lets a test tell sbd's own SSH agent from a terminal's.
     env["SSH_AUTH_SOCK"] = sbdAgent
+    env.merge(sbdEnvironment) { $1 }
     p.environment = env
     let log = FileHandle(forWritingAtPath: home.log)!
     log.seekToEndOfFile()

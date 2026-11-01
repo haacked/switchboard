@@ -568,8 +568,13 @@ public final class Service {
   /// also deletes the local branch, and needs `worktree`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
   /// can take a while. A failed removal leaves the session and its panes in
-  /// place. The conversation's transcript stays in the account's projects
-  /// folder, because Claude Code has no command that archives a local session.
+  /// place. A store that can't delete the session's record also refuses the
+  /// removal before anything stops. After the worktree is gone, the session is
+  /// forgotten whatever happens to the branch, because its folder is missing.
+  /// The branch is checked again at that point. A failed check or delete keeps
+  /// the branch and throws after the session is forgotten. The conversation's
+  /// transcript stays in the account's projects folder, because Claude Code has
+  /// no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
@@ -595,16 +600,26 @@ public final class Service {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
         throw APIError("\(session.id) changed while it was being removed")
       }
+      // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
+      try store.checkDeletable(session: session.id)
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
     if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
-    // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
-    // Passing the checked tip makes git refuse when a commit landed after the check.
+    var branchRemoved = false
+    var branchError: Error?
     if let repo, let branch {
-      _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
-      // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
-      _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+      do {
+        try recheckBranch(repo, branch, pr: pr)
+        // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
+        // Passing the checked tip makes git refuse when a commit landed after the check.
+        _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+        branchRemoved = true
+        // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
+        _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+      } catch {
+        branchError = error
+      }
     }
     try queue.sync {
       // A follow-up can start between the two steps.
@@ -617,8 +632,11 @@ public final class Service {
       try store.delete(session: session.id)
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
+    if let branchError, let branch {
+      throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)")
+    }
     return [
-      "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branch != nil),
+      "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branchRemoved),
     ]
   }
 
@@ -633,10 +651,28 @@ public final class Service {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
     let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
+    try requireTip(tip, of: branch, inMerged: pr)
+    return (branch, tip)
+  }
+
+  private func requireTip(_ tip: String, of branch: String, inMerged pr: PullRequest) throws {
     guard tip == pr.headSha else {
       throw APIError("\(branch) has commits that are not in its merged PR \(pr.url). Keep the branch.")
     }
-    return (branch, tip)
+  }
+
+  /// Runs the checks that `checkBranchIsMerged` made, now that the worktree is gone: the branch
+  /// still exists with the checked tip, which is the head of the merged PR, and no worktree has it
+  /// checked out. Deleting the ref of a checked-out branch breaks that worktree.
+  private func recheckBranch(_ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?) throws {
+    guard let pr, pr.state == .merged, pr.head == branch.name else {
+      throw APIError("\(branch.name) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
+    }
+    guard branchExists(repo, branch.name) else { throw APIError("\(branch.name) no longer exists.") }
+    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"]), of: branch.name, inMerged: pr)
+    let checkedOut = try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
+      .contains { $0 == "branch refs/heads/\(branch.name)" }
+    guard !checkedOut else { throw APIError("\(branch.name) is checked out in a worktree.") }
   }
 
   /// Returns the session's repo, or throws unless the session's folder is a
