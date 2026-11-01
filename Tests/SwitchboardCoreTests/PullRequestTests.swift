@@ -9,13 +9,13 @@ func samplePR(
   state: PRState = .open, draft: Bool = false, headSha: String = samplePRHead, base: String = "main",
   defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
   verdicts: [Review] = [], reviews: [Review] = [], checks: String? = nil, mergedBase: Int? = nil,
-  queue: TrunkQueueState? = nil
+  queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil
 ) -> PullRequest {
   PullRequest(
     id: "PR_42", number: 42, url: "https://github.com/acme/widgets/pull/42", repo: "acme/widgets", state: state,
     draft: draft, head: "feature", headSha: headSha, base: base, defaultBranch: defaultBranch, mergeable: mergeable,
     reviewDecision: reviewDecision, verdicts: verdicts, reviews: reviews, checks: checks, mergedBase: mergedBase,
-    queue: queue)
+    queue: queue, reviewRequests: reviewRequests)
 }
 
 func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) -> Review {

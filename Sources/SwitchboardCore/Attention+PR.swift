@@ -59,5 +59,18 @@ extension Attention {
     }
   }
 
+  /// Waiting while an open PR needs only the review that GitHub still waits
+  /// on, so the session has nothing to do until a reviewer answers. Each
+  /// condition below keeps a case in Needs you that the user or Claude must
+  /// act on. Run it after `openPR`, which has handled conflicts, requested
+  /// changes, and approvals.
+  static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
+    guard let pr = facts.pr, pr.state == .open, !pr.draft, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
+      !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
+      pr.checks != "FAILURE", pr.checks != "ERROR", classify(facts.lastReply ?? "") == .other
+    else { return nil }
+    return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
+  }
+
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
 }

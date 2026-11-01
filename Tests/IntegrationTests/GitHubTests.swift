@@ -176,6 +176,35 @@ extension Instance {
     #expect(try sbd.get(s.id).markedDone == false)
   }
 
+  @Test func waitsForAReviewerUntilTheReviewArrives() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.poll()
+    func state(after edit: (inout [String: JSON]) -> Void) throws -> SessionSummary {
+      github.change(18303, edit)
+      try sbd.poll(all: true)
+      return try sbd.get(s.id)
+    }
+    let requested = try state {
+      $0["reviewDecision"] = "REVIEW_REQUIRED"
+      $0["latestOpinionatedReviews"] = ["nodes": []]
+      $0["reviewRequests"] = ["nodes": [["requestedReviewer": ["__typename": "User", "login": "alex"]]]]
+    }
+    #expect(requested.state == .waiting)
+    #expect(requested.reason == "review of #18303 by alex")
+    #expect(try sbd.triage().isEmpty)
+
+    let reviewed = try state { $0["reviewRequests"] = ["nodes": []] }
+    #expect(reviewed.state == .needsYou)
+    #expect(reviewed.reason == "read its last reply and decide what's next")
+
+    #expect(
+      try state { $0["reviewRequests"] = ["nodes": [["requestedReviewer": ["login": "alex"]]]] }.state == .waiting)
+    let failing = try state { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": "FAILURE"]]]]] }
+    #expect(failing.state == .needsYou)
+  }
+
   @Test func findsTheBranchsNewPRAfterItsPRCloses() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

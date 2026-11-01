@@ -231,6 +231,7 @@ public enum Attention {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
     if let v = openPR(facts) { return v }
+    if let v = awaitingReview(facts) { return v }
     if now - facts.lastActivity > staleAfterMs {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }

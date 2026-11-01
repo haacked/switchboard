@@ -112,13 +112,19 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The Trunk queue state that the trunk-io comments show, and nil when no
   /// comment shows one.
   public var queue: TrunkQueueState?
+  /// The logins (or team slugs) whose review GitHub still waits on. A
+  /// reviewer who submitted a review leaves the list. nil when the poll
+  /// didn't ask, as in events that an older sbd recorded, which differs from
+  /// an empty list that says nobody was asked.
+  public var reviewRequests: [String]?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
     draft: Bool = false, head: String = "", headSha: String = "", base: String = "main",
     defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
-    mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil
+    mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
+    reviewRequests: [String]? = nil
   ) {
     self.id = id
     self.number = number
@@ -141,6 +147,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.mergedAt = mergedAt
     self.closedAt = closedAt
     self.queue = queue
+    self.reviewRequests = reviewRequests
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
