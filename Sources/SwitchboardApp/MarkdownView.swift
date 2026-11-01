@@ -36,7 +36,7 @@ private struct MarkdownBlocksView: View {
       VStack(alignment: .leading, spacing: 3) {
         ForEach(Array(items.enumerated()), id: \.offset) { i, item in
           HStack(alignment: .firstTextBaseline, spacing: 6) {
-            marker(number.map { "\($0 + i)." } ?? "•", checked: item.checked)
+            marker(number.map { "\($0 + i)." } ?? (item.checked == nil ? "•" : nil), checked: item.checked)
             MarkdownBlocksView(blocks: item.blocks)
           }
         }
@@ -65,7 +65,8 @@ private struct MarkdownBlocksView: View {
           Divider()
           ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
             GridRow {
-              ForEach(Array(row.enumerated()), id: \.offset) { c, cell in tableCell(cell, alignments[c], header: false)
+              ForEach(Array(row.enumerated()), id: \.offset) { c, cell in
+                tableCell(cell, alignments[c], header: false)
               }
             }
           }
@@ -80,11 +81,14 @@ private struct MarkdownBlocksView: View {
   }
 
   @ViewBuilder
-  private func marker(_ text: String, checked: Bool?) -> some View {
-    if let checked {
-      Image(systemName: checked ? "checkmark.square" : "square").foregroundStyle(.secondary)
-    } else {
-      Text(text).foregroundStyle(.secondary).monospacedDigit()
+  private func marker(_ text: String?, checked: Bool?) -> some View {
+    HStack(spacing: 4) {
+      if let text { Text(text).foregroundStyle(.secondary).monospacedDigit() }
+      if let checked {
+        Image(systemName: checked ? "checkmark.square" : "square")
+          .foregroundStyle(.secondary)
+          .accessibilityLabel(checked ? "Done" : "Not done")
+      }
     }
   }
 

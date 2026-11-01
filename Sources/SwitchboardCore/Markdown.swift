@@ -60,7 +60,7 @@ public enum MarkdownBlock: Equatable, Sendable {
         var body: [String] = []
         // An unclosed fence runs to the end, as a reply cut off mid-block does.
         while i < lines.count, !fence.closes(lines[i].trimmingCharacters(in: .whitespaces)) {
-          body.append(lines[i])
+          body.append(Self.dedent(lines[i], by: Self.indent(line)))
           i += 1
         }
         i += 1
@@ -106,10 +106,10 @@ public enum MarkdownBlock: Equatable, Sendable {
     return blocks
   }
 
-  /// Whether a line begins a block of its own, which ends a table.
+  /// Whether a line begins a block of its own, which ends a table. A rule
+  /// is not listed, because a table row contains a `|` and a rule does not.
   private static func startsBlock(_ trimmed: String) -> Bool {
-    fence(trimmed) != nil || heading(trimmed) != nil || isRule(trimmed) || trimmed.hasPrefix(">")
-      || listItem(trimmed) != nil
+    fence(trimmed) != nil || heading(trimmed) != nil || trimmed.hasPrefix(">") || listItem(trimmed) != nil
   }
 
   /// Reads the list that starts at `lines[start]`, and returns it with the
@@ -119,15 +119,21 @@ public enum MarkdownBlock: Equatable, Sendable {
   /// starts the next item, even after blank lines. Any other line ends the list.
   private static func list(_ lines: [String], from start: Int, first: ListMarker, depth: Int) -> (MarkdownBlock, Int) {
     let base = indent(lines[start])
+    func sibling(_ line: String) -> ListMarker? {
+      listItem(line).flatMap { $0.numbered == first.numbered ? $0 : nil }
+    }
     var items: [Item] = []
-    var current: (marker: ListMarker, body: [String])?
+    // `indent` is how far the item's first deeper line is indented, up to the
+    // marker's width. Every later line of the item loses the same amount, so
+    // the lines keep their indentation relative to each other.
+    var current: (marker: ListMarker, body: [String], indent: Int?)?
     func endItem() {
-      guard let (marker, body) = current else { return }
+      guard let (marker, body, _) = current else { return }
       let checkbox = Self.checkbox(marker.text)
       items.append(Item(checked: checkbox.checked, blocks: Self.blocks(of: [checkbox.text] + body, depth: depth + 1)))
     }
     var i = start
-    scan: while i < lines.count {
+    while i < lines.count {
       let line = lines[i]
       if line.isBlank {
         var next = i
@@ -135,17 +141,19 @@ public enum MarkdownBlock: Equatable, Sendable {
         guard next < lines.count else { break }
         if indent(lines[next]) > base {
           current?.body += repeatElement("", count: next - i)
-        } else if !(Self.listItem(lines[next]).map { $0.numbered == first.numbered } ?? false) {
-          break scan
+        } else if sibling(lines[next]) == nil {
+          break
         }
         i = next
         continue
       }
       if indent(line) > base, let marker = current?.marker {
-        current?.body.append(dedent(line, by: marker.width))
-      } else if let marker = Self.listItem(line), marker.numbered == first.numbered {
+        let width = current?.indent ?? min(indent(line), marker.width)
+        current?.indent = width
+        current?.body.append(dedent(line, by: width))
+      } else if let marker = sibling(line) {
         endItem()
-        current = (marker, [])
+        current = (marker, [], nil)
       } else {
         break
       }
@@ -159,8 +167,7 @@ public enum MarkdownBlock: Equatable, Sendable {
     line.prefix { $0 == " " || $0 == "\t" }.count
   }
 
-  /// Removes up to `width` leading whitespace characters, which is how far an
-  /// item's own lines are indented past the list's.
+  /// Removes up to `width` leading whitespace characters.
   private static func dedent(_ line: String, by width: Int) -> String {
     String(line.dropFirst(min(indent(line), width)))
   }
@@ -206,6 +213,10 @@ public enum MarkdownBlock: Equatable, Sendable {
     return Fence(character: character, length: run.count, info: info)
   }
 
+  /// A table has this many columns at most. Every row is padded to the header's
+  /// width, so a wider header would let a few bytes of `|` rows build millions of cells.
+  private static let maxColumns = 64
+
   /// A header row and the delimiter row under it that has one cell for each
   /// header cell. Both rows need a `|`.
   private static func table(header: String, delimiter: String) -> (header: [String], alignments: [Alignment])? {
@@ -213,7 +224,7 @@ public enum MarkdownBlock: Equatable, Sendable {
     guard header.contains("|"), delimiter.contains("|") else { return nil }
     let head = cells(header)
     let marks = cells(delimiter)
-    guard !head.isEmpty, marks.count == head.count else { return nil }
+    guard !head.isEmpty, head.count <= maxColumns, marks.count == head.count else { return nil }
     var alignments: [Alignment] = []
     for mark in marks {
       let left = mark.hasPrefix(":")
@@ -254,7 +265,7 @@ public enum MarkdownBlock: Equatable, Sendable {
 
   private static func checkbox(_ text: String) -> (checked: Bool?, text: String) {
     for (mark, checked) in [("[ ] ", false), ("[x] ", true), ("[X] ", true)] where text.hasPrefix(mark) {
-      return (checked, String(text.dropFirst(4)))
+      return (checked, String(text.dropFirst(mark.count)))
     }
     return (nil, text)
   }
@@ -263,7 +274,9 @@ public enum MarkdownBlock: Equatable, Sendable {
     let text: String
     let number: Int?
     var numbered: Bool { number != nil }
-    /// The marker's characters, which the item's own lines are indented past.
+    /// The column where the item's text starts: the line's own indentation,
+    /// the marker, and the space after it. A line of the item that is indented
+    /// at least this far lies inside the item's text.
     let width: Int
   }
 

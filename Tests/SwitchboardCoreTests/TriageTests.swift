@@ -429,9 +429,53 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
 
   @Test func aTableNeedsAtLeastOneColumn() {
     for md in ["|\n|\n| a | b |\nmore", "||\n||\n| a |"] {
-      #expect(!MarkdownBlock.parse(md).contains { if case .table = $0 { true } else { false } }, "\(md)")
-      #expect("\(MarkdownBlock.parse(md))".contains("a"), "\(md)")
+      #expect(MarkdownBlock.parse(md) == [.paragraph(md)], "\(md)")
     }
+  }
+
+  @Test func aTableHasAtMostSixtyFourColumns() {
+    func table(_ columns: Int) -> String {
+      let head = "|" + String(repeating: " a |", count: columns)
+      return "\(head)\n|" + String(repeating: "---|", count: columns) + "\n\(head)"
+    }
+    guard case .table(let header, _, let rows) = MarkdownBlock.parse(table(64)).first else {
+      Issue.record("64 columns should be a table")
+      return
+    }
+    #expect(header.count == 64)
+    #expect(rows.map(\.count) == [64])
+    #expect(MarkdownBlock.parse(table(65)) == [.paragraph(table(65))])
+    // A few bytes per row must not build thousands of cells.
+    let wide = "|" + String(repeating: "a|", count: 5_000)
+    #expect(MarkdownBlock.parse("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|") == [.paragraph("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|")])
+  }
+
+  @Test func codeInAListItemKeepsItsIndentationWhateverTheMarkerWidth() {
+    // The item's lines are indented less than `10. ` is wide.
+    #expect(
+      MarkdownBlock.parse("10. a\n   ```\n   if x:\n       y\n   ```") == [
+        .list(number: 10, items: [item("a", .code(language: nil, text: "if x:\n    y"))])
+      ])
+    // A tab after the item's indentation belongs to the code.
+    #expect(
+      MarkdownBlock.parse("1. a\n  ```go\n  func f() {\n  \tx()\n  }\n  ```") == [
+        .list(number: 1, items: [item("a", .code(language: "go", text: "func f() {\n\tx()\n}"))])
+      ])
+    // The item's lines are indented more than `1. ` is wide.
+    #expect(
+      MarkdownBlock.parse("1. a\n    ```\n    x\n    ```") == [
+        .list(number: 1, items: [item("a", .code(language: nil, text: "x"))])
+      ])
+    #expect(MarkdownBlock.parse("  ```\n  x\n    y\n  ```") == [.code(language: nil, text: "x\n  y")])
+  }
+
+  @Test func aQuoteKeepsTheIndentationOfItsBlocks() {
+    #expect(
+      MarkdownBlock.parse("> ```\n>     indented\n> ```") == [.quote([.code(language: nil, text: "    indented")])])
+    #expect(
+      MarkdownBlock.parse(">  - a\n>    - b") == [
+        .quote([.list(number: nil, items: [item("a", .list(number: nil, items: [item("b")]))])])
+      ])
   }
 
   @Test func aLineOfOnlyUnicodeSpaceIsBlankInsideAList() {
@@ -453,7 +497,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     let lists = MarkdownBlock.parse(String(repeating: "- ", count: 10_000) + "deep text")
     let staircase = MarkdownBlock.parse(
       (0..<600).map { String(repeating: " ", count: $0) + "- item\($0)" }.joined(separator: "\n"))
-    for blocks in [quotes, lists, staircase] { #expect(depth(blocks) <= 64) }
+    for blocks in [quotes, lists, staircase] { #expect(depth(blocks) <= 34) }
     #expect("\(quotes)".contains("deep text"))
     #expect("\(lists)".contains("deep text"))
     #expect("\(staircase)".contains("item599"))
@@ -482,6 +526,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
         .code(language: "md", text: "```sh\nx\n```"), .paragraph("after"),
       ])
     #expect(MarkdownBlock.parse("```\n```swift\n```") == [.code(language: nil, text: "```swift")])
+    #expect(MarkdownBlock.parse("```\nx\n`````\nafter") == [.code(language: nil, text: "x"), .paragraph("after")])
     #expect(MarkdownBlock.parse("~~~\n```\n~~~") == [.code(language: nil, text: "```")])
     #expect(MarkdownBlock.parse("```x``` then more\n\nnext") == [.paragraph("```x``` then more"), .paragraph("next")])
   }
