@@ -81,7 +81,7 @@ wait_for() { # <seconds> <command…>
 
 # Replaces the last run's files in .build/gui-test/<backend> with this run's.
 save_shots() {
-  [ -d "$home/shots/${backend:-}" ] || return 0
+  [ -n "${backend:-}" ] && [ -d "$home/shots/$backend" ] || return 0
   [ -z "${session:-}" ] || sb screen "$session" >"$home/shots/$backend/screen.txt" 2>/dev/null || true
   rm -rf ".build/gui-test/$backend"
   mkdir -p ".build/gui-test/$backend"
@@ -166,6 +166,7 @@ check_backend() {
 
   grep -q "^terminal: $backend\$" "$shots/app.log" || fail "the app did not pick $backend: $(grep '^terminal:' "$shots/app.log")"
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
+  grep -q '^selftest: attached after' "$shots/app.log" || fail "the app never saw the session attach: $(grep '^selftest: gave up' "$shots/app.log")"
 
   local got
   got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
@@ -181,11 +182,11 @@ check_backend() {
   # narrower and 200 pt shorter and went back: the last size appeared before,
   # with a different size in between.
   read -r -a sizes <<<"$(sed -n 's/^sizes //p' "$shots/screen.txt")"
-  local last=${sizes[${#sizes[@]} - 1]} earlier=-1 changed='' i
-  for ((i = 0; i < ${#sizes[@]} - 1; i++)); do
-    if [ "${sizes[i]}" = "$last" ]; then earlier=$i; changed=''; else [ $earlier -ge 0 ] && changed=1; fi
+  local last=${sizes[${#sizes[@]} - 1]} seen='' changed='' size
+  for size in "${sizes[@]:0:${#sizes[@]}-1}"; do
+    if [ "$size" = "$last" ]; then seen=1; elif [ -n "$seen" ]; then changed=1; fi
   done
-  [ $earlier -ge 0 ] && [ -n "$changed" ] || fail "the pane did not shrink and return to $last: ${sizes[*]}"
+  [ -n "$changed" ] || fail "the pane did not shrink and return to $last: ${sizes[*]}"
   for png in pane-start pane-resized pane-end; do
     [ -s "$shots/$png.png" ] || fail "missing $png.png"
   done
