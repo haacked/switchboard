@@ -88,16 +88,15 @@ struct ContentView: View {
       ToolbarItem {
         if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
           Menu {
-            ForEach(model.accounts) { account in
-              Button {
-                model.useAccount(account.folder)
-              } label: {
-                Text("\(account.name) (\(account.sessions))")
-                if account.active { Image(systemName: "checkmark") }
+            Picker("Account", selection: Binding(get: { active.folder }, set: model.useAccount)) {
+              ForEach(model.accounts) { account in
+                Text("\(account.name) (\(account.sessions))").tag(account.folder)
               }
             }
+            .pickerStyle(.inline)
           } label: {
-            Label(active.name, systemImage: "person.crop.circle")
+            Label("Account: \(active.name)", systemImage: "person.crop.circle")
+              .labelStyle(.titleAndIcon)
           }
           .help("The Claude account for new sessions without a parent. Spawned sessions use their parent's.")
         }
