@@ -205,6 +205,9 @@ public enum ReplyKind: Equatable, Sendable {
 public enum Attention {
   static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs
+  /// A subagent with no event for this long is taken to have lost its
+  /// SubagentStop, as when sbd was down.
+  public static let subagentQuietMs: Int64 = 30 * 60 * 1000
 
   public static func evaluate(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict {
     if session.done { return Verdict(state: .done, reason: "marked done") }
@@ -234,6 +237,12 @@ public enum Attention {
     if let v = awaitingReview(facts) { return v }
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
+    }
+    if !facts.subagents.isEmpty, now - facts.lastActivity <= subagentQuietMs,
+      case .other = classify(facts.lastReply ?? "")
+    {
+      let n = facts.subagents.count
+      return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
     return replyVerdict(facts.lastReply ?? "")
   }
