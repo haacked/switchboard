@@ -32,6 +32,23 @@ extension Instance {
     try run(["rm", id, "--worktree", "--delete-branch"])
   }
 
+  /// Restarts sbd with a `git` in front of the real one that runs `afterRemove` (a shell
+  /// snippet, with `$REPO` the repo) once `git worktree remove` succeeds.
+  func runAfterWorktreeRemoval(_ repo: String, _ afterRemove: String) throws {
+    let dir = "\(home.path)/git-wrapper"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let script = """
+      #!/bin/sh
+      /usr/bin/git "$@" || exit $?
+      case " $* " in *" worktree remove "*) REPO='\(repo)'; \(afterRemove);; esac
+      """
+    try script.write(toFile: "\(dir)/git", atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(dir)/git")
+    stopSbd()
+    sbdEnvironment["PATH"] = "\(dir):" + (ProcessInfo.processInfo.environment["PATH"] ?? "")
+    try startSbd()
+  }
+
   func intact(_ s: SessionSummary) throws -> Bool {
     try FileManager.default.fileExists(atPath: s.cwd) && client.sessions().map(\.id).contains(s.id)
   }
@@ -241,5 +258,39 @@ extension Instance {
     #expect(try sbd.intact(s))
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") != "")
+  }
+
+  private static let mergedBranch = "haacked/cdp-dlq-breaker-counts-lookups"
+
+  /// After the worktree is gone, the branch fails a safety check. The worktree and the session
+  /// go, because the session's folder is missing, and the branch stays.
+  private func refusesTheBranchAfterTheWorktreeIsRemoved(
+    _ afterRemove: String, error: String
+  ) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    try sbd.runAfterWorktreeRemoval(repo, afterRemove)
+    // The restart drops the polled PR, so poll it again.
+    try sbd.poll(all: true)
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(error))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.client.sessions().isEmpty)
+  }
+
+  @Test func keepsTheBranchWhenACommitLandsAfterTheWorktreeIsRemoved() throws {
+    try refusesTheBranchAfterTheWorktreeIsRemoved(
+      "git -C \"$REPO\" branch -f \(Self.mergedBranch) main", error: "not in its merged PR")
+  }
+
+  @Test func keepsTheBranchWhenAnotherWorktreeChecksItOutAfterTheWorktreeIsRemoved() throws {
+    try refusesTheBranchAfterTheWorktreeIsRemoved(
+      "git -C \"$REPO\" checkout -q \(Self.mergedBranch)", error: "checked out")
+  }
+
+  @Test func reportsABranchThatIsGoneAfterTheWorktreeIsRemoved() throws {
+    try refusesTheBranchAfterTheWorktreeIsRemoved(
+      "git -C \"$REPO\" branch -D \(Self.mergedBranch) >/dev/null", error: "no longer exists")
   }
 }
