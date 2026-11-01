@@ -30,6 +30,8 @@ struct NewSessionView: View {
     return false
   }
 
+  private var makesWorktree: Bool { createWorktree && folderIsRepo }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("New Session").font(.title2.bold())
@@ -38,10 +40,10 @@ struct NewSessionView: View {
           TextField("Folder", text: $folder)
           Button("Choose…", action: choose)
         }
-        Toggle("Create a worktree", isOn: $createWorktree)
+        Toggle("Create a worktree", isOn: Binding(get: { makesWorktree }, set: { createWorktree = $0 }))
           .disabled(!folderIsRepo)
           .help(folderIsRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
-        if createWorktree && folderIsRepo {
+        if makesWorktree {
           TextField("Branch", text: $form.branch, prompt: Text("optional: named automatically when blank"))
         }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
@@ -84,7 +86,7 @@ struct NewSessionView: View {
       let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
       return t.isEmpty ? nil : t
     }
-    let worktree = createWorktree && folderIsRepo
+    let worktree = makesWorktree
     model.create(
       NewSession(
         path: folder.expandingTilde, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),

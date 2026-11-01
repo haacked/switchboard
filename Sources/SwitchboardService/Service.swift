@@ -133,11 +133,8 @@ public final class Service {
         var args = try JSONCoding.convert(request.args, to: NewSession.self)
         if args.worktree == true, (args.branch ?? "").isEmpty {
           let repo = (args.path as NSString).standardizingPath
-          var branch: String
-          repeat {
-            branch = config.branchPrefix + NewSession.autoBranch(name: args.name)
-          } while branchExists(repo, branch)
-          args.branch = branch
+          args.branch = NewSession.freeAutoBranch(
+            prefix: config.branchPrefix, name: args.name, exists: { branchExists(repo, $0) })
         }
         let folder = try prepareFolder(args)
         awaitMCPServers()

@@ -23,4 +23,11 @@ struct AutoBranchTests {
     let branch = NewSession.autoBranch(name: "x")
     #expect(branch.range(of: #"^x-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
   }
+
+  @Test func skipsABranchThatExists() {
+    var suffixes = ["aaaa", "bbbb"].makeIterator()
+    let branch = NewSession.freeAutoBranch(
+      prefix: "p/", name: "x", exists: { $0 == "p/x-aaaa" }, suffix: { suffixes.next()! })
+    #expect(branch == "p/x-bbbb")
+  }
 }

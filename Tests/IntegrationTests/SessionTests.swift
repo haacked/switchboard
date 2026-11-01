@@ -416,7 +416,7 @@ import Testing
   }
 }
 
-@Suite struct AutoBranchSessionTests {
+@Suite(.timeLimit(.minutes(2))) struct AutoBranchSessionTests {
   @Test func namesTheBranchOfAWorktreeWithTheConfiguredPrefix() throws {
     let sbd = try Instance(config: ["branchPrefix": "haacked/"])
     let repo = try Repos.create("\(sbd.home.path)/repo")

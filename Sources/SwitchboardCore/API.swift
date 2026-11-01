@@ -64,12 +64,23 @@ public struct NewSession: Codable, Sendable {
 
 extension NewSession {
   /// A branch name for a worktree that the user didn't name: the slug of `name`,
-  /// then a random suffix so that it never matches an existing branch.
+  /// then a random suffix that makes a match with an existing branch unlikely.
+  /// `freeAutoBranch` checks for one.
   public static func autoBranch(
     name: String?, suffix: String = String(UUID().uuidString.lowercased().prefix(4))
   ) -> String {
     let slug = Followup.slug(name ?? "", max: 40)
     return "\(slug.isEmpty ? "session" : slug)-\(suffix)"
+  }
+
+  /// The first `autoBranch` name, with `prefix`, for which `exists` is false.
+  public static func freeAutoBranch(
+    prefix: String, name: String?, exists: (String) -> Bool,
+    suffix: () -> String = { String(UUID().uuidString.lowercased().prefix(4)) }
+  ) -> String {
+    var branch: String
+    repeat { branch = prefix + autoBranch(name: name, suffix: suffix()) } while exists(branch)
+    return branch
   }
 }
 
