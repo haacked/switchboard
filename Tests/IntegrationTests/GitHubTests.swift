@@ -176,6 +176,25 @@ extension Instance {
     #expect(try sbd.get(s.id).markedDone == false)
   }
 
+  @Test func mergedPRWhoseFolderWasRemovedIsDone() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.poll()
+    github.change(18303) { $0["state"] = "MERGED" }
+    let file = "\(s.cwd)/notes.txt"
+    try "x".write(toFile: file, atomically: true, encoding: .utf8)
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).state == .needsYou)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.sb("send", s.id, "after the merge")
+    try sbd.poll()
+    try sbd.poll(all: true)
+    let done = try sbd.get(s.id)
+    #expect(done.state == .done)
+    #expect(done.reason == "#18303 merged; its folder is gone")
+  }
+
   @Test func waitsForAReviewerUntilTheReviewArrives() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

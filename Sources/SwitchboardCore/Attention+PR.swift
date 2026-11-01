@@ -1,15 +1,17 @@
 import Foundation
 
 extension Attention {
-  /// Done when the PR merged or closed and the folder is clean. Needs you
+  /// Done when the PR merged or closed and the folder is clean or gone. A
+  /// folder whose count failed for another reason is not known to be clean,
+  /// so it fires no rule. Needs you
   /// when the folder has uncommitted changes and no turn runs. An open wait
   /// or a wait's outcome comes first, because a session can wait on its
   /// merged PR's deploy.
   static func finishedPR(_ session: Session, _ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.state != .open, let dirty = facts.dirty, waitVerdict(session, facts) == nil else {
-      return nil
-    }
+    guard let pr = facts.pr, pr.state != .open, waitVerdict(session, facts) == nil else { return nil }
     let what = "#\(pr.number) \(pr.state == .merged ? "merged" : "closed")"
+    if facts.folderGone { return Verdict(state: .done, reason: "\(what); its folder is gone") }
+    guard let dirty = facts.dirty else { return nil }
     if dirty == 0 {
       return Verdict(state: .done, reason: "\(what); archive the worktree\(facts.turnRunning ? " once it stops" : "")")
     }
