@@ -12,6 +12,7 @@
   /// - `hide`: hides the app, then unhides it.
   /// - `minimize`: minimizes the window, then restores it.
   /// - `select-while-closed`: selects another session while the window is closed, then shows the window.
+  /// - `resize-while-closed`: resizes the window while it is closed, then shows it.
   /// - `reparent`: takes the surface views out of the window and puts them back.
   /// - `watch`: reports every 3 s for two minutes, while a script sleeps and wakes the displays.
   /// - `wake`: posts the screens-did-wake notification with surfaces open.
@@ -54,12 +55,19 @@
           await settle("selected another session while closed")
           window.makeKeyAndOrderFront(nil)
           await settle("shown again")
+        case "resize-while-closed":
+          window.close()
+          await settle("closed")
+          window.setFrame(window.frame.insetBy(dx: 120, dy: 80), display: false)
+          await settle("resized while closed")
+          window.makeKeyAndOrderFront(nil)
+          await settle("shown again")
         case "reparent":
           // What a rebuilt HSplitView does to its panes: the views leave the window and come back.
           let views = surfaceViews()
           let parents = views.map { $0.superview }
           for view in views { view.removeFromSuperview() }
-          await settle("views removed")
+          await settle("views removed", views: views)
           for (view, parent) in zip(views, parents) { parent?.addSubview(view) }
           await settle("views added back")
         case "watch":
@@ -77,9 +85,9 @@
       }
     }
 
-    private static func settle(_ step: String) async {
+    private static func settle(_ step: String, views: [GhosttySurfaceView]? = nil) async {
       try? await Task.sleep(nanoseconds: 2_000_000_000)
-      report(step)
+      report(step, views: views)
       try? await Task.sleep(nanoseconds: 6_000_000_000)
     }
 
@@ -93,8 +101,8 @@
       return found
     }
 
-    private static func report(_ step: String) {
-      let views = surfaceViews()
+    private static func report(_ step: String, views: [GhosttySurfaceView]? = nil) {
+      let views = views ?? surfaceViews()
       let live = views.filter { $0.surface != nil }.count
       let drawn = views.filter { $0.surface != nil && $0.layer?.contents != nil }.count
       let sums = views.compactMap { checksum($0) }.map { String($0, radix: 16) }.joined(separator: ",")

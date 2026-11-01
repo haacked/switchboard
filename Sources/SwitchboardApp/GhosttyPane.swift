@@ -231,6 +231,10 @@
       guard !Self.keepsHiddenSurfaces, let surface else { return }
       self.surface = nil
       lifetime.surfaceFreed()
+      // The surface's layer calls into the surface's renderer when Core Animation redraws it.
+      wantsLayer = false
+      layer = nil
+      // The free stays on the main queue because libghostty's surface list has no lock. It blocks for about 16 ms.
       DispatchQueue.main.async {
         ghostty_surface_free(surface)
         withExtendedLifetime(self) {}
