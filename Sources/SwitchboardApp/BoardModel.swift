@@ -110,16 +110,25 @@ final class BoardModel: ObservableObject {
     let readFollowups = followups || Date().timeIntervalSince(followupsRead) >= 5
     if readFollowups { followupsRead = Date() }
     poller.async {
-      // sbd moves a follow-up from `followup-ls` to `ls` in one step. Reading
-      // `followup-ls` first lists it in at least one of the two.
-      let more = readFollowups ? try? client.call("followup-ls", as: [SessionSummary].self) : nil
-      let result = Result { try client.sessions() }
+      let (result, more) = Self.read(
+        sessions: client.sessions,
+        followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         self.apply(result, followups: more)
       }
     }
+  }
+
+  /// Reads the follow-ups, then the sessions. sbd moves a follow-up from
+  /// `followup-ls` to `ls` in one step, so this order lists it in at least one
+  /// of the two.
+  static func read(
+    sessions: () throws -> [SessionSummary], followups: (() throws -> [SessionSummary])?
+  ) -> (Result<[SessionSummary], Error>, [SessionSummary]?) {
+    let more = followups.flatMap { try? $0() }
+    return (Result { try sessions() }, more)
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
