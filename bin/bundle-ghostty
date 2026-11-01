@@ -4,12 +4,13 @@
 # Contents/Resources/terminfo. Ghostty finds terminfo in the folder next to the
 # one GHOSTTY_RESOURCES_DIR names. Usage: bin/bundle-ghostty <Resources dir>.
 # Follows symlinks so the bundle holds no link to a file outside it.
-# Does nothing when bin/build-ghostty has not run, so a plain build bundles as
-# before. SB_GHOSTTY_SHARE overrides .build/ghostty/share.
+# Does nothing when bin/build-ghostty has not run, so a build without libghostty
+# needs neither zig nor the Metal toolchain. SB_GHOSTTY_SHARE overrides
+# .build/ghostty/share.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+root=$(cd "$(dirname "$0")/.." && pwd)
 resources=${1:?usage: bin/bundle-ghostty <Resources dir>}
-share=${SB_GHOSTTY_SHARE:-.build/ghostty/share}
+share=${SB_GHOSTTY_SHARE:-$root/.build/ghostty/share}
 [ -e "$share" ] || exit 0
 for part in ghostty/themes ghostty/shell-integration terminfo/78/xterm-ghostty; do
   if [ ! -e "$share/$part" ]; then

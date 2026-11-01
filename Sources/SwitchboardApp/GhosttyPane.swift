@@ -103,7 +103,7 @@
     }
 
     /// Ghostty finds its terminfo and shell integration through GHOSTTY_RESOURCES_DIR. Without it the child gets
-    /// TERM=xterm-256color. An app bundle would carry the folder; a development build finds it in .build/ghostty.
+    /// TERM=xterm-256color. An app bundle carries the folder; a development build finds it in .build/ghostty.
     private static func pointToResources() {
       if getenv("GHOSTTY_RESOURCES_DIR") != nil { return }
       if let url = GhosttyResources.locate(

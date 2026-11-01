@@ -45,8 +45,8 @@ import Testing
     let root = try tempDir()
     defer { try? FileManager.default.removeItem(at: root) }
     let resources = root.appendingPathComponent("App.app/Contents/Resources")
-    try FileManager.default.createDirectory(
-      at: resources.appendingPathComponent("ghostty"), withIntermediateDirectories: true)
+    try makeResources(at: resources.appendingPathComponent("ghostty"))
+    try FileManager.default.removeItem(at: resources.appendingPathComponent("ghostty/themes"))
     try Data().write(to: resources.appendingPathComponent("ghostty/themes"))
     #expect(GhosttyResources.locate(resourceURL: resources, executableURL: nil, inBundle: true) == nil)
   }
