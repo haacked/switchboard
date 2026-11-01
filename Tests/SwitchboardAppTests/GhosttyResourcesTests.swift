@@ -10,9 +10,12 @@ import Testing
     return url
   }
 
-  func makeResources(at url: URL) throws {
+  func makeResources(at url: URL, terminfoEntry: Bool = true) throws {
     try FileManager.default.createDirectory(
       at: url.appendingPathComponent("themes"), withIntermediateDirectories: true)
+    let terminfo = url.deletingLastPathComponent().appendingPathComponent("terminfo/78")
+    try FileManager.default.createDirectory(at: terminfo, withIntermediateDirectories: true)
+    if terminfoEntry { try Data("x".utf8).write(to: terminfo.appendingPathComponent("xterm-ghostty")) }
   }
 
   @Test func bundledAppUsesItsResourcesFolder() throws {
@@ -68,6 +71,22 @@ import Testing
   @Test func developmentBuildWithoutLibghosttyFindsNothing() throws {
     let root = try tempDir()
     defer { try? FileManager.default.removeItem(at: root) }
+    let exe = root.appendingPathComponent(".build/debug/Switchboard")
+    #expect(GhosttyResources.locate(resourceURL: nil, executableURL: exe, inBundle: false) == nil)
+  }
+
+  @Test func bundledAppIgnoresResourcesWithoutTheTerminfoEntry() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let resources = root.appendingPathComponent("App.app/Contents/Resources")
+    try makeResources(at: resources.appendingPathComponent("ghostty"), terminfoEntry: false)
+    #expect(GhosttyResources.locate(resourceURL: resources, executableURL: nil, inBundle: true) == nil)
+  }
+
+  @Test func developmentBuildIgnoresResourcesWithoutTheTerminfoEntry() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try makeResources(at: root.appendingPathComponent(".build/ghostty/share/ghostty"), terminfoEntry: false)
     let exe = root.appendingPathComponent(".build/debug/Switchboard")
     #expect(GhosttyResources.locate(resourceURL: nil, executableURL: exe, inBundle: false) == nil)
   }

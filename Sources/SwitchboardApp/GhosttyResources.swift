@@ -3,11 +3,18 @@ import Foundation
 /// Finds the folder that GHOSTTY_RESOURCES_DIR must name. Ghostty reads themes and shell integration from that
 /// folder and finds terminfo in a sibling folder named `terminfo`.
 enum GhosttyResources {
-  /// The folder holds `themes` when it is usable.
+  /// The folder is usable when it holds `themes` and the sibling `terminfo` folder holds the xterm-ghostty entry.
+  /// Pointing GHOSTTY_RESOURCES_DIR at a folder without that entry makes the child start with an unknown TERM.
   static func isResourcesDir(_ url: URL) -> Bool {
     var isDir: ObjCBool = false
-    return FileManager.default.fileExists(atPath: url.appendingPathComponent("themes").path, isDirectory: &isDir)
+    let hasThemes =
+      FileManager.default.fileExists(atPath: url.appendingPathComponent("themes").path, isDirectory: &isDir)
       && isDir.boolValue
+    let entry = url.deletingLastPathComponent().appendingPathComponent("terminfo/78/xterm-ghostty")
+    var isEntryDir: ObjCBool = true
+    let hasTerminfo =
+      FileManager.default.fileExists(atPath: entry.path, isDirectory: &isEntryDir) && !isEntryDir.boolValue
+    return hasThemes && hasTerminfo
   }
 
   /// A bundled app uses only its own Contents/Resources/ghostty, so an unrelated `.build` above the app never

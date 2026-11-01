@@ -58,18 +58,56 @@ import Testing
     #expect(try FileManager.default.contentsOfDirectory(atPath: resources.path) == ["AppIcon.icns"])
   }
 
-  @Test(arguments: ["ghostty/themes", "ghostty/shell-integration", "terminfo"])
+  @Test(arguments: ["ghostty/themes", "ghostty/shell-integration", "terminfo/78/xterm-ghostty"])
   func refusesAnIncompleteShare(missing: String) throws {
     let dir = try scratch()
     defer { try? FileManager.default.removeItem(at: dir) }
     let share = dir.appendingPathComponent("share")
-    for part in ["ghostty/themes", "ghostty/shell-integration", "terminfo"] where part != missing {
-      try touch(share, "\(part)/f")
+    for part in ["ghostty/themes/Dark", "ghostty/shell-integration/f", "terminfo/78/xterm-ghostty"]
+    where !part.hasPrefix(missing) {
+      try touch(share, part)
+    }
+    if missing.hasPrefix("terminfo") {
+      try FileManager.default.createDirectory(
+        at: share.appendingPathComponent("terminfo"), withIntermediateDirectories: true)
     }
     let resources = dir.appendingPathComponent("Resources")
     let r = try run(share: share, into: resources)
     #expect(r.status != 0)
     #expect(r.stderr.contains(missing))
     #expect(!exists(resources, "ghostty"))
+  }
+
+  @Test func copiesTheFilesThatSymlinksPointTo() throws {
+    let dir = try scratch()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = dir.appendingPathComponent("store")
+    try touch(store, "ghostty/themes/Dark")
+    try touch(store, "ghostty/shell-integration/f")
+    try touch(store, "terminfo/78/xterm-ghostty")
+    let share = dir.appendingPathComponent("share")
+    try FileManager.default.createDirectory(at: share, withIntermediateDirectories: true)
+    for name in ["ghostty", "terminfo"] {
+      try FileManager.default.createSymbolicLink(
+        at: share.appendingPathComponent(name), withDestinationURL: store.appendingPathComponent(name))
+    }
+    let resources = dir.appendingPathComponent("Resources")
+    #expect(try run(share: share, into: resources).status == 0)
+    for name in ["ghostty", "terminfo"] {
+      let attributes = try FileManager.default.attributesOfItem(atPath: resources.appendingPathComponent(name).path)
+      #expect(attributes[.type] as? FileAttributeType == .typeDirectory)
+    }
+    #expect(exists(resources, "terminfo/78/xterm-ghostty"))
+  }
+
+  @Test func refusesAnEmptyTerminfoFolder() throws {
+    let dir = try scratch()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let share = dir.appendingPathComponent("share")
+    try touch(share, "ghostty/themes/Dark")
+    try touch(share, "ghostty/shell-integration/f")
+    try touch(share, "terminfo/f")
+    let r = try run(share: share, into: dir.appendingPathComponent("Resources"))
+    #expect(r.status != 0)
   }
 }
