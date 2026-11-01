@@ -55,19 +55,18 @@ private struct MarkdownBlocksView: View {
       }
       .fixedSize(horizontal: false, vertical: true)
     case .table(let header, let alignments, let rows):
-      // Each column is as wide as its widest cell, up to a limit where the
-      // cell's text wraps. A table wider than the pane scrolls sideways.
       ScrollView(.horizontal) {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
           GridRow {
             ForEach(Array(header.enumerated()), id: \.offset) { c, cell in
-              tableCell(cell, alignments[c], header: true).gridColumnAlignment(alignment(alignments[c]))
+              tableCell(cell, alignments[c], header: true).gridColumnAlignment(alignments[c].horizontal)
             }
           }
           Divider()
           ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
             GridRow {
-              ForEach(Array(row.enumerated()), id: \.offset) { c, cell in tableCell(cell, alignments[c], header: false) }
+              ForEach(Array(row.enumerated()), id: \.offset) { c, cell in tableCell(cell, alignments[c], header: false)
+              }
             }
           }
         }
@@ -90,32 +89,18 @@ private struct MarkdownBlocksView: View {
   }
 
   private func tableCell(_ text: String, _ align: MarkdownBlock.Alignment, header: Bool) -> some View {
-    let styled = header ? inline(text).bold() : inline(text)
-    return styled
-      .multilineTextAlignment(textAlignment(align))
-      .frame(maxWidth: .infinity, alignment: Alignment(horizontal: alignment(align), vertical: .top))
-      .modifier(CappedWidth(limit: 320))
-  }
-
-  private func textAlignment(_ alignment: MarkdownBlock.Alignment) -> TextAlignment {
-    switch alignment {
-    case .leading: .leading
-    case .center: .center
-    case .trailing: .trailing
+    CappedWidthLayout(limit: 320) {
+      (header ? inline(text).bold() : inline(text))
+        .multilineTextAlignment(align.text)
+        .frame(maxWidth: .infinity, alignment: Alignment(horizontal: align.horizontal, vertical: .top))
     }
   }
 
-  private func alignment(_ alignment: MarkdownBlock.Alignment) -> HorizontalAlignment {
-    switch alignment {
-    case .leading: .leading
-    case .center: .center
-    case .trailing: .trailing
-    }
-  }
+  private static let inlineOptions = AttributedString.MarkdownParsingOptions(
+    interpretedSyntax: .inlineOnlyPreservingWhitespace)
 
   private func inline(_ text: String) -> Text {
-    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-    return Text((try? AttributedString(markdown: text, options: options)) ?? AttributedString(text))
+    Text((try? AttributedString(markdown: text, options: Self.inlineOptions)) ?? AttributedString(text))
   }
 }
 
@@ -123,14 +108,6 @@ private struct MarkdownBlocksView: View {
 /// child is wider, and measures the height at that width. A horizontal
 /// ScrollView proposes no width, so a plain `frame(maxWidth:)` would measure a
 /// wrapped cell's height as one line.
-private struct CappedWidth: ViewModifier {
-  let limit: CGFloat
-
-  func body(content: Content) -> some View {
-    CappedWidthLayout(limit: limit) { content }
-  }
-}
-
 private struct CappedWidthLayout: Layout {
   let limit: CGFloat
 
@@ -142,5 +119,23 @@ private struct CappedWidthLayout: Layout {
 
   func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
     subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+  }
+}
+
+extension MarkdownBlock.Alignment {
+  fileprivate var horizontal: HorizontalAlignment {
+    switch self {
+    case .leading: .leading
+    case .center: .center
+    case .trailing: .trailing
+    }
+  }
+
+  fileprivate var text: TextAlignment {
+    switch self {
+    case .leading: .leading
+    case .center: .center
+    case .trailing: .trailing
+    }
   }
 }

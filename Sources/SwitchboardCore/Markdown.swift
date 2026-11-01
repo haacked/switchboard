@@ -31,10 +31,19 @@ public enum MarkdownBlock: Equatable, Sendable {
   /// Reads the blocks of a reply. Text that no rule below recognizes becomes a
   /// paragraph, so nothing is lost.
   public static func parse(_ markdown: String) -> [MarkdownBlock] {
-    blocks(of: markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"))
+    blocks(of: markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"), depth: 0)
   }
 
-  private static func blocks(of lines: [String]) -> [MarkdownBlock] {
+  /// Lists and quotes nest this deep at most. Deeper text becomes one paragraph,
+  /// which keeps the recursion in the parser and in the view from overflowing
+  /// the stack on a reply such as ten thousand `>`.
+  private static let maxDepth = 32
+
+  private static func blocks(of lines: [String], depth: Int) -> [MarkdownBlock] {
+    guard depth <= maxDepth else {
+      let text = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+      return text.isEmpty ? [] : [.paragraph(text.joined(separator: "\n"))]
+    }
     var blocks: [MarkdownBlock] = []
     var paragraph: [String] = []
     func endParagraph() {
@@ -71,7 +80,7 @@ public enum MarkdownBlock: Equatable, Sendable {
           quoted.append(Self.unquoted(lines[i].trimmingCharacters(in: .whitespaces)))
           i += 1
         }
-        blocks.append(.quote(Self.blocks(of: quoted)))
+        blocks.append(.quote(Self.blocks(of: quoted, depth: depth + 1)))
       } else if i < lines.count, let table = Self.table(header: trimmed, delimiter: lines[i]) {
         endParagraph()
         i += 1
@@ -86,7 +95,7 @@ public enum MarkdownBlock: Equatable, Sendable {
         blocks.append(.table(header: table.header, alignments: table.alignments, rows: rows))
       } else if let first = Self.listItem(line) {
         endParagraph()
-        let (list, next) = Self.list(lines, from: i - 1, first: first)
+        let (list, next) = Self.list(lines, from: i - 1, first: first, depth: depth)
         blocks.append(list)
         i = next
       } else {
@@ -104,29 +113,28 @@ public enum MarkdownBlock: Equatable, Sendable {
   }
 
   /// Reads the list that starts at `lines[start]`, and returns it with the
-  /// index of the first line after it. A line that is indented deeper than
-  /// the first item, or that follows a blank line and is, belongs to the item
-  /// above it, and that item's lines are read as blocks of their own. A list
-  /// item of the same kind that is not deeper starts the next item, even after
-  /// blank lines. Any other line ends the list.
-  private static func list(_ lines: [String], from start: Int, first: ListMarker) -> (MarkdownBlock, Int) {
+  /// index of the first line after it. A line indented deeper than the first
+  /// item belongs to the item above it, and the item's lines are read as
+  /// blocks of their own. A list item of the same kind that is not deeper
+  /// starts the next item, even after blank lines. Any other line ends the list.
+  private static func list(_ lines: [String], from start: Int, first: ListMarker, depth: Int) -> (MarkdownBlock, Int) {
     let base = indent(lines[start])
     var items: [Item] = []
     var current: (marker: ListMarker, body: [String])?
     func endItem() {
       guard let (marker, body) = current else { return }
       let checkbox = Self.checkbox(marker.text)
-      items.append(Item(checked: checkbox.checked, blocks: Self.blocks(of: [checkbox.text] + body)))
+      items.append(Item(checked: checkbox.checked, blocks: Self.blocks(of: [checkbox.text] + body, depth: depth + 1)))
     }
     var i = start
     scan: while i < lines.count {
       let line = lines[i]
-      if line.trimmingCharacters(in: .whitespaces).isEmpty {
+      if line.isBlank {
         var next = i
-        while next < lines.count, lines[next].trimmingCharacters(in: .whitespaces).isEmpty { next += 1 }
+        while next < lines.count, lines[next].isBlank { next += 1 }
         guard next < lines.count else { break }
         if indent(lines[next]) > base {
-          current?.body += lines[i..<next].map { _ in "" }
+          current?.body += repeatElement("", count: next - i)
         } else if !(Self.listItem(lines[next]).map { $0.numbered == first.numbered } ?? false) {
           break scan
         }
@@ -205,7 +213,7 @@ public enum MarkdownBlock: Equatable, Sendable {
     guard header.contains("|"), delimiter.contains("|") else { return nil }
     let head = cells(header)
     let marks = cells(delimiter)
-    guard marks.count == head.count else { return nil }
+    guard !head.isEmpty, marks.count == head.count else { return nil }
     var alignments: [Alignment] = []
     for mark in marks {
       let left = mark.hasPrefix(":")
@@ -253,8 +261,8 @@ public enum MarkdownBlock: Equatable, Sendable {
 
   private struct ListMarker {
     let text: String
-    let numbered: Bool
     let number: Int?
+    var numbered: Bool { number != nil }
     /// The marker's characters, which the item's own lines are indented past.
     let width: Int
   }
@@ -263,14 +271,18 @@ public enum MarkdownBlock: Equatable, Sendable {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
     let lead = indent(line)
     for bullet in ["- ", "* ", "+ "] where trimmed.hasPrefix(bullet) {
-      return ListMarker(text: String(trimmed.dropFirst(2)), numbered: false, number: nil, width: lead + 2)
+      return ListMarker(text: String(trimmed.dropFirst(2)), number: nil, width: lead + 2)
     }
     let digits = trimmed.prefix { $0.isNumber }
     let rest = trimmed.dropFirst(digits.count)
     if !digits.isEmpty, digits.count <= 9, rest.hasPrefix(". ") || rest.hasPrefix(") ") {
       return ListMarker(
-        text: String(rest.dropFirst(2)), numbered: true, number: Int(digits), width: lead + digits.count + 2)
+        text: String(rest.dropFirst(2)), number: Int(digits), width: lead + digits.count + 2)
     }
     return nil
   }
+}
+
+extension String {
+  fileprivate var isBlank: Bool { trimmingCharacters(in: .whitespaces).isEmpty }
 }

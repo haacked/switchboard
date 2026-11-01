@@ -329,7 +329,9 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       MarkdownBlock.parse(md) == [
         .heading(level: 2, text: "Findings"),
         .paragraph("The merge **loses** findings:\nthe old pipeline found 6."),
-        .list(number: nil, items: [item("one"), item("two\nwrapped"), item("three", .list(number: nil, items: [item("nested")]))]),
+        .list(
+          number: nil,
+          items: [item("one"), item("two\nwrapped"), item("three", .list(number: nil, items: [item("nested")]))]),
         .list(number: 1, items: [item("first"), item("second")]),
         .code(language: "swift", text: "let x = 1\n\nlet y = 2"),
         .quote([.paragraph("quoted\ntext")]),
@@ -410,7 +412,10 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       MarkdownBlock.parse("| a || c |\n|---|---|---|\n| | y | |") == [
         .table(header: ["a", "", "c"], alignments: [.leading, .leading, .leading], rows: [["", "y", ""]])
       ])
-    #expect(MarkdownBlock.parse("| a | b |\n|---|---|") == [.table(header: ["a", "b"], alignments: [.leading, .leading], rows: [])])
+    #expect(
+      MarkdownBlock.parse("| a | b |\n|---|---|") == [
+        .table(header: ["a", "b"], alignments: [.leading, .leading], rows: [])
+      ])
   }
 
   @Test func aTableEndsWhereAnotherBlockStarts() {
@@ -420,6 +425,38 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       #expect(blocks.first == table, "\(next)")
       #expect(blocks.count == 2, "\(next)")
     }
+  }
+
+  @Test func aTableNeedsAtLeastOneColumn() {
+    for md in ["|\n|\n| a | b |\nmore", "||\n||\n| a |"] {
+      #expect(!MarkdownBlock.parse(md).contains { if case .table = $0 { true } else { false } }, "\(md)")
+      #expect("\(MarkdownBlock.parse(md))".contains("a"), "\(md)")
+    }
+  }
+
+  @Test func aLineOfOnlyUnicodeSpaceIsBlankInsideAList() {
+    #expect(MarkdownBlock.parse("- a\n\u{00A0}\n- b") == [.list(number: nil, items: [item("a"), item("b")])])
+  }
+
+  @Test func deepNestingStaysBoundedAndKeepsItsText() {
+    func depth(_ blocks: [MarkdownBlock]) -> Int {
+      1
+        + (blocks.map { block -> Int in
+          switch block {
+          case .quote(let inner): depth(inner)
+          case .list(_, let items): items.map { depth($0.blocks) }.max() ?? 0
+          default: 0
+          }
+        }.max() ?? 0)
+    }
+    let quotes = MarkdownBlock.parse(String(repeating: ">", count: 10_000) + " deep text")
+    let lists = MarkdownBlock.parse(String(repeating: "- ", count: 10_000) + "deep text")
+    let staircase = MarkdownBlock.parse(
+      (0..<600).map { String(repeating: " ", count: $0) + "- item\($0)" }.joined(separator: "\n"))
+    for blocks in [quotes, lists, staircase] { #expect(depth(blocks) <= 64) }
+    #expect("\(quotes)".contains("deep text"))
+    #expect("\(lists)".contains("deep text"))
+    #expect("\(staircase)".contains("item599"))
   }
 
   @Test func textThatIsNotATableStaysAParagraph() {
