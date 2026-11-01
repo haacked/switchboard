@@ -231,6 +231,12 @@ struct SessionRow: View {
           if pinned { Image(systemName: "star.fill").foregroundStyle(.yellow).imageScale(.small) }
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
+          if let pr = session.pr, let url = pr.link {
+            Link("#\(pr.number)", destination: url)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .help("\(pr.repo): \(pr.title)")
+          }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         Text(session.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
