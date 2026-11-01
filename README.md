@@ -185,6 +185,8 @@ bin/test --claude   # also the tests that run the installed claude with Haiku, i
 bin/bundle          # build/Switchboard.app
 ```
 
+The app draws its terminals with SwiftTerm. An experimental libghostty backend needs full Xcode and `mise` with zig 0.15.2 (`mise install zig@0.15.2`). `bin/build-ghostty` builds libghostty from the commit in `ghostty.pin` in about a minute, and `SB_GHOSTTY=1 swift build` links it. Then `SB_TERMINAL=ghostty` picks it when the app starts. It loads `~/.config/ghostty/config`, and `SB_GHOSTTY_CONFIG=<file>` adds more settings, such as `window-vsync = false` on a Mac whose displays are asleep. `bin/test` never builds it. See `plans/libghostty.md` next to the design plan.
+
 The stub plays the hook payloads that `bin/test --claude` records in `Tests/IntegrationTests/Fixtures/claude/`. After a Claude Code update, run `bin/test --claude` and read `git diff` on that folder to see what the new version sends.
 
 `spikes/phase0/` holds the Phase 0 tests that measured the Claude Code and GitHub behaviors this relies on.

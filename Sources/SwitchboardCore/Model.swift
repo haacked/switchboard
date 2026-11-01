@@ -195,6 +195,11 @@ public struct Terminals: Codable, Equatable, Sendable {
   public func attachCommand(_ pane: Pane) -> [String] {
     [tmux, "-S", socket, "attach-session", "-t", "=\(pane == .claude ? claude : shell)"]
   }
+
+  /// `attachCommand` as one line for a POSIX shell, for a terminal that takes a command string.
+  public func attachCommandLine(_ pane: Pane) -> String {
+    attachCommand(pane).map(shellQuote).joined(separator: " ")
+  }
 }
 
 public enum Pane: String, Sendable {
