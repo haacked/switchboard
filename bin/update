@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Updates Switchboard to the latest main: quits the app, fast-forwards this
+# checkout, runs bin/install, and opens the app. It checks the checkout before
+# it quits the app, so a refusal leaves the app running. Quitting the app does
+# not stop sbd or any session. bin/install restarts sbd.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+app="$HOME/Applications/Switchboard.app"
+timeout=30
+
+branch=$(git symbolic-ref --short -q HEAD || true)
+if [ "$branch" != main ]; then
+  echo "Refusing to update: this checkout is on '${branch:-a detached HEAD}', not main." >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Refusing to update: this checkout has uncommitted changes." >&2
+  exit 1
+fi
+git fetch origin
+if ! git merge-base --is-ancestor HEAD origin/main; then
+  echo "Refusing to update: main has commits that origin/main lacks, so it cannot fast-forward." >&2
+  exit 1
+fi
+
+bundle_id=com.haacked.switchboard
+if [ -f "$app/Contents/Info.plist" ]; then
+  bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")
+fi
+running() {
+  [ "$(osascript -e "application id \"$bundle_id\" is running")" = true ]
+}
+
+if running; then
+  echo "Quitting Switchboard…"
+  osascript -e "tell application id \"$bundle_id\" to quit"
+  for _ in $(seq "$timeout"); do
+    running || break
+    sleep 1
+  done
+  if running; then
+    echo "Switchboard did not quit within ${timeout}s. Quit it yourself and run bin/update again." >&2
+    exit 1
+  fi
+fi
+
+git merge --ff-only origin/main
+bin/install
+bin/start

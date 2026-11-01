@@ -9,10 +9,12 @@ Each session is a folder, or a new git worktree, with the real Claude Code termi
 
 ```
 bin/install
-open ~/Applications/Switchboard.app
+bin/start
 ```
 
 `bin/install` builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
+
+`bin/start` opens the installed app. `bin/update` quits the app, fast-forwards this checkout to `origin/main`, runs `bin/install`, and opens the app again. It refuses, with the app still running, when the checkout is not on main, has uncommitted changes, or cannot fast-forward. Quitting the app leaves `sbd` and your sessions running.
 
 It needs macOS 14 or later, the Xcode Command Line Tools (Swift 6.4), `tmux` (`brew install tmux`), `gh` signed in with `gh auth login` (`brew install gh`), and Claude Code signed in with your subscription. Sessions run the unmodified `claude` CLI. Switchboard never calls the Claude API.
 

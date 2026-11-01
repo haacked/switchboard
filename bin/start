@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Opens the installed app. Run bin/install first.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+app="$HOME/Applications/Switchboard.app"
+if [ ! -d "$app" ]; then
+  echo "Switchboard is not installed at $app. Run bin/install first." >&2
+  exit 1
+fi
+open "$app"
