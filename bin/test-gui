@@ -81,11 +81,14 @@ fail() {
   exit 1
 }
 
-wait_for 30 sb ls >/dev/null 2>&1 || { backend=sbd fail "sbd did not answer"; }
-session=$(sb new "$home/work" --name selftest --json | jq -r '.id')
-[ -n "$session" ] && [ "$session" != null ] || { backend=sbd fail "sb new returned no session id"; }
+wait_for 30 sb ls >/dev/null 2>&1 || backend=sbd fail "sbd did not answer"
 screen_has_stub() { sb screen "$session" 2>/dev/null | grep -q '^sizes '; }
-wait_for 30 screen_has_stub || { backend=stub fail "the stand-in claude never drew its screen"; }
+# Sets $session to a new session, once its stand-in claude has drawn its screen.
+new_session() {
+  session=$(sb new "$home/work" --name "$1" --json | jq -r '.id')
+  [ -n "$session" ] && [ "$session" != null ] || backend=sbd fail "sb new returned no session id"
+  wait_for 30 screen_has_stub || backend=stub fail "the stand-in claude never drew its screen"
+}
 
 # What the stand-in receives, in order: a b c, Return, Ctrl-C, Option-b, Up,
 # Down, Left, Backspace, Escape, Tab, Shift-Tab, x, and a bracketed paste of
@@ -119,7 +122,7 @@ check_backend() {
     "$bin_dir/Switchboard" >"$shots/app.log" 2>&1 &
   app_pid=$!
   finished() { grep -q '^selftest: \(done\|no terminal pane\)' "$shots/app.log" || ! kill -0 "$app_pid" 2>/dev/null; }
-  wait_for 90 finished || { fail "the self test did not finish"; }
+  wait_for 90 finished || fail "the self test did not finish"
   kill -KILL "$app_pid" 2>/dev/null || true
   wait "$app_pid" 2>/dev/null || true
   app_pid=''
@@ -132,10 +135,9 @@ check_backend() {
   grep -q "^terminal: $backend\$" "$shots/app.log" || fail "the app did not pick $backend: $(grep '^terminal:' "$shots/app.log")"
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
 
-  local got want ok=''
+  local got
   got=$(sed -n 's/^rx //p' "$home/shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
-  for want in "${accepted[@]}"; do [ "$got" = "$want" ] && ok=1; done
-  if [ -z "$ok" ]; then
+  if ! printf '%s\n' "${accepted[@]}" | grep -Fxq -- "$got"; then
     printf 'accepted: %s\n' "${accepted[@]}" >&2
     echo "received: $got" >&2
     fail "the stand-in received other bytes"
@@ -160,9 +162,6 @@ check_backend() {
 
 for b in "${backends[@]}"; do
   # Each backend gets a session of its own, so the screen holds only its bytes.
-  if [ "$b" != "${backends[0]}" ]; then
-    session=$(sb new "$home/work" --name "selftest-$b" --json | jq -r '.id')
-    wait_for 30 screen_has_stub || { backend=stub fail "the stand-in claude never drew its screen"; }
-  fi
+  new_session "selftest-$b"
   check_backend "$b"
 done
