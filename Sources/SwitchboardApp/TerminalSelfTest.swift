@@ -26,14 +26,40 @@ enum TerminalSelfTest {
     }
     guard let folder = env["SB_TERMINAL_TEST"] else { return }
     Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 4_000_000_000)
-      if model.selection == nil, let first = model.sessions.first {
-        model.selection = first.id
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-      }
+      await waitForAttach(model)
       await run(folder: folder)
       if ProcessInfo.processInfo.environment["SB_TERMINAL_TEST_EXIT"] != nil { NSApp.terminate(nil) }
     }
+  }
+
+  /// Selects the first session when none is selected. It then waits until the selected session reports
+  /// a tmux client on its Claude pane, a terminal view is in the window, and the file named by
+  /// SB_TERMINAL_TEST_READY exists (when that is set). The caller creates that file once the pane's
+  /// program has seen the terminal's size, which `attached` alone does not show under load. The wait
+  /// ends after 180 s and logs "gave up", which `bin/test-gui` treats as a failure.
+  private static func waitForAttach(_ model: BoardModel) async {
+    let start = Date()
+    let ready = ProcessInfo.processInfo.environment["SB_TERMINAL_TEST_READY"]
+    var met = false
+    while Date().timeIntervalSince(start) < 180 {
+      if model.selection == nil, let first = model.sessions.first { model.selection = first.id }
+      let readyFileExists = ready.map { FileManager.default.fileExists(atPath: $0) } ?? true
+      let attached = model.selected?.attached == true
+      if readyFileExists, attached, claudePane() != nil {
+        met = true
+        break
+      }
+      await pause(0.25)
+    }
+    let ms = Int(Date().timeIntervalSince(start) * 1000)
+    log(met ? "attached after \(ms) ms" : "gave up waiting to attach after \(ms) ms")
+    await pause(1)
+  }
+
+  private static func claudePane() -> NSView? {
+    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
+    else { return nil }
+    return panes(in: root).first
   }
 
   private static func panes(in view: NSView) -> [NSView] {
@@ -172,9 +198,7 @@ enum TerminalSelfTest {
   private static func log(_ text: String) { FileHandle.standardError.write(Data("selftest: \(text)\n".utf8)) }
 
   static func run(folder: String) async {
-    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView,
-      let pane = panes(in: root).first
-    else { return log("no terminal pane") }
+    guard let pane = claudePane() else { return log("no terminal pane") }
     pane.window?.makeFirstResponder(pane)
     log("pane \(type(of: pane)) \(Int(pane.bounds.width))x\(Int(pane.bounds.height))")
     await pause(1)
