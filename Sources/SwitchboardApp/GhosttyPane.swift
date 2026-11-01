@@ -249,7 +249,7 @@
 
     deinit {
       stopObserving()
-      // Every other path frees the surface through freeSurface(), so this frees one only for a view deallocated while it still holds a surface.
+      // A view deallocated while it still holds a surface frees it here. Every other path goes through freeSurface().
       if let surface { ghostty_surface_free(surface) }
     }
 
