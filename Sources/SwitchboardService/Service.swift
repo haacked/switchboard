@@ -740,14 +740,16 @@ public final class Service {
     var level = [pane]
     while !level.isEmpty {
       let kids = level.flatMap { children[$0] ?? [] }
-      if let match = kids.first(where: { row in
-        row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
-      }) {
-        return match.pid
-      }
+      if let match = kids.first(where: { runs($0, program: program) }) { return match.pid }
       level = kids.map(\.pid)
     }
     return nil
+  }
+
+  /// Whether the command of the process names the claude command, in its
+  /// first or second word.
+  static func runs(_ row: ProcessRow, program: String) -> Bool {
+    row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
   }
 
   /// Marks a pane that sbd just started as alive until the next snapshot, so

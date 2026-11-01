@@ -351,6 +351,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
       ])
     func held(_ label: String, in cwd: String) -> String {
       "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it."
+        + " Or import it with --stop to exit that claude."
     }
 
     let stop = "`CLAUDE_CONFIG_DIR='\(sbd.account("A"))' claude stop deadbeef`"
@@ -389,6 +390,85 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
     #expect(imported.refused.isEmpty)
     #expect(Set(imported.imported.map(\.claudeSessionId)) == [ids.live, ids.job])
+  }
+
+  /// A process whose command names the stub claude, like the claude that `claude agents` lists.
+  private func stubClaude(ignoringTerm: Bool = false) throws -> Process {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/bash")
+    p.arguments = ["-c", "\(ignoringTerm ? "trap '' TERM; " : "")exec -a claude-stub sleep 60"]
+    try p.run()
+    let pid = p.processIdentifier
+    for _ in 0..<100 {
+      let r = try runCommand("/bin/ps", ["-p", "\(pid)", "-o", "command="])
+      if r.stdout.hasPrefix("claude-stub") { break }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return p
+  }
+
+  @Test func stopExitsOnlyAnIdleInteractiveClaudeThatRunsTheSession() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/idle")
+    let sleeper = Process()
+    sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    sleeper.arguments = ["60"]
+    try sleeper.run()
+    let (idle, busy, waiting, job, ignores, other) =
+      (
+        try stubClaude(), try stubClaude(), try stubClaude(), try stubClaude(), try stubClaude(ignoringTerm: true),
+        try stubClaude()
+      )
+    let all = [idle, busy, waiting, job, ignores, other, sleeper]
+    defer { for p in all where p.isRunning { p.terminate() } }
+    func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
+    let ids = (
+      idle: newId(), busy: newId(), waiting: newId(), job: newId(), ignores: newId(), other: newId(), reused: newId()
+    )
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(ids.idle, cwd: tree, name: "idle", pid: pid(idle), status: "idle"),
+        agent(ids.busy, cwd: tree, name: "busy", pid: pid(busy), status: "busy"),
+        agent(ids.waiting, cwd: tree, name: "waiting", pid: pid(waiting), status: "waiting"),
+        agent(ids.job, cwd: tree, name: "job", pid: pid(job), status: "idle", job: "deadbeef"),
+        agent(ids.ignores, cwd: tree, name: "ignores", pid: pid(ignores), status: "idle"),
+        agent(ids.other, cwd: tree, name: "other", pid: pid(other), status: "idle"),
+        // The pid belongs to a process that is not a claude, as after a reboot or a crash.
+        agent(ids.reused, cwd: tree, name: "reused", pid: pid(sleeper), status: "idle"),
+      ])
+    let names = ["idle", "busy", "waiting", "job", "ignores", "other", "reused"]
+
+    // "other" is listed, but its ref is not in the stop list, so its claude stays.
+    let result = try sbd.client.importSessions(names, stop: names.filter { $0 != "other" })
+
+    #expect(result.imported.map(\.claudeSessionId) == [ids.idle])
+    #expect(Set(reasons(result).keys) == ["busy", "waiting", "job", "ignores", "other", "reused"])
+    #expect(reasons(result)["ignores"]?.contains("didn't exit after SIGTERM") == true)
+    #expect(reasons(result)["reused"]?.contains("is not a claude") == true)
+    idle.waitUntilExit()
+    #expect(idle.terminationReason == .uncaughtSignal && idle.terminationStatus == SIGTERM)
+    for p in [busy, waiting, job, ignores, other, sleeper] { #expect(p.isRunning) }
+    let cli = try sbd.run("import", "busy", "--stop")
+    #expect(cli.status == 1)
+    #expect(busy.isRunning)
+  }
+
+  @Test func stopRefusesAnIdleSessionWhosePidAnotherListedSessionThatIsBusyShares() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/shared")
+    let shared = try stubClaude()
+    defer { if shared.isRunning { shared.terminate() } }
+    let pid = Int(shared.processIdentifier)
+    let (stale, live) = (newId(), newId())
+    try sbd.writeAgents("A", [agent(stale, cwd: tree, name: "stale", pid: pid, status: "idle")])
+    try sbd.writeAgents("B", [agent(live, cwd: tree, name: "live", pid: pid, status: "busy")])
+
+    let result = try sbd.client.importSessions(["stale"], stop: ["stale"])
+
+    #expect(result.imported.isEmpty)
+    #expect(reasons(result)["stale"]?.contains("runs in another terminal") == true)
+    #expect(shared.isRunning)
   }
 
   @Test func failsWhenAnAccountsClaudeAgentsOutputIsNotJSON() throws {

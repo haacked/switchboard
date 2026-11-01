@@ -325,8 +325,8 @@ final class BoardModel: ObservableObject {
     Result { try Client().importable(all: all, repo: repo) }
   }
 
-  nonisolated func importSessions(_ refs: [String]) -> Result<ImportResult, Error> {
-    Result { try Client().importSessions(refs) }
+  nonisolated func importSessions(_ refs: [String], stop: [String]) -> Result<ImportResult, Error> {
+    Result { try Client().importSessions(refs, stop: stop) }
   }
 
   /// Clears the selected session and shows the Queue or the Board.

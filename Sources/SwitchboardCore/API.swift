@@ -201,9 +201,12 @@ public final class Client: Sendable {
     try call("account-use", ["account": .string(ref)], as: [AccountInfo].self)
   }
 
-  public func importSessions(_ refs: [String], name: String? = nil) throws -> ImportResult {
+  /// With `stop`, exits the idle interactive claude that runs each session
+  /// that one of these refs names before importing it.
+  public func importSessions(_ refs: [String], name: String? = nil, stop: [String] = []) throws -> ImportResult {
     var args: [String: JSON] = ["refs": .array(refs.map(JSON.string))]
     if let name { args["name"] = .string(name) }
+    if !stop.isEmpty { args["stop"] = .array(stop.map(JSON.string)) }
     return try call("import", args, as: ImportResult.self)
   }
 }

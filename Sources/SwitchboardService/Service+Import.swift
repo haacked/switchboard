@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 
 /// Lists the Claude sessions that run outside Switchboard, and imports them.
-/// Import never stops another claude, so a session imports only once no claude
+/// Import stops no claude unless asked to, so a session imports once no claude
 /// runs it. An interactive session leaves `claude agents` when its claude
 /// exits. So sbd remembers each session that it lists, and offers one that
 /// left the list for a day after it last listed it.
@@ -24,18 +24,23 @@ extension Service {
   /// Imports the sessions that the refs name. A ref is a Claude session id, a
   /// unique prefix of one, or a unique Claude name. git and the transcripts
   /// run off the state queue. A second check on the queue refuses a session
-  /// that another request imported meanwhile.
+  /// that another request imported meanwhile. `stop` lists the refs whose
+  /// claude may exit. A listed session that waits idle at its prompt in
+  /// another terminal gets SIGTERM, and imports once its claude has exited. A
+  /// busy or waiting session, a background job, and a session whose pid another
+  /// listed session that is not stoppable shares stay refused.
   func importSessions(_ args: JSON) throws -> ImportResult {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
     let name = args["name"]?.string
+    let stop = Set(args["stop"]?.array?.compactMap(\.string) ?? [])
     if name != nil && refs.count > 1 { throw APIError("a name fits only one imported session") }
     let candidates = try importCandidates()
     var refused: [Refusal] = []
     var chosen: [(ref: String, session: ClaudeSession)] = []
     queue.sync {
       for ref in refs {
-        switch resolve(ref, in: candidates) {
+        switch resolve(ref, in: candidates, stop: stop.contains(ref)) {
         case .success(let c):
           if !chosen.contains(where: { $0.session.id == c.id }) { chosen.append((ref, c)) }
         case .failure(let error):
@@ -43,6 +48,11 @@ extension Service {
         }
       }
     }
+    // Only a stoppable session can still run here. Its claude exits off the state queue.
+    let snapshot = chosen.contains { $0.session.running } ? buildSnapshot() : Snapshot()
+    let exits = concurrentMap(chosen.map(\.session)) { $0.running ? exitClaude(of: $0, in: snapshot) : nil }
+    refused += zip(chosen, exits).compactMap { item, why in why.map { Refusal(ref: item.ref, reason: $0) } }
+    chosen = zip(chosen, exits).filter { $0.1 == nil }.map(\.0)
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
       Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
@@ -144,8 +154,34 @@ extension Service {
     }
   }
 
-  /// The candidate that the ref names, or why it can't be imported.
-  private func resolve(_ ref: String, in candidates: [ClaudeSession]) -> Result<ClaudeSession, APIError> {
+  /// Sends SIGTERM to the claude that runs the session, and waits up to five
+  /// seconds for it to exit. Returns why it didn't exit, or nil once it has.
+  /// It sends nothing unless a fresh process list shows a claude command at
+  /// the pid, which is neither sbd nor the claude of a Switchboard session.
+  /// `claude agents` can list a pid that another process has reused.
+  private func exitClaude(of s: ClaudeSession, in snapshot: Snapshot) -> String? {
+    guard let pid = s.pid else { return nil }
+    guard pid > 1, pid != Int(getpid()), pid <= Int(Int32.max) else { return refuseToSignal(s, pid) }
+    if !Processes.exists(pid) { return nil }
+    let program = (config.claude as NSString).lastPathComponent
+    let isClaude = snapshot.children.values.joined().contains { $0.pid == pid && Service.runs($0, program: program) }
+    guard isClaude, !snapshot.claudePids.values.contains(pid) else { return refuseToSignal(s, pid) }
+    kill(pid_t(pid), SIGTERM)
+    for _ in 0..<50 {
+      if !Processes.exists(pid) { return nil }
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+    return "\(s.name ?? s.idPrefix)'s claude (pid \(pid)) didn't exit after SIGTERM. Exit it there, then import it."
+  }
+
+  private func refuseToSignal(_ s: ClaudeSession, _ pid: Int) -> String {
+    "\(s.name ?? s.idPrefix)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
+  }
+
+  /// The candidate that the ref names, or why it can't be imported. With
+  /// `stop`, an idle interactive session passes although a claude runs it,
+  /// unless a listed session that is not stoppable shares its pid.
+  private func resolve(_ ref: String, in candidates: [ClaudeSession], stop: Bool) -> Result<ClaudeSession, APIError> {
     let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
     guard matches.count == 1 else {
       if matches.isEmpty, let error = alreadyImported(ref, id: ref) { return .failure(error) }
@@ -156,7 +192,8 @@ extension Service {
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
     let label = c.name ?? c.idPrefix
-    if let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
+    let sharesBusyPid = candidates.contains { $0.id != c.id && $0.pid == c.pid && !$0.stoppable }
+    if !(stop && c.stoppable && !sharesBusyPid), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }
     return .success(c)
   }

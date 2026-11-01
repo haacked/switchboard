@@ -104,6 +104,13 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
 
   public var running: Bool { pid != nil }
 
+  /// True when an interactive claude runs the session and waits at its prompt.
+  /// Exiting that claude loses no turn.
+  public var stoppable: Bool { pid != nil && job == nil && status == "idle" }
+
+  /// True when no claude runs the session, or when `import --stop` can exit it.
+  public var importable: Bool { !running || stoppable }
+
   /// The name that the session gets on import: its branch in a worktree, else
   /// Claude's name, else its folder's name.
   public var title: String { (worktree ? branch : nil) ?? name ?? (cwd as NSString).lastPathComponent }
@@ -127,7 +134,8 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public func whereItRuns(_ label: String) -> String? {
     guard let pid else { return nil }
     guard let job else {
-      return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it."
+      let stop = stoppable ? " Or import it with --stop to exit that claude." : ""
+      return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it.\(stop)"
     }
     let stop = ClaudeAccount.command("claude stop \(job)", in: account)
     return "\(label) runs as background job \(job). Stop it with `\(stop)`, then import it."
