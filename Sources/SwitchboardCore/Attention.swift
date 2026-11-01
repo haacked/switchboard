@@ -36,6 +36,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// Background jobs that run under claude, as the last `job` event counted
+  /// them. A job sends no hooks, so sbd's tick finds it in the process list.
+  public var jobs = 0
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
   /// When the state last changed. `Attention.track` sets it.
@@ -65,7 +68,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The kinds of the events that the pollers and the summaries record. They
   /// report on GitHub, the folder, and a reply, not on the session. They do
   /// not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage"]
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job"]
 
   public init() {}
 
@@ -92,8 +95,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       lastReply = d["lastReply"]?.string
       // A reply means that the user sent a prompt before it.
       if d["hasReplies"]?.bool == true { prompts = max(prompts, 1) }
+    case "job":
+      jobs = d["count"]?.int ?? 0
     case "SessionEnd", "stopped", "exited":
       live = false
+      jobs = 0
       endTurn()
       subagents = []
     case "UserPromptSubmit":
@@ -196,6 +202,11 @@ public enum ReplyKind: Equatable, Sendable {
   /// A next step that needs no decision, such as "Want me to push?".
   case offer(String)
   case other
+
+  var isQuestion: Bool {
+    if case .question = self { return true }
+    return false
+  }
 }
 
 /// The attention rules. They follow the `/sessions` skill
@@ -243,6 +254,11 @@ public enum Attention {
     {
       let n = facts.subagents.count
       return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
+    }
+    // A question still needs the user's answer while a job runs.
+    if facts.jobs > 0, case let kind = classify(facts.lastReply ?? ""), !kind.isQuestion {
+      return Verdict(
+        state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
     }
     return replyVerdict(facts.lastReply ?? "")
   }
