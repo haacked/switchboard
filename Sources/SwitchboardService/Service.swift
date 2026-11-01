@@ -601,7 +601,11 @@ public final class Service {
     if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
     // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
     // Passing the checked tip makes git refuse when a commit landed after the check.
-    if let repo, let branch { _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip]) }
+    if let repo, let branch {
+      _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+      // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
+      _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+    }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {

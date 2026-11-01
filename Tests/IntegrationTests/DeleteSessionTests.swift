@@ -186,10 +186,12 @@ extension Instance {
   @Test func deletesTheBranchOfAMergedPR() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
+    try sbd.git(repo, "config", "branch.haacked/cdp-dlq-breaker-counts-lookups.remote", "origin")
     let r = try sbd.deleteSessionAndBranch(s.id)
     #expect(r.status == 0)
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
     #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") == "")
+    #expect(!(try sbd.git(repo, "config", "--list")).contains("branch.haacked/cdp-dlq-breaker-counts-lookups"))
     #expect(try sbd.client.sessions().isEmpty)
   }
 
