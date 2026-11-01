@@ -335,6 +335,19 @@ final class BoardModel: ObservableObject {
     mainView = view
   }
 
+  /// Opens a Board card. A session in the Queue list is focused there and
+  /// scrolled into view. Any other session opens directly, because the Queue
+  /// has no row for it.
+  func openFromBoard(_ id: String) {
+    guard triage.contains(where: { $0.id == id }) else {
+      selection = id
+      return
+    }
+    show(.queue)
+    queueFocus = id
+    queueJumps += 1
+  }
+
   /// Moves to the next Queue item while the Queue shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {

@@ -67,6 +67,70 @@ import Testing
     #expect(model.selection == "f")
   }
 
+  @Test func boardCardForAQueueSessionFocusesItInTheQueue() {
+    let model = model(["a", "b"])
+    model.show(.board)
+    let jumps = model.queueJumps
+    model.openFromBoard("b")
+    #expect(model.selection == nil)
+    #expect(model.visibleView == .queue)
+    #expect(model.queueFocus == "b")
+    #expect(model.queueJumps == jumps + 1)
+  }
+
+  @Test func boardCardForACanContinueSessionFocusesItInTheQueue() {
+    let model = model(["a"])
+    model.apply(.success([summary("a"), summary("c", state: .canContinue)]), followups: nil)
+    model.show(.board)
+    model.openFromBoard("c")
+    #expect(model.selection == nil)
+    #expect(model.visibleView == .queue)
+    #expect(model.queueFocus == "c")
+  }
+
+  @Test func boardCardForAFollowupOnlySessionSelectsIt() {
+    let model = model(["a"])
+    model.apply(.success([summary("a")]), followups: [summary("f", state: .notStarted)])
+    model.show(.board)
+    let jumps = model.queueJumps
+    model.openFromBoard("f")
+    #expect(model.selection == "f")
+    #expect(model.queueJumps == jumps)
+  }
+
+  @Test func boardCardForAnUnlistedIdSelectsItUntilThePollClearsIt() {
+    let model = model(["a"])
+    model.show(.board)
+    model.openFromBoard("gone")
+    #expect(model.selection == "gone")
+    model.apply(.success([summary("a")]), followups: nil)
+    #expect(model.selection == nil)
+  }
+
+  @Test func nextNeedingYouAfterABoardCardMovesOnFromTheClickedItem() {
+    let model = model(["a", "b", "c"])
+    model.show(.board)
+    model.openFromBoard("b")
+    model.selectNextNeedingYou()
+    #expect(model.currentQueueItem == "c")
+    #expect(model.visibleView == .queue)
+  }
+
+  @Test func boardCardForASessionOutsideTheQueueSelectsIt() {
+    for state in [AttentionState.working, .done, .stale] {
+      let model = model(["a"])
+      var outside = summary("r", state: state)
+      outside.triage = nil
+      model.apply(.success([summary("a"), outside]), followups: nil)
+      model.show(.board)
+      let jumps = model.queueJumps
+      model.openFromBoard("r")
+      #expect(model.selection == "r")
+      #expect(model.visibleView == nil)
+      #expect(model.queueJumps == jumps)
+    }
+  }
+
   @Test func nextNeedingYouWithAStaleSelectionActsAsWithNone() {
     let model = model(["a", "b"])
     model.show(.queue)

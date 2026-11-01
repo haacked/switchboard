@@ -54,8 +54,12 @@ struct TriageList: View {
         }
         .padding(.vertical, 6)
       }
-      .onChange(of: model.queueJumps) {
-        if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id) } }
+      .onChange(of: model.queueJumps, initial: true) {
+        // The rows have no layout yet when the Queue replaces the Board. A scroll
+        // right away often does nothing, so this waits 0.3 s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+          if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id) } }
+        }
       }
     }
   }
