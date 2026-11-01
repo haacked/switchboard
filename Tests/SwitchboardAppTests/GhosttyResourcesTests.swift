@@ -41,7 +41,7 @@ import Testing
         inBundle: true) == nil)
   }
 
-  @Test func bundledAppIgnoresAnEmptyOrFileGhosttyEntry() throws {
+  @Test func bundledAppIgnoresThemesThatIsAFile() throws {
     let root = try tempDir()
     defer { try? FileManager.default.removeItem(at: root) }
     let resources = root.appendingPathComponent("App.app/Contents/Resources")
@@ -80,6 +80,16 @@ import Testing
     defer { try? FileManager.default.removeItem(at: root) }
     let resources = root.appendingPathComponent("App.app/Contents/Resources")
     try makeResources(at: resources.appendingPathComponent("ghostty"), terminfoEntry: false)
+    #expect(GhosttyResources.locate(resourceURL: resources, executableURL: nil, inBundle: true) == nil)
+  }
+
+  @Test func bundledAppIgnoresATerminfoEntryThatIsADirectory() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let resources = root.appendingPathComponent("App.app/Contents/Resources")
+    try makeResources(at: resources.appendingPathComponent("ghostty"), terminfoEntry: false)
+    try FileManager.default.createDirectory(
+      at: resources.appendingPathComponent("terminfo/78/xterm-ghostty"), withIntermediateDirectories: true)
     #expect(GhosttyResources.locate(resourceURL: resources, executableURL: nil, inBundle: true) == nil)
   }
 
