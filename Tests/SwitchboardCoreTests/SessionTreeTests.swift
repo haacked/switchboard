@@ -41,10 +41,7 @@ import Testing
     let list = [
       summary("m"), summary("x"), summary("c", parent: "b"), summary("b", parent: "m"), summary("y", parent: "x"),
     ]
-    #expect(
-      SessionTree.subtree(of: "m", in: list).map { String(repeating: ">", count: $0.depth) + $0.id } == [
-        "m", ">b", ">>c",
-      ])
+    #expect(subtreeLayout("m", list) == ["m", ">b", ">>c"])
     #expect(SessionTree.subtree(of: "none", in: list).isEmpty)
   }
 
