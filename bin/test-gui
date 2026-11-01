@@ -7,7 +7,8 @@
 # bin/build-ghostty has built libghostty. The script ends the app, sbd, the
 # tmux server, the stand-in, and its folder in /tmp when it exits, whether or
 # not the checks passed. It keeps the app's log, the screen, and the pane
-# PNGs in .build/gui-test/<backend>.
+# PNGs in .build/gui-test/<backend>, and after any failure also sbd's log in
+# .build/gui-test/sbd.log.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
@@ -42,9 +43,16 @@ bin_dir=$(swift build --show-bin-path)
 home=$(mktemp -d /tmp/sbt.XXXXXX)
 echo $$ >"$home/owner.pid"
 app_pid=''
+backend=''
 cleanup() {
   status=$?
   trap - EXIT
+  # Any failure keeps the logs, including one that set -e or a signal caused.
+  if [ "$status" -ne 0 ]; then
+    mkdir -p .build/gui-test
+    cp "$home/sbd.log" .build/gui-test/sbd.log 2>/dev/null || true
+    save_shots 2>/dev/null || true
+  fi
   if [ -n "$app_pid" ]; then kill -KILL "$app_pid" 2>/dev/null || true; fi
   SB_HOME="$home" Tests/IntegrationTests/Fixtures/reap || true
   exit "$status"
@@ -73,8 +81,8 @@ wait_for() { # <seconds> <command…>
 
 # Replaces the last run's files in .build/gui-test/<backend> with this run's.
 save_shots() {
-  [ -d "$home/shots/$backend" ] || return 0
-  sb screen "$session" >"$home/shots/$backend/screen.txt" 2>/dev/null || true
+  [ -d "$home/shots/${backend:-}" ] || return 0
+  [ -z "${session:-}" ] || sb screen "$session" >"$home/shots/$backend/screen.txt" 2>/dev/null || true
   rm -rf ".build/gui-test/$backend"
   mkdir -p ".build/gui-test/$backend"
   cp -R "$home/shots/$backend/." ".build/gui-test/$backend/"
@@ -129,10 +137,27 @@ check_backend() {
   echo "Checking $backend…"
 
   env ${env_extra[@]+"${env_extra[@]}"} SB_SELECT="$session" SB_TERMINAL_TEST="$shots" SB_TERMINAL_TEST_EXIT=1 \
+    SB_TERMINAL_TEST_READY="$shots/ready" \
     "$bin_dir/Switchboard" >"$shots/app.log" 2>&1 &
   app_pid=$!
-  finished() { grep -q '^selftest: \(done\|no terminal pane\)' "$shots/app.log" || ! kill -0 "$app_pid" 2>/dev/null; }
-  wait_for 90 finished || fail "the self test did not finish"
+  app_alive() { kill -0 "$app_pid" 2>/dev/null; }
+  # Records how the app ended in its log, and ends the run when it is not alive.
+  check_app_alive() {
+    app_alive && return 0
+    local status=0
+    wait "$app_pid" || status=$?
+    app_pid=''
+    echo "app exited with status $status" >>"$shots/app.log"
+    fail "the app exited with status $status $1"
+  }
+  # The stand-in starts at 200x50 and sees a new size once the app's terminal attaches and resizes it.
+  pane_resized() { sb screen "$session" 2>/dev/null | grep -q '^sizes [^ ]* [^ ]' || ! app_alive; }
+  wait_for 120 pane_resized || fail "the stand-in never saw the app's terminal attach"
+  check_app_alive "before its terminal attached"
+  touch "$shots/ready"
+  finished() { grep -q '^selftest: \(done\|no terminal pane\)' "$shots/app.log" || ! app_alive; }
+  wait_for 240 finished || fail "the self test did not finish"
+  if ! grep -q '^selftest: done' "$shots/app.log"; then check_app_alive "during the self test"; fi
   kill -KILL "$app_pid" 2>/dev/null || true
   wait "$app_pid" 2>/dev/null || true
   app_pid=''

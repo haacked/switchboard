@@ -26,14 +26,34 @@ enum TerminalSelfTest {
     }
     guard let folder = env["SB_TERMINAL_TEST"] else { return }
     Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 4_000_000_000)
-      if model.selection == nil, let first = model.sessions.first {
-        model.selection = first.id
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-      }
+      await waitForAttach(model)
       await run(folder: folder)
       if ProcessInfo.processInfo.environment["SB_TERMINAL_TEST_EXIT"] != nil { NSApp.terminate(nil) }
     }
+  }
+
+  /// Selects the first session when none is selected. It then waits until the selected session reports
+  /// a tmux client on its Claude pane, a terminal view is in the window, and the file named by
+  /// SB_TERMINAL_TEST_READY exists (when that is set). The caller creates that file once the pane's
+  /// program has seen the terminal's size, which `attached` alone does not show under load. A slow
+  /// start can take far longer than a fixed delay, so the wait ends after 180 s, and `run` then
+  /// reports what is missing.
+  private static func waitForAttach(_ model: BoardModel) async {
+    let start = Date()
+    let ready = ProcessInfo.processInfo.environment["SB_TERMINAL_TEST_READY"]
+    while Date().timeIntervalSince(start) < 180 {
+      if model.selection == nil, let first = model.sessions.first { model.selection = first.id }
+      if let ready, !FileManager.default.fileExists(atPath: ready) {
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        continue
+      }
+      let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
+      let attached = model.selected?.attached == true
+      if attached, let root, !panes(in: root).isEmpty { break }
+      try? await Task.sleep(nanoseconds: 250_000_000)
+    }
+    log("attached after \(Int(Date().timeIntervalSince(start) * 1000)) ms")
+    await pause(1)
   }
 
   private static func panes(in view: NSView) -> [NSView] {
