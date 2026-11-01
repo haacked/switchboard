@@ -33,7 +33,9 @@ struct NewSessionView: View {
   private var makesWorktree: Bool { createWorktree && folderIsRepo }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let isRepo = folderIsRepo
+    let makesWorktree = createWorktree && isRepo
+    return VStack(alignment: .leading, spacing: 12) {
       Text("New Session").font(.title2.bold())
       SwiftUI.Form {
         HStack {
@@ -41,8 +43,8 @@ struct NewSessionView: View {
           Button("Choose…", action: choose)
         }
         Toggle("Create a worktree", isOn: Binding(get: { makesWorktree }, set: { createWorktree = $0 }))
-          .disabled(!folderIsRepo)
-          .help(folderIsRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
+          .disabled(!isRepo)
+          .help(isRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
         if makesWorktree {
           TextField("Branch", text: $form.branch, prompt: Text("optional: named automatically when blank"))
         }

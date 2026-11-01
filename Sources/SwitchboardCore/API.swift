@@ -67,16 +67,18 @@ extension NewSession {
   /// then a random suffix that makes a match with an existing branch unlikely.
   /// `freeAutoBranch` checks for one.
   public static func autoBranch(
-    name: String?, suffix: String = String(UUID().uuidString.lowercased().prefix(4))
+    name: String?, suffix: String = randomSuffix()
   ) -> String {
     let slug = Followup.slug(name ?? "", max: 40)
     return "\(slug.isEmpty ? "session" : slug)-\(suffix)"
   }
 
+  public static func randomSuffix() -> String { String(UUID().uuidString.lowercased().prefix(4)) }
+
   /// The first `autoBranch` name, with `prefix`, for which `exists` is false.
   public static func freeAutoBranch(
     prefix: String, name: String?, exists: (String) -> Bool,
-    suffix: () -> String = { String(UUID().uuidString.lowercased().prefix(4)) }
+    suffix: () -> String = randomSuffix
   ) -> String {
     var branch: String
     repeat { branch = prefix + autoBranch(name: name, suffix: suffix()) } while exists(branch)
