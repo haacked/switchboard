@@ -261,6 +261,12 @@ public final class Service {
       return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
+    // A job starts inside a turn, and the tick skips a running turn. The count
+    // is recorded before the Stop, so the session never shows Needs you
+    // between the Stop and the next tick.
+    if kind == "Stop", case .running(let pid) = claudeState(id) {
+      recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
+    }
     let event = record(id, kind, payload)
     switch kind {
     case "SessionStart":
@@ -789,10 +795,15 @@ public final class Service {
     }
   }
 
-  /// Background work is running when a child of claude leads its own process
-  /// group, as a background Bash job does.
-  func hasBackgroundJob(_ pid: Int) -> Bool {
-    (snapshot.children[pid] ?? []).contains { $0.pgid == $0.pid }
+  /// The number of background jobs. A job is a child of claude that leads its
+  /// own process group, as a background Bash job does.
+  func backgroundJobs(_ pid: Int, in children: [Int: [ProcessRow]]? = nil) -> Int {
+    ((children ?? snapshot.children)[pid] ?? []).filter { $0.pgid == $0.pid }.count
+  }
+
+  /// Records the job count when it differs from the one in the session's facts.
+  func recordJobs(_ id: String, _ count: Int) {
+    if count != entries[id]?.facts.jobs { record(id, "job", ["count": .number(Double(count))]) }
   }
 
   /// Records each claude that exited or started without a hook, and stops
@@ -819,7 +830,10 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          if hasBackgroundJob(pid) { entries[id]?.lastJobSeen = now }
+          let jobs = backgroundJobs(pid)
+          if jobs > 0 { entries[id]?.lastJobSeen = now }
+          // A running turn outranks the job rule. The tick records the count after the turn ends.
+          if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
           if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
@@ -863,7 +877,7 @@ public final class Service {
     // for twice the idle time lost its SubagentStop, as when sbd was down.
     guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
     guard !attached(id) else { return false }
-    return !hasBackgroundJob(pid)
+    return backgroundJobs(pid) == 0
   }
 
   // MARK: Summaries

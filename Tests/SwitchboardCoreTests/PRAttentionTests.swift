@@ -320,6 +320,14 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
   }
 
+  @Test func openPRRuleWinsOverARunningJob() throws {
+    let f = try prFacts(samplePR(mergeable: .conflicting), then: [event("job", 3, ["count": 1])])
+
+    #expect(
+      Attention.evaluate(session(), f, now: Self.now)
+        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+  }
+
   @Test func openPRRuleWinsOverAnOffer() throws {
     let f = try prFacts(samplePR(mergeable: .conflicting), reply: "Want me to push?")
 
