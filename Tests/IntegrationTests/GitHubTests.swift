@@ -186,21 +186,32 @@ extension Instance {
       try sbd.poll(all: true)
       return try sbd.get(s.id)
     }
-    let requested = try state {
+    let copilot: JSON = ["requestedReviewer": ["__typename": "Bot", "login": "copilot-pull-request-reviewer"]]
+    let draft = try state {
+      $0["isDraft"] = true
       $0["reviewDecision"] = "REVIEW_REQUIRED"
       $0["latestOpinionatedReviews"] = ["nodes": []]
-      $0["reviewRequests"] = ["nodes": [["requestedReviewer": ["__typename": "User", "login": "alex"]]]]
+      $0["reviewRequests"] = ["nodes": [copilot]]
     }
+    #expect(draft.state == .needsYou)
+
+    let requested = try state { $0["isDraft"] = false }
     #expect(requested.state == .waiting)
-    #expect(requested.reason == "review of #18303 by alex")
+    #expect(requested.reason == "review of #18303 by copilot-pull-request-reviewer")
     #expect(try sbd.triage().isEmpty)
 
-    let reviewed = try state { $0["reviewRequests"] = ["nodes": []] }
+    // GitHub clears the request when the reviewer submits.
+    let reviewed = try state {
+      $0["reviewRequests"] = ["nodes": []]
+      $0["reviews"] = [
+        "nodes": [["author": ["__typename": "Bot", "login": "copilot-pull-request-reviewer"], "state": "COMMENTED"]]
+      ]
+    }
     #expect(reviewed.state == .needsYou)
     #expect(reviewed.reason == "read its last reply and decide what's next")
+    #expect(try sbd.triage().map(\.id) == [s.id])
 
-    #expect(
-      try state { $0["reviewRequests"] = ["nodes": [["requestedReviewer": ["login": "alex"]]]] }.state == .waiting)
+    #expect(try state { $0["reviewRequests"] = ["nodes": [copilot]] }.state == .waiting)
     let failing = try state { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": "FAILURE"]]]]] }
     #expect(failing.state == .needsYou)
   }
