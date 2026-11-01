@@ -65,9 +65,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// recorded it.
   public var triage: TriageSummary?
 
-  /// The kinds of the events that the pollers and the summaries record. They
-  /// report on GitHub, the folder, and a reply, not on the session. They do
-  /// not hold off the idle stop or the Stale state.
+  /// The kinds of the events that the pollers, the summaries, and the tick
+  /// record. They report on GitHub, the folder, a reply, and claude's
+  /// background jobs, not on the session. They do not hold off the idle stop
+  /// or the Stale state.
   static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job"]
 
   public init() {}

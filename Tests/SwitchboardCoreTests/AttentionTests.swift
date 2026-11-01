@@ -151,6 +151,15 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 3).state == .needsYou)
   }
 
+  @Test func offerWaitsWhileAJobRuns() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "The server is up. Want me to run the tests?"]),
+      event("job", 2, ["count": 1]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 3).state == .waiting)
+  }
+
   @Test func subagentsOutrankBackgroundJobs() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "go"]), event("SubagentStart", 1, ["agent_id": "a1"]),

@@ -31,9 +31,11 @@ import Testing
   /// the clock by 1 ms to run the tick.
   @Test func sessionWaitsWhileItsBackgroundJobRuns() throws {
     let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
-    let s = try sbd.new(prompt: "background 100 held")
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
+    try sbd.sb("send", s.id, "background 100 held")
     try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
-    try sbd.advanceClock(1)
+    // No tick has run since the Stop, so the Stop itself counted the job.
     let waiting = try sbd.get(s.id)
     #expect(waiting.state == .waiting)
     #expect(waiting.reason == "waiting on 1 background job")
@@ -53,7 +55,7 @@ import Testing
 
   @Test func sessionWaitsUntilItsLastBackgroundJobEnds() throws {
     let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
-    let s = try sbd.new(prompt: "background 100 two")
+    let s = try sbd.new(prompt: "background 100 held two")
     try sbd.waitFor(s.id, "the turn that starts the jobs") { $0.lastReply == "Started a job of 100 s." }
     try sbd.advanceClock(1)
     #expect(try sbd.get(s.id).reason == "waiting on 2 background jobs")
