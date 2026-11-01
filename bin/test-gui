@@ -24,6 +24,7 @@ if [ "${SB_GHOSTTY:-}" = 1 ]; then
     backends+=(ghostty)
   else
     echo "Skipping ghostty: .build/ghostty is missing. Run bin/build-ghostty."
+    unset SB_GHOSTTY
   fi
 fi
 
@@ -31,7 +32,7 @@ plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
 args=()
 if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
 echo "Building…"
-swift build ${args[@]+"${args[@]}"} >/dev/null
+build_output=$(swift build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
 bin_dir=$(swift build --show-bin-path)
 
 # The folder is under /tmp, because a Unix socket path can't exceed 103 bytes.
@@ -70,14 +71,24 @@ wait_for() { # <seconds> <command…>
   done
 }
 
+# Replaces the last run's files in .build/gui-test/<backend> with this run's.
+save_shots() {
+  [ -d "$home/shots/$backend" ] || return 0
+  sb screen "$session" >"$home/shots/$backend/screen.txt" 2>/dev/null || true
+  rm -rf ".build/gui-test/$backend"
+  mkdir -p ".build/gui-test/$backend"
+  cp -R "$home/shots/$backend/." ".build/gui-test/$backend/"
+}
+
 fail() {
+  save_shots || true
   echo "FAIL ($backend): $*" >&2
   echo "--- sbd log" >&2
   tail -n 20 "$home/sbd.log" >&2 || true
   echo "--- app log" >&2
   tail -n 20 "$home/shots/$backend/app.log" >&2 || true
   echo "--- screen" >&2
-  cat "$home/shots/screen.txt" >&2 || true
+  cat "$home/shots/$backend/screen.txt" >&2 || true
   exit 1
 }
 
@@ -107,10 +118,9 @@ done
 
 check_backend() {
   backend=$1
-  local shots="$home/shots/$backend" env_extra=()
+  local shots="$home/shots/$backend" env_extra=(SB_TERMINAL="$backend")
   mkdir "$shots"
   if [ "$backend" = ghostty ]; then
-    env_extra=(SB_TERMINAL=ghostty)
     if [ -z "${SB_GHOSTTY_CONFIG:-}" ]; then
       echo "window-vsync = false" >"$shots/ghostty.conf"
       env_extra+=("SB_GHOSTTY_CONFIG=$shots/ghostty.conf")
@@ -127,16 +137,13 @@ check_backend() {
   wait "$app_pid" 2>/dev/null || true
   app_pid=''
 
-  sb screen "$session" >"$home/shots/screen.txt"
-  mkdir -p ".build/gui-test/$backend"
-  cp -R "$shots/." ".build/gui-test/$backend/"
-  cp "$home/shots/screen.txt" ".build/gui-test/$backend/screen.txt"
+  save_shots
 
   grep -q "^terminal: $backend\$" "$shots/app.log" || fail "the app did not pick $backend: $(grep '^terminal:' "$shots/app.log")"
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
 
   local got
-  got=$(sed -n 's/^rx //p' "$home/shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
+  got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
   if ! printf '%s\n' "${accepted[@]}" | grep -Fxq -- "$got"; then
     printf 'accepted: %s\n' "${accepted[@]}" >&2
     echo "received: $got" >&2
@@ -148,7 +155,7 @@ check_backend() {
   # starts with sizes from before the app attached. The window then got 300 pt
   # narrower and 200 pt shorter and went back: the last size appeared before,
   # with a different size in between.
-  read -r -a sizes <<<"$(sed -n 's/^sizes //p' "$home/shots/screen.txt")"
+  read -r -a sizes <<<"$(sed -n 's/^sizes //p' "$shots/screen.txt")"
   local last=${sizes[${#sizes[@]} - 1]} earlier=-1 changed='' i
   for ((i = 0; i < ${#sizes[@]} - 1; i++)); do
     if [ "${sizes[i]}" = "$last" ]; then earlier=$i; changed=''; else [ $earlier -ge 0 ] && changed=1; fi
