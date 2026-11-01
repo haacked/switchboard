@@ -564,23 +564,32 @@ public final class Service {
 
   /// Stops claude, removes the worktree when asked, then closes the panes and
   /// forgets the session. A removal that asked for the worktree first checks
-  /// that nothing is lost, and refuses before it stops anything. git runs off
+  /// that nothing is lost, and refuses before it stops anything. `branch`
+  /// also deletes the local branch, and needs `worktree`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
   /// can take a while. A failed removal leaves the session and its panes in
   /// place. The conversation's transcript stays in the account's projects
   /// folder, because Claude Code has no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
-    let (session, mergedPR, sharedWith): (Session, Bool, String?) = try queue.sync {
+    let removesBranch = args["branch"]?.bool == true
+    guard removesWorktree || !removesBranch else {
+      throw APIError("A branch checked out in a worktree can't be deleted. Remove the worktree too.")
+    }
+    let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       let entry = entries[id]!
       let shared = entries.values.first { $0.session.id != id && $0.session.cwd == entry.session.cwd }
-      return (entry.session, entry.facts.pr?.state == .merged, shared?.session.id)
+      return (entry.session, entry.facts.pr, shared?.session.id)
     }
     var repo: String?
-    if removesWorktree { repo = try checkWorktreeIsLossless(session, mergedPR: mergedPR, sharedWith: sharedWith) }
+    var branch: (name: String, tip: String)?
+    if removesWorktree {
+      repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
+    }
+    if removesBranch { branch = try checkBranchIsMerged(session, pr: pr) }
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -590,6 +599,13 @@ public final class Service {
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
     if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
+    // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
+    // Passing the checked tip makes git refuse when a commit landed after the check.
+    if let repo, let branch {
+      _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+      // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
+      _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+    }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
@@ -601,7 +617,26 @@ public final class Service {
       try store.delete(session: session.id)
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
-    return ["removed": .string(session.id), "worktree_removed": .bool(repo != nil)]
+    return [
+      "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branch != nil),
+    ]
+  }
+
+  /// Returns the session's branch and its tip, or throws unless the worktree has the branch
+  /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
+  /// hold the only copy of the work, and a commit made after the merge is in no PR.
+  private func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
+    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
+      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
+    }
+    guard let pr, pr.state == .merged, pr.head == branch else {
+      throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
+    }
+    let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
+    guard tip == pr.headSha else {
+      throw APIError("\(branch) has commits that are not in its merged PR \(pr.url). Keep the branch.")
+    }
+    return (branch, tip)
   }
 
   /// Returns the session's repo, or throws unless the session's folder is a
@@ -617,7 +652,9 @@ public final class Service {
       )
     }
     if let sharedWith {
-      throw APIError("\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree.")
+      throw APIError(
+        "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."
+      )
     }
     let linked = try worktreePaths(repo).dropFirst()
     let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
