@@ -194,3 +194,62 @@ import Testing
     #expect(more == nil)
   }
 }
+
+@MainActor
+@Suite struct BoardModelManager {
+  func summary(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, card: Bool = false)
+    -> SessionSummary
+  {
+    var s = SessionSummary(
+      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
+      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
+    s.manager = manager ? true : nil
+    return s
+  }
+
+  func model(_ list: [SessionSummary]) -> BoardModel {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.apply(.success(list), followups: nil)
+    return model
+  }
+
+  @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
+    for state in [AttentionState.needsYou, .canContinue] {
+      for card in [false, true] {
+        let model = model([summary("m", manager: true, state: state, card: card), summary("a")])
+        #expect(model.triage.map(\.id) == ["a"])
+        #expect(model.currentQueueItem == "a")
+      }
+    }
+  }
+
+  @Test func theManagerAloneLeavesTheQueueEmpty() {
+    let model = model([summary("m", manager: true, card: true)])
+    #expect(model.triage.isEmpty)
+    #expect(model.needsYou.isEmpty)
+    #expect(model.currentQueueItem == nil)
+  }
+
+  @Test func nextNeedingYouSkipsTheManagerInTheQueueAndOutsideIt() {
+    let model = model([summary("m", manager: true), summary("a"), summary("b")])
+    model.show(.queue)
+    model.selectNextNeedingYou()
+    model.selectNextNeedingYou()
+    model.selectNextNeedingYou()
+    #expect(model.currentQueueItem != "m")
+    #expect(model.queueFocus != "m")
+    model.show(.board)
+    for _ in 0..<3 {
+      model.selectNextNeedingYou()
+      #expect(model.selection != "m")
+    }
+  }
+
+  @Test func theManagerDoesNotNotifyWhenItStartsNeedingYou() {
+    let model = model([summary("m", manager: true, state: .working), summary("a", state: .working)])
+    let next = [summary("m", manager: true), summary("a")]
+    #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
+  }
+}

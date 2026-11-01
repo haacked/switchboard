@@ -447,7 +447,10 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(MarkdownBlock.parse(table(65)) == [.paragraph(table(65))])
     // A few bytes per row must not build thousands of cells.
     let wide = "|" + String(repeating: "a|", count: 5_000)
-    #expect(MarkdownBlock.parse("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|") == [.paragraph("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|")])
+    #expect(
+      MarkdownBlock.parse("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|") == [
+        .paragraph("\(wide)\n|" + String(repeating: "-|", count: 5_000) + "\n|\n|")
+      ])
   }
 
   @Test func codeInAListItemKeepsItsIndentationWhateverTheMarkerWidth() {
@@ -565,5 +568,26 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(!config.triage.enabled)
     #expect(config.triage.account == "~/.claude-work")
     #expect(config.triage.model == "haiku")
+  }
+}
+
+@Suite struct TriageManager {
+  func summary(_ id: String, manager: Bool, state: AttentionState = .needsYou, source: TriageSource = .summary)
+    -> SessionSummary
+  {
+    var s = SessionSummary(
+      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
+      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: source)
+    s.manager = manager ? true : nil
+    return s
+  }
+
+  @Test func theOrderLeavesOutTheManager() {
+    let list = [
+      summary("m1", manager: true, source: .card), summary("m2", manager: true),
+      summary("m3", manager: true, state: .canContinue), summary("a", manager: false),
+    ]
+    #expect(Triage.order(list).map(\.id) == ["a"])
   }
 }
