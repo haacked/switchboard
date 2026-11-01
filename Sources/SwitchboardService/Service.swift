@@ -362,8 +362,48 @@ public final class Service {
 
   /// The repo's worktrees, starting with the main checkout.
   func worktreePaths(_ repo: String) throws -> [String] {
-    try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
-      .filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
+    try worktreeEntries(repo).map(\.path)
+  }
+
+  struct WorktreeEntry {
+    var path: String
+    var branch: String?
+    /// Set by `git worktree lock`, which tools such as Supacode use. `worktree remove` refuses it.
+    var locked: Bool
+  }
+
+  func worktreeEntries(_ repo: String) throws -> [WorktreeEntry] {
+    var entries: [WorktreeEntry] = []
+    for line in try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(
+      separator: "\n", omittingEmptySubsequences: true)
+    {
+      if line.hasPrefix("worktree ") {
+        entries.append(WorktreeEntry(path: String(line.dropFirst("worktree ".count)), branch: nil, locked: false))
+      } else if line.hasPrefix("branch refs/heads/") {
+        entries[entries.count - 1].branch = String(line.dropFirst("branch refs/heads/".count))
+      } else if line == "locked" || line.hasPrefix("locked ") {
+        entries[entries.count - 1].locked = true
+      }
+    }
+    return entries
+  }
+
+  func worktreeEntry(_ repo: String, at path: String) throws -> WorktreeEntry? {
+    try worktreeEntries(repo).first { samePath($0.path, path) }
+  }
+
+  func samePath(_ a: String, _ b: String) -> Bool {
+    // The last component may be gone, so only its parent is resolved.
+    let real = { (path: String) -> String in
+      let url = URL(fileURLWithPath: path)
+      return url.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent)
+        .path
+    }
+    return real(a) == real(b)
+  }
+
+  func lockedError(_ path: String) -> APIError {
+    APIError("\(path) is a locked worktree, so git won't remove it. Unlock it with `git worktree unlock` first.")
   }
 
   func branchExists(_ repo: String, _ branch: String) -> Bool {
@@ -595,7 +635,8 @@ public final class Service {
   /// Stops claude, removes the worktree when asked, then closes the panes and
   /// forgets the session. A removal that asked for the worktree first checks
   /// that nothing is lost, and refuses before it stops anything. `branch`
-  /// also deletes the local branch, and needs `worktree`. git runs off
+  /// also deletes the local branch, and needs `worktree`. `remote_branch`
+  /// also deletes the branch on its remote, and needs `branch`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
   /// can take a while. A failed removal leaves the session and its panes in
   /// place. A store that can't delete the session's record also refuses the
@@ -604,12 +645,20 @@ public final class Service {
   /// The branch is checked again at that point. A failed check or delete keeps
   /// the branch and throws after the session is forgotten. The conversation's
   /// transcript stays in the account's projects folder, because Claude Code has
-  /// no command that archives a local session.
+  /// no command that archives a local session. A session whose folder is gone
+  /// has no worktree to check or remove. Git forgets the worktree, and the
+  /// branch passes the same checks from the repo.
+  /// The remote branch is deleted only after the local branch is, and only when
+  /// it is at the merged PR's head. Otherwise it stays and the call throws.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
+    let removesRemoteBranch = args["remote_branch"]?.bool == true
     guard removesWorktree || !removesBranch else {
       throw APIError("A branch checked out in a worktree can't be deleted. Remove the worktree too.")
+    }
+    guard removesBranch || !removesRemoteBranch else {
+      throw APIError("The remote branch can't be deleted without the local branch. Delete the local branch too.")
     }
     let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
       let id = try lookup(args)
@@ -621,10 +670,18 @@ public final class Service {
     }
     var repo: String?
     var branch: (name: String, tip: String)?
+    let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
     if removesWorktree {
-      repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
+      if folderGone {
+        repo = try checkGoneWorktree(session)
+      } else {
+        repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
+      }
     }
-    if removesBranch { branch = try checkBranchIsMerged(session, pr: pr) }
+    if removesBranch {
+      branch =
+        folderGone ? try checkGoneBranchIsMerged(repo!, session, pr: pr) : try checkBranchIsMerged(session, pr: pr)
+    }
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -635,7 +692,7 @@ public final class Service {
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
+    if let repo { _ = try gitOutput(repo, folderGone ? ["worktree", "prune"] : ["worktree", "remove", session.cwd]) }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
@@ -651,6 +708,15 @@ public final class Service {
         branchError = error
       }
     }
+    var remoteRemoved = false
+    var remoteError: Error?
+    if let repo, let branch, branchRemoved, removesRemoteBranch, let pr {
+      do {
+        remoteRemoved = try deleteRemoteBranch(repo, branch.name, pr: pr)
+      } catch {
+        remoteError = error
+      }
+    }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
@@ -663,11 +729,63 @@ public final class Service {
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     if let branchError, let branch {
-      throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)")
+      let remote = removesRemoteBranch ? " It also kept the remote branch, because the local branch stayed." : ""
+      throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError).\(remote)")
+    }
+    if let remoteError {
+      throw APIError(
+        "Removed \(session.id), its worktree, and its local branch, and kept the remote branch: \(remoteError)")
     }
     return [
       "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branchRemoved),
+      "remote_branch_removed": .bool(remoteRemoved),
     ]
+  }
+
+  /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
+  /// worktree for it or git keeps the worktree locked.
+  private func checkGoneWorktree(_ session: Session) throws -> String {
+    guard let repo = session.repo else {
+      throw APIError(
+        "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
+      )
+    }
+    if let entry = try worktreeEntry(repo, at: session.cwd), entry.locked { throw lockedError(session.cwd) }
+    return repo
+  }
+
+  /// `checkBranchIsMerged` for a session whose folder is gone: the branch is read from the repo.
+  private func checkGoneBranchIsMerged(_ repo: String, _ session: Session, pr: PullRequest?) throws -> (
+    name: String, tip: String
+  ) {
+    guard let branch = session.branch, branchExists(repo, branch) else {
+      throw APIError("\(session.branch ?? "The branch of \(session.id)") no longer exists.")
+    }
+    guard let pr, pr.state == .merged, pr.head == branch else {
+      throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
+    }
+    let tip = try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"])
+    try requireTip(tip, of: branch, inMerged: pr)
+    let elsewhere = try worktreeEntries(repo).contains { $0.branch == branch && !samePath($0.path, session.cwd) }
+    guard !elsewhere else { throw APIError("\(branch) is checked out in a worktree.") }
+    return (branch, tip)
+  }
+
+  /// Deletes the branch from the remote it tracks, or from origin, when the remote's tip is the
+  /// head of the merged PR. Returns false when the remote has no such branch. The push names the
+  /// tip it expects, so git refuses when the branch moved after the check.
+  private func deleteRemoteBranch(_ repo: String, _ branch: String, pr: PullRequest) throws -> Bool {
+    let remote =
+      (try? gitOutput(repo, ["config", "branch.\(branch).remote"])).flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
+    let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"])
+    guard let tip = listed.split(whereSeparator: \.isWhitespace).first.map(String.init) else { return false }
+    guard tip == pr.headSha else {
+      throw APIError(
+        "\(remote)/\(branch) is at \(tip.prefix(8)), not the merged PR's head \(pr.headSha.prefix(8)). Keep the remote branch."
+      )
+    }
+    _ = try gitOutput(repo, ["push", remote, "--delete", "--force-with-lease=refs/heads/\(branch):\(tip)", branch])
+    return true
   }
 
   /// Returns the session's branch and its tip, or throws unless the worktree has the branch
@@ -727,6 +845,7 @@ public final class Service {
     guard linked.contains(where: { real($0) == real(session.cwd) }) else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
+    if try worktreeEntry(repo, at: session.cwd)?.locked == true { throw lockedError(session.cwd) }
     // The flag keeps status from taking the index lock while claude commits.
     let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
     let changed = status.split(separator: "\n").count

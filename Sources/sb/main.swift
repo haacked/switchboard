@@ -37,11 +37,13 @@ let usage = """
     note <session> [<text>]       add a note, or list the notes
     note <session> --rm <id>
     rename <session> <name>
-    rm <session> [--worktree [--delete-branch]]
+    rm <session> [--worktree [--delete-branch [--delete-remote-branch]]]
                                   remove the session, and its worktree with --worktree, which refuses
                                   uncommitted files, unpushed commits, and a folder sbd didn't make.
                                   --delete-branch also deletes the local branch, and refuses unless the
-                                  session's PR is merged and the branch has no commit after it
+                                  session's PR is merged and the branch has no commit after it.
+                                  --delete-remote-branch also deletes the branch on its remote, and keeps
+                                  it, with an error, unless it is at the merged PR's head
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -452,6 +454,7 @@ case "rm":
     [
       "session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree")),
       "branch": .bool(a.switches.contains("--delete-branch")),
+      "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
     ])
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "import":
