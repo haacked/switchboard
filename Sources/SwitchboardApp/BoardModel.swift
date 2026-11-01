@@ -117,10 +117,25 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
+  /// hook event and the views never show. Publishing for it redraws the views
+  /// and restarts a tooltip's hover delay.
+  private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
+    a.count == b.count
+      && zip(a, b).allSatisfy { old, new in
+        var old = old
+        old.lastActivity = new.lastActivity
+        return old == new
+      }
+  }
+
   private func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
     switch result {
     case .success(let list):
-      unreachable = nil
+      // Assigning a @Published property republishes even an equal value. A
+      // refresh every second would redraw the views each time, and a redraw
+      // resets the hover delay before a tooltip shows.
+      if unreachable != nil { unreachable = nil }
       if let more, followups != more { followups = more }
       if loaded {
         for s in list where s.state == .needsYou && knownStates[s.id] != .needsYou && knownStates[s.id] != nil {
@@ -132,14 +147,15 @@ final class BoardModel: ObservableObject {
       }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
-      if sessions != list { sessions = list }
+      if !sameShown(sessions, list) { sessions = list }
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
       loaded = true
       NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
     case .failure(let error):
-      unreachable = "\(error)"
+      let problem = "\(error)"
+      if unreachable != problem { unreachable = problem }
     }
   }
 

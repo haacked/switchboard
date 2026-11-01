@@ -114,14 +114,19 @@ struct SessionView: View {
             .help("Stop claude now. It resumes when you send a message or open the session again.")
         } else {
           Button("Resume") { model.resume(session.id) }
+            .help("Restart claude in this session. It continues the conversation.")
         }
         Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
+          .help(
+            session.markedDone
+              ? "Mark the session not done. It returns to its own group on the board, and to the Queue if it needs you or claude can continue."
+              : "Mark the session done. It leaves the Queue and moves to Done on the board.")
         Button(role: .destructive) {
           ui.confirmingRemove = true
         } label: {
           Image(systemName: "trash")
         }
-        .help("Remove the session")
+        .help("Remove the session. Asks you to confirm first.")
       }
     }
     .padding(12)
