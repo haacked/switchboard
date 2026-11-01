@@ -40,10 +40,10 @@ func ago(_ ms: Int64) -> String {
 struct ContentView: View {
   @EnvironmentObject var model: BoardModel
 
-  private var viewChoice: Binding<Bool?> {
+  private var viewChoice: Binding<MainView?> {
     Binding(
-      get: { model.selected == nil ? model.showingBoard : nil },
-      set: { if let board = $0 { model.show(board: board) } })
+      get: { model.selected == nil ? model.mainView : nil },
+      set: { if let view = $0 { model.show(view) } })
   }
 
   var body: some View {
@@ -70,7 +70,10 @@ struct ContentView: View {
         } else if let s = model.selected {
           SessionView(session: s).id(s.id)
         } else {
-          if model.showingBoard { BoardView() } else { QueueView() }
+          switch model.mainView {
+          case .queue: QueueView()
+          case .board: BoardView()
+          }
         }
       }
     }
@@ -78,8 +81,8 @@ struct ContentView: View {
       ToolbarItem(placement: .navigation) {
         // No segment is selected while a session shows.
         Picker("View", selection: viewChoice) {
-          Text("Queue (\(model.triage.count))").tag(Bool?.some(false))
-          Text("Board").tag(Bool?.some(true))
+          Text("Queue (\(model.triage.count))").tag(MainView?.some(.queue))
+          Text("Board").tag(MainView?.some(.board))
         }
         .pickerStyle(.segmented)
         .labelsHidden()

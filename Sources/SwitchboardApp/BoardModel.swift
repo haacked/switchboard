@@ -3,6 +3,12 @@ import Foundation
 import SwitchboardCore
 import UserNotifications
 
+/// The two views that the detail pane shows while no session is selected.
+enum MainView {
+  case queue
+  case board
+}
+
 /// The app's view of sbd. It polls `ls` once a second, because sbd keeps
 /// state in memory and answers in a few milliseconds.
 @MainActor
@@ -18,8 +24,8 @@ final class BoardModel: ObservableObject {
   /// The id of the Done session whose delete the sidebar is confirming.
   @Published var confirmingDelete: String?
   var presentingSheet: Bool { showingNew || showingImport }
-  /// With no session selected, the detail shows the Board instead of the Queue.
-  @Published var showingBoard = false
+  /// The view that the detail pane shows while no session is selected.
+  @Published var mainView = MainView.queue
   /// The Queue item that the user last moved to.
   @Published var queueFocus: String?
   /// Counts ⌘J presses in the Queue. Each one scrolls to the current item,
@@ -86,6 +92,9 @@ final class BoardModel: ObservableObject {
   }
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
+
+  /// The Queue or the Board while no session is selected, else nil.
+  var visibleView: MainView? { selection == nil ? mainView : nil }
 
   /// The focused Queue session while it exists, else the first item. A session
   /// that the user just answered leaves the list while it works, and the
@@ -319,18 +328,19 @@ final class BoardModel: ObservableObject {
     Result { try Client().importSessions(refs) }
   }
 
-  /// Clears the selected session and shows the Board or the Queue.
-  func show(board: Bool) {
+  /// Clears the selected session and shows the Queue or the Board.
+  func show(_ view: MainView) {
     selection = nil
-    showingBoard = board
+    mainView = view
   }
 
   /// Moves to the next Queue item while the Queue shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
-    let list = selection == nil && !showingBoard ? triage : needsYou
+    let inQueue = visibleView == .queue
+    let list = inQueue ? triage : needsYou
     guard !list.isEmpty else { return }
-    if selection == nil && !showingBoard {
+    if inQueue {
       let i = list.firstIndex { $0.id == currentQueueItem } ?? -1
       queueFocus = list[(i + 1) % list.count].id
       queueJumps += 1
