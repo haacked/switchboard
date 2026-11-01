@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_QUEUE focuses a session's item in the Queue, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, and SB_SHEET=import opens the import sheet. SB_SNAPSHOT names a
+/// app starts, SB_QUEUE focuses a session's item in the Queue, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, and SB_SHEET=import opens the import sheet. SB_SNAPSHOT names a
 /// PNG file that the app draws its main window, or the window's open sheet,
 /// into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
 /// window itself, so this needs no screen recording permission. The drawing
@@ -18,6 +18,9 @@ enum Snapshot {
     if let id = env["SB_BOARD_CLICK"] {
       model.show(.board)
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { model.openFromBoard(id) }
+      if env["SB_JUMP"] != nil {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.selectNextNeedingYou() }
+      }
     }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
     TerminalSelfTest.start(model)
