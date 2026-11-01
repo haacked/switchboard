@@ -38,6 +38,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var lastLaunch: Int64?
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
+  /// The descriptions of the background shell jobs that the last Stop listed
+  /// as running. A finished job sends claude a prompt. The turn for that
+  /// prompt ends in another Stop, which replaces this list.
+  public var backgroundJobs: [String] = []
   /// When the state last changed. `Attention.track` sets it.
   public var stateSince: Int64 = 0
   public var lastState: AttentionState?
@@ -96,6 +100,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       live = false
       endTurn()
       subagents = []
+      backgroundJobs = []
     case "UserPromptSubmit":
       if userPrompt { prompts += 1 }
       startTurn(event.t)
@@ -142,6 +147,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "Stop":
       endTurn()
       lastReply = d["last_assistant_message"]?.string
+      backgroundJobs = (d["background_tasks"]?.array ?? []).compactMap { task in
+        guard task["type"]?.string == "shell", task["status"]?.string == "running" else { return nil }
+        return task["description"]?.string ?? task["command"]?.string ?? "a background job"
+      }
     case "StopFailure", "idle":
       // An API or usage limit error ends the turn without a Stop. So does
       // Escape, which sbd finds out from `claude agents` and records as idle.
@@ -235,16 +244,26 @@ public enum Attention {
     }
     if let v = openPR(facts) { return v }
     if let v = awaitingReview(facts) { return v }
+    if let v = runningWork(facts, now: now) { return v }
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    if !facts.subagents.isEmpty, now - facts.lastActivity <= subagentQuietMs,
-      case .other = classify(facts.lastReply ?? "")
-    {
-      let n = facts.subagents.count
-      return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
-    }
     return replyVerdict(facts.lastReply ?? "")
+  }
+
+  /// Waiting while a background job or a subagent runs, when the turn has
+  /// ended and the reply asks nothing and offers nothing. A shell job sends no
+  /// events while it runs. A subagent that sends no event for `subagentQuietMs`
+  /// stops holding the session.
+  static func runningWork(_ facts: SessionFacts, now: Int64) -> Verdict? {
+    guard case .other = classify(facts.lastReply ?? "") else { return nil }
+    if let job = facts.backgroundJobs.first {
+      let more = facts.backgroundJobs.count - 1
+      return Verdict(state: .waiting, reason: oneLine(job + (more > 0 ? " and \(more) more" : "")))
+    }
+    let n = facts.subagents.count
+    guard n > 0, now - facts.lastActivity <= subagentQuietMs else { return nil }
+    return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
   }
 
   /// Evaluates the session at `now`, and records in `facts` when its state

@@ -107,13 +107,74 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 5).state == .canContinue)
   }
 
-  @Test func turnEndedWithASubagentRunningIsWorking() {
+  @Test func turnEndedWithASubagentRunningIsWaiting() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "go"]),
       event("SubagentStart", 1, ["agent_id": "a1"]),
       event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
     ])
-    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .working, reason: "waiting on 1 subagent"))
+    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func turnEndedWithSeveralReviewersRunningIsWaiting() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "/review-code"]),
+      event("SubagentStart", 1, ["agent_id": "a1", "agent_type": "code-reviewer-correctness"]),
+      event("SubagentStart", 2, ["agent_id": "a2", "agent_type": "code-reviewer-testing"]),
+      event(
+        "Stop", 3,
+        ["last_assistant_message": "Two reviewers are still running. I'll validate the findings once they report."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .waiting, reason: "waiting on 2 subagents"))
+  }
+
+  @Test func aBackgroundJobStaysWaitingPastTheSubagentQuietLimit() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "I'm waiting on CI.", "background_tasks": [Self.watch]]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 2 + Attention.subagentQuietMs).state == .waiting)
+  }
+
+  private static let watch: JSON = [
+    "id": "b1", "status": "running", "type": "shell", "description": "gh run watch 41",
+  ]
+
+  @Test func turnEndedWithABackgroundJobRunningIsWaiting() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "I'm waiting on CI.", "background_tasks": [Self.watch]]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 2) == Verdict(state: .waiting, reason: "gh run watch 41"))
+  }
+
+  @Test func aBackgroundJobDoesNotHideAQuestion() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event(
+        "Stop", 1,
+        ["last_assistant_message": "CI is running. Which fix do you want?", "background_tasks": [Self.watch]]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 2).state == .needsYou)
+  }
+
+  @Test func theJobsCompletionReturnsTheSessionToTheReplyVerdict() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "I'm waiting on CI.", "background_tasks": [Self.watch]]),
+      event("UserPromptSubmit", 2, ["prompt": "<task-notification><task-id>b1</task-id></task-notification>"]),
+      event("Stop", 3, ["last_assistant_message": "CI passed.", "background_tasks": []]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4).state == .needsYou)
+  }
+
+  @Test func aSessionThatEndedHoldsNoBackgroundJob() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "I'm waiting on CI.", "background_tasks": [Self.watch]]),
+      event("SessionEnd", 2, [:]),
+    ])
+    #expect(f.backgroundJobs.isEmpty)
   }
 
   @Test func subagentStopReturnsTheSessionToTheReplyVerdict() {
