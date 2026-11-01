@@ -392,16 +392,17 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(Set(imported.imported.map(\.claudeSessionId)) == [ids.live, ids.job])
   }
 
-  /// A process whose command names the stub claude, like the claude that `claude agents` lists.
-  private func stubClaude(ignoringTerm: Bool = false) throws -> Process {
+  /// A process whose command starts with `argv0`. The stub claude's name makes it look like the claude that
+  /// `claude agents` lists.
+  private func stubClaude(argv0: String = "claude-stub", ignoringTerm: Bool = false) throws -> Process {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/bash")
-    p.arguments = ["-c", "\(ignoringTerm ? "trap '' TERM; " : "")exec -a claude-stub sleep 60"]
+    p.arguments = ["-c", "\(ignoringTerm ? "trap '' TERM; " : "")exec -a '\(argv0)' sleep 60"]
     try p.run()
     let pid = p.processIdentifier
     for _ in 0..<100 {
       let r = try runCommand("/bin/ps", ["-p", "\(pid)", "-o", "command="])
-      if r.stdout.hasPrefix("claude-stub") { break }
+      if r.stdout.hasPrefix(argv0) { break }
       Thread.sleep(forTimeInterval: 0.05)
     }
     return p
@@ -419,11 +420,14 @@ private func reasons(_ result: ImportResult) -> [String: String] {
         try stubClaude(), try stubClaude(), try stubClaude(), try stubClaude(), try stubClaude(ignoringTerm: true),
         try stubClaude()
       )
-    let all = [idle, busy, waiting, job, ignores, other, sleeper]
+    // `tail claude-stub` has the claude command as an argument, which is not claude. `node claude-stub` is.
+    let (lookalike, viaNode) = (try stubClaude(argv0: "tail claude-stub"), try stubClaude(argv0: "node claude-stub"))
+    let all = [idle, busy, waiting, job, ignores, other, sleeper, lookalike, viaNode]
     defer { for p in all where p.isRunning { p.terminate() } }
     func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
     let ids = (
-      idle: newId(), busy: newId(), waiting: newId(), job: newId(), ignores: newId(), other: newId(), reused: newId()
+      idle: newId(), busy: newId(), waiting: newId(), job: newId(), ignores: newId(), other: newId(), reused: newId(),
+      lookalike: newId(), viaNode: newId()
     )
     try sbd.writeAgents(
       "A",
@@ -436,22 +440,53 @@ private func reasons(_ result: ImportResult) -> [String: String] {
         agent(ids.other, cwd: tree, name: "other", pid: pid(other), status: "idle"),
         // The pid belongs to a process that is not a claude, as after a reboot or a crash.
         agent(ids.reused, cwd: tree, name: "reused", pid: pid(sleeper), status: "idle"),
+        agent(ids.lookalike, cwd: tree, name: "lookalike", pid: pid(lookalike), status: "idle"),
+        agent(ids.viaNode, cwd: tree, name: "viaNode", pid: pid(viaNode), status: "idle"),
       ])
-    let names = ["idle", "busy", "waiting", "job", "ignores", "other", "reused"]
+    let names = ["idle", "busy", "waiting", "job", "ignores", "other", "reused", "lookalike", "viaNode"]
 
     // "other" is listed, but its ref is not in the stop list, so its claude stays.
     let result = try sbd.client.importSessions(names, stop: names.filter { $0 != "other" })
 
-    #expect(result.imported.map(\.claudeSessionId) == [ids.idle])
-    #expect(Set(reasons(result).keys) == ["busy", "waiting", "job", "ignores", "other", "reused"])
+    #expect(Set(result.imported.map(\.claudeSessionId)) == [ids.idle, ids.viaNode])
+    #expect(Set(reasons(result).keys) == ["busy", "waiting", "job", "ignores", "other", "reused", "lookalike"])
     #expect(reasons(result)["ignores"]?.contains("didn't exit after SIGTERM") == true)
     #expect(reasons(result)["reused"]?.contains("is not a claude") == true)
     idle.waitUntilExit()
     #expect(idle.terminationReason == .uncaughtSignal && idle.terminationStatus == SIGTERM)
-    for p in [busy, waiting, job, ignores, other, sleeper] { #expect(p.isRunning) }
+    viaNode.waitUntilExit()
+    #expect(viaNode.terminationReason == .uncaughtSignal)
+    for p in [busy, waiting, job, ignores, other, sleeper, lookalike] { #expect(p.isRunning) }
     let cli = try sbd.run("import", "busy", "--stop")
     #expect(cli.status == 1)
     #expect(busy.isRunning)
+  }
+
+  @Test func stopKeepsTheBusyRowWhenTwoAccountsListOneSessionWithOnePid() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/twice")
+    let (first, second) = (try stubClaude(), try stubClaude())
+    defer { for p in [first, second] where p.isRunning { p.terminate() } }
+    let (idleFirst, busyFirst) = (newId(), newId())
+    // Each session is idle in one account and busy in the other, in both orders.
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(idleFirst, cwd: tree, name: "idleFirst", pid: Int(first.processIdentifier), status: "idle"),
+        agent(busyFirst, cwd: tree, name: "busyFirst", pid: Int(second.processIdentifier), status: "busy"),
+      ])
+    try sbd.writeAgents(
+      "B",
+      [
+        agent(idleFirst, cwd: tree, name: "idleFirst", pid: Int(first.processIdentifier), status: "busy"),
+        agent(busyFirst, cwd: tree, name: "busyFirst", pid: Int(second.processIdentifier), status: "idle"),
+      ])
+
+    let result = try sbd.client.importSessions(["idleFirst", "busyFirst"], stop: ["idleFirst", "busyFirst"])
+
+    #expect(result.imported.isEmpty)
+    #expect(Set(reasons(result).keys) == ["idleFirst", "busyFirst"])
+    #expect(first.isRunning && second.isRunning)
   }
 
   @Test func stopRefusesAnIdleSessionWhosePidAnotherListedSessionThatIsBusyShares() throws {

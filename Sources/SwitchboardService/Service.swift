@@ -752,6 +752,19 @@ public final class Service {
     row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
   }
 
+  /// Programs that run a script named in the second word of their command.
+  private static let interpreters: Set<String> = ["node", "bun", "deno", "python", "python3", "sh", "bash", "zsh"]
+
+  /// Whether the process is claude itself: its command starts with the claude
+  /// command, or with an interpreter that runs it. `runs` is looser, because
+  /// any argument in the second word matches, such as `tail /tmp/claude`.
+  /// Signals use this one.
+  static func isClaude(_ row: ProcessRow, program: String) -> Bool {
+    let words = row.command.split(separator: " ").map { ($0 as NSString).lastPathComponent }
+    guard let first = words.first else { return false }
+    return first == program || (interpreters.contains(first) && words.dropFirst().first == program)
+  }
+
   /// Marks a pane that sbd just started as alive until the next snapshot, so
   /// a second request can't start it again. A snapshot that began before
   /// this can no longer replace it.

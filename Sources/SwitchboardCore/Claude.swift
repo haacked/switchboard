@@ -108,6 +108,10 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// Exiting that claude loses no turn.
   public var stoppable: Bool { pid != nil && job == nil && status == "idle" }
 
+  /// Which of two rows for one session to keep: 2 for a claude that runs and
+  /// can't be stopped, 1 for one that can be, 0 when none runs.
+  public var keepRank: Int { running ? (stoppable ? 1 : 2) : 0 }
+
   /// True when no claude runs the session, or when `import --stop` can exit it.
   public var importable: Bool { !running || stoppable }
 

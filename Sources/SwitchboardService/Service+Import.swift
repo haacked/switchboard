@@ -89,7 +89,9 @@ extension Service {
 
   /// The sessions that `claude agents --json` lists in each account. A row
   /// whose process is gone counts as a session that no claude runs. When two
-  /// accounts list a session, the row whose claude runs wins.
+  /// accounts list a session, the row whose claude runs wins. A row whose
+  /// claude can't be stopped wins over one whose claude can, so that `stop`
+  /// never exits a claude that another account lists as busy.
   private func listAgents(_ accounts: [String], now: Int64) throws -> [ClaudeSession] {
     guard let claude = findExecutable(config.claude) else {
       throw APIError("can't find \(config.claude). Set \"claude\" in \(home.config)")
@@ -107,7 +109,7 @@ extension Service {
     var byId: [String: ClaudeSession] = [:]
     for var s in try lists.flatMap({ try $0.get() }) {
       if let pid = s.pid, !Processes.exists(pid) { s.clearProcess() }
-      if byId[s.id]?.running != true { byId[s.id] = s }
+      if byId[s.id].map({ $0.running && $0.keepRank >= s.keepRank }) != true { byId[s.id] = s }
     }
     return Array(byId.values)
   }
@@ -164,7 +166,8 @@ extension Service {
     guard pid > 1, pid != Int(getpid()), pid <= Int(Int32.max) else { return refuseToSignal(s, pid) }
     if !Processes.exists(pid) { return nil }
     let program = (config.claude as NSString).lastPathComponent
-    let isClaude = snapshot.children.values.joined().contains { $0.pid == pid && Service.runs($0, program: program) }
+    let rows = snapshot.children.values.joined()
+    let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
     guard isClaude, !snapshot.claudePids.values.contains(pid) else { return refuseToSignal(s, pid) }
     kill(pid_t(pid), SIGTERM)
     for _ in 0..<50 {
