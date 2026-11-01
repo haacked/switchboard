@@ -67,6 +67,32 @@ import Testing
     #expect(model.selection == "f")
   }
 
+  @Test func boardCardForAQueueSessionFocusesItInTheQueue() {
+    let model = model(["a", "b"])
+    model.show(.board)
+    let jumps = model.queueJumps
+    model.openFromBoard("b")
+    #expect(model.selection == nil)
+    #expect(model.visibleView == .queue)
+    #expect(model.queueFocus == "b")
+    #expect(model.queueJumps == jumps + 1)
+  }
+
+  @Test func boardCardForASessionOutsideTheQueueSelectsIt() {
+    for state in [AttentionState.working, .done, .stale] {
+      let model = model(["a"])
+      var outside = summary("r", state: state)
+      outside.triage = nil
+      model.apply(.success([summary("a"), outside]), followups: nil)
+      model.show(.board)
+      let jumps = model.queueJumps
+      model.openFromBoard("r")
+      #expect(model.selection == "r")
+      #expect(model.visibleView == nil)
+      #expect(model.queueJumps == jumps)
+    }
+  }
+
   @Test func nextNeedingYouWithAStaleSelectionActsAsWithNone() {
     let model = model(["a", "b"])
     model.show(.queue)

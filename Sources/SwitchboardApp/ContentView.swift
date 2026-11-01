@@ -294,7 +294,7 @@ struct BoardView: View {
                 LazyVStack(spacing: 8) {
                   ForEach(model.board.filter { $0.state == state }) { s in
                     Button {
-                      model.selection = s.id
+                      model.openFromBoard(s.id)
                     } label: {
                       VStack(alignment: .leading, spacing: 4) {
                         Text(s.name).fontWeight(.medium).lineLimit(1)
