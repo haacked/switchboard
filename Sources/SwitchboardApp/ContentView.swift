@@ -247,7 +247,7 @@ struct SessionRow: View {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {
-            Link("#\(pr.number)", destination: url)
+            Link(destination: url) { Text(verbatim: "#\(pr.number)") }
               .font(.caption)
               .foregroundStyle(.secondary)
               .help("\(pr.repo): \(pr.title)")
@@ -313,7 +313,7 @@ struct BoardView: View {
                           Text(s.name).fontWeight(.medium).lineLimit(1)
                           Spacer()
                           if let pr = s.pr {
-                            Text("#\(pr.number)")
+                            Text(verbatim: "#\(pr.number)")
                               .font(.caption.bold())
                               .foregroundStyle(pr.status.color)
                               .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
