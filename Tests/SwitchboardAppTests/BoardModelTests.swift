@@ -69,13 +69,37 @@ import Testing
 
   @Test func nextNeedingYouWithAStaleSelectionActsAsWithNone() {
     let model = model(["a", "b"])
-    model.show(board: false)
+    model.show(.queue)
     model.selection = "a"
     model.apply(.success([summary("b")]), followups: nil)
     let jumps = model.queueJumps
     model.selectNextNeedingYou()
     #expect(model.selection == nil)
     #expect(model.queueJumps == jumps + 1)
+  }
+}
+
+@MainActor
+@Suite struct BoardModelVisibleView {
+  @Test func isTheMainViewWhileNothingIsSelected() {
+    let model = BoardModel()
+    #expect(model.visibleView == .queue)
+    model.show(.board)
+    #expect(model.visibleView == .board)
+  }
+
+  @Test func isNilWhileASessionIsSelected() {
+    let model = BoardModel()
+    model.selection = "a"
+    #expect(model.visibleView == nil)
+  }
+
+  @Test func showClearsTheSelection() {
+    let model = BoardModel()
+    model.selection = "a"
+    model.show(.queue)
+    #expect(model.selection == nil)
+    #expect(model.visibleView == .queue)
   }
 }
 
