@@ -237,7 +237,7 @@ struct SessionRow: View {
           if let pr = session.pr, let url = pr.link {
             Link("#\(pr.number)", destination: url)
               .font(.caption)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(pr.status.color)
               .help("\(pr.repo): \(pr.title)")
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -246,6 +246,17 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
+  }
+}
+
+extension PRStatus {
+  var color: Color {
+    switch self {
+    case .draft, .closed: .gray
+    case .merged: .purple
+    case .approved: .green
+    case .changesRequested, .reviewRequired, .notApproved: .blue
+    }
   }
 }
 
