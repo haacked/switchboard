@@ -112,10 +112,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The Trunk queue state that the trunk-io comments show, and nil when no
   /// comment shows one.
   public var queue: TrunkQueueState?
-  /// The logins (or team slugs) whose review GitHub still waits on. A
-  /// reviewer who submitted a review leaves the list. nil when the poll
-  /// didn't ask, as in events that an older sbd recorded, which differs from
-  /// an empty list that says nobody was asked.
+  /// The logins or team slugs whose review GitHub still asks for. A reviewer
+  /// leaves the list when they submit a review. nil means the poll did not
+  /// read the field, as in events that an older sbd recorded. An empty list
+  /// means nobody was asked.
   public var reviewRequests: [String]?
 
   public init(
@@ -168,6 +168,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
       return approvers.isEmpty ? .notApproved : .approved
     }
   }
+
+  /// Whether the head commit's checks ended in failure or error.
+  public var checksFailed: Bool { checks == "FAILURE" || checks == "ERROR" }
 
   /// Whether the PR is open, not a draft, and approved.
   public var isApproved: Bool { status == .approved }

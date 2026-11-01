@@ -59,26 +59,24 @@ extension Attention {
     }
   }
 
-  /// Waiting while an open PR needs only the review that GitHub still waits
-  /// on, so the session has nothing to do until a reviewer answers. Each
-  /// condition below keeps a case in Needs you that the user or Claude must
-  /// act on. Run it after `openPR`, which has handled conflicts, requested
-  /// changes, and approvals.
+  /// Waiting while an open PR needs only the review that GitHub still asks
+  /// for. Each condition keeps a case in Needs you that someone must act on.
+  /// It does not rely on `openPR` running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open, !pr.draft, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
       !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
-      pr.checks != "FAILURE", pr.checks != "ERROR", classify(facts.lastReply ?? "") == .other
+      !pr.checksFailed, classify(facts.lastReply ?? "") == .other
     else { return nil }
     return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
   }
 
   /// Whether an open, ready PR needs a look after a review wait ended: a
-  /// reviewer answered and none is left to ask, or a check failed. A session
-  /// in this state stays out of Stale, because a PR event does not count as
-  /// session activity and the idle time would otherwise hide the PR.
+  /// reviewer answered and none is left, or a check failed. A PR event does
+  /// not count as session activity, so without this the idle time would move
+  /// the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
     guard let pr = facts.pr, pr.state == .open, !pr.draft else { return false }
-    return pr.checks == "FAILURE" || pr.checks == "ERROR" || (pr.reviewRequests == [] && !pr.reviews.isEmpty)
+    return pr.checksFailed || (pr.reviewRequests == [] && !pr.reviews.isEmpty)
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }

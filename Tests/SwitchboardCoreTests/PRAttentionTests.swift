@@ -377,6 +377,8 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 @Suite struct AwaitingReview {
   static let now: Int64 = 10
   static let alex = ["alex"]
+  static let stale = Attention.staleAfterMs + 10
+  static let commented = [Review(author: "alex", state: "COMMENTED")]
   static let waits = Verdict(state: .waiting, reason: "review of #42 by alex")
 
   private func verdict(_ pr: PullRequest, reply: String = "Opened the PR.") throws -> Verdict {
@@ -506,11 +508,8 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   @Test func waitsEvenWhenStale() throws {
     let f = try prFacts(samplePR(reviewRequests: Self.alex))
 
-    #expect(Attention.evaluate(session(), f, now: Attention.staleAfterMs + 10) == Self.waits)
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == Self.waits)
   }
-
-  private static let stale = Attention.staleAfterMs + 10
-  private static let commented = [Review(author: "alex", state: "COMMENTED")]
 
   @Test func answeredReviewNeedsYouEvenAfterTheSessionWentIdle() throws {
     let f = try prFacts(samplePR(reviews: Self.commented, reviewRequests: []))
