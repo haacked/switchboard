@@ -134,7 +134,12 @@ public final class Service {
         if args.worktree == true, (args.branch ?? "").isEmpty {
           let repo = (args.path as NSString).standardizingPath
           args.branch = NewSession.freeAutoBranch(
-            prefix: config.branchPrefix, name: args.name, exists: { branchExists(repo, $0) })
+            prefix: config.branchPrefix, name: args.name,
+            exists: { branch in
+              branchExists(repo, branch)
+                || ((try? worktreeLocation(repo, branch)).map { FileManager.default.fileExists(atPath: $0.dir) }
+                  ?? false)
+            })
         }
         let folder = try prepareFolder(args)
         awaitMCPServers()
@@ -311,6 +316,14 @@ public final class Service {
 
   // MARK: Sessions
 
+  /// The main checkout of the repo at `path` and the folder that a worktree of
+  /// it on `branch` gets.
+  func worktreeLocation(_ path: String, _ branch: String) throws -> (main: String, dir: String) {
+    // The first worktree names the main checkout, whose folder name names the repo.
+    let main = try worktreePaths(path).first ?? path
+    return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
+  }
+
   /// The folder a new session runs in, and its branch. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
   /// which this creates unless it exists.
@@ -322,9 +335,7 @@ public final class Service {
       return (path, current?.isEmpty == false ? current : nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreePaths(path).first ?? path
-    let dir = "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)"
+    let (main, dir) = try worktreeLocation(path, branch)
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }

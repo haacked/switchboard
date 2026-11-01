@@ -426,6 +426,7 @@ import Testing
     #expect(branch == "haacked/fix-it")
     #expect(s.cwd == "\(sbd.home.path)/worktrees/repo/\(branch)")
     #expect(try sbd.git(s.cwd, "branch", "--show-current") == branch)
+    #expect(s.repo == repo)
     let cli = try sbd.sb("new", repo, "--worktree", "--name", "From cli", "--json")
     let fromCli = try JSONDecoder().decode(SessionSummary.self, from: Data(cli.utf8))
     #expect(fromCli.branch == "haacked/from-cli")
@@ -443,6 +444,19 @@ import Testing
     let unchecked = try sbd.client.call(
       "new", ["path": .string(repo), "worktree": false], as: SessionSummary.self)
     #expect(unchecked.cwd == repo)
+  }
+
+  @Test func doesNotReuseALeftoverWorktreeFolder() throws {
+    let sbd = try Instance(config: ["branchPrefix": "haacked/"])
+    let repo = try Repos.create("\(sbd.home.path)/repo")
+    let first = try sbd.client.call(
+      "new", ["path": .string(repo), "name": "Fix it", "worktree": true], as: SessionSummary.self)
+    _ = try sbd.git(first.cwd, "switch", "-c", "other-work")
+    _ = try sbd.git(repo, "branch", "-D", "haacked/fix-it")
+    let second = try sbd.client.call(
+      "new", ["path": .string(repo), "name": "Fix it", "worktree": true], as: SessionSummary.self)
+    #expect(second.cwd != first.cwd)
+    #expect(second.branch?.range(of: #"^haacked/fix-it-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
   }
 }
 

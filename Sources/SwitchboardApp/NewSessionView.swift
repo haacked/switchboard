@@ -30,8 +30,6 @@ struct NewSessionView: View {
     return false
   }
 
-  private var makesWorktree: Bool { createWorktree && folderIsRepo }
-
   var body: some View {
     let isRepo = folderIsRepo
     let makesWorktree = createWorktree && isRepo
@@ -46,7 +44,7 @@ struct NewSessionView: View {
           .disabled(!isRepo)
           .help(isRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
         if makesWorktree {
-          TextField("Branch", text: $form.branch, prompt: Text("optional: named automatically when blank"))
+          TextField("Branch", text: $form.branch, prompt: Text("optional: made from the name when blank"))
         }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
         if model.accounts.count > 1 {
@@ -68,7 +66,7 @@ struct NewSessionView: View {
         Button("Cancel", role: .cancel) { dismiss() }
           .keyboardShortcut(.cancelAction)
         Button("Start") {
-          start()
+          start(worktree: makesWorktree)
           dismiss()
         }
         .keyboardShortcut(.defaultAction)
@@ -83,12 +81,11 @@ struct NewSessionView: View {
     if let path = chooseFolder(at: folder) { folder = path }
   }
 
-  private func start() {
+  private func start(worktree: Bool) {
     func optional(_ s: String) -> String? {
       let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
       return t.isEmpty ? nil : t
     }
-    let worktree = makesWorktree
     model.create(
       NewSession(
         path: folder.expandingTilde, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),

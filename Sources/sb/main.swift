@@ -406,7 +406,7 @@ case "new":
   let folder = URL(fileURLWithPath: path.expandingTilde).path
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
-    worktree: a.switches.contains("--worktree") ? true : nil,
+    worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
     account: a.values["--account"])
