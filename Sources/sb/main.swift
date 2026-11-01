@@ -6,11 +6,12 @@ let usage = """
 
   Sessions:
     ls                            list sessions by state
-    new <folder> [--branch B] [--base REF] [--name N] [--prompt P] [--model M]
-        [--account A]             start a session in the folder, or in a new
-                                  worktree of its repo with --branch. It runs
-                                  under the account A, else its parent's, else
-                                  the active account
+    new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
+        [--model M] [--account A] start a session in the folder, or in a new
+                                  worktree of its repo with --branch or
+                                  --worktree. --worktree names the branch from
+                                  --name. It runs under the account A, else its
+                                  parent's, else the active account
     account                       list the Claude accounts and the active one
     account use <name|folder>     run new sessions under this account
     manager                       start the Manager, a session that manages the others,

@@ -29,7 +29,7 @@ public struct APIError: Error, CustomStringConvertible {
 
 /// Arguments of `new`.
 public struct NewSession: Codable, Sendable {
-  /// The folder to run in. With `branch`, the repo to make a worktree of.
+  /// The folder to run in. With `branch` or `worktree`, the repo to make a worktree of.
   public var path: String
   public var branch: String?
   /// The commit that a new branch starts from, such as origin/main.

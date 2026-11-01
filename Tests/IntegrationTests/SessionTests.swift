@@ -433,9 +433,12 @@ import Testing
     let typed = try sbd.client.call(
       "new", ["path": .string(repo), "branch": "feature", "worktree": true], as: SessionSummary.self)
     #expect(typed.branch == "feature")
-    // Without `worktree`, a blank branch runs in the folder.
+    // Without `worktree`, or with it false as the app sends it, a blank branch runs in the folder.
     let plain = try sbd.client.call("new", ["path": .string(repo)], as: SessionSummary.self)
     #expect(plain.cwd == repo)
+    let unchecked = try sbd.client.call(
+      "new", ["path": .string(repo), "worktree": false], as: SessionSummary.self)
+    #expect(unchecked.cwd == repo)
   }
 }
 

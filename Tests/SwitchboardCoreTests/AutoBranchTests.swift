@@ -19,7 +19,8 @@ struct AutoBranchTests {
     #expect(branch.count <= 45)
   }
 
-  @Test func twoCallsDiffer() {
-    #expect(NewSession.autoBranch(name: "x") != NewSession.autoBranch(name: "x"))
+  @Test func defaultSuffixIsFourHexCharacters() {
+    let branch = NewSession.autoBranch(name: "x")
+    #expect(branch.range(of: #"^x-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
   }
 }

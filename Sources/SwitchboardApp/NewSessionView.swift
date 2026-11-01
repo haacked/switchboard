@@ -20,6 +20,16 @@ struct NewSessionView: View {
   @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form = Form()
 
+  /// Whether the folder or one of its parents holds a `.git`.
+  private var folderIsRepo: Bool {
+    var url = URL(fileURLWithPath: folder.expandingTilde).standardizedFileURL
+    while url.path != "/" {
+      if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return true }
+      url.deleteLastPathComponent()
+    }
+    return false
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("New Session").font(.title2.bold())
@@ -29,7 +39,9 @@ struct NewSessionView: View {
           Button("Choose…", action: choose)
         }
         Toggle("Create a worktree", isOn: $createWorktree)
-        if createWorktree {
+          .disabled(!folderIsRepo)
+          .help(folderIsRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
+        if createWorktree && folderIsRepo {
           TextField("Branch", text: $form.branch, prompt: Text("optional: named automatically when blank"))
         }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
@@ -72,10 +84,11 @@ struct NewSessionView: View {
       let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
       return t.isEmpty ? nil : t
     }
+    let worktree = createWorktree && folderIsRepo
     model.create(
       NewSession(
-        path: folder.expandingTilde, branch: createWorktree ? optional(form.branch) : nil, name: optional(form.name),
-        worktree: createWorktree,
+        path: folder.expandingTilde, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),
+        worktree: worktree,
         prompt: optional(form.prompt), account: optional(form.account)))
   }
 }
