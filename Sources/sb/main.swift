@@ -113,8 +113,7 @@ struct Args {
   /// one that starts with --. Flags for those commands go before the session.
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
-      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
-      "--since",
+      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session", "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
     ]).union(waitFlags.keys)

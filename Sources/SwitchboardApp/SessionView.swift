@@ -93,7 +93,9 @@ struct SessionView: View {
         Toggle(isOn: $ui.deleteWorktree) {
           Text("Delete the worktree \(session.cwd)")
         }
-        .help("Refuses when the worktree has uncommitted files, or commits that are on no remote branch unless the PR is merged.")
+        .help(
+          "Refuses when the worktree has uncommitted files, or commits that are on no remote branch unless the PR is merged."
+        )
         if let branch = session.branch {
           Toggle(isOn: $ui.deleteBranch) {
             Text("Delete the local branch \(branch)")
@@ -113,7 +115,7 @@ struct SessionView: View {
         Button("Remove Session", role: .destructive) {
           ui.confirmingRemove = false
           if ui.deleteWorktree {
-            model.delete(session.id, branch: ui.deleteBranch && session.branch != nil)
+            model.delete(session.id, branch: ui.deleteBranch)
           } else {
             model.remove(session.id)
           }
