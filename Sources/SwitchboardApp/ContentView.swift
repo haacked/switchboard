@@ -15,6 +15,18 @@ extension AttentionState {
   }
 }
 
+extension PRStatus {
+  var color: Color {
+    switch self {
+    case .approved: .green
+    case .changesRequested: .red
+    case .reviewRequired, .notApproved: .orange
+    case .merged: .purple
+    case .draft, .closed: .gray
+    }
+  }
+}
+
 /// The state's title in a capsule of its color.
 struct StateBadge: View {
   let state: AttentionState
@@ -297,7 +309,16 @@ struct BoardView: View {
                       model.openFromBoard(s.id)
                     } label: {
                       VStack(alignment: .leading, spacing: 4) {
-                        Text(s.name).fontWeight(.medium).lineLimit(1)
+                        HStack {
+                          Text(s.name).fontWeight(.medium).lineLimit(1)
+                          Spacer()
+                          if let pr = s.pr {
+                            Text("#\(pr.number)")
+                              .font(.caption.bold())
+                              .foregroundStyle(pr.status.color)
+                              .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                          }
+                        }
                         Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
                           .font(.caption2).foregroundStyle(.tertiary)
