@@ -55,9 +55,9 @@ struct TriageList: View {
         .padding(.vertical, 6)
       }
       .onChange(of: model.queueJumps, initial: true) {
-        // The list is built after layout when the Queue replaces the Board, and a
-        // scroll before that does nothing.
-        DispatchQueue.main.async {
+        // The rows have no layout yet when the Queue replaces the Board. A scroll
+        // right away often does nothing, so this waits 0.3 s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
           if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id) } }
         }
       }
