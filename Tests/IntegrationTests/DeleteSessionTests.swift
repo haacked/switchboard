@@ -294,7 +294,7 @@ extension Instance {
       "git -C \"$REPO\" branch -D \(Self.mergedBranch) >/dev/null", error: "no longer exists")
   }
 
-  /// Makes every delete from `table` fail, as a store that is read-only or full would.
+  /// Makes every delete from `table` abort, as a constraint on the store would.
   private func blockDeletes(from table: String, _ sbd: Instance) throws {
     let r = try runCommand(
       "/usr/bin/sqlite3",
@@ -316,6 +316,8 @@ extension Instance {
     #expect(try sbd.intact(s))
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+    // sqlite3 has no busy timeout, so this fails while sbd's connection still holds the write lock.
+    #expect(try runCommand("/usr/bin/sqlite3", [sbd.home.database, "BEGIN IMMEDIATE; ROLLBACK;"]).status == 0)
   }
 
   @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheSession() throws {

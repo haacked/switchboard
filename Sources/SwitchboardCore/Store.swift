@@ -34,8 +34,10 @@ public final class Store {
     try run("DELETE FROM snapshots WHERE session = ?", [id])
   }
 
-  /// Throws unless `delete(session:)` would succeed now. It runs the deletes in a
-  /// transaction that it rolls back.
+  /// Throws when `delete(session:)` hits an abort or a constraint, a read-only
+  /// connection, or a write lock held past the busy timeout. It runs the deletes
+  /// in a transaction that it rolls back, so it doesn't see a failure that only
+  /// the commit causes.
   public func checkDeletable(session id: String) throws {
     try exec("BEGIN IMMEDIATE")
     defer { try? exec("ROLLBACK") }

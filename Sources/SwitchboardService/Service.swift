@@ -568,13 +568,13 @@ public final class Service {
   /// also deletes the local branch, and needs `worktree`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
   /// can take a while. A failed removal leaves the session and its panes in
-  /// place. A store that can't delete the session refuses the removal before
-  /// anything stops. Once the worktree is gone the session is forgotten whatever happens
-  /// to the branch, because its folder is missing. The branch is checked again
-  /// after the worktree goes, and a failed check or delete keeps the branch and
-  /// throws after the session is forgotten. The conversation's transcript stays
-  /// in the account's projects folder, because Claude Code has no command that
-  /// archives a local session.
+  /// place. A store that can't delete the session's record also refuses the
+  /// removal before anything stops. After the worktree is gone, the session is
+  /// forgotten whatever happens to the branch, because its folder is missing.
+  /// The branch is checked again at that point. A failed check or delete keeps
+  /// the branch and throws after the session is forgotten. The conversation's
+  /// transcript stays in the account's projects folder, because Claude Code has
+  /// no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
@@ -600,7 +600,7 @@ public final class Service {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
         throw APIError("\(session.id) changed while it was being removed")
       }
-      // Once the worktree is gone, a record that can't be deleted would list the session with its folder missing.
+      // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
       try store.checkDeletable(session: session.id)
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
