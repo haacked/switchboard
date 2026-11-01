@@ -11,6 +11,22 @@ import Testing
     return rules
   }
 
+  /// A view whose window closed and whose surface was freed.
+  func closed() -> SurfaceLifetime {
+    var rules = live()
+    _ = rules.windowClosed()
+    rules.surfaceFreed()
+    return rules
+  }
+
+  /// A view that left its window and whose surface was freed.
+  func left() -> SurfaceLifetime {
+    var rules = live()
+    _ = rules.leftWindow()
+    rules.surfaceFreed()
+    return rules
+  }
+
   @Test func createsASurfaceWhenTheViewEntersAWindow() {
     var rules = SurfaceLifetime()
     #expect(rules.enteredWindow() == .create)
@@ -29,9 +45,7 @@ import Testing
   }
 
   @Test func createsANewSurfaceWhenAFreedViewComesBack() {
-    var rules = live()
-    _ = rules.leftWindow()
-    rules.surfaceFreed()
+    var rules = left()
     #expect(rules.enteredWindow() == .create)
   }
 
@@ -47,9 +61,7 @@ import Testing
   }
 
   @Test func createsTheSurfaceAgainWhenAClosedWindowIsShown() {
-    var rules = live()
-    _ = rules.windowClosed()
-    rules.surfaceFreed()
+    var rules = closed()
     #expect(rules.windowShown() == .create)
   }
 
@@ -59,9 +71,7 @@ import Testing
   }
 
   @Test func showingAWindowTwiceCreatesOneSurface() {
-    var rules = live()
-    _ = rules.windowClosed()
-    rules.surfaceFreed()
+    var rules = closed()
     #expect(rules.windowShown() == .create)
     rules.surfaceCreated()
     #expect(rules.windowShown() == nil)
@@ -79,31 +89,23 @@ import Testing
   }
 
   @Test func doesNotCreateOnWakeWhileTheWindowIsClosed() {
-    var rules = live()
-    _ = rules.windowClosed()
-    rules.surfaceFreed()
+    var rules = closed()
     #expect(rules.displayWoke() == nil)
   }
 
   @Test func doesNotCreateOnWakeForAViewOutsideAWindow() {
-    var rules = live()
-    _ = rules.leftWindow()
-    rules.surfaceFreed()
+    var rules = left()
     #expect(rules.displayWoke() == nil)
   }
 
   @Test func doesNotCreateWhenTheWindowIsShownForAViewOutsideAWindow() {
-    var rules = live()
-    _ = rules.windowClosed()
-    rules.surfaceFreed()
+    var rules = closed()
     _ = rules.leftWindow()
     #expect(rules.windowShown() == nil)
   }
 
   @Test func aViewMovedToANewWindowAfterACloseGetsASurface() {
-    var rules = live()
-    _ = rules.windowClosed()
-    rules.surfaceFreed()
+    var rules = closed()
     #expect(rules.enteredWindow() == .create)
   }
 }

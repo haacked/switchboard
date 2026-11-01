@@ -11,27 +11,30 @@ struct SurfaceLifetime {
   private var windowIsClosed = false
   private var hasSurface = false
 
+  private var createIfMissing: Action? { hasSurface ? nil : .create }
+  private var freeIfHeld: Action? { hasSurface ? .free : nil }
+
   mutating func enteredWindow() -> Action? {
     inWindow = true
     windowIsClosed = false
-    return hasSurface ? nil : .create
+    return createIfMissing
   }
 
   mutating func leftWindow() -> Action? {
     inWindow = false
-    return hasSurface ? .free : nil
+    return freeIfHeld
   }
 
   mutating func windowClosed() -> Action? {
     windowIsClosed = true
-    return hasSurface ? .free : nil
+    return freeIfHeld
   }
 
   /// The window became visible, which includes a closed window that opens again.
   mutating func windowShown() -> Action? {
     guard inWindow, windowIsClosed else { return nil }
     windowIsClosed = false
-    return hasSurface ? nil : .create
+    return createIfMissing
   }
 
   /// A display woke, which can make a create succeed that failed while every display slept.

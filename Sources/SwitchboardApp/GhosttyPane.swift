@@ -147,7 +147,7 @@
     // MARK: Surface lifetime
 
     /// SB_GHOSTTY_KEEP=1 keeps every surface alive after its view leaves the window, to measure what hidden surfaces cost.
-    private static let keepsHiddenSurfaces = getenv("SB_GHOSTTY_KEEP") != nil
+    static let keepsHiddenSurfaces = getenv("SB_GHOSTTY_KEEP") != nil
 
     /// `ghostty_surface_free` takes about 16 ms, which would stall the main thread on every session switch.
     private static let freeQueue = DispatchQueue(label: "switchboard.ghostty.free")
@@ -192,7 +192,7 @@
     @MainActor private func perform(_ action: SurfaceLifetime.Action?) {
       switch action {
       case .create: createSurface()
-      case .free: if !Self.keepsHiddenSurfaces { freeSurface() }
+      case .free: freeSurface()
       case nil: break
       }
     }
@@ -230,7 +230,7 @@
     /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd. The view stays alive until
     /// the free finishes, because the surface holds the view's address.
     private func freeSurface() {
-      guard let surface else { return }
+      guard !Self.keepsHiddenSurfaces, let surface else { return }
       self.surface = nil
       lifetime.surfaceFreed()
       Self.freeQueue.async {
@@ -242,12 +242,12 @@
     /// Called when SwiftUI removes the view.
     func close() {
       stopObserving()
-      if !Self.keepsHiddenSurfaces { freeSurface() }
+      freeSurface()
     }
 
     deinit {
       stopObserving()
-      // Only reached with a surface when SB_GHOSTTY_KEEP is off and nothing freed it, which close() prevents.
+      // close() frees the surface first, so this frees one only when the view never reached close().
       if let surface { ghostty_surface_free(surface) }
     }
 
@@ -354,10 +354,9 @@
     func makeNSView(context: Context) -> GhosttySurfaceView { GhosttySurfaceView(command: command) }
     func updateNSView(_ view: GhosttySurfaceView, context: Context) {}
     static func dismantleNSView(_ view: GhosttySurfaceView, coordinator: ()) {
-      if getenv("SB_GHOSTTY_KEEP") != nil {
+      if GhosttySurfaceView.keepsHiddenSurfaces {
         GhosttySurfaceView.kept.append(view)
         if let surface = view.surface { ghostty_surface_set_occlusion(surface, false) }
-        return
       }
       view.close()
     }
