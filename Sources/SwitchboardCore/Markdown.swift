@@ -78,7 +78,7 @@ public enum MarkdownBlock: Equatable, Sendable {
         var rows: [[String]] = []
         while i < lines.count {
           let row = lines[i].trimmingCharacters(in: .whitespaces)
-          guard row.contains("|") else { break }
+          guard row.contains("|"), !Self.startsBlock(row) else { break }
           let cells = Self.cells(row)
           rows.append((0..<table.header.count).map { $0 < cells.count ? cells[$0] : "" })
           i += 1
@@ -95,6 +95,12 @@ public enum MarkdownBlock: Equatable, Sendable {
     }
     endParagraph()
     return blocks
+  }
+
+  /// Whether a line begins a block of its own, which ends a table.
+  private static func startsBlock(_ trimmed: String) -> Bool {
+    fence(trimmed) != nil || heading(trimmed) != nil || isRule(trimmed) || trimmed.hasPrefix(">")
+      || listItem(trimmed) != nil
   }
 
   /// Reads the list that starts at `lines[start]`, and returns it with the

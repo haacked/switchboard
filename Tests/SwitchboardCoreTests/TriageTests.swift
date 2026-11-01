@@ -405,6 +405,23 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       ])
   }
 
+  @Test func tableCellsMayBeEmptyAndATableMayHaveNoRows() {
+    #expect(
+      MarkdownBlock.parse("| a || c |\n|---|---|---|\n| | y | |") == [
+        .table(header: ["a", "", "c"], alignments: [.leading, .leading, .leading], rows: [["", "y", ""]])
+      ])
+    #expect(MarkdownBlock.parse("| a | b |\n|---|---|") == [.table(header: ["a", "b"], alignments: [.leading, .leading], rows: [])])
+  }
+
+  @Test func aTableEndsWhereAnotherBlockStarts() {
+    let table = MarkdownBlock.table(header: ["a", "b"], alignments: [.leading, .leading], rows: [["1", "2"]])
+    for next in ["# h | x", "> q | x", "- i | x", "1. i | x", "```a|b", "---"] {
+      let blocks = MarkdownBlock.parse("| a | b |\n|---|---|\n| 1 | 2 |\n\(next)")
+      #expect(blocks.first == table, "\(next)")
+      #expect(blocks.count == 2, "\(next)")
+    }
+  }
+
   @Test func textThatIsNotATableStaysAParagraph() {
     #expect(MarkdownBlock.parse("a | b\nc | d") == [.paragraph("a | b\nc | d")])
     #expect(MarkdownBlock.parse("| a | b |\n| --- |\n| 1 | 2 |") == [.paragraph("| a | b |\n| --- |\n| 1 | 2 |")])
