@@ -8,6 +8,8 @@ final class SessionViewState: ObservableObject {
   @Published var terminals: Terminals?
   @Published var terminalsError: String?
   @Published var confirmingRemove = false
+  @Published var deleteWorktree = false
+  @Published var deleteBranch = false
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -79,10 +81,50 @@ struct SessionView: View {
         if Task.isCancelled { return }
       }
     }
-    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove) {
-      Button("Remove Session", role: .destructive) { model.remove(session.id) }
-    } message: {
-      Text("This stops claude and closes both terminals. The folder and the conversation's transcript stay.")
+    .sheet(isPresented: $ui.confirmingRemove) { removeSheet }
+  }
+
+  /// A confirmation dialog can't hold toggles, so the options are in a sheet.
+  private var removeSheet: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Remove \(session.name)?").font(.headline)
+      Text("This stops claude and closes both terminals. The conversation's transcript stays.")
+      if session.repo != nil {
+        Toggle(isOn: $ui.deleteWorktree) {
+          Text("Delete the worktree \(session.cwd)")
+        }
+        .help("Refuses when the worktree has uncommitted files, or commits that are on no remote branch unless the PR is merged.")
+        if let branch = session.branch {
+          Toggle(isOn: $ui.deleteBranch) {
+            Text("Delete the local branch \(branch)")
+          }
+          .padding(.leading, 20)
+          .disabled(!ui.deleteWorktree)
+          .help("Refuses unless the session's PR is merged and the branch has no commit after it.")
+        }
+        Text("A refusal removes nothing and shows the reason.").font(.caption).foregroundStyle(.secondary)
+      } else {
+        Text("The folder stays.")
+      }
+      HStack {
+        Spacer()
+        Button("Cancel", role: .cancel) { ui.confirmingRemove = false }
+          .keyboardShortcut(.cancelAction)
+        Button("Remove Session", role: .destructive) {
+          ui.confirmingRemove = false
+          if ui.deleteWorktree {
+            model.delete(session.id, branch: ui.deleteBranch && session.branch != nil)
+          } else {
+            model.remove(session.id)
+          }
+        }
+      }
+    }
+    .padding(20)
+    .frame(width: 460)
+    .onDisappear {
+      ui.deleteWorktree = false
+      ui.deleteBranch = false
     }
   }
 

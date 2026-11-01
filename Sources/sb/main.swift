@@ -31,8 +31,11 @@ let usage = """
     note <session> [<text>]       add a note, or list the notes
     note <session> --rm <id>
     rename <session> <name>
-    rm <session> [--worktree]     remove the session, and its worktree with --worktree, which refuses
-                                  uncommitted files, unpushed commits, and a folder sbd didn't make
+    rm <session> [--worktree [--delete-branch]]
+                                  remove the session, and its worktree with --worktree, which refuses
+                                  uncommitted files, unpushed commits, and a folder sbd didn't make.
+                                  --delete-branch also deletes the local branch, and refuses unless the
+                                  session's PR is merged and the branch has no commit after it
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -110,7 +113,8 @@ struct Args {
   /// one that starts with --. Flags for those commands go before the session.
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
-      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session", "--since",
+      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
+      "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
     ]).union(waitFlags.keys)
@@ -436,7 +440,12 @@ case "send":
   let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
   if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
 case "rm":
-  let result = call("rm", ["session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree"))])
+  let result = call(
+    "rm",
+    [
+      "session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree")),
+      "branch": .bool(a.switches.contains("--delete-branch")),
+    ])
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "import":
   do {

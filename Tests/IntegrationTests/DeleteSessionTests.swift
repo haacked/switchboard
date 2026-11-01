@@ -28,6 +28,10 @@ extension Instance {
 
   func deleteSession(_ id: String) throws -> CommandResult { try run(["rm", id, "--worktree"]) }
 
+  func deleteSessionAndBranch(_ id: String) throws -> CommandResult {
+    try run(["rm", id, "--worktree", "--delete-branch"])
+  }
+
   func intact(_ s: SessionSummary) throws -> Bool {
     try FileManager.default.fileExists(atPath: s.cwd) && client.sessions().map(\.id).contains(s.id)
   }
@@ -161,5 +165,63 @@ extension Instance {
     #expect(try sbd.intact(first))
     try sbd.sb("rm", second.id)
     #expect(try sbd.deleteSession(first.id).status == 0)
+  }
+
+  /// A session on the recorded branch of PR 122953, whose PR is merged and whose
+  /// head is the branch tip after a commit.
+  private func mergedBranchSession(_ github: FakeGitHub) throws -> (Instance, String, SessionSummary) {
+    let sbd = try Instance.withGitHub(github)
+    let repo = try Repos.create("\(sbd.home.path)/posthog", origin: "https://github.com/PostHog/posthog.git")
+    let s = try sbd.worktreeSession(repo, branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.commit(s.cwd, "a.txt")
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(122953) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
+    try sbd.poll(all: true)
+    return (sbd, repo, s)
+  }
+
+  @Test func deletesTheBranchOfAMergedPR() throws {
+    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status == 0)
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") == "")
+    #expect(try sbd.client.sessions().isEmpty)
+  }
+
+  @Test func refusesToDeleteTheBranchOfASessionWithNoMergedPRBeforeStoppingAnything() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    // Nothing is uncommitted or unpushed, so only the branch check refuses.
+    let s = try sbd.worktreeSession(repo)
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("no merged PR"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/feature") != "")
+  }
+
+  @Test func refusesToDeleteTheBranchWithoutTheWorktree() throws {
+    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    let r = try sbd.run(["rm", s.id, "--delete-branch"])
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("Remove the worktree too"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") != "")
+  }
+
+  @Test func refusesToDeleteTheBranchOfACommitAfterTheMerge() throws {
+    let (sbd, repo, s) = try mergedBranchSession(try FakeGitHub())
+    try sbd.commit(s.cwd, "b.txt")
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not in its merged PR"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/cdp-dlq-breaker-counts-lookups") != "")
   }
 }
