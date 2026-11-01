@@ -40,6 +40,12 @@ func ago(_ ms: Int64) -> String {
 struct ContentView: View {
   @EnvironmentObject var model: BoardModel
 
+  private var viewChoice: Binding<Bool?> {
+    Binding(
+      get: { model.selection == nil ? model.showingBoard : nil },
+      set: { if let board = $0 { model.show(board: board) } })
+  }
+
   var body: some View {
     NavigationSplitView {
       Sidebar()
@@ -64,19 +70,21 @@ struct ContentView: View {
         } else if let s = model.selected {
           SessionView(session: s).id(s.id)
         } else {
-          Picker("View", selection: $model.showingBoard) {
-            Text("Queue (\(model.triage.count))").tag(false)
-            Text("Board").tag(true)
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
-          .frame(width: 240)
-          .padding(8)
           if model.showingBoard { BoardView() } else { QueueView() }
         }
       }
     }
     .toolbar {
+      ToolbarItem(placement: .navigation) {
+        // No segment is selected while a session shows.
+        Picker("View", selection: viewChoice) {
+          Text("Queue (\(model.triage.count))").tag(Bool?.some(false))
+          Text("Board").tag(Bool?.some(true))
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help("Show the Queue (⌘1) or the Board (⌘2)")
+      }
       ToolbarItem {
         if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
           Menu {
