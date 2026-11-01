@@ -1,0 +1,42 @@
+#!/usr/bin/perl
+# A stand-in for claude in bin/test-gui. It puts its terminal in raw mode,
+# turns on bracketed paste, and redraws the screen after every read with the
+# bytes it received so far and the sizes the terminal had. `sb screen` then
+# shows what the app's terminal sent:
+#   sizes <columns>x<rows> ...   the size at the start, and after each SIGWINCH
+#   rx <hex> ...                 the bytes received, 12 to a line, oldest first
+# Like the claude stub in the integration tests, it answers `claude agents`
+# with an empty list and fails the summary call.
+use strict;
+use warnings;
+$| = 1;
+if (($ARGV[0] // '') eq 'agents') { print "[]\n"; exit 0 }
+if (($ARGV[0] // '') eq '-p') { exit 1 }
+
+system('stty', 'raw', '-echo');
+my (@bytes, @sizes);
+
+sub size {
+  my ($rows, $columns) = split ' ', `stty size`;
+  return "${columns}x${rows}";
+}
+
+sub draw {
+  print "\e[H\e[2Jsizes @sizes\r\n";
+  for (my $i = 0; $i < @bytes; $i += 12) {
+    my $last = $i + 11 < $#bytes ? $i + 11 : $#bytes;
+    print 'rx ', join(' ', map { sprintf '%02x', $_ } @bytes[$i .. $last]), "\r\n";
+  }
+}
+
+$SIG{WINCH} = sub { push @sizes, size(); draw() };
+push @sizes, size();
+print "\e[?2004h";
+draw();
+while (1) {
+  my $n = sysread(STDIN, my $chunk, 4096);
+  if (!defined $n) { next if $!{EINTR}; last }
+  last if $n == 0;
+  push @bytes, unpack('C*', $chunk);
+  draw();
+}
