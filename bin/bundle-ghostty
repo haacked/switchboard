@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Copies libghostty's resources into an app bundle: share/ghostty (themes, shell
+# integration) to Contents/Resources/ghostty and share/terminfo to
+# Contents/Resources/terminfo. Ghostty finds terminfo in the folder next to the
+# one GHOSTTY_RESOURCES_DIR names. Usage: bin/bundle-ghostty <Resources dir>.
+# Does nothing when bin/build-ghostty has not run, so a plain build bundles as
+# before. SB_GHOSTTY_SHARE overrides .build/ghostty/share.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+resources=${1:?usage: bin/bundle-ghostty <Resources dir>}
+share=${SB_GHOSTTY_SHARE:-.build/ghostty/share}
+[ -e "$share" ] || exit 0
+for part in ghostty/themes ghostty/shell-integration terminfo; do
+  if [ ! -d "$share/$part" ]; then
+    echo "$share is incomplete: $share/$part is missing. Run bin/build-ghostty again." >&2
+    exit 1
+  fi
+done
+rm -rf "$resources/ghostty" "$resources/terminfo"
+mkdir -p "$resources"
+cp -R "$share/ghostty" "$resources/ghostty"
+cp -R "$share/terminfo" "$resources/terminfo"
+echo "Bundled Ghostty resources from $share" >&2
