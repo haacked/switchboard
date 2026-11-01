@@ -115,10 +115,9 @@
     }
   }
 
-  /// One libghostty surface. The surface exists from the moment the view enters
-  /// a window until `close()`, so a session that isn't on screen holds no
-  /// renderer and no PTY. The surface runs `command` in its own PTY, which for
-  /// the app is a tmux client attached to one of sbd's panes.
+  /// One libghostty surface, which runs `command` in its own PTY. For the app,
+  /// the command is a tmux client attached to one of sbd's panes. The view holds
+  /// a surface only while it is in an open window (see `SurfaceLifetime`).
   final class GhosttySurfaceView: NSView {
     nonisolated(unsafe) static var kept: [GhosttySurfaceView] = []
 
@@ -146,10 +145,51 @@
 
     // MARK: Surface lifetime
 
+    /// SB_GHOSTTY_KEEP=1 keeps every surface alive instead of freeing it, to measure what hidden surfaces cost.
+    static let keepsHiddenSurfaces = getenv("SB_GHOSTTY_KEEP") != nil
+
+    private var lifetime = SurfaceLifetime()
+    private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
+    private var visibility: NSKeyValueObservation?
+
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
-      guard window != nil, surface == nil else { return }
-      MainActor.assumeIsolated { createSurface() }
+      stopObserving()
+      guard let window else { return perform(lifetime.leftWindow()) }
+      observe(NSWindow.willCloseNotification, object: window) { $0.lifetime.windowClosed() }
+      visibility = window.observe(\.isVisible) { [weak self] window, _ in
+        guard window.isVisible else { return }
+        MainActor.assumeIsolated { if let self { self.perform(self.lifetime.windowShown()) } }
+      }
+      // A create fails while every display sleeps, so it is tried again when one wakes.
+      observe(NSWorkspace.screensDidWakeNotification, in: NSWorkspace.shared.notificationCenter) {
+        $0.lifetime.displayWoke()
+      }
+      perform(lifetime.enteredWindow(windowIsVisible: window.isVisible))
+    }
+
+    private func observe(
+      _ name: Notification.Name, in center: NotificationCenter = .default, object: AnyObject? = nil,
+      _ event: @escaping (GhosttySurfaceView) -> SurfaceLifetime.Action?
+    ) {
+      let token = center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { if let self { self.perform(event(self)) } }
+      }
+      observers.append((center, token))
+    }
+
+    private func stopObserving() {
+      for (center, token) in observers { center.removeObserver(token) }
+      observers = []
+      visibility = nil
+    }
+
+    @MainActor private func perform(_ action: SurfaceLifetime.Action?) {
+      switch action {
+      case .create: createSurface()
+      case .free: freeSurface()
+      case nil: break
+      }
     }
 
     @MainActor private func createSurface() {
@@ -167,11 +207,10 @@
         return ghostty_surface_new(app, &config)
       }
       guard let surface else {
-        // With every display asleep, Ghostty can't make its display link and the call fails.
         GhosttyRuntime.log("ghostty_surface_new failed. Trying again when a display wakes.")
-        waitForDisplay()
         return
       }
+      lifetime.surfaceCreated()
       if let id = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 {
         ghostty_surface_set_display_id(surface, id)
       }
@@ -181,38 +220,33 @@
           ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
       pushSize()
       if window?.firstResponder === window || window?.firstResponder == nil { window?.makeFirstResponder(self) }
+      // A new surface starts focused, so a pane that isn't the first responder has to be told.
+      ghostty_surface_set_focus(surface, window?.firstResponder === self)
     }
 
-    private var wakeObserver: NSObjectProtocol?
-
-    @MainActor private func waitForDisplay() {
-      guard wakeObserver == nil else { return }
-      wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-        forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main
-      ) { [weak self] _ in
-        MainActor.assumeIsolated {
-          guard let self, self.surface == nil, self.window != nil else { return }
-          self.createSurface()
-          if self.surface != nil, let token = self.wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(token)
-            self.wakeObserver = nil
-          }
-        }
-      }
-    }
-
-    /// Frees the surface, which ends the PTY and the tmux client in it. The tmux pane keeps running in sbd.
-    func close() {
-      if let token = wakeObserver {
-        NSWorkspace.shared.notificationCenter.removeObserver(token)
-        wakeObserver = nil
-      }
-      guard let surface else { return }
+    /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd.
+    private func freeSurface() {
+      guard !Self.keepsHiddenSurfaces, let surface else { return }
       self.surface = nil
+      lifetime.surfaceFreed()
+      // The surface's layer calls into the surface's renderer when Core Animation redraws it.
+      wantsLayer = false
+      layer = nil
+      // The free runs on the main thread because libghostty's surface list has no lock. It blocks for about 16 ms.
       ghostty_surface_free(surface)
     }
 
-    deinit { close() }
+    /// Called when SwiftUI removes the view.
+    func close() {
+      stopObserving()
+      freeSurface()
+    }
+
+    deinit {
+      stopObserving()
+      // A view deallocated while it still holds a surface frees it here. Every other path goes through freeSurface().
+      if let surface { ghostty_surface_free(surface) }
+    }
 
     private func pushSize() {
       guard let surface else { return }
@@ -317,11 +351,9 @@
     func makeNSView(context: Context) -> GhosttySurfaceView { GhosttySurfaceView(command: command) }
     func updateNSView(_ view: GhosttySurfaceView, context: Context) {}
     static func dismantleNSView(_ view: GhosttySurfaceView, coordinator: ()) {
-      // SB_GHOSTTY_KEEP=1 keeps every surface alive after its view leaves the window, to measure what hidden surfaces cost.
-      if getenv("SB_GHOSTTY_KEEP") != nil {
+      if GhosttySurfaceView.keepsHiddenSurfaces {
         GhosttySurfaceView.kept.append(view)
         if let surface = view.surface { ghostty_surface_set_occlusion(surface, false) }
-        return
       }
       view.close()
     }
