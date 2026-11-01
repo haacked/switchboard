@@ -140,7 +140,9 @@ final class Outcome<T>: @unchecked Sendable {
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets", "on": "1h"])
     let folder = "\(sbd.home.path)/worktrees/widgets/fix-the-cache"
     let started = Outcome<SessionSummary>()
-    DispatchQueue.global().async {
+    // A thread of its own, because the global queue gets no thread while the
+    // parallel tests block every thread of Swift's cooperative pool.
+    Thread.detachNewThread {
       started.result = Result {
         try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)], as: SessionSummary.self)
       }

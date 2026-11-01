@@ -8,6 +8,21 @@ struct PaneRow {
   var dead: Bool
   /// The number of terminals attached to the pane's tmux session.
   var clients: Int
+
+  /// Reads the output of `list-panes -F` with `TerminalHost.paneFormat`. A
+  /// field may be empty: tmux 3.8 prints no pid for a pane whose program
+  /// exited. A pane is listed whenever its line has a session name, because a
+  /// pane that sbd missed would make it start the session again.
+  static func parse(_ output: String) -> [String: PaneRow] {
+    var rows: [String: PaneRow] = [:]
+    for line in output.split(separator: "\n") {
+      let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+      guard let name = f.first, !name.isEmpty else { continue }
+      func field(_ i: Int) -> Substring { i < f.count ? f[i] : "" }
+      rows[String(name)] = PaneRow(pid: Int(field(1)) ?? 0, dead: field(2) == "1", clients: Int(field(3)) ?? 0)
+    }
+    return rows
+  }
 }
 
 /// The terminal host: a private tmux server on $SB_HOME/tmux.sock. Each pane
@@ -93,18 +108,13 @@ final class TerminalHost {
     return r.stdout
   }
 
+  /// The format that `panes()` asks `list-panes` for, and `PaneRow.parse` reads.
+  static let paneFormat = "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{session_attached}"
+
   /// Every pane on the server, keyed by its tmux session name.
   func panes() -> [String: PaneRow] {
-    guard
-      let out = try? run(["list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{session_attached}"])
-    else { return [:] }
-    var rows: [String: PaneRow] = [:]
-    for line in out.split(separator: "\n") {
-      let f = line.split(separator: "\t")
-      guard f.count == 4, let pid = Int(f[1]) else { continue }
-      rows[String(f[0])] = PaneRow(pid: pid, dead: f[2] == "1", clients: Int(f[3]) ?? 0)
-    }
-    return rows
+    guard let out = try? run(["list-panes", "-a", "-F", TerminalHost.paneFormat]) else { return [:] }
+    return PaneRow.parse(out)
   }
 
   /// The value of a tmux format for the pane, or nil when the pane is missing.
