@@ -267,6 +267,12 @@ final class BoardModel: ObservableObject {
     Result { try Client().importSessions(refs) }
   }
 
+  /// Clears the selected session and shows the Board or the Queue.
+  func show(board: Bool) {
+    selection = nil
+    showingBoard = board
+  }
+
   /// Moves to the next Queue item while the Queue shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
