@@ -317,11 +317,8 @@ public final class Service {
       return (path, current?.isEmpty == false ? current : nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    // The first line of `worktree list` names the main checkout, whose
-    // folder name names the repo.
-    let main =
-      try gitOutput(path, ["worktree", "list", "--porcelain"]).split(separator: "\n").first
-      .map { String($0.dropFirst("worktree ".count)) } ?? path
+    // The first worktree names the main checkout, whose folder name names the repo.
+    let main = try worktreePaths(path).first ?? path
     let dir = "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)"
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -334,6 +331,12 @@ public final class Service {
     _ = try gitOutput(
       path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"])
     return (dir, branch)
+  }
+
+  /// The repo's worktrees, starting with the main checkout.
+  func worktreePaths(_ repo: String) throws -> [String] {
+    try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
+      .filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
   }
 
   func branchExists(_ repo: String, _ branch: String) -> Bool {
@@ -560,24 +563,33 @@ public final class Service {
   }
 
   /// Stops claude, removes the worktree when asked, then closes the panes and
-  /// forgets the session. git runs off the state queue, because removing a
-  /// worktree with large ignored folders can take a while. A failed removal
-  /// leaves the session and its panes in place.
+  /// forgets the session. A removal that asked for the worktree first checks
+  /// that nothing is lost, and refuses before it stops anything. git runs off
+  /// the state queue, because removing a worktree with large ignored folders
+  /// can take a while. A failed removal leaves the session and its panes in
+  /// place. The conversation's transcript stays in the account's projects
+  /// folder, because Claude Code has no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
-    let fresh = buildSnapshot()
-    let session: Session = try queue.sync {
+    let removesWorktree = args["worktree"]?.bool == true
+    let (session, mergedPR, sharedWith): (Session, Bool, String?) = try queue.sync {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      let entry = entries[id]!
+      let shared = entries.values.first { $0.session.id != id && $0.session.cwd == entry.session.cwd }
+      return (entry.session, entry.facts.pr?.state == .merged, shared?.session.id)
+    }
+    var repo: String?
+    if removesWorktree { repo = try checkWorktreeIsLossless(session, mergedPR: mergedPR, sharedWith: sharedWith) }
+    let fresh = buildSnapshot()
+    try queue.sync {
+      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
+        throw APIError("\(session.id) changed while it was being removed")
+      }
       install(fresh)
-      if case .running(let pid) = claudeState(id) { kill(pid_t(pid), SIGTERM) }
-      return entries[id]!.session
+      if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    var removed = false
-    if args["worktree"]?.bool == true, let repo = session.repo {
-      _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
-      removed = true
-    }
+    if let repo { _ = try gitOutput(repo, ["worktree", "remove", session.cwd]) }
     try queue.sync {
       // A follow-up can start between the two steps.
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
@@ -589,7 +601,43 @@ public final class Service {
       try store.delete(session: session.id)
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
-    return ["removed": .string(session.id), "worktree_removed": .bool(removed)]
+    return ["removed": .string(session.id), "worktree_removed": .bool(repo != nil)]
+  }
+
+  /// Returns the session's repo, or throws unless the session's folder is a
+  /// linked worktree of the repo that `new` made it from, no other session runs
+  /// in it, it has no uncommitted file, and HEAD is on a remote branch. With a
+  /// merged PR, HEAD may instead be on a local branch, because a squash merge
+  /// leaves the commits on no remote branch and `worktree remove` keeps the
+  /// branch. Any git failure refuses the removal.
+  private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool, sharedWith: String?) throws -> String {
+    guard let repo = session.repo else {
+      throw APIError(
+        "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
+      )
+    }
+    if let sharedWith {
+      throw APIError("\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree.")
+    }
+    let linked = try worktreePaths(repo).dropFirst()
+    let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+    guard linked.contains(where: { real($0) == real(session.cwd) }) else {
+      throw APIError("\(session.cwd) is not a worktree of \(repo)")
+    }
+    // The flag keeps status from taking the index lock while claude commits.
+    let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
+    let changed = status.split(separator: "\n").count
+    guard changed == 0 else {
+      throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
+    }
+    let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
+    let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not"] + kept)
+    guard unpushed == "0" else {
+      throw APIError(
+        "\(session.cwd) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
+      )
+    }
+    return repo
   }
 
   // MARK: Processes and the stop rule

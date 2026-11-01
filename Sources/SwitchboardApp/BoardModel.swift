@@ -15,6 +15,8 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
+  /// The id of the Done session whose delete the sidebar is confirming.
+  @Published var confirmingDelete: String?
   var presentingSheet: Bool { showingNew || showingImport }
   /// With no session selected, the detail shows the Board instead of the Queue.
   @Published var showingBoard = false
@@ -233,6 +235,15 @@ final class BoardModel: ObservableObject {
     let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }
     perform(followup ? "followup-rm" : "rm", ["session": .string(id)])
+  }
+
+  /// Removes the session and its worktree. sbd refuses, and removes nothing,
+  /// when the worktree has uncommitted files, has commits that are on no remote
+  /// branch, or isn't one that sbd made. The error shows in the banner.
+  func delete(_ id: String) {
+    perform("rm", ["session": .string(id), "worktree": .bool(true)]) { _ in
+      if self.selection == id { self.selection = nil }
+    }
   }
 
   /// `path` is the checkout to start in, for a follow-up whose checkout sbd

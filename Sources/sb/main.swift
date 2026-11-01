@@ -31,7 +31,8 @@ let usage = """
     note <session> [<text>]       add a note, or list the notes
     note <session> --rm <id>
     rename <session> <name>
-    rm <session> [--worktree]     remove the session, and its worktree with --worktree
+    rm <session> [--worktree]     remove the session, and its worktree with --worktree, which refuses
+                                  uncommitted files, unpushed commits, and a folder sbd didn't make
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
