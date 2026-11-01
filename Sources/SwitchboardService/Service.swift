@@ -135,11 +135,7 @@ public final class Service {
           let repo = (args.path as NSString).standardizingPath
           args.branch = NewSession.freeAutoBranch(
             prefix: config.branchPrefix, name: args.name,
-            exists: { branch in
-              branchExists(repo, branch)
-                || ((try? worktreeLocation(repo, branch)).map { FileManager.default.fileExists(atPath: $0.dir) }
-                  ?? false)
-            })
+            exists: { branchOrFolderTaken(repo, $0) })
         }
         let folder = try prepareFolder(args)
         awaitMCPServers()
@@ -322,6 +318,13 @@ public final class Service {
     // The first worktree names the main checkout, whose folder name names the repo.
     let main = try worktreePaths(path).first ?? path
     return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
+  }
+
+  /// Whether `branch` exists in the repo at `path`, or the folder for a worktree on it does.
+  func branchOrFolderTaken(_ path: String, _ branch: String) -> Bool {
+    if branchExists(path, branch) { return true }
+    guard let location = try? worktreeLocation(path, branch) else { return false }
+    return FileManager.default.fileExists(atPath: location.dir)
   }
 
   /// The folder a new session runs in, and its branch. With a branch, the
