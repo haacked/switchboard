@@ -329,12 +329,113 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       MarkdownBlock.parse(md) == [
         .heading(level: 2, text: "Findings"),
         .paragraph("The merge **loses** findings:\nthe old pipeline found 6."),
-        .list(number: nil, items: ["one", "two\nwrapped", "three\n• nested"]),
-        .list(number: 1, items: ["first", "second"]),
+        .list(number: nil, items: [item("one"), item("two\nwrapped"), item("three", .list(number: nil, items: [item("nested")]))]),
+        .list(number: 1, items: [item("first"), item("second")]),
         .code(language: "swift", text: "let x = 1\n\nlet y = 2"),
-        .quote("quoted\ntext"),
+        .quote([.paragraph("quoted\ntext")]),
         .rule,
       ])
+  }
+
+  private func item(_ text: String, _ more: MarkdownBlock...) -> MarkdownBlock.Item {
+    .init(checked: nil, blocks: [.paragraph(text)] + more)
+  }
+
+  @Test func nestedListsKeepTheirKindNumbersAndDepth() {
+    let md = "1. a\n   1. x\n   2. y\n      - deep\n2. b\n   - bullet in ordered"
+    #expect(
+      MarkdownBlock.parse(md) == [
+        .list(
+          number: 1,
+          items: [
+            item(
+              "a",
+              .list(
+                number: 1,
+                items: [item("x"), item("y", .list(number: nil, items: [item("deep")]))])),
+            item("b", .list(number: nil, items: [item("bullet in ordered")])),
+          ])
+      ])
+  }
+
+  @Test func fencedCodeInAListItemIsACodeBlock() {
+    let md = "1. Run:\n   ```sh\n   make\n\n   make test\n   ```\n2. Done"
+    #expect(
+      MarkdownBlock.parse(md) == [
+        .list(number: 1, items: [item("Run:", .code(language: "sh", text: "make\n\nmake test")), item("Done")])
+      ])
+  }
+
+  @Test func blankLinesBetweenItemsKeepOneList() {
+    #expect(
+      MarkdownBlock.parse("1. a\n\n   detail\n\n2. b\n\n3. c") == [
+        .list(number: 1, items: [item("a", .paragraph("detail")), item("b"), item("c")])
+      ])
+    #expect(MarkdownBlock.parse("- a\n\n- b") == [.list(number: nil, items: [item("a"), item("b")])])
+    #expect(MarkdownBlock.parse("- a\n\nafter") == [.list(number: nil, items: [item("a")]), .paragraph("after")])
+  }
+
+  @Test func taskItemsCarryTheirState() {
+    #expect(
+      MarkdownBlock.parse("- [ ] todo\n- [x] done\n- [X] also\n- [link](u)") == [
+        .list(
+          number: nil,
+          items: [
+            .init(checked: false, blocks: [.paragraph("todo")]),
+            .init(checked: true, blocks: [.paragraph("done")]),
+            .init(checked: true, blocks: [.paragraph("also")]),
+            item("[link](u)"),
+          ])
+      ])
+  }
+
+  @Test func readsTables() {
+    let md = "intro\n| Name | Value |\n| :--- | ---: |\n| a | 1 |\n| `x\\|y` | 2 | extra\n| short |\n\nafter"
+    #expect(
+      MarkdownBlock.parse(md) == [
+        .paragraph("intro"),
+        .table(
+          header: ["Name", "Value"], alignments: [.leading, .trailing],
+          rows: [["a", "1"], ["`x|y`", "2"], ["short", ""]]),
+        .paragraph("after"),
+      ])
+    #expect(
+      MarkdownBlock.parse("a | b\n:-:|-:\nc | d") == [
+        .table(header: ["a", "b"], alignments: [.center, .trailing], rows: [["c", "d"]])
+      ])
+  }
+
+  @Test func textThatIsNotATableStaysAParagraph() {
+    #expect(MarkdownBlock.parse("a | b\nc | d") == [.paragraph("a | b\nc | d")])
+    #expect(MarkdownBlock.parse("| a | b |\n| --- |\n| 1 | 2 |") == [.paragraph("| a | b |\n| --- |\n| 1 | 2 |")])
+    #expect(MarkdownBlock.parse("| a | b |\n---") == [.paragraph("| a | b |"), .rule])
+  }
+
+  @Test func aQuoteHoldsBlocks() {
+    let md = "> intro\n>\n> - one\n> - two\n>\n> ```\n> code\n> ```\n>> inner"
+    #expect(
+      MarkdownBlock.parse(md) == [
+        .quote([
+          .paragraph("intro"), .list(number: nil, items: [item("one"), item("two")]),
+          .code(language: nil, text: "code"), .quote([.paragraph("inner")]),
+        ])
+      ])
+  }
+
+  @Test func aFenceClosesOnlyOnAtLeastItsOwnLength() {
+    #expect(
+      MarkdownBlock.parse("````md\n```sh\nx\n```\n````\nafter") == [
+        .code(language: "md", text: "```sh\nx\n```"), .paragraph("after"),
+      ])
+    #expect(MarkdownBlock.parse("```\n```swift\n```") == [.code(language: nil, text: "```swift")])
+    #expect(MarkdownBlock.parse("~~~\n```\n~~~") == [.code(language: nil, text: "```")])
+    #expect(MarkdownBlock.parse("```x``` then more\n\nnext") == [.paragraph("```x``` then more"), .paragraph("next")])
+  }
+
+  @Test func crlfReadsAsLF() {
+    let md = "# T\r\n\r\n- a\r\n  - b\r\n\r\n```\r\nc\r\n```\r\n"
+    #expect(MarkdownBlock.parse(md) == MarkdownBlock.parse(md.replacingOccurrences(of: "\r\n", with: "\n")))
+    #expect(!MarkdownBlock.parse(md).contains(.code(language: nil, text: "c\r")))
   }
 
   @Test func anUnclosedFenceRunsToTheEnd() {

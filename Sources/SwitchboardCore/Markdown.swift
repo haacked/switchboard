@@ -3,41 +3,59 @@ import Foundation
 /// A block of Markdown. The app draws each block with SwiftUI's inline
 /// Markdown, which handles emphasis, code spans, and links but no blocks.
 public enum MarkdownBlock: Equatable, Sendable {
+  /// A list item. `checked` is nil unless the item starts with `[ ]` or `[x]`.
+  public struct Item: Equatable, Sendable {
+    public var checked: Bool?
+    public var blocks: [MarkdownBlock]
+
+    public init(checked: Bool?, blocks: [MarkdownBlock]) {
+      self.checked = checked
+      self.blocks = blocks
+    }
+  }
+
+  public enum Alignment: Equatable, Sendable {
+    case leading, center, trailing
+  }
+
   case heading(level: Int, text: String)
   case paragraph(String)
   /// `number` is the first item's number for a numbered list, or nil for bullets.
-  case list(number: Int?, items: [String])
+  case list(number: Int?, items: [Item])
   case code(language: String?, text: String)
-  case quote(String)
+  case quote([MarkdownBlock])
+  /// Every row has one cell for each header cell.
+  case table(header: [String], alignments: [Alignment], rows: [[String]])
   case rule
 
   /// Reads the blocks of a reply. Text that no rule below recognizes becomes a
   /// paragraph, so nothing is lost.
   public static func parse(_ markdown: String) -> [MarkdownBlock] {
+    blocks(of: markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"))
+  }
+
+  private static func blocks(of lines: [String]) -> [MarkdownBlock] {
     var blocks: [MarkdownBlock] = []
     var paragraph: [String] = []
     func endParagraph() {
       if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
       paragraph = []
     }
-    let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
     var i = 0
     while i < lines.count {
       let line = lines[i]
       let trimmed = line.trimmingCharacters(in: .whitespaces)
       i += 1
-      if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+      if let fence = Self.fence(trimmed) {
         endParagraph()
-        let fence = String(trimmed.prefix(3))
-        let language = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
         var body: [String] = []
         // An unclosed fence runs to the end, as a reply cut off mid-block does.
-        while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(fence) {
+        while i < lines.count, !fence.closes(lines[i].trimmingCharacters(in: .whitespaces)) {
           body.append(lines[i])
           i += 1
         }
         i += 1
-        blocks.append(.code(language: language.isEmpty ? nil : language, text: body.joined(separator: "\n")))
+        blocks.append(.code(language: fence.info.isEmpty ? nil : fence.info, text: body.joined(separator: "\n")))
       } else if trimmed.isEmpty {
         endParagraph()
       } else if let heading = Self.heading(trimmed) {
@@ -53,32 +71,84 @@ public enum MarkdownBlock: Equatable, Sendable {
           quoted.append(Self.unquoted(lines[i].trimmingCharacters(in: .whitespaces)))
           i += 1
         }
-        blocks.append(.quote(quoted.joined(separator: "\n")))
-      } else if let first = Self.listItem(line) {
+        blocks.append(.quote(Self.blocks(of: quoted)))
+      } else if i < lines.count, let table = Self.table(header: trimmed, delimiter: lines[i]) {
         endParagraph()
-        var items = [first.text]
+        i += 1
+        var rows: [[String]] = []
         while i < lines.count {
-          let indented = lines[i].hasPrefix(" ") || lines[i].hasPrefix("\t")
-          let next = Self.listItem(lines[i])
-          if !indented, let next, next.numbered == first.numbered {
-            items.append(next.text)
-          } else if indented, !lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
-            // An indented item stays in its parent, as a line of its own. An
-            // indented plain line continues the item above it.
-            let text = lines[i].trimmingCharacters(in: .whitespaces)
-            items[items.count - 1] += "\n" + (next.map { ($0.numbered ? "" : "• ") + $0.text } ?? text)
-          } else {
-            break
-          }
+          let row = lines[i].trimmingCharacters(in: .whitespaces)
+          guard row.contains("|") else { break }
+          let cells = Self.cells(row)
+          rows.append((0..<table.header.count).map { $0 < cells.count ? cells[$0] : "" })
           i += 1
         }
-        blocks.append(.list(number: first.number, items: items))
+        blocks.append(.table(header: table.header, alignments: table.alignments, rows: rows))
+      } else if let first = Self.listItem(line) {
+        endParagraph()
+        let (list, next) = Self.list(lines, from: i - 1, first: first)
+        blocks.append(list)
+        i = next
       } else {
         paragraph.append(trimmed)
       }
     }
     endParagraph()
     return blocks
+  }
+
+  /// Reads the list that starts at `lines[start]`, and returns it with the
+  /// index of the first line after it. A line that is indented deeper than
+  /// the first item, or that follows a blank line and is, belongs to the item
+  /// above it, and that item's lines are read as blocks of their own. A list
+  /// item of the same kind that is not deeper starts the next item, even after
+  /// blank lines. Any other line ends the list.
+  private static func list(_ lines: [String], from start: Int, first: ListMarker) -> (MarkdownBlock, Int) {
+    let base = indent(lines[start])
+    var items: [Item] = []
+    var current: (marker: ListMarker, body: [String])?
+    func endItem() {
+      guard let (marker, body) = current else { return }
+      let checkbox = Self.checkbox(marker.text)
+      items.append(Item(checked: checkbox.checked, blocks: Self.blocks(of: [checkbox.text] + body)))
+    }
+    var i = start
+    scan: while i < lines.count {
+      let line = lines[i]
+      if line.trimmingCharacters(in: .whitespaces).isEmpty {
+        var next = i
+        while next < lines.count, lines[next].trimmingCharacters(in: .whitespaces).isEmpty { next += 1 }
+        guard next < lines.count else { break }
+        if indent(lines[next]) > base {
+          current?.body += lines[i..<next].map { _ in "" }
+        } else if !(Self.listItem(lines[next]).map { $0.numbered == first.numbered } ?? false) {
+          break scan
+        }
+        i = next
+        continue
+      }
+      if indent(line) > base, let marker = current?.marker {
+        current?.body.append(dedent(line, by: marker.width))
+      } else if let marker = Self.listItem(line), marker.numbered == first.numbered {
+        endItem()
+        current = (marker, [])
+      } else {
+        break
+      }
+      i += 1
+    }
+    endItem()
+    return (.list(number: first.number, items: items), i)
+  }
+
+  private static func indent(_ line: String) -> Int {
+    line.prefix { $0 == " " || $0 == "\t" }.count
+  }
+
+  /// Removes up to `width` leading whitespace characters, which is how far an
+  /// item's own lines are indented past the list's.
+  private static func dedent(_ line: String, by width: Int) -> String {
+    String(line.dropFirst(min(indent(line), width)))
   }
 
   private static func heading(_ line: String) -> MarkdownBlock? {
@@ -93,19 +163,107 @@ public enum MarkdownBlock: Equatable, Sendable {
       && (chars.allSatisfy { $0 == "-" } || chars.allSatisfy { $0 == "*" } || chars.allSatisfy { $0 == "_" })
   }
 
+  /// Removes the `>` and the one space after it. The rest keeps its
+  /// indentation, which a quoted code block needs.
   private static func unquoted(_ line: String) -> String {
-    String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
+    let rest = line.dropFirst()
+    return String(rest.hasPrefix(" ") ? rest.dropFirst() : rest)
   }
 
-  private static func listItem(_ line: String) -> (text: String, numbered: Bool, number: Int?)? {
+  private struct Fence {
+    let character: Character
+    let length: Int
+    let info: String
+
+    /// A fence closes on a line of only its character, at least as long as the opening.
+    func closes(_ trimmed: String) -> Bool {
+      let run = trimmed.prefix { $0 == character }
+      return run.count >= length && run.count == trimmed.count
+    }
+  }
+
+  /// A backtick fence's info text can't hold a backtick, so "```x``` y" is
+  /// text with code spans.
+  private static func fence(_ trimmed: String) -> Fence? {
+    guard let character = trimmed.first, character == "`" || character == "~" else { return nil }
+    let run = trimmed.prefix { $0 == character }
+    let info = trimmed.dropFirst(run.count).trimmingCharacters(in: .whitespaces)
+    guard run.count >= 3, !(character == "`" && info.contains("`")) else { return nil }
+    return Fence(character: character, length: run.count, info: info)
+  }
+
+  /// A header row and the delimiter row under it that has one cell for each
+  /// header cell. Both rows need a `|`.
+  private static func table(header: String, delimiter: String) -> (header: [String], alignments: [Alignment])? {
+    let delimiter = delimiter.trimmingCharacters(in: .whitespaces)
+    guard header.contains("|"), delimiter.contains("|") else { return nil }
+    let head = cells(header)
+    let marks = cells(delimiter)
+    guard marks.count == head.count else { return nil }
+    var alignments: [Alignment] = []
+    for mark in marks {
+      let left = mark.hasPrefix(":")
+      let right = mark.hasSuffix(":") && mark.count > 1
+      let dashes = mark.dropFirst(left ? 1 : 0).dropLast(right ? 1 : 0)
+      guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+      alignments.append(left && right ? .center : right ? .trailing : .leading)
+    }
+    return (head, alignments)
+  }
+
+  /// The cells of a row, split at each `|` that a backslash doesn't escape.
+  private static func cells(_ row: String) -> [String] {
+    var cells: [String] = []
+    var cell = ""
+    var characters = Substring(row).makeIterator()
+    var escaped = false
+    while let c = characters.next() {
+      if escaped {
+        cell.append(c == "|" ? "|" : "\\\(c)")
+        escaped = false
+      } else if c == "\\" {
+        escaped = true
+      } else if c == "|" {
+        cells.append(cell)
+        cell = ""
+      } else {
+        cell.append(c)
+      }
+    }
+    if escaped { cell.append("\\") }
+    cells.append(cell)
+    // A leading and a trailing `|` frame the row and hold no cell.
+    if row.hasPrefix("|") { cells.removeFirst() }
+    if row.hasSuffix("|"), !row.hasSuffix("\\|"), !cells.isEmpty { cells.removeLast() }
+    return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+  }
+
+  private static func checkbox(_ text: String) -> (checked: Bool?, text: String) {
+    for (mark, checked) in [("[ ] ", false), ("[x] ", true), ("[X] ", true)] where text.hasPrefix(mark) {
+      return (checked, String(text.dropFirst(4)))
+    }
+    return (nil, text)
+  }
+
+  private struct ListMarker {
+    let text: String
+    let numbered: Bool
+    let number: Int?
+    /// The marker's characters, which the item's own lines are indented past.
+    let width: Int
+  }
+
+  private static func listItem(_ line: String) -> ListMarker? {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
+    let lead = indent(line)
     for bullet in ["- ", "* ", "+ "] where trimmed.hasPrefix(bullet) {
-      return (String(trimmed.dropFirst(2)), false, nil)
+      return ListMarker(text: String(trimmed.dropFirst(2)), numbered: false, number: nil, width: lead + 2)
     }
     let digits = trimmed.prefix { $0.isNumber }
     let rest = trimmed.dropFirst(digits.count)
     if !digits.isEmpty, digits.count <= 9, rest.hasPrefix(". ") || rest.hasPrefix(") ") {
-      return (String(rest.dropFirst(2)), true, Int(digits))
+      return ListMarker(
+        text: String(rest.dropFirst(2)), numbered: true, number: Int(digits), width: lead + digits.count + 2)
     }
     return nil
   }
