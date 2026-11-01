@@ -56,6 +56,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
+  /// Whether the folder no longer exists, as the poller found when its count
+  /// failed. A count that failed for another reason leaves this false.
+  public var folderGone = false
   /// The id of the last Stop event, which keys the turn's triage summary.
   public var lastStop: Int64 = 0
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
@@ -161,6 +164,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       }
     case "worktree":
       dirty = d["dirty"]?.int
+      folderGone = d["gone"]?.bool ?? false
     default:
       break
     }
