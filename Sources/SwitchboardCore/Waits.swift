@@ -230,11 +230,8 @@ public struct Wait: Codable, Equatable, Sendable {
     case .merge:
       return ended
     case .ci:
-      switch pr.checks {
-      case "SUCCESS": return "the checks passed"
-      case "FAILURE", "ERROR": return "the checks failed"
-      default: return ended
-      }
+      if pr.checks == "SUCCESS" { return "the checks passed" }
+      return pr.checksFailed ? "the checks failed" : ended
     case .review, .botReview:
       let verbs = ["APPROVED": "approved", "CHANGES_REQUESTED": "requested changes", "COMMENTED": "reviewed"]
       let newest = pr.reviews.last { r in

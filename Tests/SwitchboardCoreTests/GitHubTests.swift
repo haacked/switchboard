@@ -118,6 +118,27 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(parsed.pr.checks == nil)
   }
 
+  @Test func reviewRequestsNameEachRequestedReviewer() throws {
+    let requests: JSON = [
+      "nodes": [
+        ["requestedReviewer": ["__typename": "User", "login": "alex"]],
+        ["requestedReviewer": ["__typename": "Bot", "login": "copilot-pull-request-reviewer"]],
+        ["requestedReviewer": ["__typename": "Team", "slug": "flags"]],
+        ["requestedReviewer": .null],
+      ]
+    ]
+    let node = try editedNode(18303, ["reviewRequests": requests])
+
+    #expect(try #require(GitHub.parsePR(node)).pr.reviewRequests == ["alex", "copilot-pull-request-reviewer", "flags"])
+  }
+
+  @Test func noReviewRequestsIsAnEmptyListAndAnAbsentFieldIsNil() throws {
+    let none = try editedNode(18303, ["reviewRequests": ["nodes": []]])
+
+    #expect(try #require(GitHub.parsePR(none)).pr.reviewRequests == [])
+    #expect(try #require(GitHub.parsePR(try editedNode(18303, [:]))).pr.reviewRequests == nil)
+  }
+
   @Test(
     arguments: [
       (

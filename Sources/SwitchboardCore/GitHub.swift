@@ -67,6 +67,9 @@ public enum GitHub {
           headRefName headRefOid baseRefName mergeable reviewDecision
           repository { nameWithOwner defaultBranchRef { name } }
           labels(first: 20) { nodes { name } }
+          reviewRequests(first: 20) {
+            nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } }
+          }
           latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt commit { oid } } }
           reviews(last: 20) { nodes { author { __typename login } state submittedAt } }
           commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -116,6 +119,9 @@ public enum GitHub {
         author: login(n["author"]), state: n["state"]?.string ?? "", submittedAt: n["submittedAt"]?.string,
         commit: n["commit"]?["oid"]?.string, bot: n["author"]?["__typename"]?.string == "Bot" ? true : nil)
     }
+    let reviewRequests = node["reviewRequests"].map {
+      nodes($0).compactMap { $0["requestedReviewer"].flatMap { $0["login"]?.string ?? $0["slug"]?.string } }
+    }
     let pr = PullRequest(
       id: id, number: number, url: node["url"]?.string ?? "", repo: node["repository"]?["nameWithOwner"]?.string ?? "",
       title: node["title"]?.string ?? "", state: PRState(rawValue: node["state"]?.string ?? "") ?? .open,
@@ -127,7 +133,8 @@ public enum GitHub {
       verdicts: nodes(node["latestOpinionatedReviews"]).map(review), reviews: nodes(node["reviews"]).map(review),
       labels: nodes(node["labels"]).compactMap { $0["name"]?.string },
       checks: nodes(node["commits"]).first?["commit"]?["statusCheckRollup"]?["state"]?.string,
-      mergedAt: node["mergedAt"]?.string, closedAt: node["closedAt"]?.string)
+      mergedAt: node["mergedAt"]?.string, closedAt: node["closedAt"]?.string,
+      reviewRequests: reviewRequests)
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }

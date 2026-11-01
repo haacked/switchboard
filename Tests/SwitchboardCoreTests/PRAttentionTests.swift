@@ -373,3 +373,167 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: .done, reason: reason))
   }
 }
+
+@Suite struct AwaitingReview {
+  static let now: Int64 = 10
+  static let alex = ["alex"]
+  static let stale = Attention.staleAfterMs + 10
+  static let commented = [Review(author: "alex", state: "COMMENTED")]
+  static let waits = Verdict(state: .waiting, reason: "review of #42 by alex")
+
+  private func verdict(_ pr: PullRequest, reply: String = "Opened the PR.") throws -> Verdict {
+    Attention.evaluate(session(), try prFacts(pr, reply: reply), now: Self.now)
+  }
+
+  @Test func readyPRWithARequestedReviewerWaits() throws {
+    #expect(try verdict(samplePR(reviewDecision: .reviewRequired, reviewRequests: Self.alex)) == Self.waits)
+  }
+
+  @Test func prWithNoRequiredReviewWaitsOnItsRequest() throws {
+    #expect(try verdict(samplePR(reviewDecision: nil, reviewRequests: Self.alex)) == Self.waits)
+  }
+
+  @Test func botAndTeamReviewersAreNamedLikePeople() throws {
+    let v = try verdict(samplePR(reviewRequests: ["copilot-pull-request-reviewer", "acme/flags"]))
+
+    #expect(v == Verdict(state: .waiting, reason: "review of #42 by copilot-pull-request-reviewer and acme/flags"))
+  }
+
+  @Test func pendingChecksStillWait() throws {
+    #expect(try verdict(samplePR(checks: "PENDING", reviewRequests: Self.alex)) == Self.waits)
+    #expect(try verdict(samplePR(checks: "SUCCESS", reviewRequests: Self.alex)) == Self.waits)
+  }
+
+  @Test func pushAfterRequestedChangesWaitsForTheReReview() throws {
+    let stale = sampleVerdict("alex", "CHANGES_REQUESTED", on: "oldsha")
+    let v = try verdict(
+      samplePR(reviewDecision: .changesRequested, verdicts: [stale], reviewRequests: Self.alex))
+
+    #expect(v == Self.waits)
+  }
+
+  @Test func draftPRNeedsYou() throws {
+    #expect(try verdict(samplePR(draft: true, reviewRequests: Self.alex)) == readTheReply)
+  }
+
+  @Test func prWithNoRequestedReviewerNeedsYou() throws {
+    #expect(try verdict(samplePR(reviewRequests: [])) == readTheReply)
+  }
+
+  @Test func prWithUnknownRequestsNeedsYou() throws {
+    #expect(try verdict(samplePR(reviewRequests: nil)) == readTheReply)
+  }
+
+  @Test(arguments: ["FAILURE", "ERROR"])
+  func failingChecksNeedYou(_ checks: String) throws {
+    #expect(try verdict(samplePR(checks: checks, reviewRequests: Self.alex)) == readTheReply)
+  }
+
+  @Test func conflictNeedsYou() throws {
+    let v = try verdict(samplePR(mergeable: .conflicting, reviewRequests: Self.alex))
+
+    #expect(v == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+  }
+
+  @Test func changesRequestedOnTheCurrentCommitNeedYou() throws {
+    let current = sampleVerdict("alex", "CHANGES_REQUESTED", on: samplePRHead)
+    let v = try verdict(samplePR(reviewDecision: .changesRequested, verdicts: [current], reviewRequests: Self.alex))
+
+    #expect(v == Verdict(state: .needsYou, reason: "address the changes that alex requested on #42"))
+  }
+
+  @Test func approvedPRNeedsYou() throws {
+    let v = try verdict(
+      samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alex", "APPROVED")], reviewRequests: Self.alex))
+
+    #expect(v == Verdict(state: .needsYou, reason: "merge #42, approved by alex"))
+  }
+
+  @Test func mergedBaseNeedsYou() throws {
+    let v = try verdict(samplePR(mergedBase: 40, reviewRequests: Self.alex))
+
+    #expect(v == Verdict(state: .needsYou, reason: "retarget #42; its base #40 merged"))
+  }
+
+  @Test func queuedPRDoesNotWaitOnAReview() throws {
+    #expect(try verdict(samplePR(queue: .pending, reviewRequests: Self.alex)) == readTheReply)
+  }
+
+  @Test func removedFromTheQueueNeedsYou() throws {
+    let v = try verdict(samplePR(queue: .removed, reviewRequests: Self.alex))
+
+    #expect(v == Verdict(state: .needsYou, reason: "find out why Trunk removed #42 from its queue"))
+  }
+
+  @Test func mergedPRDoesNotWait() throws {
+    let f = try prFacts(samplePR(state: .merged, reviewRequests: Self.alex), dirty: 0)
+
+    #expect(Attention.evaluate(session(), f, now: Self.now).state == .done)
+  }
+
+  @Test func questionForTheUserStaysInNeedsYou() throws {
+    let v = try verdict(samplePR(reviewRequests: Self.alex), reply: "Which approach do you prefer?")
+
+    #expect(v == Verdict(state: .needsYou, reason: "answer: Which approach do you prefer?"))
+  }
+
+  @Test func offerStaysInCanContinue() throws {
+    let v = try verdict(samplePR(reviewRequests: Self.alex), reply: "Want me to push?")
+
+    #expect(v.state == .canContinue)
+  }
+
+  @Test func newTurnWins() throws {
+    let f = try prFacts(samplePR(reviewRequests: Self.alex), then: runningTurn)
+
+    #expect(Attention.evaluate(session(), f, now: Self.now).state == .working)
+  }
+
+  @Test func manualWaitIsNotReplacedByTheReviewWait() throws {
+    let f = try prFacts(samplePR(reviewRequests: Self.alex))
+
+    #expect(
+      Attention.evaluate(session(wait: "run the app and look"), f, now: Self.now)
+        == Verdict(state: .waiting, reason: "run the app and look"))
+  }
+
+  @Test func reviewSubmittedMovesTheSessionBackToNeedsYou() throws {
+    let requested = try prFacts(samplePR(reviewRequests: Self.alex))
+    let commented = try prFacts(samplePR(reviews: [Review(author: "alex", state: "COMMENTED")], reviewRequests: []))
+
+    #expect(Attention.evaluate(session(), requested, now: Self.now) == Self.waits)
+    #expect(Attention.evaluate(session(), commented, now: Self.now) == readTheReply)
+  }
+
+  @Test func waitsEvenWhenStale() throws {
+    let f = try prFacts(samplePR(reviewRequests: Self.alex))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == Self.waits)
+  }
+
+  @Test func answeredReviewNeedsYouEvenAfterTheSessionWentIdle() throws {
+    let f = try prFacts(samplePR(reviews: Self.commented, reviewRequests: []))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+  }
+
+  @Test(arguments: ["FAILURE", "ERROR"])
+  func failingChecksNeedYouEvenAfterTheSessionWentIdle(_ checks: String) throws {
+    let f = try prFacts(samplePR(checks: checks, reviewRequests: Self.alex))
+
+    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+  }
+
+  @Test func idleSessionStaysStaleWhenNoPRActionIsOutstanding() throws {
+    let cases: [PullRequest] = [
+      samplePR(draft: true, reviews: Self.commented, reviewRequests: []),
+      samplePR(draft: true, checks: "FAILURE"),
+      samplePR(reviews: [], reviewRequests: []),
+      samplePR(reviews: Self.commented, reviewRequests: nil),
+    ]
+    for pr in cases {
+      let f = try prFacts(pr)
+      #expect(Attention.evaluate(session(), f, now: Self.stale).state == .stale)
+    }
+  }
+}
