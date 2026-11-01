@@ -14,10 +14,11 @@ struct SurfaceLifetime {
   private var createIfMissing: Action? { hasSurface ? nil : .create }
   private var freeIfHeld: Action? { hasSurface ? .free : nil }
 
-  mutating func enteredWindow() -> Action? {
+  /// A view that enters a window that isn't visible waits for `windowShown()`, so a closed window holds no surface.
+  mutating func enteredWindow(windowIsVisible: Bool) -> Action? {
     inWindow = true
-    windowIsClosed = false
-    return createIfMissing
+    windowIsClosed = !windowIsVisible
+    return windowIsVisible ? createIfMissing : nil
   }
 
   mutating func leftWindow() -> Action? {

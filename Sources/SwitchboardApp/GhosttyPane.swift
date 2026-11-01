@@ -115,10 +115,9 @@
     }
   }
 
-  /// One libghostty surface. The surface exists from the moment the view enters
-  /// a window until `close()`, so a session that isn't on screen holds no
-  /// renderer and no PTY. The surface runs `command` in its own PTY, which for
-  /// the app is a tmux client attached to one of sbd's panes.
+  /// One libghostty surface, which runs `command` in its own PTY. For the app,
+  /// the command is a tmux client attached to one of sbd's panes. The view holds
+  /// a surface only while it is in an open window (see `SurfaceLifetime`).
   final class GhosttySurfaceView: NSView {
     nonisolated(unsafe) static var kept: [GhosttySurfaceView] = []
 
@@ -149,9 +148,6 @@
     /// SB_GHOSTTY_KEEP=1 keeps every surface alive after its view leaves the window, to measure what hidden surfaces cost.
     static let keepsHiddenSurfaces = getenv("SB_GHOSTTY_KEEP") != nil
 
-    /// `ghostty_surface_free` takes about 16 ms, which would stall the main thread on every session switch.
-    private static let freeQueue = DispatchQueue(label: "switchboard.ghostty.free")
-
     private var lifetime = SurfaceLifetime()
     private var observers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
     private var visibility: NSKeyValueObservation?
@@ -171,7 +167,7 @@
       let workspace = NSWorkspace.shared.notificationCenter
       observers.append(
         (workspace, observe(workspace, NSWorkspace.screensDidWakeNotification, nil) { $0.lifetime.displayWoke() }))
-      perform(lifetime.enteredWindow())
+      perform(lifetime.enteredWindow(windowIsVisible: window.isVisible))
     }
 
     private func observe(
@@ -225,6 +221,8 @@
           ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
       pushSize()
       if window?.firstResponder === window || window?.firstResponder == nil { window?.makeFirstResponder(self) }
+      // A new surface starts focused, so a pane that isn't the first responder has to be told.
+      ghostty_surface_set_focus(surface, window?.firstResponder === self)
     }
 
     /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd. The view stays alive until
@@ -233,7 +231,7 @@
       guard !Self.keepsHiddenSurfaces, let surface else { return }
       self.surface = nil
       lifetime.surfaceFreed()
-      Self.freeQueue.async {
+      DispatchQueue.main.async {
         ghostty_surface_free(surface)
         withExtendedLifetime(self) {}
       }
@@ -247,7 +245,7 @@
 
     deinit {
       stopObserving()
-      // close() frees the surface first, so this frees one only when the view never reached close().
+      // Every other path frees the surface through freeSurface(), so this frees one only for a view deallocated while it still holds a surface.
       if let surface { ghostty_surface_free(surface) }
     }
 

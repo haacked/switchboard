@@ -11,6 +11,7 @@
   /// - `close`: closes the window, then shows it again, as the menu bar's "Open Switchboard" does.
   /// - `hide`: hides the app, then unhides it.
   /// - `minimize`: minimizes the window, then restores it.
+  /// - `select-while-closed`: selects another session while the window is closed, then shows the window.
   /// - `reparent`: takes the surface views out of the window and puts them back.
   /// - `watch`: reports every 3 s for two minutes, while a script sleeps and wakes the displays.
   /// - `wake`: posts the screens-did-wake notification with surfaces open.
@@ -45,6 +46,14 @@
           await settle("minimized")
           window.deminiaturize(nil)
           await settle("restored")
+        case "select-while-closed":
+          // The menu bar sets the selection before it shows the window.
+          window.close()
+          await settle("closed")
+          model.selection = model.sessions.dropFirst().first?.id
+          await settle("selected another session while closed")
+          window.makeKeyAndOrderFront(nil)
+          await settle("shown again")
         case "reparent":
           // What a rebuilt HSplitView does to its panes: the views leave the window and come back.
           let views = surfaceViews()

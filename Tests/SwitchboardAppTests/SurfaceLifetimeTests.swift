@@ -6,7 +6,7 @@ import Testing
   /// A view that is in a window with a live surface.
   func live() -> SurfaceLifetime {
     var rules = SurfaceLifetime()
-    #expect(rules.enteredWindow() == .create)
+    #expect(rules.enteredWindow(windowIsVisible: true) == .create)
     rules.surfaceCreated()
     return rules
   }
@@ -29,12 +29,24 @@ import Testing
 
   @Test func createsASurfaceWhenTheViewEntersAWindow() {
     var rules = SurfaceLifetime()
-    #expect(rules.enteredWindow() == .create)
+    #expect(rules.enteredWindow(windowIsVisible: true) == .create)
+  }
+
+  @Test func createsNothingForAViewThatEntersAWindowThatIsNotVisible() {
+    var rules = SurfaceLifetime()
+    #expect(rules.enteredWindow(windowIsVisible: false) == nil)
+    #expect(rules.displayWoke() == nil)
+  }
+
+  @Test func createsTheSurfaceOfAViewThatEnteredAClosedWindowWhenTheWindowIsShown() {
+    var rules = SurfaceLifetime()
+    _ = rules.enteredWindow(windowIsVisible: false)
+    #expect(rules.windowShown() == .create)
   }
 
   @Test func doesNotCreateASecondSurfaceWhenTheViewReentersAWindowWithOne() {
     var rules = live()
-    #expect(rules.enteredWindow() == nil)
+    #expect(rules.enteredWindow(windowIsVisible: true) == nil)
   }
 
   @Test func freesTheSurfaceWhenTheViewLeavesTheWindow() {
@@ -46,7 +58,7 @@ import Testing
 
   @Test func createsANewSurfaceWhenAFreedViewComesBack() {
     var rules = left()
-    #expect(rules.enteredWindow() == .create)
+    #expect(rules.enteredWindow(windowIsVisible: true) == .create)
   }
 
   @Test func freesTheSurfaceWhenTheWindowCloses() {
@@ -56,7 +68,7 @@ import Testing
 
   @Test func closingAWindowWithNoSurfaceFreesNothing() {
     var rules = SurfaceLifetime()
-    _ = rules.enteredWindow()
+    _ = rules.enteredWindow(windowIsVisible: true)
     #expect(rules.windowClosed() == nil)
   }
 
@@ -79,7 +91,19 @@ import Testing
 
   @Test func retriesAFailedCreateWhenADisplayWakes() {
     var rules = SurfaceLifetime()
-    _ = rules.enteredWindow()
+    _ = rules.enteredWindow(windowIsVisible: true)
+    #expect(rules.displayWoke() == .create)
+  }
+
+  @Test func retriesAFailedCreateWhenADisplayWakesAfterTheWindowIsShownAgain() {
+    var rules = closed()
+    #expect(rules.windowShown() == .create)
+    #expect(rules.displayWoke() == .create)
+  }
+
+  @Test func retriesAFailedCreateWhenADisplayWakesAfterAMoveToANewWindow() {
+    var rules = closed()
+    #expect(rules.enteredWindow(windowIsVisible: true) == .create)
     #expect(rules.displayWoke() == .create)
   }
 
@@ -106,6 +130,6 @@ import Testing
 
   @Test func aViewMovedToANewWindowAfterACloseGetsASurface() {
     var rules = closed()
-    #expect(rules.enteredWindow() == .create)
+    #expect(rules.enteredWindow(windowIsVisible: true) == .create)
   }
 }
