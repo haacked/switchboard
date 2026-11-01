@@ -560,22 +560,33 @@ public final class Service {
   }
 
   /// Stops claude, removes the worktree when asked, then closes the panes and
-  /// forgets the session. git runs off the state queue, because removing a
-  /// worktree with large ignored folders can take a while. A failed removal
-  /// leaves the session and its panes in place.
+  /// forgets the session. A removal that asked for the worktree first checks
+  /// that nothing is lost, and refuses before it stops anything. git runs off
+  /// the state queue, because removing a worktree with large ignored folders
+  /// can take a while. A failed removal leaves the session and its panes in
+  /// place. The conversation's transcript stays in the account's projects
+  /// folder, because Claude Code has no command that archives a local session.
   private func remove(_ args: JSON) throws -> JSON {
-    let fresh = buildSnapshot()
-    let session: Session = try queue.sync {
+    let removesWorktree = args["worktree"]?.bool == true
+    let (found, mergedPR): (Session, Bool) = try queue.sync {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      return (entries[id]!.session, entries[id]!.facts.pr?.state == .merged)
+    }
+    if removesWorktree { try checkWorktreeIsLossless(found, mergedPR: mergedPR) }
+    let fresh = buildSnapshot()
+    let session: Session = try queue.sync {
+      guard let current = entries[found.id]?.session, !starting.contains(found.id) else {
+        throw APIError("\(found.id) changed while it was being removed")
+      }
       install(fresh)
-      if case .running(let pid) = claudeState(id) { kill(pid_t(pid), SIGTERM) }
-      return entries[id]!.session
+      if case .running(let pid) = claudeState(found.id) { kill(pid_t(pid), SIGTERM) }
+      return current
     }
     var removed = false
-    if args["worktree"]?.bool == true, let repo = session.repo {
-      _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
+    if removesWorktree {
+      _ = try gitOutput(session.repo!, ["worktree", "remove", session.cwd])
       removed = true
     }
     try queue.sync {
@@ -590,6 +601,35 @@ public final class Service {
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     return ["removed": .string(session.id), "worktree_removed": .bool(removed)]
+  }
+
+  /// Throws unless the session's folder is a linked worktree of the repo that
+  /// `new` made it from, has no uncommitted file, and has no commit that is
+  /// missing from every remote branch. A merged PR stands for its commits,
+  /// because a squash merge leaves them on no remote branch. Any git failure
+  /// refuses the removal.
+  private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool) throws {
+    guard let repo = session.repo else {
+      throw APIError(
+        "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
+      )
+    }
+    let linked = try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(separator: "\n")
+      .filter { $0.hasPrefix("worktree ") }.dropFirst().map { String($0.dropFirst("worktree ".count)) }
+    let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+    guard linked.contains(where: { real($0) == real(session.cwd) }) else {
+      throw APIError("\(session.cwd) is not a worktree of \(repo)")
+    }
+    let changed = try gitOutput(session.cwd, ["status", "--porcelain"]).split(separator: "\n").count
+    guard changed == 0 else {
+      throw APIError("\(session.cwd) has \(changed) uncommitted \(changed == 1 ? "file" : "files"). Commit or discard them first.")
+    }
+    guard !mergedPR else { return }
+    let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+    guard unpushed == "0" else {
+      throw APIError(
+        "\(session.cwd) has \(unpushed) \(unpushed == "1" ? "commit that is" : "commits that are") not on a pushed branch and not in a merged PR. Push \(unpushed == "1" ? "it" : "them") first.")
+    }
   }
 
   // MARK: Processes and the stop rule

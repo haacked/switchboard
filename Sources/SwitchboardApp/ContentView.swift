@@ -132,6 +132,11 @@ struct Sidebar: View {
           Section(isExpanded: expanded(state)) {
             ForEach(SessionTree.rows(group)) { row in
               SessionRow(session: row.session).padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
+                .contextMenu {
+                  if state == .done {
+                    Button("Delete Session and Worktree…", role: .destructive) { model.confirmingDelete = row.id }
+                  }
+                }
             }
           } header: {
             HStack {
@@ -143,6 +148,15 @@ struct Sidebar: View {
         }
       }
     }
+    .confirmationDialog(
+      "Delete \(deleting?.name ?? "this session")?", isPresented: confirmingDelete, presenting: deleting
+    ) { session in
+      Button("Delete Session and Worktree", role: .destructive) { model.delete(session.id) }
+    } message: { session in
+      Text(
+        "This stops claude, closes both terminals, and deletes the session, its events, and its worktree \(session.cwd). The branch and the conversation's transcript stay. Switchboard refuses if the worktree has uncommitted files or commits that aren't pushed."
+      )
+    }
     .overlay {
       if model.board.isEmpty && model.unreachable == nil {
         VStack(spacing: 8) {
@@ -152,6 +166,12 @@ struct Sidebar: View {
         }
       }
     }
+  }
+
+  private var deleting: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
+
+  private var confirmingDelete: Binding<Bool> {
+    Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
 
   private func expanded(_ state: AttentionState) -> Binding<Bool> {
