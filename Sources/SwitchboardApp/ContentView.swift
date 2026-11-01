@@ -287,6 +287,7 @@ struct ManagerButton: View {
 
 struct SessionRow: View {
   let session: SessionSummary
+  @Environment(\.backgroundProminence) private var prominence
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
@@ -303,8 +304,9 @@ struct SessionRow: View {
           if let pr = session.pr, let url = pr.link {
             Link(destination: url) { Text(verbatim: "#\(pr.number)") }
               .font(.caption)
-              .foregroundStyle(pr.status.color)
-              .help("\(pr.repo): \(pr.title)")
+              .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
+              .help("\(pr.repo): \(pr.title) (\(pr.status.rawValue))")
+              .accessibilityValue(pr.status.rawValue)
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
