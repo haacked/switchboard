@@ -130,6 +130,10 @@
     private let command: String
     private(set) var surface: ghostty_surface_t?
     private var tracking: NSTrackingArea?
+    /// Text the input method is composing. See GhosttySurfaceView+Input.swift.
+    var marked = MarkedText()
+    /// The strings the input context inserted during the current keyDown, or nil outside a keyDown.
+    var keyTexts: [String]?
 
     init(command: String) {
       self.command = command
@@ -248,73 +252,10 @@
     }
 
     override func resignFirstResponder() -> Bool {
+      discardComposition()
       if let surface { ghostty_surface_set_focus(surface, false) }
       return true
     }
-
-    // MARK: Keyboard
-
-    private static func mods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
-      var mods = GHOSTTY_MODS_NONE.rawValue
-      if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
-      if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
-      if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
-      if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
-      if flags.contains(.capsLock) { mods |= GHOSTTY_MODS_CAPS.rawValue }
-      let raw = flags.rawValue
-      if raw & UInt(NX_DEVICERSHIFTKEYMASK) != 0 { mods |= GHOSTTY_MODS_SHIFT_RIGHT.rawValue }
-      if raw & UInt(NX_DEVICERCTLKEYMASK) != 0 { mods |= GHOSTTY_MODS_CTRL_RIGHT.rawValue }
-      if raw & UInt(NX_DEVICERALTKEYMASK) != 0 { mods |= GHOSTTY_MODS_ALT_RIGHT.rawValue }
-      if raw & UInt(NX_DEVICERCMDKEYMASK) != 0 { mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue }
-      return ghostty_input_mods_e(mods)
-    }
-
-    /// The text a key event types, with control characters and function-key
-    /// codes left out, because Ghostty encodes those from the key itself.
-    private static func text(of event: NSEvent, with flags: NSEvent.ModifierFlags) -> String? {
-      guard let chars = event.characters(byApplyingModifiers: flags), let scalar = chars.unicodeScalars.first else {
-        return nil
-      }
-      if chars.unicodeScalars.count == 1 {
-        if scalar.value < 0x20 { return event.characters(byApplyingModifiers: flags.subtracting(.control)) }
-        if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }
-      }
-      return chars
-    }
-
-    private func send(_ action: ghostty_input_action_e, _ event: NSEvent) {
-      guard let surface else { return }
-      // The config's macos-option-as-alt decides which modifiers change the typed character.
-      let translated = ghostty_surface_key_translation_mods(surface, Self.mods(event.modifierFlags))
-      var flags = event.modifierFlags
-      for (flag, bit) in [
-        (NSEvent.ModifierFlags.shift, GHOSTTY_MODS_SHIFT), (.control, GHOSTTY_MODS_CTRL), (.option, GHOSTTY_MODS_ALT),
-        (.command, GHOSTTY_MODS_SUPER),
-      ] {
-        if translated.rawValue & bit.rawValue != 0 { flags.insert(flag) } else { flags.remove(flag) }
-      }
-      var key = ghostty_input_key_s()
-      key.action = action
-      key.keycode = UInt32(event.keyCode)
-      key.mods = Self.mods(event.modifierFlags)
-      key.consumed_mods = Self.mods(flags.subtracting([.control, .command]))
-      key.composing = false
-      key.unshifted_codepoint = event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
-      if action != GHOSTTY_ACTION_RELEASE, let text = Self.text(of: event, with: flags) {
-        text.withCString {
-          key.text = $0
-          _ = ghostty_surface_key(surface, key)
-        }
-      } else {
-        _ = ghostty_surface_key(surface, key)
-      }
-    }
-
-    override func keyDown(with event: NSEvent) {
-      send(event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS, event)
-    }
-
-    override func keyUp(with event: NSEvent) { send(GHOSTTY_ACTION_RELEASE, event) }
 
     @objc func paste(_ sender: Any?) { binding("paste_from_clipboard") }
     @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }

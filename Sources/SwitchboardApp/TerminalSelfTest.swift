@@ -4,7 +4,7 @@ import SwiftTerm
 /// A scripted check of the terminal panes, for comparing SwiftTerm with
 /// libghostty on a Mac with no one at the keyboard. SB_TERMINAL_TEST=<folder>
 /// sends the same synthetic key, paste, scroll, and resize events to the
-/// leftmost pane (the Claude pane) of the selected session, then writes
+/// leftmost pane (the Claude pane) of the selected session (the first one when none is selected), then writes
 /// pane.png (the pane as drawn) to the folder. The pane's program reports
 /// what it received, so `sb screen` shows the result.
 @MainActor
@@ -27,6 +27,10 @@ enum TerminalSelfTest {
     guard let folder = env["SB_TERMINAL_TEST"] else { return }
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 4_000_000_000)
+      if model.selection == nil, let first = model.sessions.first {
+        model.selection = first.id
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+      }
       await run(folder: folder)
       if ProcessInfo.processInfo.environment["SB_TERMINAL_TEST_EXIT"] != nil { NSApp.terminate(nil) }
     }
@@ -73,6 +77,60 @@ enum TerminalSelfTest {
       else { continue }
       if type == .keyDown { view.keyDown(with: event) } else { view.keyUp(with: event) }
     }
+  }
+
+  /// A modifier key on its own, which AppKit reports as flagsChanged. `flags` are the modifiers held after the change.
+  private static func modifier(_ view: NSView, code: UInt16, flags: NSEvent.ModifierFlags) {
+    guard let window = view.window,
+      let event = NSEvent.keyEvent(
+        with: .flagsChanged, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
+        isARepeat: false, keyCode: code)
+    else { return }
+    view.flagsChanged(with: event)
+  }
+
+  /// Marked text, a dead key, and modifier keys on their own. The checks that read the pane's state log a
+  /// result here. What reaches the program shows in `sb screen`: é (c3 a9) after the dead key, and, for a
+  /// program that asked for the Kitty keyboard protocol's "report all keys" level, the modifier events.
+  ///
+  /// Synthetic key events reach the input context, but they don't start a dead key, because the keyboard
+  /// layout's state machine only runs for events from the keyboard. So the check starts the composition
+  /// through the NSTextInputClient calls that an input context makes, then sends the key that finishes it
+  /// with the composed character as its text.
+  private static func inputMethodChecks(_ pane: NSView) async {
+    guard let client = pane as? NSTextInputClient else { return log("input: pane is not an NSTextInputClient") }
+    let none = NSRange(location: NSNotFound, length: 0)
+    client.setMarkedText("にほん", selectedRange: NSRange(location: 3, length: 0), replacementRange: none)
+    log("marked text set: has \(client.hasMarkedText()) range \(client.markedRange())")
+    client.setMarkedText(NSAttributedString(string: "日本"), selectedRange: none, replacementRange: none)
+    log("marked text replaced: has \(client.hasMarkedText()) range \(client.markedRange())")
+    log("candidate window rect \(client.firstRect(forCharacterRange: client.markedRange(), actualRange: nil))")
+    await pause()
+    if let folder = ProcessInfo.processInfo.environment["SB_TERMINAL_TEST"] {
+      png(pane, to: "\(folder)/pane-preedit.png")
+    }
+    client.unmarkText()
+    log("marked text cleared: has \(client.hasMarkedText()) range \(client.markedRange())")
+    await pause()
+
+    client.setMarkedText("´", selectedRange: NSRange(location: 1, length: 0), replacementRange: none)
+    log("dead key: composing \(client.hasMarkedText())")
+    key(pane, "é", "e", code: code(for: "e"))
+    log("dead key then e: composing \(client.hasMarkedText())")
+    await pause()
+
+    modifier(pane, code: 0x38, flags: .shift)
+    modifier(pane, code: 0x38, flags: [])
+    modifier(pane, code: 0x3B, flags: .control)
+    modifier(pane, code: 0x3B, flags: [])
+    // Both Shift keys, then the left one up: the right one is still held.
+    modifier(pane, code: 0x38, flags: NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x2))
+    modifier(pane, code: 0x3C, flags: NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x6))
+    modifier(pane, code: 0x38, flags: NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.shift.rawValue | 0x4))
+    modifier(pane, code: 0x3C, flags: [])
+    await pause()
+    log("modifier keys alone: shift, control, both shifts")
   }
 
   private static func scroll(_ view: NSView, lines: Int32) {
@@ -146,6 +204,8 @@ enum TerminalSelfTest {
     key(pane, "x", code: code(for: "x"))
     await pause()
     log("x")
+
+    await inputMethodChecks(pane)
 
     let board = NSPasteboard.general
     board.clearContents()
