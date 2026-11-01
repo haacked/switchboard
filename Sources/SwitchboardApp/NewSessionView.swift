@@ -17,6 +17,7 @@ struct NewSessionView: View {
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
   @AppStorage("lastFolder") private var folder = NSHomeDirectory()
+  @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form = Form()
 
   var body: some View {
@@ -27,7 +28,10 @@ struct NewSessionView: View {
           TextField("Folder", text: $folder)
           Button("Choose…", action: choose)
         }
-        TextField("Branch", text: $form.branch, prompt: Text("optional: makes a worktree of the folder's repo"))
+        Toggle("Create a worktree", isOn: $createWorktree)
+        if createWorktree {
+          TextField("Branch", text: $form.branch, prompt: Text("optional: named automatically when blank"))
+        }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
         if model.accounts.count > 1 {
           Picker("Account", selection: $form.account) {
@@ -70,7 +74,8 @@ struct NewSessionView: View {
     }
     model.create(
       NewSession(
-        path: folder.expandingTilde, branch: optional(form.branch), name: optional(form.name),
+        path: folder.expandingTilde, branch: createWorktree ? optional(form.branch) : nil, name: optional(form.name),
+        worktree: createWorktree,
         prompt: optional(form.prompt), account: optional(form.account)))
   }
 }

@@ -416,6 +416,29 @@ import Testing
   }
 }
 
+@Suite struct AutoBranchSessionTests {
+  @Test func namesTheBranchOfAWorktreeWithTheConfiguredPrefix() throws {
+    let sbd = try Instance(config: ["branchPrefix": "haacked/"])
+    let repo = try Repos.create("\(sbd.home.path)/repo")
+    let s = try sbd.client.call(
+      "new", ["path": .string(repo), "name": "Fix it", "worktree": true], as: SessionSummary.self)
+    let branch = try #require(s.branch)
+    #expect(branch.range(of: #"^haacked/fix-it-[0-9a-f]{4}$"#, options: .regularExpression) != nil)
+    #expect(s.cwd == "\(sbd.home.path)/worktrees/repo/\(branch)")
+    #expect(try sbd.git(s.cwd, "branch", "--show-current") == branch)
+    let cli = try sbd.sb("new", repo, "--worktree", "--name", "From cli", "--json")
+    let fromCli = try JSONDecoder().decode(SessionSummary.self, from: Data(cli.utf8))
+    #expect(fromCli.branch?.hasPrefix("haacked/from-cli-") == true)
+    // A typed branch is used as typed, without the prefix.
+    let typed = try sbd.client.call(
+      "new", ["path": .string(repo), "branch": "feature", "worktree": true], as: SessionSummary.self)
+    #expect(typed.branch == "feature")
+    // Without `worktree`, a blank branch runs in the folder.
+    let plain = try sbd.client.call("new", ["path": .string(repo)], as: SessionSummary.self)
+    #expect(plain.cwd == repo)
+  }
+}
+
 @Suite struct HookTests {
   @Test func hookIsSilentWhenSbdIsDown() throws {
     var env = ProcessInfo.processInfo.environment

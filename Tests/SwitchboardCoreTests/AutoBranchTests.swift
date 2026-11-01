@@ -1,0 +1,25 @@
+import Testing
+
+@testable import SwitchboardCore
+
+struct AutoBranchTests {
+  @Test func slugsTheNameAndAddsTheSuffix() {
+    #expect(NewSession.autoBranch(name: "Fix the Flaky Test!", suffix: "ab12") == "fix-the-flaky-test-ab12")
+  }
+
+  @Test func fallsBackToSessionWithoutAUsableName() {
+    #expect(NewSession.autoBranch(name: nil, suffix: "ab12") == "session-ab12")
+    #expect(NewSession.autoBranch(name: "  ✨ ", suffix: "ab12") == "session-ab12")
+  }
+
+  @Test func capsTheSlugLength() {
+    let branch = NewSession.autoBranch(name: String(repeating: "word ", count: 30), suffix: "ab12")
+    #expect(branch.hasSuffix("-ab12"))
+    #expect(!branch.contains("--"))
+    #expect(branch.count <= 45)
+  }
+
+  @Test func twoCallsDiffer() {
+    #expect(NewSession.autoBranch(name: "x") != NewSession.autoBranch(name: "x"))
+  }
+}

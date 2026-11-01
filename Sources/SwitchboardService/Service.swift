@@ -130,7 +130,10 @@ public final class Service {
       case "hook":
         return try handleHook(request.args, hookGone: hookGone)
       case "new":
-        let args = try JSONCoding.convert(request.args, to: NewSession.self)
+        var args = try JSONCoding.convert(request.args, to: NewSession.self)
+        if args.worktree == true, (args.branch ?? "").isEmpty {
+          args.branch = config.branchPrefix + NewSession.autoBranch(name: args.name)
+        }
         let folder = try prepareFolder(args)
         awaitMCPServers()
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }

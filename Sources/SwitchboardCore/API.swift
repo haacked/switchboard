@@ -35,6 +35,9 @@ public struct NewSession: Codable, Sendable {
   /// The commit that a new branch starts from, such as origin/main.
   public var base: String?
   public var name: String?
+  /// Makes a worktree even without a `branch`. The branch is then
+  /// `Config.branchPrefix` and `autoBranch(name:)`.
+  public var worktree: Bool?
   public var prompt: String?
   public var model: String?
   /// The session that starts this one. An id that sbd doesn't know is ignored.
@@ -44,17 +47,29 @@ public struct NewSession: Codable, Sendable {
   public var account: String?
 
   public init(
-    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, prompt: String? = nil,
-    model: String? = nil, parent: String? = nil, account: String? = nil
+    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
+    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil
   ) {
     self.path = path
     self.branch = branch
     self.base = base
     self.name = name
+    self.worktree = worktree
     self.prompt = prompt
     self.model = model
     self.parent = parent
     self.account = account
+  }
+}
+
+extension NewSession {
+  /// A branch name for a worktree that the user didn't name: the slug of `name`,
+  /// then a random suffix so that it never matches an existing branch.
+  public static func autoBranch(
+    name: String?, suffix: String = String(UUID().uuidString.lowercased().prefix(4))
+  ) -> String {
+    let slug = Followup.slug(name ?? "", max: 40)
+    return "\(slug.isEmpty ? "session" : slug)-\(suffix)"
   }
 }
 

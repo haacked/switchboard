@@ -113,7 +113,8 @@ struct Args {
   /// one that starts with --. Flags for those commands go before the session.
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
-      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session", "--since",
+      "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
+      "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
     ]).union(waitFlags.keys)
@@ -404,6 +405,7 @@ case "new":
   let folder = URL(fileURLWithPath: path.expandingTilde).path
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
+    worktree: a.switches.contains("--worktree") ? true : nil,
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
     account: a.values["--account"])
