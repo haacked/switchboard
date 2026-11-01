@@ -7,6 +7,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+# Swift Testing starts every test at once. A test that blocks a thread, such
+# as runCommand or starting sbd and tmux, holds one of the threads in Swift's
+# cooperative pool, which has one per CPU. CI runners have 3 CPUs, so blocked
+# tests leave no thread for the others, and a blocked test can't be cancelled
+# at its time limit. This caps how many tests run at once. An existing value
+# of the variable wins.
+export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-2}"
 args=()
 if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
 if [ "${1:-}" = --claude ]; then
