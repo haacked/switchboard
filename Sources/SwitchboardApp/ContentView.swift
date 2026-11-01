@@ -42,7 +42,7 @@ struct ContentView: View {
 
   private var viewChoice: Binding<Bool?> {
     Binding(
-      get: { model.selection == nil ? model.showingBoard : nil },
+      get: { model.selected == nil ? model.showingBoard : nil },
       set: { if let board = $0 { model.show(board: board) } })
   }
 
