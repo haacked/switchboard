@@ -51,9 +51,9 @@ public enum SessionTree {
   }
 
   /// `root` and its descendants as rows, `root` at depth 0. A Done descendant
-  /// has no row, because the Done group lists it. Its own children that are
-  /// not Done move up to its depth, so they stay under the nearest ancestor
-  /// that has a row.
+  /// has no row, because the list shows only sessions with work left. Its own
+  /// children that are not Done move up to its depth, so they stay under the
+  /// nearest ancestor that has a row.
   public static func subtree(of root: String, in sessions: [SessionSummary]) -> [Row] {
     guard let top = sessions.first(where: { $0.id == root }) else { return [] }
     let children = children(sessions)

@@ -73,7 +73,7 @@ import Testing
   }
 
   @Test func doneSessionsThatNameEachOtherDoNotLoop() {
-    let list = [summary("m"), summary("a", parent: "b", state: .done), summary("b", parent: "a", state: .done)]
-    #expect(subtreeLayout("m", list) == ["m"])
+    let list = [summary("m", parent: "a"), summary("a", parent: "m", state: .done), summary("b", parent: "a")]
+    #expect(subtreeLayout("m", list) == ["m", ">b"])
   }
 }
