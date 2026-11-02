@@ -250,8 +250,18 @@ import Testing
     #expect(model([summary("m", manager: true)]).sidebarGroups.isEmpty)
   }
 
-  @Test func theManagerStaysReachableThroughTheModel() {
-    let model = model([summary("m", manager: true, state: .needsYou)])
+  @Test func aChildInAnotherStateIsTopLevelInItsOwnGroup() {
+    let model = model([summary("p"), summary("c", parent: "p", state: .needsYou)])
+    #expect(shown(model) == ["needsYou: c", "working: p"])
+  }
+
+  @Test func theManagerStaysSelectableWithoutASidebarRow() {
+    let sessions = [summary("m", manager: true, state: .needsYou)]
+    let model = model(sessions)
+    model.selection = "m"
+    model.apply(.success(sessions), followups: nil)
     #expect(model.manager?.id == "m")
+    #expect(model.selection == "m")
+    #expect(model.selected?.id == "m")
   }
 }
