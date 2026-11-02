@@ -209,7 +209,7 @@ struct Sidebar: View {
       Text(accountSwitchMessage(change))
     }
     .overlay {
-      if model.sidebarGroups.isEmpty && model.manager == nil && model.unreachable == nil {
+      if model.sidebarIsEmpty {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
           Button("Start a Session…") { model.showingNew = true }
@@ -261,8 +261,8 @@ struct DeleteButton: View {
 }
 
 /// Opens the Manager, or starts it. The star turns the Needs you color and
-/// fills while the Manager needs you, because the Queue, the sidebar, and the
-/// Dock badge leave it out.
+/// fills while the Manager needs you, because the Queue and the Dock badge
+/// leave it out.
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 

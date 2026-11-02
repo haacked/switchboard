@@ -117,6 +117,9 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
+  /// True while the sidebar has no rows and sbd answers.
+  var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && manager == nil && unreachable == nil }
+
   /// The Queue or the Board while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
 

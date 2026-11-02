@@ -430,20 +430,13 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: p,>c"])
   }
 
-  @Test func theManagerHasNoSidebarRow() {
-    for state in [AttentionState.working, .needsYou, .done] {
-      let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
-      let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
-      #expect(!ids.contains("m"))
-      #expect(ids == ["a"])
-    }
-  }
-
-  @Test func theManagerHasAPinnedRowWithNoChildrenUnderIt() {
+  @Test func theManagerIsPinnedAndNotInAStateGroup() {
     for state in [AttentionState.working, .needsYou, .done] {
       let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
       #expect(model.manager?.id == "m")
-      #expect(!model.sidebarGroups.flatMap { $0.rows.map(\.id) }.contains("m"))
+      let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
+      #expect(!ids.contains("m"))
+      #expect(ids == ["a"])
     }
   }
 
@@ -451,25 +444,19 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model([summary("a")]).manager == nil)
   }
 
-  @Test func theManagerStaysOutOfTheQueueWithAPinnedRow() {
-    let model = model([summary("m", manager: true, state: .needsYou), summary("a", state: .needsYou)])
-    #expect(model.manager?.id == "m")
-    #expect(model.triage.map(\.id) == ["a"])
-  }
-
-  @Test func selectingThePinnedRowShowsTheManager() {
-    let model = model([summary("m", manager: true)])
-    model.selection = model.manager?.id
-    #expect(model.selected?.id == "m")
-  }
-
   @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
     let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("g", parent: "a")])
     #expect(shown(model) == ["working: a,>g"])
   }
 
-  @Test func aManagerWithNoChildrenLeavesTheSidebarEmpty() {
-    #expect(model([summary("m", manager: true)]).sidebarGroups.isEmpty)
+  @Test func aManagerWithNoChildrenLeavesTheGroupsEmptyButNotTheSidebar() {
+    let model = model([summary("m", manager: true)])
+    #expect(model.sidebarGroups.isEmpty)
+    #expect(!model.sidebarIsEmpty)
+  }
+
+  @Test func withNoSessionsTheSidebarIsEmpty() {
+    #expect(model([]).sidebarIsEmpty)
   }
 
   @Test func aChildInAnotherStateIsTopLevelInItsOwnGroup() {
@@ -482,7 +469,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: a", "notStarted: f"])
   }
 
-  @Test func theManagerStaysSelectableWithoutASidebarRow() {
+  @Test func theManagerStaysSelectedAcrossARefresh() {
     let sessions = [summary("m", manager: true, state: .needsYou)]
     let model = model(sessions)
     model.selection = "m"
