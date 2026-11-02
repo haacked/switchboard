@@ -290,6 +290,8 @@ import Testing
     let back = try JSONCoding.decode(AccountMove.self, from: try sbd.sb("account", "move", "--json", "A"))
     #expect(back.moved == [s.id])
     #expect(try String(contentsOfFile: subagent, encoding: .utf8) == "one\ntwo\n")
+    let mode = try FileManager.default.attributesOfItem(atPath: subagent)[.posixPermissions] as? Int
+    #expect(mode == 0o600)
   }
 
   @Test func movingBackKeepsASubagentTranscriptThatIsNotAPrefixOfTheSource() throws {

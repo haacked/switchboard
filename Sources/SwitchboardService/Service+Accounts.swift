@@ -191,7 +191,9 @@ extension Service {
       }
       try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
       if fm.fileExists(atPath: dest) {
-        _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
+        _ = try fm.replaceItemAt(
+          URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial),
+          backupItemName: nil, options: .usingNewMetadataOnly)
       } else {
         try fm.moveItem(atPath: partial, toPath: dest)
       }
