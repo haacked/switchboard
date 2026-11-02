@@ -21,4 +21,5 @@ jobs:
       - run: swift --version
       - run: brew install tmux
       - run: tmux -V
+      - run: sysctl -n hw.ncpu hw.memsize && uptime
       - run: bin/test

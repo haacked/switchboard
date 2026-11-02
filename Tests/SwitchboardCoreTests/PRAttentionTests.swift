@@ -11,6 +11,10 @@ private func worktreeEvent(_ t: Int64, dirty: Int) -> Event {
   event("worktree", t, ["dirty": .number(Double(dirty))])
 }
 
+private func goneEvent(_ t: Int64) -> Event {
+  event("worktree", t, ["dirty": .null, "gone": true])
+}
+
 private func trunkComment(_ id: String = "IC_trunk") -> PRComment {
   PRComment(id: id, author: "trunk-io[bot]", createdAt: "2026-10-25T00:00:00Z", body: "<!-- Trunk Merge -->")
 }
@@ -18,13 +22,15 @@ private func trunkComment(_ id: String = "IC_trunk") -> PRComment {
 /// The facts of a session whose turn ended with `reply`, then got its PR.
 /// `then` holds the events that arrive after the PR, such as a prompt that starts a turn.
 private func prFacts(
-  _ pr: PullRequest?, comments: [PRComment] = [], dirty: Int? = nil, reply: String = "Pushed.", then: [Event] = []
+  _ pr: PullRequest?, comments: [PRComment] = [], dirty: Int? = nil, gone: Bool = false, reply: String = "Pushed.",
+  then: [Event] = []
 ) throws -> SessionFacts {
   var events = [
     event("UserPromptSubmit", 0, ["prompt": "go"]), event("Stop", 1, ["last_assistant_message": .string(reply)]),
     try prEvent(2, pr, comments: comments),
   ]
   if let dirty { events.append(worktreeEvent(3, dirty: dirty)) }
+  if gone { events.append(goneEvent(3)) }
   return facts(events + then)
 }
 
@@ -145,6 +151,52 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let f = try prFacts(samplePR(state: state), dirty: 2, then: runningTurn)
 
     #expect(Attention.evaluate(session(), f, now: Self.now).state == .working)
+  }
+
+  @Test(arguments: PRAttention.finished)
+  func finishedPRWithAMissingFolderIsDone(_ state: PRState, _ word: String) throws {
+    let f = try prFacts(samplePR(state: state), gone: true)
+
+    #expect(
+      Attention.evaluate(session(), f, now: Self.now)
+        == Verdict(state: .done, reason: "#42 \(word); its folder is gone"))
+  }
+
+  @Test func mergedPRWithAMissingFolderIsDoneWhileATurnRuns() throws {
+    let f = try prFacts(samplePR(state: .merged), gone: true, then: runningTurn)
+
+    #expect(Attention.evaluate(session(), f, now: Self.now).state == .done)
+  }
+
+  @Test(arguments: [0, 2])
+  func openWaitWinsOverAMergedPRWithAMissingFolder(_ dirty: Int) throws {
+    let f = try prFacts(samplePR(state: .merged), dirty: dirty, gone: true)
+
+    #expect(
+      Attention.evaluate(session(wait: "the deploy of #42"), f, now: Self.now)
+        == Verdict(state: .waiting, reason: "the deploy of #42"))
+  }
+
+  @Test func waitOutcomeWinsOverAMergedPRWithAMissingFolder() throws {
+    let wait = waitOn(.deploy, pr: pr1204, environment: "prod", then: .notify)
+    let f = try prFacts(samplePR(state: .merged), gone: true, then: [resolved(wait, "it deployed", 4)])
+
+    #expect(
+      Attention.evaluate(session(), f, now: Self.now)
+        == Verdict(state: .needsYou, reason: "#1204 to reach prod: it deployed"))
+  }
+
+  @Test func openPRWithAMissingFolderIsNotDone() throws {
+    let f = try prFacts(samplePR(state: .open), gone: true)
+
+    #expect(Attention.evaluate(session(), f, now: Self.now).state != .done)
+  }
+
+  @Test func laterCountOfTheFolderClearsTheMissingFlag() throws {
+    let f = try prFacts(samplePR(state: .merged), gone: true, then: [worktreeEvent(5, dirty: 2)])
+
+    #expect(f.folderGone == false)
+    #expect(Attention.evaluate(session(), f, now: Self.now).state == .needsYou)
   }
 
   @Test(arguments: PRAttention.finished)
@@ -317,6 +369,14 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(), f, now: Attention.staleAfterMs + 10)
+        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+  }
+
+  @Test func openPRRuleWinsOverARunningJob() throws {
+    let f = try prFacts(samplePR(mergeable: .conflicting), then: [event("job", 3, ["count": 1])])
+
+    #expect(
+      Attention.evaluate(session(), f, now: Self.now)
         == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
   }
 

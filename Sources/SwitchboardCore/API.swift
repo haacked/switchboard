@@ -29,12 +29,15 @@ public struct APIError: Error, CustomStringConvertible {
 
 /// Arguments of `new`.
 public struct NewSession: Codable, Sendable {
-  /// The folder to run in. With `branch`, the repo to make a worktree of.
+  /// The folder to run in. With `branch` or `worktree`, the repo to make a worktree of.
   public var path: String
   public var branch: String?
   /// The commit that a new branch starts from, such as origin/main.
   public var base: String?
   public var name: String?
+  /// Makes a worktree even without a `branch`. The branch is then
+  /// `Config.branchPrefix` and a slug of `name`, with a random suffix when that branch exists.
+  public var worktree: Bool?
   public var prompt: String?
   public var model: String?
   /// The session that starts this one. An id that sbd doesn't know is ignored.
@@ -44,17 +47,36 @@ public struct NewSession: Codable, Sendable {
   public var account: String?
 
   public init(
-    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, prompt: String? = nil,
-    model: String? = nil, parent: String? = nil, account: String? = nil
+    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
+    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil
   ) {
     self.path = path
     self.branch = branch
     self.base = base
     self.name = name
+    self.worktree = worktree
     self.prompt = prompt
     self.model = model
     self.parent = parent
     self.account = account
+  }
+}
+
+extension NewSession {
+  public static func randomSuffix() -> String { String(UUID().uuidString.lowercased().prefix(4)) }
+
+  /// A branch name for a worktree that the user didn't name: `prefix` and the
+  /// slug of `name`, or "session" when the slug is empty. A name for which
+  /// `exists` is true gets a random suffix, redrawn until `exists` is false.
+  public static func freeAutoBranch(
+    prefix: String, name: String?, exists: (String) -> Bool,
+    suffix: () -> String = randomSuffix
+  ) -> String {
+    let slug = Followup.slug(name ?? "", max: 40)
+    let stem = prefix + (slug.isEmpty ? "session" : slug)
+    var branch = stem
+    while exists(branch) { branch = "\(stem)-\(suffix())" }
+    return branch
   }
 }
 

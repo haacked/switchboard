@@ -36,12 +36,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// Background jobs that run under claude, as the last `job` event counted
+  /// them. A job sends no hooks, so sbd's tick finds it in the process list.
+  public var jobs = 0
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
-  /// The descriptions of the background shell jobs that the last Stop listed
-  /// as running. A finished job sends claude a prompt. The turn for that
-  /// prompt ends in another Stop, which replaces this list.
-  public var backgroundJobs: [String] = []
   /// When the state last changed. `Attention.track` sets it.
   public var stateSince: Int64 = 0
   public var lastState: AttentionState?
@@ -60,16 +59,20 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
+  /// Whether the folder no longer exists, as the poller found when its count
+  /// failed. A count that failed for another reason leaves this false.
+  public var folderGone = false
   /// The id of the last Stop event, which keys the turn's triage summary.
   public var lastStop: Int64 = 0
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
   /// recorded it.
   public var triage: TriageSummary?
 
-  /// The kinds of the events that the pollers and the summaries record. They
-  /// report on GitHub, the folder, and a reply, not on the session. They do
-  /// not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage"]
+  /// The kinds of the events that the pollers, the summaries, and the tick
+  /// record. They report on GitHub, the folder, a reply, and claude's
+  /// background jobs, not on the session. They do not hold off the idle stop
+  /// or the Stale state.
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job"]
 
   public init() {}
 
@@ -96,11 +99,13 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       lastReply = d["lastReply"]?.string
       // A reply means that the user sent a prompt before it.
       if d["hasReplies"]?.bool == true { prompts = max(prompts, 1) }
+    case "job":
+      jobs = d["count"]?.int ?? 0
     case "SessionEnd", "stopped", "exited":
       live = false
+      jobs = 0
       endTurn()
       subagents = []
-      backgroundJobs = []
     case "UserPromptSubmit":
       if userPrompt { prompts += 1 }
       startTurn(event.t)
@@ -147,10 +152,6 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "Stop":
       endTurn()
       lastReply = d["last_assistant_message"]?.string
-      backgroundJobs = (d["background_tasks"]?.array ?? []).compactMap { task in
-        guard task["type"]?.string == "shell", task["status"]?.string == "running" else { return nil }
-        return task["description"]?.string ?? task["command"]?.string ?? "a background job"
-      }
     case "StopFailure", "idle":
       // An API or usage limit error ends the turn without a Stop. So does
       // Escape, which sbd finds out from `claude agents` and records as idle.
@@ -170,6 +171,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       }
     case "worktree":
       dirty = d["dirty"]?.int
+      folderGone = d["gone"]?.bool ?? false
     default:
       break
     }
@@ -205,6 +207,11 @@ public enum ReplyKind: Equatable, Sendable {
   /// A next step that needs no decision, such as "Want me to push?".
   case offer(String)
   case other
+
+  var isQuestion: Bool {
+    if case .question = self { return true }
+    return false
+  }
 }
 
 /// The attention rules. They follow the `/sessions` skill
@@ -244,26 +251,21 @@ public enum Attention {
     }
     if let v = openPR(facts) { return v }
     if let v = awaitingReview(facts) { return v }
-    if let v = runningWork(facts, now: now) { return v }
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    return replyVerdict(facts.lastReply ?? "")
-  }
-
-  /// Waiting while a background job or a subagent runs, when the turn has
-  /// ended and the reply asks nothing and offers nothing. A shell job sends no
-  /// events while it runs. A subagent that sends no event for `subagentQuietMs`
-  /// stops holding the session.
-  static func runningWork(_ facts: SessionFacts, now: Int64) -> Verdict? {
-    guard case .other = classify(facts.lastReply ?? "") else { return nil }
-    if let job = facts.backgroundJobs.first {
-      let more = facts.backgroundJobs.count - 1
-      return Verdict(state: .waiting, reason: oneLine(job + (more > 0 ? " and \(more) more" : "")))
+    if !facts.subagents.isEmpty, now - facts.lastActivity <= subagentQuietMs,
+      case .other = classify(facts.lastReply ?? "")
+    {
+      let n = facts.subagents.count
+      return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
-    let n = facts.subagents.count
-    guard n > 0, now - facts.lastActivity <= subagentQuietMs else { return nil }
-    return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
+    // A question still needs the user's answer while a job runs.
+    if facts.jobs > 0, !classify(facts.lastReply ?? "").isQuestion {
+      return Verdict(
+        state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
+    }
+    return replyVerdict(facts.lastReply ?? "")
   }
 
   /// Evaluates the session at `now`, and records in `facts` when its state

@@ -15,6 +15,18 @@ extension AttentionState {
   }
 }
 
+extension PRStatus {
+  var color: Color {
+    switch self {
+    case .approved: .green
+    case .changesRequested: .red
+    case .reviewRequired, .notApproved: .orange
+    case .merged: .purple
+    case .draft, .closed: .gray
+    }
+  }
+}
+
 /// The state's title in a capsule of its color.
 struct StateBadge: View {
   let state: AttentionState
@@ -235,9 +247,9 @@ struct SessionRow: View {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {
-            Link("#\(pr.number)", destination: url)
+            Link(destination: url) { Text(verbatim: "#\(pr.number)") }
               .font(.caption)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(pr.status.color)
               .help("\(pr.repo): \(pr.title)")
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -246,6 +258,17 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
+  }
+}
+
+extension PRStatus {
+  var color: Color {
+    switch self {
+    case .draft, .closed: .gray
+    case .merged: .purple
+    case .approved: .green
+    case .changesRequested, .reviewRequired, .notApproved: .blue
+    }
   }
 }
 
@@ -297,7 +320,16 @@ struct BoardView: View {
                       model.openFromBoard(s.id)
                     } label: {
                       VStack(alignment: .leading, spacing: 4) {
-                        Text(s.name).fontWeight(.medium).lineLimit(1)
+                        HStack {
+                          Text(s.name).fontWeight(.medium).lineLimit(1)
+                          Spacer()
+                          if let pr = s.pr {
+                            Text(verbatim: "#\(pr.number)")
+                              .font(.caption.bold())
+                              .foregroundStyle(pr.status.color)
+                              .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                          }
+                        }
                         Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
                           .font(.caption2).foregroundStyle(.tertiary)

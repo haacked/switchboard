@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# Runs the app's TerminalSelfTest against a private sbd, and checks the bytes
+# that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
+# app's terminal, as `sb screen` shows them. It opens the app's window, so it
+# needs a logged-in macOS session with a display, and bin/test never runs it.
+# It checks SwiftTerm, and also Ghostty when SB_GHOSTTY=1 is set and
+# bin/build-ghostty has built libghostty. The script ends the app, sbd, the
+# tmux server, the stand-in, and its folder in /tmp when it exits, whether or
+# not the checks passed. It keeps the app's log, the screen, and the pane
+# PNGs in .build/gui-test/<backend>, and after any failure also sbd's log in
+# .build/gui-test/sbd.log.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root=$PWD
+
+if [ "$(launchctl managername 2>/dev/null)" != Aqua ] && [ -z "${SB_GUI_ANY_SESSION:-}" ]; then
+  echo "bin/test-gui needs a logged-in macOS session with a display. This is a $(launchctl managername) session." >&2
+  echo "Set SB_GUI_ANY_SESSION=1 to try anyway." >&2
+  exit 2
+fi
+
+backends=(swiftterm)
+if [ "${SB_GHOSTTY:-}" = 1 ]; then
+  if [ -d .build/ghostty/GhosttyKit.xcframework ]; then
+    backends+=(ghostty)
+  else
+    echo "Skipping ghostty: .build/ghostty is missing. Run bin/build-ghostty."
+    unset SB_GHOSTTY
+  fi
+fi
+
+plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+args=()
+if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
+echo "Building…"
+build_output=$(swift build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
+bin_dir=$(swift build --show-bin-path)
+
+# The folder is under /tmp, because a Unix socket path can't exceed 103 bytes.
+# Tests/IntegrationTests/Fixtures/reap ends every process whose arguments
+# name a /tmp/sbt.XXXXXX home, which are sbd, the tmux server and its clients,
+# and the stand-in, and then removes the home.
+home=$(mktemp -d /tmp/sbt.XXXXXX)
+echo $$ >"$home/owner.pid"
+app_pid=''
+backend=''
+cleanup() {
+  status=$?
+  trap - EXIT
+  # Any failure keeps the logs, including one that set -e or a signal caused.
+  if [ "$status" -ne 0 ]; then
+    mkdir -p .build/gui-test
+    cp "$home/sbd.log" .build/gui-test/sbd.log 2>/dev/null || true
+    save_shots 2>/dev/null || true
+  fi
+  if [ -n "$app_pid" ]; then kill -KILL "$app_pid" 2>/dev/null || true; fi
+  SB_HOME="$home" Tests/IntegrationTests/Fixtures/reap || true
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+export SB_HOME="$home"
+sb() { "$bin_dir/sb" "$@"; }
+
+jq -n --arg claude "$root/Tests/GUI/received-bytes-stub" --arg home "$home" \
+  '{claude: $claude, idleStopSeconds: 600, tickSeconds: 0.2, worktreeRoot: "\($home)/worktrees",
+    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}}' >"$home/config.json"
+mkdir "$home/work" "$home/shots"
+: >"$home/sbd.log"
+"$bin_dir/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
+
+wait_for() { # <seconds> <command…>
+  local deadline=$((SECONDS + $1))
+  shift
+  until "$@"; do
+    if [ $SECONDS -ge $deadline ]; then return 1; fi
+    sleep 0.2
+  done
+}
+
+# Replaces the last run's files in .build/gui-test/<backend> with this run's.
+save_shots() {
+  [ -n "${backend:-}" ] && [ -d "$home/shots/$backend" ] || return 0
+  [ -z "${session:-}" ] || sb screen "$session" >"$home/shots/$backend/screen.txt" 2>/dev/null || true
+  rm -rf ".build/gui-test/$backend"
+  mkdir -p ".build/gui-test/$backend"
+  cp -R "$home/shots/$backend/." ".build/gui-test/$backend/"
+}
+
+fail() {
+  save_shots || true
+  echo "FAIL ($backend): $*" >&2
+  echo "--- sbd log" >&2
+  tail -n 20 "$home/sbd.log" >&2 || true
+  echo "--- app log" >&2
+  tail -n 20 "$home/shots/$backend/app.log" >&2 || true
+  echo "--- screen" >&2
+  cat "$home/shots/$backend/screen.txt" >&2 || true
+  exit 1
+}
+
+wait_for 30 sb ls >/dev/null 2>&1 || backend=sbd fail "sbd did not answer"
+screen_has_stub() { sb screen "$session" 2>/dev/null | grep -q '^sizes '; }
+# Sets $session to a new session, once its stand-in claude has drawn its screen.
+new_session() {
+  session=$(sb new "$home/work" --name "$1" --json | jq -r '.id')
+  [ -n "$session" ] && [ "$session" != null ] || backend=sbd fail "sb new returned no session id"
+  wait_for 30 screen_has_stub || backend=stub fail "the stand-in claude never drew its screen"
+}
+
+# What the stand-in receives, in order: a b c, Return, Ctrl-C, Option-b, Up,
+# Down, Left, Backspace, Escape, Tab, Shift-Tab, x, a dead key followed by e
+# (é), and a bracketed paste of two lines. Marked text and modifier keys on
+# their own send nothing. Two things differ between terminals, so each has its
+# accepted forms. Shift-Tab is ESC [ Z from Ghostty, and a plain tab from
+# SwiftTerm today (the check also takes ESC [ Z for when that changes). A
+# pasted newline is a line feed from SwiftTerm, and a terminal may send a
+# carriage return.
+expected() { # <Shift-Tab bytes> <newline byte>
+  echo "61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 $1 78 c3 a9 1b 5b 32 30 30 7e" \
+    "70 61 73 74 65 20 6c 69 6e 65 20 6f 6e 65 $2 70 61 73 74 65 20 6c 69 6e 65 20 74 77 6f $2 1b 5b 32 30 31 7e"
+}
+accepted=()
+for shift_tab in "1b 5b 5a" "09"; do
+  for newline in 0a 0d; do accepted+=("$(expected "$shift_tab" "$newline")"); done
+done
+
+check_backend() {
+  backend=$1
+  local shots="$home/shots/$backend" env_extra=(SB_TERMINAL="$backend")
+  mkdir "$shots"
+  if [ "$backend" = ghostty ]; then
+    if [ -z "${SB_GHOSTTY_CONFIG:-}" ]; then
+      echo "window-vsync = false" >"$shots/ghostty.conf"
+      env_extra+=("SB_GHOSTTY_CONFIG=$shots/ghostty.conf")
+    fi
+  fi
+  echo "Checking $backend…"
+
+  env ${env_extra[@]+"${env_extra[@]}"} SB_SELECT="$session" SB_TERMINAL_TEST="$shots" SB_TERMINAL_TEST_EXIT=1 \
+    SB_TERMINAL_TEST_READY="$shots/ready" \
+    "$bin_dir/Switchboard" >"$shots/app.log" 2>&1 &
+  app_pid=$!
+  app_alive() { kill -0 "$app_pid" 2>/dev/null; }
+  # Records how the app ended in its log, and ends the run when it is not alive.
+  check_app_alive() {
+    app_alive && return 0
+    local status=0
+    wait "$app_pid" || status=$?
+    app_pid=''
+    echo "app exited with status $status" >>"$shots/app.log"
+    fail "the app exited with status $status $1"
+  }
+  # The stand-in starts at 200x50 and sees a new size once the app's terminal attaches and resizes it.
+  pane_resized() { sb screen "$session" 2>/dev/null | grep -q '^sizes [^ ]* [^ ]' || ! app_alive; }
+  wait_for 120 pane_resized || fail "the stand-in never saw the app's terminal attach"
+  check_app_alive "before its terminal attached"
+  touch "$shots/ready"
+  finished() { grep -q '^selftest: \(done\|no terminal pane\)' "$shots/app.log" || ! app_alive; }
+  wait_for 240 finished || fail "the self test did not finish"
+  if ! grep -q '^selftest: done' "$shots/app.log"; then check_app_alive "during the self test"; fi
+  kill -KILL "$app_pid" 2>/dev/null || true
+  wait "$app_pid" 2>/dev/null || true
+  app_pid=''
+
+  save_shots
+
+  grep -q "^terminal: $backend\$" "$shots/app.log" || fail "the app did not pick $backend: $(grep '^terminal:' "$shots/app.log")"
+  grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
+  grep -q '^selftest: attached after' "$shots/app.log" || fail "the app never saw the session attach: $(grep '^selftest: gave up' "$shots/app.log")"
+
+  local got
+  got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
+  if ! printf '%s\n' "${accepted[@]}" | grep -Fxq -- "$got"; then
+    printf 'accepted: %s\n' "${accepted[@]}" >&2
+    echo "received: $got" >&2
+    fail "the stand-in received other bytes"
+  fi
+  if [ "$backend" = ghostty ] && [[ $got != *"1b 5b 5a"* ]]; then fail "Ghostty did not send ESC [ Z for Shift-Tab"; fi
+
+  # tmux and the app size the pane before the window shrinks, so the list
+  # starts with sizes from before the app attached. The window then got 300 pt
+  # narrower and 200 pt shorter and went back: the last size appeared before,
+  # with a different size in between.
+  read -r -a sizes <<<"$(sed -n 's/^sizes //p' "$shots/screen.txt")"
+  local last=${sizes[${#sizes[@]} - 1]} seen='' changed='' size
+  for size in "${sizes[@]:0:${#sizes[@]}-1}"; do
+    if [ "$size" = "$last" ]; then seen=1; elif [ -n "$seen" ]; then changed=1; fi
+  done
+  [ -n "$changed" ] || fail "the pane did not shrink and return to $last: ${sizes[*]}"
+  for png in pane-start pane-resized pane-end; do
+    [ -s "$shots/$png.png" ] || fail "missing $png.png"
+  done
+  echo "ok: $backend (sizes ${sizes[*]})"
+}
+
+for b in "${backends[@]}"; do
+  # Each backend gets a session of its own, so the screen holds only its bytes.
+  new_session "selftest-$b"
+  check_backend "$b"
+done
