@@ -556,6 +556,23 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.client.call("ping") != nil)
   }
 
+  @Test func stopImportsASessionThatTwoAccountsListWithOnePid() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/samepid")
+    let claude = try stubClaude()
+    defer { if claude.isRunning { claude.terminate() } }
+    let id = newId()
+    let row = agent(id, cwd: tree, name: "twice", pid: Int(claude.processIdentifier), status: "idle")
+    try sbd.writeAgents("A", [row])
+    try sbd.writeAgents("B", [row])
+
+    let result = try sbd.client.importSessions(["twice"], stop: ["twice"])
+
+    #expect(result.imported.map(\.claudeSessionId) == [id])
+    claude.waitUntilExit()
+    #expect(claude.terminationReason == .uncaughtSignal)
+  }
+
   @Test func stopLeavesEveryClaudeRunningWhenSessionsThatSeveralClaudesRunOverlap() throws {
     let sbd = try Instance(accounts: ["A", "B"])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/overlap")
@@ -726,6 +743,9 @@ private func reasons(_ result: ImportResult) -> [String: String] {
         agent(busy, cwd: tree, name: "busy", pid: pid(busy2), status: "busy"),
         agent(both, cwd: tree, name: "both", pid: pid(idle2), status: "idle"),
       ])
+
+    let listed = try sbd.client.importable().sessions.first { $0.id == both }
+    #expect(listed?.summary == "in several claudes" && listed?.stoppable == false)
 
     let result = try sbd.client.importSessions(["busy", "stale", "both"], stop: ["busy", "stale", "both"])
 

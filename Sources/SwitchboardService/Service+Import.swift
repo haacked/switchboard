@@ -26,11 +26,11 @@ extension Service {
   /// run off the state queue. A second check on the queue refuses a session
   /// that another request imported meanwhile. `stop` lists the refs whose
   /// claude may exit. A ref and a stop entry that name one session let its
-  /// claude exit. That session must wait idle at its prompt in another
+  /// claude exit. That session must wait idle at its prompt in one other
   /// terminal. It then gets SIGTERM, and imports once its claude has exited. A
-  /// busy or waiting session and a background job stay refused. So does a
-  /// session whose claude also runs a listed session that is not imported, or
-  /// that import can't exit.
+  /// busy or waiting session, a background job, and a session that several
+  /// claudes run stay refused. So does a session whose claude also runs a
+  /// listed session that is not imported, or that import can't exit.
   func importSessions(_ args: JSON) throws -> ImportResult {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
@@ -102,8 +102,8 @@ extension Service {
   /// whose process is gone counts as a session that no claude runs. When two
   /// accounts list a session, the row whose claude runs wins, and it keeps the
   /// pids of both rows' claudes. A row whose claude can't be stopped wins over
-  /// one whose claude can, so that `stop` never exits a claude that another
-  /// account lists as busy.
+  /// one whose claude can. A session that rows list with different pids has
+  /// several claudes, so import refuses it.
   private func listAgents(_ accounts: [String], now: Int64) throws -> [ClaudeSession] {
     guard let claude = findExecutable(config.claude) else {
       throw APIError("can't find \(config.claude). Set \"claude\" in \(home.config)")
@@ -182,9 +182,9 @@ extension Service {
   /// `claude agents` can list a pid that another process has reused. It then
   /// sends SIGTERM to each verified pid once and waits up to five seconds for
   /// the claudes to exit. A session whose claude outlasts the signal is
-  /// refused. Every session here has one claude, because a session that
-  /// several claudes run is not stoppable, so two sessions that share a pid get
-  /// the same answer.
+  /// refused. A session that is not stoppable is refused here too. Every other
+  /// session has one claude, so two sessions that share a pid get the same
+  /// answer.
   private func exitClaudes(of sessions: [ClaudeSession]) -> [String: String] {
     let running = sessions.filter(\.running)
     guard !running.isEmpty else { return [:] }
@@ -217,7 +217,7 @@ extension Service {
     }
     var refused: [String: String] = [:]
     for s in running {
-      refused[s.id] = s.livePids.lazy.compactMap { problem($0, of: s) }.first
+      refused[s.id] = s.stoppable ? s.livePids.lazy.compactMap { problem($0, of: s) }.first : s.whereItRuns(s.label)
     }
     let exiting = running.filter { refused[$0.id] == nil }
     // Only a pid that passed the checks above gets a signal. A pid that did not exist then may name a process now.

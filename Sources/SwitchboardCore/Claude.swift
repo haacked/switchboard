@@ -143,7 +143,7 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var summary: String {
     switch (running, job) {
     case (true, let job?): "background job \(job), \(status ?? "running")"
-    case (true, nil): "\(status ?? "running") in another terminal"
+    case (true, nil): otherPids != nil ? "in several claudes" : "\(status ?? "running") in another terminal"
     case (false, let job?): "background job \(job), stopped"
     case (false, nil): "exited"
     }
