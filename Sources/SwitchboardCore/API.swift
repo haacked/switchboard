@@ -80,6 +80,45 @@ extension NewSession {
   }
 }
 
+/// What `account-move` did, or with `dryRun` would do, to the sessions that are
+/// not on the account.
+public struct AccountMove: Codable, Equatable, Sendable {
+  public struct Blocked: Codable, Equatable, Sendable {
+    public var session: String
+    public var name: String
+    public var reason: String
+
+    public init(session: String, name: String, reason: String) {
+      self.session = session
+      self.name = name
+      self.reason = reason
+    }
+  }
+
+  /// The folder of the account that the sessions move to.
+  public var account: String
+  /// The sessions that moved, or with `dryRun` that would move.
+  public var moved: [String]
+  /// The sessions that stay on their account, and why.
+  public var blocked: [Blocked]
+
+  public init(account: String, moved: [String] = [], blocked: [Blocked] = []) {
+    self.account = account
+    self.moved = moved
+    self.blocked = blocked
+  }
+}
+
+extension AccountMove {
+  /// What a move means for the sessions that move, for the prompt that offers it.
+  public static let consequences = """
+    A moved session resumes its conversation under the new account, with that account's settings, \
+    MCP servers, and permissions. Its transcript is copied, and the old copy stays. Its next message \
+    may write the whole conversation to the prompt cache again, which uses quota. A session whose \
+    claude is running stays on its account until you stop it.
+    """
+}
+
 /// One Claude account, as `accounts` reports it.
 public struct AccountInfo: Codable, Equatable, Sendable, Identifiable {
   public var name: String
@@ -221,6 +260,10 @@ public final class Client: Sendable {
 
   public func useAccount(_ ref: String) throws -> [AccountInfo] {
     try call("account-use", ["account": .string(ref)], as: [AccountInfo].self)
+  }
+
+  public func moveSessions(to ref: String, dryRun: Bool = false) throws -> AccountMove {
+    try call("account-move", ["account": .string(ref), "dryRun": .bool(dryRun)], as: AccountMove.self)
   }
 
   public func importSessions(_ refs: [String], name: String? = nil) throws -> ImportResult {

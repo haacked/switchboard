@@ -13,7 +13,12 @@ let usage = """
                                   --name. It runs under the account A, else its
                                   parent's, else the active account
     account                       list the Claude accounts and the active one
-    account use <name|folder>     run new sessions under this account
+    account use <name|folder> [--move | --new-only]
+                                  run new sessions under this account. --move
+                                  moves the sessions whose claude is stopped
+                                  too. A terminal asks when neither is given
+    account move <name|folder> [--dry-run]
+                                  move the sessions whose claude is stopped
     manager                       start the Manager, a session that manages the others,
                                   or open it
     get <session>                 show one session

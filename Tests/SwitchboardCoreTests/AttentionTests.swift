@@ -107,13 +107,25 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 5).state == .canContinue)
   }
 
-  @Test func turnEndedWithASubagentRunningIsWorking() {
+  @Test func turnEndedWithASubagentRunningIsWaiting() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "go"]),
       event("SubagentStart", 1, ["agent_id": "a1"]),
       event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
     ])
-    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .working, reason: "waiting on 1 subagent"))
+    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func turnEndedWithSeveralReviewersRunningIsWaiting() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "/review-code"]),
+      event("SubagentStart", 1, ["agent_id": "a1", "agent_type": "code-reviewer-correctness"]),
+      event("SubagentStart", 2, ["agent_id": "a2", "agent_type": "code-reviewer-testing"]),
+      event(
+        "Stop", 3,
+        ["last_assistant_message": "Two reviewers are still running. I'll validate the findings once they report."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .waiting, reason: "waiting on 2 subagents"))
   }
 
   @Test func turnEndedWithABackgroundJobRunningIsWaiting() {
@@ -165,7 +177,7 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
       event("UserPromptSubmit", 0, ["prompt": "go"]), event("SubagentStart", 1, ["agent_id": "a1"]),
       event("Stop", 2, ["last_assistant_message": "Waiting for the review."]), event("job", 3, ["count": 1]),
     ])
-    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .working, reason: "waiting on 1 subagent"))
+    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
   }
 
   @Test func idleSessionWithAJobIsStaleAfterTwoDays() {

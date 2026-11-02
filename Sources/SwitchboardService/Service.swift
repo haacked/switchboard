@@ -119,7 +119,9 @@ public final class Service {
 
   // MARK: Requests
 
-  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals", "resolve-wait", "answer"]
+  static let actsOnProcesses: Set<String> = [
+    "send", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+  ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer"]
 
   /// `hookGone` reports whether the client closed its connection, which a
@@ -237,7 +239,7 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try host.screen(paneName(id, pane)))
-    case "accounts", "account-use":
+    case "accounts", "account-use", "account-move":
       return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())
@@ -485,15 +487,18 @@ public final class Service {
   /// that account. Before a SessionStart for the conversation, as for an
   /// imported one, this looks in the account that the pane sets. A session
   /// that sbd never started claude for has none.
-  private func hasTranscript(_ session: Session) -> Bool {
-    guard session.started else { return false }
+  private func hasTranscript(_ session: Session) -> Bool { transcriptFile(session) != nil }
+
+  /// The session's transcript file, by the rules of `hasTranscript`.
+  func transcriptFile(_ session: Session) -> String? {
+    guard session.started else { return nil }
     if let path = entries[session.id]?.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
     {
-      return FileManager.default.fileExists(atPath: path)
+      return FileManager.default.fileExists(atPath: path) ? path : nil
     }
     let account = claudeAccount(of: session.id)
-    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) != nil
+    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd)
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
