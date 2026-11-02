@@ -351,10 +351,9 @@ public final class Service {
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
-      let current = try? gitOutput(dir, ["branch", "--show-current"])
+      let current = (try? gitOutput(dir, ["branch", "--show-current"])) ?? ""
       guard current == branch else {
-        throw APIError(
-          "\(dir) has \(current.flatMap { $0.isEmpty ? nil : $0 } ?? "no branch") checked out, not \(branch)")
+        throw APIError("\(dir) has \(current.isEmpty ? "no branch" : current) checked out, not \(branch)")
       }
       return (dir, branch)
     }
