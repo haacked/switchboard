@@ -108,17 +108,12 @@ final class TerminalHost {
     return r.stdout
   }
 
-  /// The format that `panes()` asks `list-panes` for, and `PaneRow.parse` reads.
+  /// The format that `checkedPanes()` asks `list-panes` for, and `PaneRow.parse` reads.
   static let paneFormat = "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{session_attached}"
 
-  /// Every pane on the server, keyed by its tmux session name.
-  func panes() -> [String: PaneRow] {
-    (try? checkedPanes()) ?? [:]
-  }
-
-  /// Every pane on the server. A missing server has no panes. It throws when
-  /// tmux fails for any other reason, which leaves the panes unknown, where
-  /// `panes()` reports none.
+  /// Every pane on the server, keyed by its tmux session name. A missing
+  /// server has no panes. It throws when tmux fails for any other reason,
+  /// which leaves the panes unknown.
   func checkedPanes() throws -> [String: PaneRow] {
     do {
       return PaneRow.parse(try run(["list-panes", "-a", "-F", TerminalHost.paneFormat]))
@@ -137,6 +132,11 @@ final class TerminalHost {
     let text = error.description
     return text.contains("no server running")
       || (text.contains("error connecting to") && text.contains("No such file or directory"))
+  }
+
+  static func isDuplicateSession(_ error: Error) -> Bool {
+    guard let error = error as? APIError else { return false }
+    return error.description.hasPrefix("tmux new-session: duplicate session")
   }
 
   /// The value of a tmux format for the pane, or nil when the pane is missing.
@@ -160,17 +160,26 @@ final class TerminalHost {
     display(name, "#{?pane_dead_signal,signal #{pane_dead_signal},status #{pane_dead_status}}")
   }
 
-  /// Starts a pane in its own tmux session. With no command, the pane runs
-  /// the login shell. tmux stores `env` in the session for later respawns.
+  /// Starts a pane in its own tmux session. When the session already exists,
+  /// this leaves a running pane alone and starts a dead one again. With no
+  /// command, the pane runs the login shell. tmux stores `env` in the session for later respawns.
   /// tmux also copies the variables that its `update-environment` option
   /// names from each terminal that attaches. `-E` keeps it from copying them
   /// from sbd's own client. This removes those names in `env` from the
   /// session again. A value that the session holds for one of them then came
   /// from a terminal.
   func create(_ name: String, cwd: String, env: [String: String], command: String? = nil) throws {
-    try run(
-      ["new-session", "-d", "-E", "-s", name, "-x", "200", "-y", "50", "-c", cwd] + envArgs(env)
-        + (command.map { [$0] } ?? []))
+    do {
+      try run(
+        ["new-session", "-d", "-E", "-s", name, "-x", "200", "-y", "50", "-c", cwd] + envArgs(env)
+          + (command.map { [$0] } ?? []))
+    } catch {
+      guard TerminalHost.isDuplicateSession(error) else { throw error }
+      // The pane exists, so sbd's list of panes was out of date. A running
+      // pane stays as it is, and a dead one starts again.
+      if display(name, "#{pane_dead}") == "1" { try respawn(name, cwd: cwd, env: env, command: command) }
+      return
+    }
     let copied = try copiedFromTerminals()
     for key in env.keys where copied.contains(key) { try run(["set-environment", "-t", "=\(name)", "-u", key]) }
   }

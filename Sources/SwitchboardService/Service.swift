@@ -108,7 +108,7 @@ public final class Service {
       entries[session.id] = e
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
-    snapshot = buildSnapshot()
+    snapshot = buildSnapshot() ?? Snapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     // A summary that was running when sbd stopped never finished.
@@ -916,8 +916,9 @@ public final class Service {
   // MARK: Processes and the stop rule
 
   /// Reads the panes and the processes. It reads no Service state, so it runs
-  /// off the state queue.
-  func buildSnapshot() -> Snapshot { buildSnapshot { host.panes() } }
+  /// off the state queue. It returns nil when tmux can't list the panes. An
+  /// empty list would make sbd start the panes that it already has.
+  func buildSnapshot() -> Snapshot? { try? buildSnapshot(reading: host.checkedPanes) }
 
   /// The snapshot of the panes that `readPanes` returns and a new process
   /// list. It throws what `readPanes` throws.
@@ -978,8 +979,8 @@ public final class Service {
   }
 
   /// Takes a newer snapshot, keeping what `markStarting` set since it was read.
-  private func install(_ s: Snapshot) {
-    if s.taken >= snapshot.taken { snapshot = s }
+  private func install(_ s: Snapshot?) {
+    if let s, s.taken >= snapshot.taken { snapshot = s }
   }
 
   /// Takes a snapshot off the state queue and installs it, without making

@@ -30,3 +30,39 @@ import Testing
     #expect(!TerminalHost.isNoServer(APIError("The file doesn't exist: No such file or directory")))
   }
 }
+
+@Suite struct TerminalHostCreateTests {
+  private func host() throws -> TerminalHost {
+    var template = Array("/tmp/sbh.XXXXXX".utf8CString)
+    let dir = String(cString: try #require(mkdtemp(&template)))
+    return try TerminalHost(home: Home(path: dir), config: Config())
+  }
+
+  private func waitUntil(_ what: String, _ ok: () -> Bool) throws {
+    for _ in 0..<100 {
+      if ok() { return }
+      usleep(100_000)
+    }
+    throw APIError("timed out waiting for \(what)")
+  }
+
+  @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
+  func createLeavesARunningPaneRunning() throws {
+    let host = try host()
+    defer { _ = try? host.run(["kill-server"]) }
+    try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
+    let pid = try #require(try host.checkedPanes()["a"]).pid
+    try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
+    #expect((try? host.checkedPanes())?["a"]?.pid == pid)
+  }
+
+  @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
+  func createStartsADeadPaneAgain() throws {
+    let host = try host()
+    defer { _ = try? host.run(["kill-server"]) }
+    try host.create("a", cwd: "/tmp", env: [:], command: "true")
+    try waitUntil("the pane to exit") { (try? host.checkedPanes())?["a"]?.dead == true }
+    try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
+    #expect((try? host.checkedPanes())?["a"]?.dead == false)
+  }
+}

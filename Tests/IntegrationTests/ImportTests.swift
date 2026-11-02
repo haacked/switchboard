@@ -883,7 +883,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.client.sessions().filter { $0.claudeSessionId == id }.count == 1)
   }
 
-  @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Times out on the CI runner. Run it locally."))
+  @Test
   func importsASessionOnceWhenTwoRequestsRaceForIt() async throws {
     let sbd = try Instance(accounts: ["A"])
     let id = newId()
