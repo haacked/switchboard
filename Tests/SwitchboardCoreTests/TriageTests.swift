@@ -25,6 +25,23 @@ func item(_ f: SessionFacts, session s: Session = session(), now: Int64 = 1000) 
 let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres or SQLite?"
 
 @Suite struct TriageItems {
+  @Test func aRuleVerdictKeepsItsKindWhateverItsText() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
+    let review = Verdict(state: .needsYou, reason: "tidy the folder", kind: .review)
+    #expect(Triage.item(f, review)?.kind == .review)
+    #expect(Triage.item(f, review)?.source == .rule)
+    let action = Verdict(state: .needsYou, reason: "commit the uncommitted changes")
+    #expect(Triage.item(f, action)?.kind == .action)
+  }
+
+  @Test func aRuleVerdictWithTheRepliesTextIsNotTheReply() {
+    var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
+    f.apply(stop(1, 5, proseQuestion))
+    let rule = Verdict(state: .needsYou, reason: Attention.replyVerdict(proseQuestion).reason)
+    #expect(Triage.item(f, rule)?.source == .rule)
+    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion))?.source != .rule)
+  }
+
   @Test func aPermissionCardGivesAllowAndDeny() {
     let f = facts(permissionTurn())
     let item = item(f)

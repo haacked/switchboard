@@ -454,19 +454,19 @@ private func importedEvent(at t: Int64, reply: String?, activity: Int64?, hasRep
   @Test func anImportedQuestionNeedsAnAnswer() {
     #expect(
       verdict(reply: "Which schema should I use, A or B?", hasReplies: true)
-        == Verdict(state: .needsYou, reason: "answer: Which schema should I use, A or B?"))
+        == Verdict(state: .needsYou, reason: "answer: Which schema should I use, A or B?", source: .reply))
   }
 
   @Test func anImportedOfferCanContinue() {
     #expect(
       verdict(reply: "I wrote the parser. Want me to run the tests?", hasReplies: true)
-        == Verdict(state: .canContinue, reason: "offered: Want me to run the tests?"))
+        == Verdict(state: .canContinue, reason: "offered: Want me to run the tests?", source: .reply))
   }
 
   @Test func anImportedSessionWithRepliesButNoTextNeedsYouToReadIt() {
     #expect(
       verdict(reply: nil, hasReplies: true)
-        == Verdict(state: .needsYou, reason: "read its last reply and decide what's next"))
+        == Verdict(state: .needsYou, reason: "read its last reply and decide what's next", source: .reply))
   }
 
   @Test func anImportedSessionWithoutRepliesNeedsAFirstPrompt() {

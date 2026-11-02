@@ -143,7 +143,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .needsYou, reason: "#42 \(word); commit or discard the uncommitted changes"))
+        == Verdict(state: .needsYou, reason: "#42 \(word); commit or discard the uncommitted changes", kind: .review))
   }
 
   @Test(arguments: PRAttention.finished)

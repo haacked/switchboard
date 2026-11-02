@@ -16,7 +16,7 @@ extension Attention {
       return Verdict(state: .done, reason: "\(what); archive the worktree\(facts.turnRunning ? " once it stops" : "")")
     }
     if facts.turnRunning { return nil }
-    return Verdict(state: .needsYou, reason: "\(what); commit or discard the uncommitted changes")
+    return Verdict(state: .needsYou, reason: "\(what); commit or discard the uncommitted changes", kind: .review)
   }
 
   /// The rules for an open PR of a session whose turn has ended: a merged

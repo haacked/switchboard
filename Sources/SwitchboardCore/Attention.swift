@@ -202,10 +202,22 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   }
 }
 
-/// The state and its reason line.
+/// What decided a verdict.
+public enum VerdictSource: Equatable, Sendable {
+  /// The session's last reply.
+  case reply
+  /// Any other rule.
+  case rule
+}
+
+/// The state and its reason line. `kind` is the triage kind of the item that
+/// a rule verdict becomes, and `source` tells a reply verdict from a rule
+/// verdict.
 public struct Verdict: Equatable, Sendable {
   public var state: AttentionState
   public var reason: String
+  public var kind: TriageKind = .action
+  public var source: VerdictSource = .rule
 }
 
 public enum ReplyKind: Equatable, Sendable {

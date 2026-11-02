@@ -105,9 +105,9 @@ extension Attention {
   /// the session's state.
   public static func replyVerdict(_ reply: String) -> Verdict {
     switch classify(reply) {
-    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"))
-    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"))
-    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
+    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"), source: .reply)
+    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"), source: .reply)
+    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next", source: .reply)
     }
   }
 }
@@ -168,7 +168,7 @@ public enum Triage {
   /// no card, prompt, or rule decided it.
   static func fromReply(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
     facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil
-      && verdict == Attention.replyVerdict(facts.lastReply ?? "")
+      && verdict.source == .reply
   }
 
   /// Whether the turn that just ended needs a summary: the reply decides the
@@ -199,10 +199,8 @@ public enum Triage {
 
   static func ruleItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem {
     let reason = verdict.reason
-    let kind: TriageKind =
-      facts.waitOutcome != nil ? .info : reason.contains("uncommitted") ? .review : .action
     let text = capitalized(reason)
-    return TriageItem(title: title(reason), kind: kind, summary: text.hasSuffix(".") ? text : text + ".", source: .rule)
+    return TriageItem(title: title(reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".", source: .rule)
   }
 
   /// The last paragraph of the reply as the summary, with no options.

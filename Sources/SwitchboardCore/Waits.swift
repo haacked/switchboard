@@ -441,7 +441,7 @@ extension Attention {
   /// even while other waits stay open. Otherwise Waiting while the session
   /// has an open wait.
   static func waitVerdict(_ session: Session, _ facts: SessionFacts) -> Verdict? {
-    if let outcome = facts.waitOutcome { return Verdict(state: .needsYou, reason: oneLine(outcome)) }
+    if let outcome = facts.waitOutcome { return Verdict(state: .needsYou, reason: oneLine(outcome), kind: .info) }
     guard let waits = session.waits, !waits.isEmpty else { return nil }
     return Verdict(state: .waiting, reason: oneLine(waits.map(\.line).joined(separator: "; ")))
   }
