@@ -112,11 +112,12 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// The pid of every claude that runs the session.
   public var livePids: [Int] { (pid.map { [$0] } ?? []) + (otherPids ?? []) }
 
-  /// True when an interactive claude runs the session and waits at its prompt.
-  /// Exiting that claude loses no turn, unless one starts after the listing
-  /// that read this status. When several claudes run the session,
-  /// the row that `keepRank` picks stands for all of them.
-  public var stoppable: Bool { pid != nil && job == nil && status == "idle" }
+  /// True when one interactive claude runs the session and waits at its
+  /// prompt. Exiting that claude loses no turn, unless one starts after the
+  /// listing that read this status. A session that several claudes run is not
+  /// stoppable, because import would have to exit each of them, and one can
+  /// outlast the signal.
+  public var stoppable: Bool { pid != nil && job == nil && status == "idle" && otherPids == nil }
 
   /// Which of two rows for one session to keep: 2 for a claude that runs and
   /// can't be stopped, 1 for one that can be, 0 when none runs.
@@ -154,6 +155,10 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public func whereItRuns(_ label: String) -> String? {
     guard let pid else { return nil }
     guard let job else {
+      if otherPids != nil {
+        let pids = livePids.map(String.init).joined(separator: ", ")
+        return "\(label) runs in several claudes, in \(cwd) (pids \(pids)). Exit claude in each, then import it."
+      }
       let stop = stoppable ? " Or import it with --stop to exit that claude." : ""
       return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it.\(stop)"
     }
