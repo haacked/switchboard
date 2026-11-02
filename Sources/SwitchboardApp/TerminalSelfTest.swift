@@ -1,12 +1,10 @@
 import AppKit
 import SwiftTerm
 
-/// A scripted check of the terminal panes, for comparing SwiftTerm with
-/// libghostty on a Mac with no one at the keyboard. SB_TERMINAL_TEST=<folder>
-/// sends the same synthetic key, paste, scroll, and resize events to the
-/// leftmost pane (the Claude pane) of the selected session (the first one when none is selected), then writes
-/// pane.png (the pane as drawn) to the folder. The pane's program reports
-/// what it received, so `sb screen` shows the result.
+/// A scripted check of the terminal panes on a Mac with no one at the keyboard. SB_TERMINAL_TEST=<folder>
+/// sends synthetic key, paste, scroll, and resize events to the leftmost pane (the Claude pane) of the
+/// selected session (the first one when none is selected), then writes pane.png (the pane as drawn) to the
+/// folder. The pane's program reports what it received, so `sb screen` shows the result.
 @MainActor
 enum TerminalSelfTest {
   static func start(_ model: BoardModel) {
@@ -56,25 +54,23 @@ enum TerminalSelfTest {
     await pause(1)
   }
 
-  private static func claudePane() -> NSView? {
+  private static func claudePane() -> TerminalView? {
     guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
     else { return nil }
-    return panes(in: root).first
+    return panes(in: root).min { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
   }
 
-  private static func panes(in view: NSView) -> [NSView] {
-    var found: [NSView] = []
+  private static func panes(in view: NSView) -> [TerminalView] {
+    var found: [TerminalView] = []
     func walk(_ v: NSView) {
-      if v is TerminalView {
-        found.append(v)
-      } else if String(describing: type(of: v)) == "GhosttySurfaceView" {
-        found.append(v)
+      if let terminal = v as? TerminalView {
+        found.append(terminal)
       } else {
         v.subviews.forEach(walk)
       }
     }
     walk(view)
-    return found.sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+    return found
   }
 
   /// The key code that types `char` on the current keyboard layout, so the script
@@ -124,26 +120,25 @@ enum TerminalSelfTest {
   /// layout's state machine only runs for events from the keyboard. So the check starts the composition
   /// through the NSTextInputClient calls that an input context makes, then sends the key that finishes it
   /// with the composed character as its text.
-  private static func inputMethodChecks(_ pane: NSView) async {
-    guard let client = pane as? NSTextInputClient else { return log("input: pane is not an NSTextInputClient") }
+  private static func inputMethodChecks(_ pane: TerminalView) async {
     let none = NSRange(location: NSNotFound, length: 0)
-    client.setMarkedText("にほん", selectedRange: NSRange(location: 3, length: 0), replacementRange: none)
-    log("marked text set: has \(client.hasMarkedText()) range \(client.markedRange())")
-    client.setMarkedText(NSAttributedString(string: "日本"), selectedRange: none, replacementRange: none)
-    log("marked text replaced: has \(client.hasMarkedText()) range \(client.markedRange())")
-    log("candidate window rect \(client.firstRect(forCharacterRange: client.markedRange(), actualRange: nil))")
+    pane.setMarkedText("にほん", selectedRange: NSRange(location: 3, length: 0), replacementRange: none)
+    log("marked text set: has \(pane.hasMarkedText()) range \(pane.markedRange())")
+    pane.setMarkedText(NSAttributedString(string: "日本"), selectedRange: none, replacementRange: none)
+    log("marked text replaced: has \(pane.hasMarkedText()) range \(pane.markedRange())")
+    log("candidate window rect \(pane.firstRect(forCharacterRange: pane.markedRange(), actualRange: nil))")
     await pause()
     if let folder = ProcessInfo.processInfo.environment["SB_TERMINAL_TEST"] {
       png(pane, to: "\(folder)/pane-preedit.png")
     }
-    client.unmarkText()
-    log("marked text cleared: has \(client.hasMarkedText()) range \(client.markedRange())")
+    pane.unmarkText()
+    log("marked text cleared: has \(pane.hasMarkedText()) range \(pane.markedRange())")
     await pause()
 
-    client.setMarkedText("´", selectedRange: NSRange(location: 1, length: 0), replacementRange: none)
-    log("dead key: composing \(client.hasMarkedText())")
+    pane.setMarkedText("´", selectedRange: NSRange(location: 1, length: 0), replacementRange: none)
+    log("dead key: composing \(pane.hasMarkedText())")
     key(pane, "é", "e", code: code(for: "e"))
-    log("dead key then e: composing \(client.hasMarkedText())")
+    log("dead key then e: composing \(pane.hasMarkedText())")
     await pause()
 
     modifier(pane, code: 0x38, flags: .shift)
@@ -181,18 +176,12 @@ enum TerminalSelfTest {
   }
 
   private static func png(_ view: NSView, to path: String) {
-    var rep: NSBitmapImageRep?
-    if let layer = view.layer, let surface = layer.contents, CFGetTypeID(surface as CFTypeRef) == IOSurfaceGetTypeID() {
-      let image = CIImage(ioSurface: surface as! IOSurfaceRef)
-      rep = NSBitmapImageRep(ciImage: image)
-    } else if let layer = view.layer, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds),
+    guard let layer = view.layer, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds),
       let context = NSGraphicsContext(bitmapImageRep: bitmap)
-    {
-      // cacheDisplay misses the layers that SwiftTerm draws text in, so draw the layer tree.
-      layer.render(in: context.cgContext)
-      rep = bitmap
-    }
-    try? rep?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    else { return }
+    // cacheDisplay misses the layers that SwiftTerm draws text in, so draw the layer tree.
+    layer.render(in: context.cgContext)
+    try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
   }
 
   private static func log(_ text: String) { FileHandle.standardError.write(Data("selftest: \(text)\n".utf8)) }
@@ -200,7 +189,7 @@ enum TerminalSelfTest {
   static func run(folder: String) async {
     guard let pane = claudePane() else { return log("no terminal pane") }
     pane.window?.makeFirstResponder(pane)
-    log("pane \(type(of: pane)) \(Int(pane.bounds.width))x\(Int(pane.bounds.height))")
+    log("pane \(Int(pane.bounds.width))x\(Int(pane.bounds.height))")
     await pause(1)
     png(pane, to: "\(folder)/pane-start.png")
 
@@ -222,7 +211,7 @@ enum TerminalSelfTest {
     key(pane, "\u{7F}", code: 51)
     key(pane, "\u{1B}", code: 53)
     key(pane, "\t", code: 48)
-    key(pane, "\u{19}", "\t", code: 48, mods: .shift)
+    key(pane, "\u{19}", code: 48, mods: .shift)
     await pause()
     log("up, down, left, delete, escape, tab, shift-tab")
     key(pane, "x", code: code(for: "x"))
@@ -234,11 +223,7 @@ enum TerminalSelfTest {
     let board = NSPasteboard.general
     board.clearContents()
     board.setString("paste line one\npaste line two\n", forType: .string)
-    if let pane = pane as? TerminalView {
-      pane.paste(pane)
-    } else {
-      pane.tryToPerform(NSSelectorFromString("paste:"), with: pane)
-    }
+    pane.paste(pane)
     await pause(0.8)
     log("paste")
 

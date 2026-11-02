@@ -17,4 +17,4 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 
 - Swift for the app and the service.
 - Sessions run the unmodified `claude` CLI under the user's Claude subscription. Never call the Claude API with a subscription login.
-- Only Xcode's Command Line Tools are installed (Swift 6.4). The service and the CLI build with SwiftPM. The app bundle and libghostty probably need full Xcode.
+- Only Xcode's Command Line Tools are installed (Swift 6.4). The service, the CLI, and the app bundle build with SwiftPM.
