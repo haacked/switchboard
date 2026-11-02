@@ -388,11 +388,15 @@ public final class Service {
   }
 
   func samePath(_ a: String, _ b: String) -> Bool {
-    // The last component may be gone, so only its parent is resolved.
+    // A gone worktree may have lost its parent folders too, so the deepest folder that exists is resolved.
     let real = { (path: String) -> String in
-      let url = URL(fileURLWithPath: path)
-      return url.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent)
-        .path
+      var url = URL(fileURLWithPath: path).standardizedFileURL
+      var gone: [String] = []
+      while !FileManager.default.fileExists(atPath: url.path), url.path != "/" {
+        gone.insert(url.lastPathComponent, at: 0)
+        url.deleteLastPathComponent()
+      }
+      return gone.reduce(url.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }.path
     }
     return real(a) == real(b)
   }
@@ -722,7 +726,7 @@ public final class Service {
     var remoteRemoved = false
     var remoteError: Error?
     let localBranchIsGone = branchRemoved || branch == nil
-    if let target = remoteTarget, localBranchIsGone, let pr, pr.state == .merged, pr.head == target.branch {
+    if let target = remoteTarget, localBranchIsGone, let pr = mergedPR(pr, of: target.branch) {
       do {
         remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
       } catch {
@@ -811,12 +815,18 @@ public final class Service {
     guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
       throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
     }
-    guard let pr, pr.state == .merged, pr.head == branch else {
+    guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
     let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
     try requireTip(tip, of: branch, inMerged: pr)
     return (branch, tip)
+  }
+
+  /// The PR when it merged `branch`, or nil.
+  private func mergedPR(_ pr: PullRequest?, of branch: String) -> PullRequest? {
+    guard let pr, pr.state == .merged, pr.head == branch else { return nil }
+    return pr
   }
 
   private func requireTip(_ tip: String, of branch: String, inMerged pr: PullRequest) throws {
@@ -832,17 +842,11 @@ public final class Service {
   private func recheckBranch(
     _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, ignoring path: String? = nil
   ) throws {
-    guard let pr, pr.state == .merged, pr.head == branch.name else {
+    guard let pr = mergedPR(pr, of: branch.name) else {
       throw APIError("\(branch.name) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
     guard branchExists(repo, branch.name) else { throw APIError("\(branch.name) no longer exists.") }
-    let tip = try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"])
-    guard tip == branch.tip else {
-      throw APIError(
-        "\(branch.name) moved after the check, so it may have commits that are not in its merged PR \(pr.url). Keep the branch."
-      )
-    }
-    try requireTip(tip, of: branch.name, inMerged: pr)
+    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"]), of: branch.name, inMerged: pr)
     let checkedOut = try worktreeEntries(repo).contains { entry in
       entry.branch == branch.name && !(path.map { samePath(entry.path, $0) } ?? false)
     }

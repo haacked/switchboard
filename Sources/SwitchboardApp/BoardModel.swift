@@ -21,7 +21,7 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
-  /// The id of the Done session whose delete the sidebar is confirming.
+  /// The id of the Done session whose delete the confirmation dialog in ContentView asks about.
   @Published var confirmingDelete: String?
   /// The ids of the Done sessions whose delete is running.
   @Published var deleting: Set<String> = []

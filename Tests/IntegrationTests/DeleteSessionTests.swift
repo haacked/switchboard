@@ -529,7 +529,7 @@ extension Instance {
     try FileManager.default.removeItem(atPath: s.cwd)
     let r = try sbd.deleteDoneSession(s.id)
     #expect(r.status != 0)
-    #expect(r.stderr.contains("locked"))
+    #expect(r.stderr.contains("is a locked worktree"))
     #expect(try sbd.client.sessions().map(\.id) == [s.id])
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
   }
@@ -624,7 +624,7 @@ extension Instance {
   }
 
   @Test func leavesEverythingWhenTheWorktreeIsLocked() throws {
-    try refusesAndChangesNothing("locked") { sbd, repo, s, _ in
+    try refusesAndChangesNothing("is a locked worktree") { sbd, repo, s, _ in
       try sbd.git(repo, "worktree", "lock", "--reason", "Supacode", s.cwd)
     }
   }

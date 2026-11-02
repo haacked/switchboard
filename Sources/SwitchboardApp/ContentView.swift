@@ -59,7 +59,7 @@ struct ContentView: View {
       set: { if let view = $0 { model.show(view) } })
   }
 
-  private var deleting: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
+  private var confirmingDeleteSession: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
 
   private var isConfirmingDelete: Binding<Bool> {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
@@ -141,7 +141,8 @@ struct ContentView: View {
       }
     }
     .confirmationDialog(
-      "Delete \(deleting?.name ?? "this session")?", isPresented: isConfirmingDelete, presenting: deleting
+      "Delete \(confirmingDeleteSession?.name ?? "this session")?", isPresented: isConfirmingDelete,
+      presenting: confirmingDeleteSession
     ) { session in
       Button("Delete", role: .destructive) { model.deleteDone(session) }
     } message: { session in
@@ -248,7 +249,7 @@ struct DeleteButton: View {
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
     .disabled(model.deleting.contains(session.id))
-    .accessibilityLabel("Delete \(BoardModel.deletePlan(session).summary) of \(session.name)")
+    .accessibilityLabel("Delete \(session.name): \(BoardModel.deletePlan(session).summary)")
     .help("Delete \(BoardModel.deletePlan(session).summary)…")
   }
 }
