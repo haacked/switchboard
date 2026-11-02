@@ -149,7 +149,7 @@ public enum Triage {
       item = cardItem(card)
       item.ref = "card:\(card.id)"
     } else if !fromReply(facts, verdict) {
-      item = ruleItem(facts, verdict)
+      item = ruleItem(verdict)
       item.ref = "rule:\(item.title)"
     } else {
       if let summary = facts.triage {
@@ -196,7 +196,7 @@ public enum Triage {
       summary: card.questions.map(\.question).joined(separator: " "), options: options, source: .card)
   }
 
-  static func ruleItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem {
+  static func ruleItem(_ verdict: Verdict) -> TriageItem {
     let text = capitalized(verdict.reason)
     return TriageItem(
       title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",

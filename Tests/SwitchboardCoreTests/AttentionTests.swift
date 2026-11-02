@@ -330,6 +330,7 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     ("Is this right? I think so.\n\nThe build passes.", .other),
     ("**Do you want me to open the PR?**", .offer("Do you want me to open the PR?")),
     ("Want me to update README.md?", .offer("Want me to update README.md?")),
+    ("**Want me to push?** I can also open the PR.", .offer("Want me to push?")),
     ("Which of v1.2.3 or v1.3.0 should I ship?", .question("Which of v1.2.3 or v1.3.0 should I ship?")),
     ("Done.\n\nWant me to open https://example.com/a.b?", .offer("Want me to open https://example.com/a.b?")),
   ])

@@ -34,7 +34,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(Triage.item(f, action)?.kind == .action)
   }
 
-  @Test func aRuleVerdictWithTheRepliesTextIsNotTheReply() {
+  @Test func aRuleVerdictWithTheReplyTextIsNotTheReply() {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     f.apply(stop(1, 5, proseQuestion))
     let rule = Verdict(state: .needsYou, reason: Attention.replyVerdict(proseQuestion).reason)
