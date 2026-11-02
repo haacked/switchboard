@@ -235,7 +235,7 @@ check_relaunch() {
     wait_for 20 shell_has "$mark-[0-9]" || fail "the shell did not answer $mark"
     sb screen "$session" --shell | grep -o "$mark-[0-9]*" | tail -n 1 | sed 's/.*-//'
   }
-  fingerprint() { # the session, the pids of both panes, and the stand-in's screen
+  fingerprint() { # every session's record, every tmux pane's pid, and this session's stand-in screen
     {
       sb ls --json | jq -c '[.[] | {id, name, state, claudePid}] | sort_by(.id)'
       tmux -S "$tmux_socket" list-panes -a -F '#{session_name} #{pane_pid} #{pane_dead}' | sort
@@ -243,10 +243,14 @@ check_relaunch() {
     }
   }
 
+  # The stand-in redraws its screen when the app resizes it, so a read can catch a partial redraw.
+  matches_before() { [ "$(fingerprint)" = "$before" ]; }
   unchanged() {
-    local after
-    after=$(fingerprint)
-    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed $1"; }
+    wait_for 5 matches_before || {
+      local after
+      after=$(fingerprint) diff <(echo "$before") <(echo "$after") >&2 || true
+      fail "the session changed $1"
+    }
   }
   sb_rx_has() { sb screen "$session" | grep -q "^rx.* $1"; }
 
