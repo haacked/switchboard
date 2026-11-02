@@ -685,6 +685,12 @@ public final class Service {
         branch = try checkBranchIsMerged(session, pr: pr)
       }
     }
+    // The branch's git config is deleted with the branch, so the remote is read first.
+    var remoteName = "origin"
+    if removesRemoteBranch, let repo, let branch {
+      remoteName =
+        (try? gitOutput(repo, ["config", "branch.\(branch.name).remote"])).flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
+    }
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -695,7 +701,10 @@ public final class Service {
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    if let repo { _ = try gitOutput(repo, folderGone ? ["worktree", "prune"] : ["worktree", "remove", session.cwd]) }
+    // Prune would also drop the records of other worktrees whose folders are missing.
+    if let repo, try !folderGone || worktreeEntry(repo, at: session.cwd) != nil {
+      _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
+    }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
@@ -715,7 +724,7 @@ public final class Service {
     var remoteError: Error?
     if let repo, let branch, branchRemoved, removesRemoteBranch, let pr {
       do {
-        remoteRemoved = try deleteRemoteBranch(repo, branch.name, pr: pr)
+        remoteRemoved = try deleteRemoteBranch(repo, remoteName, branch.name, pr: pr)
       } catch {
         remoteError = error
       }
@@ -733,7 +742,7 @@ public final class Service {
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     if let branchError, let branch {
       let remote = removesRemoteBranch ? " It also kept the remote branch, because the local branch stayed." : ""
-      throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError).\(remote)")
+      throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
     }
     if let remoteError {
       throw APIError(
@@ -758,12 +767,11 @@ public final class Service {
   }
 
   /// `checkBranchIsMerged` for a session whose folder is gone: the branch is read from the repo.
+  /// A branch that is already gone leaves nothing to delete, so it returns nil.
   private func checkGoneBranchIsMerged(_ repo: String, _ session: Session, pr: PullRequest?) throws -> (
     name: String, tip: String
-  ) {
-    guard let branch = session.branch, branchExists(repo, branch) else {
-      throw APIError("\(session.branch ?? "The branch of \(session.id)") no longer exists.")
-    }
+  )? {
+    guard let branch = session.branch, branchExists(repo, branch) else { return nil }
     guard let pr, pr.state == .merged, pr.head == branch else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
@@ -774,12 +782,10 @@ public final class Service {
     return (branch, tip)
   }
 
-  /// Deletes the branch from the remote it tracks, or from origin, when the remote's tip is the
+  /// Deletes the branch from `remote` when the remote's tip is the
   /// head of the merged PR. Returns false when the remote has no such branch. The push names the
   /// tip it expects, so git refuses when the branch moved after the check.
-  private func deleteRemoteBranch(_ repo: String, _ branch: String, pr: PullRequest) throws -> Bool {
-    let remote =
-      (try? gitOutput(repo, ["config", "branch.\(branch).remote"])).flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
+  private func deleteRemoteBranch(_ repo: String, _ remote: String, _ branch: String, pr: PullRequest) throws -> Bool {
     let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"])
     guard let tip = listed.split(whereSeparator: \.isWhitespace).first.map(String.init) else { return false }
     guard tip == pr.headSha else {

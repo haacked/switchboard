@@ -23,6 +23,8 @@ final class BoardModel: ObservableObject {
   @Published var showingImport = false
   /// The id of the Done session whose delete the sidebar is confirming.
   @Published var confirmingDelete: String?
+  /// The ids of the Done sessions whose delete is running.
+  @Published var deleting: Set<String> = []
   var presentingSheet: Bool { showingNew || showingImport }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.queue
@@ -316,6 +318,12 @@ final class BoardModel: ObservableObject {
     /// The local branch, or nil while the session's PR is not merged.
     var branch: String?
 
+    /// What the delete icon's label and tooltip say it removes.
+    var summary: String {
+      if branch != nil { return "the session, its worktree, and its branch" }
+      return worktree != nil ? "the session and its worktree" : "the session"
+    }
+
     var message: String {
       var parts = ["the session \(name)"]
       if let worktree { parts.append("its worktree \(worktree) (if it is still there)") }
@@ -326,7 +334,7 @@ final class BoardModel: ObservableObject {
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
-        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. Nothing is deleted when it refuses, except that a branch that fails its check after the worktree is gone stays."
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
     }
 
@@ -364,9 +372,11 @@ final class BoardModel: ObservableObject {
 
   /// Deletes a Done session with everything `deletePlan` names. sbd runs the checks of `delete`.
   func deleteDone(_ s: SessionSummary) {
-    perform("rm", Self.deleteRequest(s)) { _ in
-      if self.selection == s.id { self.selection = nil }
-    }
+    guard deleting.insert(s.id).inserted else { return }
+    perform(
+      "rm", Self.deleteRequest(s),
+      then: { _ in if self.selection == s.id { self.selection = nil } },
+      finally: { self.deleting.remove(s.id) })
   }
 
   /// Removes the session and its worktree. sbd refuses, and removes nothing,

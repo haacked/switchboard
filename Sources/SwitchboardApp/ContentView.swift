@@ -174,7 +174,7 @@ struct Sidebar: View {
               .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
               .contextMenu {
                 if BoardModel.canDelete(row.session) {
-                  Button("Delete Session, Worktree, and Branch…", role: .destructive) {
+                  Button("Delete \(BoardModel.deletePlan(row.session).summary.capitalizedFirst)…", role: .destructive) {
                     model.confirmingDelete = row.id
                   }
                 }
@@ -234,6 +234,10 @@ struct Sidebar: View {
   }
 }
 
+extension String {
+  var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
+
 /// Asks to delete a Done session with its worktree and branch. The dialog is on ContentView.
 struct DeleteButton: View {
   @EnvironmentObject var model: BoardModel
@@ -247,8 +251,9 @@ struct DeleteButton: View {
     }
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
-    .accessibilityLabel("Delete \(session.name), its worktree, and its branch")
-    .help("Delete the session, its worktree, and its branch…")
+    .disabled(model.deleting.contains(session.id))
+    .accessibilityLabel("Delete \(BoardModel.deletePlan(session).summary) of \(session.name)")
+    .help("Delete \(BoardModel.deletePlan(session).summary)…")
   }
 }
 

@@ -273,6 +273,29 @@ import Testing
     let text = BoardModel.deletePlan(done()).message
     #expect(text.contains("uncommitted files"))
     #expect(text.contains("checked out in another worktree"))
-    #expect(text.contains("Nothing is deleted"))
+    #expect(text.contains("A refusal before anything stops deletes nothing"))
+  }
+
+  @Test func saysThatTheSessionAndWorktreeGoEvenWhenTheBranchCheckFails() {
+    let text = BoardModel.deletePlan(done()).message
+    #expect(!text.contains("Nothing is deleted when it refuses, except"))
+    #expect(text.contains("A refusal before anything stops deletes nothing"))
+    #expect(text.contains("fails its check after the worktree is gone"))
+  }
+
+  @Test func ignoresASecondDeleteWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let session = done()
+    model.deleteDone(session)
+    #expect(model.deleting == [session.id])
+    model.deleteDone(session)
+    #expect(model.deleting == [session.id])
+  }
+
+  @Test func labelsTheIconWithWhatItRemoves() {
+    #expect(BoardModel.deletePlan(done()).summary == "the session, its worktree, and its branch")
+    #expect(BoardModel.deletePlan(done(pr: .closed)).summary == "the session and its worktree")
+    #expect(BoardModel.deletePlan(done(repo: nil, branch: nil)).summary == "the session")
   }
 }
