@@ -225,6 +225,12 @@ import Testing
     #expect(!BoardModel.canDelete(done(manager: true)))
   }
 
+  @Test func neverOffersTheIconOnAFollowupThatHasNotStarted() {
+    var s = done()
+    s.followup = Followup(prompt: "p")
+    #expect(!BoardModel.canDelete(s))
+  }
+
   @Test func neverOffersTheIconOutsideTheDoneColumn() {
     for state in AttentionState.allCases where state != .done {
       #expect(!BoardModel.canDelete(done(state: state)))
