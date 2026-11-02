@@ -240,4 +240,56 @@ import Testing
       ])
     #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("B"))
   }
+
+  @Test func copiesTheConversationsFolderWithItsSubagentsAndToolResults() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    let extra = (old as NSString).deletingPathExtension
+    try FileManager.default.createDirectory(atPath: "\(extra)/subagents", withIntermediateDirectories: true)
+    try "sub".write(toFile: "\(extra)/subagents/agent-1.jsonl", atomically: true, encoding: .utf8)
+
+    try move(sbd)
+    let copy = try #require(transcript(sbd, "B", s))
+    #expect(
+      try String(contentsOfFile: "\((copy as NSString).deletingPathExtension)/subagents/agent-1.jsonl", encoding: .utf8)
+        == "sub")
+  }
+
+  @Test func movesBackToAnAccountThatHoldsAnOlderCopy() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    try move(sbd)
+    try sbd.sb("send", s.id, "second")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: second" }
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+    let grown = try #require(transcript(sbd, "B", s))
+
+    let back = try JSONCoding.decode(AccountMove.self, from: try sbd.sb("account", "move", "--json", "A"))
+    #expect(back.moved == [s.id])
+    let old = try #require(transcript(sbd, "A", s))
+    #expect(FileManager.default.contentsEqual(atPath: old, andPath: grown))
+    try sbd.sb("send", s.id, "third")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: third" }
+  }
+
+  @Test func theDryRunListsASessionWhoseMoveWouldConflictAsBlocked() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    let folder = ((old as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    let dir = "\(sbd.account("B"))/projects/\(folder)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    try "{}\n".write(toFile: "\(dir)/\(s.claudeSessionId).jsonl", atomically: true, encoding: .utf8)
+
+    let plan = try move(sbd, "--dry-run")
+    #expect(plan.moved.isEmpty)
+    #expect(plan.blocked.map(\.session) == [s.id])
+  }
+
+  @Test func theUseCommandRefusesBothAnswers() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    #expect(throws: TestError.self) { try sbd.sb("account", "use", "B", "--move", "--new-only") }
+  }
 }

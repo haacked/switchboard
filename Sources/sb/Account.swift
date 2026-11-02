@@ -9,6 +9,7 @@ func account(_ a: Args) {
   case "use":
     guard words.count == 2 else { die("usage: sb account use <name|folder> [--move | --new-only]") }
     let ref = words[1]
+    if a.switches.contains("--move") && a.switches.contains("--new-only") { die("--move and --new-only conflict") }
     let move = moveChoice(a, ref)
     let accounts = call("account-use", ["account": .string(ref)])
     guard move else { return printAccounts(accounts, json: a.json) }

@@ -78,8 +78,11 @@ extension Service {
     var result = AccountMove(account: target)
     for id in entries.keys.sorted() {
       guard let session = entries[id]?.session, !session.cwd.isEmpty, claudeAccount(of: id) != target else { continue }
+      if let reason = moveRefusal(id, to: target) {
+        result.blocked.append(.init(session: id, name: session.name, reason: reason))
+        continue
+      }
       do {
-        if let reason = moveRefusal(id) { throw APIError(reason) }
         if !dryRun { try move(id, to: target) }
         result.moved.append(id)
       } catch {
@@ -90,11 +93,33 @@ extension Service {
     return result
   }
 
-  private func moveRefusal(_ id: String) -> String? {
+  /// Why the session cannot move now, so that `dryRun` lists the same
+  /// sessions as a move.
+  private func moveRefusal(_ id: String, to target: String) -> String? {
     guard let e = entries[id] else { return "no session \(id)" }
+    if starting.contains(id) { return "it is starting" }
     if claudeState(id) != .stopped { return "its claude is running. Stop it first" }
     if !e.pending.isEmpty || e.inFlight != nil { return "a message is on its way to it" }
+    if let source = transcriptFile(e.session) {
+      let dest = transcriptDestination(source, id: e.session.claudeSessionId, to: target)
+      if let conflict = transcriptConflict(source, dest) { return conflict }
+    }
     return nil
+  }
+
+  private func transcriptDestination(_ source: String, id: String, to target: String) -> String {
+    let folder = ((source as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    return "\(target)/projects/\(folder)/\(id).jsonl"
+  }
+
+  /// Why the account's file at `dest` rules out a copy of `source`: it holds
+  /// another transcript of the conversation.
+  private func transcriptConflict(_ source: String, _ dest: String) -> String? {
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: dest), !sameFile(source, dest), !fm.contentsEqual(atPath: source, andPath: dest),
+      !startsWith(source, dest)
+    else { return nil }
+    return "the account already holds another transcript of this conversation, at \(dest)"
   }
 
   /// Copies the conversation's transcript to the account, then switches the
@@ -110,21 +135,19 @@ extension Service {
     record(id, "account-moved", ["from": .string(from), "to": .string(target)])
   }
 
-  /// Puts the transcript at <to>/projects/<same folder>/<id>.jsonl, and the
-  /// conversation's file history beside it, which a rewind needs. An account
-  /// that shares the folder, such as through a symlink, already holds them. An
-  /// account that holds another transcript for the conversation makes this
-  /// throw, because claude resumes the one it finds.
+  /// Puts the transcript at <to>/projects/<same folder>/<id>.jsonl, the
+  /// conversation's folder beside it, which holds its subagent transcripts and
+  /// tool results, and its file history, which a rewind needs. An account that
+  /// shares a folder, such as through a symlink, already holds those files. A
+  /// copy of the transcript that is a prefix of the source, left by an earlier
+  /// move, is replaced. Another transcript makes this throw, because claude
+  /// resumes the one it finds.
   private func copyConversation(_ source: String, id: String, from: String, to target: String) throws {
     let fm = FileManager.default
-    let folder = ((source as NSString).deletingLastPathComponent as NSString).lastPathComponent
-    let dir = "\(target)/projects/\(folder)"
-    let dest = "\(dir)/\(id).jsonl"
-    if fm.fileExists(atPath: dest) {
-      guard sameFile(source, dest) || fm.contentsEqual(atPath: source, andPath: dest) else {
-        throw APIError("the account already holds another transcript of this conversation, at \(dest)")
-      }
-    } else {
+    let dest = transcriptDestination(source, id: id, to: target)
+    let dir = (dest as NSString).deletingLastPathComponent
+    if let conflict = transcriptConflict(source, dest) { throw APIError(conflict) }
+    if !fm.fileExists(atPath: dest) || !fm.contentsEqual(atPath: source, andPath: dest) {
       try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
       let partial = "\(dest).moving"
       try? fm.removeItem(atPath: partial)
@@ -134,17 +157,51 @@ extension Service {
           throw APIError("the copy differs from \(source)")
         }
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
-        try fm.moveItem(atPath: partial, toPath: dest)
+        if fm.fileExists(atPath: dest) {
+          _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
+        } else {
+          try fm.moveItem(atPath: partial, toPath: dest)
+        }
       } catch {
         try? fm.removeItem(atPath: partial)
         throw error
       }
     }
-    let history = "file-history/\(id)"
-    if fm.fileExists(atPath: "\(from)/\(history)"), !fm.fileExists(atPath: "\(target)/\(history)") {
-      try fm.createDirectory(atPath: "\(target)/file-history", withIntermediateDirectories: true)
-      try fm.copyItem(atPath: "\(from)/\(history)", toPath: "\(target)/\(history)")
+    let sourceDir = (source as NSString).deletingPathExtension
+    try copyMissing(sourceDir, to: (dest as NSString).deletingPathExtension)
+    try copyMissing("\(from)/file-history/\(id)", to: "\(target)/file-history/\(id)")
+  }
+
+  /// Copies each file under `source` that `dest` lacks. Nothing happens when
+  /// `source` does not exist.
+  private func copyMissing(_ source: String, to dest: String) throws {
+    let fm = FileManager.default
+    var isDir: ObjCBool = false
+    guard fm.fileExists(atPath: source, isDirectory: &isDir) else { return }
+    guard !fm.fileExists(atPath: dest) else {
+      guard isDir.boolValue else { return }
+      for name in try fm.contentsOfDirectory(atPath: source) {
+        try copyMissing("\(source)/\(name)", to: "\(dest)/\(name)")
+      }
+      return
     }
+    try fm.createDirectory(atPath: (dest as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    try fm.copyItem(atPath: source, toPath: dest)
+  }
+
+  /// Whether the file at `prefix` is the first bytes of the file at `path`.
+  private func startsWith(_ path: String, _ prefix: String) -> Bool {
+    guard let file = FileHandle(forReadingAtPath: path), let head = FileHandle(forReadingAtPath: prefix) else {
+      return false
+    }
+    defer {
+      try? file.close()
+      try? head.close()
+    }
+    while let expected = try? head.read(upToCount: 1 << 20), !expected.isEmpty {
+      guard let actual = try? file.read(upToCount: expected.count), actual == expected else { return false }
+    }
+    return true
   }
 
   private func sameFile(_ a: String, _ b: String) -> Bool {
