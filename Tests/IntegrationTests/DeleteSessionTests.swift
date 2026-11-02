@@ -552,4 +552,98 @@ extension Instance {
     #expect(try sbd.client.sessions().map(\.id) == [s.id])
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
   }
+
+  // MARK: Every refusal of the Done delete leaves everything in place
+
+  /// What the delete would remove: the record, the running claude, the worktree and its files, and both branches.
+  private struct Placed: Equatable {
+    var sessions: [String]
+    var live: Bool?
+    var worktreeFiles: [String]
+    var localBranch: String
+    var remoteBranch: String
+  }
+
+  private func placed(_ sbd: Instance, _ repo: String, _ s: SessionSummary, _ origin: String) throws -> Placed {
+    Placed(
+      sessions: try sbd.client.sessions().map(\.id),
+      live: try? sbd.get(s.id).live,
+      worktreeFiles: ((try? FileManager.default.contentsOfDirectory(atPath: s.cwd)) ?? []).sorted(),
+      localBranch: try sbd.git(repo, "branch", "--list", "-v", Self.mergedBranch),
+      remoteBranch: try remoteBranch(origin))
+  }
+
+  /// Deletes a Done session after `breakIt` makes one safety check fail, and expects the refusal to
+  /// name `error` and to change nothing.
+  private func refusesAndChangesNothing(
+    _ error: String, _ breakIt: (Instance, String, SessionSummary, String) throws -> Void
+  )
+    throws
+  {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try breakIt(sbd, repo, s, origin)
+    let before = try placed(sbd, repo, s, origin)
+    #expect(before.sessions.contains(s.id))
+    #expect(before.live == true)
+    #expect(before.localBranch != "")
+    #expect(before.remoteBranch != "")
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(error), Comment(rawValue: r.stderr))
+    #expect(try placed(sbd, repo, s, origin) == before)
+  }
+
+  @Test func deletesADoneSessionWhoseWorktreeAndBranchesExist() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    let before = try placed(sbd, repo, s, origin)
+    #expect(before.sessions == [s.id])
+    #expect(!before.worktreeFiles.isEmpty)
+    #expect(before.localBranch != "")
+    #expect(before.remoteBranch != "")
+    #expect(try sbd.deleteDoneSession(s.id).status == 0)
+    let after = try placed(sbd, repo, s, origin)
+    #expect(after.sessions.isEmpty)
+    #expect(after.worktreeFiles.isEmpty)
+    #expect(after.localBranch == "")
+    #expect(after.remoteBranch == "")
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeHasUncommittedFiles() throws {
+    try refusesAndChangesNothing("uncommitted files") { _, _, s, _ in
+      try "x".write(toFile: "\(s.cwd)/dirty.txt", atomically: true, encoding: .utf8)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheBranchHasACommitAfterTheMerge() throws {
+    try refusesAndChangesNothing("not in its merged PR") { sbd, _, s, _ in
+      try sbd.commit(s.cwd, "later.txt")
+      try sbd.git(s.cwd, "push", "-q", "origin", Self.mergedBranch)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheBranchHasACommitOnNoRemote() throws {
+    try refusesAndChangesNothing("not in its merged PR") { sbd, _, s, _ in
+      try sbd.commit(s.cwd, "local-only.txt")
+    }
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeIsLocked() throws {
+    try refusesAndChangesNothing("locked") { sbd, repo, s, _ in
+      try sbd.git(repo, "worktree", "lock", "--reason", "Supacode", s.cwd)
+    }
+  }
+
+  @Test func leavesEverythingWhenAnotherSessionRunsInTheWorktree() throws {
+    try refusesAndChangesNothing("also runs in") { sbd, repo, s, _ in
+      _ = try sbd.worktreeSession(repo, branch: Self.mergedBranch)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeIsDetachedFromTheBranch() throws {
+    try refusesAndChangesNothing("checked out") { sbd, _, s, _ in
+      try sbd.git(s.cwd, "checkout", "-q", "--detach", "HEAD~1")
+    }
+  }
 }
