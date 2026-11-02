@@ -447,6 +447,18 @@ extension Instance {
     #expect(try remoteBranch(origin) == "")
   }
 
+  @Test func deletesADoneSessionWhoseFolderAndItsParentAreGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try FileManager.default.removeItem(atPath: (s.cwd as NSString).deletingLastPathComponent)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd) == false)
+    #expect(try remoteBranch(origin) == "")
+  }
+
   @Test func keepsTheBranchOfADoneSessionWhoseFolderIsGoneAndWhoseBranchMovedOffThePRsHead() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)

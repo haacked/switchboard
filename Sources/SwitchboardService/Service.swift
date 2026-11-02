@@ -704,15 +704,17 @@ public final class Service {
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    // Prune would also drop the records of other worktrees whose folders are missing.
-    if let repo, try !folderGone || worktreeEntry(repo, at: session.cwd) != nil {
-      _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
+    // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
+    // folder's path through a symlink, so it gets the path that it lists for the worktree.
+    if let repo {
+      let listed = folderGone ? try worktreeEntry(repo, at: session.cwd)?.path : session.cwd
+      if let listed { _ = try gitOutput(repo, ["worktree", "remove", listed]) }
     }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
       do {
-        try recheckBranch(repo, branch, pr: pr)
+        try recheckBranch(repo, branch.name, pr: pr)
         // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
         // Passing the checked tip makes git refuse when a commit landed after the check.
         _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
@@ -783,7 +785,7 @@ public final class Service {
   )? {
     guard let name = session.branch, branchExists(repo, name) else { return nil }
     let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"]))
-    try recheckBranch(repo, branch, pr: pr, ignoring: session.cwd)
+    try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd)
     return branch
   }
 
@@ -836,21 +838,21 @@ public final class Service {
   }
 
   /// Runs the checks that `checkBranchIsMerged` made, now that the worktree is gone: the branch
-  /// still exists with the checked tip, which is the head of the merged PR, and no worktree has it
-  /// checked out. Deleting the ref of a checked-out branch breaks that worktree.
+  /// still exists, its tip is the head of the merged PR, and no worktree has it checked out.
+  /// Deleting the ref of a checked-out branch breaks that worktree.
   /// A worktree at `path` does not count as having the branch checked out.
   private func recheckBranch(
-    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, ignoring path: String? = nil
+    _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil
   ) throws {
-    guard let pr = mergedPR(pr, of: branch.name) else {
-      throw APIError("\(branch.name) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
+    guard let pr = mergedPR(pr, of: branch) else {
+      throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    guard branchExists(repo, branch.name) else { throw APIError("\(branch.name) no longer exists.") }
-    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"]), of: branch.name, inMerged: pr)
+    guard branchExists(repo, branch) else { throw APIError("\(branch) no longer exists.") }
+    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"]), of: branch, inMerged: pr)
     let checkedOut = try worktreeEntries(repo).contains { entry in
-      entry.branch == branch.name && !(path.map { samePath(entry.path, $0) } ?? false)
+      entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)
     }
-    guard !checkedOut else { throw APIError("\(branch.name) is checked out in a worktree.") }
+    guard !checkedOut else { throw APIError("\(branch) is checked out in a worktree.") }
   }
 
   /// Returns the session's repo, or throws unless the session's folder is a
