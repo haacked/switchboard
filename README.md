@@ -80,7 +80,7 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 
 ### The Manager
 
-`sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app has no sidebar row for it. Its toolbar star (⇧⌘M, or Session > Open Manager) opens it, and the star turns orange while the Manager needs you. The sessions it started are top level in the sidebar. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
+`sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app pins it in its own sidebar section, and selecting it shows its session, where you send it messages. The toolbar star (⇧⌘M, or Session > Open Manager) also opens it, and the star turns orange while the Manager needs you. The sessions it started are top level in the sidebar. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
 
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
