@@ -3,9 +3,17 @@ import Testing
 @testable import SwitchboardCore
 
 @Suite struct TerminalBackendChoice {
-  @Test func defaultsToSwiftTerm() {
-    #expect(TerminalBackend.choose(environment: [:], ghosttyAvailable: true) == .init(backend: .swiftTerm, note: nil))
-    #expect(TerminalBackend.choose(environment: [:], ghosttyAvailable: false) == .init(backend: .swiftTerm, note: nil))
+  @Test func defaultsToGhostty() {
+    #expect(TerminalBackend.choose(environment: [:], ghosttyAvailable: true) == .init(backend: .ghostty, note: nil))
+    #expect(
+      TerminalBackend.choose(environment: ["SB_TERMINAL": ""], ghosttyAvailable: true)
+        == .init(backend: .ghostty, note: nil))
+  }
+
+  @Test func theDefaultFallsBackToSwiftTermWhenTheBuildLacksGhostty() {
+    let choice = TerminalBackend.choose(environment: [:], ghosttyAvailable: false)
+    #expect(choice.backend == .swiftTerm)
+    #expect(choice.note?.contains("bin/build-ghostty") == true)
   }
 
   @Test func ghosttyNeedsTheRequestAndTheLibrary() {
@@ -17,14 +25,20 @@ import Testing
   }
 
   @Test func swiftTermCanBeRequestedExplicitly() {
-    #expect(
-      TerminalBackend.choose(environment: ["SB_TERMINAL": "swiftterm"], ghosttyAvailable: true).backend == .swiftTerm)
+    for available in [true, false] {
+      #expect(
+        TerminalBackend.choose(environment: ["SB_TERMINAL": "SwiftTerm"], ghosttyAvailable: available)
+          == .init(backend: .swiftTerm, note: nil))
+    }
   }
 
   @Test func anUnknownNameFallsBackAndSaysSo() {
     let choice = TerminalBackend.choose(environment: ["SB_TERMINAL": "kitty"], ghosttyAvailable: true)
-    #expect(choice.backend == .swiftTerm)
+    #expect(choice.backend == .ghostty)
     #expect(choice.note?.contains("kitty") == true)
+    let without = TerminalBackend.choose(environment: ["SB_TERMINAL": "kitty"], ghosttyAvailable: false)
+    #expect(without.backend == .swiftTerm)
+    #expect(without.note?.contains("kitty") == true)
   }
 }
 

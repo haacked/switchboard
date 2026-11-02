@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # Builds build/Switchboard.app in release mode. Contents/MacOS holds the app,
 # sbd, and sb, because the app and sb find their siblings there. The bundle is
-# signed ad hoc, which is enough to run it on this Mac. When bin/build-ghostty has
-# run, Contents/Resources also holds Ghostty's resources (see bin/bundle-ghostty).
+# signed ad hoc, which is enough to run it on this Mac. Ghostty is the app's default
+# terminal, so when bin/build-ghostty has run, this links libghostty and
+# Contents/Resources holds Ghostty's resources (see bin/bundle-ghostty). Without
+# it the app falls back to SwiftTerm. SB_GHOSTTY=0 forces a SwiftTerm-only build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [ -z "${SB_GHOSTTY:-}" ]; then
+  if [ -d .build/ghostty/GhosttyKit.xcframework ]; then
+    export SB_GHOSTTY=1
+  else
+    echo "Warning: .build/ghostty is missing, so the app has no libghostty and uses SwiftTerm. Run bin/build-ghostty first." >&2
+  fi
+fi
 swift build -c release
 bin=$(swift build -c release --show-bin-path)
 version=$("$bin/sb" version | awk '{print $2}')
@@ -13,7 +22,13 @@ rm -rf build/Switchboard.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Switchboard" "$bin/sbd" "$bin/sb" "$app/Contents/MacOS/"
 cp assets/icon/AppIcon.icns "$app/Contents/Resources/"
-bin/bundle-ghostty "$app/Contents/Resources"
+if [ "${SB_GHOSTTY:-}" = 1 ]; then
+  bin/bundle-ghostty "$app/Contents/Resources"
+  if [ ! -e "$app/Contents/Resources/terminfo/78/xterm-ghostty" ]; then
+    echo "libghostty is linked but its resources are missing. Run bin/build-ghostty again." >&2
+    exit 1
+  fi
+fi
 cat >"$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

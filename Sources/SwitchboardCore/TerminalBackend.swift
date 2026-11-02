@@ -7,7 +7,7 @@ public enum TerminalBackend: String, Sendable {
 
   public struct Choice: Equatable, Sendable {
     public var backend: TerminalBackend
-    /// Why the choice differs from what `SB_TERMINAL` asked for.
+    /// Why the choice is not the terminal that the default or `SB_TERMINAL` names.
     public var note: String?
 
     public init(backend: TerminalBackend, note: String?) {
@@ -16,22 +16,22 @@ public enum TerminalBackend: String, Sendable {
     }
   }
 
-  /// SwiftTerm unless `SB_TERMINAL=ghostty` asks for libghostty and this build has it.
+  private static let missingGhostty =
+    "This build has no libghostty. Run bin/build-ghostty, then SB_GHOSTTY=1 swift build. Using swiftterm."
+
+  /// libghostty unless `SB_TERMINAL=swiftterm` asks for SwiftTerm or this build lacks libghostty.
   public static func choose(environment: [String: String], ghosttyAvailable: Bool) -> Choice {
-    guard let name = environment["SB_TERMINAL"]?.lowercased(), !name.isEmpty else {
-      return Choice(backend: .swiftTerm, note: nil)
-    }
+    let preferred =
+      ghosttyAvailable ? Choice(backend: .ghostty, note: nil) : Choice(backend: .swiftTerm, note: missingGhostty)
+    guard let name = environment["SB_TERMINAL"]?.lowercased(), !name.isEmpty else { return preferred }
     switch TerminalBackend(rawValue: name) {
     case .ghostty:
-      if ghosttyAvailable { return Choice(backend: .ghostty, note: nil) }
-      return Choice(
-        backend: .swiftTerm,
-        note: "SB_TERMINAL=ghostty needs a build with libghostty. Run bin/build-ghostty, then SB_GHOSTTY=1 swift build."
-      )
+      return preferred
     case .swiftTerm:
       return Choice(backend: .swiftTerm, note: nil)
     case nil:
-      return Choice(backend: .swiftTerm, note: "SB_TERMINAL=\(name) is not a terminal. Using swiftterm.")
+      return Choice(
+        backend: preferred.backend, note: "SB_TERMINAL=\(name) is not a terminal. Using \(preferred.backend.rawValue).")
     }
   }
 }
