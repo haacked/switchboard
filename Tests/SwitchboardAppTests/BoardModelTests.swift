@@ -4,6 +4,13 @@ import Testing
 
 @testable import SwitchboardApp
 
+final class Counter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+  var value: Int { lock.withLock { count } }
+  func increment() { lock.withLock { count += 1 } }
+}
+
 /// A session whose triage item is a decision, or a card when `card` is true.
 func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, card: Bool = false)
   -> SessionSummary
@@ -209,6 +216,121 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
       }, followups: nil)
     #expect(order == ["ls"])
     #expect(more == nil)
+  }
+}
+
+@MainActor
+@Suite struct DeletingDoneSessions {
+  func done(
+    repo: String? = "/repos/posthog", branch: String? = "haacked/fix", pr: PRState? = .merged,
+    state: AttentionState = .done, manager: Bool? = nil
+  ) -> SessionSummary {
+    var s = SessionSummary(
+      id: "s1", name: "fix", cwd: "/worktrees/posthog/haacked/fix", repo: repo, branch: branch, claudeSessionId: "c",
+      state: state, reason: "", since: 0, lastActivity: 0, live: false, claudePid: nil, attached: false,
+      lastReply: nil, waits: [], notes: [])
+    s.manager = manager
+    if let pr {
+      s.pr = try! JSONDecoder().decode(
+        PRSummary.self,
+        from: Data(
+          """
+          {"number":7,"url":"https://github.com/o/r/pull/7","repo":"o/r","title":"Fix","state":"\(pr.rawValue)","status":"\(pr == .merged ? "Merged" : "Closed")"}
+          """.utf8))
+    }
+    return s
+  }
+
+  @Test func offersTheIconOnADoneSession() {
+    #expect(BoardModel.canDelete(done()))
+  }
+
+  @Test func neverOffersTheIconOnTheManager() {
+    #expect(!BoardModel.canDelete(done(manager: true)))
+  }
+
+  @Test func neverOffersTheIconOnAFollowupThatHasNotStarted() {
+    var s = done()
+    s.followup = Followup(prompt: "p")
+    #expect(!BoardModel.canDelete(s))
+  }
+
+  @Test func neverOffersTheIconOutsideTheDoneColumn() {
+    for state in AttentionState.allCases where state != .done {
+      #expect(!BoardModel.canDelete(done(state: state)))
+    }
+  }
+
+  @Test func asksForTheWorktreeTheBranchAndTheRemoteBranchOfAMergedPR() {
+    let request = BoardModel.deleteRequest(done())
+    #expect(
+      request == [
+        "session": "s1", "worktree": true, "branch": true, "remote_branch": true,
+      ])
+  }
+
+  @Test func keepsTheBranchWhenThePRIsNotMerged() {
+    let request = BoardModel.deleteRequest(done(pr: .closed))
+    #expect(request["worktree"] == true)
+    #expect(request["branch"] == false)
+    #expect(request["remote_branch"] == false)
+    #expect(BoardModel.deletePlan(done(pr: nil)).branch == nil)
+  }
+
+  @Test func removesOnlyTheSessionWhenSbdMadeNoWorktree() {
+    let request = BoardModel.deleteRequest(done(repo: nil, branch: nil))
+    #expect(request == ["session": "s1", "worktree": false, "branch": false, "remote_branch": false])
+    let plan = BoardModel.deletePlan(done(repo: nil, branch: nil))
+    #expect(plan.worktree == nil)
+  }
+
+  @Test func namesEverythingItDeletesInTheConfirmation() {
+    let text = BoardModel.deletePlan(done()).message
+    #expect(text.contains("the session fix"))
+    #expect(text.contains("/worktrees/posthog/haacked/fix"))
+    #expect(text.contains("local branch haacked/fix"))
+    #expect(text.contains("remote branch haacked/fix"))
+    #expect(text.contains("only if it is still at the merged PR's head"))
+  }
+
+  @Test func saysThatTheBranchStaysWhenThePRIsNotMerged() {
+    let text = BoardModel.deletePlan(done(pr: .closed)).message
+    #expect(!text.contains("the remote branch haacked/fix"))
+    #expect(text.contains("The branch stays"))
+  }
+
+  @Test func namesTheRefusalsInTheConfirmation() {
+    let text = BoardModel.deletePlan(done()).message
+    #expect(text.contains("uncommitted files"))
+    #expect(text.contains("checked out in another worktree"))
+    #expect(text.contains("A refusal before anything stops deletes nothing"))
+  }
+
+  @Test func saysThatTheSessionAndWorktreeGoEvenWhenTheBranchCheckFails() {
+    let text = BoardModel.deletePlan(done()).message
+    #expect(text.contains("fails its check after the worktree is gone"))
+  }
+
+  @Test func ignoresASecondDeleteWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    let session = done()
+    model.deleteDone(session)
+    model.deleteDone(session)
+    #expect(model.deleting == [session.id])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  @Test func labelsTheIconWithWhatItRemoves() {
+    #expect(BoardModel.deletePlan(done()).summary == "the session, its worktree, and its branch")
+    #expect(BoardModel.deletePlan(done(pr: .closed)).summary == "the session and its worktree")
+    #expect(BoardModel.deletePlan(done(repo: nil, branch: nil)).summary == "the session")
   }
 }
 

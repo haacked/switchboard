@@ -21,8 +21,10 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
-  /// The id of the Done session whose delete the sidebar is confirming.
+  /// The id of the Done session whose delete the confirmation dialog in ContentView asks about.
   @Published var confirmingDelete: String?
+  /// The ids of the Done sessions whose delete is running.
+  @Published var deleting: Set<String> = []
   var presentingSheet: Bool { showingNew || showingImport }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.queue
@@ -61,6 +63,10 @@ final class BoardModel: ObservableObject {
   private var drafts: [Int64: CardView.Draft] = [:]
 
   let client = Client()
+  /// Sends one request to sbd. Tests replace it.
+  lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
+    try client.call(op, args, timeout: 300)
+  }
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
@@ -222,9 +228,9 @@ final class BoardModel: ObservableObject {
   func perform(
     _ op: String, _ args: [String: JSON], then: ((JSON) -> Void)? = nil, finally: (() -> Void)? = nil
   ) {
-    let client = client
+    let send = send
     worker.async {
-      let result = Result { try client.call(op, args, timeout: 300) }
+      let result = Result { try send(op, args) }
       Task { @MainActor in
         switch result {
         case .success(let value):
@@ -325,6 +331,75 @@ final class BoardModel: ObservableObject {
     let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }
     perform(followup ? "followup-rm" : "rm", ["session": .string(id)])
+  }
+
+  /// What the Done column's delete icon removes, for the confirmation.
+  struct DeletePlan {
+    var name: String
+    /// The worktree's path, or nil when sbd made no worktree for the session.
+    var worktree: String?
+    /// The local branch, or nil when sbd made no worktree for the session or its PR is not merged.
+    var branch: String?
+
+    /// What the delete icon's label and tooltip say it removes.
+    var summary: String {
+      if branch != nil { return "the session, its worktree, and its branch" }
+      return worktree != nil ? "the session and its worktree" : "the session"
+    }
+
+    var message: String {
+      var parts = ["the session \(name)"]
+      if let worktree { parts.append("its worktree \(worktree) (if it is still there)") }
+      if let branch {
+        parts.append("its local branch \(branch)")
+        parts.append("the remote branch \(branch), only if it is still at the merged PR's head")
+      }
+      var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
+      if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
+      text +=
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
+      return text
+    }
+
+    private static func list(_ parts: [String]) -> String {
+      switch parts.count {
+      case 0, 1: parts.joined()
+      case 2: parts.joined(separator: " and ")
+      default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
+      }
+    }
+  }
+
+  /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
+  nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
+    s.state == .done && s.manager != true && !s.waitsToStart
+  }
+
+  nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {
+    let merged = s.pr?.state == .merged
+    let branch = s.repo != nil && merged ? s.branch : nil
+    return DeletePlan(
+      name: s.name, worktree: s.repo == nil ? nil : s.cwd, branch: branch)
+  }
+
+  /// The request that the icon sends: the same `rm` as the trash dialog, with the worktree, the
+  /// branch, and the remote branch on. The branch is on only for a merged PR, because sbd
+  /// refuses the whole delete for a branch with no merged PR.
+  nonisolated static func deleteRequest(_ s: SessionSummary) -> [String: JSON] {
+    let plan = deletePlan(s)
+    return [
+      "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
+      "remote_branch": .bool(plan.branch != nil),
+    ]
+  }
+
+  /// Deletes a Done session with everything `deletePlan` names. sbd runs the safety checks of `rm`.
+  func deleteDone(_ s: SessionSummary) {
+    guard deleting.insert(s.id).inserted else { return }
+    perform(
+      "rm", Self.deleteRequest(s),
+      then: { _ in if self.selection == s.id { self.selection = nil } },
+      finally: { self.deleting.remove(s.id) })
   }
 
   /// Removes the session and its worktree. sbd refuses, and removes nothing,

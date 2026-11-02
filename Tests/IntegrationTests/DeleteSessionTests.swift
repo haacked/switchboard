@@ -32,6 +32,11 @@ extension Instance {
     try run(["rm", id, "--worktree", "--delete-branch"])
   }
 
+  /// What the Done column's delete icon asks for.
+  func deleteDoneSession(_ id: String) throws -> CommandResult {
+    try run(["rm", id, "--worktree", "--delete-branch", "--delete-remote-branch"])
+  }
+
   /// Restarts sbd with a `git` in front of the real one that runs `afterRemove` (a shell
   /// snippet, with `$REPO` the repo) once `git worktree remove` succeeds.
   func runAfterWorktreeRemoval(_ repo: String, _ afterRemove: String) throws {
@@ -225,6 +230,18 @@ extension Instance {
     #expect(try sbd.git(repo, "branch", "--list", "haacked/feature") != "")
   }
 
+  @Test func refusesTheBranchOfASessionWhoseFolderIsGoneAndWhosePRIsNotMerged() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("no merged PR"))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/feature") != "")
+  }
+
   @Test func refusesToDeleteTheBranchWithoutTheWorktree() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
@@ -275,6 +292,7 @@ extension Instance {
     let r = try sbd.deleteSessionAndBranch(s.id)
     #expect(r.status != 0)
     #expect(r.stderr.contains(error))
+    #expect(!r.stderr.contains(".."))
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
     #expect(try sbd.client.sessions().isEmpty)
   }
@@ -326,5 +344,348 @@ extension Instance {
 
   @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheEvents() throws {
     try refusesWhenTheStoreCannotDelete("events", branch: true)
+  }
+
+  // MARK: The Done column's delete icon
+
+  /// A session like `mergedBranchSession`, whose origin is a bare repo that holds the branch at the
+  /// merged PR's head.
+  private func doneSessionWithRemote(_ github: FakeGitHub) throws -> (Instance, String, SessionSummary, String) {
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    let origin = "\(sbd.home.path)/origin.git"
+    try sbd.git(sbd.home.path, "init", "-q", "--bare", origin)
+    try sbd.git(repo, "config", "url.\(origin).insteadOf", "https://github.com/PostHog/posthog.git")
+    try sbd.git(s.cwd, "push", "-q", "origin", Self.mergedBranch)
+    return (sbd, repo, s, origin)
+  }
+
+  private func removeFolderAndLocalBranch(_ sbd: Instance, _ repo: String, _ s: SessionSummary) throws {
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "worktree", "prune")
+    try sbd.git(repo, "branch", "-D", Self.mergedBranch)
+  }
+
+  private func remoteBranch(_ origin: String) throws -> String {
+    try runCommand("/usr/bin/git", ["-C", origin, "branch", "--list", Self.mergedBranch]).stdout
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  @Test func keepsTheRemoteBranchWhenItsTipIsNotTheMergedPRsHead() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    // Someone pushed another commit to the remote branch after the merge.
+    let other = "\(sbd.home.path)/other"
+    try sbd.git(sbd.home.path, "clone", "-q", origin, other)
+    try sbd.git(other, "checkout", "-q", Self.mergedBranch)
+    try sbd.commit(other, "later.txt")
+    try sbd.git(other, "push", "-q", "origin", Self.mergedBranch)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("kept the remote branch: origin/\(Self.mergedBranch) is at"))
+    #expect(r.stderr.contains("not the merged PR's head"))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func deletesTheRestWhenTheRemoteBranchIsAlreadyGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try sbd.git(origin, "branch", "-D", Self.mergedBranch)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0)
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
+  }
+
+  @Test func refusesTheRemoteBranchWithoutTheLocalBranch() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s, origin) = try doneSessionWithRemote(github)
+    let r = try sbd.run(["rm", s.id, "--worktree", "--delete-remote-branch"])
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("Delete the local branch too"))
+    #expect(try sbd.intact(s))
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func theIconRefusesABranchThatIsOnNoRemoteAndHasNoMergedPR() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.commit(s.cwd, "a.txt")
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not on a pushed branch"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/feature") != "")
+  }
+
+  @Test func theIconKeepsTheBranchAnotherWorktreeChecksOut() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try sbd.runAfterWorktreeRemoval(repo, "git -C \"$REPO\" checkout -q \(Self.mergedBranch)")
+    try sbd.poll(all: true)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("kept \(Self.mergedBranch)"))
+    #expect(r.stderr.contains("checked out"))
+    #expect(r.stderr.contains("also kept the remote branch"))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func refusesASessionWhoseFolderIsGoneAndWhoseDetachedHeadHasUnpushedCommits() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.commit(s.cwd, "lonely.txt")
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("Push them first"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd))
+  }
+
+  @Test func deletesADoneSessionWhoseFolderIsGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd) == false)
+    #expect(try remoteBranch(origin) == "")
+  }
+
+  @Test func deletesADoneSessionWhoseFolderAndItsParentAreGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try FileManager.default.removeItem(atPath: (s.cwd as NSString).deletingLastPathComponent)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd) == false)
+    #expect(try remoteBranch(origin) == "")
+  }
+
+  @Test func keepsTheBranchOfADoneSessionWhoseFolderIsGoneAndWhoseBranchMovedOffThePRsHead() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try sbd.commit(s.cwd, "b.txt")
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not in its merged PR"))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func keepsTheRecordsOfOtherWorktreesWhoseFoldersAreGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, _) = try doneSessionWithRemote(github)
+    let other = "\(sbd.home.path)/other-worktree"
+    try sbd.git(repo, "worktree", "add", "-q", "-b", "other-branch", other)
+    try FileManager.default.removeItem(atPath: other)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains("other-worktree"))
+  }
+
+  @Test func deletesTheRemoteBranchOfTheRemoteTheBranchTracks() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    let fork = "\(sbd.home.path)/fork.git"
+    try sbd.git(sbd.home.path, "init", "-q", "--bare", fork)
+    try sbd.git(repo, "remote", "add", "fork", fork)
+    try sbd.git(repo, "config", "url.\(fork).insteadOf", "fork:")
+    try sbd.git(s.cwd, "push", "-q", "-u", "fork", Self.mergedBranch)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try remoteBranch(fork) == "")
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func refusesAGoneWorktreeWhoseBranchRefWasDeletedWhileItsCommitsAreOnNoRemote() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.commit(s.cwd, "only-in-the-reflog.txt")
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "update-ref", "-d", "refs/heads/haacked/feature")
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("can't be checked"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd))
+  }
+
+  @Test func deletesADoneSessionWhoseFolderAndBranchAreBothGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try removeFolderAndLocalBranch(sbd, repo, s)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try remoteBranch(origin) == "")
+  }
+
+  @Test func keepsTheRemoteBranchOfAnOpenPRWhenTheFolderAndBranchAreGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    github.change(122953) { $0["state"] = "OPEN" }
+    try sbd.poll(all: true)
+    try removeFolderAndLocalBranch(sbd, repo, s)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func refusesABranchWhoseTipIsBehindTheMergedPRsHead() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    try sbd.commit(s.cwd, "b.txt")
+    let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    try sbd.git(s.cwd, "reset", "-q", "--hard", "HEAD~1")
+    github.change(122953) { $0["headRefOid"] = .string(head) }
+    try sbd.poll(all: true)
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not in its merged PR"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+  }
+
+  @Test func refusesALockedWorktreeWhoseFolderIsGoneBeforeStoppingAnything() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, _) = try doneSessionWithRemote(github)
+    try sbd.git(repo, "worktree", "lock", s.cwd)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("is a locked worktree"))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+  }
+
+  @Test func refusesABranchCheckedOutElsewhereWhoseFolderIsGoneBeforeStoppingAnything() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, _) = try doneSessionWithRemote(github)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "worktree", "add", "-q", "-f", "\(sbd.home.path)/elsewhere", Self.mergedBranch)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("checked out"))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
+  }
+
+  // MARK: Every refusal of the Done delete leaves everything in place
+
+  /// What the delete would remove: the record, the running claude, the worktree and its files, and both branches.
+  private struct Placed: Equatable {
+    var sessions: [String]
+    var live: Bool?
+    var worktreeFiles: [String]
+    var localBranch: String
+    var remoteBranch: String
+  }
+
+  private func placed(_ sbd: Instance, _ repo: String, _ s: SessionSummary, _ origin: String) throws -> Placed {
+    Placed(
+      sessions: try sbd.client.sessions().map(\.id),
+      live: try? sbd.get(s.id).live,
+      worktreeFiles: ((try? FileManager.default.contentsOfDirectory(atPath: s.cwd)) ?? []).sorted(),
+      localBranch: try sbd.git(repo, "branch", "--list", "-v", Self.mergedBranch),
+      remoteBranch: try remoteBranch(origin))
+  }
+
+  /// Deletes a Done session after `breakIt` makes one safety check fail, and expects the refusal to
+  /// name `error` and to change nothing.
+  private func refusesAndChangesNothing(
+    _ error: String, _ breakIt: (Instance, String, SessionSummary, String) throws -> Void
+  )
+    throws
+  {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try breakIt(sbd, repo, s, origin)
+    let before = try placed(sbd, repo, s, origin)
+    #expect(before.sessions.contains(s.id))
+    #expect(before.live == true)
+    #expect(before.localBranch != "")
+    #expect(before.remoteBranch != "")
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(error), Comment(rawValue: r.stderr))
+    #expect(try placed(sbd, repo, s, origin) == before)
+  }
+
+  @Test func deletesADoneSessionWhoseWorktreeAndBranchesExist() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    let before = try placed(sbd, repo, s, origin)
+    #expect(before.sessions == [s.id])
+    #expect(!before.worktreeFiles.isEmpty)
+    #expect(before.localBranch != "")
+    #expect(before.remoteBranch != "")
+    #expect(try sbd.deleteDoneSession(s.id).status == 0)
+    let after = try placed(sbd, repo, s, origin)
+    #expect(after.sessions.isEmpty)
+    #expect(after.worktreeFiles.isEmpty)
+    #expect(after.localBranch == "")
+    #expect(after.remoteBranch == "")
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeHasUncommittedFiles() throws {
+    try refusesAndChangesNothing("uncommitted files") { _, _, s, _ in
+      try "x".write(toFile: "\(s.cwd)/dirty.txt", atomically: true, encoding: .utf8)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheBranchHasACommitAfterTheMerge() throws {
+    try refusesAndChangesNothing("not in its merged PR") { sbd, _, s, _ in
+      try sbd.commit(s.cwd, "later.txt")
+      try sbd.git(s.cwd, "push", "-q", "origin", Self.mergedBranch)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeHasACommitOnNoBranch() throws {
+    try refusesAndChangesNothing("not on a pushed branch") { sbd, _, s, _ in
+      try sbd.git(s.cwd, "checkout", "-q", "--detach")
+      try sbd.commit(s.cwd, "detached.txt")
+    }
+  }
+
+  @Test func leavesEverythingWhenTheGoneWorktreeHasACommitOnNoBranch() throws {
+    try refusesAndChangesNothing("Push them first") { sbd, _, s, _ in
+      try sbd.git(s.cwd, "checkout", "-q", "--detach")
+      try sbd.commit(s.cwd, "detached.txt")
+      try FileManager.default.removeItem(atPath: s.cwd)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeIsLocked() throws {
+    try refusesAndChangesNothing("is a locked worktree") { sbd, repo, s, _ in
+      try sbd.git(repo, "worktree", "lock", "--reason", "Supacode", s.cwd)
+    }
+  }
+
+  @Test func leavesEverythingWhenAnotherSessionRunsInTheWorktree() throws {
+    try refusesAndChangesNothing("also runs in") { sbd, repo, s, _ in
+      _ = try sbd.worktreeSession(repo, branch: Self.mergedBranch)
+    }
+  }
+
+  @Test func leavesEverythingWhenTheWorktreeIsDetachedFromTheBranch() throws {
+    try refusesAndChangesNothing("checked out") { sbd, _, s, _ in
+      try sbd.git(s.cwd, "checkout", "-q", "--detach", "HEAD~1")
+    }
   }
 }

@@ -59,6 +59,12 @@ struct ContentView: View {
       set: { if let view = $0 { model.show(view) } })
   }
 
+  private var confirmingDeleteSession: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
+
+  private var isConfirmingDelete: Binding<Bool> {
+    Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
+  }
+
   var body: some View {
     NavigationSplitView {
       Sidebar()
@@ -135,6 +141,14 @@ struct ContentView: View {
         .help("Start a session (⌘N)")
       }
     }
+    .confirmationDialog(
+      "Delete \(confirmingDeleteSession?.name ?? "this session")?", isPresented: isConfirmingDelete,
+      presenting: confirmingDeleteSession
+    ) { session in
+      Button("Delete", role: .destructive) { model.deleteDone(session) }
+    } message: { session in
+      Text(BoardModel.deletePlan(session).message)
+    }
     .sheet(isPresented: $model.showingNew) {
       NewSessionView().environmentObject(model)
     }
@@ -153,12 +167,18 @@ struct Sidebar: View {
         let state = group.state
         Section(isExpanded: expanded(state)) {
           ForEach(group.rows) { row in
-            SessionRow(session: row.session).padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
-              .contextMenu {
-                if state == .done {
-                  Button("Delete Session and Worktree…", role: .destructive) { model.confirmingDelete = row.id }
+            HStack(spacing: 4) {
+              SessionRow(session: row.session)
+              if BoardModel.canDelete(row.session) { DeleteButton(session: row.session) }
+            }
+            .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
+            .contextMenu {
+              if BoardModel.canDelete(row.session) {
+                Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
+                  model.confirmingDelete = row.id
                 }
               }
+            }
           }
         } header: {
           HStack {
@@ -168,15 +188,6 @@ struct Sidebar: View {
           }
         }
       }
-    }
-    .confirmationDialog(
-      "Delete \(deleting?.name ?? "this session")?", isPresented: isConfirmingDelete, presenting: deleting
-    ) { session in
-      Button("Delete Session and Worktree", role: .destructive) { model.delete(session.id) }
-    } message: { session in
-      Text(
-        "This stops claude, closes both terminals, and deletes the session, its events, and its worktree \(session.cwd). The branch and the conversation's transcript stay."
-      )
     }
     .confirmationDialog(
       "Switch to \(model.switchingAccount?.name ?? "this account")?", isPresented: isSwitchingAccount,
@@ -215,16 +226,30 @@ struct Sidebar: View {
     return lines.joined(separator: "\n\n")
   }
 
-  private var deleting: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
-
-  private var isConfirmingDelete: Binding<Bool> {
-    Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
-  }
-
   private func expanded(_ state: AttentionState) -> Binding<Bool> {
     Binding(
       get: { !model.collapsed.contains(state) },
       set: { if $0 { model.collapsed.remove(state) } else { model.collapsed.insert(state) } })
+  }
+}
+
+/// Asks to delete a Done session with its worktree and branch. The dialog is on ContentView.
+struct DeleteButton: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+
+  var body: some View {
+    let summary = BoardModel.deletePlan(session).summary
+    Button {
+      model.confirmingDelete = session.id
+    } label: {
+      Image(systemName: "trash")
+    }
+    .buttonStyle(.borderless)
+    .foregroundStyle(.secondary)
+    .disabled(model.deleting.contains(session.id))
+    .accessibilityLabel("Delete \(session.name): \(summary)")
+    .help("Delete \(summary)…")
   }
 }
 
@@ -327,30 +352,33 @@ struct BoardView: View {
               ScrollView {
                 LazyVStack(spacing: 8) {
                   ForEach(model.board.filter { $0.state == state }) { s in
-                    Button {
-                      model.openFromBoard(s.id)
-                    } label: {
-                      VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                          Text(s.name).fontWeight(.medium).lineLimit(1)
-                          Spacer()
-                          if let pr = s.pr {
-                            Text(verbatim: "#\(pr.number)")
-                              .font(.caption.bold())
-                              .foregroundStyle(pr.status.color)
-                              .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                    ZStack(alignment: .bottomTrailing) {
+                      Button {
+                        model.openFromBoard(s.id)
+                      } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                          HStack {
+                            Text(s.name).fontWeight(.medium).lineLimit(1)
+                            Spacer()
+                            if let pr = s.pr {
+                              Text(verbatim: "#\(pr.number)")
+                                .font(.caption.bold())
+                                .foregroundStyle(pr.status.color)
+                                .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                            }
                           }
+                          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                          Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
+                            .font(.caption2).foregroundStyle(.tertiary)
                         }
-                        Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                        Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
-                          .font(.caption2).foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(state.color.opacity(0.08)))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(state.color.opacity(0.3)))
                       }
-                      .frame(maxWidth: .infinity, alignment: .leading)
-                      .padding(10)
-                      .background(RoundedRectangle(cornerRadius: 8).fill(state.color.opacity(0.08)))
-                      .overlay(RoundedRectangle(cornerRadius: 8).stroke(state.color.opacity(0.3)))
+                      .buttonStyle(.plain)
+                      if BoardModel.canDelete(s) { DeleteButton(session: s).padding(6) }
                     }
-                    .buttonStyle(.plain)
                   }
                 }
               }
