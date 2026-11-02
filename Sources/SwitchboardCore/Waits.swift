@@ -220,14 +220,17 @@ public struct Wait: Codable, Equatable, Sendable {
   ///   state.
   /// - `merge`: the PR merged or closed.
   /// - `queue`: the PR merged or closed, or the trunk-io comments show that
-  ///   Trunk merged it or removed it from the queue. A PR that Trunk has not
-  ///   queued yet keeps the wait open.
+  ///   Trunk merged it or removed it from the queue after the wait was set. A PR
+  ///   that Trunk has not queued yet keeps the wait open.
   public func resolution(of pr: SwitchboardCore.PullRequest) -> String? {
     let ended: String? =
-      switch pr.state {
-      case .open: nil
-      case .merged: kind == .merge ? "it merged" : kind == .queue ? "Trunk merged it" : "the PR merged first"
-      case .closed: kind == .merge || kind == .queue ? "it closed without merging" : "the PR closed first"
+      switch (pr.state, kind) {
+      case (.open, _): nil
+      case (.merged, .merge): "it merged"
+      case (.merged, .queue): "Trunk merged it"
+      case (.merged, _): "the PR merged first"
+      case (.closed, .merge), (.closed, .queue): "it closed without merging"
+      case (.closed, _): "the PR closed first"
       }
     switch kind {
     case .merge:
@@ -254,6 +257,8 @@ public struct Wait: Codable, Equatable, Sendable {
       return pr.approvers.isEmpty ? "the PR is approved" : "approved by " + pr.approvers.joined(separator: ", ")
     case .queue:
       if ended != nil { return ended }
+      // A status from before the wait can describe an earlier run of the PR.
+      guard let at = pr.queueAt, at > created else { return nil }
       switch pr.queue {
       case .removed?: return "Trunk removed it from the queue"
       case .merged?: return "Trunk merged it"

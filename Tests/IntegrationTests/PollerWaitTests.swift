@@ -31,6 +31,9 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
 @Suite(.timeLimit(.minutes(2))) struct PollerWaitTests {
   static let charts = "PostHog/charts"
   static let branch = "haacked/cdp-dlq-runbook-lookup-step"
+  static let posthog = "PostHog/posthog"
+  /// The branch of PostHog/posthog#122953, which has Trunk's status comment.
+  static let posthogBranch = "haacked/cdp-dlq-breaker-counts-lookups"
 
   /// A session on the branch of PostHog/charts#18303, whose PR the poller has read.
   func chartsSession(_ sbd: Instance) throws -> SessionSummary {
@@ -173,7 +176,7 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
   @Test func anApprovalWaitResolvesOnceTheApproverApproves() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
     try sbd.sb("wait", s.id, "--kind", "approval", "--who", "alex")
     try sbd.poll()
     #expect(try sbd.get(s.id).waits.count == 1)
@@ -200,7 +203,7 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
   @Test func aWaitOnAnotherPRInTheSessionsRepoPollsThatPR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "#122179")
     let result = try sbd.poll()
     #expect(result["resolved"]?.int == 1)
@@ -229,9 +232,6 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
     #expect(try sbd.get(s.id).waits.count == 1)
   }
 
-  static let posthog = "PostHog/posthog"
-  static let queued = "haacked/cdp-dlq-breaker-counts-lookups"
-
   /// The id of Trunk's first status comment on #122953.
   func trunkComment(_ github: FakeGitHub) throws -> String {
     let nodes = github.pr(122953)["firstComments"]?["nodes"]?.array ?? []
@@ -241,24 +241,44 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
   @Test func aQueueWaitResumesTheSessionWhenTrunkRemovesThePR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.queued)
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
     let comment = try trunkComment(github)
     try sbd.poll()
-    github.edit(comment: comment, body: "Testing in the queue", at: "2026-10-26T00:00:00Z")
+    github.edit(comment: comment, body: "Testing in the queue", at: stamp(-3600))
     try sbd.sb("wait", s.id, "--kind", "queue", "--note", "then deploy")
     #expect(try sbd.poll()["resolved"]?.int == 0)
     #expect(try sbd.get(s.id).waits.count == 1)
-    github.edit(comment: comment, body: "Removed from the merge queue", at: "2026-10-26T01:00:00Z")
+    github.edit(comment: comment, body: "Removed from the merge queue", at: stamp(3600))
     try sbd.advanceClock(30_000)
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(
       sbd, s, with: "the merge queue for the session's PR: Trunk removed it from the queue. Your note: then deploy.")
   }
 
+  @Test func aQueueWaitIgnoresARemovalFromBeforeItWasSet() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
+    let comment = try trunkComment(github)
+    github.edit(comment: comment, body: "Removed from the merge queue", at: stamp(-3600))
+    try sbd.poll()
+    try sbd.sb("wait", s.id, "--kind", "queue")
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.get(s.id).pr?.queue == .removed)
+    #expect(try sbd.get(s.id).waits.count == 1)
+    github.edit(comment: comment, body: "Testing in the queue", at: stamp(60))
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    github.edit(comment: comment, body: "Removed from the merge queue", at: stamp(3600))
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
   @Test func aQueueWaitResumesTheSessionWhenThePRMerges() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.queued)
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
     try sbd.poll()
     try sbd.sb("wait", s.id, "--kind", "queue")
     #expect(try sbd.poll()["resolved"]?.int == 0)
@@ -274,7 +294,7 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
   @Test func aDeployWaitWaitsForItsOwnPoller() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.queued)
+    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
     try sbd.sb("wait", s.id, "--kind", "deploy", "--target", "#122179")
     #expect(try sbd.poll()["resolved"]?.int == 0)
     #expect(try sbd.get(s.id).waits.count == 1)
