@@ -149,44 +149,58 @@ extension Service {
     if let conflict = transcriptConflict(source, dest) { throw APIError(conflict) }
     if !fm.fileExists(atPath: dest) || !fm.contentsEqual(atPath: source, andPath: dest) {
       try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-      let partial = "\(dest).moving"
-      try? fm.removeItem(atPath: partial)
-      do {
-        try fm.copyItem(atPath: source, toPath: partial)
-        guard fm.contentsEqual(atPath: source, andPath: partial) else {
-          throw APIError("the copy differs from \(source)")
-        }
-        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
-        if fm.fileExists(atPath: dest) {
-          _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
-        } else {
-          try fm.moveItem(atPath: partial, toPath: dest)
-        }
-      } catch {
-        try? fm.removeItem(atPath: partial)
-        throw error
-      }
+      try replaceFile(dest, with: source)
     }
     let sourceDir = (source as NSString).deletingPathExtension
     try copyMissing(sourceDir, to: (dest as NSString).deletingPathExtension)
     try copyMissing("\(from)/file-history/\(id)", to: "\(target)/file-history/\(id)")
   }
 
-  /// Copies each file under `source` that `dest` lacks. Nothing happens when
-  /// `source` does not exist.
+  /// Copies each file under `source` that `dest` lacks. A file at `dest` that
+  /// is the first bytes of the one at `source`, left by an earlier move, is
+  /// replaced. Any other file at `dest` stays. Nothing happens when `source`
+  /// does not exist.
   private func copyMissing(_ source: String, to dest: String) throws {
     let fm = FileManager.default
     var isDir: ObjCBool = false
     guard fm.fileExists(atPath: source, isDirectory: &isDir) else { return }
     guard !fm.fileExists(atPath: dest) else {
-      guard isDir.boolValue else { return }
-      for name in try fm.contentsOfDirectory(atPath: source) {
-        try copyMissing("\(source)/\(name)", to: "\(dest)/\(name)")
+      if isDir.boolValue {
+        for name in try fm.contentsOfDirectory(atPath: source) {
+          try copyMissing("\(source)/\(name)", to: "\(dest)/\(name)")
+        }
+      } else if !fm.contentsEqual(atPath: source, andPath: dest), startsWith(source, dest) {
+        try replaceFile(dest, with: source)
       }
       return
     }
     try fm.createDirectory(atPath: (dest as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
     try fm.copyItem(atPath: source, toPath: dest)
+  }
+
+  /// Copies `source` to `dest` through `<dest>.moving`, so `dest` never holds part of a copy. The copy is
+  /// checked against `source` and readable only by its owner.
+  private func replaceFile(_ dest: String, with source: String) throws {
+    let fm = FileManager.default
+    let partial = "\(dest).moving"
+    try? fm.removeItem(atPath: partial)
+    do {
+      try fm.copyItem(atPath: source, toPath: partial)
+      guard fm.contentsEqual(atPath: source, andPath: partial) else {
+        throw APIError("the copy differs from \(source)")
+      }
+      try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
+      if fm.fileExists(atPath: dest) {
+        _ = try fm.replaceItemAt(
+          URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial),
+          backupItemName: nil, options: .usingNewMetadataOnly)
+      } else {
+        try fm.moveItem(atPath: partial, toPath: dest)
+      }
+    } catch {
+      try? fm.removeItem(atPath: partial)
+      throw error
+    }
   }
 
   /// Whether the file at `prefix` is the first bytes of the file at `path`.

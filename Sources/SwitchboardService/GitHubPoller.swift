@@ -275,13 +275,14 @@ final class GitHubPoller {
 
   /// Looks up the node ids of the branches with no known PR, and of new
   /// pr-link lines. A branch with no PR is looked up again after the idle
-  /// interval, and so is a branch whose PR closed unmerged.
+  /// interval, and so is a branch whose PR closed or merged, because the
+  /// branch may have a new PR.
   private func lookUp(all: Bool, now: Int64, interest: Interest, stats: inout Stats) throws {
     var keys: Set<PRKey> = []
     for t in tracked.values {
       if let key = t.branch.key {
-        let closed = t.branch.prId.flatMap { prs[$0]?.pr.state } == .closed
-        if (t.branch.prId == nil || closed)
+        let ended = t.branch.prId.flatMap { prs[$0]?.pr.state }.map { $0 != .open } ?? false
+        if (t.branch.prId == nil || ended)
           && (all || GitHub.elapsed(since: t.branch.lookedUp, settings.idleMs, now: now))
         {
           keys.insert(key)
