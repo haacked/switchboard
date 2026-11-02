@@ -27,8 +27,8 @@ extension Service {
   /// that another request imported meanwhile. `stop` lists the refs whose
   /// claude may exit. A listed session that waits idle at its prompt in
   /// another terminal gets SIGTERM, and imports once its claude has exited. A
-  /// busy or waiting session, a background job, and a session whose pid another
-  /// listed session that is not stoppable shares stay refused.
+  /// busy or waiting session and a background job stay refused. So does a
+  /// session whose claude also runs a listed session that import can't exit.
   func importSessions(_ args: JSON) throws -> ImportResult {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
@@ -49,9 +49,11 @@ extension Service {
       }
     }
     // Only a stoppable session can still run here. Its claude exits off the state queue.
-    let exits = concurrentMap(chosen.map(\.session)) { $0.running ? exitClaude(of: $0) : nil }
-    refused += zip(chosen, exits).compactMap { item, why in why.map { Refusal(ref: item.ref, reason: $0) } }
-    chosen = zip(chosen, exits).filter { $0.1 == nil }.map(\.0)
+    let outcomes = concurrentMap(chosen) { ($0, $0.session.running ? exitClaude(of: $0.session) : nil) }
+    chosen = []
+    for (item, why) in outcomes {
+      if let why { refused.append(Refusal(ref: item.ref, reason: why)) } else { chosen.append(item) }
+    }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
       Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
@@ -171,7 +173,7 @@ extension Service {
   /// sbd nor the claude of a Switchboard session, and that has no background
   /// task. `claude agents` can list a pid that another process has reused.
   private func exitClaude(of s: ClaudeSession) -> String? {
-    let label = s.name ?? s.idPrefix
+    let label = s.label
     let pids = s.livePids
     if let bad = pids.first(where: { $0 <= 1 || $0 == Int(getpid()) || $0 > Int(Int32.max) }) {
       return refuseToSignal(s, bad)
@@ -204,7 +206,7 @@ extension Service {
   }
 
   private func refuseToSignal(_ s: ClaudeSession, _ pid: Int) -> String {
-    "\(s.name ?? s.idPrefix)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
+    "\(s.label)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
   }
 
   /// The candidate that the ref names, or why it can't be imported. With
@@ -221,14 +223,14 @@ extension Service {
     }
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
-    let label = c.name ?? c.idPrefix
+    let label = c.label
     if c.stoppable,
       let other = candidates.first(where: {
         $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
       })
     {
       let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
-      let otherLabel = other.name ?? other.idPrefix
+      let otherLabel = other.label
       return .failure(
         APIError(
           "\(label) shares its claude (pid \(pid)) with \(otherLabel), which import can't exit. Exit claude there, then import it."

@@ -84,8 +84,8 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var branch: String?
   /// True when the folder is a linked worktree of its repo.
   public var worktree: Bool
-  /// The pids of the other claudes that run the session, which accounts other
-  /// than this row's list. Nil when this row's claude is the only one.
+  /// The pids of the claudes that other accounts list for the session. Nil
+  /// when no other account lists one.
   public var otherPids: [Int]?
 
   public init(
@@ -130,6 +130,9 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
 
   /// The id's first 8 characters, which tell apart two sessions with one title.
   public var idPrefix: String { String(id.prefix(8)) }
+
+  /// Claude's name for the session, else its id's first 8 characters.
+  public var label: String { name ?? idPrefix }
 
   /// Whether a claude runs the session, and where, in a few words.
   public var summary: String {

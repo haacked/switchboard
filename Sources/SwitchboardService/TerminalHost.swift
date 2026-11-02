@@ -113,8 +113,7 @@ final class TerminalHost {
 
   /// Every pane on the server, keyed by its tmux session name.
   func panes() -> [String: PaneRow] {
-    guard let out = try? run(["list-panes", "-a", "-F", TerminalHost.paneFormat]) else { return [:] }
-    return PaneRow.parse(out)
+    (try? checkedPanes()) ?? [:]
   }
 
   /// Every pane on the server. A missing server has no panes. It throws when
