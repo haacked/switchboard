@@ -12,6 +12,8 @@ public struct Home: Sendable {
   }
 
   public var socket: String { "\(path)/sbd.sock" }
+  /// The file that the running sbd holds an exclusive lock on.
+  public var lock: String { "\(path)/sbd.lock" }
   public var database: String { "\(path)/sb.db" }
   public var tmuxSocket: String { "\(path)/tmux.sock" }
   public var tmuxConfig: String { "\(path)/tmux.conf" }

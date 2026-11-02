@@ -25,8 +25,13 @@ while let arg = args.popFirst() {
 
 let home = Home(path: homePath)
 do { try home.create() } catch { fail("can't create \(home.path): \(error)") }
-if (try? Client(home: home).call("ping", timeout: 2)) != nil {
-  fail("another sbd already serves \(home.socket)")
+// The lock lives as long as this process. O_CLOEXEC keeps the terminals that
+// sbd starts from inheriting it, which would hold the lock after sbd exits.
+let lockFile = open(home.lock, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+if lockFile < 0 { fail("can't open \(home.lock): \(UnixSocket.errnoText())") }
+if flock(lockFile, LOCK_EX | LOCK_NB) != 0 {
+  if errno == EWOULDBLOCK { fail("another sbd already serves \(home.socket)") }
+  fail("can't lock \(home.lock): \(UnixSocket.errnoText())")
 }
 
 let service: Service
