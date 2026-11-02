@@ -112,12 +112,15 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// The pid of every claude that runs the session.
   public var livePids: [Int] { (pid.map { [$0] } ?? []) + (otherPids ?? []) }
 
+  /// True when the rows of two accounts list the session with different pids.
+  public var runsInSeveralClaudes: Bool { otherPids != nil }
+
   /// True when one interactive claude runs the session and waits at its
   /// prompt. Exiting that claude loses no turn, unless one starts after the
   /// listing that read this status. A session that several claudes run is not
   /// stoppable, because import would have to exit each of them, and one can
   /// outlast the signal.
-  public var stoppable: Bool { pid != nil && job == nil && status == "idle" && otherPids == nil }
+  public var stoppable: Bool { pid != nil && job == nil && status == "idle" && !runsInSeveralClaudes }
 
   /// Which of two rows for one session to keep: 2 for a claude that runs and
   /// can't be stopped, 1 for one that can be, 0 when none runs.
@@ -143,7 +146,7 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var summary: String {
     switch (running, job) {
     case (true, let job?): "background job \(job), \(status ?? "running")"
-    case (true, nil): otherPids != nil ? "in several claudes" : "\(status ?? "running") in another terminal"
+    case (true, nil): runsInSeveralClaudes ? "in several claudes" : "\(status ?? "running") in another terminal"
     case (false, let job?): "background job \(job), stopped"
     case (false, nil): "exited"
     }
@@ -155,7 +158,7 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public func whereItRuns(_ label: String) -> String? {
     guard let pid else { return nil }
     guard let job else {
-      if otherPids != nil {
+      if runsInSeveralClaudes {
         let pids = livePids.map(String.init).joined(separator: ", ")
         return "\(label) runs in several claudes, in \(cwd) (pids \(pids)). Exit claude in each, then import it."
       }

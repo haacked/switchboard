@@ -295,12 +295,11 @@ extension Service {
     let label = c.label
     // Exiting a claude ends every session that runs in it, so a session that
     // shares its claude with one that import can't exit is refused.
-    let busy =
-      c.stoppable
-      ? candidates.lazy.filter { $0.id != c.id && !$0.stoppable }.compactMap { o in
+    if c.stoppable,
+      let (other, pid) = candidates.lazy.filter({ !$0.stoppable }).compactMap({ o in
         c.sharedPid(with: o).map { (o, $0) }
-      }.first : nil
-    if let (other, pid) = busy {
+      }).first
+    {
       return .failure(
         APIError(
           "\(label) shares its claude (pid \(pid)) with \(other.label), which import can't exit. Exit claude there, then import it."
