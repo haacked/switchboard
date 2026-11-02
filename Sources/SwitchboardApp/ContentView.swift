@@ -16,11 +16,12 @@ extension AttentionState {
 }
 
 extension PRStatus {
+  /// Review states are blue, not orange, because orange is the Needs you color on the Board.
   var color: Color {
     switch self {
     case .approved: .green
     case .changesRequested: .red
-    case .reviewRequired, .notApproved: .orange
+    case .reviewRequired, .notApproved: .blue
     case .merged: .purple
     case .draft, .closed: .gray
     }
@@ -258,17 +259,6 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
-  }
-}
-
-extension PRStatus {
-  var color: Color {
-    switch self {
-    case .draft, .closed: .gray
-    case .merged: .purple
-    case .approved: .green
-    case .changesRequested, .reviewRequired, .notApproved: .blue
-    }
   }
 }
 
