@@ -17,7 +17,7 @@ public enum TerminalBackend: String, Sendable {
   }
 
   private static let missingGhostty =
-    "This build has no libghostty. Run bin/build-ghostty, then SB_GHOSTTY=1 swift build. Using swiftterm."
+    "This build has no libghostty. Run bin/build-ghostty, then bin/install or SB_GHOSTTY=1 swift build. Using swiftterm."
 
   /// libghostty unless `SB_TERMINAL=swiftterm` asks for SwiftTerm or this build lacks libghostty.
   public static func choose(environment: [String: String], ghosttyAvailable: Bool) -> Choice {

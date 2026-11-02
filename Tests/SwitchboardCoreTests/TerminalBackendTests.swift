@@ -16,7 +16,7 @@ import Testing
     #expect(choice.note?.contains("bin/build-ghostty") == true)
   }
 
-  @Test func ghosttyNeedsTheRequestAndTheLibrary() {
+  @Test func anExplicitGhosttyRequestStillNeedsTheLibrary() {
     let env = ["SB_TERMINAL": "ghostty"]
     #expect(TerminalBackend.choose(environment: env, ghosttyAvailable: true).backend == .ghostty)
     let missing = TerminalBackend.choose(environment: env, ghosttyAvailable: false)
