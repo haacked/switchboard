@@ -3,9 +3,9 @@
 # that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
 # app's terminal, as `sb screen` shows them. It opens the app's window, so it
 # needs a logged-in macOS session with a display, and bin/test never runs it.
-# It then quits the app and starts it again, and kills it and starts it again,
-# and checks through sb and tmux that the session, its claude pane, and its
-# shell pane are the same processes with the same screens.
+# It then quits the app, and separately kills it, and starts it again each
+# time. It checks through sb and tmux that the session and both its panes are
+# the same processes with the same screens.
 # It checks SwiftTerm, and also Ghostty when SB_GHOSTTY=1 is set and
 # bin/build-ghostty has built libghostty. The script ends the app, sbd, the
 # tmux server, the stand-in, and its folder in /tmp when it exits, whether or
@@ -204,13 +204,11 @@ for b in "${backends[@]}"; do
   check_backend "$b"
 done
 
-# The app owns no session. Quitting it, or killing it, must leave every
-# session and both its panes running, and a new app must attach to them again.
 # The stand-in's screen keeps every byte it received, so a restarted stand-in
 # would lose them. The shell's pid shows whether its process is the same one.
 check_relaunch() {
   backend=relaunch
-  local shots="$home/shots/relaunch" tmux_socket="$home/tmux.sock" before after how
+  local shots="$home/shots/relaunch" tmux_socket="$home/tmux.sock" before how
   mkdir "$shots"
   new_session relaunch
   local shell_target="=$session-shell:" claude_target="=$session-claude:"
@@ -238,6 +236,13 @@ check_relaunch() {
     }
   }
 
+  unchanged() {
+    local after
+    after=$(fingerprint)
+    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed $1"; }
+  }
+  sb_rx_has() { sb screen "$session" | grep -q "^rx.* $1"; }
+
   echo "Checking that sessions survive the app (relaunch)…"
   start_app
   tmux -S "$tmux_socket" send-keys -t "$claude_target" abc
@@ -256,11 +261,9 @@ check_relaunch() {
     wait "$app_pid" 2>/dev/null || true
     app_pid=''
     sb ls --json | jq -e --arg id "$session" 'any(.[]; .id == $id)' >/dev/null || fail "the session is gone after the app ended ($how)"
-    after=$(fingerprint)
-    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed while the app was gone ($how)"; }
+    unchanged "while the app was gone ($how)"
     start_app
-    after=$(fingerprint)
-    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed after the app came back ($how)"; }
+    unchanged "after the app came back ($how)"
     [ "$(shell_pid "again-$how")" = "$shell_before" ] || fail "the shell is a new process after $how"
   done
   kill -KILL "$app_pid" 2>/dev/null || true
@@ -269,5 +272,4 @@ check_relaunch() {
   echo "ok: relaunch (quit and kill)"
 }
 
-sb_rx_has() { sb screen "$session" | grep -q "^rx.* $1"; }
 check_relaunch
