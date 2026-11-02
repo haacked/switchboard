@@ -90,9 +90,6 @@ final class FakeGitHub {
     return JSON.parse(text)?["data"]?["nodes"]?.array ?? []
   }
 
-  /// The first recorded PR node.
-  static func recordedPR() -> JSON { (try? recorded("github-status.json").first) ?? .null }
-
   /// The recorded PR with this number.
   func pr(_ number: Int) -> [String: JSON] {
     lock.withLock { prs.values.first { $0["number"]?.int == number }! }
@@ -209,17 +206,16 @@ final class FakeGitHub {
             return found
           })
       }
-      if query.contains("... on PullRequest") {
-        let selection = Selection(query: query, on: "PullRequest")!
+      if let selection = Selection(query: query, on: "PullRequest") {
         let prQuery: PRQuery = query.contains("reviews(") ? .status : .base
         kind = prQuery.rawValue
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
         let failing = failingPRs[prQuery, default: []]
         data["nodes"] = nodes({ prs[$0].map { selection.project(.object($0)) } }, failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
-      } else if query.contains("... on IssueComment") {
+      } else if let selection = Selection(query: query, on: "IssueComment") {
         kind = "bodies"
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
-        data["nodes"] = nodes({ bodies[$0] }, failing: failingComments.contains)
+        data["nodes"] = nodes({ bodies[$0].map(selection.project) }, failing: failingComments.contains)
       } else {
         kind = "lookup"
         var i = 0

@@ -2,7 +2,11 @@ import SwitchboardCore
 import Testing
 
 @Suite struct SelectionProjection {
-  let node = FakeGitHub.recordedPR()
+  let node: JSON
+
+  init() throws {
+    node = try #require(FakeGitHub.recorded("github-status.json").first)
+  }
 
   @Test func statusQueryDropsTheBaseFields() throws {
     let selection = try #require(Selection(query: GitHub.statusQuery, on: "PullRequest"))
@@ -11,6 +15,15 @@ import Testing
     #expect(projected["number"] != nil)
     #expect(projected["firstComments"]?["nodes"]?.array?.first?["id"] != nil)
     #expect(projected["reviews"]?["nodes"]?.array?.first?["author"]?["login"] != nil)
+  }
+
+  @Test func statusQueryKeepsEverythingButTheBaseRef() throws {
+    let selection = try #require(Selection(query: GitHub.statusQuery, on: "PullRequest"))
+    for recorded in try FakeGitHub.recorded("github-status.json") {
+      var expected = try #require(recorded.object)
+      expected["baseRef"] = nil
+      #expect(selection.project(recorded) == .object(expected))
+    }
   }
 
   @Test func baseQueryKeepsOnlyTheBaseFields() throws {
