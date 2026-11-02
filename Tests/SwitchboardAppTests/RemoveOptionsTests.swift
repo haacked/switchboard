@@ -17,7 +17,7 @@ import Testing
   }
 
   @Test func checksBothWhenTheFolderExistsAndThePRIsMerged() {
-    let o = RemoveOptions(session(pr: .merged), folderExists: { _ in true })
+    let o = RemoveOptions(session(pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in true })
     #expect(o.worktree && o.worktreeEnabled)
     #expect(o.branch && o.branchEnabled)
     #expect(o.worktreeNote == nil && o.branchNote == nil)
@@ -25,14 +25,14 @@ import Testing
 
   @Test(arguments: [PRState?.none, .open, .closed])
   func keepsTheBranchUncheckedAndDisabledWithoutAMergedPR(_ pr: PRState?) {
-    let o = RemoveOptions(session(pr: pr), folderExists: { _ in true })
+    let o = RemoveOptions(session(pr: pr), folderExists: { _ in true }, isLinkedWorktree: { _ in true })
     #expect(o.worktree && o.worktreeEnabled)
     #expect(!o.branch && !o.branchEnabled)
     #expect(o.branchNote?.contains("PR is not merged") == true)
   }
 
   @Test func keepsBothUncheckedAndDisabledWhenTheFolderIsGone() {
-    let o = RemoveOptions(session(pr: .merged), folderExists: { _ in false })
+    let o = RemoveOptions(session(pr: .merged), folderExists: { _ in false }, isLinkedWorktree: { _ in true })
     #expect(!o.worktree && !o.worktreeEnabled)
     #expect(!o.branch && !o.branchEnabled)
     #expect(o.worktreeNote?.contains("folder is gone") == true)
@@ -40,14 +40,25 @@ import Testing
   }
 
   @Test func keepsTheBranchUncheckedWhenTheSessionHasNone() {
-    let o = RemoveOptions(session(branch: nil, pr: .merged), folderExists: { _ in true })
+    let o = RemoveOptions(
+      session(branch: nil, pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in true })
     #expect(o.worktree)
     #expect(!o.branch && !o.branchEnabled)
   }
 
   @Test func offersNothingWhenTheSessionHasNoRepo() {
-    let o = RemoveOptions(session(repo: nil, pr: .merged), folderExists: { _ in true })
+    let o = RemoveOptions(session(repo: nil, pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in true })
     #expect(!o.worktree && !o.worktreeEnabled)
     #expect(!o.branch && !o.branchEnabled)
+  }
+}
+
+extension RemoveOptionsDefaults {
+  @Test func keepsBothUncheckedAndDisabledForTheMainCheckout() {
+    let o = RemoveOptions(session(pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in false })
+    #expect(!o.worktree && !o.worktreeEnabled)
+    #expect(!o.branch && !o.branchEnabled)
+    #expect(o.worktreeNote?.contains("main checkout") == true)
+    #expect(o.branchNote?.contains("main checkout") == true)
   }
 }

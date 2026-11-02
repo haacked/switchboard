@@ -10,6 +10,7 @@ final class SessionViewState: ObservableObject {
   @Published var confirmingRemove = false
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
+  @Published var removeOptions: RemoveOptions?
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -89,14 +90,13 @@ struct SessionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
-      if session.repo != nil {
-        let options = RemoveOptions(session)
+      if session.repo != nil, let options = ui.removeOptions {
         Toggle(
           isOn: Binding(
             get: { ui.deleteWorktree },
             set: {
               ui.deleteWorktree = $0
-              if !$0 { ui.deleteBranch = false }
+              ui.deleteBranch = $0 && options.branch
             })
         ) {
           Text("Delete the worktree \(session.cwd)" + (options.worktreeNote.map { " (\($0))" } ?? ""))
@@ -178,6 +178,7 @@ struct SessionView: View {
               : "Mark the session done. It leaves the Queue and moves to Done on the board.")
         Button(role: .destructive) {
           let options = RemoveOptions(session)
+          ui.removeOptions = options
           ui.deleteWorktree = options.worktree
           ui.deleteBranch = options.branch
           ui.confirmingRemove = true

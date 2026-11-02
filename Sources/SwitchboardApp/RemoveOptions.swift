@@ -12,11 +12,26 @@ struct RemoveOptions: Equatable {
   var branchEnabled = false
   var branchNote: String?
 
-  init(_ session: SessionSummary, folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
+  /// A linked worktree has a `.git` file, and a main checkout has a `.git` folder.
+  static func hasGitFile(_ path: String) -> Bool {
+    var isDirectory: ObjCBool = false
+    return FileManager.default.fileExists(atPath: path + "/.git", isDirectory: &isDirectory) && !isDirectory.boolValue
+  }
+
+  init(
+    _ session: SessionSummary,
+    folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+    isLinkedWorktree: (String) -> Bool = RemoveOptions.hasGitFile
+  ) {
     guard session.repo != nil else { return }
     guard folderExists(session.cwd) else {
       worktreeNote = "the folder is gone"
-      branchNote = "the folder is gone"
+      branchNote = "the folder is gone, so there is no worktree to remove first"
+      return
+    }
+    guard isLinkedWorktree(session.cwd) else {
+      worktreeNote = "this is the main checkout, not a worktree"
+      branchNote = "this is the main checkout, not a worktree"
       return
     }
     worktree = true
