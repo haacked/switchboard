@@ -77,6 +77,19 @@ import Testing
     }
   }
 
+  @Test func aClaudeThatIsExitingAfterItsSessionEndedStaysNotLive() throws {
+    let sbd = try Instance()
+    let s = try lingeringSession(sbd, seconds: 8)
+    try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
+    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    // A tick sees the exiting claude first. Then the clock passes the 10 s that a claude may run without a SessionStart.
+    sleep(1)
+    try sbd.advanceClock(15_000)
+    sleep(1)
+    #expect(try sbd.get(s.id).live == false)
+    #expect(try sbd.get(s.id).claudePid != nil)
+  }
+
   @Test func aDoneSessionsWaitsDontResumeIt() throws {
     let sbd = try Instance()
     let s = try idleSession(sbd)

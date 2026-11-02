@@ -1033,8 +1033,11 @@ public final class Service {
         switch claudeState(id) {
         case .running(let pid):
           // SessionStart marks claude live. A claude that runs for 10 s with
-          // no SessionStart, because its hook failed, counts as live too.
-          if live {
+          // no SessionStart, because its hook failed, counts as live too. A
+          // claude whose SessionStart arrived and whose SessionEnd followed
+          // is exiting, and stays not live.
+          let reportedStart = (entries[id]?.facts.lastStart ?? 0) >= (entries[id]?.facts.lastLaunch ?? 0)
+          if live || reportedStart {
             entries[id]?.unreportedSince = nil
           } else if let since = entries[id]?.unreportedSince {
             if now - since > 10_000 {

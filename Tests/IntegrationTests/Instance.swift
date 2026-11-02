@@ -303,8 +303,12 @@ final class Instance {
     return last!
   }
 
+  /// A CI runner has 3 CPUs, and it starts sbd, tmux, and a stub claude several times slower than a laptop does.
+  /// A wait that succeeds returns at once, so only a failing wait takes longer.
+  static let timeoutScale: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 3
+
   func waitFor(_ what: String, timeout: Double = 15, _ condition: () throws -> Bool) throws {
-    let deadline = Date().addingTimeInterval(timeout)
+    let deadline = Date().addingTimeInterval(timeout * Instance.timeoutScale)
     while Date() < deadline {
       if try condition() { return }
       usleep(100_000)
