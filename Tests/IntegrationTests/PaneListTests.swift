@@ -29,13 +29,19 @@ import Testing
     defer { try? FileManager.default.removeItem(atPath: (flag as NSString).deletingLastPathComponent) }
     let sbd = try Instance(config: ["tmux": .string(tmux)])
     let s = try sbd.new()
-    let before = try sbd.client.terminals(s.id)
+    // A tick records `exited` only for a live claude, so the failure must start after claude is live.
+    try sbd.waitFor(s.id, "claude to start") { $0.live }
+    _ = try sbd.client.terminals(s.id)
     FileManager.default.createFile(atPath: flag, contents: nil)
     // The tick reads the panes every 0.2 s. A request that acts on processes reads them too.
     usleep(600_000)
-    let during = try sbd.client.terminals(s.id)
-    #expect(during.claude == before.claude)
+    _ = try sbd.client.terminals(s.id)
+    #expect(try sbd.get(s.id).live)
     try FileManager.default.removeItem(atPath: flag)
-    #expect(try sbd.client.terminals(s.id).shell == before.shell)
+    _ = try sbd.client.terminals(s.id)
+    #expect(try sbd.get(s.id).live)
+    let kinds = try sbd.events(s.id).map(\.kind)
+    #expect(!kinds.contains("exited"))
+    #expect(kinds.filter { $0 == "started" || $0 == "resumed" }.count == 1)
   }
 }

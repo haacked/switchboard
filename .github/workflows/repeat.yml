@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: repeat-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   repeat:
     runs-on: macos-26

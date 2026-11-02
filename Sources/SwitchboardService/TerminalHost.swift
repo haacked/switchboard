@@ -177,7 +177,7 @@ final class TerminalHost {
       guard TerminalHost.isDuplicateSession(error) else { throw error }
       // The pane exists, so sbd's list of panes was out of date. A running
       // pane stays as it is, and a dead one starts again.
-      if display(name, "#{pane_dead}") == "1" { try respawn(name, cwd: cwd, env: env, command: command) }
+      if isDead(name) == true { try respawn(name, cwd: cwd, env: env, command: command) }
       return
     }
     let copied = try copiedFromTerminals()

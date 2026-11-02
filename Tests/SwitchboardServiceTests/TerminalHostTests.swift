@@ -29,6 +29,13 @@ import Testing
     #expect(!TerminalHost.isNoServer(CocoaError(.fileNoSuchFile)))
     #expect(!TerminalHost.isNoServer(APIError("The file doesn't exist: No such file or directory")))
   }
+
+  @Test func readsOnlyANewSessionDuplicateAsADuplicateSession() {
+    #expect(TerminalHost.isDuplicateSession(APIError("tmux new-session: duplicate session: a")))
+    #expect(!TerminalHost.isDuplicateSession(APIError("tmux new-session: no server running on /tmp/s")))
+    #expect(!TerminalHost.isDuplicateSession(APIError("tmux respawn-pane: duplicate session: a")))
+    #expect(!TerminalHost.isDuplicateSession(CocoaError(.fileNoSuchFile)))
+  }
 }
 
 @Suite struct TerminalHostCreateTests {
