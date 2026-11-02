@@ -25,10 +25,12 @@ extension Service {
   /// unique prefix of one, or a unique Claude name. git and the transcripts
   /// run off the state queue. A second check on the queue refuses a session
   /// that another request imported meanwhile. `stop` lists the refs whose
-  /// claude may exit. A listed session that waits idle at its prompt in
-  /// another terminal gets SIGTERM, and imports once its claude has exited. A
+  /// claude may exit. A ref and a stop entry that name one session let its
+  /// claude exit. That session must wait idle at its prompt in another
+  /// terminal. It then gets SIGTERM, and imports once its claude has exited. A
   /// busy or waiting session and a background job stay refused. So does a
-  /// session whose claude also runs a listed session that import can't exit.
+  /// session whose claude also runs a listed session that is not imported, or
+  /// that import can't exit.
   func importSessions(_ args: JSON) throws -> ImportResult {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
@@ -59,11 +61,9 @@ extension Service {
     }
     refuseSharedClaudes(of: &chosen, among: candidates, into: &refused)
     // Only a stoppable session can still run here. Its claude exits off the state queue.
-    let outcomes = concurrentMap(chosen) { ($0, $0.session.running ? exitClaude(of: $0.session) : nil) }
-    chosen = []
-    for (item, why) in outcomes {
-      if let why { refused.append(Refusal(ref: item.ref, reason: why)) } else { chosen.append(item) }
-    }
+    let stuck = exitClaudes(of: chosen.map(\.session))
+    refused += chosen.compactMap { item in stuck[item.session.id].map { Refusal(ref: item.ref, reason: $0) } }
+    chosen.removeAll { stuck[$0.session.id] != nil }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
       Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
@@ -175,47 +175,75 @@ extension Service {
     }
   }
 
-  /// Sends SIGTERM to every claude that runs the session, and waits up to five
-  /// seconds for them to exit. Returns why one didn't exit, or nil once all
-  /// have. It reads the panes and the process list for this session alone,
-  /// because an earlier session's wait can take five seconds. It sends nothing
-  /// unless that list shows, for each pid, a claude command that is neither
-  /// sbd nor the claude of a Switchboard session, and that has no background
-  /// task. `claude agents` can list a pid that another process has reused.
-  private func exitClaude(of s: ClaudeSession) -> String? {
-    let label = s.label
-    let pids = s.livePids
-    if let bad = pids.first(where: { !Processes.isValidPid($0) || $0 == Int(getpid()) }) {
-      return refuseToSignal(s, bad)
-    }
+  /// Exits the claudes that run the sessions, and returns why a session can't
+  /// import, by session id. It sends nothing until a fresh process list shows,
+  /// for every pid of every session, a claude command that is neither sbd nor
+  /// the claude of a Switchboard session, and that has no background task.
+  /// `claude agents` can list a pid that another process has reused. A session
+  /// whose claude also runs a refused session is refused too, so that no
+  /// refused session loses its claude. It then sends SIGTERM to each pid once
+  /// and waits up to five seconds for the claudes to exit.
+  private func exitClaudes(of sessions: [ClaudeSession]) -> [String: String] {
+    let running = sessions.filter(\.running)
+    guard !running.isEmpty else { return [:] }
     let snapshot: Snapshot
     do {
       snapshot = try buildSnapshot(reading: host.checkedPanes)
     } catch {
-      return
-        "\(label)'s claude stays running, because sbd can't list its own terminals to tell whether it owns that claude."
+      return Dictionary(
+        uniqueKeysWithValues: running.map {
+          (
+            $0.id,
+            "\($0.label)'s claude stays running, because sbd can't list its own terminals to tell whether it owns that claude."
+          )
+        })
     }
-    let alive = pids.filter(Processes.exists)
     let program = (config.claude as NSString).lastPathComponent
-    let rows = snapshot.children.values.joined()
-    for pid in alive {
-      let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
-      if !isClaude || snapshot.claudePids.values.contains(pid) { return refuseToSignal(s, pid) }
+    let claudes = Set(snapshot.children.values.joined().filter { Service.isClaude($0, program: program) }.map(\.pid))
+    let owned = Set(snapshot.claudePids.values)
+    func problem(_ pid: Int, of s: ClaudeSession) -> String? {
+      guard Processes.isValidPid(pid), pid != 1, pid != Int(getpid()) else { return notOutside(s, pid) }
+      guard Processes.exists(pid) else { return nil }
+      if !claudes.contains(pid) || owned.contains(pid) { return notOutside(s, pid) }
       if backgroundJobs(pid, in: snapshot.children) > 0 {
         return
-          "\(label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
+          "\(s.label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
+      }
+      return nil
+    }
+    var refused: [String: String] = [:]
+    for s in running {
+      refused[s.id] = s.livePids.lazy.compactMap { problem($0, of: s) }.first
+    }
+    var spread = true
+    while spread {
+      spread = false
+      for s in running where refused[s.id] == nil {
+        let other = running.first { refused[$0.id] != nil && !Set($0.livePids).isDisjoint(with: s.livePids) }
+        guard let other else { continue }
+        let pid = Set(other.livePids).intersection(s.livePids).min() ?? 0
+        refused[s.id] =
+          "\(s.label) shares its claude (pid \(pid)) with \(other.label), which can't exit. Exit claude there, then import it."
+        spread = true
       }
     }
+    let exiting = running.filter { refused[$0.id] == nil }
+    let alive = Set(exiting.flatMap(\.livePids)).filter(Processes.exists)
     for pid in alive { kill(pid_t(pid), SIGTERM) }
     for _ in 0..<50 {
-      if alive.allSatisfy({ !Processes.exists($0) }) { return nil }
+      if alive.allSatisfy({ !Processes.exists($0) }) { break }
       Thread.sleep(forTimeInterval: 0.1)
     }
-    let stuck = alive.first(where: Processes.exists) ?? alive[0]
-    return "\(label)'s claude (pid \(stuck)) didn't exit after SIGTERM. Exit it there, then import it."
+    let stuck = alive.filter(Processes.exists)
+    for s in exiting {
+      if let pid = s.livePids.first(where: stuck.contains) {
+        refused[s.id] = "\(s.label)'s claude (pid \(pid)) didn't exit after SIGTERM. Exit it there, then import it."
+      }
+    }
+    return refused.compactMapValues { $0 }
   }
 
-  private func refuseToSignal(_ s: ClaudeSession, _ pid: Int) -> String {
+  private func notOutside(_ s: ClaudeSession, _ pid: Int) -> String {
     "\(s.label)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
   }
 

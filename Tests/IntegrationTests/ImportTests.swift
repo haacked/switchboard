@@ -555,6 +555,35 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.client.call("ping") != nil)
   }
 
+  @Test func stopLeavesEveryClaudeOfTwoOverlappingSessionsRunningWhenOneIsRefused() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/overlap")
+    let (withTask, shared, other) = (try stubClaude(backgroundTask: true), try stubClaude(), try stubClaude())
+    defer { for p in [withTask, shared, other] where p.isRunning { p.terminate() } }
+    func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
+    let (x, y) = (newId(), newId())
+    // "x" runs in two claudes, one with a background task. "y" runs in the second of those and in a third.
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(x, cwd: tree, name: "x", pid: pid(withTask), status: "idle"),
+        agent(y, cwd: tree, name: "y", pid: pid(shared), status: "idle"),
+      ])
+    try sbd.writeAgents(
+      "B",
+      [
+        agent(x, cwd: tree, name: "x", pid: pid(shared), status: "idle"),
+        agent(y, cwd: tree, name: "y", pid: pid(other), status: "idle"),
+      ])
+
+    let result = try sbd.client.importSessions(["x", "y"], stop: ["x", "y"])
+
+    #expect(result.imported.isEmpty)
+    #expect(reasons(result)["x"]?.contains("runs a background task") == true)
+    #expect(reasons(result)["y"]?.contains("which can't exit") == true)
+    #expect(withTask.isRunning && shared.isRunning && other.isRunning)
+  }
+
   @Test func stopMatchesARefAndAStopEntryThatNameOneSessionInDifferentWays() throws {
     let sbd = try Instance(accounts: ["A"])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/spelling")

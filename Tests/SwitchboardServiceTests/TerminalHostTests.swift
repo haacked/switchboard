@@ -11,8 +11,9 @@ import Testing
       TerminalHost.isNoServer(APIError("tmux list-panes: error connecting to /tmp/s (No such file or directory)")))
   }
 
-  @Test func readsTheErrorThatARealTmuxPrintsForAMissingSocketAsNoServer() throws {
-    guard let tmux = findExecutable("tmux") else { return }
+  @Test(.enabled(if: findExecutable("tmux") != nil))
+  func readsTheErrorThatARealTmuxPrintsForAMissingSocketAsNoServer() throws {
+    let tmux = try #require(findExecutable("tmux"))
     let socket = "/tmp/sb-\(getpid())-none/s"
     let r = try runCommand(tmux, ["-S", socket, "list-panes", "-a"])
     #expect(r.status != 0)
