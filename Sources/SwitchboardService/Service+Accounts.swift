@@ -149,23 +149,7 @@ extension Service {
     if let conflict = transcriptConflict(source, dest) { throw APIError(conflict) }
     if !fm.fileExists(atPath: dest) || !fm.contentsEqual(atPath: source, andPath: dest) {
       try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-      let partial = "\(dest).moving"
-      try? fm.removeItem(atPath: partial)
-      do {
-        try fm.copyItem(atPath: source, toPath: partial)
-        guard fm.contentsEqual(atPath: source, andPath: partial) else {
-          throw APIError("the copy differs from \(source)")
-        }
-        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
-        if fm.fileExists(atPath: dest) {
-          _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
-        } else {
-          try fm.moveItem(atPath: partial, toPath: dest)
-        }
-      } catch {
-        try? fm.removeItem(atPath: partial)
-        throw error
-      }
+      try replaceFile(dest, with: source)
     }
     let sourceDir = (source as NSString).deletingPathExtension
     try copyMissing(sourceDir, to: (dest as NSString).deletingPathExtension)
@@ -194,13 +178,23 @@ extension Service {
     try fm.copyItem(atPath: source, toPath: dest)
   }
 
+  /// Copies `source` to `dest` through `<dest>.moving`, so `dest` never holds part of a copy. The copy is
+  /// checked against `source` and readable only by its owner.
   private func replaceFile(_ dest: String, with source: String) throws {
     let fm = FileManager.default
     let partial = "\(dest).moving"
     try? fm.removeItem(atPath: partial)
     do {
       try fm.copyItem(atPath: source, toPath: partial)
-      _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
+      guard fm.contentsEqual(atPath: source, andPath: partial) else {
+        throw APIError("the copy differs from \(source)")
+      }
+      try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial)
+      if fm.fileExists(atPath: dest) {
+        _ = try fm.replaceItemAt(URL(fileURLWithPath: dest), withItemAt: URL(fileURLWithPath: partial))
+      } else {
+        try fm.moveItem(atPath: partial, toPath: dest)
+      }
     } catch {
       try? fm.removeItem(atPath: partial)
       throw error
