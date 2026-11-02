@@ -435,7 +435,8 @@ public final class Service {
     if args.branch?.isEmpty == false {
       // The path can be a linked worktree, which goes away. The main checkout stays.
       let path = (args.path as NSString).standardizingPath
-      session.repo = (try? worktreeEntries(path).first?.path) ?? path
+      let main = try? worktreeEntries(path).first?.path
+      session.repo = main.flatMap { samePath($0, path) ? nil : $0 } ?? path
     }
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
