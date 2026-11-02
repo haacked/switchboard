@@ -686,8 +686,10 @@ public final class Service {
     }
     // The branch's git config is deleted with the branch, so the remote is read first.
     // A local branch that is already gone still has its remote branch checked.
-    let remoteBranchName = removesRemoteBranch ? (branch?.name ?? session.branch) : nil
-    let remoteName = remoteBranchName.flatMap { name in repo.map { trackedRemote($0, name) } }
+    let remoteTarget: (repo: String, remote: String, branch: String)? = {
+      guard removesRemoteBranch, let repo, let name = branch?.name ?? session.branch else { return nil }
+      return (repo, trackedRemote(repo, name), name)
+    }()
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -719,11 +721,10 @@ public final class Service {
     }
     var remoteRemoved = false
     var remoteError: Error?
-    if let repo, let name = remoteBranchName, let remoteName, branchRemoved || branch == nil,
-      let pr, pr.state == .merged, pr.head == name
-    {
+    let localBranchIsGone = branchRemoved || branch == nil
+    if let target = remoteTarget, localBranchIsGone, let pr, pr.state == .merged, pr.head == target.branch {
       do {
-        remoteRemoved = try deleteRemoteBranch(repo, remoteName, name, pr: pr)
+        remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
       } catch {
         remoteError = error
       }

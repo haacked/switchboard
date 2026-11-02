@@ -359,6 +359,12 @@ extension Instance {
     return (sbd, repo, s, origin)
   }
 
+  private func removeFolderAndLocalBranch(_ sbd: Instance, _ repo: String, _ s: SessionSummary) throws {
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "worktree", "prune")
+    try sbd.git(repo, "branch", "-D", Self.mergedBranch)
+  }
+
   private func remoteBranch(_ origin: String) throws -> String {
     try runCommand("/usr/bin/git", ["-C", origin, "branch", "--list", Self.mergedBranch]).stdout
       .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -483,9 +489,7 @@ extension Instance {
   @Test func deletesADoneSessionWhoseFolderAndBranchAreBothGone() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
-    try FileManager.default.removeItem(atPath: s.cwd)
-    try sbd.git(repo, "worktree", "prune")
-    try sbd.git(repo, "branch", "-D", Self.mergedBranch)
+    try removeFolderAndLocalBranch(sbd, repo, s)
     let r = try sbd.deleteDoneSession(s.id)
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     #expect(try sbd.client.sessions().isEmpty)
@@ -497,9 +501,7 @@ extension Instance {
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
     github.change(122953) { $0["state"] = "OPEN" }
     try sbd.poll(all: true)
-    try FileManager.default.removeItem(atPath: s.cwd)
-    try sbd.git(repo, "worktree", "prune")
-    try sbd.git(repo, "branch", "-D", Self.mergedBranch)
+    try removeFolderAndLocalBranch(sbd, repo, s)
     let r = try sbd.deleteDoneSession(s.id)
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     #expect(try remoteBranch(origin) != "")
