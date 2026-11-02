@@ -13,7 +13,7 @@ struct RemoveOptions: Equatable {
   var branchNote: String?
 
   /// True when `path` is the top folder of a linked worktree: git's own folder differs from the folder that
-  /// the worktrees share. A subfolder, a main checkout, and a submodule all fail it.
+  /// the worktrees share. A subfolder and a main checkout fail it, and so does any folder that git can't read.
   static func isLinkedWorktree(_ path: String) -> Bool {
     let git = Process()
     git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -28,7 +28,8 @@ struct RemoveOptions: Equatable {
     git.waitUntilExit()
     let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
     guard git.terminationStatus == 0, lines.count >= 3, lines[0].isEmpty else { return false }
-    return lines[1] != lines[2]
+    return URL(fileURLWithPath: String(lines[1])).resolvingSymlinksInPath()
+      != URL(fileURLWithPath: String(lines[2])).resolvingSymlinksInPath()
   }
 
   init(
@@ -43,8 +44,8 @@ struct RemoveOptions: Equatable {
       return
     }
     guard isLinkedWorktree(session.cwd) else {
-      worktreeNote = "this is the main checkout, not a worktree"
-      branchNote = "this is the main checkout, not a worktree"
+      worktreeNote = "this is not the top folder of a linked worktree"
+      branchNote = "this is not the top folder of a linked worktree"
       return
     }
     worktree = true

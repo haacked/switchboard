@@ -59,8 +59,8 @@ extension RemoveOptionsDefaults {
     let o = RemoveOptions(session(pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in false })
     #expect(!o.worktree && !o.worktreeEnabled)
     #expect(!o.branch && !o.branchEnabled)
-    #expect(o.worktreeNote?.contains("main checkout") == true)
-    #expect(o.branchNote?.contains("main checkout") == true)
+    #expect(o.worktreeNote?.contains("top folder of a linked worktree") == true)
+    #expect(o.branchNote?.contains("top folder of a linked worktree") == true)
   }
 }
 
