@@ -27,7 +27,7 @@ extension Instance {
   }
 
   /// Sets a session's stored repo to a folder that no longer exists, as older sbd versions stored a removed linked worktree.
-  func storeGoneRepo(_ id: String) throws -> String {
+  func storeGoneRepo(_ id: String) throws {
     let gone = "\(home.path)/gone-worktree"
     stopSbd()
     let store = try Store(path: home.database)
@@ -35,7 +35,6 @@ extension Instance {
     session.repo = gone
     try store.save(session)
     try startSbd()
-    return gone
   }
 
   func deleteSession(_ id: String) throws -> CommandResult { try run(["rm", id, "--worktree"]) }
@@ -492,7 +491,7 @@ extension Instance {
     let repo = try sbd.repoWithOrigin()
     let first = try sbd.worktreeSession(repo, branch: "haacked/first")
     let second = try sbd.worktreeSession(repo, branch: "haacked/second")
-    _ = try sbd.storeGoneRepo(second.id)
+    try sbd.storeGoneRepo(second.id)
     try FileManager.default.removeItem(atPath: second.cwd)
     let r = try sbd.deleteSession(second.id)
     #expect(r.status == 0, Comment(rawValue: r.stderr))
@@ -500,15 +499,26 @@ extension Instance {
     #expect(try sbd.client.sessions().map(\.id) == [first.id])
   }
 
+  @Test func deletesASessionWhoseStoredRepoIsGoneWhileItsOwnWorktreeStillExists() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let only = try sbd.worktreeSession(repo, branch: "haacked/only")
+    try sbd.storeGoneRepo(only.id)
+    let r = try sbd.deleteSession(only.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: only.cwd) == false)
+    #expect(try sbd.client.sessions().isEmpty)
+  }
+
   @Test func refusesASessionWhoseStoredRepoIsGoneAndNoKnownCheckoutListsItsWorktree() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()
     let only = try sbd.worktreeSession(repo, branch: "haacked/only")
-    _ = try sbd.storeGoneRepo(only.id)
+    try sbd.storeGoneRepo(only.id)
     try FileManager.default.removeItem(atPath: only.cwd)
     let r = try sbd.deleteSession(only.id)
     #expect(r.status != 0)
-    #expect(r.stderr.contains("no other checkout"))
+    #expect(r.stderr.contains("no known checkout"))
     #expect(try sbd.client.sessions().map(\.id) == [only.id])
   }
 

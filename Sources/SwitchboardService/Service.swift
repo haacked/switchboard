@@ -784,19 +784,20 @@ public final class Service {
     if isDirectory(repo) { return repo }
     let folders = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
     var mains: [String] = []
-    for folder in folders where isDirectory(folder) {
-      guard let main = try? worktreeEntries(folder).first?.path, !mains.contains(where: { samePath($0, main) })
-      else { continue }
-      if let listed = try? worktreeEntries(main), listed.contains(where: { samePath($0.path, session.cwd) }) {
-        mains.append(main)
-      }
+    var seen: [String] = []
+    for folder in folders where isDirectory(folder) && !seen.contains(where: { samePath($0, folder) }) {
+      guard let listed = try? worktreeEntries(folder), let main = listed.first?.path else { continue }
+      seen += listed.map(\.path)
+      if listed.contains(where: { samePath($0.path, session.cwd) }) { mains.append(main) }
     }
     if mains.count == 1 { return mains[0] }
     if mains.count > 1 {
       throw APIError(
         "\(session.id)'s repo \(repo) is gone, and \(mains.joined(separator: " and ")) both list its worktree.")
     }
-    throw APIError("\(session.id)'s repo \(repo) is gone, and no other checkout of it is known.")
+    throw APIError(
+      "\(session.id)'s repo \(repo) is gone, and no known checkout lists \(session.cwd) as a worktree. Remove the session without the worktree instead."
+    )
   }
 
   /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
