@@ -229,8 +229,8 @@ struct Sidebar: View {
 }
 
 /// Opens the Manager, or starts it. The star turns the Needs you color and
-/// fills while the Manager needs you, because the sidebar, the menu bar, and
-/// the Dock badge leave it out.
+/// fills while the Manager needs you, because the Queue, the sidebar, and the
+/// Dock badge leave it out.
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
