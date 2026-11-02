@@ -285,8 +285,13 @@ struct ManagerButton: View {
   }
 }
 
+extension PRSummary {
+  var tooltip: String { "\(status.rawValue) · \(repo): \(title)" }
+}
+
 struct SessionRow: View {
   let session: SessionSummary
+  @Environment(\.backgroundProminence) private var prominence
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
@@ -303,8 +308,9 @@ struct SessionRow: View {
           if let pr = session.pr, let url = pr.link {
             Link(destination: url) { Text(verbatim: "#\(pr.number)") }
               .font(.caption)
-              .foregroundStyle(pr.status.color)
-              .help("\(pr.repo): \(pr.title)")
+              .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
+              .help(pr.tooltip)
+              .accessibilityValue(pr.status.rawValue)
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
@@ -371,7 +377,7 @@ struct BoardView: View {
                               Text(verbatim: "#\(pr.number)")
                                 .font(.caption.bold())
                                 .foregroundStyle(pr.status.color)
-                                .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                                .help(pr.tooltip)
                             }
                           }
                           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
