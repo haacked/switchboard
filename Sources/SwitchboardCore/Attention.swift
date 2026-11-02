@@ -258,7 +258,7 @@ public enum Attention {
       case .other = classify(facts.lastReply ?? "")
     {
       let n = facts.subagents.count
-      return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
+      return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
     // A question still needs the user's answer while a job runs.
     if facts.jobs > 0, !classify(facts.lastReply ?? "").isQuestion {
