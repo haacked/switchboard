@@ -69,6 +69,8 @@ final class GitHubPoller {
     /// `/clear` starts writes its transcript there too.
     var folder: String?
     var path: String?
+    /// The account whose folder `path` is in.
+    var configDir: String?
     var offset = 0
     var link: PRKey?
     var prId: String?
@@ -178,6 +180,13 @@ final class GitHubPoller {
       t.transcript.claudeSessionId = s.claudeSessionId
       t.transcript.path = nil
       t.transcript.offset = 0
+    }
+    // A move to another account copies the transcript. The new copy is the
+    // one that grows.
+    if t.transcript.configDir != s.configDir {
+      t.transcript.configDir = s.configDir
+      t.transcript.folder = nil
+      t.transcript.path = nil
     }
     readTranscript(&t.transcript, configDir: s.configDir, projects: &shared.projects)
     tracked[s.id] = t
