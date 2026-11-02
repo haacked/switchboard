@@ -459,6 +459,17 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model([]).sidebarIsEmpty)
   }
 
+  @Test func ordinarySessionsWithoutAManagerFillTheSidebar() {
+    #expect(!model([summary("a")]).sidebarIsEmpty)
+  }
+
+  @Test func anUnreachableServiceIsNotAnEmptySidebar() {
+    struct Down: Error {}
+    let model = model([])
+    model.apply(.failure(Down()), followups: nil)
+    #expect(!model.sidebarIsEmpty)
+  }
+
   @Test func aChildInAnotherStateIsTopLevelInItsOwnGroup() {
     let model = model([summary("p"), summary("c", parent: "p", state: .needsYou)])
     #expect(shown(model) == ["needsYou: c", "working: p"])
