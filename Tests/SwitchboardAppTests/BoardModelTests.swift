@@ -4,14 +4,22 @@ import Testing
 
 @testable import SwitchboardApp
 
+/// A session whose triage item is a decision, or a card when `card` is true.
+func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, card: Bool = false)
+  -> SessionSummary
+{
+  var s = SessionSummary(
+    id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
+    since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+  s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
+  s.manager = manager ? true : nil
+  return s
+}
+
 @MainActor
 @Suite struct BoardModelSelection {
   func summary(_ id: String, state: AttentionState = .needsYou) -> SessionSummary {
-    var s = SessionSummary(
-      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
-      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
-    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: .summary)
-    return s
+    needsItem(id, state: state)
   }
 
   func model(_ ids: [String]) -> BoardModel {
@@ -197,17 +205,6 @@ import Testing
 
 @MainActor
 @Suite struct BoardModelManager {
-  func summary(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, card: Bool = false)
-    -> SessionSummary
-  {
-    var s = SessionSummary(
-      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
-      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
-    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
-    s.manager = manager ? true : nil
-    return s
-  }
-
   func model(_ list: [SessionSummary]) -> BoardModel {
     _ = NSApplication.shared
     let model = BoardModel()
@@ -218,7 +215,7 @@ import Testing
   @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
     for state in [AttentionState.needsYou, .canContinue] {
       for card in [false, true] {
-        let model = model([summary("m", manager: true, state: state, card: card), summary("a")])
+        let model = model([needsItem("m", manager: true, state: state, card: card), needsItem("a")])
         #expect(model.triage.map(\.id) == ["a"])
         #expect(model.currentQueueItem == "a")
       }
@@ -226,14 +223,14 @@ import Testing
   }
 
   @Test func theManagerAloneLeavesTheQueueEmpty() {
-    let model = model([summary("m", manager: true, card: true)])
+    let model = model([needsItem("m", manager: true, card: true)])
     #expect(model.triage.isEmpty)
     #expect(model.needsYou.isEmpty)
     #expect(model.currentQueueItem == nil)
   }
 
   @Test func nextNeedingYouSkipsTheManagerInTheQueueAndOutsideIt() {
-    let model = model([summary("m", manager: true), summary("a"), summary("b")])
+    let model = model([needsItem("m", manager: true), needsItem("a"), needsItem("b")])
     model.show(.queue)
     model.selectNextNeedingYou()
     model.selectNextNeedingYou()
@@ -248,8 +245,8 @@ import Testing
   }
 
   @Test func theManagerDoesNotNotifyWhenItStartsNeedingYou() {
-    let model = model([summary("m", manager: true, state: .working), summary("a", state: .working)])
-    let next = [summary("m", manager: true), summary("a")]
+    let model = model([needsItem("m", manager: true, state: .working), needsItem("a", state: .working)])
+    let next = [needsItem("m", manager: true), needsItem("a")]
     #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
   }
 }
