@@ -941,9 +941,9 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
-    out.triage = Triage.item(e.facts, verdict)
     out.parent = s.parent
     out.manager = s.manager
+    if Triage.mayQueue(out) { out.triage = Triage.item(e.facts, verdict) }
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir

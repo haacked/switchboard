@@ -75,6 +75,41 @@ import Testing
     #expect(text.contains("Ask the user before you send one message to several sessions"))
   }
 
+  func triaged(_ sbd: Instance) throws -> [String] {
+    try sbd.client.call("triage", as: [SessionSummary].self).map(\.id)
+  }
+
+  @Test func theManagersReplyThatReadsAsNeedsYouStaysOutOfTheQueue() throws {
+    let sbd = try Instance()
+    let m = try manager(sbd)
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("send", m.id, "hello")
+    let replied = try sbd.waitFor(m.id, "the reply") { $0.lastReply == "Done: hello" }
+    #expect(replied.state == .needsYou)
+    let other = try idle(sbd, name: "other")
+    #expect(try triaged(sbd) == [other.id])
+    #expect(try sbd.client.call("get", ["session": .string(m.id)], as: SessionSummary.self).triage == nil)
+    do {
+      try sbd.sb("choose", m.id, "1")
+      Issue.record("choose accepted the Manager")
+    } catch {
+      #expect("\(error)".contains("needs nothing from you"))
+    }
+  }
+
+  @Test func theManagersCardStaysOutOfTheQueue() throws {
+    let sbd = try Instance()
+    let m = try manager(sbd)
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("send", m.id, "perm touch x")
+    try sbd.waitFor(m.id, "the card") { !$0.cards.isEmpty }
+    let other = try sbd.new(prompt: "perm touch y", name: "other")
+    try sbd.waitFor(other.id, "the other card") { !$0.cards.isEmpty }
+    #expect(try triaged(sbd) == [other.id])
+    // The card stays on the Manager's own entry, where the user can answer it.
+    #expect(try sbd.cards().contains { $0.session == m.id })
+  }
+
   @Test func newInsideASessionRecordsItAsTheParent() throws {
     let sbd = try Instance()
     let parent = try idle(sbd, name: "p")
@@ -153,7 +188,9 @@ import Testing
     try sbd.sb("stop", parent.id)
     try sbd.waitFor(parent.id, "the stop") { !$0.live }
     let kid = try child(sbd, of: parent.id, name: "kid")
-    try sbd.waitFor(parent.id, "the resumed turn", timeout: 30) { $0.lastReply?.contains("(\(kid.id)) needs you") == true }
+    try sbd.waitFor(parent.id, "the resumed turn", timeout: 30) {
+      $0.lastReply?.contains("(\(kid.id)) needs you") == true
+    }
     #expect(sbd.stubArgs().contains { $0.hasPrefix("--resume \(parent.claudeSessionId) ") })
   }
 
