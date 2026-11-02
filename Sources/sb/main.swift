@@ -342,14 +342,15 @@ func events(_ a: Args) -> Never {
 }
 
 let label = "com.haacked.switchboard.sbd"
-let plistPath = "~/Library/LaunchAgents/\(label).plist".expandingTilde
+// SB_LAUNCH_AGENTS lets a test keep `service` away from the real folder.
+let launchAgentsFolder = (ProcessInfo.processInfo.environment["SB_LAUNCH_AGENTS"] ?? "~/Library/LaunchAgents").expandingTilde
+let plistPath = "\(launchAgentsFolder)/\(label).plist"
 
 func service(_ a: Args) {
   let uid = getuid()
-  let launchctl = "/bin/launchctl"
-  func launch(_ args: [String]) -> Int32 {
-    (try? runCommand(launchctl, args))?.status ?? -1
-  }
+  // SB_LAUNCHCTL lets a test keep `service` away from the real launchd.
+  let launchctl = ProcessInfo.processInfo.environment["SB_LAUNCHCTL"] ?? "/bin/launchctl"
+  func launch(_ args: [String]) -> CommandResult? { try? runCommand(launchctl, args) }
   switch a.positional.first {
   case "install":
     let sbd = siblingExecutable("sbd")
@@ -363,11 +364,17 @@ func service(_ a: Args) {
     }
     do {
       try client.home.create()
+      try FileManager.default.createDirectory(atPath: launchAgentsFolder, withIntermediateDirectories: true)
       let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
       try data.write(to: URL(fileURLWithPath: plistPath))
     } catch { die("can't write \(plistPath): \(error)") }
     _ = launch(["bootout", "gui/\(uid)/\(label)"])
-    guard launch(["bootstrap", "gui/\(uid)", plistPath]) == 0 else { die("launchctl bootstrap failed") }
+    let bootstrap = launch(["bootstrap", "gui/\(uid)", plistPath])
+    guard bootstrap?.status == 0 else {
+      let output = [bootstrap?.stderr, bootstrap?.stdout].compactMap { $0 }.joined()
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      die("launchctl bootstrap failed" + (output.isEmpty ? "" : ": \(output)"))
+    }
     for _ in 0..<50 {
       if (try? client.call("ping", timeout: 1)) != nil {
         print("sbd runs as a launchd agent (\(label)), with state in \(client.home.path)")
@@ -518,8 +525,8 @@ case "poll":
     let n = { (key: String) in result[key]?.int ?? 0 }
     print(
       "read \(n("polled")) PRs and looked up \(n("lookups")) in \(n("requests")) requests for \(n("points")) points")
-    if let error = result["error"]?.string { die(error) }
   }
+  if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)
   if a.json {
