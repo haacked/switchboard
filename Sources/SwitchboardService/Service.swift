@@ -781,11 +781,12 @@ public final class Service {
     let repo = try worktreeRepo(session)
     guard let entry = try worktreeEntry(repo, at: session.cwd) else { return repo }
     if entry.locked { throw lockedError(session.cwd) }
-    guard let head = entry.head else {
-      throw APIError("git lists no HEAD for the gone worktree \(session.cwd), so its commits can't be checked.")
+    // git lists the zero OID when the worktree's HEAD names a ref that no longer exists. Commits made there
+    // survive only in the worktree's reflog, which goes with its record, so they can't be checked.
+    guard let head = entry.head, !head.allSatisfy({ $0 == "0" }) else {
+      throw APIError(
+        "git lists no commit at the HEAD of the gone worktree \(session.cwd), so its commits can't be checked.")
     }
-    // git lists the zero OID when the worktree's HEAD names a ref that no longer exists, so no commit is at risk.
-    if head.allSatisfy({ $0 == "0" }) { return repo }
     try requireNoUnpushedCommits(
       in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD")
     return repo

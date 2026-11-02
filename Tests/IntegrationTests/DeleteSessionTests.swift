@@ -512,6 +512,20 @@ extension Instance {
     #expect(try remoteBranch(origin) != "")
   }
 
+  @Test func refusesAGoneWorktreeWhoseBranchRefWasDeletedWhileItsCommitsAreOnNoRemote() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.commit(s.cwd, "only-in-the-reflog.txt")
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "update-ref", "-d", "refs/heads/haacked/feature")
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("can't be checked"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd))
+  }
+
   @Test func deletesADoneSessionWhoseFolderAndBranchAreBothGone() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
@@ -655,17 +669,6 @@ extension Instance {
       try sbd.commit(s.cwd, "detached.txt")
       try FileManager.default.removeItem(atPath: s.cwd)
     }
-  }
-
-  @Test func deletesASessionWhoseFolderAndBranchRefAreGone() throws {
-    let sbd = try Instance()
-    let repo = try sbd.repoWithOrigin()
-    let s = try sbd.worktreeSession(repo)
-    try FileManager.default.removeItem(atPath: s.cwd)
-    try sbd.git(repo, "update-ref", "-d", "refs/heads/\(s.branch ?? "")")
-    let r = try sbd.deleteSession(s.id)
-    #expect(r.status == 0, Comment(rawValue: r.stderr))
-    #expect(try sbd.client.sessions().isEmpty)
   }
 
   @Test func leavesEverythingWhenTheWorktreeIsLocked() throws {
