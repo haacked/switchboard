@@ -20,7 +20,7 @@ public enum ReviewDecision: String, Codable, Sendable {
 }
 
 /// The words of `git pr` for a PR's state and review.
-public enum PRStatus: String, Codable, Sendable {
+public enum PRStatus: String, Codable, Sendable, CaseIterable {
   case merged = "Merged"
   case closed = "Closed"
   case draft = "Draft"
