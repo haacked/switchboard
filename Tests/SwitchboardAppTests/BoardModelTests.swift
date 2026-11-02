@@ -11,14 +11,22 @@ final class Counter: @unchecked Sendable {
   func increment() { lock.withLock { count += 1 } }
 }
 
+/// A session whose triage item is a decision, or a card when `card` is true.
+func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, card: Bool = false)
+  -> SessionSummary
+{
+  var s = SessionSummary(
+    id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
+    since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+  s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
+  s.manager = manager ? true : nil
+  return s
+}
+
 @MainActor
 @Suite struct BoardModelSelection {
   func summary(_ id: String, state: AttentionState = .needsYou) -> SessionSummary {
-    var s = SessionSummary(
-      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
-      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
-    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: .summary)
-    return s
+    needsItem(id, state: state)
   }
 
   func model(_ ids: [String]) -> BoardModel {
@@ -314,5 +322,73 @@ final class Counter: @unchecked Sendable {
     #expect(BoardModel.deletePlan(done()).summary == "the session, its worktree, and its branch")
     #expect(BoardModel.deletePlan(done(pr: .closed)).summary == "the session and its worktree")
     #expect(BoardModel.deletePlan(done(repo: nil, branch: nil)).summary == "the session")
+  }
+}
+
+@MainActor
+@Suite struct BoardModelManager {
+  func model(_ list: [SessionSummary]) -> BoardModel {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.apply(.success(list), followups: nil)
+    return model
+  }
+
+  @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
+    for state in [AttentionState.needsYou, .canContinue] {
+      for card in [false, true] {
+        let model = model([needsItem("m", manager: true, state: state, card: card), needsItem("a")])
+        #expect(model.triage.map(\.id) == ["a"])
+        #expect(model.currentQueueItem == "a")
+      }
+    }
+  }
+
+  @Test func theManagerAloneLeavesTheQueueEmpty() {
+    let model = model([needsItem("m", manager: true, card: true)])
+    #expect(model.triage.isEmpty)
+    #expect(model.needsYou.isEmpty)
+    #expect(model.currentQueueItem == nil)
+  }
+
+  @Test func nextNeedingYouSkipsTheManagerInTheQueueAndOutsideIt() {
+    let model = model([needsItem("m", manager: true), needsItem("a"), needsItem("b")])
+    model.show(.queue)
+    var seen: [String?] = []
+    for _ in 0..<4 {
+      model.selectNextNeedingYou()
+      seen.append(model.currentQueueItem)
+    }
+    #expect(seen == ["b", "a", "b", "a"])
+    model.show(.board)
+    seen = []
+    for _ in 0..<4 {
+      model.selectNextNeedingYou()
+      seen.append(model.selection)
+    }
+    #expect(seen == ["a", "b", "a", "b"])
+  }
+
+  @Test func theManagerDoesNotNotifyWhenItStartsNeedingYou() {
+    let model = model([needsItem("m", manager: true, state: .working), needsItem("a", state: .working)])
+    let next = [needsItem("m", manager: true), needsItem("a")]
+    #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
+  }
+
+  @Test func aFollowupNotifiesOnlyWhileItWaitsToStart() {
+    func followup(started: Bool) -> SessionSummary {
+      var s = needsItem("f")
+      s.followup = Followup(prompt: "p")
+      if started { s.followup?.started = 1 }
+      return s
+    }
+    let model = model([needsItem("f", state: .notStarted)])
+    #expect(model.sessionsToNotify([followup(started: false)]).map(\.id) == ["f"])
+    #expect(model.sessionsToNotify([followup(started: true)]).isEmpty)
+  }
+
+  @Test func aSessionSeenForTheFirstTimeDoesNotNotify() {
+    let model = model([needsItem("a")])
+    #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
   }
 }
