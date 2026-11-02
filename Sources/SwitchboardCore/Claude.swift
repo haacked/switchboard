@@ -122,6 +122,9 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// can't be stopped, 1 for one that can be, 0 when none runs.
   public var keepRank: Int { running ? (stoppable ? 1 : 2) : 0 }
 
+  /// The lowest pid of a claude that runs both sessions, or nil when none does.
+  public func sharedPid(with other: ClaudeSession) -> Int? { Set(livePids).intersection(other.livePids).min() }
+
   /// True when no claude runs the session, or when `import --stop` can exit it.
   public var importable: Bool { !running || stoppable }
 

@@ -561,13 +561,15 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let (withTask, shared, other) = (try stubClaude(backgroundTask: true), try stubClaude(), try stubClaude())
     defer { for p in [withTask, shared, other] where p.isRunning { p.terminate() } }
     func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
-    let (x, y) = (newId(), newId())
+    let (x, y, z) = (newId(), newId(), newId())
     // "x" runs in two claudes, one with a background task. "y" runs in the second of those and in a third.
+    // "z" runs in the third only, so the refusal passes from "x" through "y" to "z".
     try sbd.writeAgents(
       "A",
       [
         agent(x, cwd: tree, name: "x", pid: pid(withTask), status: "idle"),
         agent(y, cwd: tree, name: "y", pid: pid(shared), status: "idle"),
+        agent(z, cwd: tree, name: "z", pid: pid(other), status: "idle"),
       ])
     try sbd.writeAgents(
       "B",
@@ -576,12 +578,38 @@ private func reasons(_ result: ImportResult) -> [String: String] {
         agent(y, cwd: tree, name: "y", pid: pid(other), status: "idle"),
       ])
 
-    let result = try sbd.client.importSessions(["x", "y"], stop: ["x", "y"])
+    let result = try sbd.client.importSessions(["x", "y", "z"], stop: ["x", "y", "z"])
 
     #expect(result.imported.isEmpty)
     #expect(reasons(result)["x"]?.contains("runs a background task") == true)
     #expect(reasons(result)["y"]?.contains("which can't exit") == true)
+    #expect(reasons(result)["z"]?.contains("which can't exit") == true)
     #expect(withTask.isRunning && shared.isRunning && other.isRunning)
+  }
+
+  @Test func stopRefusesASessionWhoseOneClaudeIgnoresSigtermAndImportsTheOneWhoseClaudeExited() throws {
+    let sbd = try Instance(accounts: ["A", "B"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/partial")
+    let (stubborn, plain) = (try stubClaude(ignoringTerm: true), try stubClaude())
+    defer { for p in [stubborn, plain] where p.isRunning { p.terminate() } }
+    func pid(_ p: Process) -> Int { Int(p.processIdentifier) }
+    let (x, y) = (newId(), newId())
+    // "x" runs in both claudes. "y" runs in the plain one only.
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(x, cwd: tree, name: "x", pid: pid(stubborn), status: "idle"),
+        agent(y, cwd: tree, name: "y", pid: pid(plain), status: "idle"),
+      ])
+    try sbd.writeAgents("B", [agent(x, cwd: tree, name: "x", pid: pid(plain), status: "idle")])
+
+    let result = try sbd.client.importSessions(["x", "y"], stop: ["x", "y"])
+
+    #expect(result.imported.map(\.claudeSessionId) == [y])
+    #expect(reasons(result)["x"]?.contains("didn't exit after SIGTERM") == true)
+    plain.waitUntilExit()
+    #expect(plain.terminationReason == .uncaughtSignal)
+    #expect(stubborn.isRunning)
   }
 
   @Test func stopMatchesARefAndAStopEntryThatNameOneSessionInDifferentWays() throws {

@@ -180,9 +180,11 @@ extension Service {
   /// for every pid of every session, a claude command that is neither sbd nor
   /// the claude of a Switchboard session, and that has no background task.
   /// `claude agents` can list a pid that another process has reused. A session
-  /// whose claude also runs a refused session is refused too, so that no
-  /// refused session loses its claude. It then sends SIGTERM to each pid once
-  /// and waits up to five seconds for the claudes to exit.
+  /// whose claude also runs a refused session is refused too, so that sbd
+  /// foresees no refused session losing its claude. It then sends SIGTERM to
+  /// each verified pid once and waits up to five seconds for the claudes to
+  /// exit. A session with a claude that outlasts SIGTERM is refused, even when
+  /// another claude of that session has exited.
   private func exitClaudes(of sessions: [ClaudeSession]) -> [String: String] {
     let running = sessions.filter(\.running)
     guard !running.isEmpty else { return [:] }
@@ -201,6 +203,7 @@ extension Service {
     let program = (config.claude as NSString).lastPathComponent
     let claudes = Set(snapshot.children.values.joined().filter { Service.isClaude($0, program: program) }.map(\.pid))
     let owned = Set(snapshot.claudePids.values)
+    var verified = Set<Int>()
     func problem(_ pid: Int, of s: ClaudeSession) -> String? {
       guard Processes.isValidPid(pid), pid != 1, pid != Int(getpid()) else { return notOutside(s, pid) }
       guard Processes.exists(pid) else { return nil }
@@ -209,6 +212,7 @@ extension Service {
         return
           "\(s.label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
       }
+      verified.insert(pid)
       return nil
     }
     var refused: [String: String] = [:]
@@ -219,16 +223,18 @@ extension Service {
     while spread {
       spread = false
       for s in running where refused[s.id] == nil {
-        let other = running.first { refused[$0.id] != nil && !Set($0.livePids).isDisjoint(with: s.livePids) }
-        guard let other else { continue }
-        let pid = Set(other.livePids).intersection(s.livePids).min() ?? 0
+        let shared = running.lazy.filter { refused[$0.id] != nil }.compactMap { o in
+          s.sharedPid(with: o).map { (o, $0) }
+        }.first
+        guard let (other, pid) = shared else { continue }
         refused[s.id] =
           "\(s.label) shares its claude (pid \(pid)) with \(other.label), which can't exit. Exit claude there, then import it."
         spread = true
       }
     }
     let exiting = running.filter { refused[$0.id] == nil }
-    let alive = Set(exiting.flatMap(\.livePids)).filter(Processes.exists)
+    // Only a pid that passed the checks above gets a signal. A pid that exited since may name another process now.
+    let alive = Set(exiting.flatMap(\.livePids)).intersection(verified)
     for pid in alive { kill(pid_t(pid), SIGTERM) }
     for _ in 0..<50 {
       if alive.allSatisfy({ !Processes.exists($0) }) { break }
@@ -261,11 +267,10 @@ extension Service {
       let ids = Set(chosen.map(\.session.id))
       for item in chosen {
         let s = item.session
-        let other = candidates.first {
-          $0.id != s.id && !ids.contains($0.id) && !Set($0.livePids).isDisjoint(with: s.livePids)
-        }
-        guard let other else { continue }
-        let pid = Set(other.livePids).intersection(s.livePids).min() ?? 0
+        let shared = candidates.lazy.filter { $0.id != s.id && !ids.contains($0.id) }.compactMap { o in
+          s.sharedPid(with: o).map { (o, $0) }
+        }.first
+        guard let (other, pid) = shared else { continue }
         refused.append(
           Refusal(
             ref: item.ref,
@@ -301,14 +306,12 @@ extension Service {
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
     let label = c.label
-    // Exiting a claude ends every session that runs in it. Another listed
-    // session that shares the claude must be one that this request may exit.
-    if c.stoppable,
-      let other = candidates.first(where: {
-        $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
-      })
-    {
-      let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
+    // Exiting a claude ends every session that runs in it, so a session that
+    // shares its claude with one that import can't exit is refused.
+    let busy = candidates.lazy.filter { $0.id != c.id && !$0.stoppable }.compactMap { o in
+      c.sharedPid(with: o).map { (o, $0) }
+    }.first
+    if c.stoppable, let (other, pid) = busy {
       return .failure(
         APIError(
           "\(label) shares its claude (pid \(pid)) with \(other.label), which import can't exit. Exit claude there, then import it."
