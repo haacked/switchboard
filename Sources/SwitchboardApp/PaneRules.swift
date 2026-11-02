@@ -4,7 +4,6 @@ import CoreGraphics
 // so unit tests can cover them. GhosttyPane.swift connects them to AppKit and libghostty.
 
 enum PaneFocus {
-  /// Who holds the keyboard in a pane's window.
   enum KeyboardHolder {
     /// The window itself, or no responder.
     case nobody
@@ -40,6 +39,6 @@ enum PaneMouse {
   /// Tells libghostty the pointer left the pane, so hover state such as a link underline clears.
   static let exitPosition = CGPoint(x: -1, y: -1)
 
-  /// A program that turned on mouse reporting takes the right click. Otherwise it opens the Copy and Paste menu.
+  /// A program that turned on mouse reporting takes the right click. Otherwise it opens the Copy, Paste, and Select All menu.
   static func rightClickOpensMenu(consumedByTerminal: Bool) -> Bool { !consumedByTerminal }
 }

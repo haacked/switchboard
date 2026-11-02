@@ -164,13 +164,11 @@
         guard window.isVisible else { return }
         MainActor.assumeIsolated { if let self { self.perform(self.lifetime.windowShown()) } }
       }
-      observe(NSWindow.didBecomeKeyNotification, object: window) {
-        $0.syncFocus()
-        return nil
-      }
-      observe(NSWindow.didResignKeyNotification, object: window) {
-        $0.syncFocus()
-        return nil
+      for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+        observe(name, object: window) {
+          $0.syncFocus()
+          return nil
+        }
       }
       // A create fails while every display sleeps, so it is tried again when one wakes.
       observe(NSWorkspace.screensDidWakeNotification, in: NSWorkspace.shared.notificationCenter) {
@@ -271,7 +269,7 @@
       if let surface { ghostty_surface_free(surface) }
     }
 
-    /// A config with `theme = light:X,dark:Y` picks its colors, including the selection colors, from this.
+    /// A config with `theme = light:X,dark:Y` picks its colors, selection colors included, from this.
     private func pushColorScheme() {
       guard let surface else { return }
       ghostty_surface_set_color_scheme(
@@ -331,7 +329,7 @@
     @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }
     @objc override func selectAll(_ sender: Any?) { binding("select_all") }
 
-    /// Greys out Copy without a selection and Paste without text, as in any terminal.
+    /// Greys out Copy without a selection and Paste without text.
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
       let action: PaneEdit.Action
       switch item.action {
@@ -340,10 +338,10 @@
       case #selector(selectAll(_:)): action = .selectAll
       default: return true
       }
-      return surface != nil
-        && PaneEdit.isEnabled(
-          action, hasSelection: surface.map { ghostty_surface_has_selection($0) } ?? false,
-          pasteboardHasText: NSPasteboard.general.string(forType: .string) != nil)
+      guard let surface else { return false }
+      return PaneEdit.isEnabled(
+        action, hasSelection: ghostty_surface_has_selection(surface),
+        pasteboardHasText: NSPasteboard.general.types?.contains(.string) == true)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
