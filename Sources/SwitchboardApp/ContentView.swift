@@ -207,8 +207,14 @@ struct Sidebar: View {
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
+  private var needsYou: Bool { model.manager?.state == .needsYou }
+
+  private var tooltip: String {
+    guard let manager = model.manager else { return "Start a session that manages the others through sb (⇧⌘M)" }
+    return needsYou ? "The Manager needs you: \(manager.reason) (⇧⌘M)" : "Open the Manager (⇧⌘M)"
+  }
+
   var body: some View {
-    let needsYou = model.manager?.state == .needsYou
     Button {
       model.openManager()
     } label: {
@@ -216,11 +222,7 @@ struct ManagerButton: View {
         .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
     }
     .accessibilityValue(needsYou ? AttentionState.needsYou.title : "")
-    .help(
-      model.manager.map {
-        $0.state == .needsYou ? "The Manager needs you: \($0.reason) (⇧⌘M)" : "Open the Manager (⇧⌘M)"
-      }
-        ?? "Start a session that manages the others through sb (⇧⌘M)")
+    .help(tooltip)
   }
 }
 
