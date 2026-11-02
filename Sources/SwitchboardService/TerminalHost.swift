@@ -123,10 +123,17 @@ final class TerminalHost {
     do {
       return PaneRow.parse(try run(["list-panes", "-a", "-F", TerminalHost.paneFormat]))
     } catch {
-      let why = "\(error)"
-      if why.contains("no server running") || why.contains("No such file or directory") { return [:] }
+      if TerminalHost.isNoServer(error) { return [:] }
       throw error
     }
+  }
+
+  /// Whether the error is tmux's own report that no server runs, which names
+  /// the missing socket as "No such file or directory" or says "no server
+  /// running". An error from starting tmux, such as a missing binary, is not.
+  static func isNoServer(_ error: Error) -> Bool {
+    guard let error = error as? APIError, error.description.hasPrefix("tmux ") else { return false }
+    return error.description.contains("no server running") || error.description.contains("No such file or directory")
   }
 
   /// The value of a tmux format for the pane, or nil when the pane is missing.

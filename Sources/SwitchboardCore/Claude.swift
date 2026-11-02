@@ -113,7 +113,8 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var livePids: [Int] { (pid.map { [$0] } ?? []) + (otherPids ?? []) }
 
   /// True when an interactive claude runs the session and waits at its prompt.
-  /// Exiting that claude loses no turn. When several claudes run the session,
+  /// Exiting that claude loses no turn, unless one starts after the listing
+  /// that read this status. When several claudes run the session,
   /// the row that `keepRank` picks stands for all of them.
   public var stoppable: Bool { pid != nil && job == nil && status == "idle" }
 

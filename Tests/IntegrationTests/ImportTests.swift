@@ -515,6 +515,58 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(external.terminationReason == .uncaughtSignal)
   }
 
+  @Test func stopNeverSignalsSbdPid1OrTheClaudeOfASwitchboardSession() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/own")
+    // A Switchboard session runs a claude of its own, which an external row can list by mistake.
+    let own = try sbd.new()
+    let ownPid = try #require(try sbd.waitFor(own.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    let ids = (sbd: newId(), init: newId(), zero: newId(), own: newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(ids.sbd, cwd: tree, name: "sbd", pid: sbd.sbdPid, status: "idle"),
+        agent(ids.`init`, cwd: tree, name: "init", pid: 1, status: "idle"),
+        agent(ids.zero, cwd: tree, name: "zero", pid: 0, status: "idle"),
+        agent(ids.own, cwd: tree, name: "own", pid: ownPid, status: "idle"),
+      ])
+    let names = ["sbd", "init", "zero", "own"]
+
+    let result = try sbd.client.importSessions(names, stop: names)
+
+    #expect(result.imported.isEmpty)
+    #expect(Set(reasons(result).keys) == Set(names))
+    #expect(Processes.exists(ownPid) && Processes.exists(sbd.sbdPid))
+    #expect(try sbd.get(own.id).live)
+  }
+
+  @Test func stopRefusesAClaudeThatAnUnnamedIdleSessionAlsoRunsInAndImportsBothWhenNamed() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/pair")
+    let claude = try stubClaude()
+    defer { if claude.isRunning { claude.terminate() } }
+    let pid = Int(claude.processIdentifier)
+    let (first, second) = (newId(), newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(first, cwd: tree, name: "first", pid: pid, status: "idle"),
+        agent(second, cwd: tree, name: "second", pid: pid, status: "idle"),
+      ])
+
+    let refused = try sbd.client.importSessions(["first"], stop: ["first"])
+
+    #expect(refused.imported.isEmpty)
+    #expect(reasons(refused)["first"]?.contains("Name both for --stop") == true)
+    #expect(claude.isRunning)
+
+    let both = try sbd.client.importSessions(["first", "second"], stop: ["first", "second"])
+
+    #expect(Set(both.imported.map(\.claudeSessionId)) == [first, second])
+    claude.waitUntilExit()
+    #expect(claude.terminationReason == .uncaughtSignal)
+  }
+
   @Test func stopKeepsTheBusyRowWhenTwoAccountsListOneSessionWithOnePid() throws {
     let sbd = try Instance(accounts: ["A", "B"])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/twice")
@@ -700,7 +752,8 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.client.sessions().filter { $0.claudeSessionId == id }.count == 1)
   }
 
-  @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Times out on the CI runner. Run it locally.")) func importsASessionOnceWhenTwoRequestsRaceForIt() async throws {
+  @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Times out on the CI runner. Run it locally."))
+  func importsASessionOnceWhenTwoRequestsRaceForIt() async throws {
     let sbd = try Instance(accounts: ["A"])
     let id = newId()
     try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "notes", job: "0badf00d")])
