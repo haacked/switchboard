@@ -87,6 +87,29 @@ struct Boom: Error {}
     draft.clear(ifStill: "hello")
     #expect(draft.text == "hello again")
   }
+
+  @Test func keepsTheTextWhenTheSendFails() async {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.send = { _, _ in throw Boom() }
+    let draft = MessageField.Draft()
+    draft.text = "hello"
+    draft.submit("a", to: model)
+    for _ in 0..<300 where model.actionError == nil { try? await Task.sleep(nanoseconds: 10_000_000) }
+    #expect(model.actionError != nil)
+    #expect(draft.text == "hello")
+  }
+
+  @Test func clearsTheTextWhenTheSendSucceeds() async {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.send = { _, _ in .null }
+    let draft = MessageField.Draft()
+    draft.text = "hello"
+    draft.submit("a", to: model)
+    for _ in 0..<300 where !draft.text.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+    #expect(draft.text.isEmpty)
+  }
 }
 
 @MainActor

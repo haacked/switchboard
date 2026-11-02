@@ -291,7 +291,7 @@ final class BoardModel: ObservableObject {
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
   /// `sent` runs only when sbd accepted the message. A second send to the
-  /// same session waits until the first one is answered.
+  /// same session does nothing until sbd answers the first.
   func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {
     guard sending.insert(id).inserted else { return }
     perform(

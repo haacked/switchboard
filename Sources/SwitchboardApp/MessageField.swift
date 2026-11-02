@@ -7,6 +7,13 @@ struct MessageField: View {
   final class Draft: ObservableObject {
     @Published var text = ""
 
+    /// Sends the trimmed text and empties the field once sbd accepts it, unless the user changed it meanwhile.
+    @MainActor func submit(_ session: String, to model: BoardModel) {
+      let sent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !sent.isEmpty else { return }
+      model.send(session, sent) { [weak self] in self?.clear(ifStill: sent) }
+    }
+
     /// Empties the field unless the user changed it after `sent` was sent.
     func clear(ifStill sent: String) {
       if text.trimmingCharacters(in: .whitespacesAndNewlines) == sent { text = "" }
@@ -32,9 +39,5 @@ struct MessageField: View {
     }
   }
 
-  private func send() {
-    let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
-    model.send(session, text) { draft.clear(ifStill: text) }
-  }
+  private func send() { draft.submit(session, to: model) }
 }
