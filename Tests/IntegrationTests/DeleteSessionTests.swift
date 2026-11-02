@@ -461,6 +461,20 @@ extension Instance {
     #expect(try remoteBranch(origin) == "")
   }
 
+  @Test func deletesASessionStartedFromAWorktreeThatIsGone() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let first = try sbd.worktreeSession(repo, branch: "haacked/first")
+    let second = try sbd.client.call(
+      "new", ["path": .string(first.cwd), "branch": "haacked/second"], as: SessionSummary.self)
+    #expect(try sbd.deleteSession(first.id).status == 0)
+    try FileManager.default.removeItem(atPath: second.cwd)
+    let r = try sbd.deleteSession(second.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(second.cwd) == false)
+  }
+
   @Test func deletesADoneSessionWhoseFolderAndItsParentAreGone() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)

@@ -432,7 +432,11 @@ public final class Service {
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
       branch: folder.branch, claudeSessionId: UUID().uuidString.lowercased(), model: args.model ?? config.model,
       created: nowMs())
-    if args.branch?.isEmpty == false { session.repo = (args.path as NSString).standardizingPath }
+    if args.branch?.isEmpty == false {
+      // The path can be a linked worktree, which goes away. The main checkout stays.
+      let path = (args.path as NSString).standardizingPath
+      session.repo = (try? worktreeEntries(path).first?.path) ?? path
+    }
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     entries[id] = Entry(session: session)
@@ -769,14 +773,27 @@ public final class Service {
     ]
   }
 
-  /// The session's repo, or throws when sbd made no worktree for the session.
+  /// The session's repo, or throws when sbd made no worktree for the session. A repo folder that is
+  /// gone (a session started from a linked worktree that was later removed) is replaced by the main
+  /// checkout of another session's worktree under the same <worktreeRoot>/<repo> folder.
   private func worktreeRepo(_ session: Session) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
-    return repo
+    if isDirectory(repo) { return repo }
+    let root = config.worktreeRoot.expandingTilde + "/"
+    if session.cwd.hasPrefix(root) {
+      let name = String(session.cwd.dropFirst(root.count).prefix { $0 != "/" })
+      let others = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
+      for folder in others where isDirectory(folder) {
+        if let main = try? worktreeEntries(folder).first?.path, (main as NSString).lastPathComponent == name {
+          return main
+        }
+      }
+    }
+    throw APIError("\(session.id)'s repo \(repo) is gone, and no other checkout of it is known.")
   }
 
   /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
