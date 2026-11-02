@@ -162,8 +162,8 @@ final class TerminalHost {
 
   /// Starts a pane in its own tmux session. When the session already exists,
   /// this leaves a running pane alone and starts a dead one again. With no
-  /// command, the pane runs the login shell. tmux stores `env` in the session for later respawns.
-  /// tmux also copies the variables that its `update-environment` option
+  /// command, the pane runs the login shell. tmux stores `env` in the session
+  /// for later respawns. tmux also copies the variables that its `update-environment` option
   /// names from each terminal that attaches. `-E` keeps it from copying them
   /// from sbd's own client. This removes those names in `env` from the
   /// session again. A value that the session holds for one of them then came

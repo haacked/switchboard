@@ -38,6 +38,11 @@ import Testing
     return try TerminalHost(home: Home(path: dir), config: Config())
   }
 
+  private func stop(_ host: TerminalHost) {
+    _ = try? host.run(["kill-server"])
+    try? FileManager.default.removeItem(atPath: (host.socket as NSString).deletingLastPathComponent)
+  }
+
   private func waitUntil(_ what: String, _ ok: () -> Bool) throws {
     for _ in 0..<100 {
       if ok() { return }
@@ -49,7 +54,7 @@ import Testing
   @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
   func createLeavesARunningPaneRunning() throws {
     let host = try host()
-    defer { _ = try? host.run(["kill-server"]) }
+    defer { stop(host) }
     try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
     let pid = try #require(try host.checkedPanes()["a"]).pid
     try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
@@ -59,7 +64,7 @@ import Testing
   @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
   func createStartsADeadPaneAgain() throws {
     let host = try host()
-    defer { _ = try? host.run(["kill-server"]) }
+    defer { stop(host) }
     try host.create("a", cwd: "/tmp", env: [:], command: "true")
     try waitUntil("the pane to exit") { (try? host.checkedPanes())?["a"]?.dead == true }
     try host.create("a", cwd: "/tmp", env: [:], command: "sleep 60")
