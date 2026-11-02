@@ -20,7 +20,10 @@ import Testing
 
   @Test func aPaneLeavesTheKeyboardWithAFieldOrTheOtherPane() {
     #expect(!PaneFocus.claimsKeyboard(isClaudePane: true, keyboardHolder: .someoneElse))
-    #expect(!PaneFocus.claimsKeyboard(isClaudePane: true, keyboardHolder: .thePane))
+  }
+
+  @Test func aPaneThatHoldsTheKeyboardDoesNotClaimItAgain() {
+    #expect(!PaneFocus.claimsKeyboard(isClaudePane: true, keyboardHolder: .thisPane))
   }
 }
 

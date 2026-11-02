@@ -11,6 +11,8 @@
     static let shared = GhosttyRuntime()
 
     private(set) var app: ghostty_app_t?
+    /// Kept for the soft config reloads that a color scheme change requests.
+    private(set) var config: ghostty_config_t?
 
     private init() {
       Self.pointToResources()
@@ -46,7 +48,26 @@
           let runtime = Unmanaged<GhosttyRuntime>.fromOpaque(userdata)
           DispatchQueue.main.async { MainActor.assumeIsolated { runtime.takeUnretainedValue().tick() } }
         },
-        action_cb: { _, _, _ in false },
+        action_cb: { app, target, action in
+          // set_color_scheme changes only the conditional state and asks the host to reload with it.
+          guard action.tag == GHOSTTY_ACTION_RELOAD_CONFIG, action.action.reload_config.soft,
+            let app, let userdata = ghostty_app_userdata(app)
+          else { return false }
+          return MainActor.assumeIsolated {
+            guard let config = Unmanaged<GhosttyRuntime>.fromOpaque(userdata).takeUnretainedValue().config
+            else { return false }
+            switch target.tag {
+            case GHOSTTY_TARGET_SURFACE:
+              guard let surface = target.target.surface else { return false }
+              ghostty_surface_update_config(surface, config)
+            case GHOSTTY_TARGET_APP:
+              ghostty_app_update_config(app, config)
+            default:
+              return false
+            }
+            return true
+          }
+        },
         read_clipboard_cb: { userdata, _, state in
           guard let view = GhosttySurfaceView.from(userdata), let surface = view.surface,
             let text = NSPasteboard.general.string(forType: .string)
@@ -78,7 +99,7 @@
         close_surface_cb: { _, _ in }
       )
       app = ghostty_app_new(&runtime, config)
-      ghostty_config_free(config)
+      self.config = config
       if app == nil { Self.log("ghostty_app_new failed") }
 
       NotificationCenter.default.addObserver(
@@ -234,15 +255,18 @@
 
     private var keyboardHolder: PaneFocus.KeyboardHolder {
       guard let responder = window?.firstResponder, responder !== window else { return .nobody }
-      return responder === self ? .thePane : .someoneElse
+      return responder === self ? .thisPane : .someoneElse
     }
 
-    private func syncFocus() {
+    private func syncFocus() { pushFocus(isFirstResponder: keyboardHolder == .thisPane) }
+
+    /// `isFirstResponder` is a parameter because `window.firstResponder` changes only after
+    /// `becomeFirstResponder` and `resignFirstResponder` return.
+    private func pushFocus(isFirstResponder: Bool) {
       guard let surface else { return }
       ghostty_surface_set_focus(
         surface,
-        PaneFocus.surfaceIsFocused(
-          windowIsKey: window?.isKeyWindow == true, isFirstResponder: keyboardHolder == .thePane))
+        PaneFocus.surfaceIsFocused(windowIsKey: window?.isKeyWindow == true, isFirstResponder: isFirstResponder))
     }
 
     /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd.
@@ -312,16 +336,13 @@
     }
 
     override func becomeFirstResponder() -> Bool {
-      if let surface {
-        ghostty_surface_set_focus(
-          surface, PaneFocus.surfaceIsFocused(windowIsKey: window?.isKeyWindow == true, isFirstResponder: true))
-      }
+      pushFocus(isFirstResponder: true)
       return true
     }
 
     override func resignFirstResponder() -> Bool {
       discardComposition()
-      if let surface { ghostty_surface_set_focus(surface, false) }
+      pushFocus(isFirstResponder: false)
       return true
     }
 
@@ -345,6 +366,7 @@
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+      guard event.type == .rightMouseDown else { return nil }
       let menu = NSMenu()
       menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
       menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")

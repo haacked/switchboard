@@ -7,7 +7,8 @@ enum PaneFocus {
   enum KeyboardHolder {
     /// The window itself, or no responder.
     case nobody
-    case thePane
+    case thisPane
+    /// A text field or the other pane.
     case someoneElse
   }
 
