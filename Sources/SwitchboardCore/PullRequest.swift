@@ -112,6 +112,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The Trunk queue state that the trunk-io comments show, and nil when no
   /// comment shows one.
   public var queue: TrunkQueueState?
+  /// When the comment that gives `queue` last changed, in milliseconds since
+  /// the epoch. nil when `queue` is nil or `.unknown`.
+  public var queueAt: Int64?
   /// The logins or team slugs whose review GitHub still asks for. A reviewer
   /// leaves the list when they submit a review. nil means the poll did not
   /// read the field, as in events that an older sbd recorded. An empty list

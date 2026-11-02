@@ -17,11 +17,14 @@ import Testing
 
   func pr(
     _ state: PRState = .open, checks: String? = nil, draft: Bool = false, reviewDecision: ReviewDecision? = nil,
-    verdicts: [Review] = [], reviews: [Review] = []
+    verdicts: [Review] = [], reviews: [Review] = [], queue: TrunkQueueState? = nil,
+    queueAt: Int64? = PRWaitTests.set + 1000
   ) -> PullRequest {
-    PullRequest(
+    var pr = PullRequest(
       id: "PR_1", number: 7, url: "", repo: "a/b", state: state, draft: draft, reviewDecision: reviewDecision,
-      verdicts: verdicts, reviews: reviews, checks: checks)
+      verdicts: verdicts, reviews: reviews, checks: checks, queue: queue)
+    pr.queueAt = queue == nil ? nil : queueAt
+    return pr
   }
 
   func review(_ author: String, _ state: String, _ at: String, bot: Bool? = nil) -> Review {
@@ -99,8 +102,34 @@ import Testing
   }
 
   @Test func theKindsForOtherPollersStayOpen() {
-    for kind in [Wait.Kind.queue, .deploy, .date, .manual, .session] {
+    for kind in [Wait.Kind.deploy, .date, .manual, .session] {
       #expect(wait(kind).resolution(of: pr(.merged, checks: "SUCCESS")) == nil)
     }
+  }
+
+  @Test func aQueueWaitResolvesWhenTheQueueLetsTheOpenPRGo() {
+    let queue = wait(.queue)
+    #expect(queue.resolution(of: pr(queue: .removed)) == "Trunk removed it from the queue")
+    #expect(queue.resolution(of: pr(queue: .merged)) == "Trunk merged it")
+    #expect(queue.resolution(of: pr(.merged)) == "it merged")
+    #expect(queue.resolution(of: pr(.closed)) == "it closed without merging")
+    #expect(queue.resolution(of: pr(.closed, queue: .removed)) == "it closed without merging")
+  }
+
+  @Test func aQueueWaitIgnoresAStatusFromBeforeItWasSet() {
+    let queue = wait(.queue)
+    for state in [TrunkQueueState.removed, .merged] {
+      #expect(queue.resolution(of: pr(queue: state, queueAt: PRWaitTests.set - 1000)) == nil)
+      #expect(queue.resolution(of: pr(queue: state, queueAt: PRWaitTests.set)) == nil)
+      #expect(queue.resolution(of: pr(queue: state, queueAt: nil)) == nil)
+    }
+  }
+
+  @Test func aQueueWaitStaysOpenWhileTrunkHoldsOrHasNotSeenThePR() {
+    let queue = wait(.queue)
+    for held in [TrunkQueueState.submitted, .pending, .testing, .passed, .failing, .queued, .unknown] {
+      #expect(queue.resolution(of: pr(queue: held)) == nil)
+    }
+    #expect(queue.resolution(of: pr()) == nil)
   }
 }
