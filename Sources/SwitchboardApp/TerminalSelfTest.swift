@@ -211,6 +211,7 @@ enum TerminalSelfTest {
     key(pane, "\u{7F}", code: 51)
     key(pane, "\u{1B}", code: 53)
     key(pane, "\t", code: 48)
+    // A real keyboard reports U+0019 for Shift-Tab in both characters and charactersIgnoringModifiers.
     key(pane, "\u{19}", code: 48, mods: .shift)
     await pause()
     log("up, down, left, delete, escape, tab, shift-tab")
