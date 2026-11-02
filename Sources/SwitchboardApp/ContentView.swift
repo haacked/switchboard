@@ -239,6 +239,7 @@ struct DeleteButton: View {
   let session: SessionSummary
 
   var body: some View {
+    let summary = BoardModel.deletePlan(session).summary
     Button {
       model.confirmingDelete = session.id
     } label: {
@@ -247,8 +248,8 @@ struct DeleteButton: View {
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
     .disabled(model.deleting.contains(session.id))
-    .accessibilityLabel("Delete \(session.name): \(BoardModel.deletePlan(session).summary)")
-    .help("Delete \(BoardModel.deletePlan(session).summary)…")
+    .accessibilityLabel("Delete \(session.name): \(summary)")
+    .help("Delete \(summary)…")
   }
 }
 
