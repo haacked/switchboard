@@ -126,6 +126,20 @@ extension Instance {
     #expect(try sbd.sb("triage").contains("sends: Use Postgres."))
   }
 
+  @Test func doesNotSummarizeTheManagersReplies() throws {
+    let sbd = try Instance()
+    let m = try JSONCoding.decode(SessionSummary.self, from: sbd.sb("manager", "--json"))
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("send", m.id, "ask")
+    try sbd.waitFor(m.id, "the reply") { $0.lastReply != nil }
+    // The other session's call runs after the Manager's would have, so the
+    // log holds both calls by the time its summary arrives.
+    let s = try sbd.new(prompt: "ask", name: "review-code")
+    try sbd.waitForTriageEvent(s.id)
+    #expect(sbd.summaryCalls().count == 1)
+    #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
+  }
+
   @Test func summarizesAgainAfterARestartThatLostTheCall() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask", name: "FAIL-SUMMARY")

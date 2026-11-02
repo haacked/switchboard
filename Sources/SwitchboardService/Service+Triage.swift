@@ -69,8 +69,10 @@ extension Service {
   func summarizeTurn(_ id: String) {
     guard config.triage.enabled, let e = entries[id] else { return }
     guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs())) else { return }
+    let session = summary(id)
+    guard Triage.mayQueue(session) else { return }
     let stop = e.facts.lastStop
-    let input = TriageSummarizer.input(session: summary(id), reply: e.facts.lastReply ?? "")
+    let input = TriageSummarizer.input(session: session, reply: e.facts.lastReply ?? "")
     var env = ProcessInfo.processInfo.environment.merging(paneEnv(id)) { $1 }
     // A summary call is not a session, so it gets no session id.
     env["SB_SESSION_ID"] = nil
