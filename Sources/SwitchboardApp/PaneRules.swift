@@ -5,7 +5,7 @@ import CoreGraphics
 
 enum PaneFocus {
   enum KeyboardHolder {
-    /// The window itself, or no responder.
+    /// The window itself, no responder, or a control such as the sidebar list.
     case nobody
     case thisPane
     /// A text field or the other pane.

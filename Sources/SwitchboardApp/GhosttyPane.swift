@@ -49,7 +49,8 @@
           DispatchQueue.main.async { MainActor.assumeIsolated { runtime.takeUnretainedValue().tick() } }
         },
         action_cb: { app, target, action in
-          // set_color_scheme changes only the conditional state and asks the host to reload with it.
+          // ghostty_surface_set_color_scheme records the new scheme and then requests a soft reload.
+          // Passing back the unchanged config makes libghostty re-pick settings such as `theme = light:X,dark:Y`.
           guard action.tag == GHOSTTY_ACTION_RELOAD_CONFIG, action.action.reload_config.soft,
             let app, let userdata = ghostty_app_userdata(app)
           else { return false }
@@ -255,7 +256,9 @@
 
     private var keyboardHolder: PaneFocus.KeyboardHolder {
       guard let responder = window?.firstResponder, responder !== window else { return .nobody }
-      return responder === self ? .thisPane : .someoneElse
+      if responder === self { return .thisPane }
+      // A text field's field editor is an NSText.
+      return responder is NSText || responder is GhosttySurfaceView ? .someoneElse : .nobody
     }
 
     private func syncFocus() { pushFocus(isFirstResponder: keyboardHolder == .thisPane) }
