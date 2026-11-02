@@ -16,6 +16,15 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   return s
 }
 
+/// A model that has applied `list`. `apply` sets the Dock badge, which needs NSApp.
+@MainActor
+func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) -> BoardModel {
+  _ = NSApplication.shared
+  let model = BoardModel()
+  model.apply(.success(list), followups: followups)
+  return model
+}
+
 @MainActor
 @Suite struct BoardModelSelection {
   func summary(_ id: String, state: AttentionState = .needsYou) -> SessionSummary {
@@ -206,10 +215,7 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
 @MainActor
 @Suite struct BoardModelManager {
   func model(_ list: [SessionSummary]) -> BoardModel {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    model.apply(.success(list), followups: nil)
-    return model
+    appliedModel(list)
   }
 
   @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
@@ -268,5 +274,75 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   @Test func aSessionSeenForTheFirstTimeDoesNotNotify() {
     let model = model([needsItem("a")])
     #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
+  }
+}
+
+@MainActor
+@Suite struct BoardModelSidebar {
+  func summary(_ id: String, parent: String? = nil, manager: Bool = false, state: AttentionState = .working)
+    -> SessionSummary
+  {
+    var s = needsItem(id, manager: manager, state: state)
+    s.parent = parent
+    return s
+  }
+
+  func model(_ sessions: [SessionSummary], followups: [SessionSummary]? = nil) -> BoardModel {
+    appliedModel(sessions, followups: followups)
+  }
+
+  /// The sidebar as "state: id, >child" lines.
+  func shown(_ model: BoardModel) -> [String] {
+    model.sidebarGroups.map { group in
+      "\(group.state): " + group.rows.map { String(repeating: ">", count: $0.depth) + $0.id }.joined(separator: ",")
+    }
+  }
+
+  @Test func aManagerChildIsTopLevel() {
+    let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("b", parent: "m")])
+    #expect(shown(model) == ["working: a,b"])
+  }
+
+  @Test func aChildOfAnOrdinarySessionStillNests() {
+    let model = model([summary("p"), summary("c", parent: "p")])
+    #expect(shown(model) == ["working: p,>c"])
+  }
+
+  @Test func theManagerHasNoSidebarRow() {
+    for state in [AttentionState.working, .needsYou, .done] {
+      let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
+      let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
+      #expect(!ids.contains("m"))
+      #expect(ids == ["a"])
+    }
+  }
+
+  @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
+    let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("g", parent: "a")])
+    #expect(shown(model) == ["working: a,>g"])
+  }
+
+  @Test func aManagerWithNoChildrenLeavesTheSidebarEmpty() {
+    #expect(model([summary("m", manager: true)]).sidebarGroups.isEmpty)
+  }
+
+  @Test func aChildInAnotherStateIsTopLevelInItsOwnGroup() {
+    let model = model([summary("p"), summary("c", parent: "p", state: .needsYou)])
+    #expect(shown(model) == ["needsYou: c", "working: p"])
+  }
+
+  @Test func aFollowupThatHasNotStartedShowsInItsGroup() {
+    let model = model([summary("a")], followups: [summary("f", state: .notStarted)])
+    #expect(shown(model) == ["working: a", "notStarted: f"])
+  }
+
+  @Test func theManagerStaysSelectableWithoutASidebarRow() {
+    let sessions = [summary("m", manager: true, state: .needsYou)]
+    let model = model(sessions)
+    model.selection = "m"
+    model.apply(.success(sessions), followups: nil)
+    #expect(model.manager?.id == "m")
+    #expect(model.selection == "m")
+    #expect(model.selected?.id == "m")
   }
 }

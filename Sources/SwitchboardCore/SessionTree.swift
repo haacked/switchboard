@@ -49,23 +49,4 @@ public enum SessionTree {
     for s in sessions { visit(s, 0) }
     return out
   }
-
-  /// `root` and its descendants as rows, `root` at depth 0. A Done descendant
-  /// has no row, because the list shows only sessions with work left. Its own
-  /// children that are not Done move up to its depth, so they stay under the
-  /// nearest ancestor that has a row.
-  public static func subtree(of root: String, in sessions: [SessionSummary]) -> [Row] {
-    guard let top = sessions.first(where: { $0.id == root }) else { return [] }
-    let children = children(sessions)
-    var out: [Row] = []
-    var seen: Set<String> = []
-    func visit(_ s: SessionSummary, _ depth: Int) {
-      guard seen.insert(s.id).inserted else { return }
-      let listed = s.id == root || s.state != .done
-      if listed { out.append(Row(session: s, depth: depth)) }
-      for child in children[s.id] ?? [] { visit(child, listed ? depth + 1 : depth) }
-    }
-    visit(top, 0)
-    return out
-  }
 }

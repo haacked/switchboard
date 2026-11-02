@@ -38,6 +38,8 @@ struct SwitchboardApp: App {
       CommandMenu("Session") {
         Button("Next Needing You") { model.selectNextNeedingYou() }
           .keyboardShortcut("j")
+        Button("Open Manager") { model.openManager() }
+          .keyboardShortcut("m", modifiers: [.command, .shift])
         Button("Show Queue") { model.show(.queue) }
           .keyboardShortcut("1")
         Button("Show Board") { model.show(.board) }
