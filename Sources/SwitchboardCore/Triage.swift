@@ -84,7 +84,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public func option(_ key: String) throws -> TriageOption {
     let key = key.trimmingCharacters(in: .whitespaces)
     if let n = Int(key) {
-      guard options.indices.contains(n - 1) else {
+      guard n > 0, options.indices.contains(n - 1) else {
         throw APIError("there is no option \(n). There are \(options.count)")
       }
       return options[n - 1]

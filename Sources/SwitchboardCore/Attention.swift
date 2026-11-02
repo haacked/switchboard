@@ -134,15 +134,20 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       if tool == "AskUserQuestion" { openQuestion = nil }
       if let running = runningTool, Attention.same(running, tool, id) { runningTool = nil }
       // A PermissionRequest has no tool_use_id, so its tool and input pair it
-      // with the call that finished.
-      if let open = openPermission, open.tool == tool, open.input == d["tool_input"] { openPermission = nil }
+      // with the call that finished. A prompt known only from a Notification
+      // has no tool, so any finished call clears it.
+      if let open = openPermission,
+        open.tool == Attention.notificationPromptTool || (open.tool == tool && open.input == d["tool_input"])
+      {
+        openPermission = nil
+      }
     case "Notification":
       switch d["notification_type"]?.string ?? "" {
       case "permission_prompt", "elicitation_dialog":
         // A prompt that no PermissionRequest reported, such as one from a hook
         // that failed.
         if openPermission == nil && openQuestion == nil && turnRunning {
-          openPermission = ToolCall(tool: "prompt", summary: d["message"]?.string ?? "a prompt", since: event.t)
+          openPermission = ToolCall(tool: Attention.notificationPromptTool, summary: d["message"]?.string ?? "a prompt", since: event.t)
         }
       case "idle_prompt":
         // Claude Code reports the idle prompt 60 s after a Stop. It sends none
@@ -221,6 +226,7 @@ public enum ReplyKind: Equatable, Sendable {
 /// and the GitHub poller provide. They have no CI rules, and no rule for a PR
 /// that Trunk's queue holds.
 public enum Attention {
+  static let notificationPromptTool = "prompt"
   static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs
   /// A subagent with no event for this long is taken to have lost its
@@ -309,9 +315,12 @@ public enum Attention {
   static func sentences(_ text: String) -> [String] {
     var out: [String] = []
     var current = ""
-    for ch in text {
+    let chars = Array(text)
+    for (i, ch) in chars.enumerated() {
       current.append(ch == "\n" ? " " : ch)
-      if ch == "?" || ch == "." || ch == "!" {
+      // A mark inside a name such as README.md or v1.2.3 does not end a sentence.
+      let ends = i + 1 == chars.count || chars[i + 1].isWhitespace
+      if ends && (ch == "?" || ch == "." || ch == "!") {
         out.append(current)
         current = ""
       }

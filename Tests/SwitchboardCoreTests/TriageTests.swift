@@ -203,6 +203,9 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(try item.option("postgres").label == "Postgres")
     #expect(throws: APIError.self) { try item.option("3") }
     #expect(throws: APIError.self) { try item.option("0") }
+    #expect(throws: APIError.self) { try item.option("-1") }
+    #expect(throws: APIError.self) { try item.option("-9223372036854775808") }
+    #expect(throws: APIError.self) { try item.option("9223372036854775807") }
     #expect(throws: APIError.self) { try item.option("mysql") }
   }
 }
