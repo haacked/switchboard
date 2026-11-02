@@ -337,7 +337,8 @@ public final class Service {
 
   /// The folder a new session runs in, and its branch. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
-  /// which this creates unless it exists.
+  /// which this creates unless it exists. An existing one must have the
+  /// branch checked out.
   func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?) {
     let path = (args.path as NSString).standardizingPath
     guard isDirectory(path) else { throw APIError("no folder \(path)") }
@@ -350,6 +351,10 @@ public final class Service {
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
+      let current = (try? gitOutput(dir, ["branch", "--show-current"])) ?? ""
+      guard current == branch else {
+        throw APIError("\(dir) has \(current.isEmpty ? "no branch" : current) checked out, not \(branch)")
+      }
       return (dir, branch)
     }
     let exists = branchExists(path, branch)
