@@ -91,6 +91,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       transcriptPath = d["transcript_path"]?.string
     case "running":
       live = true
+    case "account-moved":
+      transcriptPath = nil
     case "started", "resumed":
       lastLaunch = event.t
     case "imported":
