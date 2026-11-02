@@ -8,11 +8,18 @@ struct TriageDetail: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
 
+  enum Pane { case terminal, summary }
+
+  /// An unstarted follow-up has no terminals, so it shows its summary and Start button whatever the toggle says.
+  static func pane(for session: SessionSummary, showingTerminal: Bool) -> Pane {
+    showingTerminal && !session.waitsToStart ? .terminal : .summary
+  }
+
   var body: some View {
     VStack(spacing: 0) {
       bar
       Divider()
-      if model.showingTerminal {
+      if Self.pane(for: session, showingTerminal: model.showingTerminal) == .terminal {
         SessionView(session: session)
       } else {
         ScrollView {

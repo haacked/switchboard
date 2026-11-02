@@ -287,7 +287,19 @@ final class BoardModel: ObservableObject {
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
-  func send(_ id: String, _ text: String) { perform("send", ["session": .string(id), "text": .string(text)]) }
+  /// `sent` runs only when sbd accepted the message.
+  func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {
+    perform("send", ["session": .string(id), "text": .string(text)], then: { _ in sent?() })
+  }
+
+  /// Opens the window when the user has closed it. The always-present menu bar item sets this.
+  var showWindow: (() -> Void)?
+
+  /// Selects the session and brings its window forward, opening the window first when it is closed.
+  func reveal(_ id: String) {
+    selection = id
+    showWindow?()
+  }
 
   /// Answers a card: allow, deny with an optional message, or one answer per question.
   func answer(_ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil) {

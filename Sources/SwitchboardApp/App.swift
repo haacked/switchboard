@@ -18,9 +18,6 @@ struct SwitchboardApp: App {
           model.start()
           Snapshot.start(model)
         }
-        .onReceive(NotificationCenter.default.publisher(for: AppDelegate.openSession)) { note in
-          model.selection = note.object as? String
-        }
         .frame(minWidth: 900, minHeight: 560)
     }
     .defaultSize(width: 1400, height: 900)
@@ -62,15 +59,7 @@ struct SwitchboardApp: App {
     MenuBarExtra {
       MenuBarContent().environmentObject(model)
     } label: {
-      let count = model.needsYou.count
-      if count == 0 {
-        Image(systemName: "square.grid.3x3")
-      } else {
-        HStack(spacing: 2) {
-          Image(systemName: "exclamationmark.bubble.fill")
-          Text("\(count)")
-        }
-      }
+      MenuBarLabel().environmentObject(model)
     }
   }
 }
@@ -107,6 +96,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
     done([.banner, .sound])
+  }
+}
+
+/// The menu bar item exists while the app runs, unlike the window, so it
+/// handles a click on a notification when the window is closed.
+struct MenuBarLabel: View {
+  @EnvironmentObject var model: BoardModel
+  @Environment(\.openWindow) private var openWindow
+
+  var body: some View {
+    let count = model.needsYou.count
+    Group {
+      if count == 0 {
+        Image(systemName: "square.grid.3x3")
+      } else {
+        HStack(spacing: 2) {
+          Image(systemName: "exclamationmark.bubble.fill")
+          Text("\(count)")
+        }
+      }
+    }
+    .onAppear { model.showWindow = { openWindow(id: "main") } }
+    .onReceive(NotificationCenter.default.publisher(for: AppDelegate.openSession)) { note in
+      if let id = note.object as? String { model.reveal(id) }
+    }
   }
 }
 

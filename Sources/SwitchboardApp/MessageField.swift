@@ -28,7 +28,9 @@ struct MessageField: View {
   private func send() {
     let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
-    model.send(session, text)
-    draft.text = ""
+    model.send(session, text) {
+      // Text typed while the request ran stays.
+      if draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft.text = "" }
+    }
   }
 }
