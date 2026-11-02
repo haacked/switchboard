@@ -315,14 +315,13 @@ final class BoardModel: ObservableObject {
     var worktree: String?
     /// The local branch, or nil while the session's PR is not merged.
     var branch: String?
-    var remoteBranch: String?
 
     var message: String {
       var parts = ["the session \(name)"]
       if let worktree { parts.append("its worktree \(worktree) (if it is still there)") }
-      if let branch { parts.append("its local branch \(branch)") }
-      if let remoteBranch {
-        parts.append("the remote branch \(remoteBranch), only if it is still at the merged PR's head")
+      if let branch {
+        parts.append("its local branch \(branch)")
+        parts.append("the remote branch \(branch), only if it is still at the merged PR's head")
       }
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
@@ -349,27 +348,23 @@ final class BoardModel: ObservableObject {
     let merged = s.pr?.state == .merged
     let branch = s.repo != nil && merged ? s.branch : nil
     return DeletePlan(
-      name: s.name, worktree: s.repo == nil ? nil : s.cwd, branch: branch, remoteBranch: branch)
+      name: s.name, worktree: s.repo == nil ? nil : s.cwd, branch: branch)
   }
 
   /// The request that the icon sends: the same `rm` as the trash dialog, with the worktree, the
   /// branch, and the remote branch on. The branch is on only for a merged PR, because sbd
   /// refuses the whole delete for a branch with no merged PR.
-  nonisolated static func deleteRequest(_ s: SessionSummary) -> (op: String, args: [String: JSON]) {
+  nonisolated static func deleteRequest(_ s: SessionSummary) -> [String: JSON] {
     let plan = deletePlan(s)
-    return (
-      "rm",
-      [
-        "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
-        "remote_branch": .bool(plan.remoteBranch != nil),
-      ]
-    )
+    return [
+      "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
+      "remote_branch": .bool(plan.branch != nil),
+    ]
   }
 
   /// Deletes a Done session with everything `deletePlan` names. sbd runs the checks of `delete`.
   func deleteDone(_ s: SessionSummary) {
-    let request = Self.deleteRequest(s)
-    perform(request.op, request.args) { _ in
+    perform("rm", Self.deleteRequest(s)) { _ in
       if self.selection == s.id { self.selection = nil }
     }
   }

@@ -679,8 +679,11 @@ public final class Service {
       }
     }
     if removesBranch {
-      branch =
-        folderGone ? try checkGoneBranchIsMerged(repo!, session, pr: pr) : try checkBranchIsMerged(session, pr: pr)
+      if folderGone, let repo {
+        branch = try checkGoneBranchIsMerged(repo, session, pr: pr)
+      } else {
+        branch = try checkBranchIsMerged(session, pr: pr)
+      }
     }
     let fresh = buildSnapshot()
     try queue.sync {
@@ -840,12 +843,10 @@ public final class Service {
         "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."
       )
     }
-    let linked = try worktreePaths(repo).dropFirst()
-    let real = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
-    guard linked.contains(where: { real($0) == real(session.cwd) }) else {
+    guard let entry = try worktreeEntries(repo).dropFirst().first(where: { samePath($0.path, session.cwd) }) else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
-    if try worktreeEntry(repo, at: session.cwd)?.locked == true { throw lockedError(session.cwd) }
+    if entry.locked { throw lockedError(session.cwd) }
     // The flag keeps status from taking the index lock while claude commits.
     let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
     let changed = status.split(separator: "\n").count
