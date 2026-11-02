@@ -92,14 +92,10 @@ final class BoardModel: ObservableObject {
     var id: AttentionState { state }
   }
 
-  /// The Manager's pinned row above the groups. Sessions it started are not
-  /// under it.
-  var sidebarManagerRow: SessionSummary? { manager }
-
-  /// The sidebar's groups, in state order, without empty ones. The Manager is
-  /// not in a group, so a session it started is top level, like one with no
-  /// parent. A session whose parent is another session nests under that parent
-  /// while both are in the same group.
+  /// The sidebar's groups, in state order, without empty ones. The Manager has
+  /// its own row above the groups, so a session it started is top level, like
+  /// one with no parent. A session whose parent is another session nests under
+  /// that parent while both are in the same group.
   var sidebarGroups: [SidebarGroup] {
     let listed = board.filter { $0.manager != true }
     return AttentionState.allCases.compactMap { state in
