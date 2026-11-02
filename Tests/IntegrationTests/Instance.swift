@@ -20,7 +20,15 @@ extension Home {
 final class Instance {
   static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent()
-  static let bin = ProcessInfo.processInfo.environment["SB_BIN_DIR"] ?? root.appendingPathComponent(".build/debug").path
+  /// The folder that holds sb and sbd. SwiftPM builds them next to the test
+  /// bundle, so `swift test -c release` uses the release builds. `SB_BIN_DIR`
+  /// overrides the folder.
+  static let bin = binDir(
+    testBundle: Bundle(for: Instance.self).bundlePath, override: ProcessInfo.processInfo.environment["SB_BIN_DIR"])
+
+  static func binDir(testBundle: String, override: String?) -> String {
+    override ?? URL(fileURLWithPath: testBundle).deletingLastPathComponent().path
+  }
   static let stub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/claude-stub").path
   static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
   static let reap = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/reap").path

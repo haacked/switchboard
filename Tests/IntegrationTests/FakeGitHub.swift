@@ -206,17 +206,16 @@ final class FakeGitHub {
             return found
           })
       }
-      if query.contains("... on PullRequest") {
-        // The status and base queries both get the whole recorded node.
+      if let selection = Selection(query: query, on: "PullRequest") {
         let prQuery: PRQuery = query.contains("reviews(") ? .status : .base
         kind = prQuery.rawValue
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
         let failing = failingPRs[prQuery, default: []]
-        data["nodes"] = nodes({ prs[$0].map(JSON.object) }, failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
-      } else if query.contains("... on IssueComment") {
+        data["nodes"] = nodes({ prs[$0].map { selection.project(.object($0)) } }, failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
+      } else if let selection = Selection(query: query, on: "IssueComment") {
         kind = "bodies"
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
-        data["nodes"] = nodes({ bodies[$0] }, failing: failingComments.contains)
+        data["nodes"] = nodes({ bodies[$0].map(selection.project) }, failing: failingComments.contains)
       } else {
         kind = "lookup"
         var i = 0
