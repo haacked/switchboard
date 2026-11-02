@@ -439,6 +439,30 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     }
   }
 
+  @Test func theManagerHasAPinnedRowWithNoChildrenUnderIt() {
+    for state in [AttentionState.working, .needsYou, .done] {
+      let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
+      #expect(model.sidebarManagerRow?.id == "m")
+      #expect(!model.sidebarGroups.flatMap { $0.rows.map(\.id) }.contains("m"))
+    }
+  }
+
+  @Test func withoutAManagerThereIsNoPinnedRow() {
+    #expect(model([summary("a")]).sidebarManagerRow == nil)
+  }
+
+  @Test func theManagerStaysOutOfTheQueueWithAPinnedRow() {
+    let model = model([summary("m", manager: true, state: .needsYou), summary("a", state: .needsYou)])
+    #expect(model.sidebarManagerRow?.id == "m")
+    #expect(model.triage.map(\.id) == ["a"])
+  }
+
+  @Test func selectingThePinnedRowShowsTheManager() {
+    let model = model([summary("m", manager: true)])
+    model.selection = model.sidebarManagerRow?.id
+    #expect(model.selected?.id == "m")
+  }
+
   @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
     let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("g", parent: "a")])
     #expect(shown(model) == ["working: a,>g"])

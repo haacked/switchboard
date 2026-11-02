@@ -163,6 +163,13 @@ struct Sidebar: View {
 
   var body: some View {
     List(selection: $model.selection) {
+      if let manager = model.sidebarManagerRow {
+        Section {
+          SessionRow(session: manager).tag(manager.id)
+        } header: {
+          Text("Manager")
+        }
+      }
       ForEach(model.sidebarGroups) { group in
         let state = group.state
         Section(isExpanded: expanded(state)) {
@@ -202,7 +209,7 @@ struct Sidebar: View {
       Text(accountSwitchMessage(change))
     }
     .overlay {
-      if model.sidebarGroups.isEmpty && model.unreachable == nil {
+      if model.sidebarGroups.isEmpty && model.sidebarManagerRow == nil && model.unreachable == nil {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
           Button("Start a Session…") { model.showingNew = true }
