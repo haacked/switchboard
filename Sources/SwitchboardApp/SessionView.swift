@@ -10,6 +10,7 @@ final class SessionViewState: ObservableObject {
   @Published var confirmingRemove = false
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
+  @Published var removeOptions: RemoveOptions?
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -89,7 +90,7 @@ struct SessionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
-      if session.repo != nil {
+      if session.repo != nil, let options = ui.removeOptions {
         Toggle(
           isOn: Binding(
             get: { ui.deleteWorktree },
@@ -98,17 +99,18 @@ struct SessionView: View {
               if !$0 { ui.deleteBranch = false }
             })
         ) {
-          Text("Delete the worktree \(session.cwd)")
+          Text("Delete the worktree \(session.cwd)" + (options.worktreeNote.map { " (\($0))" } ?? ""))
         }
+        .disabled(!options.worktreeEnabled)
         .help(
           "Refuses when the worktree has uncommitted files, or commits that are on no remote branch unless the PR is merged."
         )
         if let branch = session.branch {
           Toggle(isOn: $ui.deleteBranch) {
-            Text("Delete the local branch \(branch)")
+            Text("Delete the local branch \(branch)" + (options.branchNote.map { " (\($0))" } ?? ""))
           }
           .padding(.leading, 20)
-          .disabled(!ui.deleteWorktree)
+          .disabled(!options.branchEnabled || !ui.deleteWorktree)
           .help("Refuses unless the session's PR is merged and the branch has no commit after it.")
         }
         Text(
@@ -175,6 +177,10 @@ struct SessionView: View {
               ? "Mark the session not done. It returns to its own group on the board, and to the Queue if it needs you or claude can continue."
               : "Mark the session done. It leaves the Queue and moves to Done on the board.")
         Button(role: .destructive) {
+          let options = RemoveOptions(session)
+          ui.removeOptions = options
+          ui.deleteWorktree = options.worktree
+          ui.deleteBranch = options.branch
           ui.confirmingRemove = true
         } label: {
           Image(systemName: "trash")
