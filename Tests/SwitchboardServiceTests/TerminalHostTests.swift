@@ -11,6 +11,16 @@ import Testing
       TerminalHost.isNoServer(APIError("tmux list-panes: error connecting to /tmp/s (No such file or directory)")))
   }
 
+  @Test func readsTheErrorThatARealTmuxPrintsForAMissingSocketAsNoServer() throws {
+    guard let tmux = findExecutable("tmux") else { return }
+    let socket = "/tmp/sb-\(getpid())-none/s"
+    let r = try runCommand(tmux, ["-S", socket, "list-panes", "-a"])
+    #expect(r.status != 0)
+    // TerminalHost.run reports a failed tmux command in this form.
+    let error = APIError("tmux list-panes: \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+    #expect(TerminalHost.isNoServer(error))
+  }
+
   @Test func doesNotReadOtherFailuresAsNoServer() {
     #expect(!TerminalHost.isNoServer(APIError("tmux list-panes: error connecting to /tmp/s (Permission denied)")))
     // Starting tmux failed, as with a missing binary. tmux never ran, so it reported nothing about a server.

@@ -172,10 +172,12 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
     }
     return rows.compactMap { row in
       guard let id = row["sessionId"]?.string, let cwd = row["cwd"]?.string else { return nil }
-      return ClaudeSession(
+      var session = ClaudeSession(
         id: id, name: row["name"]?.string, cwd: cwd, account: account, status: row["status"]?.string,
-        job: row["id"]?.string, pid: row["pid"]?.int.flatMap { (1...Int(Int32.max)).contains($0) ? $0 : nil },
-        seen: seen)
+        job: row["id"]?.string, pid: row["pid"]?.int, seen: seen)
+      // A pid that can't name a process means no claude runs the session.
+      if let pid = session.pid, !Processes.isValidPid(pid) { session.clearProcess() }
+      return session
     }
   }
 

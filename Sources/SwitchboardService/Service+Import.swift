@@ -33,15 +33,18 @@ extension Service {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
     let name = args["name"]?.string
-    let stopRefs = Set(args["stop"]?.array?.compactMap(\.string) ?? []).intersection(refs)
+    let stopRefs = args["stop"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     if name != nil && refs.count > 1 { throw APIError("a name fits only one imported session") }
     let candidates = try importCandidates()
-    // Only a ref in both `refs` and `stop` that names exactly one session lets its claude exit.
-    let stopped = Set(
-      stopRefs.compactMap { ref -> String? in
-        let named = Service.matches(ref, in: candidates)
-        return named.count == 1 ? named[0].id : nil
-      })
+    func named(_ refs: [String]) -> Set<String> {
+      Set(
+        refs.compactMap { ref in
+          let found = Service.matches(ref, in: candidates)
+          return found.count == 1 ? found[0].id : nil
+        })
+    }
+    // The claude of a session exits only when a ref and a stop entry both name that one session.
+    let stopped = named(refs).intersection(named(stopRefs))
     var refused: [Refusal] = []
     var chosen: [(ref: String, session: ClaudeSession)] = []
     queue.sync {
@@ -54,6 +57,7 @@ extension Service {
         }
       }
     }
+    refuseSharedClaudes(of: &chosen, among: candidates, into: &refused)
     // Only a stoppable session can still run here. Its claude exits off the state queue.
     let outcomes = concurrentMap(chosen) { ($0, $0.session.running ? exitClaude(of: $0.session) : nil) }
     chosen = []
@@ -181,7 +185,7 @@ extension Service {
   private func exitClaude(of s: ClaudeSession) -> String? {
     let label = s.label
     let pids = s.livePids
-    if let bad = pids.first(where: { $0 <= 1 || $0 == Int(getpid()) || $0 > Int(Int32.max) }) {
+    if let bad = pids.first(where: { !Processes.isValidPid($0) || $0 == Int(getpid()) }) {
       return refuseToSignal(s, bad)
     }
     let snapshot: Snapshot
@@ -215,6 +219,38 @@ extension Service {
     "\(s.label)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
   }
 
+  /// Moves each chosen session whose claude also runs a listed session that
+  /// is not chosen to `refused`, because exiting that claude would end the
+  /// other session too. Refusing one session can leave another without its
+  /// companion, so this repeats until none moves.
+  private func refuseSharedClaudes(
+    of chosen: inout [(ref: String, session: ClaudeSession)], among candidates: [ClaudeSession],
+    into refused: inout [Refusal]
+  ) {
+    var moved = true
+    while moved {
+      moved = false
+      let ids = Set(chosen.map(\.session.id))
+      for item in chosen {
+        let s = item.session
+        let other = candidates.first {
+          $0.id != s.id && !ids.contains($0.id) && !Set($0.livePids).isDisjoint(with: s.livePids)
+        }
+        guard let other else { continue }
+        let pid = Set(other.livePids).intersection(s.livePids).min() ?? 0
+        refused.append(
+          Refusal(
+            ref: item.ref,
+            reason:
+              "\(s.label) shares its claude (pid \(pid)) with \(other.label), which isn't being imported. Import both together, or exit claude there, then import it."
+          ))
+        chosen.removeAll { $0.session.id == s.id }
+        moved = true
+        break
+      }
+    }
+  }
+
   /// The candidates that the ref names: those whose id starts with it, or whose name it is.
   static func matches(_ ref: String, in candidates: [ClaudeSession]) -> [ClaudeSession] {
     candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
@@ -222,8 +258,8 @@ extension Service {
 
   /// The candidate that the ref names, or why it can't be imported. With
   /// `stopped`, an idle interactive session passes although a claude runs it.
-  /// It is refused when another listed session runs in a claude that also runs
-  /// this one, unless that session is idle and in `stopped` too.
+  /// It is refused when a listed session that is not stoppable runs in a
+  /// claude that also runs this one.
   private func resolve(_ ref: String, in candidates: [ClaudeSession], stopped: Set<String>) -> Result<
     ClaudeSession, APIError
   > {
@@ -239,17 +275,16 @@ extension Service {
     let label = c.label
     // Exiting a claude ends every session that runs in it. Another listed
     // session that shares the claude must be one that this request may exit.
-    let sharers = candidates.filter { $0.id != c.id && !Set($0.livePids).isDisjoint(with: c.livePids) }
-    let blocker = sharers.first { !$0.stoppable } ?? sharers.first { !stopped.contains($0.id) }
-    if c.stoppable, let other = blocker {
+    if c.stoppable,
+      let other = candidates.first(where: {
+        $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
+      })
+    {
       let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
-      let shares = "\(label) shares its claude (pid \(pid)) with \(other.label)"
-      if !other.stoppable {
-        return .failure(APIError("\(shares), which import can't exit. Exit claude there, then import it."))
-      }
-      if stopped.contains(c.id) {
-        return .failure(APIError("\(shares). Import both together, or exit claude there, then import it."))
-      }
+      return .failure(
+        APIError(
+          "\(label) shares its claude (pid \(pid)) with \(other.label), which import can't exit. Exit claude there, then import it."
+        ))
     }
     if !(stopped.contains(c.id) && c.stoppable), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }

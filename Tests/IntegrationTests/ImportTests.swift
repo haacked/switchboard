@@ -549,10 +549,49 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
     let listed = try sbd.client.importable().sessions
 
-    #expect(listed.count == 3 && listed.allSatisfy { !$0.running })
+    #expect(listed.count == 3 && listed.allSatisfy { !$0.running && $0.status == nil })
     let result = try sbd.client.importSessions(pids.map { "p\($0)" }, stop: pids.map { "p\($0)" })
     #expect(result.refused.isEmpty && result.imported.count == 3)
     #expect(try sbd.client.call("ping") != nil)
+  }
+
+  @Test func stopMatchesARefAndAStopEntryThatNameOneSessionInDifferentWays() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/spelling")
+    let claude = try stubClaude()
+    defer { if claude.isRunning { claude.terminate() } }
+    let id = newId()
+    try sbd.writeAgents(
+      "A", [agent(id, cwd: tree, name: "named", pid: Int(claude.processIdentifier), status: "idle")])
+
+    let result = try sbd.client.importSessions(["named"], stop: [String(id.prefix(12))])
+
+    #expect(result.imported.map(\.claudeSessionId) == [id])
+    claude.waitUntilExit()
+    #expect(claude.terminationReason == .uncaughtSignal)
+  }
+
+  @Test func stopLeavesASharedClaudeRunningWhenOneOfItsSessionsIsRefusedForAnotherReason() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/refused")
+    let claude = try stubClaude()
+    defer { if claude.isRunning { claude.terminate() } }
+    let pid = Int(claude.processIdentifier)
+    let (kept, gone) = (newId(), newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(kept, cwd: tree, name: "kept", pid: pid, status: "idle"),
+        agent(gone, cwd: "\(sbd.home.path)/removed", name: "gone", pid: pid, status: "idle"),
+      ])
+
+    // Both are named for stop, but the folder of "gone" no longer exists, so import refuses it.
+    let result = try sbd.client.importSessions(["kept", "gone"], stop: ["kept", "gone"])
+
+    #expect(result.imported.isEmpty)
+    #expect(Set(reasons(result).keys) == ["kept", "gone"])
+    #expect(reasons(result)["kept"]?.contains("which isn't being imported") == true)
+    #expect(claude.isRunning)
   }
 
   @Test func stopLeavesAClaudeRunningWhoseOtherSessionOnlyTheStopListNames() throws {
