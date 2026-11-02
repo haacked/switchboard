@@ -430,13 +430,18 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: p,>c"])
   }
 
-  @Test func theManagerHasNoSidebarRow() {
+  @Test func theManagerIsPinnedAndNotInAStateGroup() {
     for state in [AttentionState.working, .needsYou, .done] {
       let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
+      #expect(model.manager?.id == "m")
       let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
       #expect(!ids.contains("m"))
       #expect(ids == ["a"])
     }
+  }
+
+  @Test func withoutAManagerThereIsNoPinnedRow() {
+    #expect(model([summary("a")]).manager == nil)
   }
 
   @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
@@ -444,8 +449,25 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: a,>g"])
   }
 
-  @Test func aManagerWithNoChildrenLeavesTheSidebarEmpty() {
-    #expect(model([summary("m", manager: true)]).sidebarGroups.isEmpty)
+  @Test func aManagerWithNoChildrenLeavesTheGroupsEmptyButNotTheSidebar() {
+    let model = model([summary("m", manager: true)])
+    #expect(model.sidebarGroups.isEmpty)
+    #expect(!model.sidebarIsEmpty)
+  }
+
+  @Test func withNoSessionsTheSidebarIsEmpty() {
+    #expect(model([]).sidebarIsEmpty)
+  }
+
+  @Test func ordinarySessionsWithoutAManagerFillTheSidebar() {
+    #expect(!model([summary("a")]).sidebarIsEmpty)
+  }
+
+  @Test func anUnreachableServiceIsNotAnEmptySidebar() {
+    struct Down: Error {}
+    let model = model([])
+    model.apply(.failure(Down()), followups: nil)
+    #expect(!model.sidebarIsEmpty)
   }
 
   @Test func aChildInAnotherStateIsTopLevelInItsOwnGroup() {
@@ -458,7 +480,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: a", "notStarted: f"])
   }
 
-  @Test func theManagerStaysSelectableWithoutASidebarRow() {
+  @Test func theManagerStaysSelectedAcrossARefresh() {
     let sessions = [summary("m", manager: true, state: .needsYou)]
     let model = model(sessions)
     model.selection = "m"
