@@ -74,7 +74,7 @@ final class BoardModel: ObservableObject {
   private var followupsRead = Date.distantPast
 
   /// The Manager stays out of the Queue, the Dock badge, and ⌘J. The toolbar
-  /// star shows when it needs you.
+  /// star fills and turns the Needs you color while it needs you.
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayQueue($0) } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }

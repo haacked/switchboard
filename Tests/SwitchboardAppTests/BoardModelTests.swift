@@ -16,6 +16,15 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   return s
 }
 
+/// A model that has applied `list`. `apply` sets the Dock badge, which needs NSApp.
+@MainActor
+func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) -> BoardModel {
+  _ = NSApplication.shared
+  let model = BoardModel()
+  model.apply(.success(list), followups: followups)
+  return model
+}
+
 @MainActor
 @Suite struct BoardModelSelection {
   func summary(_ id: String, state: AttentionState = .needsYou) -> SessionSummary {
@@ -206,10 +215,7 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
 @MainActor
 @Suite struct BoardModelManager {
   func model(_ list: [SessionSummary]) -> BoardModel {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    model.apply(.success(list), followups: nil)
-    return model
+    appliedModel(list)
   }
 
   @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
@@ -273,22 +279,16 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
 
 @MainActor
 @Suite struct BoardModelSidebar {
-  func summary(_ id: String, parent: String? = nil, manager: Bool? = nil, state: AttentionState = .working)
+  func summary(_ id: String, parent: String? = nil, manager: Bool = false, state: AttentionState = .working)
     -> SessionSummary
   {
-    var s = SessionSummary(
-      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
-      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+    var s = needsItem(id, manager: manager, state: state)
     s.parent = parent
-    s.manager = manager
     return s
   }
 
-  func model(_ sessions: [SessionSummary]) -> BoardModel {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    model.apply(.success(sessions), followups: nil)
-    return model
+  func model(_ sessions: [SessionSummary], followups: [SessionSummary]? = nil) -> BoardModel {
+    appliedModel(sessions, followups: followups)
   }
 
   /// The sidebar as "state: id, >child" lines.
@@ -332,9 +332,7 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   }
 
   @Test func aFollowupThatHasNotStartedShowsInItsGroup() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    model.apply(.success([summary("a")]), followups: [summary("f", state: .notStarted)])
+    let model = model([summary("a")], followups: [summary("f", state: .notStarted)])
     #expect(shown(model) == ["working: a", "notStarted: f"])
   }
 
