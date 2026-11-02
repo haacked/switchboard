@@ -212,12 +212,14 @@ public enum VerdictSource: Equatable, Sendable {
 
 /// The state and its reason line. `kind` is the triage kind of the item that
 /// a rule verdict becomes, and `source` tells a reply verdict from a rule
-/// verdict.
+/// verdict. Two verdicts are equal when their state and reason are.
 public struct Verdict: Equatable, Sendable {
   public var state: AttentionState
   public var reason: String
   public var kind: TriageKind = .action
   public var source: VerdictSource = .rule
+
+  public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }
 
 public enum ReplyKind: Equatable, Sendable {
