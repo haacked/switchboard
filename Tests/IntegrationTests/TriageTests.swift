@@ -128,7 +128,7 @@ extension Instance {
 
   @Test func doesNotSummarizeTheManagersReplies() throws {
     let sbd = try Instance()
-    let m = try decode(sbd.sb("manager", "--json"))
+    let m = try JSONCoding.decode(SessionSummary.self, from: sbd.sb("manager", "--json"))
     try sbd.waitFor(m.id, "the stub") { $0.live }
     try sbd.sb("send", m.id, "ask")
     try sbd.waitFor(m.id, "the reply") { $0.lastReply != nil }
@@ -139,8 +139,6 @@ extension Instance {
     #expect(sbd.summaryCalls().count == 1)
     #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
   }
-
-  func decode(_ text: String) throws -> SessionSummary { try JSONCoding.decode(SessionSummary.self, from: text) }
 
   @Test func summarizesAgainAfterARestartThatLostTheCall() throws {
     let sbd = try Instance()
