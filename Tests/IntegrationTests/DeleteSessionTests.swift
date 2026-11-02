@@ -424,6 +424,7 @@ extension Instance {
     #expect(r.status != 0)
     #expect(r.stderr.contains("kept \(Self.mergedBranch)"))
     #expect(r.stderr.contains("checked out"))
+    #expect(r.stderr.contains("also kept the remote branch"))
     #expect(try sbd.client.sessions().isEmpty)
     #expect(try remoteBranch(origin) != "")
   }
@@ -489,6 +490,34 @@ extension Instance {
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     #expect(try sbd.client.sessions().isEmpty)
     #expect(try remoteBranch(origin) == "")
+  }
+
+  @Test func keepsTheRemoteBranchOfAnOpenPRWhenTheFolderAndBranchAreGone() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    github.change(122953) { $0["state"] = "OPEN" }
+    try sbd.poll(all: true)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "worktree", "prune")
+    try sbd.git(repo, "branch", "-D", Self.mergedBranch)
+    let r = try sbd.deleteDoneSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try remoteBranch(origin) != "")
+  }
+
+  @Test func refusesABranchWhoseTipIsBehindTheMergedPRsHead() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try mergedBranchSession(github)
+    try sbd.commit(s.cwd, "b.txt")
+    let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    try sbd.git(s.cwd, "reset", "-q", "--hard", "HEAD~1")
+    github.change(122953) { $0["headRefOid"] = .string(head) }
+    try sbd.poll(all: true)
+    let r = try sbd.deleteSessionAndBranch(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("not in its merged PR"))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
   }
 
   @Test func refusesALockedWorktreeWhoseFolderIsGoneBeforeStoppingAnything() throws {

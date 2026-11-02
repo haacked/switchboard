@@ -324,7 +324,7 @@ public final class Service {
   /// it on `branch` gets.
   func worktreeLocation(_ path: String, _ branch: String) throws -> (main: String, dir: String) {
     // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreePaths(path).first ?? path
+    let main = try worktreeEntries(path).first?.path ?? path
     return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
   }
 
@@ -358,11 +358,6 @@ public final class Service {
     _ = try gitOutput(
       path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"])
     return (dir, branch)
-  }
-
-  /// The repo's worktrees, starting with the main checkout.
-  func worktreePaths(_ repo: String) throws -> [String] {
-    try worktreeEntries(repo).map(\.path)
   }
 
   struct WorktreeEntry {
@@ -651,7 +646,9 @@ public final class Service {
   /// no other. The branch checks read the branch from the main repo, because
   /// the worktree is gone.
   /// The remote branch is deleted only after the local branch is, and only when
-  /// it is at the merged PR's head. Otherwise it stays and the call throws.
+  /// it is at the merged PR's head. A remote branch at another commit stays and
+  /// the call throws. Without a merged PR for the branch, the remote branch is
+  /// left alone and the call succeeds.
   private func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
@@ -756,14 +753,20 @@ public final class Service {
     ]
   }
 
-  /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
-  /// worktree for it or git keeps the worktree locked.
-  private func checkGoneWorktree(_ session: Session) throws -> String {
+  /// The session's repo, or throws when sbd made no worktree for the session.
+  private func worktreeRepo(_ session: Session) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
+    return repo
+  }
+
+  /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
+  /// worktree for it or git keeps the worktree locked.
+  private func checkGoneWorktree(_ session: Session) throws -> String {
+    let repo = try worktreeRepo(session)
     if let entry = try worktreeEntry(repo, at: session.cwd), entry.locked { throw lockedError(session.cwd) }
     return repo
   }
@@ -832,7 +835,13 @@ public final class Service {
       throw APIError("\(branch.name) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
     guard branchExists(repo, branch.name) else { throw APIError("\(branch.name) no longer exists.") }
-    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"]), of: branch.name, inMerged: pr)
+    let tip = try gitOutput(repo, ["rev-parse", "refs/heads/\(branch.name)"])
+    guard tip == branch.tip else {
+      throw APIError(
+        "\(branch.name) moved after the check, so it may have commits that are not in its merged PR \(pr.url). Keep the branch."
+      )
+    }
+    try requireTip(tip, of: branch.name, inMerged: pr)
     let checkedOut = try worktreeEntries(repo).contains { entry in
       entry.branch == branch.name && !(path.map { samePath(entry.path, $0) } ?? false)
     }
@@ -846,11 +855,7 @@ public final class Service {
   /// leaves the commits on no remote branch and `worktree remove` keeps the
   /// branch. Any git failure refuses the removal.
   private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool, sharedWith: String?) throws -> String {
-    guard let repo = session.repo else {
-      throw APIError(
-        "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
-      )
-    }
+    let repo = try worktreeRepo(session)
     if let sharedWith {
       throw APIError(
         "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."

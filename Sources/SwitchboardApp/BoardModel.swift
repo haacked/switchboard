@@ -63,6 +63,10 @@ final class BoardModel: ObservableObject {
   private var drafts: [Int64: CardView.Draft] = [:]
 
   let client = Client()
+  /// Sends one request to sbd. Tests replace it.
+  lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
+    try client.call(op, args, timeout: 300)
+  }
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
@@ -205,9 +209,9 @@ final class BoardModel: ObservableObject {
   func perform(
     _ op: String, _ args: [String: JSON], then: ((JSON) -> Void)? = nil, finally: (() -> Void)? = nil
   ) {
-    let client = client
+    let send = send
     worker.async {
-      let result = Result { try client.call(op, args, timeout: 300) }
+      let result = Result { try send(op, args) }
       Task { @MainActor in
         switch result {
         case .success(let value):
@@ -315,7 +319,7 @@ final class BoardModel: ObservableObject {
     var name: String
     /// The worktree's path, or nil when sbd made no worktree for the session.
     var worktree: String?
-    /// The local branch, or nil while the session's PR is not merged.
+    /// The local branch, or nil when sbd made no worktree for the session or its PR is not merged.
     var branch: String?
 
     /// What the delete icon's label and tooltip say it removes.

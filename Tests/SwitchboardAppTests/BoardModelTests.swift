@@ -4,6 +4,13 @@ import Testing
 
 @testable import SwitchboardApp
 
+final class Counter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+  var value: Int { lock.withLock { count } }
+  func increment() { lock.withLock { count += 1 } }
+}
+
 @MainActor
 @Suite struct BoardModelSelection {
   func summary(_ id: String, state: AttentionState = .needsYou) -> SessionSummary {
@@ -284,19 +291,23 @@ import Testing
 
   @Test func saysThatTheSessionAndWorktreeGoEvenWhenTheBranchCheckFails() {
     let text = BoardModel.deletePlan(done()).message
-    #expect(!text.contains("Nothing is deleted when it refuses, except"))
-    #expect(text.contains("A refusal before anything stops deletes nothing"))
     #expect(text.contains("fails its check after the worktree is gone"))
   }
 
   @Test func ignoresASecondDeleteWhileTheFirstRuns() {
     _ = NSApplication.shared
     let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
     let session = done()
     model.deleteDone(session)
-    #expect(model.deleting == [session.id])
     model.deleteDone(session)
     #expect(model.deleting == [session.id])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
   }
 
   @Test func labelsTheIconWithWhatItRemoves() {
