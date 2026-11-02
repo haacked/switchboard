@@ -193,6 +193,7 @@ swift build
 bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/test-gui        # opens the app's window and checks the bytes its terminal sends; needs a logged-in Mac session
+bin/fmt             # formats Sources, Tests and Package.swift with swift format; --check lists files that differ and exits 1
 bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
 ```
