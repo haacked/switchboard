@@ -70,14 +70,28 @@ final class BoardModel: ObservableObject {
   private var loaded = false
   private var followupsRead = Date.distantPast
 
-  /// The Manager is pinned in the sidebar, so the Queue leaves it out.
+  /// The toolbar shows the Manager, so the Queue leaves it out.
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && $0.manager != true } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
 
-  /// The Manager, then the sessions it started and theirs, each under its parent.
-  var managerTree: [SessionTree.Row] {
-    manager.map { SessionTree.subtree(of: $0.id, in: sessions) } ?? []
+  /// A state's sessions in the sidebar, each one followed by its children.
+  struct SidebarGroup: Identifiable {
+    var state: AttentionState
+    var rows: [SessionTree.Row]
+    var id: AttentionState { state }
+  }
+
+  /// The sidebar's groups, in state order, without empty ones. The Manager has
+  /// no row, so a session it started is top level, like one with no parent. A
+  /// session whose parent is another session nests under that parent while
+  /// both are in the same group.
+  var sidebarGroups: [SidebarGroup] {
+    let listed = board.filter { $0.manager != true }
+    return AttentionState.allCases.compactMap { state in
+      let group = listed.filter { $0.state == state }
+      return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))
+    }
   }
 
   var triage: [SessionSummary] { Triage.order(sessions) }

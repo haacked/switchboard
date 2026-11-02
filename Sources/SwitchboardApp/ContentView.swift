@@ -101,6 +101,7 @@ struct ContentView: View {
         .labelsHidden()
         .help("Show the Queue (⌘1) or the Board (⌘2)")
       }
+      ToolbarItem { ManagerButton() }
       ToolbarItem {
         if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
           Menu {
@@ -148,25 +149,22 @@ struct Sidebar: View {
 
   var body: some View {
     List(selection: $model.selection) {
-      ManagerSection()
-      ForEach(AttentionState.allCases, id: \.self) { state in
-        let group = model.board.filter { $0.state == state && $0.manager != true }
-        if !group.isEmpty {
-          Section(isExpanded: expanded(state)) {
-            ForEach(SessionTree.rows(group)) { row in
-              SessionRow(session: row.session).padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
-                .contextMenu {
-                  if state == .done {
-                    Button("Delete Session and Worktree…", role: .destructive) { model.confirmingDelete = row.id }
-                  }
+      ForEach(model.sidebarGroups) { group in
+        let state = group.state
+        Section(isExpanded: expanded(state)) {
+          ForEach(group.rows) { row in
+            SessionRow(session: row.session).padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
+              .contextMenu {
+                if state == .done {
+                  Button("Delete Session and Worktree…", role: .destructive) { model.confirmingDelete = row.id }
                 }
-            }
-          } header: {
-            HStack {
-              Text(state.title)
-              Spacer()
-              Text("\(group.count)").foregroundStyle(.secondary)
-            }
+              }
+          }
+        } header: {
+          HStack {
+            Text(state.title)
+            Spacer()
+            Text("\(group.rows.count)").foregroundStyle(.secondary)
           }
         }
       }
@@ -204,35 +202,29 @@ struct Sidebar: View {
   }
 }
 
-/// The pinned Manager and the sessions it started, each under its parent.
-struct ManagerSection: View {
+/// Opens the Manager, or starts it. The star turns the Needs you color and
+/// fills while the Manager needs you, because the Queue and the sidebar leave it out.
+struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    Section {
-      if model.manager == nil {
-        Button {
-          model.openManager()
-        } label: {
-          Label("Start the Manager", systemImage: "star")
-        }
-        .buttonStyle(.plain)
-        .help("Start a session that manages the others through sb")
-      }
-      ForEach(model.managerTree) { row in
-        SessionRow(session: row.session, pinned: row.depth == 0)
-          .padding(.leading, CGFloat(row.depth) * 14)
-          .tag(row.id)
-      }
-    } header: {
-      Text("Manager")
+    let needsYou = model.manager?.state == .needsYou
+    Button {
+      model.openManager()
+    } label: {
+      Label("Manager", systemImage: needsYou ? "star.fill" : "star")
+        .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
     }
+    .help(
+      model.manager.map {
+        $0.state == .needsYou ? "The Manager needs you: \($0.reason) (⇧⌘M)" : "Open the Manager (⇧⌘M)"
+      }
+        ?? "Start a session that manages the others through sb (⇧⌘M)")
   }
 }
 
 struct SessionRow: View {
   let session: SessionSummary
-  var pinned = false
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
@@ -244,7 +236,6 @@ struct SessionRow: View {
         .help(session.waitsToStart ? "not started" : session.live ? "claude is running" : "claude is stopped")
       VStack(alignment: .leading, spacing: 2) {
         HStack {
-          if pinned { Image(systemName: "star.fill").foregroundStyle(.yellow).imageScale(.small) }
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {

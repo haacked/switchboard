@@ -194,3 +194,64 @@ import Testing
     #expect(more == nil)
   }
 }
+
+@MainActor
+@Suite struct BoardModelSidebar {
+  func summary(_ id: String, parent: String? = nil, manager: Bool? = nil, state: AttentionState = .working)
+    -> SessionSummary
+  {
+    var s = SessionSummary(
+      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
+      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+    s.parent = parent
+    s.manager = manager
+    return s
+  }
+
+  func model(_ sessions: [SessionSummary]) -> BoardModel {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.apply(.success(sessions), followups: nil)
+    return model
+  }
+
+  /// The sidebar as "state: id, >child" lines.
+  func shown(_ model: BoardModel) -> [String] {
+    model.sidebarGroups.map { group in
+      "\(group.state): " + group.rows.map { String(repeating: ">", count: $0.depth) + $0.id }.joined(separator: ",")
+    }
+  }
+
+  @Test func aManagerChildIsTopLevel() {
+    let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("b", parent: "m")])
+    #expect(shown(model) == ["working: a,b"])
+  }
+
+  @Test func aChildOfAnOrdinarySessionStillNests() {
+    let model = model([summary("p"), summary("c", parent: "p")])
+    #expect(shown(model) == ["working: p,>c"])
+  }
+
+  @Test func theManagerHasNoSidebarRow() {
+    for state in [AttentionState.working, .needsYou, .done] {
+      let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
+      let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
+      #expect(!ids.contains("m"))
+      #expect(ids == ["a"])
+    }
+  }
+
+  @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
+    let model = model([summary("m", manager: true), summary("a", parent: "m"), summary("g", parent: "a")])
+    #expect(shown(model) == ["working: a,>g"])
+  }
+
+  @Test func aManagerWithNoChildrenLeavesTheSidebarEmpty() {
+    #expect(model([summary("m", manager: true)]).sidebarGroups.isEmpty)
+  }
+
+  @Test func theManagerStaysReachableThroughTheModel() {
+    let model = model([summary("m", manager: true, state: .needsYou)])
+    #expect(model.manager?.id == "m")
+  }
+}
