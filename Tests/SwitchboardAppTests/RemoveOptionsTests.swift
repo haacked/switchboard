@@ -1,3 +1,4 @@
+import Foundation
 import SwitchboardCore
 import Testing
 
@@ -60,5 +61,35 @@ extension RemoveOptionsDefaults {
     #expect(!o.branch && !o.branchEnabled)
     #expect(o.worktreeNote?.contains("main checkout") == true)
     #expect(o.branchNote?.contains("main checkout") == true)
+  }
+}
+
+@Suite struct LinkedWorktreeCheck {
+  func git(_ dir: String, _ args: String...) throws {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    p.arguments = ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"] + args
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try p.run()
+    p.waitUntilExit()
+    #expect(p.terminationStatus == 0)
+  }
+
+  @Test func tellsALinkedWorktreeFromTheMainCheckoutAndTheirSubfolders() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    let main = root + "/main"
+    let linked = root + "/linked"
+    try FileManager.default.createDirectory(atPath: main + "/sub", withIntermediateDirectories: true)
+    try git(main, "init", "-q")
+    try git(main, "commit", "-q", "--allow-empty", "-m", "x")
+    try git(main, "worktree", "add", "-q", linked)
+    try FileManager.default.createDirectory(atPath: linked + "/sub", withIntermediateDirectories: true)
+    #expect(RemoveOptions.isLinkedWorktree(linked))
+    #expect(!RemoveOptions.isLinkedWorktree(main))
+    #expect(!RemoveOptions.isLinkedWorktree(linked + "/sub"))
+    #expect(!RemoveOptions.isLinkedWorktree(main + "/sub"))
+    #expect(!RemoveOptions.isLinkedWorktree(root + "/missing"))
   }
 }

@@ -12,16 +12,29 @@ struct RemoveOptions: Equatable {
   var branchEnabled = false
   var branchNote: String?
 
-  /// A linked worktree has a `.git` file, and a main checkout has a `.git` folder.
-  static func hasGitFile(_ path: String) -> Bool {
-    var isDirectory: ObjCBool = false
-    return FileManager.default.fileExists(atPath: path + "/.git", isDirectory: &isDirectory) && !isDirectory.boolValue
+  /// True when `path` is the top folder of a linked worktree: git's own folder differs from the folder that
+  /// the worktrees share. A subfolder, a main checkout, and a submodule all fail it.
+  static func isLinkedWorktree(_ path: String) -> Bool {
+    let git = Process()
+    git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    git.arguments = [
+      "-C", path, "rev-parse", "--show-prefix", "--path-format=absolute", "--git-dir", "--git-common-dir",
+    ]
+    let out = Pipe()
+    git.standardOutput = out
+    git.standardError = FileHandle.nullDevice
+    guard (try? git.run()) != nil else { return false }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    git.waitUntilExit()
+    let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+    guard git.terminationStatus == 0, lines.count >= 3, lines[0].isEmpty else { return false }
+    return lines[1] != lines[2]
   }
 
   init(
     _ session: SessionSummary,
     folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-    isLinkedWorktree: (String) -> Bool = RemoveOptions.hasGitFile
+    isLinkedWorktree: (String) -> Bool = RemoveOptions.isLinkedWorktree
   ) {
     guard session.repo != nil else { return }
     guard folderExists(session.cwd) else {

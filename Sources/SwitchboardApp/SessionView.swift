@@ -96,7 +96,7 @@ struct SessionView: View {
             get: { ui.deleteWorktree },
             set: {
               ui.deleteWorktree = $0
-              ui.deleteBranch = $0 && options.branch
+              if !$0 { ui.deleteBranch = false }
             })
         ) {
           Text("Delete the worktree \(session.cwd)" + (options.worktreeNote.map { " (\($0))" } ?? ""))
