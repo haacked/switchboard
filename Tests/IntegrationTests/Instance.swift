@@ -280,16 +280,25 @@ final class Instance {
   func waitFor(_ id: String, _ what: String, timeout: Double = 15, _ match: (SessionSummary) -> Bool) throws
     -> SessionSummary
   {
-    try waitFor(what, timeout: timeout, fetch: { try get(id) }, until: match)
+    do {
+      return try waitFor(what, timeout: timeout, fetch: { try get(id) }, until: match)
+    } catch let error as TestError {
+      let events = ((try? self.events(id)) ?? []).map { "\($0.t) \($0.kind)" }.joined(separator: "\n")
+      throw TestError(description: "\(error.description)\nevents:\n\(events)")
+    }
   }
 
   /// Waits until a fetched value matches, and returns it. A fetch that
   /// throws or returns nil counts as no match.
   func waitFor<T>(_ what: String, timeout: Double = 15, fetch: () throws -> T?, until match: (T) -> Bool) throws -> T {
     var last: T?
-    try waitFor(what, timeout: timeout) {
-      last = try? fetch()
-      return last.map(match) ?? false
+    do {
+      try waitFor(what, timeout: timeout) {
+        last = try? fetch()
+        return last.map(match) ?? false
+      }
+    } catch let error as TestError {
+      throw TestError(description: "\(error.description)\nlast value: \(String(describing: last))")
     }
     return last!
   }
