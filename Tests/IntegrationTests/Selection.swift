@@ -81,7 +81,7 @@ struct Selection {
     }
 
     func firstIndex(of pattern: [String]) -> Int? {
-      (0...max(0, tokens.count - pattern.count)).first { Array(tokens[$0..<min($0 + pattern.count, tokens.count)]) == pattern }
+      tokens.indices.first { tokens[$0...].starts(with: pattern) }
     }
 
     /// Reads from the token after `{` through the matching `}`.
