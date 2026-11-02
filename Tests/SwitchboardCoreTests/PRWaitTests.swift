@@ -111,7 +111,7 @@ import Testing
     let queue = wait(.queue)
     #expect(queue.resolution(of: pr(queue: .removed)) == "Trunk removed it from the queue")
     #expect(queue.resolution(of: pr(queue: .merged)) == "Trunk merged it")
-    #expect(queue.resolution(of: pr(.merged)) == "Trunk merged it")
+    #expect(queue.resolution(of: pr(.merged)) == "it merged")
     #expect(queue.resolution(of: pr(.closed)) == "it closed without merging")
     #expect(queue.resolution(of: pr(.closed, queue: .removed)) == "it closed without merging")
   }

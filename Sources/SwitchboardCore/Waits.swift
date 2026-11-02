@@ -227,7 +227,7 @@ public struct Wait: Codable, Equatable, Sendable {
       switch (pr.state, kind) {
       case (.open, _): nil
       case (.merged, .merge): "it merged"
-      case (.merged, .queue): "Trunk merged it"
+      case (.merged, .queue): "it merged"
       case (.merged, _): "the PR merged first"
       case (.closed, .merge), (.closed, .queue): "it closed without merging"
       case (.closed, _): "the PR closed first"

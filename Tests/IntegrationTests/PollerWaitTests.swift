@@ -288,7 +288,7 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
     }
     try sbd.advanceClock(30_000)
     #expect(try sbd.poll()["resolved"]?.int == 1)
-    try resumed(sbd, s, with: "the merge queue for the session's PR: Trunk merged it.")
+    try resumed(sbd, s, with: "the merge queue for the session's PR: it merged.")
   }
 
   @Test func aDeployWaitWaitsForItsOwnPoller() throws {
