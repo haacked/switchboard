@@ -3,6 +3,9 @@
 # that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
 # app's terminal, as `sb screen` shows them. It opens the app's window, so it
 # needs a logged-in macOS session with a display, and bin/test never runs it.
+# It then quits the app and starts it again, and kills it and starts it again,
+# and checks through sb and tmux that the session, its claude pane, and its
+# shell pane are the same processes with the same screens.
 # It checks SwiftTerm, and also Ghostty when SB_GHOSTTY=1 is set and
 # bin/build-ghostty has built libghostty. The script ends the app, sbd, the
 # tmux server, the stand-in, and its folder in /tmp when it exits, whether or
@@ -200,3 +203,71 @@ for b in "${backends[@]}"; do
   new_session "selftest-$b"
   check_backend "$b"
 done
+
+# The app owns no session. Quitting it, or killing it, must leave every
+# session and both its panes running, and a new app must attach to them again.
+# The stand-in's screen keeps every byte it received, so a restarted stand-in
+# would lose them. The shell's pid shows whether its process is the same one.
+check_relaunch() {
+  backend=relaunch
+  local shots="$home/shots/relaunch" tmux_socket="$home/tmux.sock" before after how
+  mkdir "$shots"
+  new_session relaunch
+  local shell_target="=$session-shell:" claude_target="=$session-claude:"
+  attached() { sb ls --json | jq -e --arg id "$session" '.[] | select(.id == $id) | .attached' >/dev/null; }
+  shell_clients() { [ -n "$(tmux -S "$tmux_socket" list-clients -t "=$session-shell" 2>/dev/null)" ]; }
+  start_app() {
+    rm -f "$shots/quit"
+    SB_SELECT="$session" SB_QUIT_FILE="$shots/quit" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+    app_pid=$!
+    wait_for 120 attached || fail "the app did not attach to the Claude pane"
+    wait_for 60 shell_clients || fail "the app did not attach to the shell pane"
+  }
+  shell_has() { sb screen "$session" --shell | grep -q "$1"; }
+  shell_pid() {
+    local mark=$1
+    tmux -S "$tmux_socket" send-keys -t "$shell_target" "echo $mark-\$\$" Enter
+    wait_for 20 shell_has "$mark-[0-9]" || fail "the shell did not answer $mark"
+    sb screen "$session" --shell | grep -o "$mark-[0-9]*" | tail -n 1 | sed 's/.*-//'
+  }
+  fingerprint() { # the session, the pids of both panes, and the stand-in's screen
+    {
+      sb ls --json | jq -c '[.[] | {id, name, state, claudePid}] | sort_by(.id)'
+      tmux -S "$tmux_socket" list-panes -a -F '#{session_name} #{pane_pid} #{pane_dead}' | sort
+      sb screen "$session" | sed -n '/^rx /p'
+    }
+  }
+
+  echo "Checking that sessions survive the app (relaunch)…"
+  start_app
+  tmux -S "$tmux_socket" send-keys -t "$claude_target" abc
+  wait_for 20 sb_rx_has "61 62 63" || fail "the stand-in did not receive the typed bytes"
+  local shell_before
+  shell_before=$(shell_pid before)
+  before=$(fingerprint)
+
+  for how in quit kill; do
+    if [ "$how" = quit ]; then
+      touch "$shots/quit"
+      wait_for 30 eval '! kill -0 "$app_pid" 2>/dev/null' || fail "the app did not quit"
+    else
+      kill -KILL "$app_pid"
+    fi
+    wait "$app_pid" 2>/dev/null || true
+    app_pid=''
+    sb ls --json | jq -e --arg id "$session" 'any(.[]; .id == $id)' >/dev/null || fail "the session is gone after the app ended ($how)"
+    after=$(fingerprint)
+    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed while the app was gone ($how)"; }
+    start_app
+    after=$(fingerprint)
+    [ "$after" = "$before" ] || { diff <(echo "$before") <(echo "$after") >&2 || true; fail "the session changed after the app came back ($how)"; }
+    [ "$(shell_pid "again-$how")" = "$shell_before" ] || fail "the shell is a new process after $how"
+  done
+  kill -KILL "$app_pid" 2>/dev/null || true
+  wait "$app_pid" 2>/dev/null || true
+  app_pid=''
+  echo "ok: relaunch (quit and kill)"
+}
+
+sb_rx_has() { sb screen "$session" | grep -q "^rx.* $1"; }
+check_relaunch
