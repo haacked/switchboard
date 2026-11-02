@@ -774,9 +774,9 @@ public final class Service {
     ]
   }
 
-  /// The session's repo, or throws when sbd made no worktree for the session. A repo folder that is
-  /// gone (a session started from a linked worktree that was later removed) is replaced by the main
-  /// checkout of another session's worktree under the same <worktreeRoot>/<repo> folder.
+  /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
+  /// gone, because the session started from a linked worktree that was later removed, this returns the
+  /// main checkout of another session's worktree under the same <worktreeRoot>/<repo> folder.
   private func worktreeRepo(_ session: Session) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
