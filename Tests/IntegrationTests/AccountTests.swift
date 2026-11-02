@@ -66,7 +66,8 @@ import Testing
     #expect(grandchild.account == sbd.account("A"))
     #expect(named.account == sbd.account("B"))
     try sbd.waitFor(grandchild.id, "the first reply") { $0.lastReply == "Done: hello" }
-    #expect(sbd.stubCalls().filter { !$0.args.hasPrefix("agents") }.prefix(3).allSatisfy { $0.account == sbd.account("A") })
+    #expect(
+      sbd.stubCalls().filter { !$0.args.hasPrefix("agents") }.prefix(3).allSatisfy { $0.account == sbd.account("A") })
   }
 
   @Test func aFollowupAddedInsideASessionKeepsItsAccount() throws {
@@ -76,7 +77,8 @@ import Testing
     try sbd.sb("account", "use", "B")
 
     let inherited = try decode(
-      sbd.sb(["followup", "add", "--json", "--repo", "acme/widgets", "Fix the cache."], env: ["SB_SESSION_ID": parent.id]))
+      sbd.sb(
+        ["followup", "add", "--json", "--repo", "acme/widgets", "Fix the cache."], env: ["SB_SESSION_ID": parent.id]))
     let alone = try decode(sbd.sb("followup", "add", "--json", "--repo", "acme/widgets", "Fix the queue."))
     let named = try decode(sbd.sb("followup", "add", "--json", "--repo", "acme/widgets", "--account", "B", "Fix it."))
 
@@ -95,5 +97,147 @@ import Testing
     #expect(throws: TestError.self) { try sbd.sb("new", "--account", "nobody", sbd.work) }
     #expect(try accounts(sbd).filter(\.active).map(\.folder) == [ClaudeAccount.defaultFolder])
     #expect(try sbd.client.sessions().isEmpty)
+  }
+
+  // MARK: Moving sessions
+
+  func move(_ sbd: Instance, _ extra: String...) throws -> AccountMove {
+    try JSONCoding.decode(AccountMove.self, from: try sbd.sb(["account", "move", "--json", "B"] + extra))
+  }
+
+  /// A session under A that has answered one prompt and then stopped.
+  func stoppedSession(_ sbd: Instance, prompt: String = "hello") throws -> SessionSummary {
+    try sbd.sb("account", "use", "A")
+    let s = try decode(sbd.sb("new", "--json", "--prompt", prompt, sbd.work))
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: \(prompt)" }
+    try sbd.sb("stop", s.id)
+    return try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+  }
+
+  func transcript(_ sbd: Instance, _ account: String, _ s: SessionSummary) -> String? {
+    let projects = "\(sbd.account(account))/projects"
+    let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
+    return folders.map { "\(projects)/\($0)/\(s.claudeSessionId).jsonl" }.first {
+      FileManager.default.fileExists(atPath: $0)
+    }
+  }
+
+  @Test func movesAStoppedSessionAndResumesItsConversationUnderTheNewAccount() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    #expect(transcript(sbd, "B", s) == nil)
+
+    let planned = try move(sbd, "--dry-run")
+    #expect(planned.moved == [s.id])
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("A"))
+
+    let result = try move(sbd)
+    #expect(result.moved == [s.id])
+    #expect(result.blocked.isEmpty)
+    let copy = try #require(transcript(sbd, "B", s))
+    #expect((copy as NSString).lastPathComponent == (old as NSString).lastPathComponent)
+    #expect(
+      ((copy as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        == ((old as NSString).deletingLastPathComponent as NSString).lastPathComponent)
+    #expect(FileManager.default.contentsEqual(atPath: old, andPath: copy))
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("B"))
+    #expect(try accounts(sbd).first { $0.folder == sbd.account("B") }?.sessions == 1)
+    #expect(try sbd.events(s.id).contains { $0.kind == "account-moved" })
+
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: again" }
+    let call = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
+    #expect(call.account == sbd.account("B"))
+    #expect(call.args.contains("--resume \(s.claudeSessionId)"))
+  }
+
+  @Test func theMoveSurvivesARestart() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    try move(sbd)
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("B"))
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: again" }
+    #expect(sbd.stubCalls().last { !$0.args.hasPrefix("agents") }?.account == sbd.account("B"))
+  }
+
+  @Test func leavesASessionWhoseClaudeRunsOnItsAccount() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    try sbd.sb("account", "use", "A")
+    let live = try decode(sbd.sb("new", "--json", "--prompt", "hello", sbd.work))
+    try sbd.waitFor(live.id, "the first reply") { $0.lastReply == "Done: hello" }
+    let stopped = try stoppedSession(sbd, prompt: "second")
+
+    let result = try move(sbd)
+    #expect(result.moved == [stopped.id])
+    #expect(result.blocked.map(\.session) == [live.id])
+    #expect(try decode(sbd.sb("get", "--json", live.id)).account == sbd.account("A"))
+    #expect(transcript(sbd, "B", live) == nil)
+  }
+
+  @Test func refusesToMoveWhenTheAccountHoldsAnotherTranscriptOfTheConversation() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    let folder = ((old as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    let dir = "\(sbd.account("B"))/projects/\(folder)"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    try "{}\n".write(toFile: "\(dir)/\(s.claudeSessionId).jsonl", atomically: true, encoding: .utf8)
+
+    let result = try move(sbd)
+    #expect(result.moved.isEmpty)
+    #expect(result.blocked.map(\.session) == [s.id])
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("A"))
+    #expect(try String(contentsOfFile: "\(dir)/\(s.claudeSessionId).jsonl", encoding: .utf8) == "{}\n")
+  }
+
+  @Test func movesWithoutACopyWhenTheAccountsShareTheirProjectsFolder() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let (a, b) = (sbd.account("A"), sbd.account("B"))
+    try FileManager.default.createDirectory(atPath: "\(a)/projects", withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: "\(b)/projects", withDestinationPath: "\(a)/projects")
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    let before = try Data(contentsOf: URL(fileURLWithPath: old))
+
+    #expect(try move(sbd).moved == [s.id])
+    #expect(try Data(contentsOf: URL(fileURLWithPath: old)) == before)
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: again" }
+    #expect(sbd.stubCalls().last { !$0.args.hasPrefix("agents") }?.account == b)
+  }
+
+  @Test func copiesTheFileHistoryOfTheConversation() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let history = "\(sbd.account("A"))/file-history/\(s.claudeSessionId)"
+    try FileManager.default.createDirectory(atPath: history, withIntermediateDirectories: true)
+    try "v1".write(toFile: "\(history)/abc@v1", atomically: true, encoding: .utf8)
+
+    try move(sbd)
+    #expect(
+      try String(contentsOfFile: "\(sbd.account("B"))/file-history/\(s.claudeSessionId)/abc@v1", encoding: .utf8)
+        == "v1")
+  }
+
+  @Test func theUseCommandMovesOnlyWhenAsked() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    try sbd.sb("account", "use", "B", "--new-only")
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("A"))
+    try sbd.sb("account", "use", "A")
+
+    let out = try sbd.sb("account", "use", "B", "--move", "--json")
+    let both = try JSONCoding.decode(JSON.self, from: out)
+    #expect(try JSONCoding.convert(both["move"]!, to: AccountMove.self).moved == [s.id])
+    #expect(
+      try JSONCoding.convert(both["accounts"]!, to: [AccountInfo].self).filter(\.active).map(\.folder) == [
+        sbd.account("B")
+      ])
+    #expect(try decode(sbd.sb("get", "--json", s.id)).account == sbd.account("B"))
   }
 }
