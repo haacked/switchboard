@@ -143,6 +143,9 @@ final class Instance {
     try waitFor("sbd answers", timeout: 10) { (try? client.call("ping", timeout: 1)) != nil }
   }
 
+  /// The pid of the sbd that `startSbd` started.
+  var sbdPid: Int { Int(process?.processIdentifier ?? 0) }
+
   func stopSbd() {
     guard let p = process else { return }
     p.terminate()

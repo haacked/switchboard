@@ -102,9 +102,14 @@ public enum Processes {
     return Dictionary(grouping: rows, by: \.ppid)
   }
 
+  /// Whether the number can name one process. A pid below 1 names a process
+  /// group, and a pid above `Int32.max` names no process.
+  public static func isValidPid(_ pid: Int) -> Bool { pid >= 1 && pid <= Int(Int32.max) }
+
   /// Whether a process with the pid exists. EPERM means it exists and belongs
   /// to another user.
   public static func exists(_ pid: Int) -> Bool {
-    kill(pid_t(pid), 0) == 0 || errno == EPERM
+    guard isValidPid(pid) else { return false }
+    return kill(pid_t(pid), 0) == 0 || errno == EPERM
   }
 }

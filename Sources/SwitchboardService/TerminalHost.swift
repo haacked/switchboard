@@ -113,8 +113,30 @@ final class TerminalHost {
 
   /// Every pane on the server, keyed by its tmux session name.
   func panes() -> [String: PaneRow] {
-    guard let out = try? run(["list-panes", "-a", "-F", TerminalHost.paneFormat]) else { return [:] }
-    return PaneRow.parse(out)
+    (try? checkedPanes()) ?? [:]
+  }
+
+  /// Every pane on the server. A missing server has no panes. It throws when
+  /// tmux fails for any other reason, which leaves the panes unknown, where
+  /// `panes()` reports none.
+  func checkedPanes() throws -> [String: PaneRow] {
+    do {
+      return PaneRow.parse(try run(["list-panes", "-a", "-F", TerminalHost.paneFormat]))
+    } catch {
+      if TerminalHost.isNoServer(error) { return [:] }
+      throw error
+    }
+  }
+
+  /// Whether the error is tmux's own report that no server runs: it says "no
+  /// server running", or it fails to connect because the socket is missing.
+  /// An error from starting tmux, such as a missing binary, and any other
+  /// "No such file or directory", such as a missing config file, is not.
+  static func isNoServer(_ error: Error) -> Bool {
+    guard let error = error as? APIError, error.description.hasPrefix("tmux ") else { return false }
+    let text = error.description
+    return text.contains("no server running")
+      || (text.contains("error connecting to") && text.contains("No such file or directory"))
   }
 
   /// The value of a tmux format for the pane, or nil when the pane is missing.

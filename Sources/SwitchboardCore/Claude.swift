@@ -84,10 +84,14 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public var branch: String?
   /// True when the folder is a linked worktree of its repo.
   public var worktree: Bool
+  /// The pids of the claudes that other accounts list for the session. Nil
+  /// when no other account lists one.
+  public var otherPids: [Int]?
 
   public init(
     id: String, name: String? = nil, cwd: String, account: String, status: String? = nil, job: String? = nil,
-    pid: Int? = nil, seen: Int64 = 0, repo: String? = nil, branch: String? = nil, worktree: Bool = false
+    pid: Int? = nil, seen: Int64 = 0, repo: String? = nil, branch: String? = nil, worktree: Bool = false,
+    otherPids: [Int]? = nil
   ) {
     self.id = id
     self.name = name
@@ -100,9 +104,33 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
     self.repo = repo
     self.branch = branch
     self.worktree = worktree
+    self.otherPids = otherPids
   }
 
   public var running: Bool { pid != nil }
+
+  /// The pid of every claude that runs the session.
+  public var livePids: [Int] { (pid.map { [$0] } ?? []) + (otherPids ?? []) }
+
+  /// True when the rows of two accounts list the session with different pids.
+  public var runsInSeveralClaudes: Bool { otherPids != nil }
+
+  /// True when one interactive claude runs the session and waits at its
+  /// prompt. Exiting that claude loses no turn, unless one starts after the
+  /// listing that read this status. A session that several claudes run is not
+  /// stoppable, because import would have to exit each of them, and one can
+  /// outlast the signal.
+  public var stoppable: Bool { pid != nil && job == nil && status == "idle" && !runsInSeveralClaudes }
+
+  /// Which of two rows for one session to keep: 2 for a claude that runs and
+  /// can't be stopped, 1 for one that can be, 0 when none runs.
+  public var keepRank: Int { running ? (stoppable ? 1 : 2) : 0 }
+
+  /// The lowest pid of a claude that runs both sessions, or nil when none does.
+  public func sharedPid(with other: ClaudeSession) -> Int? { Set(livePids).intersection(other.livePids).min() }
+
+  /// True when no claude runs the session, or when `import --stop` can exit it.
+  public var importable: Bool { !running || stoppable }
 
   /// The name that the session gets on import: its branch in a worktree, else
   /// Claude's name, else its folder's name.
@@ -111,11 +139,14 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   /// The id's first 8 characters, which tell apart two sessions with one title.
   public var idPrefix: String { String(id.prefix(8)) }
 
+  /// Claude's name for the session, else its id's first 8 characters.
+  public var label: String { name ?? idPrefix }
+
   /// Whether a claude runs the session, and where, in a few words.
   public var summary: String {
     switch (running, job) {
     case (true, let job?): "background job \(job), \(status ?? "running")"
-    case (true, nil): "\(status ?? "running") in another terminal"
+    case (true, nil): runsInSeveralClaudes ? "in several claudes" : "\(status ?? "running") in another terminal"
     case (false, let job?): "background job \(job), stopped"
     case (false, nil): "exited"
     }
@@ -127,7 +158,12 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public func whereItRuns(_ label: String) -> String? {
     guard let pid else { return nil }
     guard let job else {
-      return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it."
+      if runsInSeveralClaudes {
+        let pids = livePids.map(String.init).joined(separator: ", ")
+        return "\(label) runs in several claudes, in \(cwd) (pids \(pids)). Exit claude in each, then import it."
+      }
+      let stop = stoppable ? " Or import it with --stop to exit that claude." : ""
+      return "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it.\(stop)"
     }
     let stop = ClaudeAccount.command("claude stop \(job)", in: account)
     return "\(label) runs as background job \(job). Stop it with `\(stop)`, then import it."
@@ -137,6 +173,7 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
   public mutating func clearProcess() {
     pid = nil
     status = nil
+    otherPids = nil
   }
 
   /// The rows of `claude agents --json` for one account.
@@ -146,9 +183,12 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
     }
     return rows.compactMap { row in
       guard let id = row["sessionId"]?.string, let cwd = row["cwd"]?.string else { return nil }
-      return ClaudeSession(
+      var session = ClaudeSession(
         id: id, name: row["name"]?.string, cwd: cwd, account: account, status: row["status"]?.string,
         job: row["id"]?.string, pid: row["pid"]?.int, seen: seen)
+      // A pid that can't name a process means no claude runs the session.
+      if let pid = session.pid, !Processes.isValidPid(pid) { session.clearProcess() }
+      return session
     }
   }
 

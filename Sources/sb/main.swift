@@ -45,7 +45,10 @@ let usage = """
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
-    import <ref>... [--name N]    import Claude sessions by id, id prefix, or name
+    import <ref>... [--name N] [--stop]
+                                  import Claude sessions by id, id prefix, or name.
+                                  --stop first exits the claude of a session that
+                                  waits idle at its prompt in another terminal
     attach <session> [--shell]    attach this terminal to the Claude pane or the shell
     screen <session> [--shell]    print the pane's screen
     watch <session> --until <state> [--timeout S]
@@ -247,6 +250,7 @@ func printImportable(_ list: ImportList, repo: String? = nil) {
   }
   if list.sessions.contains(where: \.running) {
     print("● claude runs the session now. Exit it there, or stop its background job, then import it.")
+    if list.sessions.contains(where: \.stoppable) { print("  Import an idle one with --stop to exit its claude.") }
   }
 }
 
@@ -468,7 +472,8 @@ case "import":
       exit(0)
     }
     if repo != nil { die("--repo narrows the listing, so it does not go with a session to import") }
-    let r = try client.importSessions(a.positional, name: a.values["--name"])
+    let stop = a.switches.contains("--stop") ? a.positional : []
+    let r = try client.importSessions(a.positional, name: a.values["--name"], stop: stop)
     if a.json { printJSON(try JSON(encoding: r)) } else { r.imported.forEach(printSession) }
     r.refused.forEach { warn($0.reason.printable) }
     exit(r.refused.isEmpty ? 0 : 1)

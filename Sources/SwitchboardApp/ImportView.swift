@@ -100,7 +100,7 @@ struct ImportView: View {
               ImportRow(session: s, selected: selection(s))
             }
           } header: {
-            let selectable = group.sessions.filter { !$0.running }.map(\.id)
+            let selectable = group.sessions.filter(\.importable).map(\.id)
             let allSelected = !selectable.isEmpty && selectable.allSatisfy(form.selected.contains)
             let label = allSelected ? "Deselect All" : "Select All"
             HStack {
@@ -167,7 +167,7 @@ struct ImportView: View {
           return load()
         }
         form.error = nil
-        form.selected.formIntersection(list.sessions.filter { !$0.running }.map(\.id))
+        form.selected.formIntersection(list.sessions.filter(\.importable).map(\.id))
       case .failure(let error):
         form.error = "\(error)"
         AccessibilityNotification.Announcement("Can't list the sessions: \(error)").post()
@@ -176,11 +176,13 @@ struct ImportView: View {
   }
 
   private func importSelected() {
-    let refs = form.list?.sessions.map(\.id).filter(form.selected.contains) ?? []
+    let chosen = form.list?.sessions.filter { form.selected.contains($0.id) } ?? []
+    let refs = chosen.map(\.id)
+    let stop = chosen.filter(\.stoppable).map(\.id)
     let model = model
     form.activity = .importing
     Task {
-      let result = await Task.detached { model.importSessions(refs) }.value
+      let result = await Task.detached { model.importSessions(refs, stop: stop) }.value
       form.activity = nil
       model.refresh()
       switch result {
@@ -211,7 +213,7 @@ struct ImportRow: View {
       Toggle("Import \(session.title) \(session.idPrefix)", isOn: $selected)
         .toggleStyle(.checkbox)
         .labelsHidden()
-        .disabled(session.running)
+        .disabled(!session.importable)
       VStack(alignment: .leading, spacing: 2) {
         HStack {
           Text(session.title).fontWeight(.medium).lineLimit(1)
@@ -225,16 +227,19 @@ struct ImportRow: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
           .truncationMode(.middle)
-        if let runs = session.whereItRuns("It") {
+        if session.stoppable {
+          WarningLabel("It waits idle in another terminal. Importing it exits that claude.")
+            .font(.caption)
+        } else if let runs = session.whereItRuns("It") {
           WarningLabel(runs)
             .font(.caption)
         }
       }
     }
     .padding(.vertical, 2)
-    .opacity(session.running ? 0.75 : 1)
+    .opacity(session.importable ? 1 : 0.75)
     .contentShape(Rectangle())
-    .onTapGesture { if !session.running { selected.toggle() } }
+    .onTapGesture { if session.importable { selected.toggle() } }
   }
 }
 

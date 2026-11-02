@@ -747,12 +747,16 @@ public final class Service {
 
   /// Reads the panes and the processes. It reads no Service state, so it runs
   /// off the state queue.
-  func buildSnapshot() -> Snapshot {
+  func buildSnapshot() -> Snapshot { buildSnapshot { host.panes() } }
+
+  /// The snapshot of the panes that `readPanes` returns and a new process
+  /// list. It throws what `readPanes` throws.
+  func buildSnapshot(reading readPanes: () throws -> [String: PaneRow]) rethrows -> Snapshot {
     var s = Snapshot()
     // A snapshot is as old as its first read. `install` uses this to drop
     // one that began before a launch.
     s.taken = nowMs()
-    s.panes = host.panes()
+    s.panes = try readPanes()
     s.children = Processes.byParent()
     let program = (config.claude as NSString).lastPathComponent
     for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
@@ -770,14 +774,29 @@ public final class Service {
     var level = [pane]
     while !level.isEmpty {
       let kids = level.flatMap { children[$0] ?? [] }
-      if let match = kids.first(where: { row in
-        row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
-      }) {
-        return match.pid
-      }
+      if let match = kids.first(where: { runs($0, program: program) }) { return match.pid }
       level = kids.map(\.pid)
     }
     return nil
+  }
+
+  /// Whether the command of the process names the claude command, in its
+  /// first or second word.
+  static func runs(_ row: ProcessRow, program: String) -> Bool {
+    row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
+  }
+
+  /// Programs that run a script named in the second word of their command.
+  private static let interpreters: Set<String> = ["node", "bun", "deno", "python", "python3", "sh", "bash", "zsh"]
+
+  /// Whether the process is claude itself: its command starts with the claude
+  /// command, or with an interpreter that runs it. `runs` is looser, because
+  /// any argument in the second word matches, such as `tail /tmp/claude`.
+  /// Signals use this one.
+  static func isClaude(_ row: ProcessRow, program: String) -> Bool {
+    let words = row.command.split(separator: " ").map { ($0 as NSString).lastPathComponent }
+    guard let first = words.first else { return false }
+    return first == program || (interpreters.contains(first) && words.dropFirst().first == program)
   }
 
   /// Marks a pane that sbd just started as alive until the next snapshot, so
