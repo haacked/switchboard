@@ -32,10 +32,12 @@ struct RemoveOptions: Equatable {
       != URL(fileURLWithPath: String(lines[2])).resolvingSymlinksInPath()
   }
 
+  static func folderExists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: path) }
+
   /// Reads the folder off the main thread, because `git rev-parse` waits on the disk.
   static func load(
     _ session: SessionSummary,
-    folderExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+    folderExists: @escaping @Sendable (String) -> Bool = RemoveOptions.folderExists,
     isLinkedWorktree: @escaping @Sendable (String) -> Bool = RemoveOptions.isLinkedWorktree
   ) async -> RemoveOptions {
     await Task.detached {
@@ -45,7 +47,7 @@ struct RemoveOptions: Equatable {
 
   init(
     _ session: SessionSummary,
-    folderExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+    folderExists: (String) -> Bool = RemoveOptions.folderExists,
     isLinkedWorktree: (String) -> Bool = RemoveOptions.isLinkedWorktree
   ) {
     guard session.repo != nil else { return }
