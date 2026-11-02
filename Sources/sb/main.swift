@@ -351,7 +351,7 @@ func service(_ a: Args) {
   let uid = getuid()
   // SB_LAUNCHCTL lets a test keep `service` away from the real launchd.
   let launchctl = ProcessInfo.processInfo.environment["SB_LAUNCHCTL"] ?? "/bin/launchctl"
-  func launch(_ args: [String]) -> CommandResult? { try? runCommand(launchctl, args) }
+  func launch(_ args: [String]) { _ = try? runCommand(launchctl, args) }
   switch a.positional.first {
   case "install":
     let sbd = siblingExecutable("sbd")
@@ -369,7 +369,7 @@ func service(_ a: Args) {
       let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
       try data.write(to: URL(fileURLWithPath: plistPath))
     } catch { die("can't write \(plistPath): \(error)") }
-    _ = launch(["bootout", "gui/\(uid)/\(label)"])
+    launch(["bootout", "gui/\(uid)/\(label)"])
     let bootstrap: CommandResult
     do { bootstrap = try runCommand(launchctl, ["bootstrap", "gui/\(uid)", plistPath]) } catch {
       die("can't run \(launchctl): \(error)")
@@ -387,7 +387,7 @@ func service(_ a: Args) {
     }
     die("sbd did not answer. See \(client.home.log)")
   case "uninstall":
-    _ = launch(["bootout", "gui/\(uid)/\(label)"])
+    launch(["bootout", "gui/\(uid)/\(label)"])
     try? FileManager.default.removeItem(atPath: plistPath)
     print("removed the launchd agent \(label)")
   case "status":

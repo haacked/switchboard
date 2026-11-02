@@ -9,7 +9,7 @@ import Testing
     let path = "\(dir)/launchctl"
     let script =
       "#!/bin/sh\necho \"$@\" >>\"\(dir)/launchctl.log\"\n"
-      + (stderr.isEmpty ? "" : "echo '\(stderr)' >&2\n")
+      + (stderr.isEmpty ? "" : "echo \(shellQuote(stderr)) >&2\n")
       + "case \"$1\" in bootstrap) exit \(status);; *) exit 0;; esac\n"
     try script.write(toFile: path, atomically: true, encoding: .utf8)
     chmod(path, 0o755)
