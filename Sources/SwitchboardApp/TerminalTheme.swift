@@ -9,6 +9,7 @@ struct TerminalTheme {
   let background: NSColor
   let selection: NSColor
   let ansi: [SwiftTerm.Color]
+  let scheme: TerminalColorScheme
 
   init(appearance: NSAppearance) {
     var colors: [NSColor] = []
@@ -20,7 +21,9 @@ struct TerminalTheme {
     foreground = colors[0]
     background = colors[1]
     selection = colors[2]
-    ansi = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? Self.dark : Self.light
+    let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    ansi = isDark ? Self.dark : Self.light
+    scheme = isDark ? .dark : .light
   }
 
   func apply(to view: TerminalView) {
@@ -29,6 +32,9 @@ struct TerminalTheme {
     view.selectedTextBackgroundColor = selection
     view.selectedTextForegroundColor = foreground
     view.installColors(ansi)
+    // SwiftTerm reports .dark until told otherwise. Programs that subscribed with mode 2031, such as tmux,
+    // read the new colors again when this call notifies them.
+    view.updateColorScheme(scheme)
   }
 
   // Both palettes start from GitHub's Primer terminal colors. The light palette darkens some of them so that
@@ -55,8 +61,9 @@ final class ThemedTerminalView: LocalProcessTerminalView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     TerminalTheme(appearance: effectiveAppearance).apply(to: self)
-    // Programs pick truecolor for one background brightness, such as a Claude Code theme set to dark.
-    // SwiftTerm lightens or darkens text below this ratio. VS Code's terminal uses the same default.
+    // Programs choose truecolor text for either a light or a dark background. A Claude Code theme set to
+    // dark, for example, sends light text that is unreadable on a light pane. SwiftTerm lightens or darkens
+    // text whose contrast falls below this ratio. VS Code's terminal uses the same default.
     minimumContrastRatio = 4.5
   }
 

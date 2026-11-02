@@ -63,8 +63,12 @@ extension RGB {
   func foreground(_ mode: Mode) -> RGB { RGB(theme(mode).foreground) }
   func selection(_ mode: Mode) -> RGB { RGB(theme(mode).selection, over: background(mode)) }
 
-  // Colored text needs 4.5:1. Bright black is the muted gray that programs use for secondary text.
-  static let minimumContrast = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14].map { ($0, 4.5) } + [(8, 3.0)]
+  // Text needs 4.5:1. In the light palette every color except bright white meets it. In the dark palette black
+  // sits close to the background on purpose. Bright black is the muted gray for secondary text.
+  static let minimumContrast: [(Mode, Int, Double)] =
+    (0...14).map { (Mode.light, $0, 4.5) }
+    + [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15].map { (Mode.dark, $0, 4.5) }
+    + [(Mode.dark, 8, 3.0)]
 
   @Test func lightAppearanceHasLightBackground() {
     #expect(background(.light).luminance > 0.5)
@@ -91,14 +95,14 @@ extension RGB {
     #expect(theme(mode).ansi.count == 16)
   }
 
-  @Test(arguments: Mode.allCases, minimumContrast)
-  func ansiColorReadsOnBackground(mode: Mode, color: (index: Int, minimum: Double)) throws {
+  @Test(arguments: minimumContrast)
+  func ansiColorReadsOnBackground(mode: Mode, index: Int, minimum: Double) throws {
     let ansi = theme(mode).ansi
     try #require(ansi.count == 16)
 
-    let ratio = RGB(ansi[color.index]).contrast(with: background(mode))
+    let ratio = RGB(ansi[index]).contrast(with: background(mode))
 
-    #expect(ratio >= color.minimum, "ANSI \(color.index) in \(mode) has contrast \(ratio)")
+    #expect(ratio >= minimum, "ANSI \(index) in \(mode) has contrast \(ratio)")
   }
 
   // SGR 2 dims the foreground. The full foreground therefore needs headroom above 4.5:1.
@@ -151,5 +155,7 @@ extension RGB {
 
     #expect(before.isClose(to: RGB(theme(mode).selection)))
     #expect(RGB(view.selectedTextBackgroundColor).isClose(to: RGB(theme(mode.other).selection)))
+    #expect(RGB(view.nativeForegroundColor).isClose(to: RGB(theme(mode.other).foreground)))
+    #expect(RGB(view.selectedTextForegroundColor).isClose(to: RGB(theme(mode.other).foreground)))
   }
 }
