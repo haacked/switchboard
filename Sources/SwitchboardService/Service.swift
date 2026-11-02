@@ -119,7 +119,9 @@ public final class Service {
 
   // MARK: Requests
 
-  static let actsOnProcesses: Set<String> = ["send", "stop", "resume", "open", "terminals", "resolve-wait", "answer"]
+  static let actsOnProcesses: Set<String> = [
+    "send", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+  ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer"]
 
   /// `hookGone` reports whether the client closed its connection, which a
@@ -130,7 +132,13 @@ public final class Service {
       case "hook":
         return try handleHook(request.args, hookGone: hookGone)
       case "new":
-        let args = try JSONCoding.convert(request.args, to: NewSession.self)
+        var args = try JSONCoding.convert(request.args, to: NewSession.self)
+        if args.worktree == true, (args.branch ?? "").isEmpty {
+          let repo = (args.path as NSString).standardizingPath
+          args.branch = NewSession.freeAutoBranch(
+            prefix: config.branchPrefix, name: args.name,
+            exists: { branchOrFolderTaken(repo, $0) })
+        }
         let folder = try prepareFolder(args)
         awaitMCPServers()
         return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
@@ -231,7 +239,7 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try host.screen(paneName(id, pane)))
-    case "accounts", "account-use":
+    case "accounts", "account-use", "account-move":
       return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())
@@ -261,6 +269,12 @@ public final class Service {
       return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
+    // A job starts inside a turn, and the tick skips a running turn. The count
+    // is recorded before the Stop, so the session never shows Needs you
+    // between the Stop and the next tick.
+    if kind == "Stop", case .running(let pid) = claudeState(id) {
+      recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
+    }
     let event = record(id, kind, payload)
     switch kind {
     case "SessionStart":
@@ -306,6 +320,21 @@ public final class Service {
 
   // MARK: Sessions
 
+  /// The main checkout of the repo at `path` and the folder that a worktree of
+  /// it on `branch` gets.
+  func worktreeLocation(_ path: String, _ branch: String) throws -> (main: String, dir: String) {
+    // The first worktree names the main checkout, whose folder name names the repo.
+    let main = try worktreePaths(path).first ?? path
+    return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
+  }
+
+  /// Whether `branch` exists in the repo at `path`, or the folder for a worktree on it does.
+  func branchOrFolderTaken(_ path: String, _ branch: String) -> Bool {
+    if branchExists(path, branch) { return true }
+    guard let location = try? worktreeLocation(path, branch) else { return false }
+    return FileManager.default.fileExists(atPath: location.dir)
+  }
+
   /// The folder a new session runs in, and its branch. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
   /// which this creates unless it exists.
@@ -317,9 +346,7 @@ public final class Service {
       return (path, current?.isEmpty == false ? current : nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreePaths(path).first ?? path
-    let dir = "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)"
+    let (main, dir) = try worktreeLocation(path, branch)
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
@@ -460,15 +487,18 @@ public final class Service {
   /// that account. Before a SessionStart for the conversation, as for an
   /// imported one, this looks in the account that the pane sets. A session
   /// that sbd never started claude for has none.
-  private func hasTranscript(_ session: Session) -> Bool {
-    guard session.started else { return false }
+  private func hasTranscript(_ session: Session) -> Bool { transcriptFile(session) != nil }
+
+  /// The session's transcript file, by the rules of `hasTranscript`.
+  func transcriptFile(_ session: Session) -> String? {
+    guard session.started else { return nil }
     if let path = entries[session.id]?.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
     {
-      return FileManager.default.fileExists(atPath: path)
+      return FileManager.default.fileExists(atPath: path) ? path : nil
     }
     let account = claudeAccount(of: session.id)
-    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) != nil
+    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd)
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
@@ -808,12 +838,15 @@ public final class Service {
     }
   }
 
-  /// Background work is running when a child of claude leads its own process
-  /// group, as a background Bash job does.
-  func hasBackgroundJob(_ pid: Int) -> Bool { Service.hasBackgroundJob(pid, in: snapshot.children) }
+  /// The number of background jobs. A job is a child of claude that leads its
+  /// own process group, as a background Bash job does.
+  func backgroundJobs(_ pid: Int, in children: [Int: [ProcessRow]]? = nil) -> Int {
+    ((children ?? snapshot.children)[pid] ?? []).filter { $0.pgid == $0.pid }.count
+  }
 
-  static func hasBackgroundJob(_ pid: Int, in children: [Int: [ProcessRow]]) -> Bool {
-    (children[pid] ?? []).contains { $0.pgid == $0.pid }
+  /// Records the job count when it differs from the one in the session's facts.
+  func recordJobs(_ id: String, _ count: Int) {
+    if count != entries[id]?.facts.jobs { record(id, "job", ["count": .number(Double(count))]) }
   }
 
   /// Records each claude that exited or started without a hook, and stops
@@ -840,7 +873,10 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          if hasBackgroundJob(pid) { entries[id]?.lastJobSeen = now }
+          let jobs = backgroundJobs(pid)
+          if jobs > 0 { entries[id]?.lastJobSeen = now }
+          // A running turn outranks the job rule. The tick records the count after the turn ends.
+          if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
           if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
@@ -884,7 +920,7 @@ public final class Service {
     // for twice the idle time lost its SubagentStop, as when sbd was down.
     guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
     guard !attached(id) else { return false }
-    return !hasBackgroundJob(pid)
+    return backgroundJobs(pid) == 0
   }
 
   // MARK: Summaries

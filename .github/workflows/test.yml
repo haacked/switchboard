@@ -1,0 +1,25 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift-test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: brew install tmux
+      - run: tmux -V
+      - run: sysctl -n hw.ncpu hw.memsize && uptime
+      - run: bin/test

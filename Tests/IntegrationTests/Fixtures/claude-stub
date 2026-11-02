@@ -6,8 +6,10 @@
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
 #   slow <n>         runs a Bash tool call of n seconds
-#   background <n> [held]
+#   background <n> [held] [two]
 #                    starts a background job of n seconds and ends the turn.
+#                    With two, it starts a second job, whose pid goes to
+#                    $SB_HOME/job2.pid, and reports after both exit.
 #                    It reports the job in a turn of its own 0.5 s after the
 #                    job's process exits. With held, the report also waits
 #                    until $SB_HOME/report exists. The job's pid goes to
@@ -317,8 +319,9 @@ turn() {
     step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
     ;;
   background*)
-    read -r n held <<<"${p#background }"
-    rm -f "$SB_HOME/job.pid"
+    read -r n held two <<<"${p#background }"
+    [ "$held" = two ] && two=two held=''
+    rm -f "$SB_HOME/job.pid" "$SB_HOME/job2.pid"
     # Claude Code runs each background job in a process group of its own,
     # and its spawn returns after the job is in that group. perl writes the
     # job's pid once the job is there, and the turn waits for that.
@@ -326,8 +329,15 @@ turn() {
       "$SB_HOME/job.pid" sleep "$n" &
     job=$!
     while kill -0 $job 2>/dev/null && [ ! -s "$SB_HOME/job.pid" ]; do sleep 0.01; done
+    job2=$job
+    if [ "$two" = two ]; then
+      perl -e 'setpgrp(0, 0); open(my $f, ">", shift) or die; print $f $$; close $f; exec @ARGV' \
+        "$SB_HOME/job2.pid" sleep "$n" &
+      job2=$!
+      while kill -0 $job2 2>/dev/null && [ ! -s "$SB_HOME/job2.pid" ]; do sleep 0.01; done
+    fi
     step=background-job reply="Started a job of $n s." cmd="sleep $n" marker='<task-notification>'
-    before="while kill -0 $job 2>/dev/null; do sleep 0.05; done; sleep 0.5"
+    before="while kill -0 $job 2>/dev/null || kill -0 $job2 2>/dev/null; do sleep 0.05; done; sleep 0.5"
     [ "$held" = held ] && before="$before; until [ -e '$SB_HOME/report' ]; do sleep 0.05; done"
     ;;
   interrupt*)

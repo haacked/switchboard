@@ -15,6 +15,19 @@ extension AttentionState {
   }
 }
 
+extension PRStatus {
+  /// Review states are blue, not orange, because orange is the Needs you color on the Board.
+  var color: Color {
+    switch self {
+    case .approved: .green
+    case .changesRequested: .red
+    case .reviewRequired, .notApproved: .blue
+    case .merged: .purple
+    case .draft, .closed: .gray
+    }
+  }
+}
+
 /// The state's title in a capsule of its color.
 struct StateBadge: View {
   let state: AttentionState
@@ -167,6 +180,18 @@ struct Sidebar: View {
         "This stops claude, closes both terminals, and deletes the session, its events, and its worktree \(session.cwd). The branch and the conversation's transcript stay."
       )
     }
+    .confirmationDialog(
+      "Switch to \(model.switchingAccount?.name ?? "this account")?", isPresented: isSwitchingAccount,
+      presenting: model.switchingAccount
+    ) { change in
+      Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
+      if !change.plan.moved.isEmpty {
+        let n = change.plan.moved.count
+        Button("Also Move \(n) Existing Session\(n == 1 ? "" : "s")") { model.confirmAccountSwitch(change, move: true) }
+      }
+    } message: { change in
+      Text(accountSwitchMessage(change))
+    }
     .overlay {
       if model.board.isEmpty && model.unreachable == nil {
         VStack(spacing: 8) {
@@ -176,6 +201,20 @@ struct Sidebar: View {
         }
       }
     }
+  }
+
+  private var isSwitchingAccount: Binding<Bool> {
+    Binding(get: { model.switchingAccount != nil }, set: { if !$0 { model.switchingAccount = nil } })
+  }
+
+  private func accountSwitchMessage(_ change: AccountSwitch) -> String {
+    var lines = ["New sessions use \(change.name) either way."]
+    if !change.plan.moved.isEmpty { lines.append(AccountMove.consequences) }
+    let blocked = change.plan.blocked
+    if !blocked.isEmpty {
+      lines.append("Stays on its account: " + blocked.map { "\($0.name) (\($0.reason))" }.joined(separator: "; ") + ".")
+    }
+    return lines.joined(separator: "\n\n")
   }
 
   private var deleting: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
@@ -235,9 +274,9 @@ struct SessionRow: View {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {
-            Link("#\(pr.number)", destination: url)
+            Link(destination: url) { Text(verbatim: "#\(pr.number)") }
               .font(.caption)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(pr.status.color)
               .help("\(pr.repo): \(pr.title)")
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -297,7 +336,16 @@ struct BoardView: View {
                       model.openFromBoard(s.id)
                     } label: {
                       VStack(alignment: .leading, spacing: 4) {
-                        Text(s.name).fontWeight(.medium).lineLimit(1)
+                        HStack {
+                          Text(s.name).fontWeight(.medium).lineLimit(1)
+                          Spacer()
+                          if let pr = s.pr {
+                            Text(verbatim: "#\(pr.number)")
+                              .font(.caption.bold())
+                              .foregroundStyle(pr.status.color)
+                              .help("\(pr.status.rawValue) · \(pr.repo): \(pr.title)")
+                          }
+                        }
                         Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
                           .font(.caption2).foregroundStyle(.tertiary)

@@ -24,6 +24,9 @@ enum Snapshot {
     }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
     TerminalSelfTest.start(model)
+    #if SB_GHOSTTY
+      LifetimeSelfTest.start(model)
+    #endif
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3

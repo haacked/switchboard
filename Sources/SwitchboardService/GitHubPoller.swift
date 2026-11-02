@@ -69,6 +69,8 @@ final class GitHubPoller {
     /// `/clear` starts writes its transcript there too.
     var folder: String?
     var path: String?
+    /// The account whose folder `path` is in.
+    var configDir: String?
     var offset = 0
     var link: PRKey?
     var prId: String?
@@ -178,6 +180,13 @@ final class GitHubPoller {
       t.transcript.claudeSessionId = s.claudeSessionId
       t.transcript.path = nil
       t.transcript.offset = 0
+    }
+    // A move to another account copies the transcript. The new copy is the
+    // one that grows.
+    if t.transcript.configDir != s.configDir {
+      t.transcript.configDir = s.configDir
+      t.transcript.folder = nil
+      t.transcript.path = nil
     }
     readTranscript(&t.transcript, configDir: s.configDir, projects: &shared.projects)
     tracked[s.id] = t
@@ -454,7 +463,8 @@ final class GitHubPoller {
   // MARK: Events
 
   /// Records the folder's count of uncommitted files once the PR has merged
-  /// or closed, and the session's PR when it changed. The count comes first,
+  /// or closed, with whether the folder is gone, and the session's PR when it
+  /// changed. The count comes first,
   /// so the attention rules never judge a finished PR by the count of the
   /// session's previous PR. Returns whether it recorded a `pr` event.
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
@@ -465,7 +475,13 @@ final class GitHubPoller {
       // in the session fail.
       let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"]).map { $0.split(separator: "\n").count }
       t.counted = (now, s.facts.lastActivity, pr.id)
-      if dirty != s.facts.dirty { event(s.id, "worktree", ["dirty": dirty.map { .number(Double($0)) } ?? .null]) }
+      // Only ENOENT counts as gone. A permission error or a hung mount leaves
+      // the folder unread, which stays unsafe.
+      var info = stat()
+      let gone = dirty == nil && stat(s.cwd, &info) != 0 && errno == ENOENT
+      if dirty != s.facts.dirty || gone != s.facts.folderGone {
+        event(s.id, "worktree", ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)])
+      }
     }
     var changed = false
     if let id = t.prId {

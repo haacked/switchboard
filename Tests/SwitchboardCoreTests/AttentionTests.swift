@@ -107,13 +107,98 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 5).state == .canContinue)
   }
 
-  @Test func turnEndedWithASubagentRunningIsWorking() {
+  @Test func turnEndedWithASubagentRunningIsWaiting() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "go"]),
       event("SubagentStart", 1, ["agent_id": "a1"]),
       event("Stop", 2, ["last_assistant_message": "I'll wait for the review."]),
     ])
-    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .working, reason: "waiting on 1 subagent"))
+    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func turnEndedWithSeveralReviewersRunningIsWaiting() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "/review-code"]),
+      event("SubagentStart", 1, ["agent_id": "a1", "agent_type": "code-reviewer-correctness"]),
+      event("SubagentStart", 2, ["agent_id": "a2", "agent_type": "code-reviewer-testing"]),
+      event(
+        "Stop", 3,
+        ["last_assistant_message": "Two reviewers are still running. I'll validate the findings once they report."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .waiting, reason: "waiting on 2 subagents"))
+  }
+
+  @Test func turnEndedWithABackgroundJobRunningIsWaiting() {
+    let ended = [
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 2, ["last_assistant_message": "I'll wait for the task notification."]),
+    ]
+    let one = facts(ended + [event("job", 3, ["count": 1])])
+    #expect(
+      Attention.evaluate(session(), one, now: 4) == Verdict(state: .waiting, reason: "waiting on 1 background job"))
+    let two = facts(ended + [event("job", 3, ["count": 2])])
+    #expect(Attention.evaluate(session(), two, now: 4).reason == "waiting on 2 background jobs")
+    let gone = facts(ended + [event("job", 3, ["count": 1]), event("job", 4, ["count": 0])])
+    #expect(Attention.evaluate(session(), gone, now: 5).state == .needsYou)
+  }
+
+  @Test func reportOfABackgroundJobReturnsTheSessionToTheUser() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "I'll wait for the task notification."]),
+      event("job", 2, ["count": 1]),
+      event("job", 3, ["count": 0]),
+      event("UserPromptSubmit", 4, ["prompt": "<task-notification>done</task-notification>"]),
+      event("Stop", 5, ["last_assistant_message": "The review found nothing."]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 6).state == .needsYou)
+  }
+
+  @Test func questionStillNeedsYouWhileAJobRuns() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "The server is up. Which page should I test first?"]),
+      event("job", 2, ["count": 1]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 3).state == .needsYou)
+  }
+
+  @Test func offerWaitsWhileAJobRuns() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": "The server is up. Want me to run the tests?"]),
+      event("job", 2, ["count": 1]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 3).state == .waiting)
+  }
+
+  @Test func subagentsOutrankBackgroundJobs() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]), event("SubagentStart", 1, ["agent_id": "a1"]),
+      event("Stop", 2, ["last_assistant_message": "Waiting for the review."]), event("job", 3, ["count": 1]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 4) == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func idleSessionWithAJobIsStaleAfterTwoDays() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]), event("Stop", 1, ["last_assistant_message": "Server started."]),
+      event("job", 2, ["count": 1]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 2 + Attention.staleAfterMs + 1).state == .stale)
+  }
+
+  @Test func exitedClaudeHasNoBackgroundJobs() {
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]), event("Stop", 1, ["last_assistant_message": "Done."]),
+      event("job", 2, ["count": 1]), event("exited", 3),
+    ])
+    #expect(f.jobs == 0)
+  }
+
+  @Test func jobEventsDontCountAsActivity() {
+    let f = facts([event("Stop", 1), event("job", 500, ["count": 1])])
+    #expect(f.lastActivity == 1)
   }
 
   @Test func subagentStopReturnsTheSessionToTheReplyVerdict() {

@@ -53,6 +53,9 @@ final class BoardModel: ObservableObject {
   @Published var followups: [SessionSummary] = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
+  /// A switch of the active account that waits for the user to say whether
+  /// the sessions on the other accounts move too.
+  @Published var switchingAccount: AccountSwitch?
   /// What the user picked or typed on each open card, by card id. The Queue
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
@@ -217,9 +220,29 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// Makes new sessions run under the account.
+  /// Makes new sessions run under the account. When sessions on other
+  /// accounts could move to it, this asks first.
   func useAccount(_ folder: String) {
-    perform("account-use", ["account": .string(folder)])
+    let client = client
+    worker.async {
+      let plan = try? client.moveSessions(to: folder, dryRun: true)
+      Task { @MainActor in
+        if let plan, !plan.moved.isEmpty {
+          self.switchingAccount = AccountSwitch(folder: folder, plan: plan)
+        } else {
+          self.perform("account-use", ["account": .string(folder)])
+        }
+      }
+    }
+  }
+
+  /// Makes the account the one for new sessions, and with `move` moves the
+  /// sessions whose claude is stopped to it.
+  func confirmAccountSwitch(_ change: AccountSwitch, move: Bool) {
+    switchingAccount = nil
+    perform("account-use", ["account": .string(change.folder)]) { _ in
+      if move { self.perform("account-move", ["account": .string(change.folder)]) }
+    }
   }
 
   /// Starts the Manager, or opens it, and selects it.
@@ -396,4 +419,13 @@ final class BoardModel: ObservableObject {
     let path = siblingExecutable("sb")
     return FileManager.default.isExecutableFile(atPath: path) ? path : nil
   }
+}
+
+/// An account switch that the user has not confirmed, with the sessions that
+/// moving would and would not move.
+struct AccountSwitch: Identifiable {
+  var folder: String
+  var plan: AccountMove
+  var id: String { folder }
+  var name: String { ClaudeAccount.name(folder) }
 }

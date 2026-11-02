@@ -36,6 +36,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// Background jobs that run under claude, as the last `job` event counted
+  /// them. A job sends no hooks, so sbd's tick finds it in the process list.
+  public var jobs = 0
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
   /// When the state last changed. `Attention.track` sets it.
@@ -56,16 +59,20 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
+  /// Whether the folder no longer exists, as the poller found when its count
+  /// failed. A count that failed for another reason leaves this false.
+  public var folderGone = false
   /// The id of the last Stop event, which keys the turn's triage summary.
   public var lastStop: Int64 = 0
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
   /// recorded it.
   public var triage: TriageSummary?
 
-  /// The kinds of the events that the pollers and the summaries record. They
-  /// report on GitHub, the folder, and a reply, not on the session. They do
-  /// not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage"]
+  /// The kinds of the events that the pollers, the summaries, and the tick
+  /// record. They report on GitHub, the folder, a reply, and claude's
+  /// background jobs, not on the session. They do not hold off the idle stop
+  /// or the Stale state.
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job"]
 
   public init() {}
 
@@ -84,6 +91,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       transcriptPath = d["transcript_path"]?.string
     case "running":
       live = true
+    case "account-moved":
+      transcriptPath = nil
     case "started", "resumed":
       lastLaunch = event.t
     case "imported":
@@ -92,8 +101,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       lastReply = d["lastReply"]?.string
       // A reply means that the user sent a prompt before it.
       if d["hasReplies"]?.bool == true { prompts = max(prompts, 1) }
+    case "job":
+      jobs = d["count"]?.int ?? 0
     case "SessionEnd", "stopped", "exited":
       live = false
+      jobs = 0
       endTurn()
       subagents = []
     case "UserPromptSubmit":
@@ -161,6 +173,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       }
     case "worktree":
       dirty = d["dirty"]?.int
+      folderGone = d["gone"]?.bool ?? false
     default:
       break
     }
@@ -196,6 +209,11 @@ public enum ReplyKind: Equatable, Sendable {
   /// A next step that needs no decision, such as "Want me to push?".
   case offer(String)
   case other
+
+  var isQuestion: Bool {
+    if case .question = self { return true }
+    return false
+  }
 }
 
 /// The attention rules. They follow the `/sessions` skill
@@ -242,7 +260,12 @@ public enum Attention {
       case .other = classify(facts.lastReply ?? "")
     {
       let n = facts.subagents.count
-      return Verdict(state: .working, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
+      return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
+    }
+    // A question still needs the user's answer while a job runs.
+    if facts.jobs > 0, !classify(facts.lastReply ?? "").isQuestion {
+      return Verdict(
+        state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
     }
     return replyVerdict(facts.lastReply ?? "")
   }

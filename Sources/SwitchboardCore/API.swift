@@ -29,12 +29,15 @@ public struct APIError: Error, CustomStringConvertible {
 
 /// Arguments of `new`.
 public struct NewSession: Codable, Sendable {
-  /// The folder to run in. With `branch`, the repo to make a worktree of.
+  /// The folder to run in. With `branch` or `worktree`, the repo to make a worktree of.
   public var path: String
   public var branch: String?
   /// The commit that a new branch starts from, such as origin/main.
   public var base: String?
   public var name: String?
+  /// Makes a worktree even without a `branch`. The branch is then
+  /// `Config.branchPrefix` and a slug of `name`, with a random suffix when that branch exists.
+  public var worktree: Bool?
   public var prompt: String?
   public var model: String?
   /// The session that starts this one. An id that sbd doesn't know is ignored.
@@ -44,18 +47,76 @@ public struct NewSession: Codable, Sendable {
   public var account: String?
 
   public init(
-    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, prompt: String? = nil,
-    model: String? = nil, parent: String? = nil, account: String? = nil
+    path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
+    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil
   ) {
     self.path = path
     self.branch = branch
     self.base = base
     self.name = name
+    self.worktree = worktree
     self.prompt = prompt
     self.model = model
     self.parent = parent
     self.account = account
   }
+}
+
+extension NewSession {
+  public static func randomSuffix() -> String { String(UUID().uuidString.lowercased().prefix(4)) }
+
+  /// A branch name for a worktree that the user didn't name: `prefix` and the
+  /// slug of `name`, or "session" when the slug is empty. A name for which
+  /// `exists` is true gets a random suffix, redrawn until `exists` is false.
+  public static func freeAutoBranch(
+    prefix: String, name: String?, exists: (String) -> Bool,
+    suffix: () -> String = randomSuffix
+  ) -> String {
+    let slug = Followup.slug(name ?? "", max: 40)
+    let stem = prefix + (slug.isEmpty ? "session" : slug)
+    var branch = stem
+    while exists(branch) { branch = "\(stem)-\(suffix())" }
+    return branch
+  }
+}
+
+/// What `account-move` did, or with `dryRun` would do, to the sessions that are
+/// not on the account.
+public struct AccountMove: Codable, Equatable, Sendable {
+  public struct Blocked: Codable, Equatable, Sendable {
+    public var session: String
+    public var name: String
+    public var reason: String
+
+    public init(session: String, name: String, reason: String) {
+      self.session = session
+      self.name = name
+      self.reason = reason
+    }
+  }
+
+  /// The folder of the account that the sessions move to.
+  public var account: String
+  /// The sessions that moved, or with `dryRun` that would move.
+  public var moved: [String]
+  /// The sessions that stay on their account, and why.
+  public var blocked: [Blocked]
+
+  public init(account: String, moved: [String] = [], blocked: [Blocked] = []) {
+    self.account = account
+    self.moved = moved
+    self.blocked = blocked
+  }
+}
+
+extension AccountMove {
+  /// What a move means for the sessions that move, for the prompt that offers it.
+  public static let consequences = """
+    A moved session resumes its conversation under the new account, with that account's settings, \
+    MCP servers, and permissions. Its transcript is copied, and the old copy stays. Its next message \
+    may write the whole conversation to the prompt cache again, which uses quota. A session whose \
+    claude is running stays on its account until you stop it.
+    """
 }
 
 /// One Claude account, as `accounts` reports it.
@@ -199,6 +260,10 @@ public final class Client: Sendable {
 
   public func useAccount(_ ref: String) throws -> [AccountInfo] {
     try call("account-use", ["account": .string(ref)], as: [AccountInfo].self)
+  }
+
+  public func moveSessions(to ref: String, dryRun: Bool = false) throws -> AccountMove {
+    try call("account-move", ["account": .string(ref), "dryRun": .bool(dryRun)], as: AccountMove.self)
   }
 
   /// With `stop`, exits the idle interactive claude that runs each session

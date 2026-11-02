@@ -26,4 +26,52 @@ import Testing
     try sbd.advanceClock(600_000)
     try sbd.waitFor(s.id, "the idle stop") { !$0.live }
   }
+
+  /// sbd finds a job in the process list when the tick runs. Each step moves
+  /// the clock by 1 ms to run the tick.
+  @Test func sessionWaitsWhileItsBackgroundJobRuns() throws {
+    let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
+    try sbd.sb("send", s.id, "background 100 held")
+    try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+    // No tick has run since the Stop, so the Stop itself counted the job.
+    let waiting = try sbd.get(s.id)
+    #expect(waiting.state == .waiting)
+    #expect(waiting.reason == "waiting on 1 background job")
+
+    // A job that is killed leaves the wait. claude still reports it in a turn of its own.
+    let job = try #require(sbd.stubPid("job.pid"))
+    kill(job, SIGTERM)
+    try sbd.waitFor("the job to exit") { kill(job, 0) != 0 }
+    try sbd.advanceClock(1)
+    #expect(try sbd.get(s.id).state == .needsYou)
+
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
+    try sbd.waitFor("the turn that reports the job") { try sbd.events(s.id).filter { $0.kind == "Stop" }.count == 2 }
+    try sbd.advanceClock(1)
+    #expect(try sbd.get(s.id).state == .needsYou)
+  }
+
+  @Test func sessionWaitsUntilItsLastBackgroundJobEnds() throws {
+    let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
+    let s = try sbd.new(prompt: "background 100 held two")
+    try sbd.waitFor(s.id, "the turn that starts the jobs") { $0.lastReply == "Started a job of 100 s." }
+    try sbd.advanceClock(1)
+    #expect(try sbd.get(s.id).reason == "waiting on 2 background jobs")
+
+    let first = try #require(sbd.stubPid("job.pid"))
+    let second = try #require(sbd.stubPid("job2.pid"))
+    kill(first, SIGTERM)
+    try sbd.waitFor("the first job to exit") { kill(first, 0) != 0 }
+    try sbd.advanceClock(1)
+    let one = try sbd.get(s.id)
+    #expect(one.state == .waiting)
+    #expect(one.reason == "waiting on 1 background job")
+
+    kill(second, SIGTERM)
+    try sbd.waitFor("the second job to exit") { kill(second, 0) != 0 }
+    try sbd.advanceClock(1)
+    #expect(try sbd.get(s.id).state == .needsYou)
+  }
 }

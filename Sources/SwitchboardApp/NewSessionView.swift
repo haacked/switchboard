@@ -17,17 +17,35 @@ struct NewSessionView: View {
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
   @AppStorage("lastFolder") private var folder = NSHomeDirectory()
+  @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form = Form()
 
+  /// Whether the folder or one of its parents holds a `.git`.
+  private var folderIsRepo: Bool {
+    var url = URL(fileURLWithPath: folder.expandingTilde).standardizedFileURL
+    while url.path != "/" {
+      if FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) { return true }
+      url.deleteLastPathComponent()
+    }
+    return false
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let isRepo = folderIsRepo
+    let makesWorktree = createWorktree && isRepo
+    return VStack(alignment: .leading, spacing: 12) {
       Text("New Session").font(.title2.bold())
       SwiftUI.Form {
         HStack {
           TextField("Folder", text: $folder)
           Button("Choose…", action: choose)
         }
-        TextField("Branch", text: $form.branch, prompt: Text("optional: makes a worktree of the folder's repo"))
+        Toggle("Create a worktree", isOn: Binding(get: { makesWorktree }, set: { createWorktree = $0 }))
+          .disabled(!isRepo)
+          .help(isRepo ? "Start in a new worktree of the folder's repo" : "The folder isn't in a git repo")
+        if makesWorktree {
+          TextField("Branch", text: $form.branch, prompt: Text("optional: made from the name when blank"))
+        }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
         if model.accounts.count > 1 {
           Picker("Account", selection: $form.account) {
@@ -48,7 +66,7 @@ struct NewSessionView: View {
         Button("Cancel", role: .cancel) { dismiss() }
           .keyboardShortcut(.cancelAction)
         Button("Start") {
-          start()
+          start(worktree: makesWorktree)
           dismiss()
         }
         .keyboardShortcut(.defaultAction)
@@ -63,14 +81,15 @@ struct NewSessionView: View {
     if let path = chooseFolder(at: folder) { folder = path }
   }
 
-  private func start() {
+  private func start(worktree: Bool) {
     func optional(_ s: String) -> String? {
       let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
       return t.isEmpty ? nil : t
     }
     model.create(
       NewSession(
-        path: folder.expandingTilde, branch: optional(form.branch), name: optional(form.name),
+        path: folder.expandingTilde, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),
+        worktree: worktree,
         prompt: optional(form.prompt), account: optional(form.account)))
   }
 }

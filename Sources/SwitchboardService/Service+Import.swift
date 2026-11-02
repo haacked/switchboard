@@ -189,7 +189,7 @@ extension Service {
     for pid in alive {
       let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
       if !isClaude || snapshot.claudePids.values.contains(pid) { return refuseToSignal(s, pid) }
-      if Service.hasBackgroundJob(pid, in: snapshot.children) {
+      if backgroundJobs(pid, in: snapshot.children) > 0 {
         return
           "\(label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
       }
