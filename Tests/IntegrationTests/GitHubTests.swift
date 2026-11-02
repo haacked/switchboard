@@ -248,6 +248,19 @@ extension Instance {
     #expect(try sbd.get(s.id).pr?.number == 122896)
   }
 
+  @Test func findsTheBranchsNewPRAfterItsPRMerges() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).reason.hasPrefix("#122953 merged"))
+    github.change(122896) { $0["headRefName"] = "haacked/cdp-dlq-breaker-counts-lookups" }
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+  }
+
   @Test func followsTheSessionToAnotherBranch() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

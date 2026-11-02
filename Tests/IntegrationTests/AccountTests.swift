@@ -274,6 +274,24 @@ import Testing
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: third" }
   }
 
+  @Test func movingBackReplacesAStaleSubagentTranscript() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd)
+    let old = try #require(transcript(sbd, "A", s))
+    let subagent = "\((old as NSString).deletingPathExtension)/subagents/agent-1.jsonl"
+    try FileManager.default.createDirectory(
+      atPath: (subagent as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    try "one\n".write(toFile: subagent, atomically: true, encoding: .utf8)
+    try move(sbd)
+    let copy = try #require(transcript(sbd, "B", s))
+    let grownSubagent = "\((copy as NSString).deletingPathExtension)/subagents/agent-1.jsonl"
+    try "one\ntwo\n".write(toFile: grownSubagent, atomically: true, encoding: .utf8)
+
+    let back = try JSONCoding.decode(AccountMove.self, from: try sbd.sb("account", "move", "--json", "A"))
+    #expect(back.moved == [s.id])
+    #expect(try String(contentsOfFile: subagent, encoding: .utf8) == "one\ntwo\n")
+  }
+
   @Test func theDryRunListsASessionWhoseMoveWouldConflictAsBlocked() throws {
     let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
     let s = try stoppedSession(sbd)

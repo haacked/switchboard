@@ -414,6 +414,26 @@ import Testing
       try sbd.client.call("new", ["path": .string(repo), "branch": "haacked/other"])
     }
   }
+
+  @Test func refusesAnExistingWorktreeThatHasAnotherBranchCheckedOut() throws {
+    let sbd = try Instance()
+    let repo = try Repos.create("\(sbd.home.path)/repo")
+    let first = try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"], as: SessionSummary.self)
+    try sbd.sb("stop", first.id)
+    _ = try sbd.git(first.cwd, "switch", "-c", "feature-b")
+    #expect(throws: APIError.self) {
+      try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"])
+    }
+    // A detached HEAD is another branch too.
+    _ = try sbd.git(first.cwd, "switch", "--detach")
+    #expect(throws: APIError.self) {
+      try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"])
+    }
+    // Back on the requested branch, the worktree is reused.
+    _ = try sbd.git(first.cwd, "switch", "feature-a")
+    let again = try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"], as: SessionSummary.self)
+    #expect(again.cwd == first.cwd)
+  }
 }
 
 @Suite(.timeLimit(.minutes(2))) struct AutoBranchSessionTests {
