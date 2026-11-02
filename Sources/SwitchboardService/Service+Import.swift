@@ -36,12 +36,11 @@ extension Service {
     let stopRefs = Set(args["stop"]?.array?.compactMap(\.string) ?? []).intersection(refs)
     if name != nil && refs.count > 1 { throw APIError("a name fits only one imported session") }
     let candidates = try importCandidates()
-    // The sessions whose claude the request may exit: those that a ref in both
-    // `refs` and `stop` names, when it names one session.
+    // Only a ref in both `refs` and `stop` that names exactly one session lets its claude exit.
     let stopped = Set(
       stopRefs.compactMap { ref -> String? in
-        let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
-        return matches.count == 1 ? matches[0].id : nil
+        let named = Service.matches(ref, in: candidates)
+        return named.count == 1 ? named[0].id : nil
       })
     var refused: [Refusal] = []
     var chosen: [(ref: String, session: ClaudeSession)] = []
@@ -216,6 +215,11 @@ extension Service {
     "\(s.label)'s pid \(pid) is not a claude that runs outside Switchboard, so sbd leaves it running."
   }
 
+  /// The candidates that the ref names: those whose id starts with it, or whose name it is.
+  static func matches(_ ref: String, in candidates: [ClaudeSession]) -> [ClaudeSession] {
+    candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
+  }
+
   /// The candidate that the ref names, or why it can't be imported. With
   /// `stopped`, an idle interactive session passes although a claude runs it.
   /// It is refused when another listed session runs in a claude that also runs
@@ -223,7 +227,7 @@ extension Service {
   private func resolve(_ ref: String, in candidates: [ClaudeSession], stopped: Set<String>) -> Result<
     ClaudeSession, APIError
   > {
-    let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
+    let matches = Service.matches(ref, in: candidates)
     guard matches.count == 1 else {
       if matches.isEmpty, let error = alreadyImported(ref, id: ref) { return .failure(error) }
       return .failure(
@@ -237,13 +241,15 @@ extension Service {
     // session that shares the claude must be one that this request may exit.
     let sharers = candidates.filter { $0.id != c.id && !Set($0.livePids).isDisjoint(with: c.livePids) }
     let blocker = sharers.first { !$0.stoppable } ?? sharers.first { !stopped.contains($0.id) }
-    if c.stoppable, let other = blocker, !other.stoppable || stopped.contains(c.id) {
+    if c.stoppable, let other = blocker {
       let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
-      let sentence =
-        other.stoppable
-        ? "\(label) shares its claude (pid \(pid)) with \(other.label). Import both together, or exit claude there, then import it."
-        : "\(label) shares its claude (pid \(pid)) with \(other.label), which import can't exit. Exit claude there, then import it."
-      return .failure(APIError(sentence))
+      let shares = "\(label) shares its claude (pid \(pid)) with \(other.label)"
+      if !other.stoppable {
+        return .failure(APIError("\(shares), which import can't exit. Exit claude there, then import it."))
+      }
+      if stopped.contains(c.id) {
+        return .failure(APIError("\(shares). Import both together, or exit claude there, then import it."))
+      }
     }
     if !(stopped.contains(c.id) && c.stoppable), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }

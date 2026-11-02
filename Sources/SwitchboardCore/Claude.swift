@@ -174,7 +174,8 @@ public struct ClaudeSession: Codable, Equatable, Sendable, Identifiable {
       guard let id = row["sessionId"]?.string, let cwd = row["cwd"]?.string else { return nil }
       return ClaudeSession(
         id: id, name: row["name"]?.string, cwd: cwd, account: account, status: row["status"]?.string,
-        job: row["id"]?.string, pid: row["pid"]?.int, seen: seen)
+        job: row["id"]?.string, pid: row["pid"]?.int.flatMap { (1...Int(Int32.max)).contains($0) ? $0 : nil },
+        seen: seen)
     }
   }
 
