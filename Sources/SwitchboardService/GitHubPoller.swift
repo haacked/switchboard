@@ -21,6 +21,9 @@ final class GitHubPoller {
   var prs: [String: (pr: PullRequest, comments: [PRComment], polled: Int64)] = [:]
   /// Comment bodies by comment id. A comment whose edit time changed is read again.
   private var bodies: [String: PRComment] = [:]
+
+  /// The comments of a read, with the bodies that `bodies` holds.
+  func keptComments(_ comments: [PRComment]) -> [PRComment] { comments.map { bodies[$0.id] ?? $0 } }
   /// The PRs that waits and merge triggers name, by the key they were looked up with.
   var targets: [PRKey: Target] = [:]
   /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
@@ -487,7 +490,7 @@ final class GitHubPoller {
     var changed = false
     if let id = t.prId {
       if let (pr, comments, _) = prs[id] {
-        let kept = comments.map { bodies[$0.id] ?? $0 }
+        let kept = keptComments(comments)
         let shown = GitHub.shown(pr, kept, last: s.facts.pr)
         if shown != s.facts.pr || kept != s.facts.prComments {
           var data: [String: JSON] = ["pr": (try? JSON(encoding: shown)) ?? .null]
