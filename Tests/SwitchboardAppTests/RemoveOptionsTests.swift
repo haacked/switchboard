@@ -93,3 +93,19 @@ extension RemoveOptionsDefaults {
     #expect(!RemoveOptions.isLinkedWorktree(root + "/missing"))
   }
 }
+
+extension RemoveOptionsDefaults {
+  @Test @MainActor func loadsOffTheMainThreadWithTheSameResult() async {
+    let ran = Counter()
+    let off = Counter()
+    let loaded = await RemoveOptions.load(
+      session(pr: .merged), folderExists: { _ in true },
+      isLinkedWorktree: { _ in
+        ran.increment()
+        if !Thread.isMainThread { off.increment() }
+        return true
+      })
+    #expect(ran.value == 1 && off.value == 1)
+    #expect(loaded == RemoveOptions(session(pr: .merged), folderExists: { _ in true }, isLinkedWorktree: { _ in true }))
+  }
+}
