@@ -327,7 +327,7 @@ public enum Attention {
     return .other
   }
 
-  static let sentenceClosers: Set<Character> = ["*", "_", "`", "\"", "'", "\u{201D}", "\u{2019}"]
+  static let sentenceClosers: Set<Character> = ["*", "_", "`", "\"", "'", "\u{201D}", "\u{2019}", ")", "]"]
 
   static func sentences(_ text: String) -> [String] {
     var out: [String] = []
@@ -339,7 +339,7 @@ public enum Attention {
       // A mark inside a name such as README.md or v1.2.3 does not end a sentence.
       // Closing markdown and quotes after the mark stay with the sentence.
       var j = i + 1
-      while j < chars.count, sentenceClosers.contains(chars[j]) { j += 1 }
+      while j < chars.count, sentenceClosers.contains(chars[j]) || (ch == "?" && chars[j] == "!") { j += 1 }
       if j == chars.count || chars[j].isWhitespace {
         out.append(current)
         current = ""

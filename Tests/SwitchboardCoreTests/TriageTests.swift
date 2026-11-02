@@ -39,7 +39,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     f.apply(stop(1, 5, proseQuestion))
     let rule = Verdict(state: .needsYou, reason: Attention.replyVerdict(proseQuestion).reason)
     #expect(Triage.item(f, rule)?.source == .rule)
-    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion))?.source != .rule)
+    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion))?.source == .fallback)
   }
 
   @Test func aPermissionCardGivesAllowAndDeny() {
@@ -104,6 +104,15 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     let item = item(f)
     #expect(item?.source == .rule)
     #expect(item?.kind == .info)
+  }
+
+  @Test func aPromptWhileAWaitOutcomeIsPendingIsAnAction() {
+    var f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Notification", 1, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
+    ])
+    f.waitOutcome = "CI passed on #4"
+    #expect(item(f)?.kind == .action)
   }
 
   @Test func aReplyWithoutASummaryFallsBackToItsLastParagraph() {
