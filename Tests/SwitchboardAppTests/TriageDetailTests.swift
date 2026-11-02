@@ -16,6 +16,13 @@ import Testing
     #expect(TriageDetail.pane(for: s, showingTerminal: true) == .summary)
   }
 
+  @Test func showsTheTerminalOfAStartedFollowUpWhileTerminalIsOn() {
+    var s = session(waitsToStart: true)
+    s.followup?.started = 1
+    #expect(!s.waitsToStart)
+    #expect(TriageDetail.pane(for: s, showingTerminal: true) == .terminal)
+  }
+
   @Test func showsTheTerminalOfAStartedSessionWhileTerminalIsOn() {
     #expect(TriageDetail.pane(for: session(waitsToStart: false), showingTerminal: true) == .terminal)
   }

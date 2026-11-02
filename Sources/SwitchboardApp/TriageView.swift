@@ -60,7 +60,11 @@ struct TriageDetail: View {
         .help("Show the session in the sidebar, with its terminals")
       Toggle("Terminal", isOn: $model.showingTerminal)
         .toggleStyle(.button)
-        .help("Show the session's Claude terminal and shell in place of its summary")
+        .disabled(session.waitsToStart)
+        .help(
+          session.waitsToStart
+            ? "A follow-up has no terminals until it starts"
+            : "Show the session's Claude terminal and shell in place of its summary")
     }
     .padding(10)
   }

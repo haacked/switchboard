@@ -6,6 +6,11 @@ struct MessageField: View {
   /// See SessionViewState for why this isn't `@State`.
   final class Draft: ObservableObject {
     @Published var text = ""
+
+    /// Empties the field unless the user changed it after `sent` was sent.
+    func clear(ifStill sent: String) {
+      if text.trimmingCharacters(in: .whitespacesAndNewlines) == sent { text = "" }
+    }
   }
 
   @EnvironmentObject var model: BoardModel
@@ -21,16 +26,15 @@ struct MessageField: View {
         .onSubmit(send)
       Button("Send", action: send)
         .keyboardShortcut(shortcut)
-        .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .disabled(
+          model.sending.contains(session)
+            || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
   }
 
   private func send() {
     let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
-    model.send(session, text) {
-      // Text typed while the request ran stays.
-      if draft.text.trimmingCharacters(in: .whitespacesAndNewlines) == text { draft.text = "" }
-    }
+    model.send(session, text) { draft.clear(ifStill: text) }
   }
 }
