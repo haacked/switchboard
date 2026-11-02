@@ -117,15 +117,16 @@ final class TerminalHost {
     return PaneRow.parse(out)
   }
 
-  /// Every pane on the server, or nil when tmux fails for a reason other than
-  /// having no server. A missing server has no panes. Any other failure leaves
-  /// the panes unknown, which `panes()` reports as none.
-  func checkedPanes() -> [String: PaneRow]? {
+  /// Every pane on the server. A missing server has no panes. It throws when
+  /// tmux fails for any other reason, which leaves the panes unknown, where
+  /// `panes()` reports none.
+  func checkedPanes() throws -> [String: PaneRow] {
     do {
       return PaneRow.parse(try run(["list-panes", "-a", "-F", TerminalHost.paneFormat]))
     } catch {
       let why = "\(error)"
-      return why.contains("no server running") || why.contains("No such file or directory") ? [:] : nil
+      if why.contains("no server running") || why.contains("No such file or directory") { return [:] }
+      throw error
     }
   }
 

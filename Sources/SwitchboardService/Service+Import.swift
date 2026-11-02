@@ -176,11 +176,13 @@ extension Service {
     if let bad = pids.first(where: { $0 <= 1 || $0 == Int(getpid()) || $0 > Int(Int32.max) }) {
       return refuseToSignal(s, bad)
     }
-    guard let panes = host.checkedPanes() else {
+    let snapshot: Snapshot
+    do {
+      snapshot = try buildSnapshot(reading: host.checkedPanes)
+    } catch {
       return
         "\(label)'s claude stays running, because sbd can't list its own terminals to tell whether it owns that claude."
     }
-    let snapshot = buildSnapshot(panes: panes)
     let alive = pids.filter(Processes.exists)
     let program = (config.claude as NSString).lastPathComponent
     let rows = snapshot.children.values.joined()

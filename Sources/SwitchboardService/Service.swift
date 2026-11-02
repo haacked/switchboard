@@ -717,15 +717,16 @@ public final class Service {
 
   /// Reads the panes and the processes. It reads no Service state, so it runs
   /// off the state queue.
-  func buildSnapshot() -> Snapshot { buildSnapshot(panes: host.panes()) }
+  func buildSnapshot() -> Snapshot { buildSnapshot { host.panes() } }
 
-  /// The snapshot of the given panes and a new process list.
-  func buildSnapshot(panes: [String: PaneRow]) -> Snapshot {
+  /// The snapshot of the panes that `readPanes` returns and a new process
+  /// list. It throws what `readPanes` throws.
+  func buildSnapshot(reading readPanes: () throws -> [String: PaneRow]) rethrows -> Snapshot {
     var s = Snapshot()
     // A snapshot is as old as its first read. `install` uses this to drop
     // one that began before a launch.
     s.taken = nowMs()
-    s.panes = panes
+    s.panes = try readPanes()
     s.children = Processes.byParent()
     let program = (config.claude as NSString).lastPathComponent
     for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
