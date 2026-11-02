@@ -649,6 +649,25 @@ extension Instance {
     }
   }
 
+  @Test func leavesEverythingWhenTheGoneWorktreeHasACommitOnNoBranch() throws {
+    try refusesAndChangesNothing("Push them first") { sbd, _, s, _ in
+      try sbd.git(s.cwd, "checkout", "-q", "--detach")
+      try sbd.commit(s.cwd, "detached.txt")
+      try FileManager.default.removeItem(atPath: s.cwd)
+    }
+  }
+
+  @Test func deletesASessionWhoseFolderAndBranchRefAreGone() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.git(repo, "update-ref", "-d", "refs/heads/\(s.branch ?? "")")
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+  }
+
   @Test func leavesEverythingWhenTheWorktreeIsLocked() throws {
     try refusesAndChangesNothing("is a locked worktree") { sbd, repo, s, _ in
       try sbd.git(repo, "worktree", "lock", "--reason", "Supacode", s.cwd)

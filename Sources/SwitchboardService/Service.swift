@@ -650,9 +650,9 @@ public final class Service {
   /// transcript stays in the account's projects folder, because Claude Code has
   /// no command that archives a local session. When the session's folder is
   /// gone, sbd skips the uncommitted-file check but still refuses a locked
-  /// worktree and commits on the worktree's HEAD that are on no pushed branch. It removes that worktree's record from git and
-  /// no other. The branch checks read the branch from the main repo, because
-  /// the worktree is gone.
+  /// worktree and commits on the worktree's HEAD that are on no pushed branch.
+  /// It removes that worktree's record from git and no other. The branch
+  /// checks read the branch from the main repo, because the worktree is gone.
   /// The remote branch is deleted only after the local branch is, and only when
   /// it is at the merged PR's head. A remote branch at another commit stays and
   /// the call throws. Without a merged PR for the branch, the remote branch is
@@ -784,14 +784,23 @@ public final class Service {
     guard let head = entry.head else {
       throw APIError("git lists no HEAD for the gone worktree \(session.cwd), so its commits can't be checked.")
     }
+    // git lists the zero OID when the worktree's HEAD names a ref that no longer exists, so no commit is at risk.
+    if head.allSatisfy({ $0 == "0" }) { return repo }
+    try requireNoUnpushedCommits(
+      in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD")
+    return repo
+  }
+
+  /// Throws when `rev` has commits on no remote branch. With a merged PR, local branches count too, because a
+  /// squash merge leaves the commits on no remote branch and `worktree remove` keeps the branch.
+  private func requireNoUnpushedCommits(in dir: String, at rev: String, mergedPR: Bool, subject: String) throws {
     let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
-    let unpushed = try gitOutput(repo, ["rev-list", "--count", head, "--not"] + kept)
+    let unpushed = try gitOutput(dir, ["rev-list", "--count", rev, "--not"] + kept)
     guard unpushed == "0" else {
       throw APIError(
-        "\(session.cwd) is gone, and its HEAD has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
+        "\(subject) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
       )
     }
-    return repo
   }
 
   /// `checkBranchIsMerged` for a session whose folder is gone: the branch is read from the repo.
@@ -894,13 +903,7 @@ public final class Service {
     guard changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
     }
-    let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
-    let unpushed = try gitOutput(session.cwd, ["rev-list", "--count", "HEAD", "--not"] + kept)
-    guard unpushed == "0" else {
-      throw APIError(
-        "\(session.cwd) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
-      )
-    }
+    try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
     return repo
   }
 
