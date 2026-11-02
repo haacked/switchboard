@@ -167,8 +167,7 @@ public enum Triage {
   /// Whether the verdict is the one that the session's last reply gives, and
   /// no card, prompt, or rule decided it.
   static func fromReply(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
-    facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil
-      && verdict.source == .reply
+    facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil && verdict.source == .reply
   }
 
   /// Whether the turn that just ended needs a summary: the reply decides the
@@ -198,9 +197,10 @@ public enum Triage {
   }
 
   static func ruleItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem {
-    let reason = verdict.reason
-    let text = capitalized(reason)
-    return TriageItem(title: title(reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".", source: .rule)
+    let text = capitalized(verdict.reason)
+    return TriageItem(
+      title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",
+      source: .rule)
   }
 
   /// The last paragraph of the reply as the summary, with no options.

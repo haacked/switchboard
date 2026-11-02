@@ -147,7 +147,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
         // A prompt that no PermissionRequest reported, such as one from a hook
         // that failed.
         if openPermission == nil && openQuestion == nil && turnRunning {
-          openPermission = ToolCall(tool: Attention.notificationPromptTool, summary: d["message"]?.string ?? "a prompt", since: event.t)
+          openPermission = ToolCall(
+            tool: Attention.notificationPromptTool, summary: d["message"]?.string ?? "a prompt", since: event.t)
         }
       case "idle_prompt":
         // Claude Code reports the idle prompt 60 s after a Stop. It sends none
