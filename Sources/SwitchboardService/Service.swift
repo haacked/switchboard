@@ -1036,8 +1036,7 @@ public final class Service {
           // no SessionStart, because its hook failed, counts as live too. A
           // claude whose SessionStart arrived and whose SessionEnd followed
           // is exiting, and stays not live.
-          let reportedStart = (entries[id]?.facts.lastStart ?? 0) >= (entries[id]?.facts.lastLaunch ?? 0)
-          if live || reportedStart {
+          if live || entries[id]?.facts.startedSinceLaunch == true {
             entries[id]?.unreportedSince = nil
           } else if let since = entries[id]?.unreportedSince {
             if now - since > 10_000 {
@@ -1058,7 +1057,7 @@ public final class Service {
           // A message sent while claude exited waits in `pending` for a launch.
           // A claude that dies before its SessionStart isn't launched again,
           // and these launches come at most every 5 s.
-          if let e = entries[id], !e.pending.isEmpty, (e.facts.lastStart ?? 0) >= (e.facts.lastLaunch ?? 0),
+          if let e = entries[id], !e.pending.isEmpty, e.facts.startedSinceLaunch,
             now - (e.facts.lastLaunch ?? 0) >= 5_000, !mcpStarting(now: now)
           {
             try? launch(id, prompt: nil)
@@ -1146,4 +1145,9 @@ public final class Service {
     let text = JSON.object(["hooks": .object(hooks)]).text
     try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
   }
+}
+
+extension SessionFacts {
+  /// Whether the claude that the last launch started has reported its SessionStart.
+  fileprivate var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
 }
