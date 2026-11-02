@@ -232,21 +232,41 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   @Test func nextNeedingYouSkipsTheManagerInTheQueueAndOutsideIt() {
     let model = model([needsItem("m", manager: true), needsItem("a"), needsItem("b")])
     model.show(.queue)
-    model.selectNextNeedingYou()
-    model.selectNextNeedingYou()
-    model.selectNextNeedingYou()
-    #expect(model.currentQueueItem != "m")
-    #expect(model.queueFocus != "m")
-    model.show(.board)
-    for _ in 0..<3 {
+    var seen: [String?] = []
+    for _ in 0..<4 {
       model.selectNextNeedingYou()
-      #expect(model.selection != "m")
+      seen.append(model.currentQueueItem)
     }
+    #expect(seen == ["b", "a", "b", "a"])
+    model.show(.board)
+    seen = []
+    for _ in 0..<4 {
+      model.selectNextNeedingYou()
+      seen.append(model.selection)
+    }
+    #expect(seen == ["a", "b", "a", "b"])
   }
 
   @Test func theManagerDoesNotNotifyWhenItStartsNeedingYou() {
     let model = model([needsItem("m", manager: true, state: .working), needsItem("a", state: .working)])
     let next = [needsItem("m", manager: true), needsItem("a")]
     #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
+  }
+
+  @Test func aFollowupNotifiesOnlyWhileItWaitsToStart() {
+    func followup(started: Bool) -> SessionSummary {
+      var s = needsItem("f")
+      s.followup = Followup(prompt: "p")
+      if started { s.followup?.started = 1 }
+      return s
+    }
+    let model = model([needsItem("f", state: .notStarted)])
+    #expect(model.sessionsToNotify([followup(started: false)]).map(\.id) == ["f"])
+    #expect(model.sessionsToNotify([followup(started: true)]).isEmpty)
+  }
+
+  @Test func aSessionSeenForTheFirstTimeDoesNotNotify() {
+    let model = model([needsItem("a")])
+    #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
   }
 }

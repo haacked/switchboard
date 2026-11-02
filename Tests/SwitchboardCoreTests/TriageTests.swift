@@ -208,14 +208,26 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
 }
 
 @Suite struct TriageOrder {
-  func summary(_ id: String, _ state: AttentionState, since: Int64, _ source: TriageSource, _ kind: TriageKind?)
-    -> SessionSummary
-  {
+  func summary(
+    _ id: String, _ state: AttentionState, since: Int64, _ source: TriageSource, _ kind: TriageKind?,
+    manager: Bool = false
+  ) -> SessionSummary {
     var s = SessionSummary(
       id: id, name: id, cwd: "/", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "", since: since,
       lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
     s.triage = kind.map { TriageItem(title: id, kind: $0, summary: "", source: source) }
+    s.manager = manager ? true : nil
     return s
+  }
+
+  @Test func leavesOutTheManagerWhateverItsItemIs() {
+    let list = [
+      summary("m1", .needsYou, since: 0, .card, .approval, manager: true),
+      summary("m2", .needsYou, since: 0, .summary, .decision, manager: true),
+      summary("m3", .canContinue, since: 0, .summary, .approval, manager: true),
+      summary("a", .needsYou, since: 5, .summary, .decision),
+    ]
+    #expect(Triage.order(list).map(\.id) == ["a"])
   }
 
   @Test func groupsComeInOrderAndTheOldestComesFirstInAGroup() {
@@ -568,26 +580,5 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(!config.triage.enabled)
     #expect(config.triage.account == "~/.claude-work")
     #expect(config.triage.model == "haiku")
-  }
-}
-
-@Suite struct TriageManager {
-  func summary(_ id: String, manager: Bool, state: AttentionState = .needsYou, source: TriageSource = .summary)
-    -> SessionSummary
-  {
-    var s = SessionSummary(
-      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "",
-      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
-    s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: source)
-    s.manager = manager ? true : nil
-    return s
-  }
-
-  @Test func theOrderLeavesOutTheManager() {
-    let list = [
-      summary("m1", manager: true, source: .card), summary("m2", manager: true),
-      summary("m3", manager: true, state: .canContinue), summary("a", manager: false),
-    ]
-    #expect(Triage.order(list).map(\.id) == ["a"])
   }
 }

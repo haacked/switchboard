@@ -249,7 +249,7 @@ public enum Triage {
   /// Whether the session may put an item in the Queue, the badge, the menu
   /// bar, a notification, or Next Needing You. The Manager may not, because its
   /// replies and cards repeat or name the sessions it manages, which have their
-  /// own entries. No item about sb itself exists, so this refuses every Manager item.
+  /// own entries. Nothing reports a problem with sb itself, such as an out-of-date sbd, so this refuses every Manager item.
   public static func mayQueue(_ s: SessionSummary) -> Bool { s.manager != true }
 
   /// The sessions that have an item, by group and then oldest first.

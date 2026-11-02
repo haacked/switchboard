@@ -181,7 +181,7 @@ final class BoardModel: ObservableObject {
   /// The sessions that just started needing the user.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard s.state == .needsYou, Triage.mayQueue(s), knownStates[s.id] != .needsYou, let known = knownStates[s.id]
+      guard s.state == .needsYou, Triage.mayQueue(s), let known = knownStates[s.id], known != .needsYou
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.

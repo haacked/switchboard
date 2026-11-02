@@ -89,7 +89,12 @@ import Testing
     let other = try idle(sbd, name: "other")
     #expect(try triaged(sbd) == [other.id])
     #expect(try sbd.client.call("get", ["session": .string(m.id)], as: SessionSummary.self).triage == nil)
-    #expect(throws: TestError.self) { try sbd.sb("choose", m.id, "1") }
+    do {
+      try sbd.sb("choose", m.id, "1")
+      Issue.record("choose accepted the Manager")
+    } catch {
+      #expect("\(error)".contains("needs nothing from you"))
+    }
   }
 
   @Test func theManagersCardStaysOutOfTheQueue() throws {
