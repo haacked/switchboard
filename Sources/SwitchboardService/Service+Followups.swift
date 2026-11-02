@@ -149,7 +149,7 @@ extension Service {
       try update(session.id) { s in
         s.cwd = folder.cwd
         s.branch = folder.branch
-        s.repo = repo
+        s.repo = folder.repo
         s.model = s.model ?? config.model
         s.claudeConfigDir = s.claudeConfigDir ?? activeAccount
         s.done = false

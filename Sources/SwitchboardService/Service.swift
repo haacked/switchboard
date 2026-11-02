@@ -335,19 +335,22 @@ public final class Service {
     return FileManager.default.fileExists(atPath: location.dir)
   }
 
-  /// The folder a new session runs in, and its branch. With a branch, the
+  /// The folder a new session runs in, its branch, and its repo. With a branch, the
   /// folder is a worktree of the repo at <worktreeRoot>/<repo>/<branch>,
   /// which this creates unless it exists. An existing one must have the
-  /// branch checked out.
-  func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?) {
+  /// branch checked out. The repo is the main checkout, or the passed path when that
+  /// is the main checkout. It is nil without a branch.
+  func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?, repo: String?) {
     let path = (args.path as NSString).standardizingPath
     guard isDirectory(path) else { throw APIError("no folder \(path)") }
     guard let branch = args.branch, !branch.isEmpty else {
       let current = try? gitOutput(path, ["branch", "--show-current"])
-      return (path, current?.isEmpty == false ? current : nil)
+      return (path, current?.isEmpty == false ? current : nil, nil)
     }
     let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
     let (main, dir) = try worktreeLocation(path, branch)
+    // The path can be a linked worktree, which goes away. The main checkout stays.
+    let repo = samePath(main, path) ? path : main
     if FileManager.default.fileExists(atPath: dir) {
       let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
@@ -355,14 +358,14 @@ public final class Service {
       guard current == branch else {
         throw APIError("\(dir) has \(current.isEmpty ? "no branch" : current) checked out, not \(branch)")
       }
-      return (dir, branch)
+      return (dir, branch, repo)
     }
     let exists = branchExists(path, branch)
     try FileManager.default.createDirectory(
       atPath: (dir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
     _ = try gitOutput(
       path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"])
-    return (dir, branch)
+    return (dir, branch, repo)
   }
 
   struct WorktreeEntry {
@@ -426,18 +429,13 @@ public final class Service {
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  func create(_ args: NewSession, _ folder: (cwd: String, branch: String?)) throws -> SessionSummary {
+  func create(_ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?)) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
       branch: folder.branch, claudeSessionId: UUID().uuidString.lowercased(), model: args.model ?? config.model,
       created: nowMs())
-    if args.branch?.isEmpty == false {
-      // The path can be a linked worktree, which goes away. The main checkout stays.
-      let path = (args.path as NSString).standardizingPath
-      let main = try? worktreeEntries(path).first?.path
-      session.repo = main.flatMap { samePath($0, path) ? nil : $0 } ?? path
-    }
+    session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     entries[id] = Entry(session: session)
@@ -776,7 +774,7 @@ public final class Service {
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
   /// gone, because the session started from a linked worktree that was later removed, this returns the
-  /// main checkout of another session's worktree under the same <worktreeRoot>/<repo> folder.
+  /// one known main checkout that still lists the session's worktree.
   private func worktreeRepo(_ session: Session) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
@@ -784,15 +782,19 @@ public final class Service {
       )
     }
     if isDirectory(repo) { return repo }
-    let root = config.worktreeRoot.expandingTilde + "/"
-    if session.cwd.hasPrefix(root) {
-      let name = String(session.cwd.dropFirst(root.count).prefix { $0 != "/" })
-      let others = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
-      for folder in others where isDirectory(folder) {
-        if let main = try? worktreeEntries(folder).first?.path, (main as NSString).lastPathComponent == name {
-          return main
-        }
+    let folders = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
+    var mains: [String] = []
+    for folder in folders where isDirectory(folder) {
+      guard let main = try? worktreeEntries(folder).first?.path, !mains.contains(where: { samePath($0, main) })
+      else { continue }
+      if let listed = try? worktreeEntries(main), listed.contains(where: { samePath($0.path, session.cwd) }) {
+        mains.append(main)
       }
+    }
+    if mains.count == 1 { return mains[0] }
+    if mains.count > 1 {
+      throw APIError(
+        "\(session.id)'s repo \(repo) is gone, and \(mains.joined(separator: " and ")) both list its worktree.")
     }
     throw APIError("\(session.id)'s repo \(repo) is gone, and no other checkout of it is known.")
   }
