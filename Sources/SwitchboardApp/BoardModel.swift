@@ -96,9 +96,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// The sidebar's groups, in state order, without empty ones. The Manager has
-  /// no row, so a session it started is top level, like one with no parent. A
-  /// session whose parent is another session nests under that parent while
-  /// both are in the same group.
+  /// its own row above the groups, so a session it started is top level, like
+  /// one with no parent. A session whose parent is another session nests under
+  /// that parent while both are in the same group.
   var sidebarGroups: [SidebarGroup] {
     let listed = board.filter { $0.manager != true }
     return AttentionState.allCases.compactMap { state in
@@ -119,6 +119,9 @@ final class BoardModel: ObservableObject {
   }
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
+
+  /// True while the sidebar has no rows and sbd answers.
+  var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && manager == nil && unreachable == nil }
 
   /// The Queue or the Board while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
