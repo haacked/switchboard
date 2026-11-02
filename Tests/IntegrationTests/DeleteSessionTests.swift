@@ -513,8 +513,7 @@ extension Instance {
     try sbd.git(s.cwd, "push", "-q", "-u", "fork", Self.mergedBranch)
     let r = try sbd.deleteDoneSession(s.id)
     #expect(r.status == 0, Comment(rawValue: r.stderr))
-    let forkBranch = try runCommand("/usr/bin/git", ["-C", fork, "branch", "--list", Self.mergedBranch]).stdout
-    #expect(forkBranch.trimmingCharacters(in: .whitespacesAndNewlines) == "")
+    #expect(try remoteBranch(fork) == "")
     #expect(try remoteBranch(origin) != "")
   }
 

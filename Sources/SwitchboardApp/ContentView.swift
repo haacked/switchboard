@@ -174,7 +174,7 @@ struct Sidebar: View {
               .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
               .contextMenu {
                 if BoardModel.canDelete(row.session) {
-                  Button("Delete \(BoardModel.deletePlan(row.session).summary.capitalizedFirst)…", role: .destructive) {
+                  Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
                     model.confirmingDelete = row.id
                   }
                 }
@@ -232,10 +232,6 @@ struct Sidebar: View {
       get: { !model.collapsed.contains(state) },
       set: { if $0 { model.collapsed.remove(state) } else { model.collapsed.insert(state) } })
   }
-}
-
-extension String {
-  var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
 
 /// Asks to delete a Done session with its worktree and branch. The dialog is on ContentView.

@@ -686,11 +686,7 @@ public final class Service {
       }
     }
     // The branch's git config is deleted with the branch, so the remote is read first.
-    var remoteName = "origin"
-    if removesRemoteBranch, let repo, let branch {
-      remoteName =
-        (try? gitOutput(repo, ["config", "branch.\(branch.name).remote"])).flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
-    }
+    let remoteName = removesRemoteBranch ? repo.flatMap { r in branch.map { trackedRemote(r, $0.name) } } : nil
     let fresh = buildSnapshot()
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -724,7 +720,7 @@ public final class Service {
     var remoteError: Error?
     if let repo, let branch, branchRemoved, removesRemoteBranch, let pr {
       do {
-        remoteRemoved = try deleteRemoteBranch(repo, remoteName, branch.name, pr: pr)
+        remoteRemoved = try deleteRemoteBranch(repo, remoteName ?? "origin", branch.name, pr: pr)
       } catch {
         remoteError = error
       }
@@ -780,6 +776,12 @@ public final class Service {
     let elsewhere = try worktreeEntries(repo).contains { $0.branch == branch && !samePath($0.path, session.cwd) }
     guard !elsewhere else { throw APIError("\(branch) is checked out in a worktree.") }
     return (branch, tip)
+  }
+
+  /// The remote that the branch tracks, or origin.
+  private func trackedRemote(_ repo: String, _ branch: String) -> String {
+    let tracked = try? gitOutput(repo, ["config", "branch.\(branch).remote"])
+    return tracked.flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
   }
 
   /// Deletes the branch from `remote` when the remote's tip is the
