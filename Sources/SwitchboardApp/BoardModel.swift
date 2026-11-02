@@ -73,9 +73,9 @@ final class BoardModel: ObservableObject {
   private var loaded = false
   private var followupsRead = Date.distantPast
 
-  /// The toolbar star shows when the Manager needs you, so the menu bar, the
-  /// Dock badge, and ⌘J leave it out.
-  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && $0.manager != true } }
+  /// The Manager stays out of the Queue, the Dock badge, and ⌘J. The toolbar
+  /// star shows when it needs you.
+  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayQueue($0) } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
 
@@ -178,14 +178,7 @@ final class BoardModel: ObservableObject {
       // resets the hover delay before a tooltip shows.
       if unreachable != nil { unreachable = nil }
       if let more, followups != more { followups = more }
-      if loaded {
-        for s in list where s.state == .needsYou && knownStates[s.id] != .needsYou && knownStates[s.id] != nil {
-          // A follow-up that starts passes through Needs you until its first
-          // prompt. Only a follow-up that fired and is still unstarted notifies.
-          if knownStates[s.id] == .notStarted && !s.waitsToStart { continue }
-          notify(s)
-        }
-      }
+      if loaded { sessionsToNotify(list).forEach(notify) }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       if !sameShown(sessions, list) { sessions = list }
@@ -200,6 +193,17 @@ final class BoardModel: ObservableObject {
     case .failure(let error):
       let problem = "\(error)"
       if unreachable != problem { unreachable = problem }
+    }
+  }
+
+  /// The sessions that just started needing the user.
+  func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
+    list.filter { s in
+      guard s.state == .needsYou, Triage.mayQueue(s), let known = knownStates[s.id], known != .needsYou
+      else { return false }
+      // A follow-up that starts passes through Needs you until its first
+      // prompt. Only a follow-up that fired and is still unstarted notifies.
+      return known != .notStarted || s.waitsToStart
     }
   }
 
