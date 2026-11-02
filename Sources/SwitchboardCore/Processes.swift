@@ -103,8 +103,10 @@ public enum Processes {
   }
 
   /// Whether a process with the pid exists. EPERM means it exists and belongs
-  /// to another user.
+  /// to another user. A pid below 1 names a process group, and a pid above
+  /// `Int32.max` names no process, so neither counts.
   public static func exists(_ pid: Int) -> Bool {
-    kill(pid_t(pid), 0) == 0 || errno == EPERM
+    guard pid >= 1, let id = pid_t(exactly: pid) else { return false }
+    return kill(id, 0) == 0 || errno == EPERM
   }
 }

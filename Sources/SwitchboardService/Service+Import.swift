@@ -33,12 +33,16 @@ extension Service {
     let refs = args["refs"]?.array?.compactMap(\.string).filter { !$0.isEmpty } ?? []
     guard !refs.isEmpty else { throw APIError("import needs a session") }
     let name = args["name"]?.string
-    let stopRefs = args["stop"]?.array?.compactMap(\.string) ?? []
+    let stopRefs = Set(args["stop"]?.array?.compactMap(\.string) ?? []).intersection(refs)
     if name != nil && refs.count > 1 { throw APIError("a name fits only one imported session") }
     let candidates = try importCandidates()
-    // The sessions whose claude the request may exit.
+    // The sessions whose claude the request may exit: those that a ref in both
+    // `refs` and `stop` names, when it names one session.
     let stopped = Set(
-      candidates.filter { c in stopRefs.contains { c.id.hasPrefix($0) || c.name == $0 } }.map(\.id))
+      stopRefs.compactMap { ref -> String? in
+        let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
+        return matches.count == 1 ? matches[0].id : nil
+      })
     var refused: [Refusal] = []
     var chosen: [(ref: String, session: ClaudeSession)] = []
     queue.sync {
@@ -235,14 +239,10 @@ extension Service {
     let blocker = sharers.first { !$0.stoppable } ?? sharers.first { !stopped.contains($0.id) }
     if c.stoppable, let other = blocker, !other.stoppable || stopped.contains(c.id) {
       let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
-      let why =
-        other.stoppable
-        ? "Name both for --stop, or exit claude there, then import it."
-        : "which import can't exit. Exit claude there, then import it."
       let sentence =
         other.stoppable
-        ? "\(label) shares its claude (pid \(pid)) with \(other.label). \(why)"
-        : "\(label) shares its claude (pid \(pid)) with \(other.label), \(why)"
+        ? "\(label) shares its claude (pid \(pid)) with \(other.label). Import both together, or exit claude there, then import it."
+        : "\(label) shares its claude (pid \(pid)) with \(other.label), which import can't exit. Exit claude there, then import it."
       return .failure(APIError(sentence))
     }
     if !(stopped.contains(c.id) && c.stoppable), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }

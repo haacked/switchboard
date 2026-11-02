@@ -515,22 +515,21 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(external.terminationReason == .uncaughtSignal)
   }
 
-  @Test func stopNeverSignalsSbdPid1OrTheClaudeOfASwitchboardSession() throws {
+  @Test func stopNeverSignalsSbdInitOrTheClaudeOfASwitchboardSession() throws {
     let sbd = try Instance(accounts: ["A"])
     let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/own")
     // A Switchboard session runs a claude of its own, which an external row can list by mistake.
     let own = try sbd.new()
     let ownPid = try #require(try sbd.waitFor(own.id, "claude's pid") { $0.claudePid != nil }.claudePid)
-    let ids = (sbd: newId(), init: newId(), zero: newId(), own: newId())
+    let ids = (sbd: newId(), init: newId(), own: newId())
     try sbd.writeAgents(
       "A",
       [
         agent(ids.sbd, cwd: tree, name: "sbd", pid: sbd.sbdPid, status: "idle"),
         agent(ids.`init`, cwd: tree, name: "init", pid: 1, status: "idle"),
-        agent(ids.zero, cwd: tree, name: "zero", pid: 0, status: "idle"),
         agent(ids.own, cwd: tree, name: "own", pid: ownPid, status: "idle"),
       ])
-    let names = ["sbd", "init", "zero", "own"]
+    let names = ["sbd", "init", "own"]
 
     let result = try sbd.client.importSessions(names, stop: names)
 
@@ -538,6 +537,47 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(Set(reasons(result).keys) == Set(names))
     #expect(Processes.exists(ownPid) && Processes.exists(sbd.sbdPid))
     #expect(try sbd.get(own.id).live)
+  }
+
+  @Test func aPidOutsideTheRangeOfProcessesCountsAsNoClaudeAndDoesNotCrashSbd() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/range")
+    let pids = [0, -1, 5_000_000_000]
+    let ids = pids.map { _ in newId() }
+    try sbd.writeAgents(
+      "A", zip(ids, pids).map { agent($0, cwd: tree, name: "p\($1)", pid: $1, status: "idle") })
+
+    let listed = try sbd.client.importable().sessions
+
+    #expect(listed.count == 3 && listed.allSatisfy { !$0.running })
+    let result = try sbd.client.importSessions(pids.map { "p\($0)" }, stop: pids.map { "p\($0)" })
+    #expect(result.refused.isEmpty && result.imported.count == 3)
+    #expect(try sbd.client.call("ping") != nil)
+  }
+
+  @Test func stopLeavesAClaudeRunningWhoseOtherSessionOnlyTheStopListNames() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/scope")
+    let claude = try stubClaude()
+    defer { if claude.isRunning { claude.terminate() } }
+    let pid = Int(claude.processIdentifier)
+    let (first, second) = (newId(), newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(first, cwd: tree, name: "first", pid: pid, status: "idle"),
+        agent(second, cwd: tree, name: "second", pid: pid, status: "idle"),
+      ])
+
+    // "second" is in the stop list but not among the sessions to import.
+    let named = try sbd.client.importSessions(["first"], stop: ["first", "second"])
+    // An empty entry in the stop list names no session.
+    let empty = try sbd.client.importSessions(["first"], stop: ["", "first"])
+
+    #expect(named.imported.isEmpty && empty.imported.isEmpty)
+    #expect(reasons(named)["first"]?.contains("Import both together") == true)
+    #expect(reasons(empty)["first"]?.contains("Import both together") == true)
+    #expect(claude.isRunning)
   }
 
   @Test func stopRefusesAClaudeThatAnUnnamedIdleSessionAlsoRunsInAndImportsBothWhenNamed() throws {
@@ -557,7 +597,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let refused = try sbd.client.importSessions(["first"], stop: ["first"])
 
     #expect(refused.imported.isEmpty)
-    #expect(reasons(refused)["first"]?.contains("Name both for --stop") == true)
+    #expect(reasons(refused)["first"]?.contains("Import both together") == true)
     #expect(claude.isRunning)
 
     let both = try sbd.client.importSessions(["first", "second"], stop: ["first", "second"])
