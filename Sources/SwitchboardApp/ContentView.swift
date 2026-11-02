@@ -215,7 +215,7 @@ struct ManagerButton: View {
       Label("Manager", systemImage: needsYou ? "star.fill" : "star")
         .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
     }
-    .accessibilityValue(needsYou ? "Needs you" : "")
+    .accessibilityValue(needsYou ? AttentionState.needsYou.title : "")
     .help(
       model.manager.map {
         $0.state == .needsYou ? "The Manager needs you: \($0.reason) (⇧⌘M)" : "Open the Manager (⇧⌘M)"
