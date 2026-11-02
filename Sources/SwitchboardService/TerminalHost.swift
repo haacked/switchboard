@@ -117,6 +117,18 @@ final class TerminalHost {
     return PaneRow.parse(out)
   }
 
+  /// Every pane on the server, or nil when tmux fails for a reason other than
+  /// having no server. A missing server has no panes. Any other failure leaves
+  /// the panes unknown, which `panes()` reports as none.
+  func checkedPanes() -> [String: PaneRow]? {
+    do {
+      return PaneRow.parse(try run(["list-panes", "-a", "-F", TerminalHost.paneFormat]))
+    } catch {
+      let why = "\(error)"
+      return why.contains("no server running") || why.contains("No such file or directory") ? [:] : nil
+    }
+  }
+
   /// The value of a tmux format for the pane, or nil when the pane is missing.
   /// For a missing pane, tmux prints the format with every value empty and
   /// exits 0. Every pane's `#{pane_id}` starts with `%`, so a line that

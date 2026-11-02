@@ -351,16 +351,19 @@ private func reasons(_ result: ImportResult) -> [String: String] {
       ])
     func held(_ label: String, in cwd: String) -> String {
       "\(label) runs in another terminal, in \(cwd) (pid \(pid)). Exit claude there, then import it."
-        + " Or import it with --stop to exit that claude."
+    }
+    // These sessions are idle, and the busy background job "job" runs in the same claude.
+    func shared(_ label: String) -> String {
+      "\(label) shares its claude (pid \(pid)) with job, which import can't exit. Exit claude there, then import it."
     }
 
     let stop = "`CLAUDE_CONFIG_DIR='\(sbd.account("A"))' claude stop deadbeef`"
     let expected: [String: String] = [
-      "live": held("live", in: tree),
+      "live": shared("live"),
       "job": "job runs as background job deadbeef. Stop it with \(stop), then import it.",
-      "twice": held("twice", in: tree),
-      "again": held("again", in: sbd.work),
-      ids.unnamed: held(String(ids.unnamed.prefix(8)), in: sbd.work),
+      "twice": shared("twice"),
+      "again": shared("again"),
+      ids.unnamed: shared(String(ids.unnamed.prefix(8))),
       "gone": "gone's folder \(gone) no longer exists.",
       "dup": "dup matches 2 Claude sessions",
       "nothing": "no Claude session matches nothing",
@@ -372,7 +375,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(reasons(result) == expected)
     let cli = try sbd.run("import", "live")
     #expect(cli.status == 1)
-    #expect(cli.stderr.contains(held("live", in: tree)))
+    #expect(cli.stderr.contains(shared("live")))
     #expect(try sbd.client.sessions().isEmpty)
 
     holder.terminate()
@@ -394,10 +397,14 @@ private func reasons(_ result: ImportResult) -> [String: String] {
 
   /// A process whose command starts with `argv0`. The stub claude's name makes it look like the claude that
   /// `claude agents` lists.
-  private func stubClaude(argv0: String = "claude-stub", ignoringTerm: Bool = false) throws -> Process {
+  private func stubClaude(
+    argv0: String = "claude-stub", ignoringTerm: Bool = false, backgroundTask: Bool = false
+  ) throws -> Process {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/bash")
-    p.arguments = ["-c", "\(ignoringTerm ? "trap '' TERM; " : "")exec -a '\(argv0)' sleep 60"]
+    // With job control on, a background command leads its own process group, as a background Bash job does.
+    let task = backgroundTask ? "set -m; sleep 20 & " : ""
+    p.arguments = ["-c", "\(task)\(ignoringTerm ? "trap '' TERM; " : "")exec -a '\(argv0)' sleep 60"]
     try p.run()
     let pid = p.processIdentifier
     for _ in 0..<100 {
@@ -460,6 +467,52 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let cli = try sbd.run("import", "busy", "--stop")
     #expect(cli.status == 1)
     #expect(busy.isRunning)
+  }
+
+  @Test func stopRefusesAnIdleClaudeThatRunsABackgroundTask() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/task")
+    let (withTask, plain) = (try stubClaude(backgroundTask: true), try stubClaude())
+    defer { for p in [withTask, plain] where p.isRunning { p.terminate() } }
+    let (taskId, plainId) = (newId(), newId())
+    try sbd.writeAgents(
+      "A",
+      [
+        agent(taskId, cwd: tree, name: "task", pid: Int(withTask.processIdentifier), status: "idle"),
+        agent(plainId, cwd: tree, name: "plain", pid: Int(plain.processIdentifier), status: "idle"),
+      ])
+
+    let result = try sbd.client.importSessions(["task", "plain"], stop: ["task", "plain"])
+
+    #expect(result.imported.map(\.claudeSessionId) == [plainId])
+    #expect(reasons(result)["task"]?.contains("runs a background task") == true)
+    #expect(withTask.isRunning)
+  }
+
+  @Test func stopRefusesWhenTmuxCannotTellWhetherSwitchboardOwnsTheClaude() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let tree = try sbd.addWorktree(try sbd.makeRepo(), "haacked/tmux")
+    // A Switchboard session starts the tmux server.
+    let socket = try sbd.client.terminals(try sbd.new().id).socket
+    let external = try stubClaude()
+    defer { if external.isRunning { external.terminate() } }
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: tree, name: "ext", pid: Int(external.processIdentifier), status: "idle")])
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: socket)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: socket) }
+
+    let refused = try sbd.client.importSessions(["ext"], stop: ["ext"])
+
+    #expect(refused.imported.isEmpty)
+    #expect(reasons(refused)["ext"]?.contains("can't list its own terminals") == true)
+    #expect(external.isRunning)
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: socket)
+    let imported = try sbd.client.importSessions(["ext"], stop: ["ext"])
+
+    #expect(imported.imported.map(\.claudeSessionId) == [id])
+    external.waitUntilExit()
+    #expect(external.terminationReason == .uncaughtSignal)
   }
 
   @Test func stopKeepsTheBusyRowWhenTwoAccountsListOneSessionWithOnePid() throws {
@@ -535,7 +588,8 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let result = try sbd.client.importSessions(["stale"], stop: ["stale"])
 
     #expect(result.imported.isEmpty)
-    #expect(reasons(result)["stale"]?.contains("runs in another terminal") == true)
+    #expect(reasons(result)["stale"]?.contains("shares its claude") == true)
+    #expect(reasons(result)["stale"]?.contains("--stop") == false)
     #expect(shared.isRunning)
   }
 

@@ -717,12 +717,15 @@ public final class Service {
 
   /// Reads the panes and the processes. It reads no Service state, so it runs
   /// off the state queue.
-  func buildSnapshot() -> Snapshot {
+  func buildSnapshot() -> Snapshot { buildSnapshot(panes: host.panes()) }
+
+  /// The snapshot of the given panes and a new process list.
+  func buildSnapshot(panes: [String: PaneRow]) -> Snapshot {
     var s = Snapshot()
     // A snapshot is as old as its first read. `install` uses this to drop
     // one that began before a launch.
     s.taken = nowMs()
-    s.panes = host.panes()
+    s.panes = panes
     s.children = Processes.byParent()
     let program = (config.claude as NSString).lastPathComponent
     for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
@@ -806,8 +809,10 @@ public final class Service {
 
   /// Background work is running when a child of claude leads its own process
   /// group, as a background Bash job does.
-  func hasBackgroundJob(_ pid: Int) -> Bool {
-    (snapshot.children[pid] ?? []).contains { $0.pgid == $0.pid }
+  func hasBackgroundJob(_ pid: Int) -> Bool { Service.hasBackgroundJob(pid, in: snapshot.children) }
+
+  static func hasBackgroundJob(_ pid: Int, in children: [Int: [ProcessRow]]) -> Bool {
+    (children[pid] ?? []).contains { $0.pgid == $0.pid }
   }
 
   /// Records each claude that exited or started without a hook, and stops

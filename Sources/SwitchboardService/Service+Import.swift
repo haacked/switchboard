@@ -49,8 +49,7 @@ extension Service {
       }
     }
     // Only a stoppable session can still run here. Its claude exits off the state queue.
-    let snapshot = chosen.contains { $0.session.running } ? buildSnapshot() : Snapshot()
-    let exits = concurrentMap(chosen.map(\.session)) { $0.running ? exitClaude(of: $0, in: snapshot) : nil }
+    let exits = concurrentMap(chosen.map(\.session)) { $0.running ? exitClaude(of: $0) : nil }
     refused += zip(chosen, exits).compactMap { item, why in why.map { Refusal(ref: item.ref, reason: $0) } }
     chosen = zip(chosen, exits).filter { $0.1 == nil }.map(\.0)
     let sessions = withGitFacts(chosen.map(\.session))
@@ -166,20 +165,32 @@ extension Service {
 
   /// Sends SIGTERM to every claude that runs the session, and waits up to five
   /// seconds for them to exit. Returns why one didn't exit, or nil once all
-  /// have. It sends nothing unless a fresh process list shows, for each pid, a
-  /// claude command that is neither sbd nor the claude of a Switchboard
-  /// session. `claude agents` can list a pid that another process has reused.
-  private func exitClaude(of s: ClaudeSession, in snapshot: Snapshot) -> String? {
+  /// have. It reads the panes and the process list for this session alone,
+  /// because an earlier session's wait can take five seconds. It sends nothing
+  /// unless that list shows, for each pid, a claude command that is neither
+  /// sbd nor the claude of a Switchboard session, and that has no background
+  /// task. `claude agents` can list a pid that another process has reused.
+  private func exitClaude(of s: ClaudeSession) -> String? {
+    let label = s.name ?? s.idPrefix
     let pids = s.livePids
     if let bad = pids.first(where: { $0 <= 1 || $0 == Int(getpid()) || $0 > Int(Int32.max) }) {
       return refuseToSignal(s, bad)
     }
+    guard let panes = host.checkedPanes() else {
+      return
+        "\(label)'s claude stays running, because sbd can't list its own terminals to tell whether it owns that claude."
+    }
+    let snapshot = buildSnapshot(panes: panes)
     let alive = pids.filter(Processes.exists)
     let program = (config.claude as NSString).lastPathComponent
     let rows = snapshot.children.values.joined()
     for pid in alive {
       let isClaude = rows.contains { $0.pid == pid && Service.isClaude($0, program: program) }
       if !isClaude || snapshot.claudePids.values.contains(pid) { return refuseToSignal(s, pid) }
+      if Service.hasBackgroundJob(pid, in: snapshot.children) {
+        return
+          "\(label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
+      }
     }
     for pid in alive { kill(pid_t(pid), SIGTERM) }
     for _ in 0..<50 {
@@ -187,7 +198,7 @@ extension Service {
       Thread.sleep(forTimeInterval: 0.1)
     }
     let stuck = alive.first(where: Processes.exists) ?? alive[0]
-    return "\(s.name ?? s.idPrefix)'s claude (pid \(stuck)) didn't exit after SIGTERM. Exit it there, then import it."
+    return "\(label)'s claude (pid \(stuck)) didn't exit after SIGTERM. Exit it there, then import it."
   }
 
   private func refuseToSignal(_ s: ClaudeSession, _ pid: Int) -> String {
@@ -195,9 +206,9 @@ extension Service {
   }
 
   /// The candidate that the ref names, or why it can't be imported. With
-  /// `stop`, an idle interactive session passes although a claude runs it,
-  /// unless a listed session that is not stoppable runs in a claude that also
-  /// runs this one.
+  /// `stop`, an idle interactive session passes although a claude runs it. It
+  /// is refused when a listed session that is not stoppable runs in a claude
+  /// that also runs this one, with or without `stop`.
   private func resolve(_ ref: String, in candidates: [ClaudeSession], stop: Bool) -> Result<ClaudeSession, APIError> {
     let matches = candidates.filter { $0.id.hasPrefix(ref) || $0.name == ref }
     guard matches.count == 1 else {
@@ -209,10 +220,19 @@ extension Service {
     let c = matches[0]
     if let error = alreadyImported(ref, id: c.id) { return .failure(error) }
     let label = c.name ?? c.idPrefix
-    let sharesBusyPid = candidates.contains {
-      $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
+    if c.stoppable,
+      let other = candidates.first(where: {
+        $0.id != c.id && !$0.stoppable && !Set($0.livePids).isDisjoint(with: c.livePids)
+      })
+    {
+      let pid = Set(other.livePids).intersection(c.livePids).min() ?? 0
+      let otherLabel = other.name ?? other.idPrefix
+      return .failure(
+        APIError(
+          "\(label) shares its claude (pid \(pid)) with \(otherLabel), which import can't exit. Exit claude there, then import it."
+        ))
     }
-    if !(stop && c.stoppable && !sharesBusyPid), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
+    if !(stop && c.stoppable), let runs = c.whereItRuns(label) { return .failure(APIError(runs)) }
     guard isDirectory(c.cwd) else { return .failure(APIError("\(label)'s folder \(c.cwd) no longer exists.")) }
     return .success(c)
   }
