@@ -343,7 +343,8 @@ func events(_ a: Args) -> Never {
 
 let label = "com.haacked.switchboard.sbd"
 // SB_LAUNCH_AGENTS lets a test keep `service` away from the real folder.
-let launchAgentsFolder = (ProcessInfo.processInfo.environment["SB_LAUNCH_AGENTS"] ?? "~/Library/LaunchAgents").expandingTilde
+let launchAgentsFolder = (ProcessInfo.processInfo.environment["SB_LAUNCH_AGENTS"] ?? "~/Library/LaunchAgents")
+  .expandingTilde
 let plistPath = "\(launchAgentsFolder)/\(label).plist"
 
 func service(_ a: Args) {
@@ -369,10 +370,12 @@ func service(_ a: Args) {
       try data.write(to: URL(fileURLWithPath: plistPath))
     } catch { die("can't write \(plistPath): \(error)") }
     _ = launch(["bootout", "gui/\(uid)/\(label)"])
-    let bootstrap = launch(["bootstrap", "gui/\(uid)", plistPath])
-    guard bootstrap?.status == 0 else {
-      let output = [bootstrap?.stderr, bootstrap?.stdout].compactMap { $0 }.joined()
-        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let bootstrap: CommandResult
+    do { bootstrap = try runCommand(launchctl, ["bootstrap", "gui/\(uid)", plistPath]) } catch {
+      die("can't run \(launchctl): \(error)")
+    }
+    guard bootstrap.status == 0 else {
+      let output = (bootstrap.stderr + bootstrap.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
       die("launchctl bootstrap failed" + (output.isEmpty ? "" : ": \(output)"))
     }
     for _ in 0..<50 {

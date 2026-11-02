@@ -3,11 +3,12 @@ import SwitchboardCore
 import Testing
 
 @Suite(.timeLimit(.minutes(2))) struct EntryPointTests {
-  /// A launchctl stand-in that records its calls and exits with `status`,
-  /// printing `stderr` first.
+  /// A launchctl stand-in that records its calls, prints `stderr`,
+  /// and exits with `status` on bootstrap and 0 otherwise.
   private func fakeLaunchctl(in dir: String, status: Int = 0, stderr: String = "") throws -> String {
     let path = "\(dir)/launchctl"
-    let script = "#!/bin/sh\necho \"$@\" >>\"\(dir)/launchctl.log\"\n"
+    let script =
+      "#!/bin/sh\necho \"$@\" >>\"\(dir)/launchctl.log\"\n"
       + (stderr.isEmpty ? "" : "echo '\(stderr)' >&2\n")
       + "case \"$1\" in bootstrap) exit \(status);; *) exit 0;; esac\n"
     try script.write(toFile: path, atomically: true, encoding: .utf8)
@@ -23,21 +24,23 @@ import Testing
 
   @Test func serviceInstallCreatesTheLaunchAgentsFolder() throws {
     let sbd = try Instance()
-    let fakeHome = try scratch()
-    defer { try? FileManager.default.removeItem(atPath: fakeHome) }
+    let fakeHome = sbd.home.path
     let launchctl = try fakeLaunchctl(in: fakeHome)
-    let r = try sbd.run(["service", "install"], env: ["SB_LAUNCH_AGENTS": "\(fakeHome)/Library/LaunchAgents", "SB_LAUNCHCTL": launchctl])
+    let agents = "\(fakeHome)/Library/LaunchAgents"
+    let r = try sbd.run(["service", "install"], env: ["SB_LAUNCH_AGENTS": agents, "SB_LAUNCHCTL": launchctl])
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(
-      FileManager.default.fileExists(atPath: "\(fakeHome)/Library/LaunchAgents/com.haacked.switchboard.sbd.plist"))
+    let plist = "\(agents)/com.haacked.switchboard.sbd.plist"
+    #expect(FileManager.default.fileExists(atPath: plist))
+    let log = try String(contentsOfFile: "\(fakeHome)/launchctl.log", encoding: .utf8)
+    #expect(log.contains("bootstrap gui/\(getuid()) \(plist)"))
   }
 
   @Test func serviceInstallShowsLaunchctlsOutputWhenBootstrapFails() throws {
     let sbd = try Instance()
-    let fakeHome = try scratch()
-    defer { try? FileManager.default.removeItem(atPath: fakeHome) }
+    let fakeHome = sbd.home.path
     let launchctl = try fakeLaunchctl(in: fakeHome, status: 5, stderr: "Bootstrap failed: 5: Input/output error")
-    let r = try sbd.run(["service", "install"], env: ["SB_LAUNCH_AGENTS": "\(fakeHome)/Library/LaunchAgents", "SB_LAUNCHCTL": launchctl])
+    let r = try sbd.run(
+      ["service", "install"], env: ["SB_LAUNCH_AGENTS": "\(fakeHome)/Library/LaunchAgents", "SB_LAUNCHCTL": launchctl])
     #expect(r.status == 1)
     #expect(r.stderr.contains("launchctl bootstrap failed"))
     #expect(r.stderr.contains("Bootstrap failed: 5: Input/output error"))
@@ -63,12 +66,21 @@ import Testing
     defer { try? FileManager.default.removeItem(atPath: home.path) }
     try home.create()
     let fd = open(home.lock, O_CREAT | O_RDWR, 0o600)
-    #expect(fd >= 0)
+    try #require(fd >= 0)
     defer { close(fd) }
-    #expect(flock(fd, LOCK_EX | LOCK_NB) == 0)
+    try #require(flock(fd, LOCK_EX | LOCK_NB) == 0)
     let r = try runCommand(
       "\(Instance.bin)/sbd", ["--home", home.path], env: ProcessInfo.processInfo.environment, timeout: 5)
     #expect(r.status == 1, "\(r.stderr)")
     #expect(r.stderr.contains("another sbd"))
+  }
+
+  @Test func aSecondSbdLeavesTheRunningSbdServing() throws {
+    let sbd = try Instance()
+    let r = try runCommand(
+      "\(Instance.bin)/sbd", ["--home", sbd.home.path], env: ProcessInfo.processInfo.environment, timeout: 5)
+    #expect(r.status == 1, "\(r.stderr)")
+    #expect(r.stderr.contains("another sbd"))
+    #expect((try? sbd.client.call("ping", timeout: 2)) != nil)
   }
 }
