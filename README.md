@@ -80,11 +80,11 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 
 ### The Manager
 
-`sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app pins it at the top of the sidebar, with the sessions it started under it. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
+`sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app has no sidebar row for it. Its toolbar star (⇧⌘M, or Session > Open Manager) opens it, and the star turns orange while the Manager needs you. The sessions it started are top level in the sidebar. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
 
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
-`sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent. A child that reaches Done leaves the Manager's list and shows only in the Done group; its children that are not Done stay in the list, under the nearest ancestor that is not Done, and the child returns to the list if it leaves Done. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
+`sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent within a state group. A session whose parent is the Manager is top level, like one with no parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
 
 ### Triage
 
