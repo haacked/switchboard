@@ -435,6 +435,20 @@ extension Instance {
     #expect(try remoteBranch(origin) != "")
   }
 
+  @Test func refusesASessionWhoseFolderIsGoneAndWhoseDetachedHeadHasUnpushedCommits() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.commit(s.cwd, "lonely.txt")
+    try FileManager.default.removeItem(atPath: s.cwd)
+    let r = try sbd.deleteSession(s.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("Push them first"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd))
+  }
+
   @Test func deletesADoneSessionWhoseFolderIsGone() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)

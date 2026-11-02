@@ -362,6 +362,7 @@ public final class Service {
 
   struct WorktreeEntry {
     var path: String
+    var head: String?
     var branch: String?
     /// Set by `git worktree lock`, which tools such as Supacode use. `worktree remove` refuses it.
     var locked: Bool
@@ -373,7 +374,10 @@ public final class Service {
       separator: "\n", omittingEmptySubsequences: true)
     {
       if line.hasPrefix("worktree ") {
-        entries.append(WorktreeEntry(path: String(line.dropFirst("worktree ".count)), branch: nil, locked: false))
+        entries.append(
+          WorktreeEntry(path: String(line.dropFirst("worktree ".count)), head: nil, branch: nil, locked: false))
+      } else if line.hasPrefix("HEAD ") {
+        entries[entries.count - 1].head = String(line.dropFirst("HEAD ".count))
       } else if line.hasPrefix("branch refs/heads/") {
         entries[entries.count - 1].branch = String(line.dropFirst("branch refs/heads/".count))
       } else if line == "locked" || line.hasPrefix("locked ") {
@@ -645,8 +649,8 @@ public final class Service {
   /// the branch and throws after the session is forgotten. The conversation's
   /// transcript stays in the account's projects folder, because Claude Code has
   /// no command that archives a local session. When the session's folder is
-  /// gone, sbd skips the uncommitted-file and unpushed-commit checks but still
-  /// refuses a locked worktree. It removes that worktree's record from git and
+  /// gone, sbd skips the uncommitted-file check but still refuses a locked
+  /// worktree and commits on the worktree's HEAD that are on no pushed branch. It removes that worktree's record from git and
   /// no other. The branch checks read the branch from the main repo, because
   /// the worktree is gone.
   /// The remote branch is deleted only after the local branch is, and only when
@@ -676,7 +680,7 @@ public final class Service {
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
     if removesWorktree {
       if folderGone {
-        repo = try checkGoneWorktree(session)
+        repo = try checkGoneWorktree(session, mergedPR: pr?.state == .merged)
       } else {
         repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
       }
@@ -771,10 +775,22 @@ public final class Service {
   }
 
   /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
-  /// worktree for it or git keeps the worktree locked.
-  private func checkGoneWorktree(_ session: Session) throws -> String {
+  /// worktree for it, git keeps the worktree locked, or the worktree's HEAD has commits that are on
+  /// no pushed branch. Removing the worktree's record drops the only ref to such commits.
+  private func checkGoneWorktree(_ session: Session, mergedPR: Bool) throws -> String {
     let repo = try worktreeRepo(session)
-    if let entry = try worktreeEntry(repo, at: session.cwd), entry.locked { throw lockedError(session.cwd) }
+    guard let entry = try worktreeEntry(repo, at: session.cwd) else { return repo }
+    if entry.locked { throw lockedError(session.cwd) }
+    guard let head = entry.head else {
+      throw APIError("git lists no HEAD for the gone worktree \(session.cwd), so its commits can't be checked.")
+    }
+    let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
+    let unpushed = try gitOutput(repo, ["rev-list", "--count", head, "--not"] + kept)
+    guard unpushed == "0" else {
+      throw APIError(
+        "\(session.cwd) is gone, and its HEAD has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
+      )
+    }
     return repo
   }
 

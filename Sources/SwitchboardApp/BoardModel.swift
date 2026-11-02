@@ -393,7 +393,7 @@ final class BoardModel: ObservableObject {
     ]
   }
 
-  /// Deletes a Done session with everything `deletePlan` names. sbd runs the checks of `delete`.
+  /// Deletes a Done session with everything `deletePlan` names. sbd runs the safety checks of `rm`.
   func deleteDone(_ s: SessionSummary) {
     guard deleting.insert(s.id).inserted else { return }
     perform(
