@@ -2,6 +2,7 @@
   import AppKit
   import GhosttyKit
   import SwiftUI
+  import SwitchboardCore
 
   /// The one libghostty app for the process: its config (the user's Ghostty
   /// config files) and its runtime callbacks.
@@ -122,6 +123,7 @@
     nonisolated(unsafe) static var kept: [GhosttySurfaceView] = []
 
     private let command: String
+    private let isClaudePane: Bool
     private(set) var surface: ghostty_surface_t?
     private var tracking: NSTrackingArea?
     /// Text the input method is composing. See GhosttySurfaceView+Input.swift.
@@ -129,8 +131,9 @@
     /// The strings the input context inserted during the current keyDown, or nil outside a keyDown.
     var keyTexts: [String]?
 
-    init(command: String) {
+    init(command: String, isClaudePane: Bool) {
       self.command = command
+      self.isClaudePane = isClaudePane
       super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
     }
 
@@ -160,6 +163,14 @@
       visibility = window.observe(\.isVisible) { [weak self] window, _ in
         guard window.isVisible else { return }
         MainActor.assumeIsolated { if let self { self.perform(self.lifetime.windowShown()) } }
+      }
+      observe(NSWindow.didBecomeKeyNotification, object: window) {
+        $0.syncFocus()
+        return nil
+      }
+      observe(NSWindow.didResignKeyNotification, object: window) {
+        $0.syncFocus()
+        return nil
       }
       // A create fails while every display sleeps, so it is tried again when one wakes.
       observe(NSWorkspace.screensDidWakeNotification, in: NSWorkspace.shared.notificationCenter) {
@@ -214,14 +225,26 @@
       if let id = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 {
         ghostty_surface_set_display_id(surface, id)
       }
-      ghostty_surface_set_color_scheme(
-        surface,
-        effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-          ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+      pushColorScheme()
       pushSize()
-      if window?.firstResponder === window || window?.firstResponder == nil { window?.makeFirstResponder(self) }
-      // A new surface starts focused, so a pane that isn't the first responder has to be told.
-      ghostty_surface_set_focus(surface, window?.firstResponder === self)
+      if PaneFocus.claimsKeyboard(isClaudePane: isClaudePane, keyboardHolder: keyboardHolder) {
+        window?.makeFirstResponder(self)
+      }
+      // A new surface starts focused, so a pane that doesn't hold the keyboard has to be told.
+      syncFocus()
+    }
+
+    private var keyboardHolder: PaneFocus.KeyboardHolder {
+      guard let responder = window?.firstResponder, responder !== window else { return .nobody }
+      return responder === self ? .thePane : .someoneElse
+    }
+
+    private func syncFocus() {
+      guard let surface else { return }
+      ghostty_surface_set_focus(
+        surface,
+        PaneFocus.surfaceIsFocused(
+          windowIsKey: window?.isKeyWindow == true, isFirstResponder: keyboardHolder == .thePane))
     }
 
     /// Ends the PTY and the tmux client in it. The tmux pane keeps running in sbd.
@@ -248,6 +271,20 @@
       if let surface { ghostty_surface_free(surface) }
     }
 
+    /// A config with `theme = light:X,dark:Y` picks its colors, including the selection colors, from this.
+    private func pushColorScheme() {
+      guard let surface else { return }
+      ghostty_surface_set_color_scheme(
+        surface,
+        effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+          ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+      super.viewDidChangeEffectiveAppearance()
+      pushColorScheme()
+    }
+
     private func pushSize() {
       guard let surface else { return }
       let scale = window?.backingScaleFactor ?? 2
@@ -270,13 +307,17 @@
       super.updateTrackingAreas()
       if let tracking { removeTrackingArea(tracking) }
       let area = NSTrackingArea(
-        rect: bounds, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self,
+        userInfo: nil)
       addTrackingArea(area)
       tracking = area
     }
 
     override func becomeFirstResponder() -> Bool {
-      if let surface { ghostty_surface_set_focus(surface, true) }
+      if let surface {
+        ghostty_surface_set_focus(
+          surface, PaneFocus.surfaceIsFocused(windowIsKey: window?.isKeyWindow == true, isFirstResponder: true))
+      }
       return true
     }
 
@@ -289,6 +330,30 @@
     @objc func paste(_ sender: Any?) { binding("paste_from_clipboard") }
     @objc func copy(_ sender: Any?) { binding("copy_to_clipboard") }
     @objc override func selectAll(_ sender: Any?) { binding("select_all") }
+
+    /// Greys out Copy without a selection and Paste without text, as in any terminal.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+      let action: PaneEdit.Action
+      switch item.action {
+      case #selector(copy(_:)): action = .copy
+      case #selector(paste(_:)): action = .paste
+      case #selector(selectAll(_:)): action = .selectAll
+      default: return true
+      }
+      return surface != nil
+        && PaneEdit.isEnabled(
+          action, hasSelection: surface.map { ghostty_surface_has_selection($0) } ?? false,
+          pasteboardHasText: NSPasteboard.general.string(forType: .string) != nil)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+      let menu = NSMenu()
+      menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+      menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+      menu.addItem(.separator())
+      menu.addItem(withTitle: "Select All", action: #selector(selectAll(_:)), keyEquivalent: "")
+      return menu
+    }
 
     private func binding(_ action: String) {
       guard let surface else { return }
@@ -303,11 +368,13 @@
       ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, Self.mods(event.modifierFlags))
     }
 
-    private func button(_ state: ghostty_input_mouse_state_e, _ button: ghostty_input_mouse_button_e, _ event: NSEvent)
-    {
-      guard let surface else { return }
+    @discardableResult
+    private func button(
+      _ state: ghostty_input_mouse_state_e, _ button: ghostty_input_mouse_button_e, _ event: NSEvent
+    ) -> Bool {
+      guard let surface else { return false }
       position(event)
-      _ = ghostty_surface_mouse_button(surface, state, button, Self.mods(event.modifierFlags))
+      return ghostty_surface_mouse_button(surface, state, button, Self.mods(event.modifierFlags))
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -315,11 +382,35 @@
       button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, event)
     }
     override func mouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, event) }
-    override func rightMouseDown(with event: NSEvent) { button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event) }
+
+    override func rightMouseDown(with event: NSEvent) {
+      window?.makeFirstResponder(self)
+      let consumed = button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, event)
+      if PaneMouse.rightClickOpensMenu(consumedByTerminal: consumed) { super.rightMouseDown(with: event) }
+    }
     override func rightMouseUp(with event: NSEvent) { button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, event) }
+
+    override func otherMouseDown(with event: NSEvent) {
+      guard event.buttonNumber == 2 else { return super.otherMouseDown(with: event) }
+      window?.makeFirstResponder(self)
+      button(GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_MIDDLE, event)
+    }
+    override func otherMouseUp(with event: NSEvent) {
+      guard event.buttonNumber == 2 else { return super.otherMouseUp(with: event) }
+      button(GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_MIDDLE, event)
+    }
+
     override func mouseMoved(with event: NSEvent) { position(event) }
     override func mouseDragged(with event: NSEvent) { position(event) }
     override func rightMouseDragged(with event: NSEvent) { position(event) }
+    override func otherMouseDragged(with event: NSEvent) { position(event) }
+
+    override func mouseExited(with event: NSEvent) {
+      // A drag that leaves the pane keeps reporting its position through mouseDragged.
+      guard NSEvent.pressedMouseButtons == 0, let surface else { return }
+      ghostty_surface_mouse_pos(
+        surface, PaneMouse.exitPosition.x, PaneMouse.exitPosition.y, Self.mods(event.modifierFlags))
+    }
 
     override func scrollWheel(with event: NSEvent) {
       guard let surface else { return }
@@ -347,8 +438,11 @@
   struct GhosttyPane: NSViewRepresentable {
     /// The tmux attach command as one line for a POSIX shell.
     let command: String
+    let pane: Pane
 
-    func makeNSView(context: Context) -> GhosttySurfaceView { GhosttySurfaceView(command: command) }
+    func makeNSView(context: Context) -> GhosttySurfaceView {
+      GhosttySurfaceView(command: command, isClaudePane: pane == .claude)
+    }
     func updateNSView(_ view: GhosttySurfaceView, context: Context) {}
     static func dismantleNSView(_ view: GhosttySurfaceView, coordinator: ()) {
       if GhosttySurfaceView.keepsHiddenSurfaces {
