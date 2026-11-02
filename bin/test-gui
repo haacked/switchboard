@@ -82,6 +82,14 @@ wait_for() { # <seconds> <command…>
   done
 }
 
+app_gone() { ! kill -0 "$app_pid" 2>/dev/null; }
+
+end_app() {
+  kill -KILL "$app_pid" 2>/dev/null || true
+  wait "$app_pid" 2>/dev/null || true
+  app_pid=''
+}
+
 # Replaces the last run's files in .build/gui-test/<backend> with this run's.
 save_shots() {
   [ -n "${backend:-}" ] && [ -d "$home/shots/$backend" ] || return 0
@@ -163,9 +171,7 @@ check_backend() {
   finished() { grep -q '^selftest: \(done\|no terminal pane\)' "$shots/app.log" || ! app_alive; }
   wait_for 240 finished || fail "the self test did not finish"
   if ! grep -q '^selftest: done' "$shots/app.log"; then check_app_alive "during the self test"; fi
-  kill -KILL "$app_pid" 2>/dev/null || true
-  wait "$app_pid" 2>/dev/null || true
-  app_pid=''
+  end_app
 
   save_shots
 
@@ -213,6 +219,7 @@ check_relaunch() {
   new_session relaunch
   local shell_target="=$session-shell:" claude_target="=$session-claude:"
   attached() { sb ls --json | jq -e --arg id "$session" '.[] | select(.id == $id) | .attached' >/dev/null; }
+  no_clients() { ! attached && ! shell_clients; }
   shell_clients() { [ -n "$(tmux -S "$tmux_socket" list-clients -t "=$session-shell" 2>/dev/null)" ]; }
   start_app() {
     rm -f "$shots/quit"
@@ -247,28 +254,30 @@ check_relaunch() {
   start_app
   tmux -S "$tmux_socket" send-keys -t "$claude_target" abc
   wait_for 20 sb_rx_has "61 62 63" || fail "the stand-in did not receive the typed bytes"
-  local shell_before
+  local shell_before shell_after
   shell_before=$(shell_pid before)
   before=$(fingerprint)
 
   for how in quit kill; do
     if [ "$how" = quit ]; then
       touch "$shots/quit"
-      wait_for 30 eval '! kill -0 "$app_pid" 2>/dev/null' || fail "the app did not quit"
+      wait_for 30 app_gone || fail "the app did not quit"
+      local status=0
+      wait "$app_pid" || status=$?
+      app_pid=''
+      [ "$status" -eq 0 ] || fail "the app exited with status $status when it quit"
     else
-      kill -KILL "$app_pid"
+      end_app
     fi
-    wait "$app_pid" 2>/dev/null || true
-    app_pid=''
     sb ls --json | jq -e --arg id "$session" 'any(.[]; .id == $id)' >/dev/null || fail "the session is gone after the app ended ($how)"
+    wait_for 10 no_clients || fail "the app's terminals stayed attached after $how"
     unchanged "while the app was gone ($how)"
     start_app
     unchanged "after the app came back ($how)"
-    [ "$(shell_pid "again-$how")" = "$shell_before" ] || fail "the shell is a new process after $how"
+    shell_after=$(shell_pid "again-$how")
+    [ "$shell_after" = "$shell_before" ] || fail "the shell is a new process after $how"
   done
-  kill -KILL "$app_pid" 2>/dev/null || true
-  wait "$app_pid" 2>/dev/null || true
-  app_pid=''
+  end_app
   echo "ok: relaunch (quit and kill)"
 }
 
