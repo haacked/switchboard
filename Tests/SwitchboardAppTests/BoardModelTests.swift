@@ -255,6 +255,13 @@ import Testing
     #expect(shown(model) == ["needsYou: c", "working: p"])
   }
 
+  @Test func aFollowupThatHasNotStartedShowsInItsGroup() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.apply(.success([summary("a")]), followups: [summary("f", state: .notStarted)])
+    #expect(shown(model) == ["working: a", "notStarted: f"])
+  }
+
   @Test func theManagerStaysSelectableWithoutASidebarRow() {
     let sessions = [summary("m", manager: true, state: .needsYou)]
     let model = model(sessions)

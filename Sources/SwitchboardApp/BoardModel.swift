@@ -73,7 +73,8 @@ final class BoardModel: ObservableObject {
   private var loaded = false
   private var followupsRead = Date.distantPast
 
-  /// The toolbar shows the Manager, so the Queue leaves it out.
+  /// The toolbar star shows when the Manager needs you, so the menu bar, the
+  /// Dock badge, and ⌘J leave it out.
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && $0.manager != true } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
