@@ -25,6 +25,23 @@ func item(_ f: SessionFacts, session s: Session = session(), now: Int64 = 1000) 
 let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres or SQLite?"
 
 @Suite struct TriageItems {
+  @Test func aRuleVerdictKeepsItsKindWhateverItsText() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
+    let review = Verdict(state: .needsYou, reason: "tidy the folder", kind: .review)
+    #expect(Triage.item(f, review)?.kind == .review)
+    #expect(Triage.item(f, review)?.source == .rule)
+    let action = Verdict(state: .needsYou, reason: "commit the uncommitted changes")
+    #expect(Triage.item(f, action)?.kind == .action)
+  }
+
+  @Test func aRuleVerdictWithTheReplyTextIsNotTheReply() {
+    var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
+    f.apply(stop(1, 5, proseQuestion))
+    let rule = Verdict(state: .needsYou, reason: Attention.replyVerdict(proseQuestion).reason)
+    #expect(Triage.item(f, rule)?.source == .rule)
+    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion))?.source == .fallback)
+  }
+
   @Test func aPermissionCardGivesAllowAndDeny() {
     let f = facts(permissionTurn())
     let item = item(f)
@@ -87,6 +104,15 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     let item = item(f)
     #expect(item?.source == .rule)
     #expect(item?.kind == .info)
+  }
+
+  @Test func aPromptWhileAWaitOutcomeIsPendingIsAnAction() {
+    var f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Notification", 1, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
+    ])
+    f.waitOutcome = "CI passed on #4"
+    #expect(item(f)?.kind == .action)
   }
 
   @Test func aReplyWithoutASummaryFallsBackToItsLastParagraph() {
@@ -203,6 +229,9 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(try item.option("postgres").label == "Postgres")
     #expect(throws: APIError.self) { try item.option("3") }
     #expect(throws: APIError.self) { try item.option("0") }
+    #expect(throws: APIError.self) { try item.option("-1") }
+    #expect(throws: APIError.self) { try item.option("-9223372036854775808") }
+    #expect(throws: APIError.self) { try item.option("9223372036854775807") }
     #expect(throws: APIError.self) { try item.option("mysql") }
   }
 }

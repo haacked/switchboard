@@ -177,11 +177,13 @@ struct SessionView: View {
               ? "Mark the session not done. It returns to its own group on the board, and to the Queue if it needs you or claude can continue."
               : "Mark the session done. It leaves the Queue and moves to Done on the board.")
         Button(role: .destructive) {
-          let options = RemoveOptions(session)
-          ui.removeOptions = options
-          ui.deleteWorktree = options.worktree
-          ui.deleteBranch = options.branch
-          ui.confirmingRemove = true
+          Task {
+            let options = await RemoveOptions.load(session)
+            ui.removeOptions = options
+            ui.deleteWorktree = options.worktree
+            ui.deleteBranch = options.branch
+            ui.confirmingRemove = true
+          }
         } label: {
           Image(systemName: "trash")
         }

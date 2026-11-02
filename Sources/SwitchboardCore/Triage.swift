@@ -84,7 +84,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public func option(_ key: String) throws -> TriageOption {
     let key = key.trimmingCharacters(in: .whitespaces)
     if let n = Int(key) {
-      guard options.indices.contains(n - 1) else {
+      guard n > 0, options.indices.contains(n - 1) else {
         throw APIError("there is no option \(n). There are \(options.count)")
       }
       return options[n - 1]
@@ -105,9 +105,9 @@ extension Attention {
   /// the session's state.
   public static func replyVerdict(_ reply: String) -> Verdict {
     switch classify(reply) {
-    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"))
-    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"))
-    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
+    case .question(let q): return Verdict(state: .needsYou, reason: oneLine("answer: \(q)"), source: .reply)
+    case .offer(let o): return Verdict(state: .canContinue, reason: oneLine("offered: \(o)"), source: .reply)
+    case .other: return Verdict(state: .needsYou, reason: "read its last reply and decide what's next", source: .reply)
     }
   }
 }
@@ -149,7 +149,7 @@ public enum Triage {
       item = cardItem(card)
       item.ref = "card:\(card.id)"
     } else if !fromReply(facts, verdict) {
-      item = ruleItem(facts, verdict)
+      item = ruleItem(verdict)
       item.ref = "rule:\(item.title)"
     } else {
       if let summary = facts.triage {
@@ -167,8 +167,7 @@ public enum Triage {
   /// Whether the verdict is the one that the session's last reply gives, and
   /// no card, prompt, or rule decided it.
   static func fromReply(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
-    facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil
-      && verdict == Attention.replyVerdict(facts.lastReply ?? "")
+    facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil && verdict.source == .reply
   }
 
   /// Whether the turn that just ended needs a summary: the reply decides the
@@ -197,12 +196,11 @@ public enum Triage {
       summary: card.questions.map(\.question).joined(separator: " "), options: options, source: .card)
   }
 
-  static func ruleItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem {
-    let reason = verdict.reason
-    let kind: TriageKind =
-      facts.waitOutcome != nil ? .info : reason.contains("uncommitted") ? .review : .action
-    let text = capitalized(reason)
-    return TriageItem(title: title(reason), kind: kind, summary: text.hasSuffix(".") ? text : text + ".", source: .rule)
+  static func ruleItem(_ verdict: Verdict) -> TriageItem {
+    let text = capitalized(verdict.reason)
+    return TriageItem(
+      title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",
+      source: .rule)
   }
 
   /// The last paragraph of the reply as the summary, with no options.

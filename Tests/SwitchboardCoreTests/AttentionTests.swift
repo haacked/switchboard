@@ -77,6 +77,17 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), facts(events), now: 7).state == .working)
   }
 
+  @Test func notificationOnlyPermissionPromptClearsWhenAToolFinishes() {
+    let events = [
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Notification", 1, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
+    ]
+    #expect(Attention.evaluate(session(), facts(events), now: 2).state == .needsYou)
+    let done = events + [event("PostToolUse", 3, tool("Bash", ["command": "ls"], id: "b"))]
+    #expect(facts(done).openPermission == nil)
+    #expect(Attention.evaluate(session(), facts(done), now: 4).state == .working)
+  }
+
   @Test func askUserQuestionNeedsAnAnswer() {
     let input: [String: JSON] = ["questions": [["question": "Which fruit?"]]]
     var events = [
@@ -318,6 +329,14 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     ("", .other),
     ("Is this right? I think so.\n\nThe build passes.", .other),
     ("**Do you want me to open the PR?**", .offer("Do you want me to open the PR?")),
+    ("Want me to update README.md?", .offer("Want me to update README.md?")),
+    ("**Want me to push?** I can also open the PR.", .offer("Want me to push?")),
+    ("Shall I tag it \"v2?\"", .offer("Shall I tag it \"v2?")),
+    ("Shall I tag it \u{201C}v2?\u{201D}", .offer("Shall I tag it \u{201C}v2?")),
+    ("Want me to push?!", .offer("Want me to push?")),
+    ("I left the old flag in place (should I remove it?)", .question("I left the old flag in place (should I remove it?")),
+    ("Which of v1.2.3 or v1.3.0 should I ship?", .question("Which of v1.2.3 or v1.3.0 should I ship?")),
+    ("Done.\n\nWant me to open https://example.com/a.b?", .offer("Want me to open https://example.com/a.b?")),
   ])
   func classifies(_ reply: String, _ kind: ReplyKind) {
     #expect(Attention.classify(reply) == kind)
