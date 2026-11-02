@@ -42,6 +42,7 @@ public enum ParentNotice {
   /// One line for all the changes that a parent has not heard yet.
   public static func message(_ lines: [String]) -> String {
     let more = lines.count > maxLines ? ["and \(lines.count - maxLines) more"] : []
-    return "Switchboard: sessions you started changed: " + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."
+    return "Switchboard: sessions you started changed: "
+      + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."
   }
 }

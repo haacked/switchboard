@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Formats Sources, Tests and Package.swift with swift format, which ships with
+# the Command Line Tools. It rewrites the files in place. With --check, it
+# lists the files that differ, changes nothing, and exits non-zero if any differ.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+case "${1:-}" in
+  "") mode=fix ;;
+  --check) mode=check ;;
+  *)
+    echo "usage: bin/fmt [--check]" >&2
+    exit 2
+    ;;
+esac
+
+targets=(Sources Tests Package.swift)
+
+if [ "$mode" = fix ]; then
+  swift format format --in-place --recursive --parallel "${targets[@]}"
+  echo "Formatted ${targets[*]}"
+  exit 0
+fi
+
+# Without --strict, lint exits zero on findings, so formatting each file and
+# comparing is the reliable check.
+status=0
+while IFS= read -r file; do
+  if ! swift format format "$file" | cmp -s - "$file"; then
+    echo "$file"
+    status=1
+  fi
+done < <(find Sources Tests -name '*.swift' -type f | sort; echo Package.swift)
+if [ "$status" -ne 0 ]; then echo "Run bin/fmt to fix the files above." >&2; fi
+exit "$status"
