@@ -65,7 +65,8 @@ import Testing
     }
   }
 
-  @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Times out on the CI runner. Run it locally.")) func aDateWaitThatPassesWhileClaudeExitsStillResumesTheSession() throws {
+  @Test(.enabled(if: ProcessInfo.processInfo.environment["CI"] == nil, "Times out on the CI runner. Run it locally."))
+  func aDateWaitThatPassesWhileClaudeExitsStillResumesTheSession() throws {
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 3)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")

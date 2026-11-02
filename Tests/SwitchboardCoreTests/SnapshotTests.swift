@@ -23,7 +23,9 @@ import Testing
       return Event(session: "s1", t: t, kind: kind, data: data)
     }
     let pr = PullRequest(id: "PR_1", number: 7, url: "https://github.com/a/b/pull/7", repo: "a/b", title: "A change")
-    let comments = [PRComment(id: "IC_1", author: "greptile-apps[bot]", createdAt: "2026-10-01T10:00:00Z", body: "Race.")]
+    let comments = [
+      PRComment(id: "IC_1", author: "greptile-apps[bot]", createdAt: "2026-10-01T10:00:00Z", body: "Race.")
+    ]
     return [
       e("started"), e("SessionStart", ["transcript_path": "/tmp/t.jsonl"]),
       e("UserPromptSubmit", ["prompt": "hello"]),
@@ -79,7 +81,10 @@ import Testing
     try Snapshots.refresh(store, session, build: "b1")
     let summary = Event(
       session: "s1", t: 3000, kind: "triage",
-      data: ["stop": .number(Double(stop.id)), "title": "Pick a database", "kind": "decision", "summary": "Which one.", "options": []])
+      data: [
+        "stop": .number(Double(stop.id)), "title": "Pick a database", "kind": "decision", "summary": "Which one.",
+        "options": [],
+      ])
     try store.append(summary)
     let fromTail = try Snapshots.refresh(store, session, build: "b1")
     #expect(fromTail.outcome == .snapshot(tail: 1))

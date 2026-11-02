@@ -25,7 +25,10 @@ extension Service {
     guard !due.isEmpty else { return }
     guard let claude = findExecutable(config.claude) else { return }
     let answers = concurrentMap(Array(due)) { account, checks in
-      (account, checks, Result { try agentRows(claude, account: account, seen: nowMs(), timeout: Service.turnCheckTimeout) })
+      (
+        account, checks,
+        Result { try agentRows(claude, account: account, seen: nowMs(), timeout: Service.turnCheckTimeout) }
+      )
     }
     queue.sync {
       for (account, checks, list) in answers {

@@ -55,7 +55,9 @@ extension Instance {
     // A flag after the session is a flag, not the message.
     try sbd.sb("deny", s.id, "--json")
     // The stub sends no hook after an interruption, and a reply after a message.
-    let after = try sbd.waitFor(s.id, "the end of the turn") { $0.reason == "read its last reply and decide what's next" }
+    let after = try sbd.waitFor(s.id, "the end of the turn") {
+      $0.reason == "read its last reply and decide what's next"
+    }
     #expect(after.lastReply == nil)
   }
 

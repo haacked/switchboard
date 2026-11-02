@@ -20,8 +20,10 @@ func deployFixture(_ name: String) throws -> String {
     let c = try #require(DeployComment.parse(try deployFixture("comment-deployed.md")))
     let run = "https://github.com/PostHog/charts/actions/runs/40031747810"
     #expect(c.rows[.dev] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:20:00.000Z"), run: run))
-    #expect(c.rows[.prodUS] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
-    #expect(c.rows[.prodEU] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
+    #expect(
+      c.rows[.prodUS] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
+    #expect(
+      c.rows[.prodEU] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
     #expect(DeployEnvironment.allCases.allSatisfy { c.state(in: $0) == .deployed })
   }
 

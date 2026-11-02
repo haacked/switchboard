@@ -211,7 +211,9 @@ final class FakeGitHub {
         kind = prQuery.rawValue
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
         let failing = failingPRs[prQuery, default: []]
-        data["nodes"] = nodes({ prs[$0].map { selection.project(.object($0)) } }, failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
+        data["nodes"] = nodes(
+          { prs[$0].map { selection.project(.object($0)) } },
+          failing: { failing.contains(prs[$0]?["number"]?.int ?? 0) })
       } else if let selection = Selection(query: query, on: "IssueComment") {
         kind = "bodies"
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
