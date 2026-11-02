@@ -92,6 +92,7 @@ struct Selection {
         index += 1
         if token == "..." {
           if tokens[index] == "on" {
+            // Skips "on", the type name, and "{".
             index += 3
             fields += selectionSet().fields
           } else {
@@ -100,6 +101,7 @@ struct Selection {
           }
           continue
         }
+        // The alias is the key, so skip ":" and the field name.
         if index < tokens.count, tokens[index] == ":" { index += 2 }
         if index < tokens.count, tokens[index] == "(" { skipArguments() }
         var sub: Selection?

@@ -21,7 +21,8 @@ final class Instance {
   static let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent()
   /// The folder that holds sb and sbd. SwiftPM builds them next to the test
-  /// bundle, so this follows `swift test -c release` without a flag.
+  /// bundle, so `swift test -c release` uses the release builds. `SB_BIN_DIR`
+  /// overrides the folder.
   static let bin = binDir(
     testBundle: Bundle(for: Instance.self).bundlePath, override: ProcessInfo.processInfo.environment["SB_BIN_DIR"])
 

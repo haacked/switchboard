@@ -13,6 +13,9 @@ import Testing
   }
 
   @Test func findsSbAndSbdNextToTheTestBundle() {
+    if ProcessInfo.processInfo.environment["SB_BIN_DIR"] == nil {
+      #expect(Bundle(for: Instance.self).bundlePath.hasPrefix(Instance.bin + "/"))
+    }
     #expect(FileManager.default.isExecutableFile(atPath: "\(Instance.bin)/sb"))
     #expect(FileManager.default.isExecutableFile(atPath: "\(Instance.bin)/sbd"))
   }
