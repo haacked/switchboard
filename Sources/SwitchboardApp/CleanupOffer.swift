@@ -18,7 +18,7 @@ struct CleanupOffer {
     let branchPart = session.branch.map { " and the local branch \($0)" } ?? ""
     return "This stops claude, closes both terminals, and deletes the worktree \(session.cwd)\(branchPart)."
       + " The session stays in Done with its transcript, and the remote branch stays."
-      + " sbd checks again first. It refuses, and changes nothing, when a turn is running, the folder has a file that is not committed or build output, or the branch has a commit after the merge."
+      + " sbd checks again first. It refuses, and removes nothing, when a turn is running, the folder has a file that is not committed or build output, or the branch has a commit after the merge."
   }
 
   /// The failed check of a blocked cleanup. A removed cleanup needs no line,

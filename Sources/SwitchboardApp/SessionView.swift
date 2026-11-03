@@ -36,7 +36,11 @@ struct SessionView: View {
         .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
-      if let terminals = ui.terminals {
+      if session.cleanup?.state == .removed {
+        Text("Cleanup removed this session's worktree, so it has no terminals.")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
             paneLabel("Claude")
@@ -62,6 +66,8 @@ struct SessionView: View {
         .padding(8)
     }
     .task(id: session.id) {
+      // `open` refuses a session whose folder cleanup removed.
+      if session.cleanup?.state == .removed { return }
       let id = session.id
       let model = model
       // Opening a session resumes a stopped claude. The selection has to rest

@@ -65,7 +65,7 @@ struct ContentView: View {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
 
-  private var confirmingCleanup: CleanupOffer? {
+  private var confirmingCleanupOffer: CleanupOffer? {
     model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
   }
 
@@ -105,8 +105,8 @@ struct ContentView: View {
       }
       // The delete dialog is on the split view. Two dialogs on one view can hide each other.
       .confirmationDialog(
-        confirmingCleanup?.title ?? "Clean up this session?", isPresented: isConfirmingCleanup,
-        presenting: confirmingCleanup
+        confirmingCleanupOffer?.title ?? "Clean up this session?", isPresented: isConfirmingCleanup,
+        presenting: confirmingCleanupOffer
       ) { offer in
         Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
       } message: { offer in
