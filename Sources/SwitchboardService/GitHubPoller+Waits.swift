@@ -72,6 +72,7 @@ extension GitHubPoller {
   ///   an earlier PR of a reused branch;
   /// - a `ci` outcome that only one read showed, since a read just after a push
   ///   can show the old head commit, or a status that reports before CI queues.
+  ///   Two reads that both show a failure agree.
   func resolveWaits(_ interest: Interest, stats: inout Stats) {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     for (session, wait) in interest.waits {
@@ -99,8 +100,11 @@ extension GitHubPoller {
 
   private func confirmed(_ wait: Wait, _ pr: PullRequest, _ outcome: String, polled: Int64) -> Bool {
     guard wait.kind == .ci else { return true }
-    guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == outcome else {
-      confirming[wait.id] = (pr.headSha, outcome, polled)
+    // More Depot jobs can fail between the two reads. That changes the
+    // outcome's words but not the fact that the checks failed.
+    let verdict = pr.ciFailed ? "failed" : outcome
+    guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
+      confirming[wait.id] = (pr.headSha, verdict, polled)
       return false
     }
     return polled > first.polled

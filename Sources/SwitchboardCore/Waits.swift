@@ -211,7 +211,9 @@ public struct Wait: Codable, Equatable, Sendable {
   /// that merged or closed first resolves too, since nothing else would end it.
   /// `deployResolution` decides the `deploy` kind.
   ///
-  /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR.
+  /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR, or the
+  ///   head commit's Depot run has a failed job. A Depot failure names the
+  ///   failed jobs.
   /// - `review` and `bot-review`: a review that was submitted after the wait was
   ///   set, by `who`, or by any app when a `bot-review` wait has no `who`. The
   ///   outcome names the newest one.
@@ -237,6 +239,7 @@ public struct Wait: Codable, Equatable, Sendable {
       return ended
     case .ci:
       if pr.checks == "SUCCESS" { return "the checks passed" }
+      if let depot = pr.depotFailure { return depot.outcome }
       return pr.checksFailed ? "the checks failed" : ended
     case .review, .botReview:
       let verbs = ["APPROVED": "approved", "CHANGES_REQUESTED": "requested changes", "COMMENTED": "reviewed"]

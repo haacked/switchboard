@@ -9,6 +9,7 @@ import SwitchboardCore
 final class GitHubPoller {
   unowned let service: Service
   let settings: GitHubSettings
+  let depot: DepotPoller?
   let queue = DispatchQueue(label: "sbd.github")
   private var timer: DispatchSourceTimer?
 
@@ -24,13 +25,18 @@ final class GitHubPoller {
   var prs: [String: (pr: PullRequest, comments: [PRComment], polled: Int64)] = [:]
   /// Comment bodies by comment id. A comment whose edit time changed is read again.
   private var bodies: [String: PRComment] = [:]
+  /// The Depot run that the event log held for each PR, by node id, until the
+  /// first GitHub read of the PR after a restart. A Depot read that fails
+  /// then keeps it.
+  private var recordedDepot: [String: DepotRun] = [:]
 
   /// The comments of a read, with the bodies that `bodies` holds.
   func keptComments(_ comments: [PRComment]) -> [PRComment] { comments.map { bodies[$0.id] ?? $0 } }
   /// The PRs that waits and merge triggers name, by the key they were looked up with.
   var targets: [PRKey: Target] = [:]
   /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
-  /// when a later read shows the same head commit and outcome.
+  /// when a later read shows the same head commit and outcome. `outcome` is
+  /// "failed" for any failure.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
   var deploys = Deploys()
 
@@ -108,11 +114,14 @@ final class GitHubPoller {
     var changed = 0
     var resolved = 0
     var merged = 0
+    var depotRequests = 0
+    var depotRuns = 0
   }
 
-  init(service: Service, settings: GitHubSettings) {
+  init(service: Service, settings: GitHubSettings, depot: DepotSettings) {
     self.service = service
     self.settings = settings
+    self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
   }
 
   func start() {
@@ -155,14 +164,17 @@ final class GitHubPoller {
       failure = "\(error)"
       logLine("github: \(error)")
     }
+    let depotError = refreshDepot(all: all, now: now, stats: &stats)
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
     let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
+    recordedDepot = recordedDepot.filter { kept.contains($0.key) }
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
+    if let depotError { result["depotError"] = .string(depotError) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
     return .object(result)
@@ -179,6 +191,7 @@ final class GitHubPoller {
 
   /// Reads the session's branch and the new lines of its transcript.
   private func refreshLocal(_ s: Watched, all: Bool, now: Int64, shared: inout Shared) {
+    if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
     refreshBranch(&t.branch, cwd: s.cwd, all: all, now: now, configs: &shared.configs)
@@ -355,6 +368,7 @@ final class GitHubPoller {
         // Only the base query reads the merged base. A PR whose base query
         // fails keeps the merged base that the poller last read.
         if let last = prs[pr.id]?.pr, last.base == pr.base { pr.mergedBase = last.mergedBase }
+        pr.depot = prs[pr.id]?.pr.depot ?? recordedDepot.removeValue(forKey: pr.id)
         prs[pr.id] = (pr, comments.filter { GitHub.bodyAuthors.contains($0.author) }, now)
         if pr.base != pr.defaultBranch { stacked.append(pr.id) }
       }
@@ -406,6 +420,18 @@ final class GitHubPoller {
     }
   }
 
+  /// Sets the Depot run of each PR that the Depot poller read, and returns
+  /// the Depot poller's error.
+  private func refreshDepot(all: Bool, now: Int64, stats: inout Stats) -> String? {
+    guard let depot else { return nil }
+    let result = depot.refresh(
+      prs.values.map(\.pr), all: all, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
+    for (id, read) in result.reads { prs[id]?.pr.depot = read.run }
+    stats.depotRequests = result.requests
+    stats.depotRuns = result.reads.values.count { $0.run != nil }
+    return result.error
+  }
+
   private func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
 
   /// Sends one GraphQL request and returns the response, whose `data` isn't
@@ -448,7 +474,7 @@ final class GitHubPoller {
       var req = request
       req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
       stats.requests += 1
-      return try transfer(req)
+      return try httpRequest(req)
     }
     var (status, headers, body) = try attempt()
     if status == 401 {
@@ -463,23 +489,6 @@ final class GitHubPoller {
     }
     if limit.limited { throw APIError("GitHub rate limit: \(GitHub.message(json))") }
     return (status, headers, body, json)
-  }
-
-  private func transfer(_ req: URLRequest) throws -> (Int, [String: String], Data) {
-    let done = DispatchSemaphore(value: 0)
-    var result: Result<(Int, [String: String], Data), Error> = .failure(APIError("no answer"))
-    URLSession.shared.dataTask(with: req) { data, response, error in
-      if let error {
-        result = .failure(error)
-      } else if let http = response as? HTTPURLResponse {
-        var headers: [String: String] = [:]
-        for (k, v) in http.allHeaderFields { headers["\(k)".lowercased()] = "\(v)" }
-        result = .success((http.statusCode, headers, data ?? Data()))
-      }
-      done.signal()
-    }.resume()
-    done.wait()
-    return try result.get()
   }
 
   private func currentToken() throws -> String {

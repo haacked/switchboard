@@ -261,8 +261,8 @@ public enum ReplyKind: Equatable, Sendable {
 
 /// The attention rules. They follow the `/sessions` skill
 /// (`~/.dotfiles/ai/skills/sessions/SKILL.md`) for the facts that hooks, sb,
-/// and the GitHub poller provide. They have no CI rules, and no rule for a PR
-/// that Trunk's queue holds.
+/// and the GitHub poller provide. Their only CI rule is a failed Depot job, and
+/// they have no rule for a PR that Trunk's queue holds.
 public enum Attention {
   static let notificationPromptTool = "prompt"
   static let dayMs: Int64 = 24 * 3600 * 1000

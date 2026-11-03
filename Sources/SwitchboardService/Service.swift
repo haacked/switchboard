@@ -125,7 +125,7 @@ public final class Service {
     // A summary that was running when sbd stopped never finished.
     for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
-    github = GitHubPoller(service: self, settings: config.github)
+    github = GitHubPoller(service: self, settings: config.github, depot: config.depot)
   }
 
   // MARK: Requests
