@@ -62,6 +62,8 @@ final class BoardModel: ObservableObject {
   @Published var followups: [SessionSummary] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
+  /// The group suggestions, read with the follow-ups.
+  @Published var suggestions: [GroupSuggestion] = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
   /// Each account's last usage reading.
@@ -169,10 +171,12 @@ final class BoardModel: ObservableObject {
         followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
       let groups = try? client.call("group-ls", as: GroupList.self).groups
+      let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
       let usage = readUsage ? try? client.usage() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
+        if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
         if let usage, self.usage != usage { self.usage = usage }
         self.apply(result, followups: more)
       }
@@ -312,6 +316,8 @@ final class BoardModel: ObservableObject {
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
+  func acceptSuggestion(_ id: String) { perform("group-suggest", ["accept": .string(id)]) }
+  func declineSuggestion(_ id: String) { perform("group-suggest", ["decline": .string(id)]) }
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first.
   func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {

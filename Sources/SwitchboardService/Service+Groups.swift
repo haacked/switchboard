@@ -21,8 +21,7 @@ extension Service {
       let members = members(id).map(\.id)
       // This skips `place`, so a session that took its parent's group stays open to suggestions.
       for member in members { try update(member) { $0.group = nil } }
-      try store.delete(group: id)
-      groups[id] = nil
+      try deleteGroup(id)
       return ["removed": .string(id), "ungrouped": .array(members.map(JSON.string))]
     case "group-move":
       let ids = try sessionRefs(args)
@@ -37,12 +36,15 @@ extension Service {
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
     case "group-suggest":
-      let suggestions = groupSuggestions()
-      guard let accept = args["accept"]?.string else { return try JSON(encoding: suggestions) }
-      guard let suggestion = suggestions.first(where: { $0.id == accept }) else {
-        throw APIError("no suggestion \(accept). List them with: sb group suggest")
+      let suggestions = try groupSuggestions()
+      let accept = args["accept"]?.string
+      guard let id = accept ?? args["decline"]?.string else { return try JSON(encoding: suggestions) }
+      guard let suggestion = suggestions.first(where: { $0.id == id }) else {
+        throw APIError("no suggestion \(id). List them with: sb group suggest")
       }
-      return try JSON(encoding: groupSummary(try acceptSuggestion(suggestion)))
+      if accept != nil { return try JSON(encoding: groupSummary(try acceptSuggestion(suggestion))) }
+      try store.decline(suggestion: id)
+      return ["declined": .string(id)]
     case "send-group":
       return try JSON(encoding: sendGroup(args))
     default:
@@ -76,6 +78,11 @@ extension Service {
   private func saveGroup(_ group: SessionGroup) throws {
     try store.save(group: group)
     groups[group.id] = group
+  }
+
+  private func deleteGroup(_ id: String) throws {
+    try store.delete(group: id)
+    groups[id] = nil
   }
 
   /// Moves the sessions into the group, or into no group, and marks them
@@ -114,13 +121,15 @@ extension Service {
     return GroupList(groups: sorted.map { groupSummary($0.id) }, ungrouped: ungrouped)
   }
 
-  func groupSuggestions() -> [GroupSuggestion] {
+  func groupSuggestions() throws -> [GroupSuggestion] {
     let candidates = entries.values.filter { groupable($0.session) }.map { e in
       GroupSuggestions.Candidate(
         id: e.session.id, branch: e.session.branch, prTitle: e.facts.pr?.title, group: e.session.group,
-        placedByHand: e.session.placedByHand ?? false)
+        placedByHand: e.session.placedByHand ?? false, repo: e.facts.pr?.repo, pr: e.facts.pr?.number,
+        dependencies: e.facts.dependencies)
     }
-    return GroupSuggestions.make(candidates: candidates, groups: Array(groups.values))
+    return GroupSuggestions.make(
+      candidates: candidates, groups: Array(groups.values), declined: try store.declinedSuggestions())
   }
 
   /// Returns the id of the group that the suggestion filled.
@@ -132,6 +141,10 @@ extension Service {
       id = try createGroup(suggestion.name).id
     }
     try place(suggestion.sessions, in: id)
+    if let merged = suggestion.merge?.group, members(merged).isEmpty {
+      try saveGroup(groups[id]!.absorbing(groups[merged]!))
+      try deleteGroup(merged)
+    }
     return id
   }
 

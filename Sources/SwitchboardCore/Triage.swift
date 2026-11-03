@@ -224,7 +224,7 @@ public enum Triage {
     return oneLine(text, max: titleLength)
   }
 
-  static func capitalized(_ text: String) -> String {
+  public static func capitalized(_ text: String) -> String {
     text.prefix(1).uppercased() + text.dropFirst()
   }
 

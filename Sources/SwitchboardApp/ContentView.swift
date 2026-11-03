@@ -423,7 +423,49 @@ struct BoardView: View {
         .padding()
       }
       .defaultScrollAnchor(.topLeading)
+      .safeAreaInset(edge: .top, spacing: 0) {
+        if !model.suggestions.isEmpty {
+          VStack(spacing: 0) {
+            GroupSuggestionList()
+            Divider()
+          }
+          .background(.background)
+        }
+      }
     }
+  }
+}
+
+/// The group suggestions above the board, each with Accept and Decline.
+struct GroupSuggestionList: View {
+  @EnvironmentObject var model: BoardModel
+
+  var body: some View {
+    let names = Dictionary(model.board.map { ($0.id, $0.name) }) { first, _ in first }
+    let name = { (id: String) in names[id] ?? id }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 8) {
+        ForEach(model.suggestions) { s in
+          HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "lightbulb").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+              Text("\(Triage.capitalized(s.action)): \(s.sessions.map(name).joined(separator: ", "))")
+                .fontWeight(.medium)
+              Text([s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Accept") { model.acceptSuggestion(s.id) }
+            Button("Decline") { model.declineSuggestion(s.id) }
+          }
+          .accessibilityElement(children: .contain)
+          .accessibilityIdentifier("suggestion-\(s.id)")
+        }
+      }
+      .padding(10)
+    }
+    .frame(maxHeight: 160)
+    .fixedSize(horizontal: false, vertical: true)
   }
 }
 
