@@ -50,10 +50,9 @@ final class UsageReader: @unchecked Sendable {
   }
 
   /// Whether the account in the config folder may spend more, from the last
-  /// reading. It matches `QuotaBudget.hasBudget(account:)`, which automatic
-  /// continuation calls from the service's queue. It reads no network. Only a
-  /// spent limit says no. An account that sbd has not read says yes, as the
-  /// stub budget does.
+  /// reading. Auto-continue calls it from the service's queue. It reads no
+  /// network. Only a spent limit says no. An account that sbd has not read
+  /// says yes.
   func hasBudget(account: String) -> Bool {
     latest(account)?.budget().isSpent != true
   }
@@ -163,3 +162,5 @@ extension Service {
     return args["refresh"]?.bool == true ? reader.read() : reader.latest()
   }
 }
+
+extension UsageReader: QuotaBudget {}

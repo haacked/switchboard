@@ -120,6 +120,28 @@ extension Instance {
     try sbd.waitFor("the timer's read") { try sbd.client.usage().first?.limits.map(\.percent) == [47, 20, 0] }
   }
 
+  /// Auto-continue asks the usage reader, so a spent limit holds the session back.
+  @Test func aSpentLimitBlocksAutoContinue() throws {
+    let fake = try FakeUsage()
+    fake.reply(#"{"limits":[{"kind":"weekly_all","percent":100,"resets_at":"2099-01-01T00:00:00+00:00"}]}"#)
+    let sbd = try Instance(
+      accounts: ["A"], inheriting: .unset,
+      config: [
+        "usage": ["url": .string(fake.url), "pollSeconds": 0, "keychain": false],
+        "autoContinue": ["quietSeconds": 60],
+      ])
+    try sbd.sb("account", "use", "A")
+    try sbd.signIn("A", token: "token-a")
+    let s = try sbd.new(prompt: "offer", name: "t")
+    _ = try sbd.waitFor(s.id, "the offer") { $0.state == .canContinue }
+    try sbd.advanceClock(61_000)
+    #expect(try sbd.blocker(s.id) == nil)
+
+    _ = try sbd.usage()
+
+    #expect(try sbd.blocker(s.id) == "no quota left for \(sbd.account("A"))")
+  }
+
   // MARK: Failures
 
   @Test func anAccountWithNoCredentialsIsNotSignedIn() throws {

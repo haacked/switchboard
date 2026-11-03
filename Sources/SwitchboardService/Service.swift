@@ -131,7 +131,9 @@ public final class Service {
     for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot)
-    usageReader = UsageReader(service: self, settings: config.usage)
+    let reader = UsageReader(service: self, settings: config.usage)
+    usageReader = reader
+    quota = reader
   }
 
   // MARK: Requests
