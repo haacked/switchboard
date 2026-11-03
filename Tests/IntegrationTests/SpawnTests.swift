@@ -23,13 +23,9 @@ import Testing
   /// Runs `sb spawn --json` with `dir` as its working folder, which a
   /// relative --repo resolves against.
   func spawnCLI(_ sbd: Instance, from dir: String, _ args: [String]) throws -> SessionSummary {
-    var env = ProcessInfo.processInfo.environment
-    env["SB_HOME"] = sbd.home.path
-    env["CLAUDECODE"] = nil
-    env["SB_SESSION_ID"] = nil
     let r = try runCommand(
       "/bin/sh", ["-c", #"cd "$1" && shift && exec "$@""#, "sh", dir, "\(Instance.bin)/sb", "spawn", "--json"] + args,
-      env: env)
+      env: sbd.environment())
     guard r.status == 0 else { throw TestError(description: "sb spawn \(args) in \(dir) failed: \(r.stderr)") }
     return try JSONCoding.decode(SessionSummary.self, from: r.stdout)
   }
@@ -446,6 +442,50 @@ import Testing
     #expect(try !branchExists(checkout, "b1"))
   }
 
+  @Test func refusesBaseWithFollowup() throws {
+    let repos = try Repos()
+    let checkout = try repos.make("acme/widgets")
+    let sbd = try instance(repos)
+
+    let message = failure(
+      sbd, "spawn",
+      ["repository": "acme/widgets", "branch": "b1", "prompt": "Go.", "followup": true, "base": "origin/release"])
+    #expect(message.contains("--base needs a started spawn"))
+    let r = try sbd.run(
+      [
+        "spawn", "--json", "--repo", "acme/widgets", "--branch", "b1", "--prompt", "Go.", "--followup", "--base",
+        "main",
+      ])
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("--base needs a started spawn"))
+
+    try expectNothingCreated(sbd, checkouts: [checkout])
+  }
+
+  @Test func followupSpawnKeepsItsNameModelAndAccount() throws {
+    let repos = try Repos()
+    let checkout = try repos.make("acme/widgets")
+    let sbd = try Instance(
+      accounts: ["A", "B"], inheriting: .unset, config: ["repoRoots": [.string(repos.root)]])
+    try sbd.sb("account", "use", "A")
+
+    let f = try spawnCLI(
+      sbd,
+      [
+        "--repo", "acme/widgets", "--branch", "b1", "--prompt", "Go.", "--followup", "--name", "worker", "--model",
+        "sonnet", "--account", "B",
+      ])
+
+    #expect(f.name == "worker")
+    #expect(f.account == sbd.account("B"))
+    let s = try JSONCoding.decode(SessionSummary.self, from: try sbd.sb("followup", "start", "--json", f.id))
+    try expectWorktree(sbd, s, of: checkout, branch: "b1", folder: "widgets")
+    try sbd.waitFor(f.id, "the follow-up's first turn") { $0.lastReply == "Done: Go." }
+    let launch = sbd.stubCalls().last { !$0.args.hasPrefix("agents") }
+    #expect(launch?.args.contains("--model sonnet") == true)
+    #expect(launch?.account == sbd.account("B"))
+  }
+
   /// The request's fields, without the one that the case leaves out or empties.
   enum Missing: String, CaseIterable {
     case noPrompt, emptyPrompt, blankPrompt, noBranch, emptyBranch
@@ -536,6 +576,27 @@ import Testing
 
     let f = try spawn(sbd, ["repository": "dotfiles", "branch": "b2", "prompt": "Later.", "followup": true])
     #expect(f.followup?.repository == "haacked/dotfiles")
+  }
+
+  /// A repos key and a folder under the roots that differ only in case are one repository.
+  @Test func aBareNameWhoseReposKeyNamesAFolderUnderTheRootsResolvesToIt() throws {
+    let repos = try Repos()
+    let checkout = try repos.make("PostHog/posthog")
+    let sbd = try instance(repos, ["repos": ["posthog/posthog": .string(checkout)]])
+
+    let s = try spawn(sbd, ["repository": "posthog", "branch": "b1", "prompt": "Go."])
+    try expectWorktree(sbd, s, of: checkout, branch: "b1", folder: "posthog")
+  }
+
+  @Test func aBareNameSkipsAFolderUnderTheRootsWithoutAMatchingRemote() throws {
+    let repos = try Repos()
+    let acme = try repos.make("acme/widgets")
+    let other = try repos.make("other/widgets", remote: "https://gitlab.com/other/widgets.git")
+    let sbd = try instance(repos)
+
+    let s = try spawn(sbd, ["repository": "widgets", "branch": "b1", "prompt": "Go."])
+    try expectWorktree(sbd, s, of: acme, branch: "b1", folder: "widgets")
+    #expect(try worktrees(of: other) == [real(other)])
   }
 
   @Test func anAbsolutePathResolvesToTheTopFolderOfItsCheckout() throws {

@@ -15,6 +15,10 @@ extension Service {
     let followup = args["followup"]?.bool == true
     let after = text("after")
     if after != nil, !followup { throw APIError("--after needs --followup, because a started session has no trigger") }
+    if followup, text("base") != nil {
+      throw APIError(
+        "--base needs a started spawn, because a follow-up keeps no base. Pass --base to sb followup start")
+    }
 
     let (checkout, named) = try spawnCheckout(ref)
     if branchOrFolderTaken(checkout, branch) {

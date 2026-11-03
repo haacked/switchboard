@@ -34,12 +34,7 @@ import Testing
   func onTerminal(_ sbd: Instance, _ args: [String], answer: String, env extra: [String: String] = [:]) throws
     -> CommandResult
   {
-    var env = ProcessInfo.processInfo.environment
-    env["SB_HOME"] = sbd.home.path
-    env["CLAUDECODE"] = nil
-    env["SB_SESSION_ID"] = nil
-    env["ANSWER"] = answer
-    env.merge(extra) { $1 }
+    let env = sbd.environment(["ANSWER": answer].merging(extra) { $1 })
     let pipeline = #"(sleep 0.5; printf '%s\n' "$ANSWER"; sleep 3) | /usr/bin/script -q /dev/null "$@""#
     return try runCommand(
       "/bin/sh", ["-c", pipeline, "sh", "\(Instance.bin)/sb"] + args, env: env, timeout: 30)

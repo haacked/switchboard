@@ -178,18 +178,23 @@ final class Instance {
     return r.stdout
   }
 
-  /// Runs sb with this instance's SB_HOME, whatever its exit status.
+  /// The environment of an sb command with this instance's SB_HOME.
   /// CLAUDECODE and SB_SESSION_ID mark a command that Claude runs in a
-  /// session, so they come only from `env`.
-  func run(_ args: String...) throws -> CommandResult { try run(args) }
-
-  func run(_ args: [String], env extra: [String: String] = [:]) throws -> CommandResult {
+  /// session, so they come only from `extra`.
+  func environment(_ extra: [String: String] = [:]) -> [String: String] {
     var env = ProcessInfo.processInfo.environment
     env["SB_HOME"] = home.path
     env["CLAUDECODE"] = nil
     env["SB_SESSION_ID"] = nil
     env.merge(extra) { $1 }
-    return try runCommand("\(Instance.bin)/sb", args, env: env)
+    return env
+  }
+
+  /// Runs sb with this instance's SB_HOME, whatever its exit status.
+  func run(_ args: String...) throws -> CommandResult { try run(args) }
+
+  func run(_ args: [String], env extra: [String: String] = [:]) throws -> CommandResult {
+    try runCommand("\(Instance.bin)/sb", args, env: environment(extra))
   }
 
   /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
