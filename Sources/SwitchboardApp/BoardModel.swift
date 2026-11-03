@@ -25,6 +25,10 @@ final class BoardModel: ObservableObject {
   @Published var confirmingDelete: String?
   /// The ids of the Done sessions whose delete is running.
   @Published var deleting: Set<String> = []
+  /// The id of the session whose cleanup the confirmation dialog in ContentView asks about.
+  @Published var confirmingCleanup: String?
+  /// The ids of the sessions whose cleanup is running.
+  @Published var cleaningUp: Set<String> = []
   var presentingSheet: Bool { showingNew || showingImport }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.queue
@@ -422,6 +426,14 @@ final class BoardModel: ObservableObject {
       "rm", Self.deleteRequest(s),
       then: { _ in if self.selection == s.id { self.selection = nil } },
       finally: { self.deleting.remove(s.id) })
+  }
+
+  /// Removes the worktree and the local branch of a session whose PR merged.
+  /// The session stays, so the selection stays too. sbd reruns every check
+  /// first. A refusal shows in the banner.
+  func cleanup(_ s: SessionSummary) {
+    guard cleaningUp.insert(s.id).inserted else { return }
+    perform("cleanup", ["session": .string(s.id)], finally: { self.cleaningUp.remove(s.id) })
   }
 
   /// Removes the session and its worktree. sbd refuses, and removes nothing,

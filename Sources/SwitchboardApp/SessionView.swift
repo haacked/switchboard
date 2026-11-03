@@ -36,7 +36,11 @@ struct SessionView: View {
         .fixedSize(horizontal: false, vertical: true)
         Divider()
       }
-      if let terminals = ui.terminals {
+      if session.cleanup?.state == .removed {
+        Text("Cleanup removed this session's worktree, so it has no terminals.")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
             paneLabel("Claude")
@@ -62,6 +66,8 @@ struct SessionView: View {
         .padding(8)
     }
     .task(id: session.id) {
+      // `open` refuses a session whose folder cleanup removed.
+      if session.cleanup?.state == .removed { return }
       let id = session.id
       let model = model
       // Opening a session resumes a stopped claude. The selection has to rest
@@ -155,6 +161,7 @@ struct SessionView: View {
         if let pr = session.pr, let url = pr.link {
           Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
         }
+        CleanupNote(session: session)
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
           .font(.caption)
           .foregroundStyle(.tertiary)
@@ -176,6 +183,11 @@ struct SessionView: View {
             session.markedDone
               ? "Mark the session not done. It returns to its own group on the board, and to the Queue if it needs you or claude can continue."
               : "Mark the session done. It leaves the Queue and moves to Done on the board.")
+        if CleanupOffer.canCleanUp(session) {
+          Button("Clean Up…") { model.confirmingCleanup = session.id }
+            .disabled(model.cleaningUp.contains(session.id))
+            .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
+        }
         Button(role: .destructive) {
           Task {
             let options = await RemoveOptions.load(session)
