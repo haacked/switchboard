@@ -91,8 +91,17 @@ extension Service {
     guard FileManager.default.fileExists(atPath: session.cwd) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
     }
-    let repo = try checkWorktreeIsLossless(session, mergedPR: true, sharedWith: sharedWith)
+    let repo = try checkWorktreeIsLossless(
+      session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true)
     return (repo, try checkBranchIsMerged(session, pr: pr))
+  }
+
+  /// Throws for a session whose worktree `sb cleanup` removed. tmux starts a
+  /// pane whose folder is missing in the home folder.
+  func refuseCleanedUp(_ id: String) throws {
+    if entries[id]?.facts.cleanup?.state == .removed {
+      throw APIError("\(id) was cleaned up, and its worktree is gone.")
+    }
   }
 
   private func requireNoTurn(_ e: Entry) throws {

@@ -65,7 +65,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     return (sbd, repo, s)
   }
 
-  // MARK: The poller's offer
+  // MARK: The poller's cleanup checks
 
   @Test func mergedPRWithACleanWorktreeIsReadyForCleanup() throws {
     let github = try FakeGitHub()
@@ -196,6 +196,24 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(recorded.count == 1)
     #expect(recorded.first?.data["worktree"]?.string == s.cwd)
     #expect(recorded.first?.data["branch"]?.string == branch)
+    #expect(recorded.first?.data["branch_removed"] == .bool(true))
+  }
+
+  /// The branch moves after `git worktree remove`, so the delete refuses and the branch stays.
+  @Test func keepsTheBranchWhenACommitLandsAfterTheWorktreeIsRemoved() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try sbd.runAfterWorktreeRemoval(repo, "git -C \"$REPO\" branch -f \(branch) main")
+    // The restart drops the polled PR, so poll it again.
+    try sbd.poll(all: true)
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("kept \(branch)"))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.hasBranch(repo, branch))
+    #expect(try sbd.get(s.id).reason == "#122953 merged; worktree removed, kept \(branch)")
   }
 
   @Test func cleanupStopsClaudeAndClosesBothPanes() throws {
@@ -209,6 +227,18 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try sbd.get(s.id).live == false)
     #expect(try !tmuxHas(terminals, terminals.claude))
     #expect(try !tmuxHas(terminals, terminals.shell))
+  }
+
+  /// tmux would start a pane whose folder is gone in the home folder.
+  @Test func cleanedUpSessionStartsNoPane() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    #expect(try sbd.cleanup(s.id).status == 0)
+
+    for op in ["resume", "terminals"] {
+      #expect(failure(sbd, op, ["session": .string(s.id)]).contains("cleaned up"), "\(op)")
+    }
+    #expect(try sbd.get(s.id).live == false)
   }
 
   @Test func cleanupOpAnswersLikeTheCommand() throws {
@@ -346,6 +376,20 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(after.cleanup?.reason?.contains(".env") == true)
   }
 
+  @Test func cleanupDeletesTheIgnoredNamesThatConfigLists() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try ".env\n.notes/\n".write(toFile: "\(repo)/.git/info/exclude", atomically: true, encoding: .utf8)
+    try "SECRET=1".write(toFile: "\(s.cwd)/.env", atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(atPath: "\(s.cwd)/.notes", withIntermediateDirectories: true)
+    try "x".write(toFile: "\(s.cwd)/.notes/brief.md", atomically: true, encoding: .utf8)
+    try sbd.restart(setting: "cleanupDeletes", to: [".env", ".notes"])
+
+    try sbd.sb("cleanup", s.id)
+
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+  }
+
   @Test(arguments: ["--assume-unchanged", "--skip-worktree"])
   func refusesAChangeThatGitStatusSkips(_ flag: String) throws {
     try refusesAReadySession(["git status skips"]) { sbd, _, s in
@@ -360,6 +404,23 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     try "node_modules/\n".write(toFile: "\(repo)/.git/info/exclude", atomically: true, encoding: .utf8)
     try FileManager.default.createDirectory(atPath: "\(s.cwd)/web/node_modules/x", withIntermediateDirectories: true)
     try "x".write(toFile: "\(s.cwd)/web/node_modules/x/index.js", atomically: true, encoding: .utf8)
+
+    try sbd.sb("cleanup", s.id)
+
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+  }
+
+  /// ruff ignores its cache with a `.gitignore` of `*` inside it, so git lists the cache's files.
+  @Test func removesACacheThatIgnoresItself() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    try FileManager.default.createDirectory(atPath: "\(s.cwd)/.ruff_cache/0.15.20", withIntermediateDirectories: true)
+    try "*".write(toFile: "\(s.cwd)/.ruff_cache/.gitignore", atomically: true, encoding: .utf8)
+    try "x".write(toFile: "\(s.cwd)/.ruff_cache/CACHEDIR.TAG", atomically: true, encoding: .utf8)
+    try "x".write(toFile: "\(s.cwd)/.ruff_cache/0.15.20/a", atomically: true, encoding: .utf8)
+
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).cleanup == CleanupStatus(state: .ready))
 
     try sbd.sb("cleanup", s.id)
 
@@ -414,7 +475,8 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     expectBlocked(after)
   }
 
-  /// The poller's offer leaves a running turn out, so the reason says to wait for it. The command refuses it.
+  /// While a turn runs, the poller keeps its last cleanup result, so the reason says ready once it stops.
+  /// `sb cleanup` refuses the running turn.
   @Test func refusesWhileATurnRuns() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)
@@ -424,6 +486,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     }
 
     try expectRefusal(sbd, repo, s, ["running a turn"])
+    try sbd.poll(all: true)
 
     let after = try sbd.get(s.id)
     #expect(after.cleanup?.state == .ready)
@@ -495,23 +558,17 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
   }
 }
 
-/// `sb rm --worktree` runs `git worktree remove` too, so it refuses the same lost files.
+/// `sb rm --worktree` deletes ignored files with the worktree, and refuses the changes that git status skips.
 @Suite(.timeLimit(.minutes(2))) struct RemoveWorktreeLossTests {
-  @Test func refusesAnIgnoredFileThatNoBuildMakes() throws {
+  @Test func deletesIgnoredFilesWithTheWorktree() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()
     let s = try sbd.worktreeSession(repo)
-    try ".env\nnode_modules/\n".write(toFile: "\(repo)/.git/info/exclude", atomically: true, encoding: .utf8)
+    try ".env\n".write(toFile: "\(repo)/.git/info/exclude", atomically: true, encoding: .utf8)
     try "SECRET=1".write(toFile: "\(s.cwd)/.env", atomically: true, encoding: .utf8)
-    try FileManager.default.createDirectory(atPath: "\(s.cwd)/node_modules", withIntermediateDirectories: true)
 
-    let r = try sbd.deleteSession(s.id)
-
-    #expect(r.status != 0)
-    #expect(r.stderr.contains("no build makes again (1): .env"))
-    #expect(try sbd.intact(s))
-    try FileManager.default.removeItem(atPath: "\(s.cwd)/.env")
     #expect(try sbd.deleteSession(s.id).status == 0)
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
   }
 
   @Test(arguments: ["--assume-unchanged", "--skip-worktree"])
@@ -530,7 +587,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     let r = try sbd.deleteSession(s.id)
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("git status skips"))
+    #expect(r.stderr.contains("git status skips (1): a.txt"))
     #expect(try sbd.intact(s))
   }
 }

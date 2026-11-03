@@ -67,8 +67,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The removal that a `cleanup` event recorded.
   public var cleanedUp: CleanupStatus?
   /// Whether `sb cleanup` can remove the worktree, or whether it did. The
-  /// poller records the count before the finished PR's `pr` event, so the
-  /// checks count only once the PR reads merged and the count reads clean.
+  /// poller records the count before the finished PR's `pr` event, so this
+  /// returns the checks' result only once the PR reads merged and the count
+  /// reads clean.
   public var cleanup: CleanupStatus? {
     if let cleanedUp { return cleanedUp }
     guard pr?.state == .merged, dirty == 0 else { return nil }

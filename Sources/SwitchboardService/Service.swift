@@ -473,6 +473,7 @@ public final class Service {
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try refuseNotStarted(session)
+    try refuseCleanedUp(id)
     let shell = paneName(id, .shell)
     switch snapshot.panes[shell] {
     case nil:
@@ -496,6 +497,7 @@ public final class Service {
   func launch(_ id: String, prompt: String?) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try refuseNotStarted(session)
+    try refuseCleanedUp(id)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
     let resume = hasTranscript(session)
     var args = [config.claude]
@@ -921,13 +923,16 @@ public final class Service {
 
   /// Returns the session's repo, or throws unless the session's folder is a
   /// linked worktree of the repo that `new` made it from, no other session runs
-  /// in it, it has no uncommitted file, no file whose change git status skips,
-  /// and no ignored file that a build doesn't make again, and HEAD is on a
-  /// remote branch. With a merged PR, HEAD may instead be on a local branch,
-  /// because a squash merge leaves the commits on no remote branch and
-  /// `worktree remove` keeps the branch. `worktree remove` deletes ignored
-  /// files. Any git failure refuses the removal.
-  func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool, sharedWith: String?) throws -> String {
+  /// in it, it has no uncommitted file and no file whose change git status
+  /// skips, and HEAD is on a remote branch. With a merged PR, HEAD may instead
+  /// be on a local branch, because a squash merge leaves the commits on no
+  /// remote branch and `worktree remove` keeps the branch. `worktree remove`
+  /// deletes ignored files. With `onlyBuildOutputIgnored`, an ignored file that
+  /// is not build output or in `cleanupDeletes` also refuses. Any git failure
+  /// refuses the removal.
+  func checkWorktreeIsLossless(
+    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool = false
+  ) throws -> String {
     let repo = try worktreeRepo(session)
     if let sharedWith {
       throw APIError(
@@ -938,14 +943,12 @@ public final class Service {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     if entry.locked { throw lockedError(session.cwd) }
-    // The flag keeps status from taking the index lock while claude commits.
-    let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
-    let changed = status.split(separator: "\n").count
-    guard changed == 0 else {
-      throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
+    let status = try readStatus(session.cwd)
+    guard status.changed == 0 else {
+      throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
     }
     try requireNoHiddenChanges(session.cwd)
-    try requireOnlyBuildOutputIgnored(session.cwd)
+    if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
     return repo
   }
@@ -963,16 +966,38 @@ public final class Service {
     }
   }
 
-  /// Throws when the folder has an ignored path that is not build output.
-  /// `matching` lists each ignored path without what is inside it, and `-z`
-  /// leaves names unquoted.
-  private func requireOnlyBuildOutputIgnored(_ cwd: String) throws {
-    let listed = try gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain", "-z", "--ignored=matching"])
-    let kept = listed.split(separator: "\0").filter { $0.hasPrefix("!! ") }.map { String($0.dropFirst(3)) }
-      .filter { !BuildOutput.contains($0) }
+  /// The number of changed paths and the ignored paths, from one walk of
+  /// the folder. `matching` lists each ignored path without what is inside
+  /// it, and `-z` leaves names unquoted. A rename or copy entry is followed
+  /// by its source path, which has no status of its own.
+  private func readStatus(_ cwd: String) throws -> (changed: Int, ignored: [String]) {
+    // The flag keeps status from taking the index lock while claude commits.
+    let fields = try gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain", "-z", "--ignored=matching"])
+      .split(separator: "\0")
+    var changed = 0
+    var ignored: [String] = []
+    var i = fields.startIndex
+    while i < fields.endIndex {
+      let field = fields[i]
+      i += 1
+      if field.hasPrefix("!! ") {
+        ignored.append(String(field.dropFirst(3)))
+        continue
+      }
+      changed += 1
+      if field.prefix(2).contains(where: { $0 == "R" || $0 == "C" }) { i += 1 }
+    }
+    return (changed, ignored)
+  }
+
+  /// Throws when one of the folder's ignored paths is neither build output
+  /// nor a name in `cleanupDeletes`.
+  private func requireOnlyBuildOutputIgnored(_ cwd: String, ignored: [String]) throws {
+    let also = Set(config.cleanupDeletes)
+    let kept = ignored.filter { !BuildOutput.contains($0, also: also) }
     guard kept.isEmpty else {
       throw APIError(
-        "\(cwd) has ignored files that no build makes again (\(kept.count)): \(preview(kept)). Move or delete them first."
+        "\(cwd) has ignored files that no build makes again (\(kept.count)): \(preview(kept)). Move or delete them, or add their names to cleanupDeletes in config.json."
       )
     }
   }

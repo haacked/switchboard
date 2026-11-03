@@ -487,13 +487,13 @@ final class GitHubPoller {
       var info = stat()
       let gone = dirty == nil && stat(s.cwd, &info) != 0 && errno == ENOENT
       // The checks run 8 git commands. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
-      let offer: CleanupStatus? =
+      let checked: CleanupStatus? =
         dirty != 0 || pr.state != .merged
         ? nil
         : s.facts.turnRunning ? s.facts.cleanupChecked : CleanupStatus(blocker: service.cleanupBlocker(s.id, pr: pr))
-      if dirty != s.facts.dirty || gone != s.facts.folderGone || offer != s.facts.cleanupChecked {
+      if dirty != s.facts.dirty || gone != s.facts.folderGone || checked != s.facts.cleanupChecked {
         var data: [String: JSON] = ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)]
-        if let offer { data["cleanup"] = offer.reason.map(JSON.string) ?? .null }
+        if let checked { data["cleanup"] = checked.reason.map(JSON.string) ?? .null }
         event(s.id, "worktree", .object(data))
       }
     }

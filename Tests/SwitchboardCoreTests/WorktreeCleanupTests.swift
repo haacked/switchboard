@@ -14,8 +14,10 @@ private func countEvent(_ t: Int64, dirty: Int?, gone: Bool = false, cleanup: JS
   return event("worktree", t, fields)
 }
 
-private func cleanupEvent(_ t: Int64) -> Event {
-  event("cleanup", t, ["worktree": "/tmp/worktrees/repo/feature", "branch": "feature"])
+private func cleanupEvent(_ t: Int64, branchRemoved: Bool = true) -> Event {
+  event(
+    "cleanup", t,
+    ["worktree": "/tmp/worktrees/repo/feature", "branch": "feature", "branch_removed": .bool(branchRemoved)])
 }
 
 private let runningTurn = [event("UserPromptSubmit", 9, ["prompt": "keep going"])]
@@ -192,6 +194,12 @@ private func verdict(_ f: SessionFacts) -> Verdict { Attention.evaluate(session(
       #expect(verdict(f) == Verdict(state: .done, reason: "#42 merged; worktree and branch removed"))
     }
 
+    @Test func keptBranchSaysSo() throws {
+      let f = try cleanupFacts(then: [cleanupEvent(5, branchRemoved: false)])
+
+      #expect(verdict(f) == Verdict(state: .done, reason: "#42 merged; worktree removed, kept feature"))
+    }
+
     @Test func removedWinsOverAFolderGoneAfterTheCleanup() throws {
       let f = try cleanupFacts(then: [cleanupEvent(5), countEvent(6, dirty: nil, gone: true)])
 
@@ -255,14 +263,30 @@ private func verdict(_ f: SessionFacts) -> Verdict { Attention.evaluate(session(
 @Suite struct RebuildableIgnoredPathTests {
   @Test(arguments: [
     "node_modules/", "frontend/node_modules/", ".venv/", "rust/target/", "pkg/__pycache__/", "pkg/c.pyc", ".DS_Store",
-    ".build/",
+    ".build/", ".ruff_cache/.gitignore", ".ruff_cache/0.15.20/", ".ruff_cache/CACHEDIR.TAG", ".pytest_cache/v/",
+    "products/.ruff_cache/CACHEDIR.TAG", ".mypy_cache/.gitignore", ".flox/cache/", ".trunk/logs", ".husky/_/husky.sh",
+    ".hypothesis/", ".parcel-cache/",
   ])
   func buildOutputIsRebuildable(_ path: String) {
     #expect(BuildOutput.contains(path))
   }
 
-  @Test(arguments: [".env", "notes/", "frontend/.env.local", "my-node_modules/", "target.txt", ".idea/", ""])
+  @Test(arguments: [
+    ".env", "notes/", "frontend/.env.local", "my-node_modules/", "target.txt", ".idea/", "", "build/notes.txt",
+    "dist/.env",
+  ])
   func otherIgnoredPathsAreNot(_ path: String) {
     #expect(!BuildOutput.contains(path))
+  }
+}
+
+@Suite struct ConfiguredIgnoredPathTests {
+  @Test(arguments: [".env", "app/.env", ".notes/", ".notes/brief.md"])
+  func namesInAlsoCount(_ path: String) {
+    #expect(BuildOutput.contains(path, also: [".env", ".notes"]))
+  }
+
+  @Test func otherNamesStayRefused() {
+    #expect(!BuildOutput.contains(".env.local", also: [".env"]))
   }
 }
