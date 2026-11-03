@@ -1,0 +1,123 @@
+{
+  "orgId": "ntsdt08fpt",
+  "runId": "jtrfd10d8p",
+  "status": "failed",
+  "workflows": [
+    {
+      "workflowId": "05ktvf2pd7",
+      "status": "failed",
+      "workflowPath": "ci-backend.yml",
+      "jobs": [
+        {
+          "jobId": "zc73mm9xs9",
+          "jobKey": "ci-backend.yml:backend-coverage-report",
+          "status": "skipped",
+          "jobDisplayName": "Backend coverage report"
+        },
+        {
+          "jobId": "39q8m33g4f",
+          "jobKey": "ci-backend.yml:build_django_matrix",
+          "status": "finished",
+          "attempts": [
+            {
+              "attemptId": "sbv37zs6m1",
+              "attempt": 1,
+              "status": "finished",
+              "sandboxId": "vtm8grvkzxnhktcj7mcz",
+              "sessionId": "3e731dad-82d7-4321-b781-ff22c50a47fc"
+            }
+          ],
+          "jobDisplayName": "Build Django matrix"
+        },
+        {
+          "jobId": "bz2j0sdzpl",
+          "jobKey": "ci-backend.yml:build-product-test-matrix",
+          "status": "finished",
+          "attempts": [
+            {
+              "attemptId": "r4wxx8g946",
+              "attempt": 1,
+              "status": "finished",
+              "sandboxId": "x47nmsbvlh14g3x75jzm",
+              "sessionId": "f5b8d2e9-2b86-455e-9e0b-b97c95c7fcdc"
+            }
+          ],
+          "jobDisplayName": "Build product test matrix"
+        },
+        {
+          "jobId": "4g15cbg2m8",
+          "jobKey": "ci-backend.yml:calculate-running-time",
+          "status": "finished",
+          "attempts": [
+            {
+              "attemptId": "k197b6jh57",
+              "attempt": 1,
+              "status": "finished",
+              "sandboxId": "stdgfl5t8fnwhb5rnmnd",
+              "sessionId": "9770b5a8-55e4-47a9-9239-a1e771ddf260"
+            }
+          ],
+          "jobDisplayName": "Calculate running time"
+        },
+        {
+          "jobId": "cf7tzs79wh",
+          "jobKey": "ci-backend.yml:cancel-backend-on-openapi-check-failure",
+          "status": "skipped",
+          "jobDisplayName": "Cancel Backend CI after OpenAPI check failure"
+        },
+        {
+          "jobId": "7v1vvw9f3n",
+          "jobKey": "ci-backend.yml:cancel-backend-on-repo-check-failure",
+          "status": "skipped",
+          "jobDisplayName": "Cancel Backend CI after repo check failure"
+        },
+        {
+          "jobId": "v669r36tlh",
+          "jobKey": "ci-backend.yml:django_tests",
+          "status": "failed",
+          "attempts": [
+            {
+              "attemptId": "8dh0dcrtbf",
+              "attempt": 1,
+              "status": "failed",
+              "sandboxId": "vnc153044x92rxp8hb5f",
+              "sessionId": "e5aa48ba-786c-484a-b1f3-245ea6970cb1"
+            }
+          ],
+          "jobDisplayName": "Django Tests Pass on Depot"
+        },
+        {
+          "jobId": "n5th8s02rr",
+          "jobKey": "ci-backend.yml:django:matrix-05",
+          "status": "failed",
+          "attempts": [
+            {
+              "attemptId": "x12cwbq7hw",
+              "attempt": 1,
+              "status": "failed",
+              "sandboxId": "7r8flgv5z28z8k4355ff",
+              "sessionId": "68a4ddf4-d4ee-42d1-ae19-dc3f18551f1c"
+            }
+          ],
+          "jobDisplayName": "Django tests – Core (persons-on-events on, events schema legacy), Py 3.14.7, clickhouse/clickhouse-server:26.6.2 (6/10)"
+        },
+        {
+          "jobId": "jqg6m70kdf",
+          "jobKey": "ci-backend.yml:django:matrix-19",
+          "status": "failed",
+          "attempts": [
+            {
+              "attemptId": "fds9kpfmq4",
+              "attempt": 1,
+              "status": "failed",
+              "sandboxId": "fgpgcnms9fdmv988t1cz",
+              "sessionId": "96071545-d824-43d0-8b54-4ef6b583b5d5"
+            }
+          ],
+          "jobDisplayName": "Django tests – Core json-targets (persons-on-events on, events schema json), Py 3.14.7, clickhouse/clickhouse-server:26.6.2 (7/9)"
+        }
+      ],
+      "name": "Backend CI on Depot"
+    }
+  ]
+}

@@ -95,8 +95,8 @@ let usage = """
                                   earlier import read
 
   Service:
-    poll [--all]                  ask GitHub about the sessions' PRs now; --all
-                                  reads every PR, not only those due
+    poll [--all]                  ask GitHub and Depot about the sessions' PRs
+                                  now; --all reads every PR, not only those due
     snapshots [--write]           show how the last start built each session,
                                   from a snapshot or a full replay; --write
                                   first saves a snapshot of every session
@@ -232,6 +232,7 @@ func printSession(_ s: SessionSummary) {
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let run = s.pr?.depot { print("  depot:   \(run.line)") }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
@@ -539,7 +540,9 @@ case "poll":
     let n = { (key: String) in result[key]?.int ?? 0 }
     print(
       "read \(n("polled")) PRs and looked up \(n("lookups")) in \(n("requests")) requests for \(n("points")) points")
+    if n("depotRequests") > 0 { print("read \(n("depotRuns")) Depot runs in \(n("depotRequests")) requests") }
   }
+  if let error = result["depotError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)

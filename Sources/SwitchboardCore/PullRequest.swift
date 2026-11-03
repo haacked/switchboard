@@ -122,6 +122,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// read the field, as in events that an older sbd recorded. An empty list
   /// means nobody was asked.
   public var reviewRequests: [String]?
+  /// The Depot run of a head commit, as the Depot poller last read it. It can
+  /// be an earlier head commit's run.
+  public var depot: DepotRun?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
@@ -129,7 +132,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
-    reviewRequests: [String]? = nil, mergeCommit: String? = nil
+    reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil
   ) {
     self.id = id
     self.number = number
@@ -154,6 +157,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.queue = queue
     self.reviewRequests = reviewRequests
     self.mergeCommit = mergeCommit
+    self.depot = depot
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
@@ -208,6 +212,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var checks: String?
   public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
+  /// The Depot run of the head commit.
+  public var depot: DepotRun?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -219,6 +225,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     checks = pr.checks
     mergeable = pr.mergeable
     queue = pr.queue
+    depot = pr.headDepot
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can

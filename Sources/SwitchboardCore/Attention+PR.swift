@@ -25,8 +25,8 @@ extension Attention {
   }
 
   /// The rules for an open PR of a session whose turn has ended: a merged
-  /// base, a conflict, requested changes, a removal from Trunk's queue, and an
-  /// approval.
+  /// base, a conflict, requested changes, a removal from Trunk's queue, a
+  /// failed Depot job, and an approval.
   static func openPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open else { return nil }
     let n = "#\(pr.number)"
@@ -52,6 +52,11 @@ extension Attention {
     if pr.queue == .removed {
       return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue")
     }
+    // An approved PR whose Depot job failed can't merge yet.
+    if let run = pr.depotFailure {
+      let reason = "fix Depot CI on \(n): "
+      return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
+    }
     guard pr.isApproved else { return nil }
     let by = pr.approvers.isEmpty ? "" : ", approved by \(names(pr.approvers))"
     switch pr.queue {
@@ -72,7 +77,7 @@ extension Attention {
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open, !pr.draft, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
       !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
-      !pr.checksFailed, classify(facts.lastReply ?? "") == .other
+      !pr.ciFailed, classify(facts.lastReply ?? "") == .other
     else { return nil }
     return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
   }
@@ -84,7 +89,7 @@ extension Attention {
   /// idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
     guard let pr = facts.pr, pr.state == .open, !pr.draft else { return false }
-    return pr.checksFailed || (pr.reviewRequests == [] && pr.queue == nil)
+    return pr.ciFailed || (pr.reviewRequests == [] && pr.queue == nil)
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }

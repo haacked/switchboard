@@ -94,6 +94,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
   public var github = GitHubSettings()
+  public var depot = DepotSettings()
   /// How many new events a session collects before sbd saves a snapshot of its
   /// state. 0 turns snapshots off, and sbd replays every event at start.
   public var snapshotEvery = 500
@@ -132,6 +133,7 @@ public struct Config: Codable, Equatable, Sendable {
     cleanupDeletes = try c.decodeIfPresent([String].self, forKey: .cleanupDeletes) ?? d.cleanupDeletes
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
+    depot = try c.decodeIfPresent(DepotSettings.self, forKey: .depot) ?? d.depot
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery
     triage = try c.decodeIfPresent(TriageSettings.self, forKey: .triage) ?? d.triage
     autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
