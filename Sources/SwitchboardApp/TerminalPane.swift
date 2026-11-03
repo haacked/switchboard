@@ -10,7 +10,7 @@ struct TerminalPane: NSViewRepresentable {
   func makeCoordinator() -> Coordinator { Coordinator() }
 
   func makeNSView(context: Context) -> LocalProcessTerminalView {
-    let view = LocalProcessTerminalView(frame: .zero)
+    let view = ThemedTerminalView(frame: .zero)
     view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     view.optionAsMetaKey = true
     view.processDelegate = context.coordinator
