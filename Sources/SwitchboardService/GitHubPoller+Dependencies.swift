@@ -45,7 +45,9 @@ extension GitHubPoller {
       if pr?.state == .open {
         for before in old
         where before.holds && !edges.contains(where: { $0.same(repo: before.repo, number: before.number) }) {
-          guard let read = lastRead(before), read.polled < now, withState(before, recorded: old).holds else { continue }
+          guard let read = lastRead(before), read.polled < now, withState(before, before: before).holds else {
+            continue
+          }
           edges.append(before)
           recheck.insert(read.pr.id)
         }
@@ -54,7 +56,7 @@ extension GitHubPoller {
       var data: [String: JSON] = ["dependencies": (try? JSON(encoding: edges)) ?? []]
       let resolved = old.filter { $0.holds && $0.state != nil }.compactMap { before -> Dependency? in
         let current =
-          edges.first { $0.same(repo: before.repo, number: before.number) } ?? withState(before, recorded: old)
+          edges.first { $0.same(repo: before.repo, number: before.number) } ?? withState(before, before: before)
         return current.resolved ? current : nil
       }
       guard let pr, pr.state == .open, !resolved.isEmpty else {
@@ -94,41 +96,33 @@ extension GitHubPoller {
       let session = owned.first { ref.same(repo: $0.pr.repo, number: $0.pr.number) }?.id
       edges.append(Dependency(via: .body, repo: ref.repo, number: ref.number, deploy: ref.deploy, session: session))
     }
-    return edges.map { withState($0, recorded: recorded) }
+    return edges.map { e in withState(e, before: recorded.first { $0.same(repo: e.repo, number: e.number) }) }
   }
 
   /// The edge with its PR's state as this poller last read it. A deploy edge
   /// whose PR merged is deployed once the deploy comment shows both prod
-  /// regions deployed.
+  /// regions deployed. `before` is the edge as the session recorded it.
   ///
   /// The poller's reads and comment bodies are in memory, so they are empty
   /// after sbd restarts. An edge whose PR this poller has not read keeps the
-  /// state that the session recorded. A merged deploy edge whose comment
-  /// bodies have not loaded keeps the recorded `deployed`. Otherwise a failed
-  /// read after a restart would overwrite the recorded state, and the next
-  /// good read would not tell the session that the edge resolved.
-  private func withState(_ edge: Dependency, recorded: [Dependency]) -> Dependency {
+  /// recorded state. A merged deploy edge stays deployed once it was, because
+  /// its comment body may not have loaded yet. Otherwise a read after a
+  /// restart would overwrite the recorded state, and a later read would tell
+  /// the session again, or never, that the edge resolved.
+  private func withState(_ edge: Dependency, before: Dependency?) -> Dependency {
     var d = edge
-    let before = recorded.first { $0.same(repo: edge.repo, number: edge.number) }
     guard let read = lastRead(edge) else {
-      if let before {
-        d.state = before.state
-        d.deployed = d.deploy ? before.deployed : nil
-      }
+      d.state = before?.state
+      d.deployed = d.deploy ? before?.deployed : nil
       return d
     }
     d.state = read.pr.state
-    d.deployed = nil
-    if d.deploy, read.pr.state == .merged {
-      let comments = keptComments(read.comments)
-      if let comment = comments.compactMap({ $0.body.flatMap(DeployComment.parse) }).last {
-        d.deployed = comment.deployedToProd
-      } else if let before, before.state == .merged, comments.contains(where: { $0.body == nil }) {
-        d.deployed = before.deployed ?? false
-      } else {
-        d.deployed = false
-      }
+    guard d.deploy, read.pr.state == .merged else {
+      d.deployed = nil
+      return d
     }
+    let comment = keptComments(read.comments).compactMap { $0.body.flatMap(DeployComment.parse) }.last
+    d.deployed = (before?.state == .merged && before?.deployed == true) || comment?.deployedToProd == true
     return d
   }
 
