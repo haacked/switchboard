@@ -87,20 +87,30 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
 
-  /// The kinds of the events that the pollers, the summaries, and the tick
-  /// record. They report on GitHub, the folder, a reply, and claude's
-  /// background jobs, not on the session. An `auto-continue` event records
-  /// sbd's own try, and the `sent` event of a continue that worked is the
-  /// activity. They do not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = [
-    "pr", "worktree", "triage", "job", "cleanup", AutoContinue.eventKind, "dependencies",
+  /// The hook events that sbd's settings file subscribes claude to.
+  public static let hookKinds = [
+    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+    "PermissionRequest", "Notification", "Stop", "StopFailure", "SubagentStart", "SubagentStop",
   ]
+
+  /// The kinds of the events that move `lastActivity`, which holds off the
+  /// idle stop and the Stale state. They are claude's hooks, and the sbd
+  /// events that the user, the session, or a launch caused. Every other kind,
+  /// such as a poller's report, sbd's view of the process, or a kind that sbd
+  /// starts to record later, does not count. `idle` stands in for a Stop that
+  /// claude did not send. A refusal in the pane sends no hook, so
+  /// `dialog_closed` and `card_closed` can be the only record of the answer.
+  static let activityKinds = Set(hookKinds).union([
+    "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
+    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
+    "account-moved", "idle",
+  ])
 
   public init() {}
 
   public mutating func apply(_ event: Event) {
     let d = event.data
-    if !SessionFacts.observedKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
+    if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.

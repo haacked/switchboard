@@ -83,12 +83,13 @@ extension Instance {
     #expect(try sbd.sb("cards").contains("      \(command)\n"))
   }
 
-  @Test func holdsThePermissionRequestHookForADay() throws {
+  @Test func subscribesClaudeToEveryHookAndHoldsThePermissionRequestForADay() throws {
     let sbd = try Instance()
     let settings = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings, encoding: .utf8)))
     let timeout = { (event: String) in settings["hooks"]?[event]?.array?.first?["hooks"]?.array?.first?["timeout"] }
     #expect(timeout("PermissionRequest") == .number(Double(Card.holdSeconds)))
     #expect(timeout("Stop") == 30)
+    #expect(Set(settings["hooks"]?.object?.keys.map { $0 } ?? []) == Set(SessionFacts.hookKinds))
   }
 
   @Test func answersTwoQuestionsWithTheChosenLabels() throws {

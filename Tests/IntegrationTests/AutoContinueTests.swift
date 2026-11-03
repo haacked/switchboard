@@ -277,6 +277,24 @@ extension Instance {
     #expect(try sbd.get(s.id).state == .working)
   }
 
+  /// The stub holds `lag held` until $SB_HOME/report exists. The message stays in flight until then.
+  @Test func aMessageOnItsWayIsNotContinued() throws {
+    let sbd = try instance()
+    try sbd.sb("autocontinue", "on")
+    let s = try offerSession(sbd)
+    try sbd.sb("send", s.id, "lag held")
+
+    try sbd.waitFor(
+      "the message on its way", fetch: { try sbd.blocker(s.id) },
+      until: {
+        $0 == "a message is on its way"
+      })
+
+    #expect(try sbd.autoContinues(s.id).isEmpty)
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
+    try sbd.waitFor(s.id, "the reply to the held message") { $0.lastReply == "Done: lag held" }
+  }
+
   @Test func perHourLimitsTheContinuesUntilAnHourPasses() throws {
     // Each continue's reply offers again, and sbd's message is no touch, so
     // the second continue follows the first one's reply.
