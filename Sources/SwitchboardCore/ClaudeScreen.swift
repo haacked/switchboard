@@ -28,11 +28,8 @@ public enum ClaudeScreen {
     guard card.kind == .permission else {
       return card.marks.contains { mark in dialog.contains { $0.contains(mark) } }
     }
-    guard card.findable, let command = card.input["command"]?.string,
-      let open = dialog.firstIndex(where: isDashedRule),
-      let close = dialog[(open + 1)...].firstIndex(where: isDashedRule)
-    else { return false }
-    return words(dialog[(open + 1)..<close].joined(separator: " ")) == words(command)
+    guard let (shown, command) = commandBlock(card, dialog) else { return false }
+    return words(shown.joined(separator: " ")) == words(command)
   }
 
   /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
@@ -41,11 +38,18 @@ public enum ClaudeScreen {
   /// type.
   public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
     guard card.kind == .permission else { return shows(card, dialog) }
+    guard let (shown, command) = commandBlock(card, dialog) else { return false }
+    return shown.joined().filter { !$0.isWhitespace } == command.filter { !$0.isWhitespace }
+  }
+
+  /// The lines between the Bash dialog's two dashed rules, and the card's
+  /// command.
+  private static func commandBlock(_ card: Card, _ dialog: [String]) -> (ArraySlice<String>, String)? {
     guard card.findable, let command = card.input["command"]?.string,
       let open = dialog.firstIndex(where: isDashedRule),
       let close = dialog[(open + 1)...].firstIndex(where: isDashedRule)
-    else { return false }
-    return dialog[(open + 1)..<close].joined().filter { !$0.isWhitespace } == command.filter { !$0.isWhitespace }
+    else { return nil }
+    return (dialog[(open + 1)..<close], command)
   }
 
   private static func words(_ text: String) -> [Substring] {
