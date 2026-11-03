@@ -51,6 +51,9 @@ public final class Service {
   var entries: [String: Entry] = [:]
   /// The follow-ups that `followup start` is starting.
   var starting: Set<String> = []
+  /// The pid of each claude that had not exited when cleanup refused, by
+  /// session id. Its pane is closed, so no snapshot finds that pid again.
+  var exitingClaudes: [String: Int] = [:]
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]

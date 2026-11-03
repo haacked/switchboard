@@ -6,9 +6,9 @@ extension Service {
   /// and keeps the session in Done. Every check of `checkCleanup` runs first,
   /// and a turn that is running also refuses, so a refusal changes nothing.
   /// The checks run again after claude exits and the panes close. A claude
-  /// that has not exited 5 s after SIGTERM also refuses. A refusal
-  /// at that point leaves the session, the folder, and the branch, with the
-  /// panes closed.
+  /// that has not exited 5 s after SIGTERM also refuses. A later cleanup
+  /// waits for that claude again. A refusal at that point leaves the session,
+  /// the folder, and the branch, with the panes closed.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
   /// keeps the branch and throws.
@@ -29,7 +29,7 @@ extension Service {
       }
       try requireNoTurn(e)
       install(fresh)
-      var pid: Int?
+      var pid = exitingClaudes[session.id]
       if case .running(let running) = claudeState(session.id) {
         pid = running
         kill(pid_t(running), SIGTERM)
@@ -39,8 +39,12 @@ extension Service {
       return pid
     }
     // claude can write to the folder until it exits. `worktree remove` deletes ignored files.
-    if let claudePid, !exited(claudePid, within: 5) {
-      throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
+    if let claudePid {
+      let gone = exited(claudePid, within: 5)
+      queue.sync { exitingClaudes[session.id] = gone ? nil : claudePid }
+      if !gone {
+        throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
+      }
     }
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     _ = try gitOutput(repo, ["worktree", "remove", session.cwd])

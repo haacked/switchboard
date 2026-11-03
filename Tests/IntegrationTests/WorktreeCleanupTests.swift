@@ -414,12 +414,15 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try !tmuxHas(terminals, terminals.shell))
   }
 
-  /// A claude that has not exited could still write to the folder after the second check.
+  /// A claude that has not exited could still write to the folder after the second check. The
+  /// stub outlives the first 5 s wait and exits within the retry's wait. The retry finds no
+  /// claude pane. Only the pid that the refusal kept makes it wait.
   @Test func refusesAClaudeThatHasNotExitedAfterTheWait() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)
-    try sbd.sb("send", s.id, "linger 8")
-    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 8 s when I stop." }
+    try sbd.sb("send", s.id, "linger 7")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 7 s when I stop." }
+    let pid = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
 
     let r = try sbd.cleanup(s.id)
 
@@ -429,6 +432,27 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(FileManager.default.fileExists(atPath: s.cwd))
     #expect(try sbd.hasBranch(repo, branch))
     #expect(try sbd.count("cleanup", s.id) == 0)
+    #expect(Processes.exists(pid))
+
+    let retry = try sbd.cleanup(s.id)
+
+    #expect(retry.status == 0, Comment(rawValue: retry.stderr))
+    #expect(!Processes.exists(pid))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.count("cleanup", s.id) == 1)
+  }
+
+  @Test func waitsForAClaudeThatExitsWithinTheWait() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try sbd.sb("send", s.id, "linger 2")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 2 s when I stop." }
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try !sbd.hasBranch(repo, branch))
   }
 
   @Test func cleanupDeletesTheIgnoredNamesThatConfigLists() throws {
