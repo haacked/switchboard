@@ -435,6 +435,8 @@ guard let command = argv.popFirst() else {
 // one.
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
 var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
+// The text of `sb group note` is everything after the group.
+if ["group", "groups"].contains(command), argv.first == "note" { a = Args(argv, literalAfter: 2) }
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {

@@ -152,7 +152,8 @@ public enum GroupSuggestions {
   }
 
   /// The branch without its first segment, such as the owner in
-  /// `haacked/flag-cache`, split into words.
+  /// `haacked/flag-cache`, split into words. A branch without a `/` is split
+  /// whole.
   static func branchWords(_ branch: String) -> [String] {
     words(branch.split(separator: "/", maxSplits: 1).last.map(String.init) ?? branch)
   }
@@ -220,13 +221,10 @@ public enum GroupSuggestions {
     var options: [Option] = []
     for (key, sessions) in openByKey {
       var joins = groupsByKey[key] ?? [:]
-      for id in named[key.text] ?? [] { joins[id, default: 0] += 1 }
-      if !joins.isEmpty {
-        let best = joins.max { a, b in a.value != b.value ? a.value < b.value : names[a.key]! > names[b.key]! }!
-        options.append(Option(key: key, group: best.key, members: best.value, sessions: sessions))
-      } else {
-        options.append(Option(key: key, group: nil, members: 0, sessions: sessions))
-      }
+      for id in named[words(key.text).joined(separator: "-")] ?? [] { joins[id, default: 0] += 1 }
+      // Ties go to the group whose name sorts first.
+      let best = joins.max { a, b in (a.value, names[b.key] ?? "") < (b.value, names[a.key] ?? "") }
+      options.append(Option(key: key, group: best?.key, members: best?.value ?? 0, sessions: sessions))
     }
     options.sort { a, b in
       let (sizeA, sizeB) = (a.sessions.count + a.members, b.sessions.count + b.members)

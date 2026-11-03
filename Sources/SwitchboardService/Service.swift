@@ -189,6 +189,8 @@ public final class Service {
         settle(id)
       }
       if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
+      // A group send has no session argument. It waits for every server that is starting.
+      if request.op == "send-group", request.args["confirmed"]?.bool == true { awaitMCPServers() }
       // A request that acts on claude decides from the current processes,
       // so it takes a new snapshot. Other requests use the tick's.
       let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil

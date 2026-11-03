@@ -374,7 +374,8 @@ struct BoardView: View {
   static let columnWidth: CGFloat = 240
 
   var body: some View {
-    let board = model.board
+    // The Manager has its own sidebar row and belongs to no group.
+    let board = model.board.filter { $0.manager != true }
     let columns = AttentionState.allCases.filter { state in board.contains { $0.state == state } }
     if columns.isEmpty {
       VStack(spacing: 12) {
@@ -385,31 +386,38 @@ struct BoardView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       ScrollView([.horizontal, .vertical]) {
-        LazyVStack(alignment: .leading, spacing: 16) {
-          HStack(alignment: .top, spacing: 12) {
-            Spacer().frame(width: Self.labelWidth)
-            ForEach(columns, id: \.self) { state in
-              Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
-                .frame(width: Self.columnWidth, alignment: .leading)
-            }
-          }
-          ForEach(BoardRows.make(sessions: board, groups: model.groups)) { row in
-            Divider()
-            HStack(alignment: .top, spacing: 12) {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(row.title).fontWeight(.semibold).lineLimit(2)
-                Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
-                  .font(.caption).foregroundStyle(.secondary)
-              }
-              .frame(width: Self.labelWidth, alignment: .leading)
-              ForEach(columns, id: \.self) { state in
-                VStack(spacing: 8) {
-                  ForEach(row.sessions.filter { $0.state == state }) { s in BoardCard(session: s) }
+        LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
+          Section {
+            ForEach(BoardRows.make(sessions: board, groups: model.groups)) { row in
+              Divider()
+              HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(row.title).fontWeight(.semibold).lineLimit(2)
+                  Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
+                    .font(.caption).foregroundStyle(.secondary)
                 }
-                .frame(width: Self.columnWidth, alignment: .top)
+                .frame(width: Self.labelWidth, alignment: .leading)
+                ForEach(columns, id: \.self) { state in
+                  VStack(spacing: 8) {
+                    ForEach(row.sessions.filter { $0.state == state }) { s in BoardCard(session: s) }
+                  }
+                  .frame(width: Self.columnWidth, alignment: .top)
+                }
+              }
+              .accessibilityElement(children: .contain)
+              .accessibilityLabel(row.title)
+              .accessibilityIdentifier("board-row-\(row.id)")
+            }
+          } header: {
+            HStack(alignment: .top, spacing: 12) {
+              Spacer().frame(width: Self.labelWidth)
+              ForEach(columns, id: \.self) { state in
+                Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
+                  .frame(width: Self.columnWidth, alignment: .leading)
               }
             }
-            .accessibilityIdentifier("board-row-\(row.id)")
+            .padding(.vertical, 4)
+            .background(.background)
           }
         }
         .padding()
@@ -450,6 +458,7 @@ struct BoardCard: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(s.state.color.opacity(0.3)))
       }
       .buttonStyle(.plain)
+      .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if BoardModel.canDelete(s) { DeleteButton(session: s) }

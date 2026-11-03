@@ -159,7 +159,7 @@ final class BoardModel: ObservableObject {
         sessions: client.sessions,
         followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
-      let groups = readFollowups ? try? client.call("group-ls", as: GroupList.self).groups : nil
+      let groups = try? client.call("group-ls", as: GroupList.self).groups
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }

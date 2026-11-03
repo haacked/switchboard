@@ -205,6 +205,7 @@ import Testing
     ])
 
     let ids = found.flatMap(\.sessions)
+    #expect(!found.isEmpty)
     #expect(ids.count == Set(ids).count)
   }
 
@@ -271,5 +272,15 @@ import Testing
     let first = try #require(found.first)
     #expect(first.group == "g1")
     #expect(found.allSatisfy { $0.name != "flags" || $0.group == "g1" })
+  }
+
+  @Test(arguments: ["api/flags", "flag_eval", "flag evals", "flag-evals"])
+  func aScopeJoinsTheGroupNamedAfterItWhateverItsSeparators(_ scope: String) throws {
+    let found = suggest(
+      [session("a", title: "feat(\(scope)): one"), session("b", title: "fix(\(scope)): two")],
+      groups: [group("g1", scope)])
+
+    let join = try #require(found.first { $0.id.hasPrefix("scope:") })
+    #expect(join.group == "g1")
   }
 }

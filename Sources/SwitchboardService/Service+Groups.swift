@@ -77,7 +77,8 @@ extension Service {
     groups[group.id] = group
   }
 
-  /// Moves the sessions into the group, or into no group, as the user's choice.
+  /// Moves the sessions into the group, or into no group, and marks them
+  /// placed by hand, so suggestions leave them out.
   private func place(_ ids: [String], in group: String?) throws {
     try refuseUngroupable(ids)
     for id in ids {

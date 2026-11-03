@@ -99,6 +99,31 @@ import Testing
     #expect(groups.ungrouped == [u.id])
   }
 
+  @Test func groupsAndTheirNotesSurviveARestartOfSbd() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    let b = try sbd.new(name: "bravo")
+    _ = try add(sbd, "Flags", a.id)
+    _ = try sbd.sb("group", "note", "Flags", "Ship by Friday")
+
+    let before = try list(sbd)
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    #expect(try list(sbd) == before)
+    #expect(before.groups.first?.notes.map(\.text) == ["Ship by Friday"])
+    #expect(before.ungrouped == [b.id])
+  }
+
+  @Test func noteKeepsWordsThatLookLikeFlags() throws {
+    let sbd = try Instance()
+    _ = try add(sbd, "Flags")
+
+    _ = try sbd.sb("group", "note", "Flags", "deploy", "--to", "staging", "first")
+
+    #expect(try list(sbd).groups.first?.notes.map(\.text) == ["deploy --to staging first"])
+  }
+
   @Test func lsPrintsEachGroupWithItsNotesThenUngrouped() throws {
     let sbd = try Instance()
     let a = try sbd.new(name: "alpha")
@@ -531,8 +556,43 @@ import Testing
 
     let r = try onTerminal(sbd, ["send", "--group", "Flags", "Rebase on main."], answer: "n")
 
+    #expect(r.status != 0)
     #expect(r.stdout.contains("[y/N]"))
     #expect(try sent(sbd, a.id).isEmpty)
+    #expect(try sent(sbd, b.id).isEmpty)
+  }
+
+  @Test func sendGroupLeavesADeferredQuestion() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let s = try sbd.new(prompt: "pick")
+    try sbd.waitFor(s.id, "the deferred card") { $0.cards.first?.deferred == true }
+    _ = try add(sbd, "Flags", s.id)
+
+    _ = try sbd.sb("send", "--json", "--group", "Flags", "--yes", "Rebase on main.")
+
+    try sbd.waitFor(s.id, "the group message's reply") { $0.lastReply == "Done: Rebase on main." }
+    let after = try sbd.get(s.id)
+    #expect(after.cards.map(\.deferred) == [true])
+    #expect(after.reason == "answer: Which fruit?")
+  }
+
+  @Test func sendGroupSendsToTheOtherMembersWhenOneFails() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    let b = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    try sbd.sb("stop", b.id)
+    try sbd.waitFor(b.id, "claude to stop") { !$0.live }
+    try FileManager.default.removeItem(atPath: b.cwd)
+    _ = try add(sbd, "Flags", a.id, b.id)
+
+    let result = try decode(
+      GroupSend.self, sbd.sb("send", "--json", "--group", "Flags", "--yes", "Rebase on main."))
+
+    let bySession = Dictionary(uniqueKeysWithValues: (result.deliveries ?? []).map { ($0.session, $0) })
+    #expect(bySession[a.id]?.delivery != nil)
+    #expect(bySession[b.id]?.delivery == nil)
+    #expect(bySession[b.id]?.error?.contains("is gone") == true)
+    #expect(try sent(sbd, a.id) == ["Rebase on main."])
     #expect(try sent(sbd, b.id).isEmpty)
   }
 
