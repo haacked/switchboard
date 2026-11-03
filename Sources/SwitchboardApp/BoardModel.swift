@@ -101,12 +101,15 @@ final class BoardModel: ObservableObject {
     var id: AttentionState { state }
   }
 
+  /// The board without the Manager, which has its own sidebar row and belongs to no group.
+  var boardWithoutManager: [SessionSummary] { board.filter { $0.manager != true } }
+
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
   /// one with no parent. A session whose parent is another session nests under
   /// that parent while both are in the same group.
   var sidebarGroups: [SidebarGroup] {
-    let listed = board.filter { $0.manager != true }
+    let listed = boardWithoutManager
     return AttentionState.allCases.compactMap { state in
       let group = listed.filter { $0.state == state }
       return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))

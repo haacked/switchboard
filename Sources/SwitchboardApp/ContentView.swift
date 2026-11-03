@@ -374,8 +374,7 @@ struct BoardView: View {
   static let columnWidth: CGFloat = 240
 
   var body: some View {
-    // The Manager has its own sidebar row and belongs to no group.
-    let board = model.board.filter { $0.manager != true }
+    let board = model.boardWithoutManager
     let columns = AttentionState.allCases.filter { state in board.contains { $0.state == state } }
     if columns.isEmpty {
       VStack(spacing: 12) {

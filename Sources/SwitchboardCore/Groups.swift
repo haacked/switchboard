@@ -147,6 +147,9 @@ public enum GroupSuggestions {
     text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
   }
 
+  /// The words of `text`, lowercased and joined with dashes.
+  static func slug(_ text: String) -> String { words(text).joined(separator: "-") }
+
   static func significant(_ word: String) -> Bool {
     word.count >= 4 && !stopWords.contains(word) && !word.allSatisfy(\.isNumber)
   }
@@ -210,7 +213,7 @@ public enum GroupSuggestions {
     // A group whose name has the key's text counts it once, whatever the key's
     // kind, so a suggestion never makes a second group with that name.
     var named: [String: [String]] = [:]
-    for g in groups { named[words(g.name).joined(separator: "-"), default: []].append(g.id) }
+    for g in groups { named[slug(g.name), default: []].append(g.id) }
 
     struct Option {
       var key: Key
@@ -221,7 +224,7 @@ public enum GroupSuggestions {
     var options: [Option] = []
     for (key, sessions) in openByKey {
       var joins = groupsByKey[key] ?? [:]
-      for id in named[words(key.text).joined(separator: "-")] ?? [] { joins[id, default: 0] += 1 }
+      for id in named[slug(key.text)] ?? [] { joins[id, default: 0] += 1 }
       // Ties go to the group whose name sorts first.
       let best = joins.max { a, b in (a.value, names[b.key] ?? "") < (b.value, names[a.key] ?? "") }
       options.append(Option(key: key, group: best?.key, members: best?.value ?? 0, sessions: sessions))
