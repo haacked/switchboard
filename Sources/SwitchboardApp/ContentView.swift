@@ -421,6 +421,7 @@ struct BoardView: View {
         }
         .padding()
       }
+      .defaultScrollAnchor(.topLeading)
     }
   }
 }

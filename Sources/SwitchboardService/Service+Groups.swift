@@ -19,6 +19,7 @@ extension Service {
     case "group-rm":
       let id = try lookupGroup(args)
       let members = members(id).map(\.id)
+      // This skips `place`, so a session that took its parent's group stays open to suggestions.
       for member in members { try update(member) { $0.group = nil } }
       try store.delete(group: id)
       groups[id] = nil
