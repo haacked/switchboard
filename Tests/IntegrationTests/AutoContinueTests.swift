@@ -228,6 +228,20 @@ extension Instance {
     try waitForContinue(sbd, s.id)
   }
 
+  @Test func timeOnScreenWhileTheSwitchIsOffCountsAsATouch() throws {
+    let sbd = try instance()
+    let s = try offerSession(sbd)
+    let detach = try sbd.attach(s.id)
+    try sbd.waitFor(s.id, "the attached flag") { $0.attached }
+    try sbd.advanceClock(AutoContinueTests.pastQuiet)
+    detach()
+    try sbd.waitFor(s.id, "the detach") { !$0.attached }
+    try sbd.sb("autocontinue", "on")
+    let blocker = try #require(try sbd.blocker(s.id))
+    #expect(blocker.hasPrefix("you touched it"), "\(blocker)")
+    #expect(try sbd.autoContinues(s.id).isEmpty)
+  }
+
   @Test func anOpenCardIsNotContinued() throws {
     let sbd = try instance()
     try sbd.sb("autocontinue", "on")
@@ -304,6 +318,43 @@ extension Instance {
     #expect(event.data["delivery"]?.string == "resumed")
     try sbd.waitFor(a.id, "the resumed reply") { $0.lastReply == "Done: Yes, go ahead." }
     #expect(sbd.stubArgs().contains { $0.hasPrefix("--resume \(a.claudeSessionId) ") })
+  }
+
+  /// The pane's shell takes 1.5 s to start claude, and the clock passes the
+  /// 10 s in-flight window meanwhile. The `lag` message then reaches claude
+  /// 1 s after its SessionStart, while ticks run.
+  @Test func aSlowStartDoesNotContinueTwice() throws {
+    let sbd = try Instance(
+      shell: Instance.slowShell,
+      config: ["autoContinue": ["quietSeconds": .number(Double(AutoContinueTests.quietSeconds)), "message": "lag"]])
+    let s = try offerSession(sbd)
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+    try sbd.sb("autocontinue", "on")
+    try sbd.advanceClock(AutoContinueTests.pastQuiet)
+    try waitForContinue(sbd, s.id)
+    try sbd.advanceClock(11_000)
+    try sbd.waitFor(s.id, "the reply to the continue", timeout: 30) { $0.lastReply == "Done: lag" }
+    #expect(try sbd.autoContinues(s.id).count == 1)
+  }
+
+  @Test func oneTickResumesNoMoreStoppedSessionsThanTheLiveCapAllows() throws {
+    let sbd = try instance(liveCap: 1)
+    let a = try offerSession(sbd, name: "a")
+    let b = try offerSession(sbd, name: "b")
+    for s in [a, b] {
+      try sbd.sb("stop", s.id)
+      try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+    }
+    try sbd.sb("autocontinue", "on")
+    try sbd.advanceClock(AutoContinueTests.pastQuiet)
+    try sbd.waitFor(
+      "one continue", fetch: { try [a, b].filter { try !sbd.autoContinues($0.id).isEmpty } },
+      until: { !$0.isEmpty })
+    let continued = try [a, b].filter { try !sbd.autoContinues($0.id).isEmpty }
+    #expect(continued.count == 1)
+    let held = continued.first?.id == a.id ? b : a
+    #expect(try sbd.blocker(held.id) == "the live cap of 1 is full")
   }
 
   @Test func aRunningSessionIgnoresAFullLiveCap() throws {

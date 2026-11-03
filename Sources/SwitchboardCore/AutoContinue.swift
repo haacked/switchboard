@@ -4,7 +4,7 @@ import Foundation
 public struct AutoContinueSettings: Codable, Equatable, Sendable {
   /// The text that sbd sends.
   public var message = "Yes, go ahead."
-  /// How long since the user last touched the session.
+  /// How long the session must go untouched before sbd continues it.
   public var quietSeconds = 600
   /// The most automatic continues per session in any hour.
   public var perHour = 3
@@ -20,14 +20,15 @@ public struct AutoContinueSettings: Codable, Equatable, Sendable {
   }
 }
 
-/// What auto-continue needs from the quota display.
+/// What auto-continue needs to know about an account's remaining usage.
 public protocol QuotaBudget: Sendable {
   /// Whether the Claude account in the config folder may spend more on an
   /// automatic continue.
   func hasBudget(account: String) -> Bool
 }
 
-/// Says yes for every account until the quota display replaces it.
+/// Says yes for every account. A budget that reads each account's use
+/// against its 5-hour and weekly limits replaces it.
 public struct UnlimitedBudget: QuotaBudget {
   public init() {}
   public func hasBudget(account: String) -> Bool { true }

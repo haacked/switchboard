@@ -369,4 +369,14 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     let f = facts([event("auto-continue", 1000, ["text": "Yes, go ahead.", "error": "claude did not start"])])
     #expect(f.autoContinues == [1000])
   }
+
+  /// A continue that failed leaves the session to go Stale. One that succeeds
+  /// records a `sent` event, which is activity.
+  @Test func aContinueIsNotActivity() {
+    let f = facts([
+      event("Stop", 1000, ["last_assistant_message": "Want me to run the tests?"]),
+      event("auto-continue", 5000, ["text": "Yes, go ahead.", "error": "claude did not start"]),
+    ])
+    #expect(f.lastActivity == 1000)
+  }
 }

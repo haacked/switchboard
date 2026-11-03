@@ -297,6 +297,9 @@ public final class Service {
       // the next resume has to open.
       let current = payload["session_id"]?.string ?? session.claudeSessionId
       if current != session.claudeSessionId { try update(id) { $0.claudeSessionId = current } }
+      // claude reads a launch's prompt after SessionStart, and a slow start
+      // can outlast the in-flight window. The window starts again here.
+      if entries[id]?.inFlight != nil { entries[id]?.inFlight = event.t }
       refreshSoon()
       // A message that arrived while claude was starting waits until claude
       // has drawn its prompt. 1.5 s covers the redraws that Phase 0 measured.

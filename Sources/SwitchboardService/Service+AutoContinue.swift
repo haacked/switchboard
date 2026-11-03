@@ -47,8 +47,9 @@ extension Service {
     var data: [String: JSON] = ["text": .string(message), "offer": .string(offer)]
     var delivery: Delivery?
     do {
-      delivery = try send(id, message, byUser: false)
-      data["delivery"] = .string(delivery!.rawValue)
+      let sent = try send(id, message, byUser: false)
+      data["delivery"] = .string(sent.rawValue)
+      delivery = sent
     } catch {
       logLine("can't continue \(id): \(error)")
       data["error"] = .string("\(error)")
