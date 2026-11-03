@@ -17,10 +17,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        run: [1, 2, 3, 4, 5, 6, 7, 8]
+        width: [2, 3]
+        run: [1, 2, 3, 4]
+    env:
+      SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: ${{ matrix.width }}
     steps:
       - uses: actions/checkout@v4
       - run: brew install tmux
       - run: sysctl -n hw.ncpu && uptime
-      - run: swift test --help | grep -i -E "parallel|width" || true
       - run: bin/test
