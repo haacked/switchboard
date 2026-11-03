@@ -109,6 +109,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var mergedBase: Int?
   public var mergedAt: String?
   public var closedAt: String?
+  /// The commit that the merge made on the base branch. nil until the PR merges.
+  public var mergeCommit: String?
   /// The Trunk queue state that the trunk-io comments show, and nil when no
   /// comment shows one.
   public var queue: TrunkQueueState?
@@ -127,7 +129,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
-    reviewRequests: [String]? = nil
+    reviewRequests: [String]? = nil, mergeCommit: String? = nil
   ) {
     self.id = id
     self.number = number
@@ -151,6 +153,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.closedAt = closedAt
     self.queue = queue
     self.reviewRequests = reviewRequests
+    self.mergeCommit = mergeCommit
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the

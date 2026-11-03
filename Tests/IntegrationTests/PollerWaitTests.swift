@@ -26,6 +26,13 @@ extension FakeGitHub {
 /// A GitHub timestamp `seconds` from now.
 func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(seconds)) }
 
+/// Waits for the session's turn that a resolved wait's message started, and
+/// checks that the wait is gone.
+func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws {
+  try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: \(message)" }
+  #expect(try sbd.get(s.id).waits.isEmpty)
+}
+
 /// Polls resolve waits on the PR kinds, and merge triggers fire, through
 /// `sb poll` against the fake GitHub.
 @Suite(.timeLimit(.minutes(2))) struct PollerWaitTests {
@@ -40,11 +47,6 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
     let s = try sbd.session(in: PollerWaitTests.charts, branch: PollerWaitTests.branch)
     try sbd.poll()
     return s
-  }
-
-  func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws {
-    try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: \(message)" }
-    #expect(try sbd.get(s.id).waits.isEmpty)
   }
 
   @Test func aCIWaitResumesTheSessionOnceTheChecksPass() throws {
@@ -289,16 +291,6 @@ func stamp(_ seconds: Double) -> String { ISO8601DateFormatter().string(from: Da
     try sbd.advanceClock(30_000)
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(sbd, s, with: "the merge queue for the session's PR: it merged.")
-  }
-
-  @Test func aDeployWaitWaitsForItsOwnPoller() throws {
-    let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
-    try sbd.sb("wait", s.id, "--kind", "deploy", "--target", "#122179")
-    #expect(try sbd.poll()["resolved"]?.int == 0)
-    #expect(try sbd.get(s.id).waits.count == 1)
-    #expect(!github.requests.contains { $0.kind == "lookup" && $0.ids == ["PostHog/posthog#122179"] })
   }
 
   @Test func aMergeTriggerFiresWhenThePollSeesThePRMerge() throws {

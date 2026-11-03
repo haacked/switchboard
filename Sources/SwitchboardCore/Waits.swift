@@ -209,7 +209,7 @@ public struct Wait: Codable, Equatable, Sendable {
   /// What happened, when this PR kind of wait can resolve from the PR as the
   /// poller read it, or nil while the wait stays open. A wait that names a PR
   /// that merged or closed first resolves too, since nothing else would end it.
-  /// The `deploy` kind waits for the deploy poller.
+  /// `deployResolution` decides the `deploy` kind.
   ///
   /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR.
   /// - `review` and `bot-review`: a review that was submitted after the wait was
@@ -270,9 +270,10 @@ public struct Wait: Codable, Equatable, Sendable {
   }
 
   /// Whether the PR merged or closed before this wait was set, or at a time
-  /// that GitHub didn't give.
+  /// that GitHub didn't give. A deploy wait is usually set after its PR
+  /// merged, so a merge doesn't count for it.
   public func finishedBeforeSet(_ pr: SwitchboardCore.PullRequest) -> Bool {
-    guard pr.state != .open else { return false }
+    guard pr.state != .open, !(kind == .deploy && pr.state == .merged) else { return false }
     guard let at = (pr.state == .merged ? pr.mergedAt : pr.closedAt).flatMap(Transcript.milliseconds) else {
       return true
     }
