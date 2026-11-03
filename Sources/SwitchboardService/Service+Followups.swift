@@ -57,6 +57,7 @@ extension Service {
         claudeSessionId: UUID().uuidString.lowercased(),
         model: args["model"]?.string, created: now)
       session.parent = parent
+      session.group = groupOfParent(parent)
       // A follow-up added by a session stays in that session's account.
       // Without a parent, it takes the active account when it starts.
       if let ref = args["account"]?.string {

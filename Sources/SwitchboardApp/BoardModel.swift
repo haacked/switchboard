@@ -60,6 +60,8 @@ final class BoardModel: ObservableObject {
   /// ones whose trigger fired. They change only through actions and
   /// triggers, so the app reads them every 5 s.
   @Published var followups: [SessionSummary] = []
+  /// The groups, read every 5 s with the follow-ups.
+  @Published var groups: [GroupSummary] = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
   /// A switch of the active account that waits for the user to say whether
@@ -99,12 +101,15 @@ final class BoardModel: ObservableObject {
     var id: AttentionState { state }
   }
 
+  /// The board without the Manager, which has its own sidebar row and belongs to no group.
+  var boardWithoutManager: [SessionSummary] { board.filter { $0.manager != true } }
+
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
   /// one with no parent. A session whose parent is another session nests under
   /// that parent while both are in the same group.
   var sidebarGroups: [SidebarGroup] {
-    let listed = board.filter { $0.manager != true }
+    let listed = boardWithoutManager
     return AttentionState.allCases.compactMap { state in
       let group = listed.filter { $0.state == state }
       return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))
@@ -157,8 +162,10 @@ final class BoardModel: ObservableObject {
         sessions: client.sessions,
         followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
+      let groups = try? client.call("group-ls", as: GroupList.self).groups
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
+        if let groups, self.groups != groups { self.groups = groups }
         self.apply(result, followups: more)
       }
     }

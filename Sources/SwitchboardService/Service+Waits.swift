@@ -127,16 +127,20 @@ extension Service {
     return ["now": .number(Double(nowMs()))]
   }
 
+  /// A note with an id that `notes` doesn't use. It throws for empty text.
+  func makeNote(_ text: String?, by: String?, after notes: [Note]) throws -> Note {
+    guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+      throw APIError("note needs text")
+    }
+    return Note(id: shortId("n", taken: notes.map(\.id)), text: text, by: try Author(parsing: by), t: nowMs())
+  }
+
   func noteRequest(_ op: String, _ args: JSON) throws -> JSON {
     let id = try lookup(args)
     let notes = entries[id]?.session.notes ?? []
     switch op {
     case "note":
-      guard let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-        throw APIError("note needs text")
-      }
-      let note = Note(
-        id: shortId("n", taken: notes.map(\.id)), text: text, by: try Author(parsing: args["by"]?.string), t: nowMs())
+      let note = try makeNote(args["text"]?.string, by: args["by"]?.string, after: notes)
       try update(id) { $0.notes = notes + [note] }
       record(id, "note", ["note": try JSON(encoding: note)])
     case "remove-note":
