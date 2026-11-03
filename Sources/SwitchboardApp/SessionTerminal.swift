@@ -27,7 +27,7 @@ struct SessionTerminal: View {
   var body: some View {
     #if SB_GHOSTTY
       if AppTerminal.choice.backend == .ghostty {
-        GhosttyPane(command: terminals.attachCommandLine(pane))
+        GhosttyPane(command: terminals.attachCommandLine(pane), pane: pane)
       } else {
         TerminalPane(command: terminals.attachCommand(pane))
       }

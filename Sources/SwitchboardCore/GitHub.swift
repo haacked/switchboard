@@ -376,7 +376,9 @@ public enum GitHub {
   /// Needs you and come back.
   public static func shown(_ pr: PullRequest, _ comments: [PRComment], last: PullRequest?) -> PullRequest {
     var shown = pr
-    shown.queue = TrunkComments.state(of: pr, comments)
+    let change = TrunkComments.change(of: pr, comments)
+    shown.queue = change?.state
+    shown.queueAt = change?.at.flatMap(Transcript.milliseconds)
     if pr.mergeable == .unknown, let last, last.id == pr.id, last.headSha == pr.headSha, let kept = last.mergeable {
       shown.mergeable = kept
     }

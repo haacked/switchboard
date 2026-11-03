@@ -209,7 +209,7 @@ public struct Wait: Codable, Equatable, Sendable {
   /// What happened, when this PR kind of wait can resolve from the PR as the
   /// poller read it, or nil while the wait stays open. A wait that names a PR
   /// that merged or closed first resolves too, since nothing else would end it.
-  /// The `queue` and `deploy` kinds wait for other pollers.
+  /// The `deploy` kind waits for the deploy poller.
   ///
   /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR.
   /// - `review` and `bot-review`: a review that was submitted after the wait was
@@ -219,12 +219,18 @@ public struct Wait: Codable, Equatable, Sendable {
   ///   when there is no `who`. It holds at any time, since an approval is a
   ///   state.
   /// - `merge`: the PR merged or closed.
+  /// - `queue`: the PR merged or closed, or the trunk-io comments show that
+  ///   Trunk merged it or removed it from the queue after the wait was set. A PR
+  ///   that Trunk has not queued yet keeps the wait open.
   public func resolution(of pr: SwitchboardCore.PullRequest) -> String? {
     let ended: String? =
-      switch pr.state {
-      case .open: nil
-      case .merged: kind == .merge ? "it merged" : "the PR merged first"
-      case .closed: kind == .merge ? "it closed without merging" : "the PR closed first"
+      switch (pr.state, kind) {
+      case (.open, _): nil
+      case (.merged, .merge): "it merged"
+      case (.merged, .queue): "it merged"
+      case (.merged, _): "the PR merged first"
+      case (.closed, .merge), (.closed, .queue): "it closed without merging"
+      case (.closed, _): "the PR closed first"
       }
     switch kind {
     case .merge:
@@ -249,7 +255,16 @@ public struct Wait: Codable, Equatable, Sendable {
       }
       guard pr.isApproved else { return ended }
       return pr.approvers.isEmpty ? "the PR is approved" : "approved by " + pr.approvers.joined(separator: ", ")
-    case .queue, .deploy, .session, .date, .manual:
+    case .queue:
+      if ended != nil { return ended }
+      // A status from before the wait can describe an earlier run of the PR.
+      guard let at = pr.queueAt, at > created else { return nil }
+      switch pr.queue {
+      case .removed?: return "Trunk removed it from the queue"
+      case .merged?: return "Trunk merged it"
+      default: return nil
+      }
+    case .deploy, .session, .date, .manual:
       return nil
     }
   }

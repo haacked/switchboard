@@ -26,6 +26,17 @@ extension Instance {
     try git(dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", file)
   }
 
+  /// Sets a session's stored repo to a folder that no longer exists, as older sbd versions stored a removed linked worktree.
+  func storeGoneRepo(_ id: String) throws {
+    let gone = "\(home.path)/gone-worktree"
+    stopSbd()
+    let store = try Store(path: home.database)
+    var session = try #require(try store.sessions().first { $0.id == id })
+    session.repo = gone
+    try store.save(session)
+    try startSbd()
+  }
+
   func deleteSession(_ id: String) throws -> CommandResult { try run(["rm", id, "--worktree"]) }
 
   func deleteSessionAndBranch(_ id: String) throws -> CommandResult {
@@ -459,6 +470,56 @@ extension Instance {
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) == "")
     #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(s.cwd) == false)
     #expect(try remoteBranch(origin) == "")
+  }
+
+  @Test func deletesASessionStartedFromAWorktreeThatIsGone() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let first = try sbd.worktreeSession(repo, branch: "haacked/first")
+    let second = try sbd.client.call(
+      "new", ["path": .string(first.cwd), "branch": "haacked/second"], as: SessionSummary.self)
+    #expect(try sbd.deleteSession(first.id).status == 0)
+    try FileManager.default.removeItem(atPath: second.cwd)
+    let r = try sbd.deleteSession(second.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(second.cwd) == false)
+  }
+
+  @Test func deletesASessionWhoseStoredRepoIsGoneThroughTheCheckoutThatListsItsWorktree() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let first = try sbd.worktreeSession(repo, branch: "haacked/first")
+    let second = try sbd.worktreeSession(repo, branch: "haacked/second")
+    try sbd.storeGoneRepo(second.id)
+    try FileManager.default.removeItem(atPath: second.cwd)
+    let r = try sbd.deleteSession(second.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains(second.cwd) == false)
+    #expect(try sbd.client.sessions().map(\.id) == [first.id])
+  }
+
+  @Test func deletesASessionWhoseStoredRepoIsGoneWhileItsOwnWorktreeStillExists() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let only = try sbd.worktreeSession(repo, branch: "haacked/only")
+    try sbd.storeGoneRepo(only.id)
+    let r = try sbd.deleteSession(only.id)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: only.cwd) == false)
+    #expect(try sbd.client.sessions().isEmpty)
+  }
+
+  @Test func refusesASessionWhoseStoredRepoIsGoneAndNoKnownCheckoutListsItsWorktree() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let only = try sbd.worktreeSession(repo, branch: "haacked/only")
+    try sbd.storeGoneRepo(only.id)
+    try FileManager.default.removeItem(atPath: only.cwd)
+    let r = try sbd.deleteSession(only.id)
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("no known checkout"))
+    #expect(try sbd.client.sessions().map(\.id) == [only.id])
   }
 
   @Test func deletesADoneSessionWhoseFolderAndItsParentAreGone() throws {
