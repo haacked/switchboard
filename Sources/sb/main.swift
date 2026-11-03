@@ -23,6 +23,9 @@ let usage = """
                                   or open it
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
+    send --group G [--yes] <text> send a message to every session in the group, after
+                                  listing them and asking. Without a terminal, or
+                                  inside a Claude session, it needs --yes
     open <session>                resume the session if its claude is stopped
     stop <session>                stop the session's claude
     resume <session> [--prompt P] resume the session's claude
@@ -81,6 +84,16 @@ let usage = """
                                   multi-select answer with commas. Text that
                                   is no option's label goes as typed.
 
+  Groups:
+    group ls                      list the groups with their sessions, then Ungrouped
+    group add <name> [<session>...] [--note N]
+    group rm <group>              remove the group; its sessions become ungrouped
+    group move <session>... --to <group> | --ungrouped
+    group note <group> <text>
+    group suggest [--accept <id>] list groups suggested from branch names and PR
+                                  titles, or accept one. A session that you moved
+                                  to Ungrouped is never suggested
+
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
                  [--after owner/name#N] [--link URL] [--parent S] [--account A]
@@ -134,6 +147,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
+      "--group", "--to", "--note", "--accept",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -464,6 +478,8 @@ case "note":
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])
+case "send" where a.values["--group"] != nil:
+  sendGroup(a, group: a.values["--group"]!)
 case "send":
   let text = a.positional.dropFirst().joined(separator: " ")
   if text.isEmpty { die("send needs text") }
@@ -530,6 +546,8 @@ case "mcp":
   mcp(a)
 case "autocontinue":
   autoContinue(a)
+case "group", "groups":
+  group(a)
 case "followup", "followups":
   followup(a)
 case "poll":

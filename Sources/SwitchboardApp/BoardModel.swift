@@ -60,6 +60,8 @@ final class BoardModel: ObservableObject {
   /// ones whose trigger fired. They change only through actions and
   /// triggers, so the app reads them every 5 s.
   @Published var followups: [SessionSummary] = []
+  /// The groups, read every 5 s with the follow-ups.
+  @Published var groups: [GroupSummary] = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
   /// A switch of the active account that waits for the user to say whether
@@ -157,8 +159,10 @@ final class BoardModel: ObservableObject {
         sessions: client.sessions,
         followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
+      let groups = readFollowups ? try? client.call("group-ls", as: GroupList.self).groups : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
+        if let groups, self.groups != groups { self.groups = groups }
         self.apply(result, followups: more)
       }
     }

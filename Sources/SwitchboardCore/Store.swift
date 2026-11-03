@@ -20,6 +20,7 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS followup_imports (line TEXT PRIMARY KEY)")
     try exec("CREATE TABLE IF NOT EXISTS claude_sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS snapshots (session TEXT PRIMARY KEY, json TEXT NOT NULL)")
+    try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
   }
 
   deinit { sqlite3_close(db) }
@@ -68,6 +69,20 @@ public final class Store {
   public func sessions() throws -> [Session] {
     try query("SELECT json FROM sessions ORDER BY id", []) { row in
       try JSONCoding.decode(Session.self, from: row.text(0))
+    }
+  }
+
+  public func save(group: SessionGroup) throws {
+    try run("INSERT OR REPLACE INTO groups (id, json) VALUES (?, ?)", [group.id, try JSONCoding.encode(group)])
+  }
+
+  public func delete(group id: String) throws {
+    try run("DELETE FROM groups WHERE id = ?", [id])
+  }
+
+  public func groups() throws -> [SessionGroup] {
+    try query("SELECT json FROM groups ORDER BY id", []) { row in
+      try JSONCoding.decode(SessionGroup.self, from: row.text(0))
     }
   }
 

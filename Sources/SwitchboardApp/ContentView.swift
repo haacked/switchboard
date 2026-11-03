@@ -366,12 +366,16 @@ struct ServiceBanner: View {
   }
 }
 
-/// The board: one column per state that has sessions, with a card for each.
+/// The board: a row per group, with Ungrouped last, and a column per state
+/// that has sessions. Each session is a card in its group's row.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
+  static let labelWidth: CGFloat = 140
+  static let columnWidth: CGFloat = 240
 
   var body: some View {
-    let columns = AttentionState.allCases.filter { state in model.board.contains { $0.state == state } }
+    let board = model.board
+    let columns = AttentionState.allCases.filter { state in board.contains { $0.state == state } }
     if columns.isEmpty {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -380,55 +384,77 @@ struct BoardView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
-      ScrollView(.horizontal) {
-        HStack(alignment: .top, spacing: 12) {
-          ForEach(columns, id: \.self) { state in
-            VStack(alignment: .leading, spacing: 8) {
+      ScrollView([.horizontal, .vertical]) {
+        LazyVStack(alignment: .leading, spacing: 16) {
+          HStack(alignment: .top, spacing: 12) {
+            Spacer().frame(width: Self.labelWidth)
+            ForEach(columns, id: \.self) { state in
               Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
-              ScrollView {
-                LazyVStack(spacing: 8) {
-                  ForEach(model.board.filter { $0.state == state }) { s in
-                    ZStack(alignment: .bottomTrailing) {
-                      Button {
-                        model.openFromBoard(s.id)
-                      } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                          HStack {
-                            Text(s.name).fontWeight(.medium).lineLimit(1)
-                            Spacer()
-                            if let pr = s.pr {
-                              Text(verbatim: "#\(pr.number)")
-                                .font(.caption.bold())
-                                .foregroundStyle(pr.status.color)
-                                .help(pr.tooltip)
-                            }
-                          }
-                          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                          CleanupNote(session: s)
-                          Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
-                            .font(.caption2).foregroundStyle(.tertiary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(state.color.opacity(0.08)))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(state.color.opacity(0.3)))
-                      }
-                      .buttonStyle(.plain)
-                      HStack(spacing: 4) {
-                        if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
-                        if BoardModel.canDelete(s) { DeleteButton(session: s) }
-                      }
-                      .padding(6)
-                    }
-                  }
+                .frame(width: Self.columnWidth, alignment: .leading)
+            }
+          }
+          ForEach(BoardRows.make(sessions: board, groups: model.groups)) { row in
+            Divider()
+            HStack(alignment: .top, spacing: 12) {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(row.title).fontWeight(.semibold).lineLimit(2)
+                Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              .frame(width: Self.labelWidth, alignment: .leading)
+              ForEach(columns, id: \.self) { state in
+                VStack(spacing: 8) {
+                  ForEach(row.sessions.filter { $0.state == state }) { s in BoardCard(session: s) }
                 }
+                .frame(width: Self.columnWidth, alignment: .top)
               }
             }
-            .frame(width: 240)
+            .accessibilityIdentifier("board-row-\(row.id)")
           }
         }
         .padding()
       }
+    }
+  }
+}
+
+struct BoardCard: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+
+  var body: some View {
+    let s = session
+    ZStack(alignment: .bottomTrailing) {
+      Button {
+        model.openFromBoard(s.id)
+      } label: {
+        VStack(alignment: .leading, spacing: 4) {
+          HStack {
+            Text(s.name).fontWeight(.medium).lineLimit(1)
+            Spacer()
+            if let pr = s.pr {
+              Text(verbatim: "#\(pr.number)")
+                .font(.caption.bold())
+                .foregroundStyle(pr.status.color)
+                .help(pr.tooltip)
+            }
+          }
+          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+          CleanupNote(session: s)
+          Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
+            .font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(s.state.color.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(s.state.color.opacity(0.3)))
+      }
+      .buttonStyle(.plain)
+      HStack(spacing: 4) {
+        if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
+        if BoardModel.canDelete(s) { DeleteButton(session: s) }
+      }
+      .padding(6)
     }
   }
 }

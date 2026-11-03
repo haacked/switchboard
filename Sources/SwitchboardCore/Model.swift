@@ -66,6 +66,11 @@ public struct Session: Codable, Equatable, Sendable {
   /// that sbd creates or imports has one. It is nil in a session that an
   /// older sbd stored, which uses the account of sbd and config.env.
   public var claudeConfigDir: String?
+  /// The id of the session's group, or nil for Ungrouped.
+  public var group: String?
+  /// True once the user chose the session's group, or chose Ungrouped. A
+  /// session that took its parent's group has it false.
+  public var placedByHand: Bool?
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,
@@ -149,6 +154,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var account: String?
   /// Whether `sb cleanup` can remove the worktree of a finished PR, or did.
   public var cleanup: CleanupStatus?
+  /// The id of the session's group, or nil for Ungrouped.
+  public var group: String?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

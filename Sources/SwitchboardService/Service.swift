@@ -70,6 +70,7 @@ public final class Service {
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
   var quota: any QuotaBudget = UnlimitedBudget()
+  var groups: [String: SessionGroup] = [:]
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -121,6 +122,7 @@ public final class Service {
       entries[session.id] = e
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
+    for g in try store.groups() { groups[g.id] = g }
     snapshot = buildSnapshot() ?? Snapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
@@ -133,7 +135,7 @@ public final class Service {
   // MARK: Requests
 
   static let actsOnProcesses: Set<String> = [
-    "send", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+    "send", "send-group", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer"]
 
@@ -262,6 +264,8 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
+    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group":
+      return try groupRequest(op, args)
     default:
       throw APIError("unknown request \(op)")
     }
@@ -270,10 +274,15 @@ public final class Service {
   /// Finds a session by id, by unique id prefix, or by unique name.
   func lookup(_ args: JSON) throws -> String {
     guard let key = args["session"]?.string, !key.isEmpty else { throw APIError("name a session") }
-    if entries[key] != nil { return key }
-    let matches = entries.values.map(\.session).filter { $0.id.hasPrefix(key) || $0.name == key }
+    return try resolve(key, "session", entries.values.map { ($0.session.id, $0.session.name) })
+  }
+
+  /// The id that `key` names: an id, a unique id prefix, or a unique name.
+  func resolve(_ key: String, _ noun: String, _ items: [(id: String, name: String)]) throws -> String {
+    if items.contains(where: { $0.id == key }) { return key }
+    let matches = items.filter { $0.id.hasPrefix(key) || $0.name == key }
     guard matches.count == 1 else {
-      throw APIError(matches.isEmpty ? "no session \(key)" : "\(key) matches \(matches.count) sessions")
+      throw APIError(matches.isEmpty ? "no \(noun) \(key)" : "\(key) matches \(matches.count) \(noun)s")
     }
     return matches[0].id
   }
@@ -457,6 +466,7 @@ public final class Service {
       created: nowMs())
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+    session.group = groupOfParent(session.parent)
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     entries[id] = Entry(session: session)
     try store.save(session)
@@ -1233,6 +1243,7 @@ public final class Service {
     out.created = s.created
     out.account = s.claudeConfigDir
     out.cleanup = e.facts.cleanup
+    out.group = s.group
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
