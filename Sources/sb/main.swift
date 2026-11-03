@@ -232,7 +232,7 @@ func printSession(_ s: SessionSummary) {
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
-  if let run = s.pr?.depot { print("  depot:   \(run.line)") }
+  if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)

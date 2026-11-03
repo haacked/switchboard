@@ -426,9 +426,9 @@ final class GitHubPoller {
     guard let depot else { return nil }
     let result = depot.refresh(
       prs.values.map(\.pr), all: all, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
-    for (id, run) in result.runs { prs[id]?.pr.depot = run }
+    for (id, read) in result.reads { prs[id]?.pr.depot = read.run }
     stats.depotRequests = result.requests
-    stats.depotRuns = result.read
+    stats.depotRuns = result.reads.values.filter { $0.run != nil }.count
     return result.error
   }
 

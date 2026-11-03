@@ -12,9 +12,9 @@ final class DepotPoller {
   private var lastError: String?
 
   struct Result {
-    var runs: [String: DepotRun?] = [:]
+    /// What the poller read for each PR that it read this poll, by node id.
+    var reads: [String: DepotRead] = [:]
     var requests = 0
-    var read = 0
     var error: String?
   }
 
@@ -35,18 +35,17 @@ final class DepotPoller {
       do {
         let read = try self.read(pr, all: all, now: now, requests: &result.requests)
         reads[pr.id] = read
-        result.runs[pr.id] = read.run
-        result.read += read.run == nil ? 0 : 1
+        result.reads[pr.id] = read
       } catch {
         // The PR keeps its last run and is due again at the next poll.
         reads[pr.id]?.at = 0
-        // An unreachable Depot would make every PR wait for the timeout.
         if let error = error as? Unauthorized {
           credentials = nil
           result.error = error.message
         } else {
           result.error = "depot: \(error)"
         }
+        // An unreachable Depot would make every PR wait for the timeout.
         break
       }
     }

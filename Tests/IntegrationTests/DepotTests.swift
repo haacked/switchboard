@@ -215,7 +215,13 @@ extension Instance {
     #expect(try sbd.poll()["depotRequests"]?.int == 0)
     #expect(depot.requests.count == asked)
 
-    #expect((try sbd.poll(all: true)["depotRequests"]?.int ?? 0) > 0)
+    #expect(try sbd.poll(all: true)["depotRequests"]?.int == 1)
+    #expect(depot.requests("ListRuns").count == 2)
+
+    // A retry lists the finished run as running again, so its status is read again.
+    try depot.setStatus(FakeDepot.runningRun, from: "depot-status-running.json", status: "running")
+    #expect(try sbd.poll(all: true)["depotRequests"]?.int == 2)
+    #expect(try sbd.depotShown(s.id)?["status"]?.string == "running")
   }
 
   @Test func a401FromDepotPutsADepotErrorInThePollAndLeavesGitHubWorking() throws {
@@ -237,6 +243,52 @@ extension Instance {
     #expect(after.pr?.number == DepotTests.number)
     #expect(after.reason == DepotTests.readTheReply)
     #expect(try String(contentsOfFile: sbd.home.log, encoding: .utf8).contains("depot: "))
+  }
+
+  /// A 401 drops the cached token, so a `depot login` takes effect without a restart.
+  @Test func aNewDepotLoginAfterA401IsUsedAtTheNextPoll() throws {
+    let github = try FakeGitHub()
+    let depot = try FakeDepot(token: "new-token")
+    let sbd = try Instance.withDepot(github, depot, token: nil)
+    sbd.sbdEnvironment["DEPOT_TOKEN"] = ""
+    let config = "\(sbd.home.path)/depot.yaml"
+    try "api_token: old-token\n".write(toFile: config, atomically: true, encoding: .utf8)
+    try sbd.restart(setting: "depot", to: ["url": .string(depot.url), "config": .string(config)])
+    try failingPR(github, depot)
+    let s = try session(sbd)
+
+    let revoked = try sbd.poll()
+
+    #expect(revoked["depotError"]?.string?.contains("depot login") == true)
+    #expect(depot.requests.last?.authorization == "Bearer old-token")
+
+    try "api_token: new-token\n".write(toFile: config, atomically: true, encoding: .utf8)
+    let renewed = try sbd.poll()
+
+    #expect(renewed["depotError"] == nil)
+    #expect(depot.requests.last?.authorization == "Bearer new-token")
+    #expect(try sbd.depotShown(s.id)?["status"]?.string == "failed")
+  }
+
+  /// The first failed Depot request ends the poll's Depot reads, so an
+  /// unreachable Depot costs one timeout per poll rather than one per PR.
+  @Test func aFailedDepotRequestEndsThePollsDepotReads() throws {
+    let github = try FakeGitHub()
+    let depot = try FakeDepot()
+    let sbd = try Instance.withDepot(github, depot)
+    try failingPR(github, depot)
+    _ = try session(sbd)
+    _ = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.poll()
+    depot.reply(503, #"{"code":"unavailable","message":"try again"}"#)
+
+    let failed = try sbd.poll(all: true)
+
+    #expect(failed["depotRequests"]?.int == 1)
+    #expect(failed["depotError"] != nil)
+    let next = try sbd.poll(all: true)
+    #expect(next["depotError"] == nil)
+    #expect((next["depotRequests"]?.int ?? 0) >= 2)
   }
 
   @Test func depotTokenComesFromTheDepotCLIsConfigAndWithoutOneThePollReportsIt() throws {

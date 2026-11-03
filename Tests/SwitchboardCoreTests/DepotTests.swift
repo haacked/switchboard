@@ -114,7 +114,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(first.url == "https://depot.dev/orgs/ntsdt08fpt/workflows/05ktvf2pd7?job=v669r36tlh")
   }
 
-  @Test func failedRunCountsEveryJobAndEveryJobThatEnded() throws {
+  @Test func failedRunCountsEveryJob() throws {
     let run = try parsedRun()
 
     #expect(run.jobs == 9)
@@ -316,6 +316,14 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(ci(withDepot(samplePR(checks: checks), sampleDepot(["a"]))) == "Depot CI failed: a (run r1)")
   }
 
+  @Test func failedRunWithoutAFailedJobResolvesWithItsError() {
+    let run = sampleDepot([], errors: [#"workflow ci-backend.yml: unknown key "runs_on""#])
+
+    #expect(
+      ci(withDepot(samplePR(checks: "PENDING"), run))
+        == #"Depot CI failed: workflow ci-backend.yml: unknown key "runs_on" (run r1)"#)
+  }
+
   @Test func passedRollupStaysTheChecksPassed() {
     #expect(ci(withDepot(samplePR(checks: "SUCCESS"), sampleDepot(["a"]))) == "the checks passed")
   }
@@ -375,7 +383,21 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(v.state == .needsYou)
     #expect(v.reason.hasPrefix("fix Depot CI on #42: Django tests – Core"))
+    #expect(v.reason.count == 70)
+    #expect(v.reason.contains("…"))
     #expect(v.reason.hasSuffix(" and 2 more"))
+  }
+
+  /// A workflow that failed to start fails the run without a failed job.
+  @Test(
+    arguments: [
+      ([#"workflow ci-backend.yml: unknown key "runs_on""#], #"workflow ci-backend.yml: unknown key "runs_on""#),
+      ([], "the run failed"),
+    ] as [([String], String)])
+  func failedRunWithoutAFailedJobNamesItsError(_ errors: [String], _ summary: String) throws {
+    #expect(
+      try verdict(withDepot(samplePR(checks: "PENDING"), sampleDepot([], errors: errors)))
+        == Verdict(state: .needsYou, reason: "fix Depot CI on #42: \(summary)"))
   }
 
   @Test func recordedFailedRunNeedsYou() throws {
