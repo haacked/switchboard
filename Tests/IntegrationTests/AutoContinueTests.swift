@@ -277,7 +277,7 @@ extension Instance {
     #expect(try sbd.get(s.id).state == .working)
   }
 
-  /// The stub holds `lag held` until $SB_HOME/report exists. The message stays in flight until then.
+  /// The stub does not report `lag held` until $SB_HOME/report exists. The message stays in flight until then.
   @Test func aMessageOnItsWayIsNotContinued() throws {
     let sbd = try instance()
     try sbd.sb("autocontinue", "on")

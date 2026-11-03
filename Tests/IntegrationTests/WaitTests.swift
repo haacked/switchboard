@@ -90,7 +90,7 @@ import Testing
     #expect(try sbd.get(s.id).claudePid != nil)
   }
 
-  /// The clock resolves the wait. The session's own SessionEnd stays the last event that counts.
+  /// The clock resolves the wait. The session's own SessionEnd stays the last event that moves `lastActivity`.
   @Test func aDateWaitThatNotifiesKeepsTheLastActivity() throws {
     let sbd = try Instance()
     let s = try idleSession(sbd)

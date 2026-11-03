@@ -414,6 +414,23 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try !tmuxHas(terminals, terminals.shell))
   }
 
+  /// A claude that has not exited could still write to the folder after the second check.
+  @Test func refusesAClaudeThatHasNotExitedAfterTheWait() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try sbd.sb("send", s.id, "linger 8")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 8 s when I stop." }
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("has not exited"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.hasBranch(repo, branch))
+    #expect(try sbd.count("cleanup", s.id) == 0)
+  }
+
   @Test func cleanupDeletesTheIgnoredNamesThatConfigLists() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)

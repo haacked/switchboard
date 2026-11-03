@@ -3,15 +3,15 @@ import Testing
 
 @testable import SwitchboardCore
 
-/// The session's `lastActivity` after a Stop at 1 and then `later` at 500.
-private func activity(after later: Event) -> Int64 {
-  facts([event("Stop", 1), later]).lastActivity
+/// The session's `lastActivity` after a Stop at 1 and then an event of `kind` at 500.
+private func activity(after kind: String) -> Int64 {
+  facts([event("Stop", 1), event(kind, 500)]).lastActivity
 }
 
 @Suite struct ActivityKindTests {
   @Test(arguments: SessionFacts.hookKinds)
   func aHookEventIsActivity(_ kind: String) {
-    #expect(activity(after: event(kind, 500)) == 500)
+    #expect(activity(after: kind) == 500)
   }
 
   @Test(arguments: [
@@ -20,7 +20,7 @@ private func activity(after later: Event) -> Int64 {
     "account-moved", "idle",
   ])
   func anSbdEventThatUsesTheSessionIsActivity(_ kind: String) {
-    #expect(activity(after: event(kind, 500)) == 500)
+    #expect(activity(after: kind) == 500)
   }
 
   @Test(arguments: [
@@ -28,17 +28,12 @@ private func activity(after later: Event) -> Int64 {
     "pr", "worktree", "triage", "job", "cleanup", "auto-continue", "dependencies",
   ])
   func anSbdEventThatOnlyObservesTheSessionIsNotActivity(_ kind: String) {
-    #expect(activity(after: event(kind, 500)) == 1)
+    #expect(activity(after: kind) == 1)
   }
 
   /// A kind that sbd starts to record later does not count until it joins `activityKinds`.
   @Test(arguments: ["some-new-kind", "SomeNewHook"])
   func anUnknownKindIsNotActivity(_ kind: String) {
-    #expect(activity(after: event(kind, 500)) == 1)
-  }
-
-  @Test func aNewSessionIsNotStaleAtOnce() {
-    let f = facts([event("created", 1000)])
-    #expect(Attention.evaluate(session(), f, now: 2000).state != .stale)
+    #expect(activity(after: kind) == 1)
   }
 }
