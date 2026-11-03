@@ -68,7 +68,7 @@ extension Service {
   /// sessions' states. `tick` calls it after it records each session's state.
   func resolveDueWaits(now: Int64) {
     for (session, wait) in waitsToResolve() {
-      guard let outcome = wait.resolution(now: now, stateOf: { entries[$0]?.facts.lastState }) else { continue }
+      guard let outcome = wait.resolution(now: now, stateOf: lastState) else { continue }
       do {
         try resolve(session.id, wait, outcome: outcome)
       } catch {

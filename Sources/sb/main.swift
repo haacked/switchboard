@@ -247,6 +247,13 @@ func printSession(_ s: SessionSummary) {
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
+  for d in s.dependencies ?? [] {
+    let deploy = d.deploy ? (d.deployed == true ? ", deployed" : ", deploy") : ""
+    let session = d.session.map { " (session \($0))" } ?? ""
+    print(
+      "  depends: \(d.label(from: s.pr?.repo ?? d.repo)) \(d.state?.rawValue.lowercased() ?? "unknown")\(deploy)\(session)"
+    )
+  }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)

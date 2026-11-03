@@ -156,6 +156,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var cleanup: CleanupStatus?
   /// The id of the session's group, or nil for Ungrouped.
   public var group: String?
+  /// The PRs that the session's open PR waits on, or nil when it waits on none.
+  public var dependencies: [Dependency]?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

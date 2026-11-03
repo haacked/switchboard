@@ -68,7 +68,7 @@ public enum GitHub {
       rateLimit { cost }
       nodes(ids: $ids) {
         ... on PullRequest {
-          id number url title state isDraft mergedAt closedAt mergeCommit { oid }
+          id number url title state isDraft mergedAt closedAt mergeCommit { oid } body
           headRefName headRefOid baseRefName mergeable reviewDecision
           repository { nameWithOwner defaultBranchRef { name } }
           labels(first: 20) { nodes { name } }
@@ -127,8 +127,9 @@ public enum GitHub {
     let reviewRequests = node["reviewRequests"].map {
       nodes($0).compactMap { $0["requestedReviewer"].flatMap { $0["login"]?.string ?? $0["slug"]?.string } }
     }
+    let repo = node["repository"]?["nameWithOwner"]?.string ?? ""
     let pr = PullRequest(
-      id: id, number: number, url: node["url"]?.string ?? "", repo: node["repository"]?["nameWithOwner"]?.string ?? "",
+      id: id, number: number, url: node["url"]?.string ?? "", repo: repo,
       title: node["title"]?.string ?? "", state: PRState(rawValue: node["state"]?.string ?? "") ?? .open,
       draft: node["isDraft"]?.bool ?? false, head: node["headRefName"]?.string ?? "",
       headSha: node["headRefOid"]?.string ?? "", base: node["baseRefName"]?.string ?? "",
@@ -139,7 +140,8 @@ public enum GitHub {
       labels: nodes(node["labels"]).compactMap { $0["name"]?.string },
       checks: nodes(node["commits"]).first?["commit"]?["statusCheckRollup"]?["state"]?.string,
       mergedAt: node["mergedAt"]?.string, closedAt: node["closedAt"]?.string,
-      reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string)
+      reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string,
+      dependsOn: node["body"]?.string.map { Dependencies.refs(inBody: $0, repo: repo) })
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }

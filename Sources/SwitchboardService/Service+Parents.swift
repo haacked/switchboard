@@ -18,7 +18,7 @@ extension Service {
     let e = entries[id]!
     // Until its first prompt, a child waits for the prompt that started it.
     if e.facts.prompts == 0, e.facts.lastReply == nil { return (.fresh, "") }
-    let verdict = Attention.evaluate(e.session, e.facts, now: now)
+    let verdict = Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState)
     return (ChildMark(state: verdict.state, pr: e.facts.pr?.number), verdict.reason)
   }
 

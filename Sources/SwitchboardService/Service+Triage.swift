@@ -68,7 +68,9 @@ extension Service {
   /// `triage` event keyed by the Stop event.
   func summarizeTurn(_ id: String) {
     guard config.triage.enabled, let e = entries[id] else { return }
-    guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs())) else { return }
+    guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)) else {
+      return
+    }
     let session = summary(id)
     guard Triage.mayQueue(session) else { return }
     let stop = e.facts.lastStop

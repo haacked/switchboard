@@ -84,13 +84,17 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var lastTouched: Int64 = 0
   /// When sbd continued the session on its own, within the last hour.
   public var autoContinues: [Int64] = []
+  /// The PRs that the session's open PR waits on, as the poller last found them.
+  public var dependencies: [Dependency] = []
 
   /// The kinds of the events that the pollers, the summaries, and the tick
   /// record. They report on GitHub, the folder, a reply, and claude's
   /// background jobs, not on the session. An `auto-continue` event records
   /// sbd's own try, and the `sent` event of a continue that worked is the
   /// activity. They do not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup", AutoContinue.eventKind]
+  static let observedKinds: Set<String> = [
+    "pr", "worktree", "triage", "job", "cleanup", AutoContinue.eventKind, "dependencies",
+  ]
 
   public init() {}
 
@@ -202,6 +206,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "cleanup":
       let kept = d["branch_removed"]?.bool == false ? d["branch"]?.string : nil
       cleanedUp = CleanupStatus(state: .removed, reason: kept.map { "kept \($0)" })
+    case "dependencies":
+      dependencies = d["dependencies"].flatMap { try? JSONCoding.convert($0, to: [Dependency].self) } ?? []
     default:
       break
     }
@@ -271,7 +277,11 @@ public enum Attention {
   /// SubagentStop, as when sbd was down.
   public static let subagentQuietMs: Int64 = 30 * 60 * 1000
 
-  public static func evaluate(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict {
+  /// `stateOf` gives another session's last state, which the dependency
+  /// rules read for the session of a stack base.
+  public static func evaluate(
+    _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
+  ) -> Verdict {
     if session.done { return Verdict(state: .done, reason: "marked done") }
     if let verdict = followupVerdict(session) { return verdict }
     if let card = facts.cards.first {
@@ -295,8 +305,10 @@ public enum Attention {
     if facts.prompts == 0 && facts.lastReply == nil {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
+    if let v = blockedPR(facts, stateOf: stateOf) { return v }
     if let v = openPR(facts) { return v }
     if let v = awaitingReview(facts) { return v }
+    if let v = heldPR(facts) { return v }
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
@@ -318,8 +330,10 @@ public enum Attention {
   /// changed. sbd calls it after each event, with the event's time, and on
   /// each tick, for the states that time alone changes.
   @discardableResult
-  public static func track(_ session: Session, _ facts: inout SessionFacts, now: Int64) -> Verdict {
-    let verdict = evaluate(session, facts, now: now)
+  public static func track(
+    _ session: Session, _ facts: inout SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
+  ) -> Verdict {
+    let verdict = evaluate(session, facts, now: now, stateOf: stateOf)
     if verdict.state != facts.lastState {
       facts.lastState = verdict.state
       facts.stateSince = now

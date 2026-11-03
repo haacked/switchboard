@@ -39,6 +39,9 @@ final class GitHubPoller {
   /// "failed" for any failure.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
   var deploys = Deploys()
+  /// The PRs of edges that left a session's list before the poller read
+  /// their PR again. The next poll reads them whether or not they are due.
+  var recheck: Set<String> = []
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -116,6 +119,7 @@ final class GitHubPoller {
     var merged = 0
     var depotRequests = 0
     var depotRuns = 0
+    var resumed = 0
   }
 
   init(service: Service, settings: GitHubSettings, depot: DepotSettings) {
@@ -154,11 +158,15 @@ final class GitHubPoller {
     tracked = tracked.filter { ids.contains($0.key) }
     var shared = Shared()
     for s in sessions { refreshLocal(s, all: all, now: now, shared: &shared) }
-    let interest = interests()
+    var interest = interests()
+    interest.keys.formUnion(dependencyKeys(sessions))
     targets = targets.filter { interest.keys.contains($0.key) }
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
-      try readPRs(all: all, now: now, waited: waitedOn(interest), interest: interest, stats: &stats)
+      // An edge that `recordDependencies` kept reads its PR at once, as a new wait does.
+      var waited = waitedOn(interest)
+      for id in recheck { waited.created[id] = max(waited.created[id] ?? 0, now) }
+      try readPRs(all: all, now: now, waited: waited, interest: interest, stats: &stats)
       try checkDeploys(interest, all: all, now: now, stats: &stats)
     } catch {
       failure = "\(error)"
@@ -167,6 +175,7 @@ final class GitHubPoller {
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
+    recordDependencies(sessions, now: now, stats: &stats)
     let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
@@ -569,7 +578,7 @@ final class GitHubPoller {
     return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
   }
 
-  private func event(_ id: String, _ kind: String, _ data: JSON) {
+  func event(_ id: String, _ kind: String, _ data: JSON) {
     service.queue.sync {
       guard service.entries[id] != nil else { return }
       service.record(id, kind, data)
