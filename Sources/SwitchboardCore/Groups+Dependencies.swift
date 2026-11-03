@@ -85,19 +85,12 @@ extension GroupSuggestions {
     /// For each session in no group that the user didn't place there by
     /// hand, a join of the group that it has the most dependencies with.
     /// Ties go to the group whose name sorts first. A dependency on a session
-    /// that one of `merges` moves counts for the group that the merge keeps.
-    /// A join to the merged group would place the session there by hand, and
-    /// that could change which group survives and drop the merge.
-    func joins(declined: Set<String>, merges: [GroupSuggestion]) -> [GroupSuggestion] {
-      var movesTo: [String: String] = [:]
-      for m in merges {
-        guard let keep = m.group else { continue }
-        for id in m.sessions where movesTo[id] == nil { movesTo[id] = keep }
-      }
+    /// in a group in `kept` counts for the group that `kept` names.
+    func joins(declined: Set<String>, kept: [String: String]) -> [GroupSuggestion] {
       var byOpen: [String: [String: [Edge]]] = [:]
       for e in edges {
         for (loose, other) in [(e.from, e.to), (e.to, e.from)] where loose.open {
-          guard let g = movesTo[other.id] ?? group(of: other) else { continue }
+          guard let g = group(of: other).map({ kept[$0] ?? $0 }) else { continue }
           byOpen[loose.id, default: [:]][g, default: []].append(e)
         }
       }
@@ -111,6 +104,25 @@ extension GroupSuggestions {
           id: "dependency:\(session):\(g)", name: groups[g]!.name, group: g, sessions: [session],
           reason: reason(edges))
       }
+    }
+  }
+
+  /// For each group that one of `merges` merges into another, the group that
+  /// keeps its sessions at the end of the chain of merges. A join to a merged
+  /// group would place the session there by hand. That could change which
+  /// group survives and leave the merge nothing to move, so joins go to the
+  /// kept group instead.
+  static func keptGroups(_ merges: [GroupSuggestion]) -> [String: String] {
+    var next: [String: String] = [:]
+    for m in merges {
+      if let merged = m.merge?.group, let keep = m.group, next[merged] == nil { next[merged] = keep }
+    }
+    // The kept group outranks the merged one in every merge, so a chain has
+    // no cycle and is at most as long as the number of merges.
+    return next.mapValues { keep in
+      var g = keep
+      for _ in merges { g = next[g] ?? g }
+      return g
     }
   }
 }

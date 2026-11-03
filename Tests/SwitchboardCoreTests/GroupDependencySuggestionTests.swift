@@ -309,17 +309,49 @@ private let posthog = "PostHog/posthog"
     #expect(after.map(\.id) == ["merge:g1:g2"])
   }
 
-  @Test func aJoinToASessionThatStaysGoesToThatSessionsGroup() throws {
-    let found = suggest(
-      [
-        session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]),
-        session("a2", group: "g1", byHand: true),
-        session("b", group: "g2", pr: 2), session("h", group: "g2", byHand: true, pr: 4),
-        session("u", pr: 3, edges: [edge(to: "h", 4)]),
-      ],
-      groups: flagsAndCache)
+  @Test func aJoinToASessionThatStaysAlsoGoesToTheKeptGroup() throws {
+    // u depends on h, which stays in Cache. A join of u to Cache would still
+    // make Cache the survivor and leave the merge nothing to move.
+    let before = [
+      session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]),
+      session("a2", group: "g1", byHand: true),
+      session("b", group: "g2", pr: 2), session("h", group: "g2", byHand: true, pr: 4),
+      session("u", pr: 3, edges: [edge(to: "h", 4)]),
+    ]
+    let join = try #require(suggest(before, groups: flagsAndCache).first { $0.sessions == ["u"] })
+    #expect(join.id == "dependency:u:g1")
 
-    #expect(try #require(found.first { $0.sessions == ["u"] }).id == "dependency:u:g2")
+    let after = suggest(accept(join, before), groups: flagsAndCache)
+
+    #expect(after.map(\.id) == ["merge:g1:g2"])
+  }
+
+  @Test func aKeyJoinToAMergedGroupGoesToTheKeptGroup() throws {
+    let before = [
+      session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]),
+      session("a2", group: "g1", byHand: true),
+      session("b", group: "g2", pr: 2, branch: "haacked/flag-evaluations-cache"),
+      session("h", group: "g2", byHand: true),
+      session("u", branch: "haacked/flag-evaluations-perf"),
+    ]
+    let join = try #require(suggest(before, groups: flagsAndCache).first { $0.sessions == ["u"] })
+    #expect(join.group == "g1")
+    #expect(join.name == "Flags")
+
+    let after = suggest(accept(join, before), groups: flagsAndCache)
+
+    #expect(after.map(\.id) == ["merge:g1:g2"])
+  }
+
+  @Test func keptGroupsFollowAChainOfMerges() {
+    func merge(_ keep: String, _ merged: String) -> GroupSuggestion {
+      GroupSuggestion(
+        id: "m", name: keep, group: keep, sessions: ["s"], reason: "", merge: .init(group: merged, name: merged))
+    }
+
+    let kept = GroupSuggestions.keptGroups([merge("g1", "g2"), merge("g3", "g1")])
+
+    #expect(kept == ["g2": "g3", "g1": "g3"])
   }
 
   @Test func aJoinPicksTheGroupWithTheMostEdges() throws {

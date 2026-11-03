@@ -265,15 +265,19 @@ public enum GroupSuggestions {
   {
     let links = Links(candidates: candidates, groups: groups)
     let merges = links.merges(declined: declined)
-    let joins = links.joins(declined: declined, merges: merges)
+    let kept = keptGroups(merges)
+    let joins = links.joins(declined: declined, kept: kept)
     let taken = Set(joins.flatMap(\.sessions))
     let open = candidates.filter { $0.open && !taken.contains($0.id) }
-    return merges + joins + keyed(open, candidates, groups, declined: declined)
+    return merges + joins + keyed(open, candidates, groups, declined: declined, kept: kept)
   }
 
-  static func keyed(_ open: [Candidate], _ candidates: [Candidate], _ groups: [SessionGroup], declined: Set<String>)
-    -> [GroupSuggestion]
-  {
+  /// Joins and new groups from keys. A join to a group in `kept` goes to the
+  /// group that `kept` names.
+  static func keyed(
+    _ open: [Candidate], _ candidates: [Candidate], _ groups: [SessionGroup], declined: Set<String>,
+    kept: [String: String]
+  ) -> [GroupSuggestion] {
     var openByKey: [Key: [String]] = [:]
     for c in open {
       for key in keys(branch: c.branch, prTitle: c.prTitle) { openByKey[key, default: []].append(c.id) }
@@ -302,7 +306,8 @@ public enum GroupSuggestions {
       for id in named[slug(key.text)] ?? [] { joins[id, default: 0] += 1 }
       // Ties go to the group whose name sorts first.
       let best = joins.max { a, b in (a.value, names[b.key] ?? "") < (b.value, names[a.key] ?? "") }
-      options.append(Option(key: key, group: best?.key, members: best?.value ?? 0, sessions: sessions))
+      options.append(
+        Option(key: key, group: best.map { kept[$0.key] ?? $0.key }, members: best?.value ?? 0, sessions: sessions))
     }
     options.sort { a, b in
       let (sizeA, sizeB) = (a.sessions.count + a.members, b.sessions.count + b.members)
