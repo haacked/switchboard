@@ -20,7 +20,8 @@ func cards(_ a: Args) {
   // Claude chose this text, so control characters print as escapes.
   func out(_ line: String) { print(line.printable) }
   for (name, card) in cards {
-    let head = "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")"
+    let head =
+      "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")\(card.hookClosed ? ", hook closed" : "")"
     if card.kind == .permission {
       // `allow` approves the whole call, so the whole call prints.
       out("\(head)  approve \(card.tool)")

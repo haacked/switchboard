@@ -12,7 +12,13 @@ extension Instance {
   func type(_ id: String, _ line: String) throws {
     let t = try client.terminals(id)
     #expect(try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", "-l", line]).status == 0)
-    #expect(try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", "Enter"]).status == 0)
+    try press(id, "Enter")
+  }
+
+  /// The item that the cursor of the stub's dialog is on, or nil when no
+  /// dialog shows.
+  func highlighted(_ id: String) throws -> String? {
+    ClaudeScreen.dialog(try screen(id)).flatMap(ClaudeScreen.highlighted)
   }
 
   /// Whether the PermissionRequest hook that the stub ran last still runs.
@@ -123,28 +129,109 @@ extension Instance {
     #expect(throws: TestError.self) { try sbd.sb("allow", s.id) }
   }
 
-  @Test func removesTheCardWhenTheTerminalRefuses() throws {
+  @Test func removesTheCardWhenYesClosesTheDialogBeforeASlowCommandFinishes() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "perm sleep 3")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    try sbd.waitFor("the dialog") { try sbd.screen(s.id).contains("Esc to cancel") }
+    // sbd removes a card whose hook is open only after a check saw its dialog.
+    sleep(1)
+    try sbd.press(s.id, "Enter")
+    let running = try sbd.waitFor(s.id, "the removed card") { $0.cards.isEmpty }
+    #expect(running.state == .working)
+    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran sleep 3" }
+    let kinds = try sbd.events(s.id).map(\.kind)
+    let closed = try #require(kinds.firstIndex(of: "dialog_closed"))
+    #expect(try sbd.events(s.id).first { $0.kind == "dialog_closed" }?.data["allowed"] == true)
+    let finished = try #require(kinds.firstIndex(of: "PostToolUse"))
+    #expect(closed < finished)
+  }
+
+  @Test func removesTheCardWhenEscapeRefusesInTheTerminal() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "perm touch z")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
-    try sbd.type(s.id, "esc")
-    let after = try sbd.waitFor(s.id, "the closed card") { $0.cards.isEmpty }
-    #expect(after.state == .needsYou)
-    #expect(try sbd.events(s.id).contains { $0.kind == "card_closed" })
+    try sbd.press(s.id, "Escape")
+    let after = try sbd.waitFor(s.id, "the removed card") { $0.cards.isEmpty }
+    // The turn stays until claude reports it idle, and the prompt with it.
+    #expect(after.reason == "approve `touch z`")
+    let events = try sbd.events(s.id)
+    #expect(events.contains { $0.kind == "card_closed" })
+    #expect(events.contains { $0.kind == "dialog_closed" && $0.data["allowed"] == nil })
   }
 
-  @Test func keepsThePromptOpenWhenTheHookTimesOut() throws {
-    let sbd = try Instance(idleStopSeconds: 1)
-    let s = try sbd.new(prompt: "perm touch v")
+  /// A session whose card's PermissionRequest hook timed out while the
+  /// stub's dialog still shows.
+  func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance, SessionSummary) {
+    let sbd = try Instance(idleStopSeconds: idleStopSeconds)
+    let s = try sbd.new(prompt: prompt)
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     try sbd.type(s.id, "timeout")
-    let closed = try sbd.waitFor(s.id, "the closed card") { $0.cards.isEmpty }
-    #expect(closed.reason == "approve `touch v`")
+    try sbd.waitFor(s.id, "the closed hook") { $0.cards.first?.hookClosed == true }
+    return (sbd, s)
+  }
+
+  @Test func keepsTheCardWhenTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("perm touch v", idleStopSeconds: 1)
+    #expect(try sbd.events(s.id).contains { $0.kind == "card_closed" })
     // The stop rule waits for the prompt that Claude Code's dialog still shows.
     sleep(3)
-    #expect(try sbd.get(s.id).live)
+    let after = try sbd.get(s.id)
+    #expect(after.live)
+    #expect(after.cards.map(\.hookClosed) == [true])
+    #expect(after.reason == "approve `touch v`")
     try sbd.type(s.id, "y")
-    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch v" }
+    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch v" && $0.cards.isEmpty }
+  }
+
+  @Test func listsACardWhoseHookClosed() throws {
+    let (sbd, _) = try timedOut("perm touch v")
+    #expect(try sbd.sb("cards").contains(", hook closed"))
+  }
+
+  @Test func allowTypesYesAfterTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("perm touch u")
+    let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
+    #expect(answer?["delivery"]?.string == "terminal")
+    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch u" && $0.cards.isEmpty }
+  }
+
+  @Test func allowMovesTheCursorBackToYesAfterTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("perm touch u")
+    try sbd.press(s.id, "Down")
+    try sbd.waitFor("the cursor on No") { try sbd.highlighted(s.id)?.contains("No") == true }
+    try sbd.sb("allow", s.id)
+    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch u" }
+  }
+
+  @Test func denyInterruptsAfterTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("perm rm -rf build")
+    let answer = try JSON.parse(sbd.sb("deny", "--json", s.id))
+    #expect(answer?["delivery"]?.string == "terminal")
+    let after = try sbd.waitFor(s.id, "the end of the turn") {
+      $0.reason == "read its last reply and decide what's next" && $0.cards.isEmpty
+    }
+    #expect(after.lastReply == nil)
+    #expect(try sbd.events(s.id).contains { $0.kind == "answered" && $0.data["interrupted"] == true })
+  }
+
+  @Test func denyWithAMessageInterruptsAndSendsTheMessageAfterTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("perm rm -rf build")
+    try sbd.sb("deny", s.id, "Use", "make", "clean")
+    try sbd.waitFor(s.id, "the reply to the message") { $0.lastReply == "Done: Use make clean" }
+    #expect(try sbd.events(s.id).contains { $0.kind == "answered" && $0.data["interrupted"] == true })
+  }
+
+  @Test func answerCancelsTheQuestionAndSendsTheAnswersAfterTheHookTimesOut() throws {
+    let (sbd, s) = try timedOut("pick")
+    let answer = try JSON.parse(sbd.sb("answer", "--json", s.id, "apple", "green"))
+    #expect(answer?["delivery"]?.string == "terminal")
+    let message = "Answer to your question \"Which fruit?\": apple\nAnswer to your question \"Which colors?\": green"
+    try sbd.waitFor(s.id, "the reply to the answers") {
+      $0.lastReply?.hasSuffix("Answer to your question \"Which colors?\": green") == true && $0.cards.isEmpty
+    }
+    let prompts = try sbd.events(s.id).filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
+    #expect(prompts.joined(separator: "\n").contains(message))
   }
 
   @Test func defersAQuestionAndResumesWithTheAnswer() throws {

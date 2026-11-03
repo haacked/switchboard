@@ -271,6 +271,17 @@ final class Instance {
     }
   }
 
+  /// The session's Claude pane as sbd reads it, with wrapped lines joined.
+  func screen(_ id: String) throws -> String { try client.call("screen", ["session": .string(id)]).string ?? "" }
+
+  /// Presses one key in the session's Claude pane, by its tmux key name,
+  /// such as Down or Escape.
+  func press(_ id: String, _ key: String) throws {
+    let t = try client.terminals(id)
+    let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", key])
+    guard r.status == 0 else { throw TestError(description: "tmux send-keys \(key): \(r.stderr)") }
+  }
+
   /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
   func stubPid(_ file: String) -> pid_t? {
     guard let text = try? String(contentsOfFile: "\(home.path)/\(file)", encoding: .utf8) else { return nil }

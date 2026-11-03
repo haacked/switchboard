@@ -25,9 +25,11 @@
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
 #   For perm and pick, the PermissionRequest hook runs while a stand-in for
-#   Claude Code's dialog reads a line from the terminal: y allows, and esc
-#   refuses and kills the hook, as Claude Code closes the request. timeout
-#   kills the hook and leaves the dialog open, as the hook's timeout does.
+#   Claude Code's dialog shows on the terminal and reads keys: Enter on the
+#   first item or y allows, and Escape, Enter on No, or esc refuses and kills
+#   the hook, as Claude Code closes the request. timeout kills the hook and
+#   leaves the dialog open, as the hook's timeout does. perm sleep <n> sleeps
+#   n s before PostToolUse, as a long command does.
 #   perm and pick build their tool payloads by hand. The stub does not play
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
@@ -148,38 +150,104 @@ hook() {
   payload "$@" | sh -c "$hook_cmd" >/dev/null
 }
 
+# draw <cursor>: prints the dialog with ❯ on item <cursor>, as Claude Code
+# draws it: a rule, the head lines, the menu, and a footer that offers Esc.
+# It goes to stderr, because a caller captures stdout.
+draw() {
+  local i=0 item
+  {
+    printf '%s\n' "────────────────────────────────────────" "${head[@]}"
+    for item in "${items[@]}"; do
+      [ "$i" = "$1" ] && printf ' ❯ %s\n' "$item" || printf '   %s\n' "$item"
+      i=$((i + 1))
+    done
+    printf ' %s\n' "Esc to cancel"
+  } >&2
+}
+
+# erase: removes the dialog that draw printed.
+erase() { printf '\033[%dA\033[J' $((${#head[@]} + ${#items[@]} + 2)) >&2; }
+
+# keys <drawn>: draws the dialog, or draws it again when <drawn> is 1, then
+# reads keys from the terminal until an answer, and writes the answer to
+# $term. Up and Down move the cursor. Enter answers with the typed word, or
+# with the highlighted item: y for the first, esc for No. Escape alone
+# answers esc. bash 3.2 reads with whole-second timeouts, so a lone Escape
+# takes 1 s.
+keys() {
+  local c rest word='' cursor=0
+  [ "$1" = 1 ] && erase
+  draw 0
+  while IFS= read -r -s -n1 -u 3 c; do
+    case $c in
+    $'\e')
+      rest=''
+      IFS= read -r -s -n2 -t 1 -u 3 rest
+      case $rest in
+      '[A' | OA) [ "$cursor" -gt 0 ] && cursor=$((cursor - 1)) ;;
+      '[B' | OB) [ "$cursor" -lt $((${#items[@]} - 1)) ] && cursor=$((cursor + 1)) ;;
+      *) word=esc && break ;;
+      esac
+      erase
+      draw "$cursor"
+      ;;
+    '')
+      if [ -z "$word" ]; then
+        [ "${items[$cursor]}" = "2. No" ] && word=esc || word=y
+      fi
+      break
+      ;;
+    *) word="$word$c" ;;
+    esac
+  done
+  [ -n "$word" ] && printf '%s\n' "$word" >"$term"
+}
+
 # dialog <fields>: runs the PermissionRequest hook while the terminal's dialog
-# waits for a line, and prints the first answer: "hook <output>" or
-# "terminal <line>". A hook that prints nothing made no decision, so the
+# waits for keys, and prints the first answer: "hook <output>" or
+# "terminal <word>". A hook that prints nothing made no decision, so the
 # dialog keeps waiting. It prints nothing when the terminal closes, as when
-# the pane dies. The hook's pid goes to $SB_HOME/held-hook.pid.
+# the pane dies. The hook's pid goes to $SB_HOME/held-hook.pid. The dialog
+# shows the command, or the first question and its options.
 dialog() {
-  local out term hook_pid reader_pid open said answer=''
+  local out term hook_pid reader_pid open said answer='' tool head items
   out=$(mktemp) term=$(mktemp)
+  tool=$(jq -r .tool_name <<<"$1")
+  if [ "$tool" = AskUserQuestion ]; then
+    echo "⏺ AskUserQuestion" >&2
+    head=("←  ☐ $(jq -r '[.tool_input.questions[].header] | join("  ☐ ")' <<<"$1")  ✔ Submit  →"
+      "$(jq -r '.tool_input.questions[0].question' <<<"$1")")
+    items=()
+    while IFS= read -r line; do items+=("$line"); done < <(jq -r '.tool_input.questions[0].options | to_entries[] | "\(.key + 1). \(.value.label)"' <<<"$1")
+  else
+    echo "⏺ $tool($(jq -r .tool_input.command <<<"$1"))" >&2
+    head=(" Bash command" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " $(jq -r .tool_input.command <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌"
+      " Do you want to proceed?")
+    items=("1. Yes" "2. No")
+  fi
+  stty -icanon -echo <&3
   payload PermissionRequest "$1" | sh -c "exec $request_cmd" >"$out" &
   hook_pid=$!
   echo "$hook_pid" >"$SB_HOME/held-hook.pid"
-  { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
+  keys 0 &
   reader_pid=$!
   while [ -z "$answer" ]; do
     if [ -n "$hook_pid" ] && ! kill -0 "$hook_pid" 2>/dev/null; then
       [ -s "$out" ] && answer="hook $(cat "$out")"
       hook_pid=''
     fi
-    # The reader exits without a line when the terminal closes. The check
-    # comes before the read, so a line that the reader wrote before it
-    # exited still becomes the answer.
+    # The reader exits without an answer when the terminal closes. The check
+    # comes before the read, so an answer that the reader wrote before it
+    # exited still counts.
     kill -0 "$reader_pid" 2>/dev/null && open=1 || open=''
-    # One read per pass, so a line that arrives mid-pass waits for the next.
+    # One read per pass, so an answer that arrives mid-pass waits for the next.
     said=$(cat "$term")
-    # An empty line leaves a newline in the file, so the dialog does not take
-    # it for a closed terminal.
-    if [ -z "$answer" ] && [ -z "$open" ] && [ ! -s "$term" ]; then
+    if [ -z "$answer" ] && [ -z "$open" ] && [ -z "$said" ]; then
       break
     elif [ -z "$answer" ] && [ "$said" = timeout ]; then
       [ -n "$hook_pid" ] && kill "$hook_pid"
       : >"$term"
-      { IFS= read -r line && printf '%s\n' "$line" >"$term"; } <&3 &
+      keys 1 &
       reader_pid=$!
     elif [ -z "$answer" ] && [ -n "$said" ]; then
       answer="terminal $said"
@@ -187,6 +255,9 @@ dialog() {
     sleep 0.1
   done
   kill "$reader_pid" 2>/dev/null
+  wait "$reader_pid" 2>/dev/null
+  [ -n "$answer" ] && erase
+  stty icanon echo <&3
   case $answer in "terminal esc" | '') [ -n "$hook_pid" ] && kill "$hook_pid" ;; esac
   rm -f "$out" "$term"
   printf '%s' "$answer"
@@ -235,7 +306,7 @@ event() { jq -c --arg e "$2" 'select(.hook_event_name == $e)' "$recordings/$1.js
 # dialog answered. It prints the reply, or nothing when the turn stopped or
 # the terminal closed.
 answered() {
-  local tool=$1 input=$2 answer=$3 decision
+  local tool=$1 input=$2 answer=$3 decision cmd
   case $answer in
   '') return ;;
   "terminal y")
@@ -262,6 +333,9 @@ answered() {
     esac
     ;;
   esac
+  # A long command delays PostToolUse.
+  cmd=$(jq -r '.command // ""' <<<"$input")
+  case $cmd in sleep\ *) eval "$cmd" ;; esac
   hook PostToolUse "$(jq -nc --arg t "$tool" --argjson i "$input" '{tool_name: $t, tool_use_id: "c1", tool_input: $i}')"
   if [ "$tool" = AskUserQuestion ]; then
     echo "Picked: $(jq -cS .answers <<<"$input")"

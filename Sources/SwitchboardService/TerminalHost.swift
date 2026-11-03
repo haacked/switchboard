@@ -245,9 +245,7 @@ final class TerminalHost {
   /// mode first, where Enter would not reach the program.
   func paste(_ name: String, _ text: String) throws {
     let target = "=\(name):"
-    if (try? run(["display-message", "-p", "-t", target, "#{pane_in_mode}"]))?.hasPrefix("1") == true {
-      try run(["send-keys", "-t", target, "-X", "cancel"])
-    }
+    try leaveCopyMode(target)
     // The text goes in on stdin, because tmux strips a trailing semicolon
     // from a command argument.
     let buffer = "sb-\(name)"
@@ -257,6 +255,20 @@ final class TerminalHost {
     // as part of the pasted text.
     usleep(300_000)
     try run(["send-keys", "-t", target, "Enter"])
+  }
+
+  /// Presses tmux keys, such as Up or Escape, in the pane. It leaves copy
+  /// mode first, where the keys would not reach the program.
+  func press(_ name: String, _ keys: [String]) throws {
+    let target = "=\(name):"
+    try leaveCopyMode(target)
+    try run(["send-keys", "-t", target] + keys)
+  }
+
+  private func leaveCopyMode(_ target: String) throws {
+    if (try? run(["display-message", "-p", "-t", target, "#{pane_in_mode}"]))?.hasPrefix("1") == true {
+      try run(["send-keys", "-t", target, "-X", "cancel"])
+    }
   }
 
   /// The visible screen as text, with wrapped lines joined. `history` adds

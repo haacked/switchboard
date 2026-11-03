@@ -70,51 +70,67 @@ extension Service {
 
   /// Answers a card: allow, deny with an optional message, or `answers`, one
   /// per question. A held card answers through its hook. A deferred question
-  /// answers with a message to the session.
+  /// answers with a message to the session. A card whose hook closed answers
+  /// by typing into the terminal.
   func answer(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
     let card = try Card.choose(args["card"]?.int, from: entries[id]?.facts.cards ?? [], session: id)
     var data: [String: JSON] = ["card": .number(Double(card.id)), "behavior": "allow"]
-    let delivery: String
+    func answered(_ delivery: String) -> JSON {
+      record(id, "answered", .object(data))
+      return ["card": .number(Double(card.id)), "session": .string(id), "delivery": .string(delivery)]
+    }
+    // What the hook prints, and what sbd types when Claude Code no longer
+    // waits on the hook.
+    let reply: (decision: Decision, typed: TypedAnswer)
     if let given = args["answers"]?.array {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
       data["answers"] = .array(answers.map(JSON.string))
-      if card.deferred {
-        delivery = try send(id, card.answerMessage(answers), byUser: false).rawValue
-      } else {
-        delivery = try answerHook(card, card.decision(answers: answers))
-      }
+      if card.deferred { return answered(try send(id, card.answerMessage(answers), byUser: false).rawValue) }
+      reply = (card.decision(answers: answers), .escape(then: card.answerMessage(answers)))
     } else {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
-        delivery = try answerHook(card, .allow(updatedInput: nil))
+        reply = (.allow(updatedInput: nil), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
       case "deny":
         data["behavior"] = "deny"
         data["message"] = message.map(JSON.string)
-        delivery = try answerHook(card, .deny(message: message))
+        reply = (.deny(message: message), .escape(then: message))
       default:
         throw APIError("answer needs answers, or a behavior of allow or deny")
       }
     }
-    record(id, "answered", .object(data))
-    return ["card": .number(Double(card.id)), "session": .string(id), "delivery": .string(delivery)]
-  }
-
-  /// Answers a held card through its hook. The hook's thread notices a closed
-  /// request only every 0.25 s, so this checks again first.
-  private func answerHook(_ card: Card, _ decision: Decision) throws -> String {
-    guard let request = held[card.id], !request.hookGone() else {
-      throw APIError(
-        card.deferred
-          ? "card \(card.id) was deferred, so answer its questions or send \(card.session) a message"
-          : "Claude Code no longer waits on card \(card.id). Answer it in the terminal")
+    // The hook's thread notices a closed request only every 0.25 s, so this
+    // checks again first.
+    if let request = held[card.id], !request.hookGone() {
+      request.resolve(reply.decision.hookOutput)
+      return answered("hook")
     }
-    request.resolve(decision.hookOutput)
-    return "hook"
+    guard !card.deferred else {
+      throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
+    }
+    try type(reply.typed, card)
+    switch reply.typed {
+    case .yes:
+      return answered("terminal")
+    case .escape(let message):
+      data["interrupted"] = true
+      let result = answered("terminal")
+      // The Escape ended the turn, so the message pastes once the dialog closes.
+      if let message {
+        guard dialogClosed(card) else {
+          throw APIError(
+            "card \(card.id)'s dialog still shows after Escape, so sbd didn't send the message. Answer it in the terminal"
+          )
+        }
+        _ = try send(id, message, byUser: false)
+      }
+      return result
+    }
   }
 
   /// Defers each held question that has been open for `idleStopSeconds`,

@@ -23,6 +23,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// sbd denied the held request so that claude could stop. The answer goes
   /// to the session as a message.
   public var deferred: Bool
+  /// Claude Code closed the card's held request, as its timeout does, while
+  /// its dialog may still show. sbd answers it by typing into the terminal.
+  public var hookClosed: Bool
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -43,6 +46,24 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     summary = call.summary
     since = call.since
     deferred = false
+    hookClosed = false
+  }
+
+  /// Whether sbd can find the card's dialog on the screen: a question's, or
+  /// a Bash command's. Claude Code 2.1.317's dialogs for other tools weren't
+  /// captured.
+  public var findable: Bool {
+    kind == .question
+      ? !marks.isEmpty
+      : tool == "Bash" && input["command"]?.string?.contains(where: { !$0.isWhitespace }) == true
+  }
+
+  /// The texts that identify a question card's dialog on the screen, each cut
+  /// to 40 characters: each question's text and header. The dialog shows one
+  /// question at a time and every header.
+  public var marks: [String] {
+    questions.flatMap { [$0.question] + ($0.header.map { [$0] } ?? []) }
+      .map { String($0.trimmingCharacters(in: .whitespaces).prefix(40)) }.filter { !$0.isEmpty }
   }
 
   /// What the user approves: a Bash command, or the tool's whole input as
@@ -185,6 +206,11 @@ extension SessionFacts {
       guard let card else { return }
       let answered = cards.remove(at: card)
       closePrompt(answered)
+      // Claude Code sends no hook after the Escape that sbd typed.
+      if d["interrupted"]?.bool == true {
+        endTurn()
+        return
+      }
       guard d["behavior"]?.string == "deny" else { return }
       if d["message"]?.string == nil {
         endTurn()
@@ -197,9 +223,20 @@ extension SessionFacts {
       closePrompt(cards[card])
     case "card_closed":
       // A hook that timed out closes too. Claude Code's dialog then stays
-      // open, so the prompt stays open until the turn ends after No or Escape.
+      // open, so the prompt stays open. A card that sbd can find on the
+      // screen stays until its dialog leaves. sbd answers it by typing.
       guard let card else { return }
-      cards.remove(at: card)
+      if !cards[card].findable {
+        cards.remove(at: card)
+      } else {
+        cards[card].hookClosed = true
+      }
+    case "dialog_closed":
+      // Only Yes or a pick leaves the hook open, so the call runs. No and
+      // Escape leave the prompt open until the turn ends.
+      guard let card else { return }
+      let closed = cards.remove(at: card)
+      if d["allowed"]?.bool == true { closePrompt(closed) }
     case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.deferred }

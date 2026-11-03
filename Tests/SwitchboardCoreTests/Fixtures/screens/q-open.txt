@@ -1,0 +1,50 @@
+
+ ▐▛███▛█   Claude Code v2.1.317
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   /private/tmp/sbt.QTdUHi/work
+
+
+❯ Use the AskUserQuestion tool once to ask me two questions: "Which fruit?" (header Fruit, options apple, cherry) and "Which colors?" (header Colors, multiSelect true, options red, blue, green). Then
+  reply with my answers.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Fruit  ☐ Colors  ✔ Submit  →
+
+Which fruit?
+
+❯ 1. apple
+     Apple
+  2. cherry
+     Cherry
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

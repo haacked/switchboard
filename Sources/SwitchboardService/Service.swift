@@ -41,6 +41,8 @@ public final class Service {
     func messageWaiting(now: Int64) -> Bool {
       !pending.isEmpty || inFlight.map { now - $0 < Service.inFlightMs } == true
     }
+
+    var dialogs = DialogWatch()
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -1187,6 +1189,7 @@ public final class Service {
       compactSnapshots()
     }
     endIdleTurns()
+    closeGoneDialogs()
   }
 
   func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {
