@@ -125,13 +125,9 @@ final class ClaudeInstance {
 
   // MARK: The terminal
 
-  func screen(_ id: String) throws -> String { try sbd.client.call("screen", ["session": .string(id)]).string ?? "" }
+  func screen(_ id: String) throws -> String { try sbd.screen(id) }
 
-  func press(_ id: String, _ key: String) throws {
-    let t = try sbd.client.terminals(id)
-    let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", key])
-    guard r.status == 0 else { throw TestError(description: "tmux send-keys \(key): \(r.stderr)") }
-  }
+  func press(_ id: String, _ key: String) throws { try sbd.press(id, key) }
 
   /// A dialog that claude draws: a regex for its title, and a regex for the
   /// item to pick from the menu below the title.

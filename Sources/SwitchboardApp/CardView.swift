@@ -18,6 +18,16 @@ struct CardView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
+      if card.hookClosed {
+        Label(
+          card.kind == .permission
+            ? "Claude Code stopped waiting on Switchboard. Your answer is typed into the terminal."
+            : "Claude Code stopped waiting on Switchboard. Answering cancels the terminal's question and sends your answers as a message.",
+          systemImage: "keyboard"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
       if card.kind == .permission { permission } else { questions }
     }
     .disabled(model.answering.contains(card.id))

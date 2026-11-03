@@ -36,6 +36,18 @@ func permissionTurn() -> [Event] { promptTurn(touchCall, touch) }
 
 func questionTurn() -> [Event] { promptTurn(ask(), ask(id: nil)) }
 
+/// A turn whose call opens a prompt for a tool whose dialog sbd can't tell apart.
+func fetchTurn() -> [Event] {
+  let fetch = ["url": JSON.string("https://example.com")]
+  return promptTurn(tool("WebFetch", fetch, id: "f1"), tool("WebFetch", fetch))
+}
+
+let turnEnds = [
+  event("Stop", 4, ["last_assistant_message": "ok"]), event("StopFailure", 4), event("SessionEnd", 4),
+  event("stopped", 4), event("exited", 4), event("Notification", 4, ["notification_type": "idle_prompt"]),
+  event("UserPromptSubmit", 4, ["prompt": "do this instead"]),
+]
+
 @Suite struct CardTracking {
   @Test func aPermissionRequestOpensACard() {
     let f = facts(permissionTurn())
@@ -87,13 +99,14 @@ func questionTurn() -> [Event] { promptTurn(ask(), ask(id: nil)) }
     #expect(f.cards.isEmpty)
   }
 
-  @Test(arguments: [
-    event("Stop", 4, ["last_assistant_message": "ok"]), event("StopFailure", 4), event("SessionEnd", 4),
-    event("stopped", 4), event("exited", 4), event("Notification", 4, ["notification_type": "idle_prompt"]),
-    event("UserPromptSubmit", 4, ["prompt": "do this instead"]),
-  ])
+  @Test(arguments: turnEnds)
   func theEndOfTheTurnRemovesOpenCards(_ end: Event) {
     #expect(facts(permissionTurn() + [end]).cards.isEmpty)
+  }
+
+  @Test(arguments: turnEnds)
+  func theEndOfTheTurnRemovesACardWhoseHookClosed(_ end: Event) {
+    #expect(facts(permissionTurn() + [event("card_closed", 4, ["card": 3]), end]).cards.isEmpty)
   }
 
   @Test func allowingClearsThePromptAndShowsTheRunningTool() {
@@ -122,13 +135,61 @@ func questionTurn() -> [Event] { promptTurn(ask(), ask(id: nil)) }
     #expect(f.openQuestion == nil)
   }
 
-  @Test func aClosedRequestLeavesThePromptOpenUntilTheIdlePrompt() {
-    var events = permissionTurn() + [event("card_closed", 4, ["card": 3])]
+  @Test func aClosedRequestForAnUnfindableCardLeavesThePromptOpenUntilTheIdlePrompt() {
+    var events = fetchTurn() + [event("card_closed", 4, ["card": 3])]
     let closed = facts(events)
     #expect(closed.cards.isEmpty)
-    #expect(Attention.evaluate(session(), closed, now: 5) == Verdict(state: .needsYou, reason: "approve `touch x`"))
+    #expect(Attention.evaluate(session(), closed, now: 5) == Verdict(state: .needsYou, reason: "approve WebFetch"))
     events.append(event("Notification", 6, ["notification_type": "idle_prompt"]))
     #expect(!facts(events).turnRunning)
+  }
+
+  @Test func aCardOpensWithItsHookOpen() {
+    #expect(facts(permissionTurn()).cards.map(\.hookClosed) == [false])
+  }
+
+  @Test(arguments: [permissionTurn(), questionTurn()])
+  func aClosedRequestKeepsAFindableCard(_ turn: [Event]) {
+    #expect(facts(turn + [event("card_closed", 4, ["card": 3])]).cards.map(\.hookClosed) == [true])
+  }
+
+  @Test func aCardWhoseHookClosedKeepsThePromptOpen() {
+    let f = facts(permissionTurn() + [event("card_closed", 4, ["card": 3])])
+    #expect(Attention.evaluate(session(), f, now: 5) == Verdict(state: .needsYou, reason: "approve `touch x`"))
+  }
+
+  @Test func aClosedDialogRemovesItsCard() {
+    #expect(facts(permissionTurn() + [event("dialog_closed", 4, ["card": 3])]).cards.isEmpty)
+  }
+
+  @Test func anAllowedClosedDialogClosesThePromptAndShowsTheRunningTool() {
+    let f = facts(permissionTurn() + [event("dialog_closed", 4, ["card": 3, "allowed": true])])
+    #expect(f.openPermission == nil)
+    #expect(Attention.evaluate(session(), f, now: 5) == Verdict(state: .working, reason: "`touch x` (<1 min)"))
+  }
+
+  @Test func aClosedDialogRemovesACardWhoseHookClosedAndKeepsThePrompt() {
+    let events = permissionTurn() + [event("card_closed", 4, ["card": 3]), event("dialog_closed", 5, ["card": 3])]
+    let f = facts(events)
+    #expect(f.cards.isEmpty)
+    #expect(Attention.evaluate(session(), f, now: 6) == Verdict(state: .needsYou, reason: "approve `touch x`"))
+  }
+
+  @Test func anAllowedClosedDialogClosesAnOpenQuestion() {
+    let f = facts(questionTurn() + [event("dialog_closed", 4, ["card": 3, "allowed": true])])
+    #expect(f.cards.isEmpty)
+    #expect(f.openQuestion == nil)
+  }
+
+  @Test(arguments: [
+    (permissionTurn(), ["card": 3, "behavior": "deny", "interrupted": true] as [String: JSON]),
+    (permissionTurn(), ["card": 3, "behavior": "deny", "message": "Use make.", "interrupted": true]),
+    (questionTurn(), ["card": 3, "behavior": "allow", "interrupted": true]),
+  ])
+  func anAnswerThatInterruptedEndsTheTurn(_ turn: [Event], _ answer: [String: JSON]) {
+    let f = facts(turn + [event("answered", 4, answer)])
+    #expect(f.cards.isEmpty)
+    #expect(!f.turnRunning)
   }
 
   @Test func aDeferredQuestionStaysAfterTheTurnEnds() {
