@@ -24,6 +24,8 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var notes: [Note]
   public var created: Int64
   public var sessions: [String]
+  /// The plans attached to the group, or nil when it has none.
+  public var plans: [PlanSummary]?
 
   public init(_ group: SessionGroup, sessions: [String]) {
     id = group.id

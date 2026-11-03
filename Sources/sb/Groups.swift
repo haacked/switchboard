@@ -69,6 +69,7 @@ private func printGroups(_ list: GroupList) {
   for g in list.groups {
     print("\(g.name)  (\(g.id))".printable)
     for note in g.notes { print("  note: \(oneLine(note.text, max: 200))".printable) }
+    for p in g.plans ?? [] { printPlan(p, indent: "  ") }
     print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))
   }
   if !list.ungrouped.isEmpty {

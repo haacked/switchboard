@@ -22,6 +22,7 @@ extension Service {
       // This skips `place`, so a session that took its parent's group stays open to suggestions.
       for member in members { try update(member) { $0.group = nil } }
       try store.delete(group: id)
+      try detachPlans { $0.group == id }
       groups[id] = nil
       return ["removed": .string(id), "ungrouped": .array(members.map(JSON.string))]
     case "group-move":
@@ -56,7 +57,7 @@ extension Service {
   }
 
   /// Finds a group by id, by unique id prefix, or by unique name.
-  private func lookupGroup(_ args: JSON) throws -> String {
+  func lookupGroup(_ args: JSON) throws -> String {
     guard let key = args["group"]?.string, !key.isEmpty else { throw APIError("name a group") }
     return try resolve(key, "group", groups.values.map { ($0.id, $0.name) })
   }
@@ -104,7 +105,9 @@ extension Service {
   }
 
   private func groupSummary(_ id: String) -> GroupSummary {
-    GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    summary.plans = planSummaries(group: id)
+    return summary
   }
 
   func groupList() -> GroupList {

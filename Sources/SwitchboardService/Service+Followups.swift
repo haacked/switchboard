@@ -171,6 +171,7 @@ extension Service {
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       entries[id] = nil
       try store.delete(session: id)
+      try detachPlans { $0.session == id }
       return ["removed": .string(id)]
     }
   }

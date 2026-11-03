@@ -121,8 +121,7 @@ extension GitHubPoller {
       d.deployed = nil
       return d
     }
-    let comment = keptComments(read.comments).compactMap { $0.body.flatMap(DeployComment.parse) }.last
-    d.deployed = (before?.state == .merged && before?.deployed == true) || comment?.deployedToProd == true
+    d.deployed = (before?.state == .merged && before?.deployed == true) || deployedToProd(read.comments)
     return d
   }
 

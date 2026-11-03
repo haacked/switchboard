@@ -96,6 +96,19 @@ let usage = """
                                   titles, or accept one. A session that you moved
                                   to Ungrouped is never suggested
 
+  Plan documents:
+    plan attach <doc> (--group G | --session S) [--path P]
+                                  attach a local markdown file, an issue
+                                  (owner/name#N or its URL), or with --path a
+                                  file in a PR. Sessions whose PRs a group's
+                                  plan links join the group
+    plan ls [--group G | --session S]
+    plan get <plan>               show the plan and its out-of-date rows
+    plan detach <plan>
+    plan update <plan>            write the status table between
+                                  <!-- sb:status --> and <!-- /sb:status -->
+    plan auto <plan> on|off       write the table on its own when it changes
+
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
                  [--after owner/name#N] [--link URL] [--parent S] [--account A]
@@ -256,6 +269,7 @@ func printSession(_ s: SessionSummary) {
       "  depends: \(d.label(from: s.pr?.repo ?? d.repo)) \(d.state?.rawValue.lowercased() ?? "unknown")\(deploy)\(session)"
     )
   }
+  for p in s.plans ?? [] { printPlan(p, indent: "  ") }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
@@ -561,6 +575,8 @@ case "autocontinue":
   autoContinue(a)
 case "group", "groups":
   group(a)
+case "plan", "plans":
+  plan(a)
 case "followup", "followups":
   followup(a)
 case "poll":
