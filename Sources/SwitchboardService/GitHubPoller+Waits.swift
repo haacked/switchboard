@@ -46,11 +46,17 @@ extension GitHubPoller {
     return key(of: pr, session: session).flatMap { targets[$0]?.prId }
   }
 
-  /// For each PR that an open wait is about, when the newest such wait was set.
-  func waitedOn(_ interest: Interest) -> [String: Int64] {
-    var waited: [String: Int64] = [:]
+  /// For each PR that an open wait is about, when the newest such wait was
+  /// set, and whether one of those waits needs the PR read at the pending
+  /// rate. A deploy wait that names a service doesn't need it once the PR
+  /// merged, because the service's state file decides the wait.
+  func waitedOn(_ interest: Interest) -> [String: (created: Int64, pending: Bool)] {
+    var waited: [String: (created: Int64, pending: Bool)] = [:]
     for (session, wait) in interest.waits {
-      if let id = prId(of: wait, session: session.id) { waited[id] = max(waited[id] ?? 0, wait.created) }
+      guard let id = prId(of: wait, session: session.id) else { continue }
+      let settled = wait.kind == .deploy && wait.service != nil && prs[id]?.pr.state == .merged
+      let last = waited[id]
+      waited[id] = (max(last?.created ?? 0, wait.created), (last?.pending ?? false) || !settled)
     }
     return waited
   }

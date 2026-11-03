@@ -32,6 +32,21 @@ import Testing
 
   // MARK: The resolution order
 
+  /// A deploy wait is usually set after its PR merged, so an earlier merge
+  /// counts. An earlier PR of a reused branch that closed without merging
+  /// still doesn't.
+  @Test func aDeployWaitSkipsOnlyAPRThatClosedBeforeItWasSet() throws {
+    var w = wait()
+    w.created = try #require(Transcript.milliseconds("2026-10-24T00:00:00Z"))
+    var closed = pr(.closed)
+    closed.closedAt = "2026-10-23T00:00:00Z"
+    var merged = pr()
+    merged.mergedAt = "2026-10-23T00:00:00Z"
+
+    #expect(w.finishedBeforeSet(closed))
+    #expect(!w.finishedBeforeSet(merged))
+  }
+
   @Test(arguments: ["PostHog/posthog", "PostHog/charts", "PostHog/posthog.com"], [nil, "feature-flags"])
   func anOpenPRKeepsTheWaitOpen(repo: String, service: String?) throws {
     let w = wait(service: service)
@@ -283,7 +298,7 @@ import Testing
     #expect(outcome == "the deploy to prod-us failed")
   }
 
-  @Test(arguments: [DeployState.pending, .deploying, .unknown])
+  @Test(arguments: [DeployState.pending, .deploying, .unknown, .offBranch])
   func aFailedRegionResolvesWhileTheOtherIsStillGoing(other: DeployState) {
     let w = wait("prod", service: "feature-flags")
     let environments: [DeployEnvironment: EnvironmentDeploy] = [

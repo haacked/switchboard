@@ -247,6 +247,91 @@ func deployResponse(_ name: String) throws -> String {
     #expect(github.restRequests(to: DeployPollerTests.jobsPath).count == 2)
   }
 
+  /// The last read of the state file can't show what happened after a newer
+  /// wait was set, so that wait's service is read again at once.
+  @Test func aWaitSetSinceTheLastReadOfItsServiceIsCheckedAtOnce() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    try serveFeatureFlags(github, jobs: try flagsJobs([DeployPollerTests.prodEUSync: ("in_progress", nil)]))
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    try sbd.advanceClock(1_000)
+
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags", "--env", "prod-us")
+
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    #expect(github.restRequests(to: DeployPollerTests.statePath).count == 2)
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  @Test func anUnreadableStateFileKeepsTheWaitOpen() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    github.route(DeployPollerTests.statePath, contentType: "text/plain; charset=utf-8", "not a state file\n")
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
+  /// State-deploy.yml starts a little after the state file changes, so a
+  /// check can find no run yet. The next check looks again.
+  @Test func aChartsRunThatDoesntExistYetIsReadOnTheNextCheck() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    try serveFeatureFlags(github, jobs: try flagsJobs())
+    let runs = "\(DeployPollerTests.runsPath)?head_sha=\(DeployPollerTests.chartsCommit)"
+    github.route(runs, #"{"total_count":0,"workflow_runs":[]}"#)
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    let misses = github.restRequests(to: DeployPollerTests.runsPath).count
+
+    try serveFeatureFlags(github, jobs: try flagsJobs())
+    try sbd.advanceClock(DeployPollerTests.deployMs)
+
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    #expect(github.restRequests(to: DeployPollerTests.runsPath).count > misses)
+  }
+
+  /// A merged PR can't change a named service's deploy wait, so after the
+  /// read that follows the wait, the PR polls at the idle rate.
+  @Test func aNamedServicesWaitDoesntReadItsMergedPRAtThePendingRate() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    try serveFeatureFlags(github, jobs: try flagsJobs([DeployPollerTests.prodEUSync: ("in_progress", nil)]))
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    let reads = github.requests.filter { $0.kind == "status" }.count
+
+    try sbd.advanceClock(30_000)
+    try sbd.poll()
+
+    #expect(github.requests.filter { $0.kind == "status" }.count == reads)
+  }
+
+  /// GitHub counts REST and GraphQL against separate quotas. Other `gh` calls
+  /// with the same token spend the REST one.
+  @Test func aRESTRateLimitDoesntPauseTheGraphQLReads() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    github.route(DeployPollerTests.statePath, status: 403, #"{"message":"API rate limit exceeded for user ID 1."}"#)
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+    #expect(try sbd.poll()["error"]?.string?.contains("rate limit") == true)
+    let before = github.requests.count
+
+    let result = try sbd.poll(all: true)
+
+    #expect(github.requests.count > before)
+    #expect(result["error"]?.string?.contains("paused after a GitHub core rate limit") == true)
+    #expect(github.restRequests(to: DeployPollerTests.statePath).count == 1)
+  }
+
   @Test func aWaitStaysOpenWhileTheDeployedCommitLacksTheMerge() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
@@ -337,7 +422,11 @@ func deployResponse(_ name: String) throws -> String {
 
     try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "duckgres")
 
-    #expect(try sbd.poll()["resolved"]?.int == 1)
+    let result = try sbd.poll()
+
+    #expect(result["resolved"]?.int == 1)
+    #expect(result["error"] == nil)
+    #expect(!github.restRequests.contains { $0.path.contains("/compare/") })
     try resumed(
       sbd, s,
       with: "the session's PR to reach prod in duckgres: duckgres deploys from PostHog/duckgres, not PostHog/posthog.")

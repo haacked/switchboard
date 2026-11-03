@@ -25,6 +25,12 @@ extension ServiceDeployState {
   public func needsSync(in environment: DeployEnvironment) -> Bool {
     environment == .dev || !requiresProdApproval
   }
+
+  /// Whether the service builds from `repository`. A state file that names no
+  /// repository builds from any.
+  public func builds(from repository: String) -> Bool {
+    self.repository.map { Wait.sameRepository($0, repository) } ?? true
+  }
 }
 
 extension DeployState {
@@ -73,17 +79,17 @@ extension Wait {
   }
 
   /// What happened, when a deploy wait that names a service can resolve, or
-  /// nil while it stays open. `service` is the parsed state file, or nil when
+  /// nil while it stays open. `state` is the parsed state file, or nil when
   /// PostHog/charts has no state file for the service. `environments` holds
   /// each environment that the poller could decide. A missing entry keeps the
   /// wait open.
   public func serviceDeployResolution(
-    _ service: ServiceDeployState?, pr: SwitchboardCore.PullRequest,
+    _ state: ServiceDeployState?, pr: SwitchboardCore.PullRequest,
     environments: [DeployEnvironment: EnvironmentDeploy]
   ) -> String? {
-    let name = self.service ?? ""
-    guard let service else { return "\(Wait.chartsRepository) has no state/\(name).yaml" }
-    if let repository = service.repository, !Wait.sameRepository(repository, pr.repo) {
+    let name = service ?? ""
+    guard let state else { return "\(Wait.chartsRepository) has no state/\(name).yaml" }
+    if !state.builds(from: pr.repo), let repository = state.repository {
       return "\(name) deploys from \(repository), not \(pr.repo)"
     }
     let named = deployEnvironments
