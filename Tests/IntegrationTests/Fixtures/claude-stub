@@ -18,13 +18,12 @@
 #                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
 #   clear <uuid>     switches to another conversation, as /clear does
-#   linger <n>       waits n s after SIGTERM before it exits, and ignores
-#                    SIGHUP, so closing its pane does not end it sooner
+#   linger <n>       waits n s after SIGTERM before it exits. A second
+#                    SIGTERM does not restart the wait
 #   lag ...          waits 1 s before it reports the prompt, which keeps the
 #                    message in flight. lag held waits until
 #                    $SB_HOME/report exists instead
-#   onterm <file>    writes <file> in its folder first when SIGTERM or SIGHUP
-#                    arrives
+#   onterm <file>    writes <file> in its folder first when SIGTERM arrives
 #   perm <command>   asks permission to run a Bash command
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
@@ -455,13 +454,10 @@ turn() {
     ;;
   onterm*)
     onterm=${p#onterm }
-    # Closing the pane sends SIGHUP, which can arrive before the TERM trap runs.
-    trap 'echo stopped >"$onterm"; exit 129' HUP
     reply="I'll write $onterm when I stop."
     ;;
   linger*)
     linger=${p#linger }
-    trap '' HUP
     reply="I'll linger $linger s when I stop."
     ;;
   perm*)
@@ -488,7 +484,7 @@ case $source:$found in
 startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
 resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
 esac
-trap '[ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
+trap 'trap "" TERM; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
 play "$source"

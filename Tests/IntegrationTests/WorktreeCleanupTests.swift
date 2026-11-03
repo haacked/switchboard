@@ -415,14 +415,15 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
   }
 
   /// A claude that has not exited could still write to the folder after the second check. The
-  /// stub outlives the first 5 s wait and exits within the retry's wait. The retry finds no
-  /// claude pane. Only the pid that the refusal kept makes it wait.
+  /// stub outlives the first 5 s wait and exits within the retry's wait. The refusal leaves the
+  /// Claude pane open, which is how the retry finds that claude.
   @Test func refusesAClaudeThatHasNotExitedAfterTheWait() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)
     try sbd.sb("send", s.id, "linger 7")
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 7 s when I stop." }
     let pid = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    let terminals = try sbd.client.terminals(s.id)
 
     let r = try sbd.cleanup(s.id)
 
@@ -433,6 +434,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try sbd.hasBranch(repo, branch))
     #expect(try sbd.count("cleanup", s.id) == 0)
     #expect(Processes.exists(pid))
+    #expect(try tmuxHas(terminals, terminals.claude))
 
     let retry = try sbd.cleanup(s.id)
 
@@ -440,19 +442,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(!Processes.exists(pid))
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
     #expect(try sbd.count("cleanup", s.id) == 1)
-  }
-
-  @Test func waitsForAClaudeThatExitsWithinTheWait() throws {
-    let github = try FakeGitHub()
-    let (sbd, repo, s) = try finishedSession(github)
-    try sbd.sb("send", s.id, "linger 2")
-    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 2 s when I stop." }
-
-    let r = try sbd.cleanup(s.id)
-
-    #expect(r.status == 0, Comment(rawValue: r.stderr))
-    #expect(!FileManager.default.fileExists(atPath: s.cwd))
-    #expect(try !sbd.hasBranch(repo, branch))
+    #expect(try !tmuxHas(terminals, terminals.claude))
   }
 
   @Test func cleanupDeletesTheIgnoredNamesThatConfigLists() throws {

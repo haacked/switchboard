@@ -6,9 +6,9 @@ extension Service {
   /// and keeps the session in Done. Every check of `checkCleanup` runs first,
   /// and a turn that is running also refuses, so a refusal changes nothing.
   /// The checks run again after claude exits and the panes close. A claude
-  /// that has not exited 5 s after SIGTERM also refuses. A later cleanup
-  /// waits for that claude again. A refusal at that point leaves the session,
-  /// the folder, and the branch, with the panes closed.
+  /// that has not exited 5 s after SIGTERM refuses. Its pane stays open, so
+  /// that a later cleanup finds it. A refusal at that point leaves the
+  /// session, the folder, and the branch.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
   /// keeps the branch and throws.
@@ -29,23 +29,16 @@ extension Service {
       }
       try requireNoTurn(e)
       install(fresh)
-      var pid = exitingClaudes[session.id]
-      if case .running(let running) = claudeState(session.id) {
-        pid = running
-        kill(pid_t(running), SIGTERM)
-      }
-      host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
+      guard case .running(let pid) = claudeState(session.id) else { return nil }
+      kill(pid_t(pid), SIGTERM)
       return pid
     }
     // claude can write to the folder until it exits. `worktree remove` deletes ignored files.
-    if let claudePid {
-      let gone = exited(claudePid, within: 5)
-      queue.sync { exitingClaudes[session.id] = gone ? nil : claudePid }
-      if !gone {
-        throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
-      }
+    if let claudePid, !Processes.waitForExit([claudePid], seconds: 5).isEmpty {
+      throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
     }
+    host.kill(paneName(session.id, .claude))
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
     var branchError: Error?
@@ -125,14 +118,5 @@ extension Service {
     if e.facts.turnRunning {
       throw APIError("\(e.session.id) is running a turn. Clean it up once the turn ends.")
     }
-  }
-
-  private func exited(_ pid: Int, within seconds: TimeInterval) -> Bool {
-    let deadline = Date().addingTimeInterval(seconds)
-    while Processes.exists(pid) {
-      if Date() >= deadline { return false }
-      usleep(50_000)
-    }
-    return true
   }
 }
