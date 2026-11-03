@@ -111,13 +111,9 @@ new_session() {
 # What the stand-in receives, in order: a b c, Return, Ctrl-C, Option-b, Up,
 # Down, Left, Backspace, Escape, Tab, Shift-Tab, x, a dead key followed by e
 # (é), and a bracketed paste of two lines. Marked text and modifier keys on
-# their own send nothing. Shift-Tab is ESC [ Z. SwiftTerm sends a pasted
-# newline as a line feed. The check also accepts a carriage return.
-expected() { # <newline byte>
-  echo "61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 1b 5b 5a 78 c3 a9 1b 5b 32 30 30 7e" \
-    "70 61 73 74 65 20 6c 69 6e 65 20 6f 6e 65 $1 70 61 73 74 65 20 6c 69 6e 65 20 74 77 6f $1 1b 5b 32 30 31 7e"
-}
-accepted=("$(expected 0a)" "$(expected 0d)")
+# their own send nothing. Shift-Tab is ESC [ Z. A pasted newline is a line feed.
+expected="61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 1b 5b 5a 78 c3 a9 1b 5b 32 30 30 7e"
+expected+=" 70 61 73 74 65 20 6c 69 6e 65 20 6f 6e 65 0a 70 61 73 74 65 20 6c 69 6e 65 20 74 77 6f 0a 1b 5b 32 30 31 7e"
 
 check_terminal() {
   check=terminal
@@ -156,8 +152,8 @@ check_terminal() {
 
   local got
   got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
-  if ! printf '%s\n' "${accepted[@]}" | grep -Fxq -- "$got"; then
-    printf 'accepted: %s\n' "${accepted[@]}" >&2
+  if [ "$got" != "$expected" ]; then
+    echo "expected: $expected" >&2
     echo "received: $got" >&2
     fail "the stand-in received other bytes"
   fi

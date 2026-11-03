@@ -8,21 +8,7 @@ import SwiftTerm
 @MainActor
 enum TerminalSelfTest {
   static func start(_ model: BoardModel) {
-    let env = ProcessInfo.processInfo.environment
-    if let count = env["SB_TERMINAL_CYCLE"].flatMap(Int.init) {
-      let seconds = Double(env["SB_TERMINAL_CYCLE_SECONDS"] ?? "1.5") ?? 1.5
-      Task { @MainActor in
-        try? await Task.sleep(nanoseconds: 4_000_000_000)
-        for _ in 0..<(env["SB_TERMINAL_CYCLE_REPEAT"].flatMap(Int.init) ?? 1) {
-          for session in model.sessions.prefix(count) {
-            model.selection = session.id
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
-          }
-        }
-        log("cycle done pid \(ProcessInfo.processInfo.processIdentifier) sessions \(min(count, model.sessions.count))")
-      }
-    }
-    guard let folder = env["SB_TERMINAL_TEST"] else { return }
+    guard let folder = ProcessInfo.processInfo.environment["SB_TERMINAL_TEST"] else { return }
     Task { @MainActor in
       await waitForAttach(model)
       await run(folder: folder)
