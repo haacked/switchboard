@@ -139,6 +139,10 @@ final class FakeGitHub {
     lock.withLock { _ = failingPRs[query, default: []].insert(number) }
   }
 
+  func recover(_ number: Int, in query: PRQuery = .status) {
+    lock.withLock { _ = failingPRs[query, default: []].remove(number) }
+  }
+
   /// Makes the comment's node in a body query fail with an internal error.
   func fail(comment id: String) {
     lock.withLock { _ = failingComments.insert(id) }

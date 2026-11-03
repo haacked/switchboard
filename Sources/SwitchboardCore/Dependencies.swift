@@ -85,10 +85,10 @@ public enum Dependencies {
 
   /// A line that starts with `depends on`, after any markdown list, quote, or
   /// emphasis marks.
-  static let line = try! NSRegularExpression(pattern: #"^[\s>*_-]*depends on\b"#, options: [.caseInsensitive])
+  static let dependsOnLine = try! NSRegularExpression(pattern: #"^[\s>*_-]*depends on\b"#, options: [.caseInsensitive])
   /// A PR as a URL, `owner/name#N`, or `#N`, as `claude-sessions`' `pr_refs`
   /// finds it. `Wait.PullRequest(parsing:)` reads each match.
-  static let ref = try! NSRegularExpression(
+  static let prRef = try! NSRegularExpression(
     pattern: #"https?://github\.com/[\w.-]+/[\w.-]+/pull/[0-9]+|(?:[\w.-]+/[\w.-]+)?#[0-9]+"#)
 
   /// The PRs that the body's `Depends on` lines name, in order and without
@@ -101,9 +101,9 @@ public enum Dependencies {
     for raw in body.split(whereSeparator: \.isNewline) {
       let text = String(raw)
       let whole = NSRange(text.startIndex..., in: text)
-      guard line.firstMatch(in: text, range: whole) != nil else { continue }
+      guard dependsOnLine.firstMatch(in: text, range: whole) != nil else { continue }
       let deploy = text.range(of: "deploy", options: .caseInsensitive) != nil
-      for match in ref.matches(in: text, range: whole) {
+      for match in prRef.matches(in: text, range: whole) {
         guard let range = Range(match.range, in: text), let pr = Wait.PullRequest(parsing: String(text[range])) else {
           continue
         }

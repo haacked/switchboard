@@ -61,6 +61,14 @@ private func refs(_ body: String) -> [String] {
     #expect(refs("Depends on #5 (deployed)\nDepends on #6") == ["acme/widgets#5 deploy", "acme/widgets#6"])
   }
 
+  @Test func repeatBecomesADeployRefWhenALaterLineIsOne() {
+    #expect(refs("Depends on #5\nDepends on #5 (deployed)") == ["acme/widgets#5 deploy"])
+  }
+
+  @Test func refsWhoseRepoDiffersOnlyInCaseCollapse() {
+    #expect(refs("Depends on posthog/posthog#5\nDepends on PostHog/posthog#5") == ["posthog/posthog#5"])
+  }
+
   /// GitHub stores bodies that people type in its web editor with CRLF line ends.
   @Test func crlfLineEndsSplitTheLines() {
     #expect(refs("Depends on #5\r\nDepends on #6 (deployed)\r\n") == ["acme/widgets#5", "acme/widgets#6 deploy"])

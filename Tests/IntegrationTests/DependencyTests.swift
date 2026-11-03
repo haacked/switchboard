@@ -3,21 +3,6 @@ import SwitchboardCore
 import Testing
 
 extension Instance {
-  /// Like `session(in:branch:)`, with the git repo in `folder`, so that two
-  /// sessions can work in the same GitHub repo.
-  func session(in repo: String, branch: String, folder: String) throws -> SessionSummary {
-    let path = "\(home.path)/\(folder)"
-    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-    try git(path, "init", "-q", "-b", "main")
-    try git(
-      path, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty",
-      "-m", "first")
-    try git(path, "remote", "add", "origin", "https://github.com/\(repo).git")
-    try git(path, "checkout", "-q", "-b", branch)
-    let s = try client.call("new", ["path": .string(path), "prompt": "hello"], as: SessionSummary.self)
-    return try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-  }
-
   /// The first poll reads the session's PR and learns its body refs. The
   /// second poll reads the PRs that those refs name.
   func pollTwice() throws {
@@ -339,7 +324,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
         Dependency(via: .body, repo: posthog, number: 122179, deploy: true, state: .merged, deployed: true)
       ])
     #expect(try sbd.get(s.id).reason == readTheReply)
-    #expect(try sbd.sb("get", s.id).contains("  depends: #122179 merged, deploy"))
+    #expect(try sbd.sb("get", s.id).contains("  depends: #122179 merged, deployed\n"))
   }
 
   @Test func deployToBothProdRegionsResumesTheSession() throws {
@@ -361,6 +346,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
     #expect(try sbd.get(s.id).state == .waiting)
     #expect(try sbd.get(s.id).reason == "waits on the deploy of #122179")
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
+    #expect(try sbd.sb("get", s.id).contains("  depends: #122179 merged, deploy\n"))
 
     github.edit(comment: deployComment, body: deployed, at: "2026-10-23T22:34:45Z")
     try sbd.poll(all: true)
@@ -368,6 +354,51 @@ private func body(_ github: FakeGitHub, _ text: String) {
     try sbd.waitFor("the resume message") { try !sbd.messagesFromSbd(s.id).isEmpty }
     #expect(
       try sbd.messagesFromSbd(s.id) == ["Switchboard: #122179 deployed to prod, so #122896 no longer waits on it."])
+  }
+
+  @Test func failedReadAfterARestartKeepsTheEdgeAndStillResumesTheSession() throws {
+    let github = try FakeGitHub()
+    body(github, "Depends on #122953")
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: posthog, branch: dependentBranch)
+    try sbd.pollTwice()
+    let open = [Dependency(via: .body, repo: posthog, number: 122953, state: .open)]
+    #expect(try sbd.edges(s.id) == open)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+    github.fail(122953)
+    try sbd.poll(all: true)
+    #expect(try sbd.edges(s.id) == open)
+
+    github.recover(122953)
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+
+    try sbd.waitFor("the resume message") { try !sbd.messagesFromSbd(s.id).isEmpty }
+    #expect(try sbd.messagesFromSbd(s.id) == ["Switchboard: #122953 merged, so #122896 no longer waits on it."])
+  }
+
+  @Test func failedDeployCommentReadAfterARestartSendsNoSecondMessage() throws {
+    let github = try FakeGitHub()
+    body(github, "Depends on #122179 (deployed)")
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: posthog, branch: dependentBranch)
+    try sbd.pollTwice()
+    let deployed = [Dependency(via: .body, repo: posthog, number: 122179, deploy: true, state: .merged, deployed: true)]
+    #expect(try sbd.edges(s.id) == deployed)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+    github.fail(comment: deployComment)
+    try sbd.poll(all: true)
+    #expect(try sbd.edges(s.id) == deployed)
+
+    github.recover(comment: deployComment)
+    try sbd.poll(all: true)
+    sleep(1)
+
+    #expect(try sbd.messagesFromSbd(s.id).isEmpty)
   }
 
   @Test func closedDependencyNeedsYou() throws {
