@@ -90,7 +90,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// background jobs, not on the session. An `auto-continue` event records
   /// sbd's own try, and the `sent` event of a continue that worked is the
   /// activity. They do not hold off the idle stop or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup", "auto-continue"]
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup", AutoContinue.eventKind]
 
   public init() {}
 

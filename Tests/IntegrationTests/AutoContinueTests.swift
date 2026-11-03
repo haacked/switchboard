@@ -346,10 +346,9 @@ extension Instance {
     }
     try sbd.sb("autocontinue", "on")
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
-    try sbd.waitFor(
+    let continued = try sbd.waitFor(
       "one continue", fetch: { try [a, b].filter { try !sbd.autoContinues($0.id).isEmpty } },
       until: { !$0.isEmpty })
-    let continued = try [a, b].filter { try !sbd.autoContinues($0.id).isEmpty }
     #expect(continued.count == 1)
     let held = continued.first?.id == a.id ? b : a
     #expect(try sbd.blocker(held.id) == "the live cap of 1 is full")

@@ -16,6 +16,8 @@ private func passing() -> AutoContinueInput {
     event("Stop", now - 2 * hourMs + 1000, ["last_assistant_message": "I wrote the parser. Want me to run the tests?"]),
   ])
   f.lastTouched = now - 2 * hourMs
+  // The offer came after every continue that a test sets.
+  f.stateSince = now - 5 * minuteMs
   var input = AutoContinueInput(session: session(), facts: f, verdict: offer, now: now)
   input.live = 1
   input.account = "/Users/me/.claude"
@@ -149,6 +151,15 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(long == "you touched it 1200 s ago")
   }
 
+  @Test func aContinueSinceTheOfferHoldsItBack() {
+    let reason = blocker { $0.facts.autoContinues = [now - minuteMs] }
+    #expect(reason == "already continued this offer")
+  }
+
+  @Test func aContinueBeforeTheOfferPasses() {
+    #expect(blocker { $0.facts.autoContinues = [now - 10 * minuteMs] } == nil)
+  }
+
   @Test func perHourContinuesWithinTheLastHourHoldItBack() {
     let reason = blocker { $0.facts.autoContinues = [now - 30 * minuteMs, now - 20 * minuteMs, now - 10 * minuteMs] }
     #expect(reason == "continued 3 times in the last hour")
@@ -240,7 +251,8 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
       ("claude is starting or stopping", { $0.process = .stopped }),
       ("on screen", { $0.onScreen = false }),
       ("you touched it 5 s ago", { $0.facts.lastTouched = 0 }),
-      ("continued 3 times in the last hour", { $0.facts.autoContinues = [] }),
+      ("continued 3 times in the last hour", { $0.facts.autoContinues = [now - minuteMs] }),
+      ("already continued this offer", { $0.facts.stateSince = now }),
       ("the live cap of 12 is full", { $0.live = 0 }),
       ("no quota left for /a", { $0.hasBudget = true }),
     ]

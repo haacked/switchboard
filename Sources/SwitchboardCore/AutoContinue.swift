@@ -126,6 +126,9 @@ public enum AutoContinue {
     if touched > 0, input.now - touched < quiet { return "you touched it \((input.now - touched) / 1000) s ago" }
     let recent = f.autoContinues.filter { input.now - $0 < hourMs }.count
     if recent >= s.perHour { return "continued \(recent) times in the last hour" }
+    // A continue leaves the state as it was until claude reports its prompt.
+    // The in-flight window alone can't stop a second continue.
+    if let last = f.autoContinues.last, last >= f.stateSince { return "already continued this offer" }
     if input.process == .stopped, input.live >= input.liveCap { return "the live cap of \(input.liveCap) is full" }
     if !input.hasBudget { return "no quota left for \(input.account)" }
     return nil
