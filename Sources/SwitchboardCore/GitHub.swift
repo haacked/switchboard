@@ -13,6 +13,9 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
   /// How often a settled PR polls, and how often sbd looks up a branch that
   /// had no PR.
   public var idlePollSeconds: Double = 300
+  /// How often a named service's deploy state is read while a deploy wait
+  /// names the service.
+  public var deployPollSeconds: Double = 120
 
   /// A timer cycle can start a few ms less than one period after the last
   /// one. Each interval therefore ends half a timer period early, so a PR
@@ -20,6 +23,7 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
   var slackMs: Int64 { Int64(pollSeconds * 500) }
   public var pendingMs: Int64 { Int64(pollSeconds * 1000) - slackMs }
   public var idleMs: Int64 { Int64(idlePollSeconds * 1000) - slackMs }
+  public var deployMs: Int64 { Int64(deployPollSeconds * 1000) - slackMs }
 
   public init() {}
 
@@ -30,6 +34,7 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
     url = try c.decodeIfPresent(String.self, forKey: .url) ?? d.url
     pollSeconds = try c.decodeIfPresent(Double.self, forKey: .pollSeconds) ?? d.pollSeconds
     idlePollSeconds = try c.decodeIfPresent(Double.self, forKey: .idlePollSeconds) ?? d.idlePollSeconds
+    deployPollSeconds = try c.decodeIfPresent(Double.self, forKey: .deployPollSeconds) ?? d.deployPollSeconds
   }
 }
 
@@ -54,7 +59,7 @@ public enum GitHub {
   /// The authors whose comment bodies the poller reads: Trunk's queue status
   /// and PostHog's deploy table. Only a GitHub App's login ends in [bot], so
   /// no user can pass for either.
-  public static let bodyAuthors: Set<String> = [TrunkComments.author, "deployment-status-posthog[bot]"]
+  public static let bodyAuthors: Set<String> = [TrunkComments.author, DeployComment.author]
 
   static let notFound = "NOT_FOUND"
 
@@ -63,7 +68,7 @@ public enum GitHub {
       rateLimit { cost }
       nodes(ids: $ids) {
         ... on PullRequest {
-          id number url title state isDraft mergedAt closedAt
+          id number url title state isDraft mergedAt closedAt mergeCommit { oid }
           headRefName headRefOid baseRefName mergeable reviewDecision
           repository { nameWithOwner defaultBranchRef { name } }
           labels(first: 20) { nodes { name } }
@@ -134,7 +139,7 @@ public enum GitHub {
       labels: nodes(node["labels"]).compactMap { $0["name"]?.string },
       checks: nodes(node["commits"]).first?["commit"]?["statusCheckRollup"]?["state"]?.string,
       mergedAt: node["mergedAt"]?.string, closedAt: node["closedAt"]?.string,
-      reviewRequests: reviewRequests)
+      reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string)
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }
@@ -217,6 +222,11 @@ public enum GitHub {
       response?["errors"]?.array?.contains { $0["type"]?.string == "RATE_LIMITED" } == true
       || (refused && (retry != nil || message.contains("rate limit")))
     return (limited, (limited || spent) ? (retry ?? 60) : nil)
+  }
+
+  /// The error message of a response, on one line.
+  public static func message(_ response: JSON?) -> String {
+    oneLine(response?["message"]?.string ?? response?["errors"]?.array?.first?["message"]?.string ?? "", max: 120)
   }
 
   /// GitHub reports a deleted account's author as null and shows it as ghost.

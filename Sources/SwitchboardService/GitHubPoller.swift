@@ -13,8 +13,11 @@ final class GitHubPoller {
   private var timer: DispatchSourceTimer?
 
   private var token: String?
-  /// After GitHub's rate limit, no request goes out before this time.
-  private var pausedUntil: Int64 = 0
+  /// After GitHub's rate limit, no request to that quota goes out before this
+  /// time. GitHub counts GraphQL and REST (`core`) requests separately. Other
+  /// `gh` calls with the same token spend `core`.
+  private var graphQLPausedUntil: Int64 = 0
+  private var restPausedUntil: Int64 = 0
   var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id, with their comments from
   /// `GitHub.bodyAuthors`.
@@ -29,6 +32,7 @@ final class GitHubPoller {
   /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
   /// when a later read shows the same head commit and outcome.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
+  var deploys = Deploys()
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -146,6 +150,7 @@ final class GitHubPoller {
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
       try readPRs(all: all, now: now, waited: waitedOn(interest), interest: interest, stats: &stats)
+      try checkDeploys(interest, all: all, now: now, stats: &stats)
     } catch {
       failure = "\(error)"
       logLine("github: \(error)")
@@ -158,7 +163,8 @@ final class GitHubPoller {
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
-    if pausedUntil > nowMs() { result["pausedUntil"] = .number(Double(pausedUntil)) }
+    let paused = max(graphQLPausedUntil, restPausedUntil)
+    if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
     return .object(result)
   }
 
@@ -328,17 +334,15 @@ final class GitHubPoller {
   /// that GitHub reports NOT_FOUND, as after a deletion, leaves its sessions,
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
-  private func readPRs(all: Bool, now: Int64, waited: [String: Int64], interest: Interest, stats: inout Stats)
-    throws
-  {
-    // A PR with an open wait polls like a pending one. It also polls at once
-    // when the wait is newer than the last read, since that read can't show
-    // what happened after the wait was set.
+  private func readPRs(all: Bool, now: Int64, waited: Waited, interest: Interest, stats: inout Stats) throws {
+    // A PR in `waited.pending` polls like a pending PR. A PR with any open
+    // wait also polls at once when the wait is newer than the last read. That
+    // read can't show what happened after the wait was set.
     let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {
-      all || (waited[$0] ?? 0) > (prs[$0]?.polled ?? 0)
+      all || (waited.created[$0] ?? 0) > (prs[$0]?.polled ?? 0)
         || GitHub.isDue(
           prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs,
-          idleMs: waited[$0] == nil ? settings.idleMs : settings.pendingMs)
+          idleMs: waited.pending.contains($0) ? settings.pendingMs : settings.idleMs)
     }
     var stacked: [String] = []
     var gone: Set<String> = []
@@ -405,37 +409,63 @@ final class GitHubPoller {
   private func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
 
   /// Sends one GraphQL request and returns the response, whose `data` isn't
-  /// null. A 401 gets a new token from gh and one retry. A rate limit pauses
-  /// the poller for as long as `GitHub.rateLimit` says.
+  /// null.
   private func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
-    if pausedUntil > nowMs() { throw APIError("paused after a GitHub rate limit") }
-    var (status, headers, body) = try post(query, variables)
-    stats.requests += 1
-    if status == 401 {
-      token = nil
-      (status, headers, body) = try post(query, variables)
-      stats.requests += 1
-    }
-    let json = JSON.parse(String(decoding: body, as: UTF8.self))
-    let message = oneLine(json?["message"]?.string ?? json?["errors"]?.array?.first?["message"]?.string ?? "", max: 120)
-    let limit = GitHub.rateLimit(status: status, headers: headers, response: json, now: Date().timeIntervalSince1970)
-    if let pause = limit.pause { pausedUntil = nowMs() + Int64(pause * 1000) }
-    if limit.limited { throw APIError("GitHub rate limit: \(message)") }
+    var req = try apiRequest("graphql")
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = Data(JSON.object(["query": .string(query), "variables": variables]).text.utf8)
+    let (status, _, _, json) = try send(req, stats: &stats)
     guard status == 200, let json, let data = json["data"], data != .null else {
-      throw APIError("GitHub answered \(status) \(message)")
+      throw APIError("GitHub answered \(status) \(GitHub.message(json))")
     }
-    if json["errors"] != nil { logLine("github: \(message)") }
+    if json["errors"] != nil { logLine("github: \(GitHub.message(json))") }
     stats.points += data["rateLimit"]?["cost"]?.int ?? 0
     return json
   }
 
-  private func post(_ query: String, _ variables: JSON) throws -> (Int, [String: String], Data) {
-    guard let url = URL(string: settings.url + "/graphql") else { throw APIError("bad github url \(settings.url)") }
-    var req = URLRequest(url: url, timeoutInterval: 30)
-    req.httpMethod = "POST"
-    req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.httpBody = Data(JSON.object(["query": .string(query), "variables": variables]).text.utf8)
+  /// A request to `path` under the API base.
+  func apiRequest(_ path: String) throws -> URLRequest {
+    guard let url = URL(string: "\(settings.url)/\(path)") else { throw APIError("bad github url \(settings.url)") }
+    // URLSession's cache would answer a conditional request itself and hide the 304.
+    var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+    req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+    return req
+  }
+
+  /// Sends the request with the token, and returns the status, the headers
+  /// with lowercase names, the body, and the body as JSON. A 401 gets a new
+  /// token from gh and one retry. A rate limit pauses the requests to the
+  /// same quota, GraphQL or REST, for as long as `GitHub.rateLimit` says.
+  func send(_ request: URLRequest, stats: inout Stats) throws -> (
+    status: Int, headers: [String: String], body: Data, json: JSON?
+  ) {
+    let graphQL = request.url?.lastPathComponent == "graphql"
+    if (graphQL ? graphQLPausedUntil : restPausedUntil) > nowMs() {
+      throw APIError("paused after a GitHub \(graphQL ? "GraphQL" : "core") rate limit")
+    }
+    func attempt() throws -> (Int, [String: String], Data) {
+      var req = request
+      req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
+      stats.requests += 1
+      return try transfer(req)
+    }
+    var (status, headers, body) = try attempt()
+    if status == 401 {
+      token = nil
+      (status, headers, body) = try attempt()
+    }
+    let json = JSON.parse(String(decoding: body, as: UTF8.self))
+    let limit = GitHub.rateLimit(status: status, headers: headers, response: json, now: Date().timeIntervalSince1970)
+    if let pause = limit.pause {
+      let until = nowMs() + Int64(pause * 1000)
+      if graphQL { graphQLPausedUntil = until } else { restPausedUntil = until }
+    }
+    if limit.limited { throw APIError("GitHub rate limit: \(GitHub.message(json))") }
+    return (status, headers, body, json)
+  }
+
+  private func transfer(_ req: URLRequest) throws -> (Int, [String: String], Data) {
     let done = DispatchSemaphore(value: 0)
     var result: Result<(Int, [String: String], Data), Error> = .failure(APIError("no answer"))
     URLSession.shared.dataTask(with: req) { data, response, error in

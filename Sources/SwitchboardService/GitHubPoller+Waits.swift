@@ -4,7 +4,7 @@ import SwitchboardCore
 /// What the PR kinds of waits and the merge triggers of follow-ups need from a
 /// poll.
 extension GitHubPoller {
-  static let waitKinds: Set<Wait.Kind> = [.ci, .review, .botReview, .approval, .merge, .queue]
+  static let waitKinds: Set<Wait.Kind> = [.ci, .review, .botReview, .approval, .merge, .queue, .deploy]
 
   /// The open waits that the poller resolves, the PRs that follow-ups wait to
   /// see merge, and the lookup key of each PR they name.
@@ -41,16 +41,24 @@ extension GitHubPoller {
   }
 
   /// The node id of the PR that a wait is about.
-  private func prId(of wait: Wait, session: String) -> String? {
+  func prId(of wait: Wait, session: String) -> String? {
     guard let pr = wait.pr else { return tracked[session]?.prId }
     return key(of: pr, session: session).flatMap { targets[$0]?.prId }
   }
 
-  /// For each PR that an open wait is about, when the newest such wait was set.
-  func waitedOn(_ interest: Interest) -> [String: Int64] {
-    var waited: [String: Int64] = [:]
+  /// For each PR that an open wait is about, when the newest such wait was
+  /// set, and the PRs that one of those waits needs read at the pending rate.
+  struct Waited {
+    var created: [String: Int64] = [:]
+    var pending: Set<String> = []
+  }
+
+  func waitedOn(_ interest: Interest) -> Waited {
+    var waited = Waited()
     for (session, wait) in interest.waits {
-      if let id = prId(of: wait, session: session.id) { waited[id] = max(waited[id] ?? 0, wait.created) }
+      guard let id = prId(of: wait, session: session.id) else { continue }
+      waited.created[id] = max(waited.created[id] ?? 0, wait.created)
+      if wait.readsPRWhilePending(prs[id]?.pr) { waited.pending.insert(id) }
     }
     return waited
   }
@@ -68,8 +76,9 @@ extension GitHubPoller {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
-        case let pr = GitHub.shown(read.pr, keptComments(read.comments), last: nil),
-        let outcome = wait.resolution(of: pr), !(wait.pr == nil && wait.finishedBeforeSet(pr)),
+        case let comments = keptComments(read.comments), case let pr = GitHub.shown(read.pr, comments, last: nil),
+        let outcome = wait.kind == .deploy ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr),
+        !(wait.pr == nil && wait.finishedBeforeSet(pr)),
         confirmed(wait, pr, outcome, polled: read.polled),
         !service.queue.sync(execute: { service.entries[session.id]?.session.done ?? true })
       else { continue }
