@@ -33,12 +33,12 @@ extension Instance {
   static let hourMs: Int64 = 3600 * 1000
 
   /// `liveCap` is a top-level setting. `extra` sets the rest of `autoContinue`.
-  func instance(_ extra: [String: JSON] = [:], liveCap: Int? = nil) throws -> Instance {
+  func instance(_ extra: [String: JSON] = [:], liveCap: Int? = nil, shell: String = "/bin/sh") throws -> Instance {
     var settings: [String: JSON] = ["quietSeconds": .number(Double(AutoContinueTests.quietSeconds))]
     settings.merge(extra) { $1 }
     var config: [String: JSON] = ["autoContinue": .object(settings)]
     if let liveCap { config["liveCap"] = .number(Double(liveCap)) }
-    return try Instance(config: config)
+    return try Instance(shell: shell, config: config)
   }
 
   /// A session whose reply offered a next step, so that it is in Claude can continue.
@@ -324,9 +324,7 @@ extension Instance {
   /// 10 s in-flight window meanwhile. The `lag` message then reaches claude
   /// 1 s after its SessionStart, while ticks run.
   @Test func aSlowStartDoesNotContinueTwice() throws {
-    let sbd = try Instance(
-      shell: Instance.slowShell,
-      config: ["autoContinue": ["quietSeconds": .number(Double(AutoContinueTests.quietSeconds)), "message": "lag"]])
+    let sbd = try instance(["message": "lag"], shell: Instance.slowShell)
     let s = try offerSession(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
