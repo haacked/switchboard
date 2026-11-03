@@ -10,10 +10,15 @@ extension Attention {
   static func finishedPR(_ session: Session, _ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state != .open, waitVerdict(session, facts) == nil else { return nil }
     let what = "#\(pr.number) \(pr.state == .merged ? "merged" : "closed")"
+    if let cleanup = facts.cleanup, cleanup.state == .removed {
+      let removed = cleanup.reason.map { "worktree removed, \($0)" } ?? "worktree and branch removed"
+      return Verdict(state: .done, reason: "\(what); \(removed)")
+    }
     if facts.folderGone { return Verdict(state: .done, reason: "\(what); its folder is gone") }
     guard let dirty = facts.dirty else { return nil }
     if dirty == 0 {
-      return Verdict(state: .done, reason: "\(what); archive the worktree\(facts.turnRunning ? " once it stops" : "")")
+      let next = facts.cleanup?.state == .ready ? "ready for `sb cleanup`" : "archive the worktree"
+      return Verdict(state: .done, reason: "\(what); \(next)\(facts.turnRunning ? " once it stops" : "")")
     }
     if facts.turnRunning { return nil }
     return Verdict(state: .needsYou, reason: "\(what); commit or discard the uncommitted changes", kind: .review)

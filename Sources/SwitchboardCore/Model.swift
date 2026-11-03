@@ -147,6 +147,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var triage: TriageItem?
   /// The Claude account's folder, or nil when the session never recorded one.
   public var account: String?
+  /// Whether `sb cleanup` can remove the worktree of a finished PR, or did.
+  public var cleanup: CleanupStatus?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

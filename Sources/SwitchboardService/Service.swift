@@ -146,6 +146,8 @@ public final class Service {
         return managerRequest()
       case "rm":
         return .success(try remove(request.args))
+      case "cleanup":
+        return .success(try cleanup(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -470,7 +472,7 @@ public final class Service {
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try refuseNotStarted(session)
+    try requireFolder(session)
     let shell = paneName(id, .shell)
     switch snapshot.panes[shell] {
     case nil:
@@ -493,7 +495,7 @@ public final class Service {
   /// next launch.
   func launch(_ id: String, prompt: String?) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try refuseNotStarted(session)
+    try requireFolder(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
     let resume = hasTranscript(session)
     var args = [config.claude]
@@ -680,8 +682,7 @@ public final class Service {
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       let entry = entries[id]!
-      let shared = entries.values.first { $0.session.id != id && $0.session.cwd == entry.session.cwd }
-      return (entry.session, entry.facts.pr, shared?.session.id)
+      return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
     var repo: String?
     var branch: (name: String, tip: String)?
@@ -690,7 +691,8 @@ public final class Service {
       if folderGone {
         repo = try checkGoneWorktree(session, mergedPR: pr?.state == .merged)
       } else {
-        repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
+        repo = try checkWorktreeIsLossless(
+          session, mergedPR: pr?.state == .merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
       }
     }
     if removesBranch {
@@ -726,13 +728,8 @@ public final class Service {
     var branchError: Error?
     if let repo, let branch {
       do {
-        try recheckBranch(repo, branch.name, pr: pr)
-        // A squash merge leaves the branch's commits outside the base branch, so `branch -d` refuses.
-        // Passing the checked tip makes git refuse when a commit landed after the check.
-        _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+        try deleteMergedBranch(repo, branch, pr: pr)
         branchRemoved = true
-        // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
-        _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
       } catch {
         branchError = error
       }
@@ -865,7 +862,7 @@ public final class Service {
   /// Returns the session's branch and its tip, or throws unless the worktree has the branch
   /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
-  private func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
+  func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
     guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
       throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
     }
@@ -893,7 +890,7 @@ public final class Service {
   /// still exists, its tip is the head of the merged PR, and no worktree has it checked out.
   /// Deleting the ref of a checked-out branch breaks that worktree.
   /// A worktree at `path` does not count as having the branch checked out.
-  private func recheckBranch(
+  func recheckBranch(
     _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil
   ) throws {
     guard let pr = mergedPR(pr, of: branch) else {
@@ -907,13 +904,34 @@ public final class Service {
     guard !checkedOut else { throw APIError("\(branch) is checked out in a worktree.") }
   }
 
+  /// Deletes the branch after `recheckBranch` passes. A squash merge leaves
+  /// the branch's commits outside the base branch, so `branch -d` refuses.
+  /// Passing the checked tip makes git refuse when a commit landed after the
+  /// check.
+  func deleteMergedBranch(_ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?) throws {
+    try recheckBranch(repo, branch.name, pr: pr)
+    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+    // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
+    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+  }
+
+  /// Another session that runs in the session's folder.
+  func sharedSession(_ session: Session) -> String? {
+    entries.values.first { $0.session.id != session.id && $0.session.cwd == session.cwd }?.session.id
+  }
+
   /// Returns the session's repo, or throws unless the session's folder is a
   /// linked worktree of the repo that `new` made it from, no other session runs
-  /// in it, it has no uncommitted file, and HEAD is on a remote branch. With a
-  /// merged PR, HEAD may instead be on a local branch, because a squash merge
-  /// leaves the commits on no remote branch and `worktree remove` keeps the
-  /// branch. Any git failure refuses the removal.
-  private func checkWorktreeIsLossless(_ session: Session, mergedPR: Bool, sharedWith: String?) throws -> String {
+  /// in it, it has no uncommitted file and no file whose change git status
+  /// skips, and HEAD is on a remote branch. With a merged PR, HEAD may instead
+  /// be on a local branch, because a squash merge leaves the commits on no
+  /// remote branch and `worktree remove` keeps the branch. `worktree remove`
+  /// deletes ignored files. With `onlyBuildOutputIgnored`, an ignored file that
+  /// is not build output or in `cleanupDeletes` also refuses. Any git failure
+  /// refuses the removal.
+  func checkWorktreeIsLossless(
+    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool
+  ) throws -> String {
     let repo = try worktreeRepo(session)
     if let sharedWith {
       throw APIError(
@@ -924,14 +942,67 @@ public final class Service {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     if entry.locked { throw lockedError(session.cwd) }
-    // The flag keeps status from taking the index lock while claude commits.
-    let status = try gitOutput(session.cwd, ["--no-optional-locks", "status", "--porcelain"])
-    let changed = status.split(separator: "\n").count
-    guard changed == 0 else {
-      throw APIError("\(session.cwd) has uncommitted files (\(changed)). Commit or discard them first.")
+    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored)
+    guard status.changed == 0 else {
+      throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
     }
+    try requireNoHiddenChanges(session.cwd)
+    if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
     return repo
+  }
+
+  /// Throws when a tracked file has git's assume-unchanged or skip-worktree
+  /// flag, because `git status` doesn't list a change to such a file.
+  private func requireNoHiddenChanges(_ cwd: String) throws {
+    let listed = try gitOutput(cwd, ["ls-files", "-v", "-z"])
+    let hidden = listed.split(separator: "\0").filter { $0.first.map { $0.isLowercase || $0 == "S" } ?? false }
+      .map { String($0.dropFirst(2)) }
+    guard hidden.isEmpty else {
+      throw APIError(
+        "\(cwd) has files that git status skips (\(hidden.count)): \(preview(hidden)). Clear their assume-unchanged or skip-worktree flag first."
+      )
+    }
+  }
+
+  /// The number of changed paths, and with `listingIgnored` the ignored
+  /// paths, from one walk of the folder. Listing the ignored paths takes
+  /// about three times as long in posthog/posthog. `matching` lists each
+  /// ignored path without what is inside it, and `-z` leaves names unquoted.
+  /// A rename or copy entry is followed by its source path, which has no
+  /// status of its own.
+  private func readStatus(_ cwd: String, listingIgnored: Bool) throws -> (changed: Int, ignored: [String]) {
+    // The flag keeps status from taking the index lock while claude commits.
+    let args = ["--no-optional-locks", "status", "--porcelain", "-z"] + (listingIgnored ? ["--ignored=matching"] : [])
+    var fields = try gitOutput(cwd, args).split(separator: "\0").makeIterator()
+    var changed = 0
+    var ignored: [String] = []
+    while let field = fields.next() {
+      if field.hasPrefix("!! ") {
+        ignored.append(String(field.dropFirst(3)))
+        continue
+      }
+      changed += 1
+      if field.prefix(2).contains(where: { $0 == "R" || $0 == "C" }) { _ = fields.next() }
+    }
+    return (changed, ignored)
+  }
+
+  /// Throws when one of the folder's ignored paths is neither build output
+  /// nor a name in `cleanupDeletes`.
+  private func requireOnlyBuildOutputIgnored(_ cwd: String, ignored: [String]) throws {
+    let also = Set(config.cleanupDeletes)
+    let kept = ignored.filter { !BuildOutput.contains($0, also: also) }
+    guard kept.isEmpty else {
+      throw APIError(
+        "\(cwd) has ignored files that no build makes again (\(kept.count)): \(preview(kept)). Move or delete them, or add their names to cleanupDeletes in config.json."
+      )
+    }
+  }
+
+  /// The first five paths, and an ellipsis when there are more.
+  private func preview(_ paths: [String]) -> String {
+    paths.prefix(5).joined(separator: ", ") + (paths.count > 5 ? ", …" : "")
   }
 
   // MARK: Processes and the stop rule
@@ -1000,7 +1071,7 @@ public final class Service {
   }
 
   /// Takes a newer snapshot, keeping what `markStarting` set since it was read.
-  private func install(_ s: Snapshot?) {
+  func install(_ s: Snapshot?) {
     if let s, s.taken >= snapshot.taken { snapshot = s }
   }
 
@@ -1141,6 +1212,7 @@ public final class Service {
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir
+    out.cleanup = e.facts.cleanup
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

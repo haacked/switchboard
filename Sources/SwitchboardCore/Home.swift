@@ -83,6 +83,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var branchPrefix = ""
   /// The file that `followup import` reads when the request names none.
   public var followupsFile = "~/dev/haacked/notes/PostHog/Followups.md"
+  /// Names of ignored files and folders that `sb cleanup` may delete besides
+  /// build output, such as `.env` or `.notes`.
+  public var cleanupDeletes: [String] = []
   /// The Claude config folders whose sessions `sb import` lists, or nil for
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
@@ -120,6 +123,7 @@ public struct Config: Codable, Equatable, Sendable {
     repoRoots = try c.decodeIfPresent([String].self, forKey: .repoRoots) ?? d.repoRoots
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
     followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
+    cleanupDeletes = try c.decodeIfPresent([String].self, forKey: .cleanupDeletes) ?? d.cleanupDeletes
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery
