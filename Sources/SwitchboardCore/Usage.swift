@@ -69,10 +69,12 @@ public struct AccountUsage: Codable, Equatable, Sendable {
   }
 
   /// Whether the account can take more work: `.spent` when any limit is at
-  /// `limit` percent or more, with the latest reset among those limits.
-  public func budget(limit: Double = 100) -> UsageBudget {
+  /// `limit` percent or more, with the latest reset among those limits. A
+  /// limit whose reset is at or before `now` counts as unused, because the
+  /// reading can be older than the reset.
+  public func budget(limit: Double = 100, now: Int64 = nowMs()) -> UsageBudget {
     if limits.isEmpty { return .unknown(error ?? "no reading yet") }
-    let spent = limits.filter { $0.percent >= limit }
+    let spent = limits.filter { $0.percent >= limit && ($0.resetsAt.map { $0 > now } ?? true) }
     if spent.isEmpty { return .left }
     return .spent(resetsAt: spent.compactMap(\.resetsAt).max())
   }

@@ -51,10 +51,13 @@ extension Instance {
     let fake = try FakeUsage()
     let sbd = try Instance.withUsage(fake)
     try sbd.signIn("A", token: "token-a")
+    try #"{"oauthAccount":{"emailAddress":"a@example.com"}}"#.write(
+      toFile: "\(sbd.account("A"))/.claude.json", atomically: true, encoding: .utf8)
 
     let a = try sbd.usage(of: "A")
 
     #expect(a.error == nil)
+    #expect(a.email == "a@example.com")
     #expect(a.limits.map(\.kind) == ["session", "weekly_all", "weekly_scoped"])
     #expect(a.limits.map(\.label) == ["Session (5h)", "Week (all models)", "Week (Fable)"])
     #expect(a.limits.map(\.percent) == [47, 20, 0])
@@ -101,6 +104,22 @@ extension Instance {
     #expect(!sbd.stubCalls().contains { $0.args.contains("stale-token") || $0.args.contains("fresh-token") })
   }
 
+  /// The app reads the op without a refresh, so only the timer fills what it sees.
+  @Test func theTimerFillsTheReadingsThatTheAppReads() throws {
+    let fake = try FakeUsage()
+    let sbd = try Instance.withUsage(fake)
+    try sbd.signIn("A", token: "token-a")
+    let unread = try sbd.client.usage()
+    #expect(unread.map(\.folder) == [sbd.account("A")])
+    #expect(unread.first?.limits == [])
+    #expect(fake.requests.isEmpty)
+
+    // sbd lists Claude's default account until `account use` runs, so the timer starts only after a restart.
+    try sbd.restart(setting: "usage", to: ["url": .string(fake.url), "pollSeconds": 1, "keychain": false])
+
+    try sbd.waitFor("the timer's read") { try sbd.client.usage().first?.limits.map(\.percent) == [47, 20, 0] }
+  }
+
   // MARK: Failures
 
   @Test func anAccountWithNoCredentialsIsNotSignedIn() throws {
@@ -144,6 +163,7 @@ extension Instance {
     let sbd = try Instance.withUsage(fake)
     try sbd.signIn("A", token: "token-a")
     let before = try sbd.usage(of: "A")
+    #expect(before.limits.map(\.percent) == [47, 20, 0])
     fake.reply("", status: 500)
 
     let after = try sbd.usage(of: "A")

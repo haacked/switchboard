@@ -175,21 +175,22 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
   }
 
   @Test func limitsUnderOneHundredPercentLeaveBudget() throws {
-    #expect(reading(try parsedUsage("with-session")).budget() == .left)
+    #expect(reading(try parsedUsage("with-session")).budget(now: 0) == .left)
   }
 
   @Test func aSpentWeekIsSpentUntilItResets() throws {
     #expect(
-      reading(try parsedUsage("weekly-spent")).budget() == .spent(resetsAt: ms("2026-11-03T23:59:59.769Z")))
+      reading(try parsedUsage("weekly-spent")).budget(now: 0) == .spent(resetsAt: ms("2026-11-03T23:59:59.769Z")))
   }
 
   @Test func aLimitAtTheThresholdCountsAsSpent() throws {
     #expect(
-      reading(try parsedUsage("with-session")).budget(limit: 47) == .spent(resetsAt: ms("2026-11-03T20:10:00.743Z")))
+      reading(try parsedUsage("with-session")).budget(limit: 47, now: 0)
+        == .spent(resetsAt: ms("2026-11-03T20:10:00.743Z")))
   }
 
   @Test func aLimitJustUnderTheThresholdLeavesBudget() throws {
-    #expect(reading(try parsedUsage("with-session")).budget(limit: 47.5) == .left)
+    #expect(reading(try parsedUsage("with-session")).budget(limit: 47.5, now: 0) == .left)
   }
 
   /// Every spent limit must reset before the account has budget again.
@@ -199,25 +200,25 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
       limit("weekly_scoped", 100, resetsAt: 5_000),
     ]
 
-    #expect(reading(limits).budget() == .spent(resetsAt: 9_000))
+    #expect(reading(limits).budget(now: 0) == .spent(resetsAt: 9_000))
   }
 
   @Test func aLaterResetOfALimitWithRoomDoesNotCount() {
     let limits = [limit("session", 100, resetsAt: 3_000), limit("weekly_all", 50, resetsAt: 9_000)]
 
-    #expect(reading(limits).budget() == .spent(resetsAt: 3_000))
+    #expect(reading(limits).budget(now: 0) == .spent(resetsAt: 3_000))
   }
 
   @Test func aLimitOverOneHundredPercentIsSpent() {
-    #expect(reading([limit("weekly_all", 104, resetsAt: 9_000)]).budget() == .spent(resetsAt: 9_000))
+    #expect(reading([limit("weekly_all", 104, resetsAt: 9_000)]).budget(now: 0) == .spent(resetsAt: 9_000))
   }
 
   @Test func aSpentLimitWithNoResetTimeIsSpentWithNoReset() {
-    #expect(reading([limit("weekly_all", 100, resetsAt: nil)]).budget() == .spent(resetsAt: nil))
+    #expect(reading([limit("weekly_all", 100, resetsAt: nil)]).budget(now: 0) == .spent(resetsAt: nil))
   }
 
   @Test func aFailedReadingWithNoLimitsIsUnknown() {
-    let budget = reading([], error: "not signed in").budget()
+    let budget = reading([], error: "not signed in").budget(now: 0)
 
     guard case .unknown(let reason) = budget else {
       Issue.record("budget is \(budget)")
@@ -231,8 +232,26 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
     let spent = reading(try parsedUsage("weekly-spent"), error: "the usage endpoint answered 429")
     let left = reading(try parsedUsage("with-session"), error: "the usage endpoint answered 429")
 
-    #expect(spent.budget() == .spent(resetsAt: ms("2026-11-03T23:59:59.769Z")))
-    #expect(left.budget() == .left)
+    #expect(spent.budget(now: 0) == .spent(resetsAt: ms("2026-11-03T23:59:59.769Z")))
+    #expect(left.budget(now: 0) == .left)
+  }
+
+  /// A reading can be older than the reset of a limit it saw spent.
+  @Test func aSpentLimitWhoseResetHasPassedLeavesBudget() {
+    let limits = [limit("session", 100, resetsAt: 3_000), limit("weekly_all", 100, resetsAt: 9_000)]
+
+    #expect(reading(limits).budget(now: 3_000) == .spent(resetsAt: 9_000))
+    #expect(reading(limits).budget(now: 9_000) == .left)
+  }
+}
+
+@Suite struct UsageUntilTests {
+  @Test(arguments: [
+    (Int64(-5_000), "now"), (59_000, "now"), (60_000, "in 1m"), (300_000, "in 5m"),
+    (3_600_000, "in 1h 0m"), (3 * 86_400_000 + 4 * 3_600_000, "in 3d 4h"),
+  ])
+  func untilNamesTheWaitInTheLargestUnits(_ ms: Int64, _ text: String) {
+    #expect(Usage.until(ms, now: 0) == text)
   }
 }
 

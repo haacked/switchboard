@@ -23,10 +23,19 @@ struct UsageMenu: View {
       } label: {
         Label(Self.label(active), systemImage: "gauge.with.dots.needle.50percent")
           .labelStyle(.titleAndIcon)
-          .foregroundStyle(active?.budget() == .left || active == nil ? .primary : AttentionState.needsYou.color)
+          .foregroundStyle(Self.needsYou(active) ? AttentionState.needsYou.color : .primary)
       }
       .help("Claude plan usage per account, read every few minutes")
     }
+  }
+
+  /// Whether the label takes the needs-you color: a limit is spent, or the
+  /// read failed with no earlier limits. An account that sbd has not read yet
+  /// does not need the user.
+  static func needsYou(_ reading: AccountUsage?) -> Bool {
+    guard let reading else { return false }
+    if case .spent = reading.budget() { return true }
+    return reading.limits.isEmpty && reading.error != nil
   }
 
   /// The toolbar text: the session's percent and the highest weekly percent.

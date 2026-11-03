@@ -186,7 +186,8 @@ public final class Service {
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
       case "usage":
-        // A refresh waits on the network, so it runs off the state queue.
+        // `usage` runs off the state queue. The reader takes that queue itself
+        // to list the accounts, and a refresh waits on the network.
         return .success(try JSON(encoding: usageRequest(request.args)))
       default:
         break

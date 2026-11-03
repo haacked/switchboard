@@ -21,6 +21,15 @@ import Testing
     #expect(UsageMenu.label(AccountUsage(name: "a", folder: "/a", error: "not signed in")) == "Usage")
   }
 
+  @Test func onlyASpentLimitOrAFailedReadNeedsTheUser() {
+    let spent = [UsageLimit(kind: "session", label: "Session (5h)", percent: 100, resetsAt: nil)]
+    #expect(!UsageMenu.needsYou(nil))
+    #expect(!UsageMenu.needsYou(AccountUsage(name: "a", folder: "/a")))
+    #expect(!UsageMenu.needsYou(AccountUsage(name: "a", folder: "/a", limits: limits)))
+    #expect(UsageMenu.needsYou(AccountUsage(name: "a", folder: "/a", limits: spent)))
+    #expect(UsageMenu.needsYou(AccountUsage(name: "a", folder: "/a", error: "not signed in")))
+  }
+
   @Test func aRowNamesTheResetTimeWhenThereIsOne() {
     #expect(UsageMenu.row(limits[0], now: 0) == "Session (5h): 52% · resets in 2h 5m")
     #expect(UsageMenu.row(limits[1], now: 0) == "Week (all models): 21%")

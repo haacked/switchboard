@@ -4,8 +4,9 @@ import SwitchboardCore
 /// Reads each Claude account's plan usage from the endpoint that claude's
 /// `/usage` reads, on a timer and when `sb usage` asks. One read runs at a
 /// time, on `queue`. The last reading of each account stays in `readings`,
-/// which any thread may read.
-final class UsageReader {
+/// which any thread may read. `lock` guards `readings`, so the reader is
+/// Sendable.
+final class UsageReader: @unchecked Sendable {
   unowned let service: Service
   let settings: UsageSettings
   let queue = DispatchQueue(label: "sbd.usage")
@@ -48,6 +49,16 @@ final class UsageReader {
     lock.withLock { readings[ClaudeAccount.normalize(folder)] }
   }
 
+  /// Whether the account in the config folder may spend more, from the last
+  /// reading. It matches `QuotaBudget.hasBudget(account:)`, which automatic
+  /// continuation calls from the service's queue. It reads no network. Only a
+  /// spent limit says no. An account that sbd has not read says yes, as the
+  /// stub budget does.
+  func hasBudget(account: String) -> Bool {
+    if case .spent = latest(account)?.budget() { return false }
+    return true
+  }
+
   private func readAll() -> [AccountUsage] {
     let accounts = service.queue.sync { service.accountList() }
     let fresh = concurrentMap(accounts) { read($0.folder, name: $0.name) }
@@ -84,9 +95,9 @@ final class UsageReader {
     guard var creds = credentials(folder) else {
       throw APIError("not signed in; run `\(login)` and /login")
     }
-    if expired(creds.expiresAt) {
+    if expiresSoon(creds.expiresAt) {
       refresh(folder)
-      guard let fresh = credentials(folder), !expired(fresh.expiresAt) else {
+      guard let fresh = credentials(folder), !expiresSoon(fresh.expiresAt) else {
         throw APIError("the access token expired and claude could not refresh it; run `\(login)` and /login")
       }
       creds = fresh
@@ -94,9 +105,12 @@ final class UsageReader {
     return creds.token
   }
 
-  private func expired(_ expiresAt: Int64?) -> Bool {
+  /// A token this close to expiry could expire before the request arrives.
+  private static let refreshMarginMs: Int64 = 60_000
+
+  private func expiresSoon(_ expiresAt: Int64?) -> Bool {
     guard let expiresAt else { return false }
-    return expiresAt < nowMs() + 60_000
+    return expiresAt < nowMs() + Self.refreshMarginMs
   }
 
   /// The credentials from the login keychain, else from .credentials.json.
@@ -145,15 +159,6 @@ final class UsageReader {
 }
 
 extension Service {
-  /// Whether the account has room under its plan's limits, from the last
-  /// reading. It reads no network. Any thread may call it, the service's
-  /// queue included. `limit` is the percent at which a limit counts as spent.
-  public func usageBudget(for account: String, limit: Double = 100) -> UsageBudget {
-    guard let reader = usageReader else { return .unknown("sbd reads no usage") }
-    guard let reading = reader.latest(account) else { return .unknown("no reading yet") }
-    return reading.budget(limit: limit)
-  }
-
   func usageRequest(_ args: JSON) -> [AccountUsage] {
     guard let reader = usageReader else { return [] }
     return args["refresh"]?.bool == true ? reader.read() : reader.latest()
