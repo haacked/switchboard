@@ -74,7 +74,7 @@ public struct AccountUsage: Codable, Equatable, Sendable {
   /// reading can be older than the reset.
   public func budget(limit: Double = 100, now: Int64 = nowMs()) -> UsageBudget {
     if limits.isEmpty { return .unknown(error ?? "no reading yet") }
-    let spent = limits.filter { $0.percent >= limit && ($0.resetsAt.map { $0 > now } ?? true) }
+    let spent = limits.filter { $0.percent >= limit && ($0.resetsAt ?? .max) > now }
     if spent.isEmpty { return .left }
     return .spent(resetsAt: spent.compactMap(\.resetsAt).max())
   }
@@ -87,6 +87,11 @@ public enum UsageBudget: Equatable, Sendable {
   case spent(resetsAt: Int64?)
   /// sbd has no reading of the account, for the reason given.
   case unknown(String)
+
+  public var isSpent: Bool {
+    if case .spent = self { return true }
+    return false
+  }
 }
 
 public enum Usage {

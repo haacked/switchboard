@@ -34,8 +34,7 @@ struct UsageMenu: View {
   /// does not need the user.
   static func needsYou(_ reading: AccountUsage?) -> Bool {
     guard let reading else { return false }
-    if case .spent = reading.budget() { return true }
-    return reading.limits.isEmpty && reading.error != nil
+    return reading.budget().isSpent || (reading.limits.isEmpty && reading.error != nil)
   }
 
   /// The toolbar text: the session's percent and the highest weekly percent.

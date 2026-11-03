@@ -55,8 +55,7 @@ final class UsageReader: @unchecked Sendable {
   /// spent limit says no. An account that sbd has not read says yes, as the
   /// stub budget does.
   func hasBudget(account: String) -> Bool {
-    if case .spent = latest(account)?.budget() { return false }
-    return true
+    latest(account)?.budget().isSpent != true
   }
 
   private func readAll() -> [AccountUsage] {

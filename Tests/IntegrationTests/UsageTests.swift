@@ -52,7 +52,7 @@ extension Instance {
     let sbd = try Instance.withUsage(fake)
     try sbd.signIn("A", token: "token-a")
     try #"{"oauthAccount":{"emailAddress":"a@example.com"}}"#.write(
-      toFile: "\(sbd.account("A"))/.claude.json", atomically: true, encoding: .utf8)
+      toFile: ClaudeAccount.configFile(sbd.account("A")), atomically: true, encoding: .utf8)
 
     let a = try sbd.usage(of: "A")
 
