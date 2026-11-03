@@ -271,7 +271,6 @@ final class Instance {
     }
   }
 
-  /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
   /// The session's Claude pane as sbd reads it, with wrapped lines joined.
   func screen(_ id: String) throws -> String { try client.call("screen", ["session": .string(id)]).string ?? "" }
 
@@ -283,6 +282,7 @@ final class Instance {
     guard r.status == 0 else { throw TestError(description: "tmux send-keys \(key): \(r.stderr)") }
   }
 
+  /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
   func stubPid(_ file: String) -> pid_t? {
     guard let text = try? String(contentsOfFile: "\(home.path)/\(file)", encoding: .utf8) else { return nil }
     return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))

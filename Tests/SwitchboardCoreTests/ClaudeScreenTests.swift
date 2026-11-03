@@ -129,6 +129,16 @@ func dialog(_ fixture: String) throws -> [String] {
     #expect(!ClaudeScreen.shows(bashCard(capturedCommand), lines))
   }
 
+  @Test func aCommandBrokenInsideAWordMayShowItsCard() throws {
+    let lines = try #require(ClaudeScreen.dialog(try otherCommandsScreen(" touch SB8002\n84.txt")))
+    #expect(ClaudeScreen.mayShow(bashCard(capturedCommand), lines))
+  }
+
+  @Test func anotherCommandsDialogMayNotShowTheCard() throws {
+    let lines = try #require(ClaudeScreen.dialog(try otherCommandsScreen()))
+    #expect(!ClaudeScreen.mayShow(bashCard(capturedCommand), lines))
+  }
+
   @Test func theOtherCommandsDialogShowsItsOwnCard() throws {
     let lines = try #require(ClaudeScreen.dialog(try otherCommandsScreen()))
     #expect(ClaudeScreen.shows(bashCard("rm other.txt"), lines))
@@ -167,6 +177,14 @@ func dialog(_ fixture: String) throws -> [String] {
 
   @Test func aDialogWithoutACursorHighlightsNothing() {
     #expect(ClaudeScreen.highlighted([" Do you want to proceed?", " Esc to cancel"]) == nil)
+  }
+
+  @Test(arguments: [
+    ("1. Yes", true), ("Yes", true), ("2. Yes, and don't ask again for touch commands in /tmp", false),
+    ("2. No", false),
+  ])
+  func onlyThePlainYesIsYes(_ item: String, _ yes: Bool) {
+    #expect(ClaudeScreen.isYes(item) == yes)
   }
 }
 
@@ -262,6 +280,14 @@ func dialog(_ fixture: String) throws -> [String] {
     #expect(watch.check([card], screen: try shown()).isEmpty)
     #expect(watch.check([card], screen: try gone()).isEmpty)
     #expect(watch.check([], screen: try gone()).isEmpty)
+    #expect(watch.check([card], screen: try gone()).isEmpty)
+  }
+
+  @Test func aSeenDialogThatANarrowerPaneBreaksInsideAWordStays() throws {
+    var watch = DialogWatch()
+    let card = bashCard(capturedCommand)
+    let narrow = try otherCommandsScreen(" touch SB8002\n84.txt")
+    #expect(results(&watch, [card], [try shown(), narrow, narrow]) == [[], [], []])
   }
 
   @Test func eachCardIsJudgedByItsOwnDialog() throws {

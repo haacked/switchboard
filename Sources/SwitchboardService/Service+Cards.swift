@@ -114,15 +114,23 @@ extension Service {
       throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
     }
     try type(reply.typed, card)
-    guard case .escape(let then) = reply.typed else { return answered(Service.typed) }
-    data["interrupted"] = true
-    let result = answered(Service.typed)
-    // The Escape ended the turn, so the message pastes once the dialog closes.
-    if let then {
-      afterDialogCloses(card)
-      _ = try send(id, then, byUser: false)
+    switch reply.typed {
+    case .yes:
+      return answered("terminal")
+    case .escape(let message):
+      data["interrupted"] = true
+      let result = answered("terminal")
+      // The Escape ended the turn, so the message pastes once the dialog closes.
+      if let message {
+        guard dialogClosed(card) else {
+          throw APIError(
+            "card \(card.id)'s dialog still shows after Escape, so sbd didn't send the message. Answer it in the terminal"
+          )
+        }
+        _ = try send(id, message, byUser: false)
+      }
+      return result
     }
-    return result
   }
 
   /// Defers each held question that has been open for `idleStopSeconds`,

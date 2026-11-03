@@ -11,9 +11,6 @@ enum TypedAnswer {
 }
 
 extension Service {
-  /// The delivery of an answer that sbd typed into the terminal.
-  static let typed = "terminal"
-
   /// Records `dialog_closed` for each card whose dialog left Claude Code's
   /// screen, as `DialogWatch` decides. Claude Code keeps the held request
   /// open after Yes or a pick, and closes it on No and Escape, so an open
@@ -55,13 +52,16 @@ extension Service {
     }
   }
 
-  /// Holds the paste queue until the card's dialog has left the screen, at
-  /// most 3 s, so that a message pasted next reaches Claude Code's prompt.
-  func afterDialogCloses(_ card: Card) {
+  /// Waits up to 3 s for the card's session to show no dialog, and returns
+  /// whether it got there. A paste ends with Enter, and Enter answers any
+  /// dialog that still shows. This runs on the state queue.
+  func dialogClosed(_ card: Card) -> Bool {
     let pane = paneName(card.session, .claude)
-    pasteQueue.async { [self] in
-      let deadline = Date() + 3
-      while Date() < deadline, cardDialog(card, pane) != nil { usleep(100_000) }
+    let deadline = Date() + 3
+    while true {
+      if let screen = try? host.screen(pane), ClaudeScreen.dialog(screen) == nil { return true }
+      if Date() >= deadline { return false }
+      usleep(100_000)
     }
   }
 

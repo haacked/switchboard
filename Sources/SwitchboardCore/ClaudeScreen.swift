@@ -35,6 +35,19 @@ public enum ClaudeScreen {
     return words(dialog[(open + 1)..<close].joined(separator: " ")) == words(command)
   }
 
+  /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
+  /// this holds. Claude Code breaks a token that is wider than the pane in
+  /// the middle, so this ignores white space. `shows` decides what sbd may
+  /// type.
+  public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
+    guard card.kind == .permission else { return shows(card, dialog) }
+    guard card.findable, let command = card.input["command"]?.string,
+      let open = dialog.firstIndex(where: isDashedRule),
+      let close = dialog[(open + 1)...].firstIndex(where: isDashedRule)
+    else { return false }
+    return dialog[(open + 1)..<close].joined().filter { !$0.isWhitespace } == command.filter { !$0.isWhitespace }
+  }
+
   private static func words(_ text: String) -> [Substring] {
     text.split(whereSeparator: \.isWhitespace)
   }
@@ -97,7 +110,7 @@ public struct DialogWatch: Equatable, Sendable {
     var left: [Int64] = []
     for card in open where DialogWatch.watches(card) {
       var s = sightings[card.id] ?? Sighting()
-      if let dialog, ClaudeScreen.shows(card, dialog) {
+      if let dialog, ClaudeScreen.mayShow(card, dialog) {
         s = Sighting(seen: true, misses: 0)
       } else {
         s.misses += 1
