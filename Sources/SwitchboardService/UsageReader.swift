@@ -1,0 +1,161 @@
+import Foundation
+import SwitchboardCore
+
+/// Reads each Claude account's plan usage from the endpoint that claude's
+/// `/usage` reads, on a timer and when `sb usage` asks. One read runs at a
+/// time, on `queue`. The last reading of each account stays in `readings`,
+/// which any thread may read.
+final class UsageReader {
+  unowned let service: Service
+  let settings: UsageSettings
+  let queue = DispatchQueue(label: "sbd.usage")
+  private var timer: DispatchSourceTimer?
+  private let lock = NSLock()
+  private var readings: [String: AccountUsage] = [:]
+
+  init(service: Service, settings: UsageSettings) {
+    self.service = service
+    self.settings = settings
+  }
+
+  /// Reads every account now, and again every `pollSeconds`.
+  func start() {
+    guard settings.pollSeconds > 0 else { return }
+    let t = DispatchSource.makeTimerSource(queue: queue)
+    t.schedule(deadline: .now(), repeating: settings.pollSeconds)
+    t.setEventHandler { [self] in _ = readAll() }
+    t.resume()
+    timer = t
+  }
+
+  /// Reads every account and returns the readings. The caller must not be on
+  /// the service's queue.
+  func read() -> [AccountUsage] {
+    queue.sync { readAll() }
+  }
+
+  /// The last reading of each account, in the order of `sb account`. An
+  /// account that was never read has no limits.
+  func latest() -> [AccountUsage] {
+    let accounts = service.queue.sync { service.accountList() }
+    return lock.withLock {
+      accounts.map { readings[$0.folder] ?? AccountUsage(name: $0.name, folder: $0.folder) }
+    }
+  }
+
+  /// The last reading of one account, from any thread.
+  func latest(_ folder: String) -> AccountUsage? {
+    lock.withLock { readings[ClaudeAccount.normalize(folder)] }
+  }
+
+  private func readAll() -> [AccountUsage] {
+    let accounts = service.queue.sync { service.accountList() }
+    let fresh = concurrentMap(accounts) { read($0.folder, name: $0.name) }
+    return lock.withLock {
+      fresh.map { reading in
+        var reading = reading
+        // A failed read keeps the limits of the last good one.
+        if reading.error != nil, let old = readings[reading.folder] {
+          reading.limits = old.limits
+          reading.checked = old.checked
+        }
+        readings[reading.folder] = reading
+        return reading
+      }
+    }
+  }
+
+  private func read(_ folder: String, name: String) -> AccountUsage {
+    var usage = AccountUsage(name: name, folder: folder, email: email(folder))
+    do {
+      let token = try accessToken(folder)
+      usage.limits = try Usage.parse(try fetch(token))
+      usage.checked = nowMs()
+    } catch {
+      usage.error = "\(error)"
+    }
+    return usage
+  }
+
+  /// The account's access token. A token that expires within a minute is
+  /// refreshed first, through claude.
+  private func accessToken(_ folder: String) throws -> String {
+    let login = ClaudeAccount.command(service.config.claude, in: folder)
+    guard var creds = credentials(folder) else {
+      throw APIError("not signed in; run `\(login)` and /login")
+    }
+    if expired(creds.expiresAt) {
+      refresh(folder)
+      guard let fresh = credentials(folder), !expired(fresh.expiresAt) else {
+        throw APIError("the access token expired and claude could not refresh it; run `\(login)` and /login")
+      }
+      creds = fresh
+    }
+    return creds.token
+  }
+
+  private func expired(_ expiresAt: Int64?) -> Bool {
+    guard let expiresAt else { return false }
+    return expiresAt < nowMs() + 60_000
+  }
+
+  /// The credentials from the login keychain, else from .credentials.json.
+  private func credentials(_ folder: String) -> (token: String, expiresAt: Int64?)? {
+    if settings.keychain,
+      let r = try? runCommand(
+        "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"], timeout: 10),
+      r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8))
+    {
+      return creds
+    }
+    return FileManager.default.contents(atPath: ClaudeAccount.credentialsFile(folder)).flatMap(Usage.credentials)
+  }
+
+  /// claude refreshes an expired token when `claude mcp get` looks up the
+  /// claude.ai connectors. The server name does not need to exist.
+  private func refresh(_ folder: String) {
+    guard let claude = findExecutable(service.config.claude) else { return }
+    var env = ProcessInfo.processInfo.environment
+    ClaudeAccount.apply(folder, to: &env)
+    _ = try? runCommand(claude, ["mcp", "get", "switchboard-usage-refresh"], env: env, timeout: 30)
+  }
+
+  private func fetch(_ token: String) throws -> Data {
+    guard let url = URL(string: settings.url) else { throw APIError("usage.url \(settings.url) is not a URL") }
+    var request = URLRequest(url: url, timeoutInterval: 15)
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    let (status, _, data): (Int, [String: String], Data)
+    do {
+      (status, _, data) = try httpRequest(request)
+    } catch {
+      throw APIError("the usage request failed: \(error.localizedDescription)")
+    }
+    guard status == 200 else { throw APIError("the usage endpoint answered HTTP \(status)") }
+    return data
+  }
+
+  private func email(_ folder: String) -> String? {
+    let json = FileManager.default.contents(atPath: ClaudeAccount.configFile(folder)).flatMap {
+      try? JSONCoding.decoder.decode(JSON.self, from: $0)
+    }
+    return json?["oauthAccount"]?["emailAddress"]?.string
+  }
+}
+
+extension Service {
+  /// Whether the account has room under its plan's limits, from the last
+  /// reading. It reads no network. Any thread may call it, the service's
+  /// queue included. `limit` is the percent at which a limit counts as spent.
+  public func usageBudget(for account: String, limit: Double = 100) -> UsageBudget {
+    guard let reader = usageReader else { return .unknown("sbd reads no usage") }
+    guard let reading = reader.latest(account) else { return .unknown("no reading yet") }
+    return reading.budget(limit: limit)
+  }
+
+  func usageRequest(_ args: JSON) -> [AccountUsage] {
+    guard let reader = usageReader else { return [] }
+    return args["refresh"]?.bool == true ? reader.read() : reader.latest()
+  }
+}

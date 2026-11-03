@@ -590,5 +590,6 @@ extension Service {
   /// Starts the pollers' timers. sbd calls it once the server listens.
   public func startPollers() {
     github?.start()
+    usageReader?.start()
   }
 }

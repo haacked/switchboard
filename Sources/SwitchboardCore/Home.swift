@@ -100,6 +100,7 @@ public struct Config: Codable, Equatable, Sendable {
   public var snapshotEvery = 500
   public var triage = TriageSettings()
   public var autoContinue = AutoContinueSettings()
+  public var usage = UsageSettings()
 
   public init() {}
 
@@ -137,6 +138,7 @@ public struct Config: Codable, Equatable, Sendable {
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery
     triage = try c.decodeIfPresent(TriageSettings.self, forKey: .triage) ?? d.triage
     autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
+    usage = try c.decodeIfPresent(UsageSettings.self, forKey: .usage) ?? d.usage
   }
 }
 

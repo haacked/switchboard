@@ -18,7 +18,13 @@ public enum ClaudeAccount {
   /// its .claude.json in the home folder. Every other account keeps it in its
   /// own folder.
   public static func holdsAccount(_ folder: String) -> Bool {
-    isDefault(folder) || FileManager.default.fileExists(atPath: "\(normalize(folder))/.claude.json")
+    isDefault(folder) || FileManager.default.fileExists(atPath: configFile(folder))
+  }
+
+  /// The account's .claude.json, which holds its login. The default account
+  /// keeps it in the home folder.
+  public static func configFile(_ folder: String) -> String {
+    isDefault(folder) ? "~/.claude.json".expandingTilde : "\(normalize(folder))/.claude.json"
   }
 
   /// Sets CLAUDE_CONFIG_DIR to the folder, or removes it for the default account.

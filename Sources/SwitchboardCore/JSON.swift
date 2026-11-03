@@ -63,6 +63,11 @@ public enum JSON: Codable, Equatable, Sendable {
     return nil
   }
 
+  public var double: Double? {
+    if case .number(let n) = self { return n }
+    return nil
+  }
+
   public var bool: Bool? {
     if case .bool(let b) = self { return b }
     return nil

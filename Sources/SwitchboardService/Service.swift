@@ -64,6 +64,7 @@ public final class Service {
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
+  var usageReader: UsageReader?
   /// The account that `sb account use` chose, or nil before the first use.
   var chosenAccount: String?
   var parentNotices = ParentNotices()
@@ -130,6 +131,7 @@ public final class Service {
     for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot)
+    usageReader = UsageReader(service: self, settings: config.usage)
   }
 
   // MARK: Requests
@@ -183,6 +185,9 @@ public final class Service {
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
+      case "usage":
+        // A refresh waits on the network, so it runs off the state queue.
+        return .success(try JSON(encoding: usageRequest(request.args)))
       default:
         break
       }
