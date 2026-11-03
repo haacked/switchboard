@@ -26,9 +26,10 @@ extension Instance {
   }
 
   /// A git repo on `branch` whose origin is the GitHub repo `repo`, and a
-  /// session in it that has answered its first prompt.
-  func session(in repo: String, branch: String) throws -> SessionSummary {
-    let path = "\(home.path)/\(repo.replacingOccurrences(of: "/", with: "-"))"
+  /// session in it that has answered its first prompt. A `folder` lets two
+  /// sessions work in the same GitHub repo.
+  func session(in repo: String, branch: String, folder: String? = nil) throws -> SessionSummary {
+    let path = "\(home.path)/\(folder ?? repo.replacingOccurrences(of: "/", with: "-"))"
     try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
     try git(path, "init", "-q", "-b", "main")
     try git(

@@ -136,8 +136,9 @@ public final class Service {
 
   static let actsOnProcesses: Set<String> = [
     "send", "send-group", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+    "dependency-resolved",
   ]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer"]
+  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
 
   /// `hookGone` reports whether the client closed its connection, which a
   /// held PermissionRequest checks while it waits.
@@ -221,6 +222,8 @@ public final class Service {
       let id = try lookup(args)
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
       return ["delivery": .string(try send(id, text).rawValue)]
+    case "dependency-resolved":
+      return try dependencyResolved(args)
     case "stop":
       let id = try lookup(args)
       try stop(id, reason: "asked")
@@ -341,7 +344,7 @@ public final class Service {
     }
     if var e = entries[id] {
       e.facts.apply(event)
-      Attention.track(e.session, &e.facts, now: event.t)
+      Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
       e.events += 1
       entries[id] = e
     }
@@ -1188,7 +1191,7 @@ public final class Service {
           entries[id]?.unreportedSince = nil
         }
         if var e = entries[id] {
-          Attention.track(e.session, &e.facts, now: now)
+          Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
         }
       }
@@ -1228,7 +1231,7 @@ public final class Service {
 
   func summary(_ id: String) -> SessionSummary {
     let e = entries[id]!
-    let verdict = Attention.evaluate(e.session, e.facts, now: nowMs())
+    let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
@@ -1246,6 +1249,7 @@ public final class Service {
     out.account = s.claudeConfigDir
     out.cleanup = e.facts.cleanup
     out.group = s.group
+    if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
