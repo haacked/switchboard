@@ -108,7 +108,7 @@ public final class Service {
       entries[session.id] = e
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
-    snapshot = buildSnapshot()
+    snapshot = buildSnapshot() ?? Snapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     // A summary that was running when sbd stopped never finished.
@@ -937,8 +937,9 @@ public final class Service {
   // MARK: Processes and the stop rule
 
   /// Reads the panes and the processes. It reads no Service state, so it runs
-  /// off the state queue.
-  func buildSnapshot() -> Snapshot { buildSnapshot { host.panes() } }
+  /// off the state queue. It returns nil when tmux can't list the panes. An
+  /// empty list would make sbd start the panes that it already has.
+  func buildSnapshot() -> Snapshot? { try? buildSnapshot(reading: host.checkedPanes) }
 
   /// The snapshot of the panes that `readPanes` returns and a new process
   /// list. It throws what `readPanes` throws.
@@ -999,8 +1000,8 @@ public final class Service {
   }
 
   /// Takes a newer snapshot, keeping what `markStarting` set since it was read.
-  private func install(_ s: Snapshot) {
-    if s.taken >= snapshot.taken { snapshot = s }
+  private func install(_ s: Snapshot?) {
+    if let s, s.taken >= snapshot.taken { snapshot = s }
   }
 
   /// Takes a snapshot off the state queue and installs it, without making
@@ -1053,8 +1054,10 @@ public final class Service {
         switch claudeState(id) {
         case .running(let pid):
           // SessionStart marks claude live. A claude that runs for 10 s with
-          // no SessionStart, because its hook failed, counts as live too.
-          if live {
+          // no SessionStart, because its hook failed, counts as live too. A
+          // claude whose SessionStart arrived and whose SessionEnd followed
+          // is exiting, and stays not live.
+          if live || entries[id]?.facts.startedSinceLaunch == true {
             entries[id]?.unreportedSince = nil
           } else if let since = entries[id]?.unreportedSince {
             if now - since > 10_000 {
@@ -1075,7 +1078,7 @@ public final class Service {
           // A message sent while claude exited waits in `pending` for a launch.
           // A claude that dies before its SessionStart isn't launched again,
           // and these launches come at most every 5 s.
-          if let e = entries[id], !e.pending.isEmpty, (e.facts.lastStart ?? 0) >= (e.facts.lastLaunch ?? 0),
+          if let e = entries[id], !e.pending.isEmpty, e.facts.startedSinceLaunch,
             now - (e.facts.lastLaunch ?? 0) >= 5_000, !mcpStarting(now: now)
           {
             try? launch(id, prompt: nil)
@@ -1163,4 +1166,9 @@ public final class Service {
     let text = JSON.object(["hooks": .object(hooks)]).text
     try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
   }
+}
+
+extension SessionFacts {
+  /// Whether the claude that the last launch started has reported its SessionStart.
+  fileprivate var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
 }

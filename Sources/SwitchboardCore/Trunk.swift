@@ -208,15 +208,21 @@ public enum TrunkComments {
   /// last edit and a reply from its creation. Comments with the same time
   /// count in the order given.
   public static func state(of pr: PullRequest, _ comments: [PRComment]) -> TrunkQueueState? {
+    change(of: pr, comments)?.state
+  }
+
+  /// The newest state and the time it counts from, an ISO 8601 string. The time
+  /// is nil for `.unknown`, which means a trunk-io comment's body didn't load.
+  public static func change(of pr: PullRequest, _ comments: [PRComment]) -> (state: TrunkQueueState, at: String?)? {
     guard pr.state == .open else { return nil }
-    var newest: (at: String, state: TrunkQueueState)?
+    var newest: (state: TrunkQueueState, at: String)?
     for c in comments where c.author == author {
-      guard let body = c.body else { return .unknown }
+      guard let body = c.body else { return (.unknown, nil) }
       guard let named = c.edited ? statusState(body) : replyState(body) else { continue }
       let at = c.editedAt ?? c.createdAt
-      if newest.map({ $0.at <= at }) ?? true { newest = (at, named) }
+      if newest.map({ $0.at <= at }) ?? true { newest = (named, at) }
     }
-    return newest?.state
+    return newest.map { ($0.state, $0.at) }
   }
 
   /// The state that an edited status comment names. The control comment and

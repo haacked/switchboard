@@ -4,7 +4,7 @@ import SwitchboardCore
 /// What the PR kinds of waits and the merge triggers of follow-ups need from a
 /// poll.
 extension GitHubPoller {
-  static let waitKinds: Set<Wait.Kind> = [.ci, .review, .botReview, .approval, .merge]
+  static let waitKinds: Set<Wait.Kind> = [.ci, .review, .botReview, .approval, .merge, .queue]
 
   /// The open waits that the poller resolves, the PRs that follow-ups wait to
   /// see merge, and the lookup key of each PR they name.
@@ -68,8 +68,9 @@ extension GitHubPoller {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
-        let outcome = wait.resolution(of: read.pr), !(wait.pr == nil && wait.finishedBeforeSet(read.pr)),
-        confirmed(wait, read.pr, outcome, polled: read.polled),
+        case let pr = GitHub.shown(read.pr, keptComments(read.comments), last: nil),
+        let outcome = wait.resolution(of: pr), !(wait.pr == nil && wait.finishedBeforeSet(pr)),
+        confirmed(wait, pr, outcome, polled: read.polled),
         !service.queue.sync(execute: { service.entries[session.id]?.session.done ?? true })
       else { continue }
       do {
