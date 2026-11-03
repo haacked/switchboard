@@ -8,8 +8,6 @@ struct SwitchboardApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
   @StateObject private var model = BoardModel()
 
-  init() { AppTerminal.announce() }
-
   var body: some Scene {
     Window("Switchboard", id: "main") {
       ContentView()
