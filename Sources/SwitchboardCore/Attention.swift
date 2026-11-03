@@ -80,12 +80,17 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
   /// recorded it.
   public var triage: TriageSummary?
+  /// When the user last sent the session a prompt or answered its card, or 0.
+  public var lastTouched: Int64 = 0
+  /// When sbd continued the session on its own, within the last hour.
+  public var autoContinues: [Int64] = []
 
   /// The kinds of the events that the pollers, the summaries, and the tick
   /// record. They report on GitHub, the folder, a reply, and claude's
-  /// background jobs, not on the session. They do not hold off the idle stop
-  /// or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup"]
+  /// background jobs, not on the session. An `auto-continue` event records
+  /// sbd's own try, and the `sent` event of a continue that worked is the
+  /// activity. They do not hold off the idle stop or the Stale state.
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup", AutoContinue.eventKind]
 
   public init() {}
 
@@ -202,6 +207,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     }
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
+    applyAutoContinue(event, userPrompt: userPrompt)
   }
 
   private mutating func startTurn(_ t: Int64) {
