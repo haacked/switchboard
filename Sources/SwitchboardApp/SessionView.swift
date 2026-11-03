@@ -155,6 +155,7 @@ struct SessionView: View {
         if let pr = session.pr, let url = pr.link {
           Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
         }
+        CleanupNote(session: session)
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
           .font(.caption)
           .foregroundStyle(.tertiary)
@@ -176,6 +177,11 @@ struct SessionView: View {
             session.markedDone
               ? "Mark the session not done. It returns to its own group on the board, and to the Queue if it needs you or claude can continue."
               : "Mark the session done. It leaves the Queue and moves to Done on the board.")
+        if CleanupOffer.canCleanUp(session) {
+          Button("Clean Up…") { model.confirmingCleanup = session.id }
+            .disabled(model.cleaningUp.contains(session.id))
+            .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
+        }
         Button(role: .destructive) {
           Task {
             let options = await RemoveOptions.load(session)

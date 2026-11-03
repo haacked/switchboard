@@ -6,12 +6,13 @@ import Testing
 
 struct Boom: Error {}
 
+/// Waits for the main-actor work that `perform` queues after the request ends.
+@MainActor func settle(_ done: () -> Bool) async {
+  for _ in 0..<300 where !done() { try? await Task.sleep(nanoseconds: 10_000_000) }
+}
+
 @MainActor
 @Suite struct BoardModelSend {
-  /// Waits for the main-actor work that `perform` queues after the request ends.
-  func settle(_ done: () -> Bool) async {
-    for _ in 0..<300 where !done() { try? await Task.sleep(nanoseconds: 10_000_000) }
-  }
 
   @Test func doesNotReportASendThatFailed() async {
     _ = NSApplication.shared

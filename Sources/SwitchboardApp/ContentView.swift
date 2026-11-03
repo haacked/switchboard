@@ -65,6 +65,14 @@ struct ContentView: View {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
 
+  private var confirmingCleanup: CleanupOffer? {
+    model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
+  }
+
+  private var isConfirmingCleanup: Binding<Bool> {
+    Binding(get: { model.confirmingCleanup != nil }, set: { if !$0 { model.confirmingCleanup = nil } })
+  }
+
   var body: some View {
     NavigationSplitView {
       Sidebar()
@@ -94,6 +102,15 @@ struct ContentView: View {
           case .board: BoardView()
           }
         }
+      }
+      // The delete dialog is on the split view. Two dialogs on one view can hide each other.
+      .confirmationDialog(
+        confirmingCleanup?.title ?? "Clean up this session?", isPresented: isConfirmingCleanup,
+        presenting: confirmingCleanup
+      ) { offer in
+        Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
+      } message: { offer in
+        Text(offer.message)
       }
     }
     .toolbar {
@@ -176,10 +193,15 @@ struct Sidebar: View {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
               SessionRow(session: row.session)
+              if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if BoardModel.canDelete(row.session) { DeleteButton(session: row.session) }
             }
             .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
             .contextMenu {
+              if CleanupOffer.canCleanUp(row.session) {
+                Button("Clean Up: Delete the Worktree and Branch…") { model.confirmingCleanup = row.id }
+                  .disabled(model.cleaningUp.contains(row.id))
+              }
               if BoardModel.canDelete(row.session) {
                 Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
                   model.confirmingDelete = row.id
@@ -315,6 +337,7 @@ struct SessionRow: View {
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
         Text(session.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        CleanupNote(session: session)
       }
     }
     .padding(.vertical, 2)
@@ -381,6 +404,7 @@ struct BoardView: View {
                             }
                           }
                           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                          CleanupNote(session: s)
                           Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
                             .font(.caption2).foregroundStyle(.tertiary)
                         }
@@ -390,7 +414,11 @@ struct BoardView: View {
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(state.color.opacity(0.3)))
                       }
                       .buttonStyle(.plain)
-                      if BoardModel.canDelete(s) { DeleteButton(session: s).padding(6) }
+                      HStack(spacing: 4) {
+                        if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
+                        if BoardModel.canDelete(s) { DeleteButton(session: s) }
+                      }
+                      .padding(6)
                     }
                   }
                 }
