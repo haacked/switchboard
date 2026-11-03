@@ -27,8 +27,7 @@ public protocol QuotaBudget: Sendable {
   func hasBudget(account: String) -> Bool
 }
 
-/// Says yes for every account. A budget that reads each account's use
-/// against its 5-hour and weekly limits replaces it.
+/// Says yes for every account.
 public struct UnlimitedBudget: QuotaBudget {
   public init() {}
   public func hasBudget(account: String) -> Bool { true }

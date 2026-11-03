@@ -125,6 +125,7 @@ struct ContentView: View {
         .help("Show the Queue (⌘1) or the Board (⌘2)")
       }
       ToolbarItem { ManagerButton() }
+      ToolbarItem { UsageMenu() }
       ToolbarItem {
         if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
           Menu {

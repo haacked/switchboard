@@ -19,6 +19,8 @@ let usage = """
                                   too. A terminal asks when neither is given
     account move <name|folder> [--dry-run]
                                   move the sessions whose claude is stopped
+    usage                         show each account's use of its 5-hour and
+                                  weekly limits, and when each resets
     manager                       start the Manager, a session that manages the others,
                                   or open it
     get <session>                 show one session
@@ -465,6 +467,8 @@ case "new":
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "account", "accounts":
   account(a)
+case "usage":
+  usageCommand(a)
 case "manager":
   let result = call("manager", timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }

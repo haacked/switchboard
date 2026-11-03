@@ -71,7 +71,8 @@ final class Instance {
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
   /// Each account is a Claude config folder that this creates in the home.
   /// The config lists only those, so a test never reads the user's accounts.
-  /// The GitHub poller runs only when a test asks, and the Depot poller is off.
+  /// The GitHub poller and the usage reader run only when a test asks, and the
+  /// Depot poller is off.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
     inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
@@ -99,6 +100,7 @@ final class Instance {
       "claudeConfigDirs": .array(folders.map(JSON.string)), "github": ["pollSeconds": 0],
       // No test reaches the real Depot API. DepotTests point sbd at a FakeDepot.
       "depot": ["enabled": false],
+      "usage": ["pollSeconds": 0, "keychain": false],
       // Tests that read the stub's arguments don't expect the nudge in them.
       "triage": ["systemPrompt": ""],
     ]

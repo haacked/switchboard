@@ -46,6 +46,10 @@
 # the test writes, or [] when it can't be read. It adds a row for each session
 # that is in the middle of an interrupt or a slow tool call, which are the
 # turns whose status the real claude reports as idle and busy.
+# `claude mcp ...` stands for the lookup that makes the real claude refresh
+# its OAuth token. When $CLAUDE_CONFIG_DIR/refreshed-credentials.json exists,
+# a fixture that the test writes, it moves it over .credentials.json in the
+# same folder. It prints nothing and exits 0.
 # Like claude, it writes a line to the conversation's transcript for each
 # prompt and for clear, at the transcript_path that the hook payloads name.
 # --resume fails when no transcript exists, and --session-id fails when one
@@ -88,6 +92,11 @@ if [ "${1-}" = agents ]; then
   else
     echo "$listed"
   fi
+  exit 0
+fi
+if [ "${1-}" = mcp ]; then
+  dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
+  [ -e "$dir/refreshed-credentials.json" ] && mv "$dir/refreshed-credentials.json" "$dir/.credentials.json"
   exit 0
 fi
 config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}

@@ -64,6 +64,8 @@ final class BoardModel: ObservableObject {
   @Published var groups: [GroupSummary] = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
+  /// Each account's last usage reading.
+  @Published var usage: [AccountUsage] = []
   /// A switch of the active account that waits for the user to say whether
   /// the sessions on the other accounts move too.
   @Published var switchingAccount: AccountSwitch?
@@ -87,6 +89,8 @@ final class BoardModel: ObservableObject {
   private var pendingSelection: String?
   private var loaded = false
   private var followupsRead = Date.distantPast
+  /// sbd reads the usage every few minutes, so the app asks once a minute.
+  private var usageRead = Date.distantPast
 
   /// The Manager stays out of the Queue, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
@@ -157,15 +161,19 @@ final class BoardModel: ObservableObject {
     let client = client
     let readFollowups = followups || Date().timeIntervalSince(followupsRead) >= 5
     if readFollowups { followupsRead = Date() }
+    let readUsage = Date().timeIntervalSince(usageRead) >= 60
+    if readUsage { usageRead = Date() }
     poller.async {
       let (result, more) = Self.read(
         sessions: client.sessions,
         followups: readFollowups ? { try client.call("followup-ls", as: [SessionSummary].self) } : nil)
       let accounts = readFollowups ? try? client.accounts() : nil
       let groups = try? client.call("group-ls", as: GroupList.self).groups
+      let usage = readUsage ? try? client.usage() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
+        if let usage, self.usage != usage { self.usage = usage }
         self.apply(result, followups: more)
       }
     }

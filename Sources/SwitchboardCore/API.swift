@@ -258,6 +258,11 @@ public final class Client: Sendable {
     try call("accounts", as: [AccountInfo].self)
   }
 
+  /// Each account's last usage reading.
+  public func usage() throws -> [AccountUsage] {
+    try call("usage", as: [AccountUsage].self)
+  }
+
   public func useAccount(_ ref: String) throws -> [AccountInfo] {
     try call("account-use", ["account": .string(ref)], as: [AccountInfo].self)
   }
