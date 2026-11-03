@@ -12,6 +12,13 @@ let usage = """
                                   --worktree. --worktree names the branch from
                                   --name. It runs under the account A, else its
                                   parent's, else the active account
+    spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
+        [--base REF] [--model M] [--account A]
+                                  start a session on a new branch B in a new
+                                  worktree of R, which is owner/name, a name, or
+                                  a folder. Inside a session, that session is
+                                  its parent. --followup adds it unstarted.
+                                  --after makes it ready when PR N of R merges
     account                       list the Claude accounts and the active one
     account use <name|folder> [--move | --new-only]
                                   run new sessions under this account. --move
@@ -465,6 +472,8 @@ case "new":
     account: a.values["--account"])
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
+case "spawn":
+  spawn(a)
 case "account", "accounts":
   account(a)
 case "usage":
