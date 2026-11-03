@@ -133,12 +133,10 @@ extension GitHubPoller {
   private func readStateFile(_ service: String, now: Int64, stats: inout Stats) throws {
     let path = "repos/\(Wait.chartsRepository)/contents/state/\(service).yaml"
     let last = deploys.files[service]
-    let (status, headers, body, _) = try send(quota: "core", stats: &stats) {
-      var req = try apiRequest(path)
-      req.setValue("application/vnd.github.raw", forHTTPHeaderField: "Accept")
-      if let etag = last?.etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
-      return req
-    }
+    var req = try apiRequest(path)
+    req.setValue("application/vnd.github.raw", forHTTPHeaderField: "Accept")
+    if let etag = last?.etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+    let (status, headers, body, _) = try send(req, stats: &stats)
     switch status {
     case 304 where last != nil:
       deploys.files[service]?.checked = now
@@ -198,7 +196,7 @@ extension GitHubPoller {
 
   /// Sends a REST GET and returns its JSON. Anything but a 200 is an error.
   private func get(_ path: String, stats: inout Stats) throws -> JSON {
-    let (status, _, _, json) = try send(quota: "core", stats: &stats) { try apiRequest(path) }
+    let (status, _, _, json) = try send(try apiRequest(path), stats: &stats)
     guard status == 200, let json else {
       throw APIError("GitHub answered \(status) for \(path) \(GitHub.message(json))")
     }

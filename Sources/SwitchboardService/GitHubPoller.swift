@@ -14,10 +14,10 @@ final class GitHubPoller {
 
   private var token: String?
   /// After GitHub's rate limit, no request to that quota goes out before this
-  /// time. The keys are `x-ratelimit-resource` values. GitHub counts GraphQL
-  /// and REST (`core`) separately. Other `gh` calls with the same token spend
-  /// `core`.
-  private var pausedUntil: [String: Int64] = [:]
+  /// time. GitHub counts GraphQL and REST (`core`) requests separately. Other
+  /// `gh` calls with the same token spend `core`.
+  private var graphQLPausedUntil: Int64 = 0
+  private var restPausedUntil: Int64 = 0
   var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id, with their comments from
   /// `GitHub.bodyAuthors`.
@@ -163,7 +163,8 @@ final class GitHubPoller {
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
-    if let paused = pausedUntil.values.max(), paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
+    let paused = max(graphQLPausedUntil, restPausedUntil)
+    if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
     return .object(result)
   }
 
@@ -333,19 +334,15 @@ final class GitHubPoller {
   /// that GitHub reports NOT_FOUND, as after a deletion, leaves its sessions,
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
-  private func readPRs(
-    all: Bool, now: Int64, waited: [String: (created: Int64, pending: Bool)], interest: Interest,
-    stats: inout Stats
-  ) throws {
-    // A PR with an open wait that `waitedOn` marks pending polls like a
-    // pending PR. A PR with any open wait also polls at once when the wait is
-    // newer than the last read. That read can't show what happened after the
-    // wait was set.
+  private func readPRs(all: Bool, now: Int64, waited: Waited, interest: Interest, stats: inout Stats) throws {
+    // A PR in `waited.pending` polls like a pending PR. A PR with any open
+    // wait also polls at once when the wait is newer than the last read. That
+    // read can't show what happened after the wait was set.
     let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {
-      all || (waited[$0]?.created ?? 0) > (prs[$0]?.polled ?? 0)
+      all || (waited.created[$0] ?? 0) > (prs[$0]?.polled ?? 0)
         || GitHub.isDue(
           prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs,
-          idleMs: waited[$0]?.pending == true ? settings.pendingMs : settings.idleMs)
+          idleMs: waited.pending.contains($0) ? settings.pendingMs : settings.idleMs)
     }
     var stacked: [String] = []
     var gone: Set<String> = []
@@ -414,13 +411,11 @@ final class GitHubPoller {
   /// Sends one GraphQL request and returns the response, whose `data` isn't
   /// null.
   private func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
-    let (status, _, _, json) = try send(quota: "graphql", stats: &stats) {
-      var req = try apiRequest("graphql")
-      req.httpMethod = "POST"
-      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      req.httpBody = Data(JSON.object(["query": .string(query), "variables": variables]).text.utf8)
-      return req
-    }
+    var req = try apiRequest("graphql")
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = Data(JSON.object(["query": .string(query), "variables": variables]).text.utf8)
+    let (status, _, _, json) = try send(req, stats: &stats)
     guard status == 200, let json, let data = json["data"], data != .null else {
       throw APIError("GitHub answered \(status) \(GitHub.message(json))")
     }
@@ -438,17 +433,19 @@ final class GitHubPoller {
     return req
   }
 
-  /// Sends the request that `make` builds, with the token, and returns the
-  /// status, the headers with lowercase names, the body, and the body as
-  /// JSON. A 401 gets a new token from gh and one retry. A rate limit pauses
-  /// the requests to the quota that the response names, or else to `quota`,
-  /// for as long as `GitHub.rateLimit` says.
-  func send(quota: String, stats: inout Stats, _ make: () throws -> URLRequest) throws -> (
+  /// Sends the request with the token, and returns the status, the headers
+  /// with lowercase names, the body, and the body as JSON. A 401 gets a new
+  /// token from gh and one retry. A rate limit pauses the requests to the
+  /// same quota, GraphQL or REST, for as long as `GitHub.rateLimit` says.
+  func send(_ request: URLRequest, stats: inout Stats) throws -> (
     status: Int, headers: [String: String], body: Data, json: JSON?
   ) {
-    if (pausedUntil[quota] ?? 0) > nowMs() { throw APIError("paused after a GitHub \(quota) rate limit") }
+    let graphQL = request.url?.lastPathComponent == "graphql"
+    if (graphQL ? graphQLPausedUntil : restPausedUntil) > nowMs() {
+      throw APIError("paused after a GitHub \(graphQL ? "GraphQL" : "core") rate limit")
+    }
     func attempt() throws -> (Int, [String: String], Data) {
-      var req = try make()
+      var req = request
       req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
       stats.requests += 1
       return try transfer(req)
@@ -460,7 +457,10 @@ final class GitHubPoller {
     }
     let json = JSON.parse(String(decoding: body, as: UTF8.self))
     let limit = GitHub.rateLimit(status: status, headers: headers, response: json, now: Date().timeIntervalSince1970)
-    if let pause = limit.pause { pausedUntil[headers["x-ratelimit-resource"] ?? quota] = nowMs() + Int64(pause * 1000) }
+    if let pause = limit.pause {
+      let until = nowMs() + Int64(pause * 1000)
+      if graphQL { graphQLPausedUntil = until } else { restPausedUntil = until }
+    }
     if limit.limited { throw APIError("GitHub rate limit: \(GitHub.message(json))") }
     return (status, headers, body, json)
   }

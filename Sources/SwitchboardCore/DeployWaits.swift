@@ -49,6 +49,14 @@ extension Wait {
   public static let posthogRepository = "PostHog/posthog"
   public static let chartsRepository = "PostHog/charts"
 
+  /// Whether the wait needs its PR read at the pending rate. A deploy wait
+  /// that names a service doesn't need it once the PR merged. The service's
+  /// state file decides that wait. A PR that the poller hasn't read yet needs
+  /// it.
+  public func readsPRWhilePending(_ pr: SwitchboardCore.PullRequest?) -> Bool {
+    !(kind == .deploy && service != nil && pr?.state == .merged)
+  }
+
   /// The environments that a deploy wait names.
   public var deployEnvironments: [DeployEnvironment] { DeployEnvironment.named(environment ?? "prod") ?? [] }
 
@@ -89,7 +97,7 @@ extension Wait {
   ) -> String? {
     let name = service ?? ""
     guard let state else { return "\(Wait.chartsRepository) has no state/\(name).yaml" }
-    if !state.builds(from: pr.repo), let repository = state.repository {
+    if let repository = state.repository, !Wait.sameRepository(repository, pr.repo) {
       return "\(name) deploys from \(repository), not \(pr.repo)"
     }
     let named = deployEnvironments

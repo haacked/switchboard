@@ -348,6 +348,18 @@ import Testing
     #expect(dev.serviceDeployResolution(service(), pr: pr(), environments: failedProd) == nil)
   }
 
+  // MARK: How often the PR polls
+
+  /// Once the PR merged, only the service's state file can resolve a wait that
+  /// names a service.
+  @Test func aServiceWaitStopsNeedingPendingReadsOnceThePRMerged() {
+    #expect(!wait(service: "feature-flags").readsPRWhilePending(pr()))
+    #expect(wait(service: "feature-flags").readsPRWhilePending(pr(.open)))
+    #expect(wait(service: "feature-flags").readsPRWhilePending(nil))
+    #expect(wait().readsPRWhilePending(pr()))
+    #expect(waitOn(.ci).readsPRWhilePending(pr()))
+  }
+
   // MARK: One environment's state
 
   static let ancestries: [DeployedAncestry] = [.contains, .notYet, .diverged]
