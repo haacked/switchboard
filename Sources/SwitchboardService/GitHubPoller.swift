@@ -474,7 +474,10 @@ final class GitHubPoller {
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
     guard var t = tracked[s.id] else { return false }
     defer { tracked[s.id] = t }
-    if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open, shouldCount(t, s, pr.id, all, now) {
+    if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open,
+      s.facts.cleanedUp == nil,
+      shouldCount(t, s, pr.id, all, now)
+    {
       // Without the optional index lock, the count can't make a git commit
       // in the session fail.
       let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"]).map { $0.split(separator: "\n").count }
@@ -483,8 +486,15 @@ final class GitHubPoller {
       // the folder unread, which stays unsafe.
       var info = stat()
       let gone = dirty == nil && stat(s.cwd, &info) != 0 && errno == ENOENT
-      if dirty != s.facts.dirty || gone != s.facts.folderGone {
-        event(s.id, "worktree", ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)])
+      // The checks run 8 git commands. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
+      let offer: CleanupStatus? =
+        dirty != 0 || pr.state != .merged
+        ? nil
+        : s.facts.turnRunning ? s.facts.cleanupChecked : CleanupStatus(blocker: service.cleanupBlocker(s.id, pr: pr))
+      if dirty != s.facts.dirty || gone != s.facts.folderGone || offer != s.facts.cleanupChecked {
+        var data: [String: JSON] = ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)]
+        if let offer { data["cleanup"] = offer.reason.map(JSON.string) ?? .null }
+        event(s.id, "worktree", .object(data))
       }
     }
     var changed = false

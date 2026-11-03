@@ -44,6 +44,9 @@ let usage = """
                                   session's PR is merged and the branch has no commit after it.
                                   --delete-remote-branch also deletes the branch on its remote, and keeps
                                   it, with an error, unless it is at the merged PR's head
+    cleanup <session>             remove the worktree and the local branch of a session whose PR merged,
+                                  and keep the session in Done. Refuses uncommitted files, commits
+                                  after the merge, a running turn, and a folder sbd didn't make.
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -471,6 +474,9 @@ case "rm":
       "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
     ])
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
+case "cleanup":
+  let result = call("cleanup", ["session": .string(a.session("cleanup"))], timeout: 300)
+  if a.json { printJSON(result) } else { print("cleaned up \(result["cleaned"]?.string ?? "")") }
 case "import":
   do {
     let repo = a.values["--repo"]

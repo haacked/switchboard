@@ -62,6 +62,18 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// Whether the folder no longer exists, as the poller found when its count
   /// failed. A count that failed for another reason leaves this false.
   public var folderGone = false
+  /// What the cleanup checks of the last `worktree` event found.
+  public var cleanupChecked: CleanupStatus?
+  /// The removal that a `cleanup` event recorded.
+  public var cleanedUp: CleanupStatus?
+  /// Whether `sb cleanup` can remove the worktree, or whether it did. The
+  /// poller records the count before the finished PR's `pr` event, so the
+  /// checks count only once the PR reads merged and the count reads clean.
+  public var cleanup: CleanupStatus? {
+    if let cleanedUp { return cleanedUp }
+    guard pr?.state == .merged, dirty == 0 else { return nil }
+    return cleanupChecked
+  }
   /// The id of the last Stop event, which keys the turn's triage summary.
   public var lastStop: Int64 = 0
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
@@ -72,7 +84,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// record. They report on GitHub, the folder, a reply, and claude's
   /// background jobs, not on the session. They do not hold off the idle stop
   /// or the Stale state.
-  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job"]
+  static let observedKinds: Set<String> = ["pr", "worktree", "triage", "job", "cleanup"]
 
   public init() {}
 
@@ -180,6 +192,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "worktree":
       dirty = d["dirty"]?.int
       folderGone = d["gone"]?.bool ?? false
+      cleanupChecked = d["cleanup"].map { CleanupStatus(blocker: $0.string) }
+    case "cleanup":
+      let kept = d["branch_removed"]?.bool == false ? d["branch"]?.string : nil
+      cleanedUp = CleanupStatus(state: .removed, reason: kept.map { "kept \($0)" })
     default:
       break
     }
