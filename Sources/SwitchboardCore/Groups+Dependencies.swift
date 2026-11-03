@@ -84,13 +84,21 @@ extension GroupSuggestions {
 
     /// For each session in no group that the user didn't place there by
     /// hand, a join of the group that it has the most dependencies with.
-    /// Ties go to the group whose name sorts first.
-    func joins(declined: Set<String>) -> [GroupSuggestion] {
+    /// Ties go to the group whose name sorts first. A dependency on a session
+    /// that one of `merges` moves counts for the group that the merge keeps.
+    /// A join to the merged group would place the session there by hand, and
+    /// that could change which group survives and drop the merge.
+    func joins(declined: Set<String>, merges: [GroupSuggestion]) -> [GroupSuggestion] {
+      var movesTo: [String: String] = [:]
+      for m in merges {
+        guard let keep = m.group else { continue }
+        for id in m.sessions where movesTo[id] == nil { movesTo[id] = keep }
+      }
       var byOpen: [String: [String: [Edge]]] = [:]
       for e in edges {
-        for (open, other) in [(e.from, e.to), (e.to, e.from)] where open.open {
-          guard let g = group(of: other) else { continue }
-          byOpen[open.id, default: [:]][g, default: []].append(e)
+        for (loose, other) in [(e.from, e.to), (e.to, e.from)] where loose.open {
+          guard let g = movesTo[other.id] ?? group(of: other) else { continue }
+          byOpen[loose.id, default: [:]][g, default: []].append(e)
         }
       }
       return byOpen.keys.sorted().compactMap { session in

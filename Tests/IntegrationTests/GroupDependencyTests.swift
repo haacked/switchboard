@@ -165,6 +165,7 @@ extension GroupTests {
     #expect(merge.group == flags.id)
     #expect(merge.sessions == [top.id])
     #expect(merge.stays == [lead.id])
+    #expect(try sbd.sb("group", "suggest").contains("; \(lead.id) stays, placed by hand"))
 
     _ = try accept(sbd, merge.id)
 
@@ -173,6 +174,7 @@ extension GroupTests {
     let kept = try #require(try list(sbd).groups.first { $0.id == docs.id })
     #expect(kept.sessions == [lead.id])
     #expect(kept.notes.map(\.text) == ["Ship by Friday"])
+    #expect(try #require(try list(sbd).groups.first { $0.id == flags.id }).notes.isEmpty)
     #expect(try suggestions(sbd).isEmpty)
   }
 

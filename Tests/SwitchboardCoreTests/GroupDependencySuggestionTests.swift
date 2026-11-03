@@ -273,6 +273,55 @@ private let posthog = "PostHog/posthog"
     #expect(try #require(found.first).id == "dependency:u:g1")
   }
 
+  @Test func aJoinToAGroupThatAMergeEmptiesGoesToTheKeptGroupAndKeepsTheMerge() throws {
+    // Flags survives on a, placed by hand. The merge empties Cache, which u depends on.
+    let before = [
+      session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]), session("b", group: "g2", pr: 2),
+      session("u", pr: 3, edges: [edge(to: "b", 2)]),
+    ]
+    let found = suggest(before, groups: flagsAndCache)
+    let join = try #require(found.first { $0.sessions == ["u"] })
+    #expect(join.id == "dependency:u:g1")
+    #expect(join.reason == "#3 depends on #2")
+
+    let after = suggest(accept(join, before), groups: flagsAndCache)
+
+    #expect(after.map(\.id) == ["merge:g1:g2"])
+  }
+
+  @Test func aJoinToASessionThatAMergeMovesGoesToTheKeptGroupWhenSomeoneStays() throws {
+    // Cache keeps h, placed by hand. A join of u to Cache would tie the
+    // hand-placed counts and make Cache the larger group, so Cache would
+    // survive and the merge would have nothing left to move.
+    let before = [
+      session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]),
+      session("a2", group: "g1", byHand: true),
+      session("b", group: "g2", pr: 2), session("h", group: "g2", byHand: true),
+      session("u", pr: 3, edges: [edge(to: "b", 2)]),
+    ]
+    let found = suggest(before, groups: flagsAndCache)
+    #expect(try #require(merges(found).first).stays == ["h"])
+    let join = try #require(found.first { $0.sessions == ["u"] })
+    #expect(join.id == "dependency:u:g1")
+
+    let after = suggest(accept(join, before), groups: flagsAndCache)
+
+    #expect(after.map(\.id) == ["merge:g1:g2"])
+  }
+
+  @Test func aJoinToASessionThatStaysGoesToThatSessionsGroup() throws {
+    let found = suggest(
+      [
+        session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)]),
+        session("a2", group: "g1", byHand: true),
+        session("b", group: "g2", pr: 2), session("h", group: "g2", byHand: true, pr: 4),
+        session("u", pr: 3, edges: [edge(to: "h", 4)]),
+      ],
+      groups: flagsAndCache)
+
+    #expect(try #require(found.first { $0.sessions == ["u"] }).id == "dependency:u:g2")
+  }
+
   @Test func aJoinPicksTheGroupWithTheMostEdges() throws {
     let found = suggest(
       [

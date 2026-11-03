@@ -60,7 +60,8 @@ public struct GroupList: Codable, Equatable, Sendable {
 /// A group that sbd proposes: a new one, more sessions for an existing one,
 /// or a merge of two groups.
 public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
-  /// The group that a merge empties into `group`.
+  /// The group whose sessions a merge moves into `group`. sbd deletes it
+  /// when accepting leaves no session in it.
   public struct Merge: Codable, Equatable, Sendable {
     public var group: String
     public var name: String
@@ -71,7 +72,9 @@ public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
     }
   }
 
-  /// Stays the same while the key and the group stay, so `--accept` can name it.
+  /// Stays the same while the groups, sessions, and key it names stay, so
+  /// `--accept` and `--decline` can name it. sbd stores declined ids, so a
+  /// change to an id's format brings back the suggestions the user declined.
   public var id: String
   public var name: String
   /// The group to join, or nil for a new group.
@@ -261,10 +264,11 @@ public enum GroupSuggestions {
     -> [GroupSuggestion]
   {
     let links = Links(candidates: candidates, groups: groups)
-    let joins = links.joins(declined: declined)
+    let merges = links.merges(declined: declined)
+    let joins = links.joins(declined: declined, merges: merges)
     let taken = Set(joins.flatMap(\.sessions))
     let open = candidates.filter { $0.open && !taken.contains($0.id) }
-    return links.merges(declined: declined) + joins + keyed(open, candidates, groups, declined: declined)
+    return merges + joins + keyed(open, candidates, groups, declined: declined)
   }
 
   static func keyed(_ open: [Candidate], _ candidates: [Candidate], _ groups: [SessionGroup], declined: Set<String>)

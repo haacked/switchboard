@@ -53,6 +53,9 @@ final class BoardModel: ObservableObject {
   /// Sessions whose message is on its way to sbd. Their Send buttons stay
   /// disabled until sbd replies, so a second press can't send it again.
   @Published var sending: Set<String> = []
+  /// Group suggestions whose Accept or Decline is on its way to sbd. Their
+  /// rows stay disabled until sbd replies, so a second click can't answer again.
+  @Published var answeringSuggestions: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -316,8 +319,18 @@ final class BoardModel: ObservableObject {
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
-  func acceptSuggestion(_ id: String) { perform("group-suggest", ["accept": .string(id)]) }
-  func declineSuggestion(_ id: String) { perform("group-suggest", ["decline": .string(id)]) }
+  func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
+  func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
+
+  /// `then` removes the row when sbd accepts the answer. `finally` runs
+  /// before the refresh lists the suggestions again. The removal keeps the
+  /// row's buttons from turning back on for a suggestion that sbd no longer has.
+  private func answerSuggestion(_ id: String, _ key: String) {
+    guard answeringSuggestions.insert(id).inserted else { return }
+    perform(
+      "group-suggest", [key: .string(id)], then: { _ in self.suggestions.removeAll { $0.id == id } },
+      finally: { self.answeringSuggestions.remove(id) })
+  }
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first.
   func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {

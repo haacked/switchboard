@@ -446,19 +446,24 @@ struct GroupSuggestionList: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
         ForEach(model.suggestions) { s in
+          let action = Triage.capitalized(s.action)
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "lightbulb").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-              Text("\(Triage.capitalized(s.action)): \(s.sessions.map(name).joined(separator: ", "))")
+              Text("\(action): \(s.sessions.map(name).joined(separator: ", "))")
                 .fontWeight(.medium)
               Text([s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button("Accept") { model.acceptSuggestion(s.id) }
+              .accessibilityLabel("Accept: \(action)")
             Button("Decline") { model.declineSuggestion(s.id) }
+              .accessibilityLabel("Decline: \(action)")
           }
+          .disabled(model.answeringSuggestions.contains(s.id))
           .accessibilityElement(children: .contain)
+          .accessibilityLabel(action)
           .accessibilityIdentifier("suggestion-\(s.id)")
         }
       }
