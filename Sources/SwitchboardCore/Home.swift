@@ -22,6 +22,8 @@ public struct Home: Sendable {
   /// The folder of the account that `sb account use` chose, or no file.
   public var activeAccount: String { "\(path)/account" }
   public var log: String { "\(path)/sbd.log" }
+  /// Holds `on` while `sb autocontinue on` is in force.
+  public var autoContinue: String { "\(path)/auto-continue" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
   public var mcpConfig: String { "\(path)/mcp-config.json" }
   /// Where sbd writes each shared MCP server's launcher script.
@@ -55,6 +57,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var claude: String = "claude"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
+  /// The most claude processes that may run at once.
+  public var liveCap = 12
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
   /// The model for new sessions, or nil for claude's default.
@@ -94,6 +98,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// state. 0 turns snapshots off, and sbd replays every event at start.
   public var snapshotEvery = 500
   public var triage = TriageSettings()
+  public var autoContinue = AutoContinueSettings()
 
   public init() {}
 
@@ -103,6 +108,7 @@ public struct Config: Codable, Equatable, Sendable {
     claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? d.claude
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
+    liveCap = try c.decodeIfPresent(Int.self, forKey: .liveCap) ?? d.liveCap
     model = try c.decodeIfPresent(String.self, forKey: .model)
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)
@@ -128,6 +134,7 @@ public struct Config: Codable, Equatable, Sendable {
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery
     triage = try c.decodeIfPresent(TriageSettings.self, forKey: .triage) ?? d.triage
+    autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
   }
 }
 

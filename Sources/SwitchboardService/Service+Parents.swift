@@ -66,7 +66,6 @@ extension Service {
   }
 
   private func canTakeNotice(_ e: Entry, now: Int64) -> Bool {
-    e.pending.isEmpty && !e.facts.turnRunning && !mcpStarting(now: now)
-      && e.inFlight.map({ now - $0 >= Service.inFlightMs }) ?? true
+    !e.messageWaiting(now: now) && !e.facts.turnRunning && !mcpStarting(now: now)
   }
 }

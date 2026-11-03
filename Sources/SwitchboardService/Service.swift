@@ -34,6 +34,13 @@ public final class Service {
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
+    /// When the tick last saw a terminal on the Claude pane.
+    var lastOnScreen: Int64 = 0
+
+    /// Whether a message is queued for the session or on its way.
+    func messageWaiting(now: Int64) -> Bool {
+      !pending.isEmpty || inFlight.map { now - $0 < Service.inFlightMs } == true
+    }
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -58,6 +65,9 @@ public final class Service {
   /// The account that `sb account use` chose, or nil before the first use.
   var chosenAccount: String?
   var parentNotices = ParentNotices()
+  /// Whether `sb autocontinue on` is in force.
+  var autoContinueOn = false
+  var quota: any QuotaBudget = UnlimitedBudget()
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -97,6 +107,7 @@ public final class Service {
   public func load() throws {
     try writeClaudeSettings()
     loadChosenAccount()
+    loadAutoContinue()
     try store.pruneSnapshots()
     for session in try store.sessions() {
       let session = try upgraded(session)
@@ -247,6 +258,8 @@ public final class Service {
       return try JSON(encoding: mcpStatus())
     case "snapshots":
       return try snapshotRequest(args)
+    case "autocontinue":
+      return try autoContinueRequest(args)
     default:
       throw APIError("unknown request \(op)")
     }
@@ -1167,6 +1180,7 @@ public final class Service {
       deferDueQuestions(now: now)
       readyDueFollowups(now: now)
       notifyParents(now: now)
+      autoContinueSessions(now: now)
       compactSnapshots()
     }
     endIdleTurns()

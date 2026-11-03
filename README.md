@@ -104,6 +104,10 @@ The order is: a held prompt or question; a decision, question, or approval from 
 
 In the app, the Queue shows the list on the left. The right side shows the selected session's summary, its option buttons (or its card), its last reply as formatted Markdown, and a field that messages the session itself. The Terminal button shows the session's terminals in place of the summary.
 
+### Auto-continue
+
+`sb autocontinue on` lets `sbd` send each session in Claude can continue its next step on its own, and `sb autocontinue off` stops it. It is off until you turn it on, and the switch survives a restart of `sbd`. On each tick, `sbd` sends "Yes, go ahead." to a session whose last reply offered a next step, and records an `auto-continue` event that `sb events` shows. It skips a session that has an open card, an open wait, a running turn, or a terminal showing it, one that you sent a prompt to, answered, or looked at in the last 10 minutes, one that it already continued 3 times in the last hour, and one whose claude is stopped while 12 claude processes run. `sb autocontinue status` lists the sessions in Claude can continue and what holds each one back. In `config.json`, `autoContinue` sets `message`, `quietSeconds` (default 600), and `perHour` (default 3), and the top-level `liveCap` (default 12) sets the live cap.
+
 ### Follow-ups
 
 A follow-up is a session that hasn't started: a title, a prompt, a GitHub repository, and where it came from. It has no worktree and no `claude` until you start it, and it sits in the Not started column, which the sidebar keeps collapsed.

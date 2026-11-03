@@ -102,6 +102,9 @@ let usage = """
                                   first saves a snapshot of every session
     ping                          check that sbd answers
     mcp                           list the shared MCP servers that sbd runs
+    autocontinue [on|off|status]  send "Claude can continue" sessions their
+                                  next step on their own, or show what holds
+                                  each one back. Off by default
     service install|uninstall|status
     version
 
@@ -524,6 +527,8 @@ case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":
   mcp(a)
+case "autocontinue":
+  autoContinue(a)
 case "followup", "followups":
   followup(a)
 case "poll":
