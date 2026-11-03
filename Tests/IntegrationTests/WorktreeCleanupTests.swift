@@ -229,6 +229,20 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try !tmuxHas(terminals, terminals.shell))
   }
 
+  /// A folder that the user deleted by hand gets the same refusal as a cleaned-up one.
+  @Test func sessionWhoseFolderIsGoneStartsNoPane() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to stop") { !$0.live }
+    try FileManager.default.removeItem(atPath: s.cwd)
+
+    for op in ["resume", "terminals"] {
+      #expect(failure(sbd, op, ["session": .string(s.id)]).contains("is gone"), "\(op)")
+    }
+  }
+
   /// tmux would start a pane whose folder is gone in the home folder.
   @Test func cleanedUpSessionStartsNoPane() throws {
     let github = try FakeGitHub()

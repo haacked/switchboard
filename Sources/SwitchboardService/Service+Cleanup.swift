@@ -16,7 +16,7 @@ extension Service {
       let id = try lookup(args)
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       let e = entries[id]!
-      if e.facts.cleanup?.state == .removed { throw APIError("\(id) is already cleaned up") }
+      if e.facts.cleanedUp != nil { throw APIError("\(id) is already cleaned up") }
       try requireNoTurn(e)
       return (e.session, e.facts.pr, sharedSession(e.session))
     }
@@ -96,12 +96,16 @@ extension Service {
     return (repo, try checkBranchIsMerged(session, pr: pr))
   }
 
-  /// Throws for a session whose worktree `sb cleanup` removed. tmux starts a
-  /// pane whose folder is missing in the home folder.
-  func refuseCleanedUp(_ id: String) throws {
-    if entries[id]?.facts.cleanup?.state == .removed {
-      throw APIError("\(id) was cleaned up, and its worktree is gone.")
+  /// Throws for a follow-up that hasn't started, and for a session whose
+  /// folder is gone. tmux starts a pane whose folder is missing in the home
+  /// folder.
+  func requireFolder(_ session: Session) throws {
+    try refuseNotStarted(session)
+    guard !FileManager.default.fileExists(atPath: session.cwd) else { return }
+    if entries[session.id]?.facts.cleanedUp != nil {
+      throw APIError("\(session.id) was cleaned up, and its worktree is gone.")
     }
+    throw APIError("\(session.cwd) is gone, so \(session.id) can't start there.")
   }
 
   private func requireNoTurn(_ e: Entry) throws {

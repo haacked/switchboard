@@ -30,22 +30,21 @@ public struct CleanupStatus: Codable, Equatable, Sendable {
 /// The ignored paths that `git worktree remove` may delete, because a build
 /// or a package manager makes them again.
 public enum BuildOutput {
-  static let names: Set<String> = [
-    "node_modules", ".venv", "venv", "target", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    "dist", "build", ".build", ".next", ".turbo", ".cache", "coverage", ".DS_Store", "DerivedData", ".hypothesis",
-    ".parcel-cache",
-  ]
-  static let extensions: Set<String> = ["pyc", "pyo"]
   /// Folders whose ignored contents only a tool writes. ruff, pytest, and
   /// mypy put a `.gitignore` of `*` inside their caches, so git lists the
   /// files inside them and not the folder. flox, trunk, and husky keep tracked
-  /// setup in their folders and write the ignored rest themselves. Generic
-  /// names such as `build` stay out, because a user's ignored file can sit in
-  /// a tracked folder with that name.
+  /// setup in their folders and write the ignored rest themselves.
   static let toolFolders: Set<String> = [
     "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".flox", ".trunk",
     ".husky",
   ]
+  /// Names that count only as the listed path itself. A user's ignored file
+  /// can sit in a tracked folder with a generic name such as `build`.
+  static let names: Set<String> = toolFolders.union([
+    "target", "dist", "build", ".build", ".next", ".turbo", ".cache", "coverage", ".DS_Store", "DerivedData",
+    ".hypothesis", ".parcel-cache",
+  ])
+  static let extensions: Set<String> = ["pyc", "pyo"]
 
   /// Whether a path that `git status --ignored=matching` lists is build
   /// output: its last component is on the list or in `also`, or a folder
@@ -53,9 +52,7 @@ public enum BuildOutput {
   public static func contains(_ path: String, also: Set<String> = []) -> Bool {
     let parts = path.split(separator: "/").map(String.init)
     guard let name = parts.last else { return false }
-    if names.contains(name) || also.contains(name) || extensions.contains((name as NSString).pathExtension) {
-      return true
-    }
-    return parts.dropLast().contains { toolFolders.contains($0) || also.contains($0) }
+    if names.contains(name) || extensions.contains((name as NSString).pathExtension) { return true }
+    return parts.contains(where: also.contains) || parts.dropLast().contains(where: toolFolders.contains)
   }
 }

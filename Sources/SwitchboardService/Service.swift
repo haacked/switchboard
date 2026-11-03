@@ -472,8 +472,7 @@ public final class Service {
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try refuseNotStarted(session)
-    try refuseCleanedUp(id)
+    try requireFolder(session)
     let shell = paneName(id, .shell)
     switch snapshot.panes[shell] {
     case nil:
@@ -496,8 +495,7 @@ public final class Service {
   /// next launch.
   func launch(_ id: String, prompt: String?) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try refuseNotStarted(session)
-    try refuseCleanedUp(id)
+    try requireFolder(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
     let resume = hasTranscript(session)
     var args = [config.claude]
@@ -693,7 +691,8 @@ public final class Service {
       if folderGone {
         repo = try checkGoneWorktree(session, mergedPR: pr?.state == .merged)
       } else {
-        repo = try checkWorktreeIsLossless(session, mergedPR: pr?.state == .merged, sharedWith: sharedWith)
+        repo = try checkWorktreeIsLossless(
+          session, mergedPR: pr?.state == .merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
       }
     }
     if removesBranch {
@@ -931,7 +930,7 @@ public final class Service {
   /// is not build output or in `cleanupDeletes` also refuses. Any git failure
   /// refuses the removal.
   func checkWorktreeIsLossless(
-    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool = false
+    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool
   ) throws -> String {
     let repo = try worktreeRepo(session)
     if let sharedWith {
@@ -943,7 +942,7 @@ public final class Service {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     if entry.locked { throw lockedError(session.cwd) }
-    let status = try readStatus(session.cwd)
+    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored)
     guard status.changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
     }
@@ -966,26 +965,25 @@ public final class Service {
     }
   }
 
-  /// The number of changed paths and the ignored paths, from one walk of
-  /// the folder. `matching` lists each ignored path without what is inside
-  /// it, and `-z` leaves names unquoted. A rename or copy entry is followed
-  /// by its source path, which has no status of its own.
-  private func readStatus(_ cwd: String) throws -> (changed: Int, ignored: [String]) {
+  /// The number of changed paths, and with `listingIgnored` the ignored
+  /// paths, from one walk of the folder. Listing the ignored paths takes
+  /// about three times as long in posthog/posthog. `matching` lists each
+  /// ignored path without what is inside it, and `-z` leaves names unquoted.
+  /// A rename or copy entry is followed by its source path, which has no
+  /// status of its own.
+  private func readStatus(_ cwd: String, listingIgnored: Bool) throws -> (changed: Int, ignored: [String]) {
     // The flag keeps status from taking the index lock while claude commits.
-    let fields = try gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain", "-z", "--ignored=matching"])
-      .split(separator: "\0")
+    let args = ["--no-optional-locks", "status", "--porcelain", "-z"] + (listingIgnored ? ["--ignored=matching"] : [])
+    var fields = try gitOutput(cwd, args).split(separator: "\0").makeIterator()
     var changed = 0
     var ignored: [String] = []
-    var i = fields.startIndex
-    while i < fields.endIndex {
-      let field = fields[i]
-      i += 1
+    while let field = fields.next() {
       if field.hasPrefix("!! ") {
         ignored.append(String(field.dropFirst(3)))
         continue
       }
       changed += 1
-      if field.prefix(2).contains(where: { $0 == "R" || $0 == "C" }) { i += 1 }
+      if field.prefix(2).contains(where: { $0 == "R" || $0 == "C" }) { _ = fields.next() }
     }
     return (changed, ignored)
   }
