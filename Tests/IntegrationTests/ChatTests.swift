@@ -73,6 +73,26 @@ import Testing
     #expect(configs.count == 2 && configs.allSatisfy { $0 != nil })
   }
 
+  @Test func theChatsServerReachesTheChatItself() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let c = try chat(sbd, "Flags")
+    try sbd.waitFor(c.id, "the stub") { $0.live }
+    let config = try #require(launchConfigs(sbd, c).first ?? nil)
+    let mcp = try MCPClient(server: try #require(config["mcpServers"]?["switchboard"]))
+
+    let set = try mcp.call("set_wait", ["note": "the deploy"])
+    let cleared = try mcp.call("clear_wait", [:])
+    let noted = try mcp.call("add_note", ["session": .string(c.id), "text": "watching"])
+
+    #expect(!set.isError)
+    #expect(try set.decode(SessionSummary.self).waits.count == 1)
+    #expect(!cleared.isError)
+    #expect(try cleared.decode(SessionSummary.self).waits.isEmpty)
+    #expect(!noted.isError)
+    #expect(try sbd.get(c.id).notes.map(\.text) == ["watching"])
+  }
+
   // MARK: The session and its folder
 
   @Test func chatCreatesASessionNamedForTheGroupInItsFolderWithTheGuide() throws {

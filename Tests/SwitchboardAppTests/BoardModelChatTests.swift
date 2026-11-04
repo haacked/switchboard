@@ -62,4 +62,19 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
     #expect(sent.0 == "chat")
     #expect(sent.1 == ["group": "g1"])
   }
+
+  @Test func openChatSelectsAChatThatExistsWithoutAskingSbd() {
+    let model = appliedModel([chatItem("c", group: "g1"), needsItem("a")])
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+
+    model.openChat("g1")
+
+    #expect(model.selection == "c")
+    Thread.sleep(forTimeInterval: 0.2)
+    #expect(sent.value == 0)
+  }
 }

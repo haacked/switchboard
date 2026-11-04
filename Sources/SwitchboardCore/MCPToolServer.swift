@@ -147,17 +147,11 @@ public struct MCPToolServer: Sendable {
         wait.target = try sessionID(target, scoped).string
       }
       var request = try JSON(encoding: wait).object ?? [:]
-      if args["session"] != nil {
-        request["session"] = try sessionID(args, scoped)
-      } else if let caller {
-        request["session"] = .string(caller)
-      } else {
-        throw APIError("name a session")
-      }
+      request["session"] = try sessionOrCaller(args, scoped)
       return try client.call("wait", request)
     case "clear_wait":
       var request = pick(args, ["wait"])
-      request["session"] = try sessionID(args, scoped)
+      request["session"] = try sessionOrCaller(args, scoped)
       return try client.call("clear-wait", request)
     case "add_note":
       return try client.call(
@@ -203,15 +197,23 @@ public struct MCPToolServer: Sendable {
     return summary
   }
 
-  /// The id of the session that `ref` names. Without a scope, or for a
-  /// member's id, it passes the ref on. sbd then resolves it.
+  /// The id of the session that `ref` names. Without a scope, for a
+  /// member's id, or for the caller's own id, it passes the ref on. sbd then
+  /// resolves it. A group's chat calls with its own id. A chat is never a
+  /// member of its group.
   private func sessionID(_ ref: String, _ scoped: Scoped?) throws -> JSON {
-    guard let scoped, !scoped.group.sessions.contains(ref) else { return .string(ref) }
+    guard let scoped, !scoped.group.sessions.contains(ref), ref != caller else { return .string(ref) }
     return try session(ref, scoped)["id"] ?? .null
   }
 
   private func sessionID(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     try sessionID(sessionRef(args), scoped)
+  }
+
+  /// The session that `args` names, or the calling session when it names none.
+  private func sessionOrCaller(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
+    if args["session"] == nil, let caller { return .string(caller) }
+    return try sessionID(args, scoped)
   }
 
   private func sessionRef(_ args: JSON) throws -> String {

@@ -35,8 +35,14 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
       "type": "user", "isMeta": true, "timestamp": "2026-10-25T10:00:00.500Z",
       "message": ["role": "user", "content": "Caveat: a command ran."],
     ]
+    let compactSummary: JSON = [
+      "type": "user", "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
+      "timestamp": "2026-10-25T09:59:59.000Z",
+      "message": ["role": "user", "content": "This session is being continued from a previous conversation."],
+    ]
     let path = try writeTranscript(
       [
+        compactSummary,
         userLine("Fix the parser.", at: "2026-10-25T10:00:00.000Z"),
         meta,
         assistantLine([textBlock("I'll look at the parser.")], at: "2026-10-25T10:00:01.000Z"),

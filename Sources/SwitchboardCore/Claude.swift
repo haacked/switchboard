@@ -298,11 +298,14 @@ public enum Transcript {
 
   /// A user or assistant line of the main conversation that has text. A
   /// user line that holds only tool results has none. A meta line is one
-  /// that claude adds, such as a command's output.
+  /// that claude adds, such as a command's output. Claude Code writes the
+  /// summary of a compacted conversation as a user line that only its
+  /// transcript view shows.
   static func message(_ line: Data) -> ChatMessage? {
     guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line),
       let role = object["type"]?.string.flatMap(ChatMessage.Role.init(rawValue:)),
-      object["isSidechain"]?.bool != true, object["isMeta"]?.bool != true
+      object["isSidechain"]?.bool != true, object["isMeta"]?.bool != true,
+      object["isCompactSummary"]?.bool != true, object["isVisibleInTranscriptOnly"]?.bool != true
     else { return nil }
     let text = text(of: object)
     guard !text.isEmpty else { return nil }

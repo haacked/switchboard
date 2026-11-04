@@ -12,25 +12,32 @@ extension Service {
       let group = try queue.sync { try lookupGroup(args) }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       try ensureChatFolder(group)
-      if let id = queue.sync(execute: { chatID(group) }) {
-        var request: [String: JSON] = ["session": .string(id)]
-        request["text"] = text.map(JSON.string)
-        let response = handle(Request(op: text == nil ? "open" : "send", args: .object(request)))
-        guard text != nil, let delivery = response.result?["delivery"] else { return response }
-        return .success(try queue.sync { try withDelivery(summary(id), delivery) })
-      }
+      if let id = queue.sync(execute: { chatID(group) }) { return try openOrSend(id, text) }
       awaitMCPServers()
-      return try queue.sync {
-        if let id = chatID(group) { return .success(try JSON(encoding: summary(id))) }
+      // Another request can create the chat or remove the group while this one
+      // waits off the queue, so the checks run again on it.
+      let (chat, created) = try queue.sync { () -> (SessionSummary, Bool) in
+        if let id = chatID(group) { return (summary(id), false) }
+        guard let name = groups[group]?.name else { throw APIError("group \(group) was removed") }
         let folder = home.chatFolder(group)
-        let args = NewSession(path: folder, name: Chat.name(group: groups[group]!.name), prompt: text)
-        let created = try create(args, (folder, nil, nil)) { $0.chat = group }
-        guard text != nil else { return .success(try JSON(encoding: created)) }
-        return .success(try withDelivery(created, .string(Delivery.resumed.rawValue)))
+        let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
+        return (try create(new, (folder, nil, nil)) { $0.chat = group }, true)
       }
+      guard let text else { return .success(try JSON(encoding: chat)) }
+      guard created else { return try openOrSend(chat.id, text) }
+      return .success(try withDelivery(chat, .string(Delivery.resumed.rawValue)))
     } catch {
       return .failure("\(error)")
     }
+  }
+
+  /// Sends `text` to the chat, or without text opens it.
+  private func openOrSend(_ id: String, _ text: String?) throws -> Response {
+    var request: [String: JSON] = ["session": .string(id)]
+    request["text"] = text.map(JSON.string)
+    let response = handle(Request(op: text == nil ? "open" : "send", args: .object(request)))
+    guard text != nil, let delivery = response.result?["delivery"] else { return response }
+    return .success(try queue.sync { try withDelivery(summary(id), delivery) })
   }
 
   private func withDelivery(_ summary: SessionSummary, _ delivery: JSON) throws -> JSON {

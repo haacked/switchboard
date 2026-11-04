@@ -38,8 +38,8 @@ struct ChatView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
           }
-          // The log holds the last 50 messages, so its count stops changing once it is full.
-          .onChange(of: messages.last) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
+          // The log holds a fixed number of the last messages, so its count stops changing once it is full.
+          .onChange(of: messages.last, initial: true) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
         }
         Divider()
         MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
