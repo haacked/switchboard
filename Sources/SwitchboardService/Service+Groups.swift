@@ -53,8 +53,11 @@ extension Service {
   }
 
   /// The group of the session that starts a new one, or nil without a parent.
+  /// A chat's group is the one it manages, while that group exists.
   func groupOfParent(_ parent: String?) -> String? {
-    parent.flatMap { entries[$0]?.session.group }
+    guard let session = parent.flatMap({ entries[$0]?.session }) else { return nil }
+    if let chat = session.chat { return groups[chat] == nil ? nil : chat }
+    return session.group
   }
 
   /// The group that a new session joins: the one that `ref` names, else its parent's.

@@ -12,7 +12,8 @@ func chat(_ a: Args) {
     return
   }
   var args: [String: JSON] = ["group": .string(group)]
-  if let text = a.values["--send"] {
+  let words = a.positional.dropFirst().joined(separator: " ")
+  if let text = a.values["--send"] ?? (words.isEmpty ? nil : words) {
     if text.isEmpty { die("--send needs text") }
     args["text"] = .string(text)
   }

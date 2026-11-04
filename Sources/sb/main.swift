@@ -103,9 +103,10 @@ let usage = """
                                   list groups suggested from dependencies, branch
                                   names, and PR titles, or accept or decline one.
                                   A session that you placed by hand never moves
-    chat <group> [--send <text>]  open the group's chat, a session that manages
+    chat <group> [<text> | --send <text>]
+                                  open the group's chat, a session that manages
                                   the group's sessions, starting it the first
-                                  time. --send sends it a message
+                                  time. With text, send it a message
     chat <group> --log            the chat's last messages
 
   Plan documents:

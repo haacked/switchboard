@@ -70,7 +70,10 @@ import Testing
     try sbd.waitFor(c.id, "the resume") { $0.live }
     #expect(sbd.stubArgs().contains { $0.contains("--resume \(c.claudeSessionId)") })
     let configs = launchConfigs(sbd, c)
-    #expect(configs.count == 2 && configs.allSatisfy { $0 != nil })
+    #expect(configs.count == 2)
+    for config in configs {
+      #expect(config?["mcpServers"]?["switchboard"]?["args"] == ["mcp-server", "--group", .string(flags.id)])
+    }
   }
 
   @Test func theChatsServerReachesTheChatItself() throws {
@@ -186,6 +189,17 @@ import Testing
     #expect(sbd.stubArgs().contains { $0.contains(c.claudeSessionId) && $0.hasSuffix("-- hello") })
   }
 
+  @Test func trailingWordsAreTheTextLikeSend() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let c = try replied(sbd, "Flags", "hello")
+
+    let reply = try decode(JSON.self, sbd.sb("chat", "--json", "Flags", "second", "turn"))
+
+    #expect(reply["id"]?.string == c.id)
+    try sbd.waitFor(c.id, "the second reply") { $0.lastReply == "Done: second turn" }
+  }
+
   @Test func sendToAnExistingChatDeliversTheTextAndReturnsHowItWent() throws {
     let sbd = try Instance()
     _ = try addGroup(sbd, "Flags")
@@ -259,6 +273,27 @@ import Testing
   }
 
   // MARK: Removing the group
+
+  /// Starts a session from inside the chat, as `sb new` in the chat's terminal would.
+  func childOf(_ sbd: Instance, _ chat: SessionSummary, name: String) throws -> SessionSummary {
+    try decode(
+      SessionSummary.self,
+      sbd.sb("new", "--json", "--name", name, sbd.work, env: ["SB_SESSION_ID": chat.id, "CLAUDECODE": "1"]))
+  }
+
+  @Test func aSessionTheChatStartsJoinsTheChatsGroupUntilTheGroupIsGone() throws {
+    let sbd = try Instance()
+    let flags = try addGroup(sbd, "Flags")
+    let c = try chat(sbd, "Flags")
+
+    let child = try childOf(sbd, c, name: "child")
+    try sbd.sb("group", "rm", "Flags")
+    let orphan = try childOf(sbd, c, name: "orphan")
+
+    #expect(child.group == flags.id)
+    #expect(child.parent == c.id)
+    #expect(orphan.group == nil)
+  }
 
   @Test func groupRmMarksTheChatDoneAndKeepsItsFolder() throws {
     let sbd = try Instance()

@@ -28,7 +28,9 @@ struct ChatView: View {
         ScrollViewReader { proxy in
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-              if messages.isEmpty {
+              if model.chatLogs[group] == nil {
+                ProgressView().controlSize(.small)
+              } else if messages.isEmpty {
                 Text("No messages yet. Ask the chat about this group's sessions.").foregroundStyle(.secondary)
               }
               ForEach(Array(messages.enumerated()), id: \.offset) { index, message in

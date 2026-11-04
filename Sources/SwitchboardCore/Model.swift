@@ -168,12 +168,11 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var parent: String?
   /// True for the Manager.
   public var manager: Bool?
-  /// Nil in a summary from an older sbd. `sessionKind` reads it.
-  public var kind: SessionKind?
+  /// The field to read for what the session is. `manager` and `chat` stay
+  /// in the JSON for the tools that read them.
+  public var kind: SessionKind = .work
   /// The id of the group whose chat this session is.
   public var chat: String?
-
-  public var sessionKind: SessionKind { kind ?? SessionKind(manager: manager, chat: chat) }
   public var followup: Followup?
   /// When the session was added, in ms since the epoch. An imported
   /// follow-up was added on the date of its line.

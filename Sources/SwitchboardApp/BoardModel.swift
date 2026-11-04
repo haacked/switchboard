@@ -103,7 +103,7 @@ final class BoardModel: ObservableObject {
   /// star fills and turns the Needs you color while it needs you.
   var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayHaveItem($0) } }
 
-  var manager: SessionSummary? { sessions.first { $0.manager == true } }
+  var manager: SessionSummary? { sessions.first { $0.kind == .manager } }
 
   /// A state's sessions in the sidebar, each one followed by its children.
   struct SidebarGroup: Identifiable {
@@ -114,10 +114,10 @@ final class BoardModel: ObservableObject {
 
   /// The board without the Manager and the group chats, which belong to no
   /// group. The Manager has its own sidebar row. A group's Board row opens its chat.
-  var workBoard: [SessionSummary] { board.filter { $0.sessionKind == .work } }
+  var workBoard: [SessionSummary] { board.filter { $0.kind == .work } }
 
   /// The group's chat, or nil before its first start.
-  func chat(of group: String) -> SessionSummary? { sessions.first { $0.chat == group } }
+  func chat(of group: String) -> SessionSummary? { sessions.first { $0.kind == .chat && $0.chat == group } }
 
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
@@ -391,7 +391,10 @@ final class BoardModel: ObservableObject {
     poller.async {
       let messages = try? client.call("chat-log", ["group": .string(group)], as: [ChatMessage].self)
       Task { @MainActor in
-        if let messages, self.chatLogs[group] != messages { self.chatLogs[group] = messages }
+        // A failed first read shows an empty log, so the pane stops showing that it is loading.
+        if let messages = messages ?? (self.chatLogs[group] == nil ? [] : nil), self.chatLogs[group] != messages {
+          self.chatLogs[group] = messages
+        }
       }
     }
   }
@@ -461,7 +464,7 @@ final class BoardModel: ObservableObject {
 
   /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
   nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
-    s.state == .done && s.sessionKind == .work && !s.waitsToStart
+    s.state == .done && s.kind == .work && !s.waitsToStart
   }
 
   nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {
