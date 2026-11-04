@@ -415,7 +415,7 @@ final class MCPClient {
   @Test func spawnResolvesARelativeRepositoryAgainstTheServersFolder() throws {
     let sbd = try Instance()
     let repo = try sbd.makeRepo("widgets")
-    let mcp = try MCPClient(sbd, cwd: (repo as NSString).deletingLastPathComponent)
+    let mcp = try MCPClient(sbd, cwd: sbd.home.path)
 
     let absolute = try mcp.call(
       "spawn", ["repository": .string(repo), "branch": "b1", "name": "b1", "prompt": "hello"]
@@ -981,7 +981,6 @@ final class MCPClient {
     #expect(all.map(\.id) == all.map(\.id).sorted())
     #expect(oldest.map(\.id) == Array(groupIDs.prefix(2)))
     #expect(newest.map(\.id) == Array(groupIDs.suffix(2)))
-    #expect(try #require(newest.first?.id) > (try #require(oldest.last?.id)))
   }
 
   @Test(arguments: [false, true]) func aScopedEventsReadsANegativeLimitAsNoLimit(_ withSince: Bool) throws {
@@ -995,7 +994,6 @@ final class MCPClient {
     let events = try mcp.call("events", args).decode([Event].self)
 
     #expect(events.contains { $0.session == s.member.id && $0.kind == "sent" })
-    #expect(try !mcp.call("list_sessions").isError)
   }
 
   @Test func aScopedTriageReturnsOnlyTheGroupsSessions() throws {

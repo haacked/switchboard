@@ -115,7 +115,7 @@ public struct MCPToolServer: Sendable {
     case "list_sessions":
       return try inScope(client.call("ls"), scoped)
     case "get_session":
-      return try session(args, scoped)
+      return try session(sessionRef(args), scoped)
     case "read_reply":
       return try client.call("reply", ["session": try sessionID(args, scoped)])
     case "triage":
@@ -131,8 +131,8 @@ public struct MCPToolServer: Sendable {
     case "set_wait":
       var wait = try JSONCoding.convert(args, to: WaitRequest.self)
       wait.by = Author.claude.rawValue
-      if scoped != nil, wait.kind == Wait.Kind.session.rawValue, let target = wait.target {
-        wait.target = try sessionID(["session": .string(target)], scoped).string
+      if wait.kind == Wait.Kind.session.rawValue, let target = wait.target {
+        wait.target = try sessionID(target, scoped).string
       }
       var request = try JSON(encoding: wait).object ?? [:]
       if args["session"] != nil {
@@ -181,10 +181,9 @@ public struct MCPToolServer: Sendable {
     return Scoped(group: group, list: list)
   }
 
-  /// The session that `args` names, as `get` returns it. A scoped server
+  /// The session that `ref` names, as `get` returns it. A scoped server
   /// refuses a session outside its group.
-  private func session(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
-    let ref = try sessionRef(args)
+  private func session(_ ref: String, _ scoped: Scoped?) throws -> JSON {
     let summary = try client.call("get", ["session": .string(ref)])
     if let scoped, !scoped.group.sessions.contains(summary["id"]?.string ?? "") {
       throw APIError("\(ref) is not in group \(scoped.group.name)")
@@ -192,12 +191,15 @@ public struct MCPToolServer: Sendable {
     return summary
   }
 
-  /// The id of the session that `args` names. Without a scope, or for a
+  /// The id of the session that `ref` names. Without a scope, or for a
   /// member's id, it passes the ref on. sbd then resolves it.
-  private func sessionID(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
-    let ref = try sessionRef(args)
+  private func sessionID(_ ref: String, _ scoped: Scoped?) throws -> JSON {
     guard let scoped, !scoped.group.sessions.contains(ref) else { return .string(ref) }
-    return try session(args, scoped)["id"] ?? .null
+    return try session(ref, scoped)["id"] ?? .null
+  }
+
+  private func sessionID(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
+    try sessionID(sessionRef(args), scoped)
   }
 
   private func sessionRef(_ args: JSON) throws -> String {
@@ -222,22 +224,15 @@ public struct MCPToolServer: Sendable {
     return .array((list.array ?? []).filter { scoped.group.sessions.contains($0["id"]?.string ?? "") })
   }
 
-  /// A scoped server without a session reads each member's events and merges
-  /// them, so `limit` counts only the group's events.
+  /// A scoped server without a session asks for its members' events.
   private func events(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(args, ["since", "limit"])
-    if args["session"] != nil { request["session"] = try sessionID(args, scoped) }
-    guard let scoped, request["session"] == nil else { return try client.call("events", request) }
-    let limit = args["limit"]?.int ?? Event.defaultLimit
-    let merged = try scoped.group.sessions.flatMap { id in
-      var one = request
-      one["session"] = .string(id)
-      return try client.call("events", one).array ?? []
-    }.sorted { ($0["id"]?.int ?? 0) < ($1["id"]?.int ?? 0) }
-    // sbd reads a negative limit as no limit, because SQLite does.
-    guard limit >= 0 else { return .array(merged) }
-    // Without an integer `since`, sbd answers with the newest events.
-    return .array(Array(args["since"]?.int == nil ? merged.suffix(limit) : merged.prefix(limit)))
+    if args["session"] != nil {
+      request["session"] = try sessionID(args, scoped)
+    } else if let scoped {
+      request["sessions"] = .array(scoped.group.sessions.map(JSON.string))
+    }
+    return try client.call("events", request)
   }
 
   /// Without `targets`, it lists the targets and sends nothing. With them, it
@@ -275,7 +270,7 @@ public struct MCPToolServer: Sendable {
     guard args["ungrouped"]?.bool == true else {
       throw APIError("a server for group \(scoped.group.name) moves sessions only to Ungrouped")
     }
-    let ids = try (args["sessions"]?.array ?? []).map { try sessionID(["session": $0], scoped) }
+    let ids = try (args["sessions"]?.array ?? []).map { try sessionID($0.string ?? "", scoped) }
     return try client.call("group-move", ["sessions": .array(ids), "ungrouped": true])
   }
 

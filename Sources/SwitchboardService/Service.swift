@@ -260,12 +260,14 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
+      let sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
       let limit = args["limit"]?.int ?? Event.defaultLimit
       // Without `since`, the newest events, so `sb events` shows what just happened.
       if let since = args["since"]?.int {
-        return try JSON(encoding: store.events(since: Int64(since), session: session, limit: limit))
+        return try JSON(
+          encoding: store.events(since: Int64(since), session: session, sessions: sessions, limit: limit))
       }
-      return try JSON(encoding: store.events(session: session, limit: limit, newest: true))
+      return try JSON(encoding: store.events(session: session, sessions: sessions, limit: limit, newest: true))
     case "answer":
       return try answer(args)
     case "screen":
@@ -476,7 +478,7 @@ public final class Service {
         exists: { branchOrFolderTaken(repo, $0) })
     }
     // An unknown group fails here, before prepareFolder makes a worktree.
-    if let group = args.group { _ = try queue.sync { try groupOfNew(group, parent: nil) } }
+    if let group = args.group { _ = try queue.sync { try lookupGroup(["group": .string(group)]) } }
     let folder = try prepareFolder(args)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
