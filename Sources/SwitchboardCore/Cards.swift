@@ -1,11 +1,14 @@
 import Foundation
 
-/// A permission prompt or a question that the main session waits on, which
-/// the user can answer without opening the session.
+/// A permission prompt or a question that the main session waits on, or a
+/// group message that it asked for, which the user can answer without
+/// opening the session.
 public struct Card: Codable, Equatable, Sendable, Identifiable {
   public enum Kind: String, Codable, Sendable {
     case permission
     case question
+    /// A message to several sessions, which waits for the user to send or cancel it.
+    case send
   }
 
   /// The id of the PermissionRequest event that opened the card.
@@ -26,6 +29,8 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// Claude Code closed the card's held request, as its timeout does, while
   /// its dialog may still show. sbd answers it by typing into the terminal.
   public var hookClosed: Bool
+  /// The message of a `send` card. Other kinds have none.
+  public var send: GroupMessage?
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -47,6 +52,20 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     since = call.since
     deferred = false
     hookClosed = false
+    send = nil
+  }
+
+  /// Whether the card stays when its turn ends or its hook goes away: a
+  /// deferred question, or a group message, which only a decision closes.
+  public var outlivesTurn: Bool { deferred || kind == .send }
+
+  /// What the user does with the card, in the words of the session's attention reason.
+  public var reason: String {
+    switch kind {
+    case .permission: "approve \(summary)"
+    case .question: "answer: \(summary)"
+    case .send: "confirm \(summary)"
+    }
   }
 
   /// Whether sbd can find the card's dialog on the screen: a question's, or
@@ -200,8 +219,13 @@ extension SessionFacts {
     switch event.kind {
     case "PermissionRequest" where !event.fromSubagent:
       cards.append(Card(event))
+    case "send_pending":
+      if let card = Card(groupMessage: event) { cards.append(card) }
+    case "send_decided":
+      guard let card else { return }
+      cards.remove(at: card)
     case "PostToolUse" where !event.fromSubagent, "PostToolUseFailure" where !event.fromSubagent:
-      cards.removeAll { !$0.deferred && $0.isCall(tool, d["tool_input"]) }
+      cards.removeAll { !$0.outlivesTurn && $0.isCall(tool, d["tool_input"]) }
     case "answered":
       guard let card else { return }
       let answered = cards.remove(at: card)
@@ -239,10 +263,10 @@ extension SessionFacts {
       if d["allowed"]?.bool == true { closePrompt(closed) }
     case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
-      cards.removeAll { !$0.deferred }
+      cards.removeAll { !$0.outlivesTurn }
     case "UserPromptSubmit":
       // Only the user's own prompt answers a deferred question.
-      cards.removeAll { userPrompt || !$0.deferred }
+      cards.removeAll { !$0.outlivesTurn || (userPrompt && $0.deferred) }
     default:
       break
     }

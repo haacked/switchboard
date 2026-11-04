@@ -356,7 +356,16 @@ final class BoardModel: ObservableObject {
     if let behavior { args["behavior"] = .string(behavior) }
     if !message.isEmpty { args["message"] = .string(message) }
     if let answers { args["answers"] = .array(answers.map(JSON.string)) }
-    perform("answer", args, finally: { self.answering.remove(card.id) })
+    // A sent group message succeeds even when some targets fail, so the
+    // failures come back in its deliveries.
+    perform(
+      "answer", args,
+      then: { result in
+        guard card.kind == .send, let sent = try? JSONCoding.convert(result, to: GroupSend.self) else { return }
+        let failed = (sent.deliveries ?? []).compactMap { d in d.error.map { "\(d.session): \($0)" } }
+        if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
+      },
+      finally: { self.answering.remove(card.id) })
   }
 
   func choose(_ session: String, ref: String, option number: Int) {

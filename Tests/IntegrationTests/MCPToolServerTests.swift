@@ -629,74 +629,146 @@ final class MCPClient {
 
   // MARK: send_group
 
-  @Test func sendGroupWithoutTargetsReturnsThePreviewAndSendsNothing() throws {
+  /// The id of the card that a `send_group` call with text opens.
+  func openPending(_ mcp: MCPClient, _ args: [String: JSON] = ["group": "Flags", "text": "Rebase on main."]) throws
+    -> Int64
+  {
+    try #require(try mcp.call("send_group", args).decode(GroupSend.self).pending)
+  }
+
+  func answer(_ sbd: Instance, _ session: String, _ card: Int64, allow: Bool) throws {
+    _ = try sbd.client.call(
+      "answer",
+      ["session": .string(session), "card": .number(Double(card)), "behavior": .string(allow ? "allow" : "deny")])
+  }
+
+  @Test func sendGroupOpensAPendingCardAndSendsNothing() throws {
     let sbd = try Instance()
+    let caller = try sbd.new(name: "caller")
     let a = try sbd.new(name: "alpha")
     let b = try sbd.new(name: "bravo")
     let g = try addGroup(sbd, "Flags", a.id, b.id)
-    let mcp = try MCPClient(sbd)
+    let mcp = try MCPClient(sbd, env: inside(caller.id))
 
     let result = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."])
 
-    let preview = try result.decode(GroupSend.self)
-    #expect(preview.group == g.id)
-    #expect(!preview.sent)
-    #expect(Set(preview.targets.map(\.id)) == [a.id, b.id])
-    #expect(Set(preview.targets.map(\.name)) == ["alpha", "bravo"])
-    #expect(result.json?["instruction"]?.string == MCPToolServer.confirmRule)
+    let pending = try result.decode(GroupSend.self)
+    #expect(pending.group == g.id)
+    #expect(!pending.sent)
+    #expect(pending.decision == .pending)
+    #expect(Set(pending.targets.map(\.id)) == [a.id, b.id])
+    #expect(Set(pending.targets.map(\.name)) == ["alpha", "bravo"])
+    let card = try #require(pending.pending)
+    #expect(try sbd.get(caller.id).cards.map(\.id) == [card])
+    #expect(try sbd.get(caller.id).cards.map(\.kind) == [.send])
     #expect(try sent(sbd, a.id).isEmpty)
     #expect(try sent(sbd, b.id).isEmpty)
   }
 
-  @Test func sendGroupWithTheConfirmedTargetsSendsToEachMember() throws {
+  @Test func sendGroupTellsClaudeHowToReadTheDecision() throws {
     let sbd = try Instance()
+    let caller = try sbd.new(name: "caller")
     let a = try sbd.new(name: "alpha")
-    let b = try sbd.new(name: "bravo")
-    let outside = try sbd.new(name: "outside")
-    _ = try addGroup(sbd, "Flags", a.id, b.id)
-    let mcp = try MCPClient(sbd)
-    let preview = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."]).decode(GroupSend.self)
+    _ = try addGroup(sbd, "Flags", a.id)
+    let mcp = try MCPClient(sbd, env: inside(caller.id))
 
-    let result = try mcp.call(
-      "send_group",
-      ["group": "Flags", "text": "Rebase on main.", "targets": .array(preview.targets.map { .string($0.id) })]
-    ).decode(GroupSend.self)
+    let result = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."])
 
-    #expect(result.sent)
-    #expect(Set((result.deliveries ?? []).map(\.session)) == [a.id, b.id])
-    #expect(try sent(sbd, a.id) == ["Rebase on main."])
-    #expect(try sent(sbd, b.id) == ["Rebase on main."])
-    #expect(try sent(sbd, outside.id).isEmpty)
+    let instruction = try #require(result.json?["instruction"]?.string)
+    #expect(instruction.contains("Switchboard"))
+    #expect(instruction.contains("pending"))
   }
 
-  @Test func sendGroupRefusesWhenTheMembersChangedSinceThePreview() throws {
+  @Test func sendGroupWithPendingReportsPendingBeforeADecision() throws {
     let sbd = try Instance()
+    let caller = try sbd.new(name: "caller")
+    let a = try sbd.new(name: "alpha")
+    _ = try addGroup(sbd, "Flags", a.id)
+    let mcp = try MCPClient(sbd, env: inside(caller.id))
+    let card = try openPending(mcp)
+
+    let result = try mcp.call("send_group", ["pending": .number(Double(card)), "timeout": 0]).decode(GroupSend.self)
+
+    #expect(result.pending == card)
+    #expect(result.decision == .pending)
+    #expect(!result.sent)
+  }
+
+  @Test(arguments: [true, false]) func sendGroupWithPendingReportsTheDecisionAfterAnAnswer(allow: Bool) throws {
+    let sbd = try Instance()
+    let caller = try sbd.new(name: "caller")
     let a = try sbd.new(name: "alpha")
     let b = try sbd.new(name: "bravo")
-    _ = try addGroup(sbd, "Flags", a.id)
-    let mcp = try MCPClient(sbd)
-    let preview = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."]).decode(GroupSend.self)
-    try sbd.sb("group", "move", b.id, "--to", "Flags")
+    _ = try addGroup(sbd, "Flags", a.id, b.id)
+    let mcp = try MCPClient(sbd, env: inside(caller.id))
+    let card = try openPending(mcp)
+    try answer(sbd, caller.id, card, allow: allow)
 
-    let result = try mcp.call(
-      "send_group",
-      ["group": "Flags", "text": "Rebase on main.", "targets": .array(preview.targets.map { .string($0.id) })])
+    let result = try mcp.call("send_group", ["pending": .number(Double(card)), "timeout": 0]).decode(GroupSend.self)
+
+    #expect(result.decision == (allow ? .sent : .cancelled))
+    #expect(result.sent == allow)
+    #expect(Set((result.deliveries ?? []).map(\.session)) == (allow ? [a.id, b.id] : []))
+    #expect(try sent(sbd, a.id) == (allow ? ["Rebase on main."] : []))
+    #expect(try sent(sbd, b.id) == (allow ? ["Rebase on main."] : []))
+  }
+
+  /// The SB_SESSION_ID of a server that has no calling session.
+  enum NoCaller: CaseIterable { case unset, empty, unknown }
+
+  @Test(arguments: NoCaller.allCases) func sendGroupWithoutACallingSessionRefuses(_ caller: NoCaller) throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    _ = try addGroup(sbd, "Flags", a.id)
+    let env: [String: String] =
+      switch caller {
+      case .unset: [:]
+      case .empty: ["SB_SESSION_ID": "", "CLAUDECODE": "1"]
+      case .unknown: inside("snope1")
+      }
+    let mcp = try MCPClient(sbd, env: env)
+
+    let result = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."])
 
     #expect(result.isError)
+    #expect(try sbd.cards().isEmpty)
     #expect(try sent(sbd, a.id).isEmpty)
-    #expect(try sent(sbd, b.id).isEmpty)
   }
 
-  @Test func sendGroupWithEmptyTargetsSendsNothing() throws {
+  /// The `targets` that the old confirmation step passed.
+  enum OldTargets: CaseIterable { case listed, empty, withTheCaller }
+
+  @Test(arguments: OldTargets.allCases) func sendGroupWithTargetsSendsNothing(_ shape: OldTargets) throws {
     let sbd = try Instance()
+    let caller = try sbd.new(name: "caller")
     let a = try sbd.new(name: "alpha")
-    _ = try addGroup(sbd, "Flags", a.id)
+    _ = try addGroup(sbd, "Flags", caller.id, a.id)
+    let mcp = try MCPClient(sbd, env: inside(caller.id))
+    let targets: [JSON] =
+      switch shape {
+      case .listed: [.string(a.id)]
+      case .empty: []
+      case .withTheCaller: [.string(caller.id), .string(a.id)]
+      }
+
+    let result = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main.", "targets": .array(targets)])
+
+    #expect(result.isError || (try? result.decode(GroupSend.self))?.sent == false)
+    #expect(try sent(sbd, a.id).isEmpty)
+    #expect(try sent(sbd, caller.id).isEmpty)
+  }
+
+  @Test func sendGroupsSchemaTakesPendingAndNotTargets() throws {
+    let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
-    let result = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main.", "targets": []])
+    let tool = try #require(try mcp.tools().first { $0["name"]?.string == "send_group" })
 
-    #expect(try sent(sbd, a.id).isEmpty)
-    #expect(result.isError || (try? result.decode(GroupSend.self))?.sent == false)
+    let properties = try #require(tool["inputSchema"]?["properties"]?.object)
+    #expect(properties["pending"] != nil)
+    #expect(properties["timeout"] != nil)
+    #expect(properties["text"] != nil)
+    #expect(properties["targets"] == nil)
   }
 
   @Test func sendGroupLeavesOutTheCaller() throws {
@@ -706,32 +778,12 @@ final class MCPClient {
     _ = try addGroup(sbd, "Flags", caller.id, a.id)
     let mcp = try MCPClient(sbd, env: inside(caller.id))
 
-    let preview = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."]).decode(GroupSend.self)
-    let result = try mcp.call(
-      "send_group",
-      ["group": "Flags", "text": "Rebase on main.", "targets": .array(preview.targets.map { .string($0.id) })]
-    ).decode(GroupSend.self)
+    let pending = try mcp.call("send_group", ["group": "Flags", "text": "Rebase on main."]).decode(GroupSend.self)
+    try answer(sbd, caller.id, try #require(pending.pending), allow: true)
 
-    #expect(preview.targets.map(\.id) == [a.id])
-    #expect(result.sent)
+    #expect(pending.targets.map(\.id) == [a.id])
     #expect(try sent(sbd, a.id) == ["Rebase on main."])
     #expect(try sent(sbd, caller.id).isEmpty)
-  }
-
-  @Test func sendGroupRefusesConfirmedTargetsThatNameTheCaller() throws {
-    let sbd = try Instance()
-    let caller = try sbd.new(name: "caller")
-    let a = try sbd.new(name: "alpha")
-    _ = try addGroup(sbd, "Flags", caller.id, a.id)
-    let mcp = try MCPClient(sbd, env: inside(caller.id))
-
-    let result = try mcp.call(
-      "send_group",
-      ["group": "Flags", "text": "Rebase on main.", "targets": [.string(caller.id), .string(a.id)]])
-
-    #expect(result.isError)
-    #expect(try sent(sbd, caller.id).isEmpty)
-    #expect(try sent(sbd, a.id).isEmpty)
   }
 
   // MARK: Group scope
@@ -1113,31 +1165,43 @@ final class MCPClient {
   @Test func aScopedSendGroupDefaultsToTheScopesGroup() throws {
     let sbd = try Instance()
     let s = try scope(sbd)
-    let mcp = try MCPClient(sbd, group: s.group.id)
+    let mcp = try MCPClient(sbd, group: s.group.id, env: inside(s.loose.id))
 
-    let preview = try mcp.call("send_group", ["text": "Rebase on main."]).decode(GroupSend.self)
-    let result = try mcp.call(
-      "send_group", ["text": "Rebase on main.", "targets": .array(preview.targets.map { .string($0.id) })]
-    ).decode(GroupSend.self)
+    let pending = try mcp.call("send_group", ["text": "Rebase on main."]).decode(GroupSend.self)
 
-    #expect(preview.group == s.group.id)
-    #expect(preview.targets.map(\.id) == [s.member.id])
-    #expect(result.sent)
-    #expect(try sent(sbd, s.member.id) == ["Rebase on main."])
+    #expect(pending.group == s.group.id)
+    #expect(pending.targets.map(\.id) == [s.member.id])
+    #expect(pending.pending != nil)
+    #expect(!pending.sent)
+    #expect(try sent(sbd, s.member.id).isEmpty)
     #expect(try sent(sbd, s.outside.id).isEmpty)
   }
 
-  @Test(arguments: [false, true]) func aScopedSendGroupRefusesAnotherGroup(_ confirmed: Bool) throws {
+  @Test(arguments: [false, true]) func aScopedSendGroupRefusesAnotherGroup(withTargets: Bool) throws {
     let sbd = try Instance()
     let s = try scope(sbd)
-    let mcp = try MCPClient(sbd, group: s.group.id)
+    let mcp = try MCPClient(sbd, group: s.group.id, env: inside(s.loose.id))
     var args: [String: JSON] = ["group": .string(s.other.name), "text": "Rebase on main."]
-    if confirmed { args["targets"] = [.string(s.outside.id)] }
+    if withTargets { args["targets"] = [.string(s.outside.id)] }
 
     let result = try mcp.call("send_group", args)
 
     #expect(result.isError)
+    #expect(try sbd.cards().isEmpty)
     #expect(try sent(sbd, s.outside.id).isEmpty)
+  }
+
+  @Test func aScopedSendGroupRefusesToReadAnotherGroupsMessage() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let card = try openPending(
+      MCPClient(sbd, env: inside(s.loose.id)), ["group": .string(s.other.name), "text": "Rebase on main."])
+    let scoped = try MCPClient(sbd, group: s.group.id, env: inside(s.loose.id))
+
+    let result = try scoped.call("send_group", ["pending": .number(Double(card)), "timeout": 0])
+
+    #expect(result.isError)
+    #expect(result.json?["targets"] == nil)
   }
 
   @Test func aScopedAddGroupNoteDefaultsToTheScopesGroup() throws {

@@ -14,7 +14,7 @@ func cards(_ a: Args) {
     return
   }
   if cards.isEmpty {
-    print("No permission prompts or questions are open.")
+    print("No permission prompts, questions, or group messages are open.")
     return
   }
   // Claude chose this text, so control characters print as escapes.
@@ -26,6 +26,13 @@ func cards(_ a: Args) {
       // `allow` approves the whole call, so the whole call prints.
       out("\(head)  approve \(card.tool)")
       for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
+      continue
+    }
+    if let message = card.send {
+      // `allow` sends exactly this text to exactly these sessions, so both print in full.
+      out("\(head)  send \(message.summary)")
+      for t in message.targets { out("      to \(t.id)  \(t.name)") }
+      for line in message.text.split(separator: "\n", omittingEmptySubsequences: false) { out("      | \(line)") }
       continue
     }
     out("\(head)  question")
@@ -60,5 +67,11 @@ func answer(_ command: String, _ a: Args) {
     args["answers"] = .array(words.map(JSON.string))
   }
   let result = call("answer", args)
-  if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "answered") }
+  if a.json { return printJSON(result) }
+  if result["decision"] != nil {
+    let sent = decode(result, as: GroupSend.self)
+    print(sent.decision?.rawValue ?? "")
+    return printDeliveries(sent)
+  }
+  print(result["delivery"]?.string ?? "answered")
 }

@@ -501,20 +501,22 @@ import Testing
     #expect(try sent(sbd, b.id).isEmpty)
   }
 
-  @Test func sendGroupInsideClaudeRefusesWithoutYes() throws {
+  @Test(arguments: [false, true]) func sendGroupInsideClaudeOpensACardAndSendsNothing(withYes yes: Bool) throws {
     let sbd = try Instance()
     let sender = try sbd.new(name: "sender")
     let a = try sbd.new(name: "alpha")
     _ = try add(sbd, "Flags", a.id)
 
-    let r = try sbd.run(["send", "--group", "Flags", "Rebase on main."], env: inside(sender.id))
+    let r = try sbd.run(
+      ["send", "--group", "Flags"] + (yes ? ["--yes"] : []) + ["Rebase on main."], env: inside(sender.id))
 
-    #expect(r.status != 0)
-    #expect(r.stderr.contains("--yes"))
+    #expect(r.status == 0)
+    #expect(r.stdout.contains("sb send --pending"))
+    #expect(try sbd.get(sender.id).cards.map(\.kind) == [.send])
     #expect(try sent(sbd, a.id).isEmpty)
   }
 
-  @Test func sendGroupInsideClaudeRefusesWithoutYesEvenOnATerminal() throws {
+  @Test func sendGroupInsideClaudeOpensACardEvenOnATerminal() throws {
     let sbd = try Instance()
     let sender = try sbd.new(name: "sender")
     let a = try sbd.new(name: "alpha")
@@ -523,8 +525,9 @@ import Testing
     let r = try onTerminal(
       sbd, ["send", "--group", "Flags", "Rebase on main."], answer: "y", env: inside(sender.id))
 
-    #expect(r.status != 0)
-    #expect(r.stdout.contains("--yes"))
+    #expect(!r.stdout.contains("[y/N]"))
+    #expect(r.stdout.contains("sb send --pending"))
+    #expect(try sbd.get(sender.id).cards.map(\.kind) == [.send])
     #expect(try sent(sbd, a.id).isEmpty)
   }
 
@@ -606,6 +609,10 @@ import Testing
       sbd.sb(["send", "--json", "--group", "Flags", "--yes", "Rebase on main."], env: inside(sender.id)))
 
     #expect(result.targets.map(\.id) == [a.id])
+    #expect(!result.sent)
+    #expect(try sent(sbd, a.id).isEmpty)
+    let card = try #require(result.pending)
+    try sbd.sb("allow", sender.id, "--card", String(card))
     #expect(try sent(sbd, a.id) == ["Rebase on main."])
     #expect(try sent(sbd, sender.id).isEmpty)
     #expect(try sent(sbd, f.id).isEmpty)

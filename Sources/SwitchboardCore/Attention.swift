@@ -295,8 +295,7 @@ public enum Attention {
     if session.done { return Verdict(state: .done, reason: "marked done") }
     if let verdict = followupVerdict(session) { return verdict }
     if let card = facts.cards.first {
-      let reason = card.kind == .permission ? "approve \(card.summary)" : "answer: \(card.summary)"
-      return Verdict(state: .needsYou, reason: oneLine(reason))
+      return Verdict(state: .needsYou, reason: oneLine(card.reason))
     }
     if let p = facts.openPermission {
       return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
