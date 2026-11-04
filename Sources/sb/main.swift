@@ -131,7 +131,7 @@ let usage = """
                                   earlier import read
 
   docket reviews, rows with no terminal:
-    docket <pr> [--existing append|overwrite] [--name N]
+    docket <pr> [--existing append|overwrite] [--name N] [--group G] [--parent S]
                                   start a docket review of the PR, or track the
                                   one docket has open, and add its row. sb rm
                                   removes the row and leaves docket's review

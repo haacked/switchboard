@@ -171,25 +171,107 @@ struct DocketVerdictCase: Sendable, CustomTestStringConvertible {
     ("https://github.com/PostHog/posthog/pull/41234", "PostHog/posthog#41234"),
     ("https://github.com/o/r/pull/12?notification_referrer_id=x", "o/r#12"),
     ("https://github.com/o/r/pull/12#discussion_r1", "o/r#12"),
+    ("https://www.github.com/o/r/pull/12", "o/r#12"),
+    ("github.com/o/r/pull/12", "o/r#12"),
     ("o/r#12", "o/r#12"),
+    ("o/r/pull/12", "o/r#12"),
+    ("o/r.git#12", "o/r#12"),
+    ("  o/r#12 ", "o/r#12"),
+    ("12", "d/x#12"),
+    ("#12", "d/x#12"),
   ])
-  func normalizesAPullRequestReference(_ input: String, _ expected: String) {
-    #expect(DocketRef.normalize(input) == expected)
+  func readsWhatDocketReads(_ input: String, _ expected: String) {
+    #expect(DocketRef(input, defaultRepo: "d/x")?.text == expected)
   }
 
   @Test(arguments: [
-    "12",
-    "#12",
     "https://github.com/o/r/issues/12",
     "https://github.com/o/r/pull/abc",
     "https://github.com/o/r/pull/",
     "https://github.com/o/r",
     "https://github.com//r/pull/12",
     "https://example.com/o/r/pull/12",
+    "o/r#0",
+    "-o/r#1",
     "",
   ])
-  func leavesAnythingElseUnchanged(_ input: String) {
-    #expect(DocketRef.normalize(input) == input)
+  func refusesWhatDocketRefuses(_ input: String) {
+    #expect(DocketRef(input, defaultRepo: "d/x") == nil)
+  }
+
+  @Test func needsADefaultRepoForABareNumber() {
+    #expect(DocketRef("12") == nil)
+    #expect(DocketRef("12", defaultRepo: "no-slash") == nil)
+  }
+
+  @Test func matchesWithoutCaseInTheOwnerAndRepository() {
+    let ref = DocketRef("PostHog/posthog#1")!
+    #expect(ref.names("posthog/PostHog#1"))
+    #expect(ref.names("https://github.com/POSTHOG/posthog/pull/1"))
+    #expect(!ref.names("PostHog/posthog#2"))
+    #expect(!ref.names("PostHog/other#1"))
+    #expect(!ref.names("1"))
+  }
+
+  @Test(
+    arguments: [
+      ("default_repo = \"o/r\"\n", "o/r"),
+      ("# docket\ndefault_engine = \"claude\"\n  default_repo='o/r'  # mine\n", "o/r"),
+      ("[accounts]\ndefault_repo = \"o/r\"\n", nil),
+      ("default_engine = \"claude\"\n", nil),
+    ] as [(String, String?)])
+  func readsTheTopLevelDefaultRepo(_ toml: String, _ expected: String?) throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent("docket-home-\(UUID().uuidString)").path
+    try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    try toml.write(toFile: "\(home)/config.toml", atomically: true, encoding: .utf8)
+
+    #expect(DocketRef.defaultRepo(docketHome: home) == expected)
+  }
+
+  @Test func hasNoDefaultRepoWithoutAConfigFile() {
+    #expect(DocketRef.defaultRepo(docketHome: "/nonexistent-\(UUID().uuidString)") == nil)
+  }
+}
+
+@Suite struct DocketExecutable {
+  /// A home with an executable `docket` in `go/bin`.
+  func goHome() throws -> String {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent("docket-go-\(UUID().uuidString)").path
+    try FileManager.default.createDirectory(atPath: "\(home)/go/bin", withIntermediateDirectories: true)
+    FileManager.default.createFile(
+      atPath: "\(home)/go/bin/docket-sb-test", contents: Data("#!/bin/sh\n".utf8),
+      attributes: [.posixPermissions: 0o755])
+    return home
+  }
+
+  @Test func findsDocketInGoBin() throws {
+    let home = try goHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    var settings = DocketSettings()
+    settings.path = "docket-sb-test"
+
+    #expect(settings.executable(home: home, environment: [:]) == "\(home)/go/bin/docket-sb-test")
+  }
+
+  @Test func findsDocketInGOBIN() throws {
+    let home = try goHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    var settings = DocketSettings()
+    settings.path = "docket-sb-test"
+
+    #expect(
+      settings.executable(home: "/nonexistent", environment: ["GOBIN": "\(home)/go/bin"])
+        == "\(home)/go/bin/docket-sb-test")
+  }
+
+  @Test func looksNoFurtherForAPathWithASlash() throws {
+    let home = try goHome()
+    defer { try? FileManager.default.removeItem(atPath: home) }
+    var settings = DocketSettings()
+    settings.path = "bin/docket-sb-test"
+
+    #expect(settings.executable(home: home, environment: [:]) == nil)
   }
 }
 

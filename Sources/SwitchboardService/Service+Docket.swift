@@ -12,8 +12,9 @@ extension Service {
 
   /// Starts a docket review of `pr`, or tracks the open review that docket
   /// already has for it, and adds its row. A PR that an open row tracks
-  /// returns that row. It takes the state queue itself, because docket runs
-  /// for seconds.
+  /// returns that row. A review that docket could not start goes back
+  /// through `start_review`, which restarts it. It takes the state queue
+  /// itself, because docket runs for seconds.
   func startDocket(_ args: JSON) throws -> SessionSummary {
     guard let input = args["pr"]?.string?.trimmingCharacters(in: .whitespaces), !input.isEmpty else {
       throw APIError("name a pull request as a URL, org/repo#123, or a number that docket's default_repo completes")
@@ -22,26 +23,41 @@ extension Service {
     if let existing, !["append", "overwrite"].contains(existing) {
       throw APIError("--existing takes append or overwrite")
     }
-    let wanted = DocketRef.normalize(input)
-    if let id = queue.sync(execute: { openDocketRow(wanted) }) { return queue.sync { summary(id) } }
+    let placement = { [self] () throws -> (parent: String?, group: String?) in
+      let parent = try args["parent"]?.string.map { try lookup(["session": .string($0)]) }
+      return (parent, try groupOfNew(args["group"]?.string, parent: parent))
+    }
+    // A bad parent or group fails before docket starts a review that no row would track.
+    _ = try queue.sync(execute: placement)
+    // A bare number that sbd can't complete skips both checks. docket's start_review then names the PR.
+    let wanted = DocketRef(input, defaultRepo: DocketRef.defaultRepo(docketHome: docketHome()))
+    if let wanted,
+      let tracked = queue.sync(execute: { () -> SessionSummary? in
+        guard let id = openDocketRow(wanted), entries[id]?.facts.docket.review?.state != "not_started" else {
+          return nil
+        }
+        return summary(id)
+      })
+    {
+      return tracked
+    }
     let review = try withDocket { client in
-      if let open = try client.listReviews().first(where: { $0.pullRequest == wanted }) { return open }
-      var arguments: [String: JSON] = ["pull_request": .string(input)]
-      if let existing { arguments["existing"] = .string(existing) }
-      guard let started = try client.call("start_review", .object(arguments))["review"] else {
-        throw APIError("docket's start_review returned no review")
-      }
-      return try DocketClient.review(started)
+      let listed = try client.listReviews().first { $0.state != "not_started" && wanted?.names($0.pullRequest) == true }
+      return try listed ?? client.startReview(input, existing: existing)
     }
     return try queue.sync {
-      // A bare number only matches once docket names the PR.
-      if let id = openDocketRow(review.pullRequest) { return summary(id) }
-      let parent = try args["parent"]?.string.map { try lookup(["session": .string($0)]) }
+      if let id = DocketRef(review.pullRequest).flatMap(openDocketRow) {
+        if entries[id]?.facts.docket.review != review {
+          record(id, "docket", ["review": try JSON(encoding: review)])
+        }
+        return summary(id)
+      }
+      let (parent, group) = try placement()
       var session = Session(
         id: shortId("s", taken: entries.keys), name: args["name"]?.string ?? "review \(review.pullRequest)", cwd: "",
         claudeSessionId: UUID().uuidString.lowercased(), created: nowMs())
       session.parent = parent
-      session.group = try groupOfNew(args["group"]?.string, parent: parent)
+      session.group = group
       session.docket = DocketSession(pullRequest: review.pullRequest, url: review.url)
       entries[session.id] = Entry(session: session)
       try store.save(session)
@@ -52,10 +68,13 @@ extension Service {
   }
 
   /// Asks docket about the open reviews once `docket.pollSeconds` have passed
-  /// on sbd's clock since the last ask. The tick calls it on the state queue.
-  /// The ask runs on a queue of its own and records what changed.
+  /// on sbd's clock since the last ask. A `pollSeconds` of 0 never asks. The
+  /// tick calls it on the state queue. The ask runs on a queue of its own and
+  /// records what changed.
   func pollDocketsIfDue(now: Int64) {
-    guard !docketPoll.running, now - docketPoll.last >= Int64(config.docket.pollSeconds * 1000) else { return }
+    guard config.docket.pollSeconds > 0, !docketPoll.running,
+      now - docketPoll.last >= Int64(config.docket.pollSeconds * 1000)
+    else { return }
     let rows = openDocketRows()
     guard !rows.isEmpty else { return }
     docketPoll.running = true
@@ -84,8 +103,8 @@ extension Service {
       reviews = listed
     }
     for id in rows {
-      guard let e = entries[id], let pr = e.session.docket?.pullRequest else { continue }
-      guard let review = reviews.last(where: { $0.pullRequest == pr }) else {
+      guard let e = entries[id], let pr = e.session.docket.flatMap({ DocketRef($0.pullRequest) }) else { continue }
+      guard let review = reviews.last(where: { pr.names($0.pullRequest) }) else {
         record(id, "docket", ["closed": true])
         continue
       }
@@ -101,16 +120,22 @@ extension Service {
       .keys.sorted()
   }
 
-  private func openDocketRow(_ pullRequest: String) -> String? {
-    openDocketRows().first { entries[$0]?.session.docket?.pullRequest == pullRequest }
+  private func openDocketRow(_ pullRequest: DocketRef) -> String? {
+    openDocketRows().first { entries[$0]?.session.docket.map { pullRequest.names($0.pullRequest) } == true }
   }
 
   /// Runs `docket mcp` and passes the client to `body`.
   private func withDocket<T>(_ body: (DocketClient) throws -> T) throws -> T {
-    guard let docket = findExecutable(config.docket.path) else {
+    let env = docketEnvironment()
+    guard let docket = config.docket.executable(environment: env) else {
       throw APIError("can't find docket. Set docket.path in \(home.path)/config.json")
     }
-    return try DocketClient.run(docket: docket, env: docketEnvironment(), timeout: config.docket.timeoutSeconds, body)
+    return try DocketClient.run(docket: docket, env: env, timeout: config.docket.timeoutSeconds, body)
+  }
+
+  /// The folder docket keeps its state and config.toml in, as docket resolves it.
+  private func docketHome() -> String {
+    docketEnvironment()["DOCKET_HOME"].flatMap { $0.isEmpty ? nil : $0.expandingTilde } ?? "~/.docket".expandingTilde
   }
 
   /// sbd's environment and `config.env`. docket checks at startup that git,

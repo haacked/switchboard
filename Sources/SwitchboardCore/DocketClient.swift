@@ -88,6 +88,17 @@ public final class DocketClient {
     try (call("list_reviews")["reviews"]?.array ?? []).map(DocketClient.review)
   }
 
+  /// Starts a review of `pullRequest`, or restarts the review docket could
+  /// not start. `existing` is append or overwrite.
+  public func startReview(_ pullRequest: String, existing: String?) throws -> DocketReview {
+    var arguments: [String: JSON] = ["pull_request": .string(pullRequest)]
+    if let existing { arguments["existing"] = .string(existing) }
+    guard let started = try call("start_review", .object(arguments))["review"] else {
+      throw Failure(description: "docket's start_review returned no review")
+    }
+    return try DocketClient.review(started)
+  }
+
   private static let snakeCase: JSONDecoder = {
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase

@@ -32,6 +32,11 @@ struct DocketView: View {
         if let notes = docket.review?.notesPath, FileManager.default.fileExists(atPath: notes) {
           Button("Open Notes") { NSWorkspace.shared.open(URL(fileURLWithPath: notes)) }
         }
+        Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
+          .help(
+            session.markedDone
+              ? "Mark the row not done. sbd asks docket about it again"
+              : "Mark the row done. It leaves the Inbox, and sbd stops asking docket about it")
         Button(role: .destructive) {
           ui.confirmingRemove = true
         } label: {

@@ -107,7 +107,7 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     let s = try startDocket(sbd, "o/r#1")
 
     #expect(s.state == .working)
-    #expect(["starting the review", "preparing the review"].contains(s.reason))
+    #expect(s.reason == "preparing the review")
     #expect(s.docket?.pullRequest == "o/r#1")
     #expect(s.docket?.url == "https://github.com/o/r/pull/1")
     let starts = docket.calls("start_review")
@@ -250,6 +250,7 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     try docket.write("stub-broken")
     let broken = try poll(sbd, s.id, "the failed poll") { $0.state == .needsYou }
     #expect(broken.reason.hasPrefix("can't read docket"))
+    #expect(broken.reason.contains("broken on purpose"))
     #expect(broken.docket?.review?.state == "reviewing")
 
     try docket.remove("stub-broken")
@@ -266,7 +267,93 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     let refused = try sbd.run("docket", "--json", "o/r#7")
 
     #expect(refused.status != 0)
+    #expect(refused.stderr.contains("broken on purpose"))
     #expect(try docketRows(sbd).isEmpty)
+  }
+
+  @Test func restartsAReviewThatDocketCouldNotStart() throws {
+    let docket = try DocketHome()
+    let trust = "accept its trust prompt, then call start_review again"
+    try docket.setReviews([listed("o/r#3", "not_started", error: trust)])
+    let sbd = try Instance(config: docket.config)
+
+    let s = try startDocket(sbd, "o/r#3")
+
+    #expect(docket.calls("start_review").count == 1)
+    #expect(s.reason == "preparing the review")
+
+    try docket.setReviews([listed("o/r#3", "not_started", error: trust)])
+    let stuck = try poll(sbd, s.id, "the failed start") { $0.docket?.review?.state == "not_started" }
+    #expect(stuck.state == .needsYou)
+
+    let again = try startDocket(sbd, "o/r#3")
+
+    #expect(again.id == s.id)
+    #expect(docket.calls("start_review").count == 2)
+    #expect(again.reason == "preparing the review")
+  }
+
+  @Test func tracksAnOpenReviewNamedByABareNumberOrInAnotherCase() throws {
+    let docket = try DocketHome()
+    try docket.write("config.toml", "default_repo = \"o/r\"\n")
+    try docket.setReviews([listed("o/r#2", "reviewing", progress: ["detail": "reading", "waiting": false])])
+    let sbd = try Instance(config: docket.config)
+
+    let s = try startDocket(sbd, "2")
+
+    #expect(s.docket?.pullRequest == "o/r#2")
+    for again in ["#2", "O/R#2", "https://www.github.com/o/R/pull/2", "o/r/pull/2"] {
+      #expect(try startDocket(sbd, again).id == s.id, "\(again)")
+    }
+    #expect(docket.calls("start_review").isEmpty)
+    #expect(try docketRows(sbd).map(\.id) == [s.id])
+  }
+
+  @Test func refusesABadParentOrGroupBeforeDocketRuns() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config)
+
+    for args in [["--parent", "nosuch"], ["--group", "nosuch"]] {
+      let refused = try sbd.run(["docket", "--json"] + args + ["o/r#1"])
+      #expect(refused.status != 0, "\(args)")
+    }
+
+    #expect(docket.calls().isEmpty)
+    #expect(try docketRows(sbd).isEmpty)
+  }
+
+  @Test func aPollSecondsOfZeroNeverPolls() throws {
+    let docket = try DocketHome()
+    var config = docket.config
+    config["docket"] = ["path": .string(Instance.docketStub), "pollSeconds": 0]
+    let sbd = try Instance(config: config)
+    _ = try startDocket(sbd, "o/r#1")
+    let calls = docket.calls().count
+
+    try sbd.advanceClock(DocketHome.pollMs)
+    try sbd.advanceClock(DocketHome.pollMs)
+    // The stub starts within a second of a tick that polls, so a wait of a second shows that none did.
+    let called = (try? sbd.waitFor("a docket poll", timeout: 1) { docket.calls().count > calls }) != nil
+    #expect(!called)
+  }
+
+  @Test func aDocketThatHangsTimesOutAndTheRowRecovers() throws {
+    let docket = try DocketHome()
+    var config = docket.config
+    config["docket"] = [
+      "path": .string(Instance.docketStub), "pollSeconds": .number(Double(DocketHome.pollMs / 1000)),
+      "timeoutSeconds": 1,
+    ]
+    let sbd = try Instance(config: config)
+    let s = try startDocket(sbd, "o/r#12")
+    try docket.write("stub-list-delay", "5")
+
+    let hung = try poll(sbd, s.id, "the poll to time out") { $0.state == .needsYou }
+    #expect(hung.reason.hasPrefix("can't read docket"))
+
+    try docket.remove("stub-list-delay")
+    let restored = try poll(sbd, s.id, "a good poll") { $0.state == .working }
+    #expect(restored.reason == "preparing the review")
   }
 
   @Test func aPollThatStartedBeforeARowWasAddedLeavesThatRowOpen() throws {

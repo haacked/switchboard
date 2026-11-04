@@ -9,7 +9,9 @@ notifications. Its files live in $DOCKET_HOME, which it requires so that a
 test never touches the user's docket:
 
 - stub-reviews.json: the reviews that `list_reviews` returns. A missing file
-  means none. `start_review` appends to it.
+  means none. `start_review` appends to it. As docket does, it refuses a PR
+  that has an open review, and it restarts a review in state not_started.
+- config.toml: docket's own file. Its default_repo completes a bare number.
 - stub-calls.jsonl: each tool call, as {"tool": name, "arguments": {...}}.
   The stub appends a call after it reads stub-reviews.json, so a test that
   sees the call knows which reviews the call read.
@@ -41,9 +43,36 @@ calls_file = os.path.join(home, "stub-calls.jsonl")
 start_error_file = os.path.join(home, "stub-start-error")
 
 
-def normalize(ref):
-    m = re.match(r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)(/.*)?$", ref)
-    return f"{m.group(1)}/{m.group(2)}#{m.group(3)}" if m else ref
+def default_repo():
+    try:
+        with open(os.path.join(home, "config.toml")) as f:
+            m = re.search(r'^default_repo\s*=\s*"([^"]*)"', f.read(), re.M)
+            return m.group(1) if m else None
+    except FileNotFoundError:
+        return None
+
+
+def parse(ref):
+    """(org, repo, number) the way docket's ParseRef reads ref, or None."""
+    ref = ref.strip()
+    for pattern in (
+        r"^(?:https?://)?(?:www\.)?github\.com/([^/]+)/([^/]+)/pull/(\d+)",
+        r"^([^/\s]+)/([^/#\s]+)#(\d+)$",
+        r"^([^/\s]+)/([^/\s]+)/pull/(\d+)$",
+    ):
+        m = re.match(pattern, ref)
+        if m:
+            return (m.group(1), m.group(2), int(m.group(3)))
+    m = re.match(r"^#?(\d+)$", ref)
+    repo = default_repo()
+    if m and repo and repo.count("/") == 1:
+        org, name = repo.split("/")
+        return (org, name, int(m.group(1)))
+    return None
+
+
+def same(a, b):
+    return a[2] == b[2] and a[0].lower() == b[0].lower() and a[1].lower() == b[1].lower()
 
 
 def read_reviews():
@@ -91,12 +120,24 @@ def start_review(arguments):
     if os.path.exists(start_error_file):
         with open(start_error_file) as f:
             return error_result(f.read().strip())
-    pr = normalize(arguments.get("pull_request", ""))
-    m = re.match(r"^([^/]+)/([^#]+)#(\d+)$", pr)
-    url = f"https://github.com/{m.group(1)}/{m.group(2)}/pull/{m.group(3)}" if m else ""
+    ref = parse(arguments.get("pull_request", ""))
+    if ref is None:
+        return error_result(f"cannot read {arguments.get('pull_request')!r} as a pull request")
+    for review in reviews:
+        listed = parse(review["pull_request"])
+        if listed and same(listed, ref):
+            if review["state"] != "not_started":
+                return error_result(
+                    f"docket already has a review of {review['pull_request']} open, and its state is {review['state']}"
+                )
+            review["state"] = "preparing"
+            review.pop("error", None)
+            write_reviews(reviews)
+            return text_result({"review": review, "plan": "stub"})
+    org, repo, number = ref
     review = {
-        "pull_request": pr,
-        "url": url,
+        "pull_request": f"{org}/{repo}#{number}",
+        "url": f"https://github.com/{org}/{repo}/pull/{number}",
         "title": "Stub PR",
         "author": "someone",
         "state": "preparing",

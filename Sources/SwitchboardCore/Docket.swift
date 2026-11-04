@@ -2,9 +2,10 @@ import Foundation
 
 /// How sbd runs `docket mcp`.
 public struct DocketSettings: Codable, Equatable, Sendable {
-  /// The docket CLI. sbd looks a name without a slash up on PATH and in the usual bin folders.
+  /// The docket CLI. sbd looks a name without a slash up on PATH and in the
+  /// usual bin folders, then in GOBIN and ~/go/bin, where `go install` puts it.
   public var path: String = "docket"
-  /// How often sbd asks docket about the open reviews, on sbd's clock.
+  /// How often sbd asks docket about the open reviews, on sbd's clock. 0 turns the poll off.
   public var pollSeconds: Double = 30
   /// How long one `docket mcp` run may take. `list_reviews` asks claude and GitHub first.
   public var timeoutSeconds: Double = 120
@@ -17,6 +18,14 @@ public struct DocketSettings: Codable, Equatable, Sendable {
     path = try c.decodeIfPresent(String.self, forKey: .path) ?? d.path
     pollSeconds = try c.decodeIfPresent(Double.self, forKey: .pollSeconds) ?? d.pollSeconds
     timeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .timeoutSeconds) ?? d.timeoutSeconds
+  }
+
+  /// The docket that `path` names. launchd's PATH has neither GOBIN nor ~/go/bin.
+  public func executable(home: String = NSHomeDirectory(), environment: [String: String]) -> String? {
+    if let found = findExecutable(path) { return found }
+    guard !path.contains("/") else { return nil }
+    return [environment["GOBIN"], "\(home)/go/bin"].compactMap { $0 }.map { "\($0)/\(path)" }
+      .first { FileManager.default.isExecutableFile(atPath: $0) }
   }
 }
 
@@ -112,12 +121,80 @@ public struct DocketSummary: Codable, Equatable, Sendable {
   }
 }
 
-public enum DocketRef {
-  /// Returns `o/r#N`, the form docket reports, for a PR URL or for `o/r#N`.
-  /// Anything else, such as a bare number that docket reads against its
-  /// `default_repo`, comes back unchanged.
-  public static func normalize(_ input: String) -> String {
-    Wait.PullRequest(parsing: input).flatMap { $0.repository == nil ? nil : $0.text } ?? input
+/// A pull request as docket names it. It reads what docket's `ParseRef`
+/// reads, and it compares the way docket's `Ref.Equal` does.
+public struct DocketRef: Sendable {
+  public var org: String
+  public var repo: String
+  public var number: Int
+
+  /// Reads a PR URL with or without its scheme and `www.`, `org/repo#N`,
+  /// `org/repo/pull/N`, or `N` and `#N` against `defaultRepo`. It returns nil
+  /// for a bare number without a `defaultRepo` and for anything docket refuses.
+  public init?(_ input: String, defaultRepo: String? = nil) {
+    let s = input.trimmingCharacters(in: .whitespaces)
+    if let m = DocketRef.named.lazy.compactMap({ DocketRef.groups($0, s) }).first {
+      self.init(org: m[0], repo: m[1], number: m[2])
+      return
+    }
+    guard let m = DocketRef.groups(DocketRef.plain, s), let slug = defaultRepo else { return nil }
+    let parts = slug.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 2 else { return nil }
+    self.init(org: parts[0], repo: parts[1], number: m[0])
+  }
+
+  private init?(org: String, repo: String, number: String) {
+    let repo = repo.hasSuffix(".git") ? String(repo.dropLast(4)) : repo
+    guard let n = Int(number), n > 0, DocketRef.groups(DocketRef.segment, org) != nil,
+      DocketRef.groups(DocketRef.segment, repo) != nil
+    else { return nil }
+    self.org = org
+    self.repo = repo
+    self.number = n
+  }
+
+  /// `org/repo#N`, the form docket reports.
+  public var text: String { "\(org)/\(repo)#\(number)" }
+
+  /// GitHub ignores the case of an owner and a repository name, so docket does too.
+  public func matches(_ other: DocketRef) -> Bool {
+    number == other.number && org.caseInsensitiveCompare(other.org) == .orderedSame
+      && repo.caseInsensitiveCompare(other.repo) == .orderedSame
+  }
+
+  /// True when `pullRequest`, in a form docket reads without a default repo, names this PR.
+  public func names(_ pullRequest: String) -> Bool {
+    DocketRef(pullRequest).map(matches) ?? false
+  }
+
+  /// The top-level `default_repo` in docket's `config.toml` under `docketHome`.
+  public static func defaultRepo(docketHome: String) -> String? {
+    guard let text = try? String(contentsOfFile: "\(docketHome)/config.toml", encoding: .utf8) else { return nil }
+    for raw in text.split(whereSeparator: \.isNewline) {
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      if line.hasPrefix("[") { return nil }
+      guard let eq = line.firstIndex(of: "="), line[..<eq].trimmingCharacters(in: .whitespaces) == "default_repo"
+      else { continue }
+      let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+      guard let quote = value.first, quote == "\"" || quote == "'",
+        let end = value.dropFirst().firstIndex(of: quote)
+      else { return nil }
+      return String(value[value.index(after: value.startIndex)..<end])
+    }
+    return nil
+  }
+
+  private static let named = [
+    #"^(?:https?://)?(?:www\.)?github\.com/([^/]+)/([^/]+)/pull/(\d+)"#,
+    #"^([^/\s]+)/([^/#\s]+)#(\d+)$"#,
+    #"^([^/\s]+)/([^/\s]+)/pull/(\d+)$"#,
+  ].map { try! NSRegularExpression(pattern: $0) }
+  private static let plain = try! NSRegularExpression(pattern: #"^#?(\d+)$"#)
+  private static let segment = try! NSRegularExpression(pattern: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#)
+
+  private static func groups(_ regex: NSRegularExpression, _ s: String) -> [String]? {
+    guard let m = regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) else { return nil }
+    return (1..<m.numberOfRanges).compactMap { Range(m.range(at: $0), in: s).map { String(s[$0]) } }
   }
 }
 
