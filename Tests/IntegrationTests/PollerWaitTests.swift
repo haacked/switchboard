@@ -21,6 +21,12 @@ extension FakeGitHub {
       }
     }
   }
+
+  /// The id of Trunk's first status comment on the PR.
+  func trunkComment(_ number: Int) throws -> String {
+    let nodes = pr(number)["firstComments"]?["nodes"]?.array ?? []
+    return try #require(nodes.first { $0["author"]?["login"]?.string == "trunk-io" }?["id"]?.string)
+  }
 }
 
 /// A GitHub timestamp `seconds` from now.
@@ -234,17 +240,11 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     #expect(try sbd.get(s.id).waits.count == 1)
   }
 
-  /// The id of Trunk's first status comment on #122953.
-  func trunkComment(_ github: FakeGitHub) throws -> String {
-    let nodes = github.pr(122953)["firstComments"]?["nodes"]?.array ?? []
-    return try #require(nodes.first { $0["author"]?["login"]?.string == "trunk-io" }?["id"]?.string)
-  }
-
   @Test func aQueueWaitResumesTheSessionWhenTrunkRemovesThePR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
-    let comment = try trunkComment(github)
+    let comment = try github.trunkComment(122953)
     try sbd.poll()
     github.edit(comment: comment, body: "Testing in the queue", at: stamp(-3600))
     try sbd.sb("wait", s.id, "--kind", "queue", "--note", "then deploy")
@@ -261,7 +261,7 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.session(in: PollerWaitTests.posthog, branch: PollerWaitTests.posthogBranch)
-    let comment = try trunkComment(github)
+    let comment = try github.trunkComment(122953)
     github.edit(comment: comment, body: "Removed from the merge queue", at: stamp(-3600))
     try sbd.poll()
     try sbd.sb("wait", s.id, "--kind", "queue")

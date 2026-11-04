@@ -74,6 +74,7 @@ public final class Service {
   var autoContinueOn = false
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
+  var plans: [String: PlanDocument] = [:]
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -126,6 +127,7 @@ public final class Service {
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
+    for p in try store.plans() { plans[p.id] = p }
     snapshot = buildSnapshot() ?? Snapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
@@ -179,6 +181,8 @@ public final class Service {
         return .success(try JSON(encoding: importSessions(request.args)))
       case "triage", "choose", "reply":
         return try triageRequest(request.op, request.args)
+      case "plan-attach", "plan-update":
+        return .success(try planDocumentRequest(request.op, request.args))
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
@@ -278,6 +282,8 @@ public final class Service {
       return try autoContinueRequest(args)
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group":
       return try groupRequest(op, args)
+    case "plan-ls", "plan-get", "plan-detach", "plan-auto":
+      return try planRequest(op, args)
     default:
       throw APIError("unknown request \(op)")
     }
@@ -807,6 +813,7 @@ public final class Service {
       host.kill(paneName(session.id, .shell))
       entries[session.id] = nil
       try store.delete(session: session.id)
+      try detachPlans { $0.session == session.id }
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     if let branchError, let branch {
@@ -1271,6 +1278,7 @@ public final class Service {
     out.cleanup = e.facts.cleanup
     out.group = s.group
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
+    out.plans = planSummaries(session: s)
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
@@ -1279,16 +1287,11 @@ public final class Service {
 
   // MARK: Settings
 
-  static let hookEvents = [
-    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-    "PermissionRequest", "Notification", "Stop", "StopFailure", "SubagentStart", "SubagentStop",
-  ]
-
   /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
   /// with no output when sbd is down, so the session shows no hook errors.
   private func writeClaudeSettings() throws {
     var hooks: [String: JSON] = [:]
-    for event in Service.hookEvents {
+    for event in SessionFacts.hookKinds {
       let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
       let handler: JSON = ["type": "command", "command": .string("\(shellQuote(sbPath)) hook"), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]

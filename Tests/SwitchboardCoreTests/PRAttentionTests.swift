@@ -323,6 +323,11 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     samplePR(
       reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], queue: .testing),
     samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], queue: .merged),
+    withDepot(samplePR(checks: "FAILURE", queue: .testing), sampleDepot(["a"])),
+    withDepot(
+      samplePR(
+        reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], checks: "FAILURE", queue: .passed),
+      sampleDepot(["a"])),
     samplePR(),
   ])
   func openPRWithNothingToDoFiresNoRule(_ pr: PullRequest) throws {

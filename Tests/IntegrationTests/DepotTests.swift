@@ -127,6 +127,26 @@ extension Instance {
     #expect(after.reason == DepotTests.fixReason)
   }
 
+  /// Trunk queues a PR only after its required checks pass, so a failed
+  /// Depot job on a queued PR is one that isn't required.
+  @Test func failedDepotJobOnAPRInTrunksQueueLeavesTheSessionsReason() throws {
+    let github = try FakeGitHub()
+    let depot = try FakeDepot()
+    let sbd = try Instance.withDepot(github, depot)
+    try failingPR(github, depot)
+    github.checks(DepotTests.number, "FAILURE")
+    github.edit(
+      comment: try github.trunkComment(DepotTests.number), body: "Testing in the queue", at: "2026-10-26T00:00:00Z")
+    let s = try session(sbd)
+
+    try sbd.poll()
+
+    let after = try sbd.get(s.id)
+    #expect(after.pr?.queue?.isQueued == true)
+    #expect(after.pr?.depot?.status == "failed")
+    #expect(after.reason == DepotTests.readTheReply)
+  }
+
   @Test func aCIWaitResumesTheSessionWhenADepotJobFailsWhileTheRollupIsPending() throws {
     let github = try FakeGitHub()
     let depot = try FakeDepot()

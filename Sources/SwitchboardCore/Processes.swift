@@ -114,4 +114,15 @@ public enum Processes {
     guard isValidPid(pid) else { return false }
     return kill(pid_t(pid), 0) == 0 || errno == EPERM
   }
+
+  /// Waits up to `seconds` for every pid to exit. Returns the pids that still exist.
+  public static func waitForExit(_ pids: Set<Int>, seconds: TimeInterval) -> Set<Int> {
+    let deadline = Date().addingTimeInterval(seconds)
+    var alive = pids.filter(exists)
+    while !alive.isEmpty, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.05)
+      alive = alive.filter(exists)
+    }
+    return alive
+  }
 }

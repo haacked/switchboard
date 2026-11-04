@@ -21,8 +21,7 @@ extension Service {
       let members = members(id).map(\.id)
       // This skips `place`, so a session that took its parent's group stays open to suggestions.
       for member in members { try update(member) { $0.group = nil } }
-      try store.delete(group: id)
-      groups[id] = nil
+      try deleteGroup(id)
       return ["removed": .string(id), "ungrouped": .array(members.map(JSON.string))]
     case "group-move":
       let ids = try sessionRefs(args)
@@ -37,12 +36,15 @@ extension Service {
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
     case "group-suggest":
-      let suggestions = groupSuggestions()
-      guard let accept = args["accept"]?.string else { return try JSON(encoding: suggestions) }
-      guard let suggestion = suggestions.first(where: { $0.id == accept }) else {
-        throw APIError("no suggestion \(accept). List them with: sb group suggest")
+      let suggestions = try groupSuggestions()
+      let accept = args["accept"]?.string
+      guard let id = accept ?? args["decline"]?.string else { return try JSON(encoding: suggestions) }
+      guard let suggestion = suggestions.first(where: { $0.id == id }) else {
+        throw APIError("no suggestion \(id). List them with: sb group suggest")
       }
-      return try JSON(encoding: groupSummary(try acceptSuggestion(suggestion)))
+      if accept != nil { return try JSON(encoding: groupSummary(try acceptSuggestion(suggestion))) }
+      try store.decline(suggestion: id)
+      return ["declined": .string(id)]
     case "send-group":
       return try JSON(encoding: sendGroup(args))
     default:
@@ -56,7 +58,7 @@ extension Service {
   }
 
   /// Finds a group by id, by unique id prefix, or by unique name.
-  private func lookupGroup(_ args: JSON) throws -> String {
+  func lookupGroup(_ args: JSON) throws -> String {
     guard let key = args["group"]?.string, !key.isEmpty else { throw APIError("name a group") }
     return try resolve(key, "group", groups.values.map { ($0.id, $0.name) })
   }
@@ -78,6 +80,13 @@ extension Service {
     groups[group.id] = group
   }
 
+  /// Deletes the group and detaches its plans.
+  private func deleteGroup(_ id: String) throws {
+    try store.delete(group: id)
+    try detachPlans { $0.group == id }
+    groups[id] = nil
+  }
+
   /// Moves the sessions into the group, or into no group, and marks them
   /// placed by hand, so suggestions leave them out.
   private func place(_ ids: [String], in group: String?) throws {
@@ -91,7 +100,7 @@ extension Service {
   }
 
   /// The Manager has its own row in the app and belongs to no group.
-  private func groupable(_ session: Session) -> Bool { session.manager != true }
+  func groupable(_ session: Session) -> Bool { session.manager != true }
 
   private func refuseUngroupable(_ ids: [String]) throws {
     if let id = ids.first(where: { entries[$0].map { !groupable($0.session) } ?? false }) {
@@ -99,12 +108,14 @@ extension Service {
     }
   }
 
-  private func members(_ group: String) -> [Session] {
+  func members(_ group: String) -> [Session] {
     entries.values.map(\.session).filter { $0.group == group }.sorted { $0.id < $1.id }
   }
 
   private func groupSummary(_ id: String) -> GroupSummary {
-    GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    summary.plans = planSummaries(group: id)
+    return summary
   }
 
   func groupList() -> GroupList {
@@ -114,13 +125,15 @@ extension Service {
     return GroupList(groups: sorted.map { groupSummary($0.id) }, ungrouped: ungrouped)
   }
 
-  func groupSuggestions() -> [GroupSuggestion] {
+  func groupSuggestions() throws -> [GroupSuggestion] {
     let candidates = entries.values.filter { groupable($0.session) }.map { e in
       GroupSuggestions.Candidate(
         id: e.session.id, branch: e.session.branch, prTitle: e.facts.pr?.title, group: e.session.group,
-        placedByHand: e.session.placedByHand ?? false)
+        placedByHand: e.session.placedByHand ?? false, repo: e.facts.pr?.repo, pr: e.facts.pr?.number,
+        dependencies: e.facts.dependencies)
     }
-    return GroupSuggestions.make(candidates: candidates, groups: Array(groups.values))
+    return GroupSuggestions.make(
+      candidates: candidates, groups: Array(groups.values), declined: try store.declinedSuggestions())
   }
 
   /// Returns the id of the group that the suggestion filled.
@@ -132,6 +145,11 @@ extension Service {
       id = try createGroup(suggestion.name).id
     }
     try place(suggestion.sessions, in: id)
+    if let merged = suggestion.merge?.group, members(merged).isEmpty {
+      try saveGroup(groups[id]!.absorbing(groups[merged]!))
+      try movePlans(from: merged, to: id)
+      try deleteGroup(merged)
+    }
     return id
   }
 

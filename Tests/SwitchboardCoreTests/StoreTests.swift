@@ -91,6 +91,30 @@ func tempFolder() throws -> String {
 }
 
 @Suite struct ConfigTests {
+  @Test func declinedSuggestionsSurviveReopeningTheStore() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try store.decline(suggestion: "merge:g1:g2")
+      try store.decline(suggestion: "dependency:s1:g1")
+      try store.decline(suggestion: "merge:g1:g2")
+    }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2", "dependency:s1:g1"])
+  }
+
+  @Test func aNewStoreHasNoDeclinedSuggestions() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.declinedSuggestions().isEmpty)
+  }
+
   @Test func missingFieldsKeepTheirDefaults() throws {
     let c = try JSONCoding.decode(
       Config.self, from: #"{"idleStopSeconds": 30, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}}"#)

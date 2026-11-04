@@ -1,0 +1,342 @@
+import Foundation
+
+/// Where a plan document lives.
+public struct PlanSource: Codable, Equatable, Hashable, Sendable {
+  public enum Kind: String, Codable, Sendable {
+    /// A markdown file on this Mac, such as one in the notes repo.
+    case file
+    /// The body of a GitHub issue.
+    case issue
+    /// A markdown file on the head branch of a PR.
+    case pr
+  }
+
+  public var kind: Kind
+  /// owner/name of an issue or a PR.
+  public var repo: String?
+  public var number: Int?
+  /// The absolute path of a file, or the path of a PR's file in its repo.
+  public var path: String?
+
+  public init(kind: Kind, repo: String? = nil, number: Int? = nil, path: String? = nil) {
+    self.kind = kind
+    self.repo = repo
+    self.number = number
+    self.path = path
+  }
+
+  /// Reads an issue as `owner/name#N` or an issue URL, a PR as `owner/name#N`
+  /// or a PR URL with the file's `path`, or else a local path, which is
+  /// relative to `cwd`. An existing local file wins over the `owner/name#N` form.
+  public init(parsing doc: String, path: String?, cwd: String = FileManager.default.currentDirectoryPath) throws {
+    let text = doc.trimmingCharacters(in: .whitespacesAndNewlines)
+    if text.isEmpty { throw APIError("name a plan document") }
+    let file = path?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: ["/"])
+    if file?.isEmpty == true { throw APIError("--path needs a file in the PR") }
+    if let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" {
+      let parts = url.path.split(separator: "/").map(String.init)
+      guard url.host?.lowercased() == "github.com", parts.count >= 4, ["issues", "pull"].contains(parts[2]),
+        let number = Int(parts[3]), number > 0
+      else { throw APIError("\(text) is not a GitHub issue or PR") }
+      self = try PlanSource.remote(
+        repo: "\(parts[0])/\(parts[1])", number: number, path: file, pull: parts[2] == "pull")
+      return
+    }
+    let local = ((text.expandingTilde as NSString).isAbsolutePath ? text.expandingTilde : "\(cwd)/\(text)")
+    let standard = (local as NSString).standardizingPath
+    if !FileManager.default.fileExists(atPath: standard), let ref = Wait.PullRequest(parsing: text),
+      let repo = ref.repository
+    {
+      self = try PlanSource.remote(repo: repo, number: ref.number, path: file, pull: nil)
+      return
+    }
+    if file != nil { throw APIError("--path names a file in a PR, and \(text) is a local file") }
+    self.init(kind: .file, path: standard)
+  }
+
+  /// `pull` is nil for `owner/name#N`, which names an issue or a PR.
+  private static func remote(repo: String, number: Int, path: String?, pull: Bool?) throws -> PlanSource {
+    if let path {
+      if pull == false { throw APIError("an issue holds no files. --path names a file in a PR") }
+      return PlanSource(kind: .pr, repo: repo, number: number, path: path)
+    }
+    if pull == true { throw APIError("name the PR's plan file with --path") }
+    return PlanSource(kind: .issue, repo: repo, number: number)
+  }
+
+  /// `owner/name#N` of an issue or a PR.
+  public var ref: String { "\(repo ?? "")#\(number ?? 0)" }
+
+  /// The path, `owner/name#N`, or `owner/name#N:path`.
+  public var text: String {
+    switch kind {
+    case .file: path ?? ""
+    case .issue: ref
+    case .pr: "\(ref):\(path ?? "")"
+    }
+  }
+}
+
+/// A PR that a plan links.
+public struct PlanLink: Codable, Equatable, Hashable, Sendable {
+  /// owner/name.
+  public var repo: String
+  public var number: Int
+
+  public init(repo: String, number: Int) {
+    self.repo = repo
+    self.number = number
+  }
+
+  public var text: String { "\(repo)#\(number)" }
+
+  /// The link with its repo lowercased. GitHub ignores the case of owner/name.
+  public var key: PlanLink { PlanLink(repo: repo.lowercased(), number: number) }
+}
+
+/// How far a PR has gone, as a plan row tracks it.
+public enum PlanStage: String, Codable, Sendable {
+  case open, merged, deployed, closed
+}
+
+/// A table row of a plan that links at least one PR.
+public struct PlanRow: Codable, Equatable, Sendable {
+  public struct PR: Codable, Equatable, Sendable {
+    public var repo: String
+    public var number: Int
+    /// The PR's stage when sbd first knew it after the row's text last
+    /// changed. Nil until sbd reads the PR.
+    public var seen: PlanStage?
+    /// The PR's stage at sbd's last read.
+    public var now: PlanStage?
+
+    public init(repo: String, number: Int, seen: PlanStage? = nil, now: PlanStage? = nil) {
+      self.repo = repo
+      self.number = number
+      self.seen = seen
+      self.now = now
+    }
+
+    public var link: PlanLink { PlanLink(repo: repo, number: number) }
+
+    /// The PR merged, deployed, or closed since the row last changed.
+    public var advanced: Bool {
+      guard let seen, let now else { return false }
+      return now != seen && now != .open
+    }
+  }
+
+  /// The row's markdown line, trimmed.
+  public var text: String
+  /// When sbd first saw this text, in ms since the epoch.
+  public var changed: Int64
+  public var prs: [PR]
+
+  public init(text: String, changed: Int64, prs: [PR]) {
+    self.text = text
+    self.changed = changed
+    self.prs = prs
+  }
+
+  public var outOfDate: Bool { prs.contains(where: \.advanced) }
+}
+
+/// A plan attached to a group or a session, with what sbd last read from it.
+/// A field added later needs a default or an optional type, because sbd
+/// decodes the plans that an older sbd stored.
+public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
+  public var id: String
+  public var source: PlanSource
+  /// The group the plan belongs to, or nil for a session's plan.
+  public var group: String?
+  public var session: String?
+  /// True when sbd writes the generated table on its own.
+  public var autoUpdate: Bool
+  /// Milliseconds since the epoch.
+  public var attached: Int64
+  /// When sbd last read the document without an error.
+  public var read: Int64?
+  /// Why the last read or write failed, or nil after a success.
+  public var error: String?
+  /// Every PR that the document links outside the generated table.
+  public var links: [PlanLink]
+  public var rows: [PlanRow]
+  /// The text between the status markers at the last read, or nil when the
+  /// document has none.
+  public var statusBlock: String?
+
+  public init(id: String, source: PlanSource, group: String? = nil, session: String? = nil, attached: Int64) {
+    self.id = id
+    self.source = source
+    self.group = group
+    self.session = session
+    self.autoUpdate = false
+    self.attached = attached
+    self.links = []
+    self.rows = []
+  }
+
+  /// Takes in the document's text. A row whose text is unchanged keeps when
+  /// it changed and the stages it saw.
+  public mutating func update(from text: String, now: Int64) {
+    let content = Plans.parse(text)
+    links = content.links
+    let old = Dictionary(rows.map { ($0.text, $0) }) { first, _ in first }
+    var seen: Set<String> = []
+    rows = content.rows.compactMap { row in
+      guard seen.insert(row.text).inserted else { return nil }
+      return old[row.text]
+        ?? PlanRow(text: row.text, changed: now, prs: row.links.map { PlanRow.PR(repo: $0.repo, number: $0.number) })
+    }
+    statusBlock = content.statusBlock
+    read = now
+    error = nil
+  }
+
+  /// Sets each row PR's stage from `stage`, which returns nil for a PR that
+  /// sbd hasn't read. A PR with no `seen` stage takes the first known one.
+  /// A deployed PR stays deployed when a read says merged, because a read
+  /// after sbd restarts may not have the deploy comment's body yet.
+  public mutating func setStages(_ stage: (PlanLink) -> PlanStage?) {
+    for r in rows.indices {
+      for p in rows[r].prs.indices {
+        guard let s = stage(rows[r].prs[p].link), !(s == .merged && rows[r].prs[p].now == .deployed) else {
+          continue
+        }
+        if rows[r].prs[p].seen == nil { rows[r].prs[p].seen = s }
+        rows[r].prs[p].now = s
+      }
+    }
+  }
+}
+
+/// A plan as groups and sessions show it: the out-of-date rows and counts.
+public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
+  public var id: String
+  public var source: PlanSource
+  public var group: String?
+  public var session: String?
+  public var autoUpdate: Bool
+  public var read: Int64?
+  public var error: String?
+  public var links: Int
+  public var rows: Int
+  public var outOfDate: [PlanRow]
+
+  public init(_ plan: PlanDocument) {
+    id = plan.id
+    source = plan.source
+    group = plan.group
+    session = plan.session
+    autoUpdate = plan.autoUpdate
+    read = plan.read
+    error = plan.error
+    links = plan.links.count
+    rows = plan.rows.count
+    outOfDate = plan.rows.filter(\.outOfDate)
+  }
+}
+
+public enum Plans {
+  public static let startMarker = "<!-- sb:status -->"
+  public static let endMarker = "<!-- /sb:status -->"
+
+  /// What a plan document holds, as sbd reads it.
+  public struct Content: Equatable, Sendable {
+    public struct Row: Equatable, Sendable {
+      public var text: String
+      public var links: [PlanLink]
+    }
+
+    public var links: [PlanLink]
+    public var rows: [Row]
+    /// The text between the status markers, or nil without them.
+    public var statusBlock: String?
+  }
+
+  static let prURL = try! NSRegularExpression(
+    pattern: #"https?://github\.com/([\w.-]+)/([\w.-]+)/pull/([0-9]+)"#, options: [.caseInsensitive])
+  static let separatorCell = try! NSRegularExpression(pattern: #"^\s*:?-+:?\s*$"#)
+
+  /// The PR URLs in `text`, in order and without repeats.
+  public static func links(in text: String) -> [PlanLink] {
+    var out: [PlanLink] = []
+    var seen: Set<PlanLink> = []
+    for match in prURL.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+      guard let owner = Range(match.range(at: 1), in: text), let name = Range(match.range(at: 2), in: text),
+        let number = Range(match.range(at: 3), in: text).flatMap({ Int(text[$0]) })
+      else { continue }
+      let link = PlanLink(repo: "\(text[owner])/\(text[name])", number: number)
+      if seen.insert(link.key).inserted { out.append(link) }
+    }
+    return out
+  }
+
+  /// The ranges of the first start marker and the first end marker after
+  /// it. An end marker before the first start marker leaves no end.
+  static func markers(_ markdown: String) -> (start: Range<String.Index>, end: Range<String.Index>?)? {
+    guard let start = markdown.range(of: startMarker) else { return nil }
+    if let stray = markdown.range(of: endMarker), stray.lowerBound < start.lowerBound { return (start, nil) }
+    return (start, markdown.range(of: endMarker, range: start.upperBound..<markdown.endIndex))
+  }
+
+  /// The PR links and table rows outside the generated table, and the text
+  /// inside it.
+  public static func parse(_ markdown: String) -> Content {
+    var outside = markdown
+    var block: String?
+    if let (start, end) = markers(markdown), let end {
+      block = String(markdown[start.upperBound..<end.lowerBound])
+      outside = String(markdown[..<start.lowerBound]) + "\n" + String(markdown[end.upperBound...])
+    }
+    let lines = outside.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+    var rows: [Content.Row] = []
+    for (i, line) in lines.enumerated() where line.hasPrefix("|") && !isSeparator(line) {
+      // The line above a separator is the table's header.
+      if i + 1 < lines.count, isSeparator(lines[i + 1]) { continue }
+      let links = links(in: line)
+      if !links.isEmpty { rows.append(Content.Row(text: line, links: links)) }
+    }
+    return Content(links: links(in: outside), rows: rows, statusBlock: block)
+  }
+
+  static func isSeparator(_ line: String) -> Bool {
+    guard line.hasPrefix("|") else { return false }
+    let cells = line.split(separator: "|", omittingEmptySubsequences: true).map(String.init)
+    return !cells.isEmpty
+      && cells.allSatisfy { separatorCell.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+  }
+
+  /// The text that `splice` puts between the markers for this table.
+  public static func block(_ table: String) -> String { "\n\(table)\n" }
+
+  /// The document with the text between its first pair of status markers
+  /// replaced by the table.
+  public static func splice(_ markdown: String, _ table: String) throws -> String {
+    guard let (start, end) = markers(markdown) else {
+      throw APIError("the plan has no \(startMarker) line. Add \(startMarker) and \(endMarker) where the table goes")
+    }
+    guard let end else {
+      throw APIError("the plan needs one \(endMarker) after its first \(startMarker), and none before it")
+    }
+    return String(markdown[..<start.upperBound]) + block(table) + String(markdown[end.lowerBound...])
+  }
+
+  /// The generated table: one row per session, sorted by name. Nothing in it
+  /// changes unless a session's state, wait, or PR does.
+  public static func table(_ sessions: [SessionSummary]) -> String {
+    var lines = ["| Session | State | Wait | PR |", "| --- | --- | --- | --- |"]
+    for s in sessions.sorted(by: { ($0.name, $0.id) < ($1.name, $1.id) }) {
+      let pr = s.pr.map { "[\($0.repo)#\($0.number)](\($0.url)) \($0.state.rawValue.lowercased())" } ?? ""
+      let cells = [s.name, s.state.title, s.waits.first?.line ?? "", pr].map(cell)
+      lines.append("| " + cells.joined(separator: " | ") + " |")
+    }
+    return lines.joined(separator: "\n")
+  }
+
+  /// A table cell on one line. It escapes `<` as `&lt;`, so that no cell can
+  /// hold a status marker.
+  static func cell(_ text: String) -> String {
+    oneLine(text, max: 200).replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: "|", with: "\\|")
+  }
+}

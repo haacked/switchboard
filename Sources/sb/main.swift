@@ -99,9 +99,23 @@ let usage = """
     group rm <group>              remove the group; its sessions become ungrouped
     group move <session>... --to <group> | --ungrouped
     group note <group> <text>
-    group suggest [--accept <id>] list groups suggested from branch names and PR
-                                  titles, or accept one. A session that you moved
-                                  to Ungrouped is never suggested
+    group suggest [--accept <id> | --decline <id>]
+                                  list groups suggested from dependencies, branch
+                                  names, and PR titles, or accept or decline one.
+                                  A session that you placed by hand never moves
+
+  Plan documents:
+    plan attach <doc> (--group G | --session S) [--path P]
+                                  attach a local markdown file, an issue
+                                  (owner/name#N or its URL), or with --path a
+                                  file in a PR. Sessions whose PRs a group's
+                                  plan links join the group
+    plan ls [--group G | --session S]
+    plan get <plan>               show the plan and its out-of-date rows
+    plan detach <plan>
+    plan update <plan>            write the status table between
+                                  <!-- sb:status --> and <!-- /sb:status -->
+    plan auto <plan> on|off       write the table on its own when it changes
 
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
@@ -156,7 +170,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept",
+      "--group", "--to", "--note", "--accept", "--decline",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -263,6 +277,7 @@ func printSession(_ s: SessionSummary) {
       "  depends: \(d.label(from: s.pr?.repo ?? d.repo)) \(d.state?.rawValue.lowercased() ?? "unknown")\(deploy)\(session)"
     )
   }
+  for p in s.plans ?? [] { printPlan(p, indent: "  ") }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printWaitsAndNotes(s)
@@ -570,6 +585,8 @@ case "autocontinue":
   autoContinue(a)
 case "group", "groups":
   group(a)
+case "plan", "plans":
+  plan(a)
 case "followup", "followups":
   followup(a)
 case "poll":

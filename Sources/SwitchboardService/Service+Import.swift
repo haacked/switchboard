@@ -223,11 +223,7 @@ extension Service {
     // Only a pid that passed the checks above gets a signal. A pid that did not exist then may name a process now.
     let alive = Set(exiting.flatMap(\.livePids)).intersection(verified)
     for pid in alive { kill(pid_t(pid), SIGTERM) }
-    for _ in 0..<50 {
-      if alive.allSatisfy({ !Processes.exists($0) }) { break }
-      Thread.sleep(forTimeInterval: 0.1)
-    }
-    let stuck = alive.filter(Processes.exists)
+    let stuck = Processes.waitForExit(alive, seconds: 5)
     for s in exiting {
       if let pid = s.livePids.first(where: stuck.contains) {
         refused[s.id] = "\(s.label)'s claude (pid \(pid)) didn't exit after SIGTERM. Exit it there, then import it."

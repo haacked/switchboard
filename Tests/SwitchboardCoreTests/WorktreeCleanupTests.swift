@@ -129,10 +129,6 @@ private func verdict(_ f: SessionFacts) -> Verdict { Attention.evaluate(session(
 
       #expect(f.cleanup?.state == .removed)
     }
-
-    @Test func cleanupEventIsAnObservedKind() {
-      #expect(SessionFacts.observedKinds.contains("cleanup"))
-    }
   }
 
   @Suite struct Verdicts {

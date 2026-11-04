@@ -390,6 +390,61 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(after.cleanup?.reason?.contains(".env") == true)
   }
 
+  /// The stub writes `.env` when SIGTERM arrives, which is after the first check passed. Only the
+  /// check after the panes close can find it.
+  @Test func refusesAnIgnoredFileThatClaudeWritesAsItStops() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try ".env\n".write(toFile: "\(repo)/.git/info/exclude", atomically: true, encoding: .utf8)
+    try sbd.sb("send", s.id, "onterm .env")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll write .env when I stop." }
+    let env = "\(s.cwd)/.env"
+    #expect(!FileManager.default.fileExists(atPath: env))
+    let terminals = try sbd.client.terminals(s.id)
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(".env"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(FileManager.default.fileExists(atPath: env))
+    #expect(try sbd.hasBranch(repo, branch))
+    #expect(try sbd.count("cleanup", s.id) == 0)
+    #expect(try !tmuxHas(terminals, terminals.claude))
+    #expect(try !tmuxHas(terminals, terminals.shell))
+  }
+
+  /// A claude that has not exited could still write to the folder after the second check. The
+  /// stub outlives the first 5 s wait and exits within the retry's wait. The refusal leaves the
+  /// Claude pane open, which is how the retry finds that claude.
+  @Test func refusesAClaudeThatHasNotExitedAfterTheWait() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    try sbd.sb("send", s.id, "linger 7")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 7 s when I stop." }
+    let pid = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    let terminals = try sbd.client.terminals(s.id)
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("has not exited"), Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.hasBranch(repo, branch))
+    #expect(try sbd.count("cleanup", s.id) == 0)
+    #expect(Processes.exists(pid))
+    #expect(try tmuxHas(terminals, terminals.claude))
+
+    let retry = try sbd.cleanup(s.id)
+
+    #expect(retry.status == 0, Comment(rawValue: retry.stderr))
+    #expect(!Processes.exists(pid))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.count("cleanup", s.id) == 1)
+    #expect(try !tmuxHas(terminals, terminals.claude))
+  }
+
   @Test func cleanupDeletesTheIgnoredNamesThatConfigLists() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)

@@ -18,9 +18,12 @@
 #                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
 #   clear <uuid>     switches to another conversation, as /clear does
-#   linger <n>       waits n s after SIGTERM before it exits
+#   linger <n>       waits n s after SIGTERM before it exits. A second
+#                    SIGTERM does not restart the wait
 #   lag ...          waits 1 s before it reports the prompt, which keeps the
-#                    message in flight
+#                    message in flight. lag held waits until
+#                    $SB_HOME/report exists instead
+#   onterm <file>    writes <file> in its folder first when SIGTERM arrives
 #   perm <command>   asks permission to run a Bash command
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
@@ -104,7 +107,7 @@ config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
 project="$config_dir/projects/$(jq -rn --arg c "$PWD" '$c | gsub("[^A-Za-z0-9]"; "-")')"
 
 recordings="$(dirname "$0")/claude"
-settings='' mcp_config='' session='' prompt='' source=startup linger=0
+settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm=''
 while [ $# -gt 0 ]; do
   case $1 in
   --settings) settings=$2 && shift 2 ;;
@@ -392,7 +395,10 @@ questions='{"questions":[
 
 turn() {
   local p=$1 step=turn reply cmd='' marker='' before='' n job held
-  case $p in lag*) sleep 1 ;; esac
+  case $p in
+  "lag held") until [ -e "$SB_HOME/report" ]; do sleep 0.05; done ;;
+  lag*) sleep 1 ;;
+  esac
   transcript "$p"
   status
   case $p in
@@ -446,6 +452,10 @@ turn() {
     url=$(jq -r --arg n "${p#mcp }" '.mcpServers[$n].url' "$mcp_config")
     reply="MCP ${p#mcp }: $(curl -s --max-time 2 "$url" || echo "no answer from $url")"
     ;;
+  onterm*)
+    onterm=${p#onterm }
+    reply="I'll write $onterm when I stop."
+    ;;
   linger*)
     linger=${p#linger }
     reply="I'll linger $linger s when I stop."
@@ -474,7 +484,7 @@ case $source:$found in
 startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
 resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
 esac
-trap 'play sigterm; sleep "$linger"; exit 143' TERM
+trap 'trap "" TERM; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
 play "$source"
