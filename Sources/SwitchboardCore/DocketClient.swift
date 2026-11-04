@@ -33,15 +33,21 @@ public final class DocketClient {
     p.standardInput = stdin
     p.standardOutput = stdout
     p.standardError = stderr
+    do {
+      try p.run()
+    } catch {
+      throw Failure(description: "can't run \(docket): \(error.localizedDescription)")
+    }
     var errData = Data()
     let errDone = DispatchGroup()
     errDone.enter()
-    // A queue of its own reads stderr. A full stderr pipe then can't stall docket.
+    // A queue of its own reads stderr. A full stderr pipe then can't stall
+    // docket. The reader starts after the launch, because a launch that
+    // throws leaves the pipe's write end open and the read would never end.
     DispatchQueue(label: "docket.stderr").async {
       errData = stderr.fileHandleForReading.readDataToEndOfFile()
       errDone.leave()
     }
-    try p.run()
     let kill = DispatchWorkItem { if p.isRunning { p.terminate() } }
     DispatchQueue(label: "docket.timeout").asyncAfter(deadline: .now() + timeout, execute: kill)
     let client = DocketClient(input: stdin.fileHandleForWriting, output: stdout.fileHandleForReading)

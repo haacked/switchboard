@@ -271,6 +271,24 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     #expect(try docketRows(sbd).isEmpty)
   }
 
+  @Test func aDocketThatCannotLaunchFailsEachStartAndAddsNoRow() throws {
+    let docket = try DocketHome()
+    let unlaunchable = "\(docket.path)/not-a-program"
+    try docket.write("not-a-program", "this is not an executable format\n")
+    chmod(unlaunchable, 0o755)
+    var config = docket.config
+    config["docket"] = ["path": .string(unlaunchable)]
+    let sbd = try Instance(config: config)
+
+    for pr in ["o/r#1", "o/r#2"] {
+      let refused = try sbd.run("docket", "--json", pr)
+      #expect(refused.status != 0, "\(pr)")
+      #expect(refused.stderr.contains("can't run \(unlaunchable)"), "\(pr): \(refused.stderr)")
+    }
+
+    #expect(try docketRows(sbd).isEmpty)
+  }
+
   @Test func restartsAReviewThatDocketCouldNotStart() throws {
     let docket = try DocketHome()
     let trust = "accept its trust prompt, then call start_review again"
