@@ -31,6 +31,7 @@ Everything in the app also works from `sb`, and every command takes `--json`:
 ```
 sb new ~/dev/myrepo --branch haacked/fix-thing --prompt "Fix the flaky test in foo_test.py"
 sb new ~/dev/myrepo --worktree --name "Fix the flaky test"   # names the branch itself
+sb spawn --repo PostHog/posthog --branch haacked/flag-cache --prompt "Cache flag lookups."
 sb ls
 sb send <session> "Yes, push it."
 sb attach <session>          # this terminal shows the Claude pane; --shell for the shell
@@ -90,6 +91,8 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
 `sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent within a state group. A session whose parent is the Manager is top level, like one with no parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
+
+`sb spawn --repo <repo> --branch <branch> --prompt <text>` starts a session on a new branch in a new worktree of a repository. The repository is `owner/name`, which `repos` and `repoRoots` in `config.json` locate, a bare name that matches one repository there, or a folder. Run by Claude inside a session, it records that session as the parent, so the new session joins the parent's group. `--followup` adds it as a follow-up that hasn't started, and `--after pr:<N>` makes that follow-up ready when PR N of the repository merges. `--after` without `--followup` is refused, and so is `--base` with `--followup`, because a follow-up keeps no base. A follow-up spawned from a folder keeps only the `owner/name` of the folder's `upstream` remote, else its `origin` remote, so `sb followup start` finds the checkout from `repos` and `repoRoots` unless you pass `--path`. A spawn refuses a repository it can't find, a name that matches several, and a branch that exists or whose worktree folder exists.
 
 ### Groups
 

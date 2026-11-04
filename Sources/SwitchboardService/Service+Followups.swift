@@ -82,12 +82,15 @@ extension Service {
   /// The repository and branch of a folder: the `owner/name` of its
   /// `upstream` remote, else its `origin` remote, on github.com.
   private func gitContext(_ cwd: String) -> (String?, String?) {
-    guard
-      let repository = ["upstream", "origin"].lazy.compactMap({ try? self.gitOutput(cwd, ["remote", "get-url", $0]) })
-        .compactMap(Followup.repository(remote:)).first
-    else { return (nil, nil) }
+    guard let repository = githubRepository(cwd) else { return (nil, nil) }
     let branch = try? gitOutput(cwd, ["branch", "--show-current"])
     return (repository, branch?.isEmpty == false ? branch : nil)
+  }
+
+  /// The `owner/name` of the folder's `upstream` remote, else its `origin` remote, on github.com.
+  func githubRepository(_ cwd: String) -> String? {
+    ["upstream", "origin"].lazy.compactMap({ try? self.gitOutput(cwd, ["remote", "get-url", $0]) })
+      .compactMap(Followup.repository(remote:)).first
   }
 
   private func makeTrigger(on: String?, after: String?, _ repository: String?, now: Int64) throws
@@ -179,25 +182,30 @@ extension Service {
   /// setting, else <root>/<owner>/<name> under the first root in `repoRoots`
   /// that has that folder. The checkout needs a remote on github.com for the
   /// repository, so a folder that only shares the name is refused.
-  func checkout(of repository: String?) throws -> String {
-    guard let repository else { throw APIError("the follow-up has no repository. Pass --path") }
+  func checkout(of repository: String?, hint: String = "Pass --path") throws -> String {
+    guard let repository else { throw APIError("the follow-up has no repository. \(hint)") }
     let configured = config.repos.first { $0.key.lowercased() == repository.lowercased() }?.value
     let candidates = configured.map { [$0] } ?? config.repoRoots.map { "\($0)/\(repository)" }
     for path in candidates.map({ ($0.expandingTilde as NSString).standardizingPath }) {
       var isDir: ObjCBool = false
       guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
-      let remotes = ((try? gitOutput(path, ["remote", "-v"])) ?? "").split(separator: "\n").compactMap { line in
-        line.split(whereSeparator: \.isWhitespace).dropFirst().first.flatMap { Followup.repository(remote: String($0)) }
-      }
-      guard remotes.contains(where: { $0.lowercased() == repository.lowercased() }) else {
+      guard hasRemote(path, for: repository) else {
         throw APIError("\(path) has no remote on github.com for \(repository)")
       }
       return try gitOutput(path, ["rev-parse", "--show-toplevel"])
     }
     if let configured { throw APIError("repos sets \(repository) to \(configured), which isn't a folder") }
     throw APIError(
-      "can't find a checkout of \(repository) under \(config.repoRoots.joined(separator: ", ")). Pass --path, or add it to repos in \(home.config)"
+      "can't find a checkout of \(repository) under \(config.repoRoots.joined(separator: ", ")). \(hint), or add it to repos in \(home.config)"
     )
+  }
+
+  /// Whether the folder has a remote on github.com for `owner/name`.
+  func hasRemote(_ path: String, for repository: String) -> Bool {
+    ((try? gitOutput(path, ["remote", "-v"])) ?? "").split(separator: "\n").contains { line in
+      line.split(whereSeparator: \.isWhitespace).dropFirst().first
+        .flatMap { Followup.repository(remote: String($0)) }?.lowercased() == repository.lowercased()
+    }
   }
 
   // MARK: Triggers
