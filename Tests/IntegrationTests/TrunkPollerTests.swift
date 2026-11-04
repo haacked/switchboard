@@ -99,6 +99,10 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 /// PRs, comments, and trunk runs through `sb poll` against the fake GitHub and a fake trunk.
 @Suite(.timeLimit(.minutes(2))) struct TrunkPollerTests {
   static let posthog = "PostHog/posthog"
+  /// A poll interval long enough that sbd's timer never fires during a test, so
+  /// only the test's own polls run trunk. The interval tests need a nonzero
+  /// pending interval, which is half of this.
+  static let slowPoll: Double = 3600
   /// The branch of PostHog/posthog#122953, which has Trunk's status comment.
   static let posthogBranch = "haacked/cdp-dlq-breaker-counts-lookups"
 
@@ -187,7 +191,7 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
   @Test func aSecondPollWithinThePendingIntervalDoesNotRunTrunkAgain() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withTrunk(github, pollSeconds: 30)
+    let sbd = try Instance.withTrunk(github, pollSeconds: Self.slowPoll)
     _ = try posthogSession(sbd)
     try queue(github)
     try sbd.trunkPrints(122953, trunkStatus(122953, [submitted, pending, testing]))
@@ -202,7 +206,7 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
   @Test func aCommentChangeAfterTheLastReadRunsTrunkWithinTheInterval() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withTrunk(github, pollSeconds: 30)
+    let sbd = try Instance.withTrunk(github, pollSeconds: Self.slowPoll)
     let s = try posthogSession(sbd)
     try queue(github)
     try sbd.trunkPrints(122953, trunkStatus(122953, [submitted, pending, (-120, "✖ Failed", failedText)]))
@@ -224,12 +228,12 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
   @Test func aPollAfterThePendingIntervalRunsTrunkAgain() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withTrunk(github, pollSeconds: 30)
+    let sbd = try Instance.withTrunk(github, pollSeconds: Self.slowPoll)
     _ = try posthogSession(sbd)
     try queue(github)
     try sbd.trunkPrints(122953, trunkStatus(122953, [submitted, pending, testing]))
     try sbd.poll()
-    try sbd.advanceClock(30_000)
+    try sbd.advanceClock(Int64(Self.slowPoll * 1000))
 
     let later = try sbd.poll()
 
@@ -239,7 +243,7 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
   @Test func pollAllRunsTrunkWithinThePendingInterval() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withTrunk(github, pollSeconds: 30)
+    let sbd = try Instance.withTrunk(github, pollSeconds: Self.slowPoll)
     _ = try posthogSession(sbd)
     try queue(github)
     try sbd.trunkPrints(122953, trunkStatus(122953, [submitted, pending, testing]))
