@@ -16,9 +16,10 @@ extension Service {
         let session = try lookup(args)
         list = list.filter { $0.session == session }
       }
-      return try JSON(encoding: list.map(PlanSummary.init))
+      let made = planRowFollowups()
+      return try JSON(encoding: list.map { PlanSummary(reported($0, made)) })
     case "plan-get":
-      return try JSON(encoding: plans[try lookupPlan(args)]!)
+      return try JSON(encoding: reported(plans[try lookupPlan(args)]!, planRowFollowups()))
     case "plan-detach":
       let id = try lookupPlan(args)
       try detachPlans { $0.id == id }
@@ -27,7 +28,7 @@ extension Service {
       let id = try lookupPlan(args)
       guard let on = args["on"]?.bool else { throw APIError("plan auto needs on or off") }
       updatePlan(id) { $0.autoUpdate = on }
-      return try JSON(encoding: plans[id]!)
+      return try JSON(encoding: reported(plans[id]!, planRowFollowups()))
     default:
       throw APIError("unknown request \(op)")
     }
@@ -52,14 +53,16 @@ extension Service {
         }
         try savePlan(plan)
         joinPlanGroups()
-        return try JSON(encoding: plan)
+        return try JSON(encoding: reported(plan, planRowFollowups()))
       }
     case "plan-update":
       let id = try queue.sync { try lookupPlan(args) }
       var stats = GitHubPoller.Stats()
       let wrote = try github.queue.sync { try github.writePlan(id, now: nowMs(), stats: &stats) }
       return try queue.sync {
-        guard let plan = plans[id], var out = try JSON(encoding: plan).object else { throw APIError("no plan \(id)") }
+        guard let plan = plans[id], var out = try JSON(encoding: reported(plan, planRowFollowups())).object else {
+          throw APIError("no plan \(id)")
+        }
         out["wrote"] = .bool(wrote)
         return .object(out)
       }
@@ -81,7 +84,7 @@ extension Service {
   }
 
   /// Finds a plan by id or unique id prefix, or by its document's text.
-  private func lookupPlan(_ args: JSON) throws -> String {
+  func lookupPlan(_ args: JSON) throws -> String {
     guard let key = args["plan"]?.string, !key.isEmpty else { throw APIError("name a plan") }
     return try resolveRef(key, "plan", plans.values.map { ($0.id, $0.source.text) })
   }
@@ -153,23 +156,32 @@ extension Service {
     }
   }
 
-  /// The generated table for the plan: the group's sessions, or the plan's session.
-  func planTable(_ plan: PlanDocument) -> String {
-    let sessions = plan.group.map(members) ?? plan.session.flatMap { entries[$0]?.session }.map { [$0] } ?? []
-    return Plans.table(sessions.map(\.id).map(summary))
+  /// The group's sessions, or the plan's session.
+  func planSessions(_ plan: PlanDocument) -> [Session] {
+    plan.group.map(members) ?? plan.session.flatMap { entries[$0]?.session }.map { [$0] } ?? []
   }
 
-  /// The plans of a group, or nil when it has none.
-  func planSummaries(group: String) -> [PlanSummary]? {
-    nonEmpty(plans.values.filter { $0.group == group })
+  /// The generated table for the plan.
+  func planTable(_ plan: PlanDocument) -> String {
+    let made = planRowFollowups()
+    return Plans.table(planSessions(plan).map { summary($0.id, planRows: made) })
+  }
+
+  /// The plans of a group, or nil when it has none. `made` defaults to
+  /// `planRowFollowups()`, which a caller that summarizes many groups or
+  /// sessions computes once and passes.
+  func planSummaries(group: String, _ made: PlanRowFollowups? = nil) -> [PlanSummary]? {
+    nonEmpty(plans.values.filter { $0.group == group }, made)
   }
 
   /// The plans attached to the session and to its group, or nil when there are none.
-  func planSummaries(session s: Session) -> [PlanSummary]? {
-    nonEmpty(plans.values.filter { $0.session == s.id || ($0.group != nil && $0.group == s.group) })
+  func planSummaries(session s: Session, _ made: PlanRowFollowups? = nil) -> [PlanSummary]? {
+    nonEmpty(plans.values.filter { $0.session == s.id || ($0.group != nil && $0.group == s.group) }, made)
   }
 
-  private func nonEmpty(_ list: [PlanDocument]) -> [PlanSummary]? {
-    list.isEmpty ? nil : list.sorted { $0.id < $1.id }.map(PlanSummary.init)
+  private func nonEmpty(_ list: [PlanDocument], _ made: PlanRowFollowups?) -> [PlanSummary]? {
+    guard !list.isEmpty else { return nil }
+    let made = made ?? planRowFollowups()
+    return list.sorted { $0.id < $1.id }.map { PlanSummary(reported($0, made)) }
   }
 }

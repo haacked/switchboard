@@ -56,6 +56,12 @@ public func shellQuote(_ text: String) -> String {
   "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+/// The text as one shell word: bare when it holds only letters, digits,
+/// `.`, `_`, and `-`, and in single quotes otherwise.
+public func shellWord(_ text: String) -> String {
+  text.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil ? text : shellQuote(text)
+}
+
 /// The full path of `name`. A name with a slash is checked as given. A name
 /// without one is looked up on PATH, then in ~/.local/bin, where claude
 /// installs itself, then in Homebrew's and the system's bin folders. sbd runs

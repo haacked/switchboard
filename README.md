@@ -128,10 +128,13 @@ sb plan ls [--group G | --session S]
 sb plan get <plan>
 sb plan update <plan>                    # write the status table now
 sb plan auto <plan> on                   # write it on its own when it changes
+sb plan followup <plan> <row>            # make a follow-up from a Not started row
 sb plan detach <plan>
 ```
 
 `sbd` reads each plan with the GitHub poller: a file when it changes, and a GitHub plan once per idle interval with an ETag. It finds every PR URL (`https://github.com/<owner>/<name>/pull/<N>`) in the document. A session whose PR a group's plan links joins that group, unless you placed it by hand or plans of two groups link it. A table row is out of date when a PR it links merged, deployed, or closed after `sbd` first saw the row's current text. `sb group ls` and `sb get` show those rows, and editing a row clears it.
+
+A row of a table with `Item` and `Status` columns that links no PR and whose status reads Not started can become a follow-up. `sb plan ls`, `sb plan get`, `sb group ls`, and `sb get` list those rows, and the Board shows a Follow up button for each under its group's name. `sb plan followup <plan> <row>` names the row by its `#` cell or its item text and adds a follow-up in the plan's group, or under the plan's session, with the item as its title and prompt and the plan as its link. Its repository is the one that the group's sessions share, else the issue's or PR's repository. A row that links a PR, or that already has a follow-up, is refused. Removing the follow-up lets the row make another.
 
 `sb plan update` writes a table of the group's sessions, with each one's state, wait, and PR, between `<!-- sb:status -->` and `<!-- /sb:status -->`, and leaves the rest of the document alone. A plan without those two lines refuses the update. A file is written in place. An issue's body is checked again just before the edit, and the edit retries when someone changed the issue meanwhile. A PR's file is committed to the PR's head branch with its blob SHA, and the commit retries when the file changed. Writing to GitHub publishes, so `sbd` writes only on `sb plan update`, or after `sb plan auto <plan> on`, at most once per idle interval and only when the table changed.
 

@@ -39,11 +39,15 @@ func plan(_ a: Args) {
     print(
       result["wrote"]?.bool == true ? "wrote the table to \(p.source.text)" : "\(p.source.text) already holds the table"
     )
+  case "followup":
+    guard words.count == 2 else { die("usage: sb plan followup <plan> <row>") }
+    let result = call("plan-followup", ["plan": .string(words[0]), "row": .string(words[1])])
+    if a.json { printJSON(result) } else { printSession(summary(result)) }
   case "auto":
     guard words.count == 2, ["on", "off"].contains(words[1]) else { die("usage: sb plan auto <plan> on|off") }
     printPlanDocument(call("plan-auto", ["plan": .string(words[0]), "on": .bool(words[1] == "on")]), json: a.json)
   default:
-    die("usage: sb plan ls|attach|detach|get|update|auto")
+    die("usage: sb plan ls|attach|detach|get|update|followup|auto")
   }
 }
 
@@ -59,18 +63,27 @@ private func printPlanDocument(_ result: JSON, json: Bool) {
   print(
     "  table:   \(p.statusBlock == nil ? "no \(Plans.startMarker) block" : "yes"), auto update \(p.autoUpdate ? "on" : "off")"
   )
-  for row in PlanSummary(p).outOfDate { printRow(row, indent: "  ") }
+  printRows(PlanSummary(p), indent: "  ")
 }
 
-/// One line for the plan, then a line for each out-of-date row.
+/// One line for the plan, then a line for each out-of-date row and each row
+/// that can become a follow-up.
 func printPlan(_ p: PlanSummary, indent: String) {
-  var line = "\(indent)plan: \(p.id) \(p.source.text) (\(p.rows) rows, \(p.outOfDate.count) out of date)"
+  var line =
+    "\(indent)plan: \(p.id) \(p.source.text) (\(p.rows) rows, \(p.outOfDate.count) out of date, \(p.canFollowUp.count) to follow up)"
   if let error = p.error { line += ", error: \(oneLine(error, max: 120))" }
   print(line.printable)
-  for row in p.outOfDate { printRow(row, indent: indent + "  ") }
+  printRows(p, indent: indent + "  ")
 }
 
-private func printRow(_ row: PlanRow, indent: String) {
-  let changed = row.prs.filter(\.advanced).map { "\($0.link.text) \($0.now?.rawValue ?? "")" }
-  print("\(indent)out of date: \(oneLine(row.text, max: 160)) (\(changed.joined(separator: ", ")))".printable)
+private func printRows(_ p: PlanSummary, indent: String) {
+  for row in p.outOfDate {
+    let changed = row.prs.filter(\.advanced).map { "\($0.link.text) \($0.now?.rawValue ?? "")" }
+    print("\(indent)out of date: \(oneLine(row.text, max: 160)) (\(changed.joined(separator: ", ")))".printable)
+  }
+  for row in p.canFollowUp {
+    print(
+      "\(indent)not started: \(oneLine(row.label, max: 160)) (sb plan followup \(p.id) \(shellWord(row.ref)))".printable
+    )
+  }
 }
