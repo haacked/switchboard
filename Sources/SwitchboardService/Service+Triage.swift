@@ -72,7 +72,7 @@ extension Service {
       return
     }
     let session = summary(id)
-    guard Triage.mayQueue(session) else { return }
+    guard Triage.mayHaveItem(session) else { return }
     let stop = e.facts.lastStop
     let input = TriageSummarizer.input(session: session, reply: e.facts.lastReply ?? "")
     var env = ProcessInfo.processInfo.environment.merging(paneEnv(id)) { $1 }

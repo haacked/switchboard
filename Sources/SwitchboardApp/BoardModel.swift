@@ -5,7 +5,7 @@ import UserNotifications
 
 /// The two views that the detail pane shows while no session is selected.
 enum MainView {
-  case queue
+  case inbox
   case board
 }
 
@@ -31,15 +31,15 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   var presentingSheet: Bool { showingNew || showingImport }
   /// The view that the detail pane shows while no session is selected.
-  @Published var mainView = MainView.queue
-  /// The Queue item that the user last moved to.
-  @Published var queueFocus: String?
-  /// Counts ⌘J presses in the Queue. Each one scrolls to the current item,
+  @Published var mainView = MainView.inbox
+  /// The Inbox item that the user last moved to.
+  @Published var inboxFocus: String?
+  /// Counts ⌘J presses in the Inbox. Each one scrolls to the current item,
   /// even when ⌘J lands on the item it reached last time.
-  @Published var queueJumps = 0
-  /// The right pane of the Queue shows the session's terminals instead of its summary.
+  @Published var inboxJumps = 0
+  /// The right pane of the Inbox shows the session's terminals instead of its summary.
   @Published var showingTerminal = false
-  /// The last reply of the sessions the Queue showed, read from their
+  /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
@@ -74,7 +74,7 @@ final class BoardModel: ObservableObject {
   /// A switch of the active account that waits for the user to say whether
   /// the sessions on the other accounts move too.
   @Published var switchingAccount: AccountSwitch?
-  /// What the user picked or typed on each open card, by card id. The Queue
+  /// What the user picked or typed on each open card, by card id. The Inbox
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
 
@@ -97,9 +97,9 @@ final class BoardModel: ObservableObject {
   /// sbd reads the usage every few minutes, so the app asks once a minute.
   private var usageRead = Date.distantPast
 
-  /// The Manager stays out of the Queue, the Dock badge, and ⌘J. The toolbar
+  /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
-  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayQueue($0) } }
+  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayHaveItem($0) } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
 
@@ -141,14 +141,14 @@ final class BoardModel: ObservableObject {
   /// True while the sidebar has no rows and sbd answers.
   var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && manager == nil && unreachable == nil }
 
-  /// The Queue or the Board while no session is selected, else nil.
+  /// The Inbox or the Board while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
 
-  /// The focused Queue session while it exists, else the first item. A session
+  /// The focused Inbox session while it exists, else the first item. A session
   /// that the user just answered leaves the list while it works, and the
   /// right pane stays on it to show its next reply.
-  var currentQueueItem: String? {
-    sessions.contains { $0.id == queueFocus } ? queueFocus : triage.first?.id
+  var currentInboxItem: String? {
+    sessions.contains { $0.id == inboxFocus } ? inboxFocus : triage.first?.id
   }
 
   func start() {
@@ -237,7 +237,7 @@ final class BoardModel: ObservableObject {
   /// The sessions that just started needing the user.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard s.state == .needsYou, Triage.mayQueue(s), let known = knownStates[s.id], known != .needsYou
+      guard s.state == .needsYou, Triage.mayHaveItem(s), let known = knownStates[s.id], known != .needsYou
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
@@ -514,35 +514,35 @@ final class BoardModel: ObservableObject {
     Result { try Client().importSessions(refs, stop: stop) }
   }
 
-  /// Clears the selected session and shows the Queue or the Board.
+  /// Clears the selected session and shows the Inbox or the Board.
   func show(_ view: MainView) {
     selection = nil
     mainView = view
   }
 
-  /// Opens a Board card. A session in the Queue list is focused there and
-  /// scrolled into view. Any other session opens directly, because the Queue
+  /// Opens a Board card. A session in the Inbox list is focused there and
+  /// scrolled into view. Any other session opens directly, because the Inbox
   /// has no row for it.
   func openFromBoard(_ id: String) {
     guard triage.contains(where: { $0.id == id }) else {
       selection = id
       return
     }
-    show(.queue)
-    queueFocus = id
-    queueJumps += 1
+    show(.inbox)
+    inboxFocus = id
+    inboxJumps += 1
   }
 
-  /// Moves to the next Queue item while the Queue shows. Otherwise selects
+  /// Moves to the next Inbox item while the Inbox shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
-    let inQueue = visibleView == .queue
-    let list = inQueue ? triage : needsYou
+    let showingInbox = visibleView == .inbox
+    let list = showingInbox ? triage : needsYou
     guard !list.isEmpty else { return }
-    if inQueue {
-      let i = list.firstIndex { $0.id == currentQueueItem } ?? -1
-      queueFocus = list[(i + 1) % list.count].id
-      queueJumps += 1
+    if showingInbox {
+      let i = list.firstIndex { $0.id == currentInboxItem } ?? -1
+      inboxFocus = list[(i + 1) % list.count].id
+      inboxJumps += 1
       // A field in the item that scrolls away would keep the keystrokes.
       NSApp.keyWindow?.makeFirstResponder(nil)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {

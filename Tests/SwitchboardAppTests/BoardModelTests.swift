@@ -91,35 +91,35 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.selection == "f")
   }
 
-  @Test func boardCardForAQueueSessionFocusesItInTheQueue() {
+  @Test func boardCardForAnInboxSessionFocusesItInTheInbox() {
     let model = model(["a", "b"])
     model.show(.board)
-    let jumps = model.queueJumps
+    let jumps = model.inboxJumps
     model.openFromBoard("b")
     #expect(model.selection == nil)
-    #expect(model.visibleView == .queue)
-    #expect(model.queueFocus == "b")
-    #expect(model.queueJumps == jumps + 1)
+    #expect(model.visibleView == .inbox)
+    #expect(model.inboxFocus == "b")
+    #expect(model.inboxJumps == jumps + 1)
   }
 
-  @Test func boardCardForACanContinueSessionFocusesItInTheQueue() {
+  @Test func boardCardForACanContinueSessionFocusesItInTheInbox() {
     let model = model(["a"])
     model.apply(.success([summary("a"), summary("c", state: .canContinue)]), followups: nil)
     model.show(.board)
     model.openFromBoard("c")
     #expect(model.selection == nil)
-    #expect(model.visibleView == .queue)
-    #expect(model.queueFocus == "c")
+    #expect(model.visibleView == .inbox)
+    #expect(model.inboxFocus == "c")
   }
 
   @Test func boardCardForAFollowupOnlySessionSelectsIt() {
     let model = model(["a"])
     model.apply(.success([summary("a")]), followups: [summary("f", state: .notStarted)])
     model.show(.board)
-    let jumps = model.queueJumps
+    let jumps = model.inboxJumps
     model.openFromBoard("f")
     #expect(model.selection == "f")
-    #expect(model.queueJumps == jumps)
+    #expect(model.inboxJumps == jumps)
   }
 
   @Test func boardCardForAnUnlistedIdSelectsItUntilThePollClearsIt() {
@@ -136,34 +136,34 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     model.show(.board)
     model.openFromBoard("b")
     model.selectNextNeedingYou()
-    #expect(model.currentQueueItem == "c")
-    #expect(model.visibleView == .queue)
+    #expect(model.currentInboxItem == "c")
+    #expect(model.visibleView == .inbox)
   }
 
-  @Test func boardCardForASessionOutsideTheQueueSelectsIt() {
+  @Test func boardCardForASessionOutsideTheInboxSelectsIt() {
     for state in [AttentionState.working, .done, .stale] {
       let model = model(["a"])
       var outside = summary("r", state: state)
       outside.triage = nil
       model.apply(.success([summary("a"), outside]), followups: nil)
       model.show(.board)
-      let jumps = model.queueJumps
+      let jumps = model.inboxJumps
       model.openFromBoard("r")
       #expect(model.selection == "r")
       #expect(model.visibleView == nil)
-      #expect(model.queueJumps == jumps)
+      #expect(model.inboxJumps == jumps)
     }
   }
 
   @Test func nextNeedingYouWithAStaleSelectionActsAsWithNone() {
     let model = model(["a", "b"])
-    model.show(.queue)
+    model.show(.inbox)
     model.selection = "a"
     model.apply(.success([summary("b")]), followups: nil)
-    let jumps = model.queueJumps
+    let jumps = model.inboxJumps
     model.selectNextNeedingYou()
     #expect(model.selection == nil)
-    #expect(model.queueJumps == jumps + 1)
+    #expect(model.inboxJumps == jumps + 1)
   }
 }
 
@@ -171,7 +171,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 @Suite struct BoardModelVisibleView {
   @Test func isTheMainViewWhileNothingIsSelected() {
     let model = BoardModel()
-    #expect(model.visibleView == .queue)
+    #expect(model.visibleView == .inbox)
     model.show(.board)
     #expect(model.visibleView == .board)
   }
@@ -185,9 +185,9 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   @Test func showClearsTheSelection() {
     let model = BoardModel()
     model.selection = "a"
-    model.show(.queue)
+    model.show(.inbox)
     #expect(model.selection == nil)
-    #expect(model.visibleView == .queue)
+    #expect(model.visibleView == .inbox)
   }
 }
 
@@ -340,30 +340,30 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     appliedModel(list)
   }
 
-  @Test func theQueueLeavesOutTheManagerWhateverItsItemIs() {
+  @Test func theInboxLeavesOutTheManagerWhateverItsItemIs() {
     for state in [AttentionState.needsYou, .canContinue] {
       for card in [false, true] {
         let model = model([needsItem("m", manager: true, state: state, card: card), needsItem("a")])
         #expect(model.triage.map(\.id) == ["a"])
-        #expect(model.currentQueueItem == "a")
+        #expect(model.currentInboxItem == "a")
       }
     }
   }
 
-  @Test func theManagerAloneLeavesTheQueueEmpty() {
+  @Test func theManagerAloneLeavesTheInboxEmpty() {
     let model = model([needsItem("m", manager: true, card: true)])
     #expect(model.triage.isEmpty)
     #expect(model.needsYou.isEmpty)
-    #expect(model.currentQueueItem == nil)
+    #expect(model.currentInboxItem == nil)
   }
 
-  @Test func nextNeedingYouSkipsTheManagerInTheQueueAndOutsideIt() {
+  @Test func nextNeedingYouSkipsTheManagerInTheInboxAndOutsideIt() {
     let model = model([needsItem("m", manager: true), needsItem("a"), needsItem("b")])
-    model.show(.queue)
+    model.show(.inbox)
     var seen: [String?] = []
     for _ in 0..<4 {
       model.selectNextNeedingYou()
-      seen.append(model.currentQueueItem)
+      seen.append(model.currentInboxItem)
     }
     #expect(seen == ["b", "a", "b", "a"])
     model.show(.board)
