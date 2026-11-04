@@ -154,16 +154,9 @@ public final class Service {
       case "hook":
         return try handleHook(request.args, hookGone: hookGone)
       case "new":
-        var args = try JSONCoding.convert(request.args, to: NewSession.self)
-        if args.worktree == true, (args.branch ?? "").isEmpty {
-          let repo = (args.path as NSString).standardizingPath
-          args.branch = NewSession.freeAutoBranch(
-            prefix: config.branchPrefix, name: args.name,
-            exists: { branchOrFolderTaken(repo, $0) })
-        }
-        let folder = try prepareFolder(args)
-        awaitMCPServers()
-        return try queue.sync { try .success(JSON(encoding: create(args, folder))) }
+        return try .success(JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self))))
+      case "spawn":
+        return try .success(JSON(encoding: spawn(request.args)))
       case "manager":
         return managerRequest()
       case "rm":
@@ -475,6 +468,20 @@ public final class Service {
       throw APIError("git \(args.joined(separator: " ")): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
+  func newSession(_ args: NewSession) throws -> SessionSummary {
+    var args = args
+    if args.worktree == true, (args.branch ?? "").isEmpty {
+      let repo = (args.path as NSString).standardizingPath
+      args.branch = NewSession.freeAutoBranch(
+        prefix: config.branchPrefix, name: args.name,
+        exists: { branchOrFolderTaken(repo, $0) })
+    }
+    let folder = try prepareFolder(args)
+    awaitMCPServers()
+    return try queue.sync { try create(args, folder) }
   }
 
   func create(_ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?)) throws -> SessionSummary {
