@@ -38,7 +38,7 @@ struct ChatView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
           }
-          // The log holds a fixed number of the last messages, so its count stops changing once it is full.
+          // The scroll follows the last message, because the count stops changing once the log is full.
           .onChange(of: messages.last, initial: true) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
         }
         Divider()
