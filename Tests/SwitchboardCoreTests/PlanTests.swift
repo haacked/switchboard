@@ -79,6 +79,69 @@ private func url(_ repo: String, _ number: Int) -> String { "https://github.com/
   func docThatNamesNoFileIssueOrPRIsRefused(_ doc: String) {
     #expect(throws: (any Error).self) { try PlanSource(parsing: doc, path: nil) }
   }
+
+  @Test func relativePathIsRelativeToTheCwd() throws {
+    let source = try PlanSource(parsing: "notes/../notes/plan.md", path: nil, cwd: "/tmp/work")
+
+    #expect(source.kind == .file)
+    #expect(source.path == "/tmp/work/notes/plan.md")
+  }
+
+  @Test func existingLocalFileWinsOverTheIssueForm() throws {
+    let cwd = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    defer { try? FileManager.default.removeItem(atPath: cwd) }
+    try FileManager.default.createDirectory(atPath: "\(cwd)/PostHog", withIntermediateDirectories: true)
+    let file = "\(cwd)/PostHog/posthog#5"
+    try "# Plan\n".write(toFile: file, atomically: true, encoding: .utf8)
+
+    let source = try PlanSource(parsing: "PostHog/posthog#5", path: nil, cwd: cwd)
+
+    #expect(source.kind == .file)
+    #expect(source.path == (file as NSString).standardizingPath)
+  }
+}
+
+@Suite struct PlanDocumentReread {
+  let row = "| 1 | Breaker | \(url("PostHog/posthog", 1)) |"
+
+  var table: String { "| # | Item | Status |\n| --- | --- | --- |\n\(row)\n" }
+
+  func plan() -> PlanDocument {
+    PlanDocument(id: "p1", source: PlanSource(kind: .file, path: "/tmp/plan.md"), group: "g", attached: 0)
+  }
+
+  @Test func rowWhoseTextIsUnchangedStaysOutOfDateAfterARead() {
+    var plan = plan()
+    plan.update(from: table, now: 1)
+    plan.setStages { _ in .open }
+    plan.setStages { _ in .merged }
+    #expect(plan.rows.first?.outOfDate == true)
+
+    plan.update(from: "# Plan\n\nA new paragraph.\n\n" + table, now: 2)
+
+    #expect(plan.rows.map(\.text) == [row])
+    #expect(plan.rows.first?.outOfDate == true)
+  }
+
+  @Test func repeatedRowIsKeptOnce() {
+    var plan = plan()
+
+    plan.update(from: table + row + "\n", now: 1)
+
+    #expect(plan.rows.map(\.text) == [row])
+  }
+
+  /// A read after sbd restarts may report merged before it has the deploy comment's body.
+  @Test func deployedPRStaysDeployedWhenAReadSaysMerged() {
+    var plan = plan()
+    plan.update(from: table, now: 1)
+    plan.setStages { _ in .deployed }
+
+    plan.setStages { _ in .merged }
+
+    #expect(plan.rows.first?.prs.first?.now == .deployed)
+    #expect(plan.rows.first?.outOfDate == false)
+  }
 }
 
 @Suite struct PlanLinkParsing {

@@ -92,7 +92,7 @@ extension Service {
   }
 
   /// The Manager has its own row in the app and belongs to no group.
-  private func groupable(_ session: Session) -> Bool { session.manager != true }
+  func groupable(_ session: Session) -> Bool { session.manager != true }
 
   private func refuseUngroupable(_ ids: [String]) throws {
     if let id = ids.first(where: { entries[$0].map { !groupable($0.session) } ?? false }) {
@@ -100,7 +100,7 @@ extension Service {
     }
   }
 
-  private func members(_ group: String) -> [Session] {
+  func members(_ group: String) -> [Session] {
     entries.values.map(\.session).filter { $0.group == group }.sorted { $0.id < $1.id }
   }
 

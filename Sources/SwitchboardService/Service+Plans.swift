@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// The plan documents that groups and sessions have attached.
 extension Service {
-  /// The requests that read the state only. They run on the state queue.
+  /// The requests that don't read or write the document. They run on the state queue.
   func planRequest(_ op: String, _ args: JSON) throws -> JSON {
     switch op {
     case "plan-ls":
@@ -21,8 +21,7 @@ extension Service {
       return try JSON(encoding: plans[try lookupPlan(args)]!)
     case "plan-detach":
       let id = try lookupPlan(args)
-      try store.delete(plan: id)
-      plans[id] = nil
+      try detachPlans { $0.id == id }
       return ["detached": .string(id)]
     case "plan-auto":
       let id = try lookupPlan(args)
@@ -127,7 +126,7 @@ extension Service {
       for link in plan.links { linkedBy[link.key, default: []].insert(group) }
     }
     guard !linkedBy.isEmpty else { return }
-    for (id, e) in entries where e.session.manager != true && e.session.placedByHand != true {
+    for (id, e) in entries where groupable(e.session) && e.session.placedByHand != true {
       guard let pr = e.facts.pr, let linking = linkedBy[PlanLink(repo: pr.repo, number: pr.number).key],
         linking.count == 1, let group = linking.first, e.session.group != group
       else { continue }
@@ -141,10 +140,8 @@ extension Service {
 
   /// The generated table for the plan: the group's sessions, or the plan's session.
   func planTable(_ plan: PlanDocument) -> String {
-    let ids = entries.values.map(\.session).filter { s in
-      plan.group.map { s.group == $0 } ?? (s.id == plan.session)
-    }.map(\.id)
-    return Plans.table(ids.map(summary))
+    let sessions = plan.group.map(members) ?? entries.values.map(\.session).filter { $0.id == plan.session }
+    return Plans.table(sessions.map(\.id).map(summary))
   }
 
   /// The plans of a group, or nil when it has none.

@@ -86,6 +86,8 @@ final class FakeGitHub {
   private var revision = 0
   /// What to run after the next GET of each path.
   private var afterGET: [String: () -> Void] = [:]
+  /// The status that the next GET of each path gets instead of its answer.
+  private var failingGETs: [String: Int] = [:]
 
   init() throws {
     let listener = socket(AF_INET, SOCK_STREAM, 0)
@@ -318,6 +320,12 @@ final class FakeGitHub {
     lock.withLock { afterGET[path] = action }
   }
 
+  /// Answers the next GET of `path` with `status` and no ETag, as a GitHub
+  /// outage does. `path` has no leading slash and no query.
+  func failNextGET(_ path: String, status: Int = 502) {
+    lock.withLock { failingGETs[path] = status }
+  }
+
   static func sha(_ revision: Int) -> String { String(format: "%040x", revision) }
 
   static func timestamp(_ revision: Int) -> String {
@@ -399,7 +407,9 @@ final class FakeGitHub {
     let (reply, after): (Reply, (() -> Void)?) = lock.withLock {
       restLog.append(RESTRequest(method: method, path: bare, query: query, ifNoneMatch: ifNoneMatch, body: body))
       let reply: Reply
-      if issues[bare] != nil {
+      if method == "GET", let status = failingGETs.removeValue(forKey: bare) {
+        reply = Reply(status: status, headers: [:], body: #"{"message":"Server Error"}"#)
+      } else if issues[bare] != nil {
         reply = answerIssue(bare, method: method, ifNoneMatch: ifNoneMatch, body: body)
       } else if files[bare] != nil {
         reply = answerFile(bare, method: method, query: query, ifNoneMatch: ifNoneMatch, body: body)

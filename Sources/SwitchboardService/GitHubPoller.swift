@@ -47,8 +47,8 @@ final class GitHubPoller {
   /// The PRs of edges that left a session's list before the poller read
   /// their PR again. The next poll reads them whether or not they are due.
   var recheck: Set<String> = []
-  /// What the last read of each plan document returned, by plan id.
-  var planReads: [String: PlanRead] = [:]
+  /// What the poller knows about each plan document, by plan id.
+  var trackedPlans: [String: TrackedPlan] = [:]
 
   /// What the poller knows about one session.
   struct Tracked {

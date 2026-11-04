@@ -14,6 +14,10 @@ private let rfcPath = "rfcs/flag-evaluations.md"
 private let issueNumber = 1300
 private let issuePath = FakeGitHub.issuePath(rfcs, issueNumber)
 private let contentsPath = FakeGitHub.contentsPath(rfcs, rfcPath)
+/// A fork of `rfcs` that holds #1209's head branch in the fork tests.
+private let rfcsFork = "haacked/requests-for-comments-internal"
+/// The deployment-status-posthog comment on #122179, which shows it deployed to dev, prod-us, and prod-eu.
+private let deployComment = "IC_kwDODg-Tdc8AAAABfAhApw"
 
 private let start = "<!-- sb:status -->"
 private let end = "<!-- /sb:status -->"
@@ -64,11 +68,11 @@ private func outside(_ text: String) -> [String] {
 }
 
 /// Answers `GET /repos/{rfcs}/pulls/1209` with the head branch that holds the file.
-private func servePull(_ github: FakeGitHub, state: String = "open") {
+private func servePull(_ github: FakeGitHub, state: String = "open", headRepo: String = rfcs) {
   let pull: JSON = [
     "number": .number(Double(rfcPR)), "state": .string(state), "merged": false,
     "html_url": .string(url(rfcs, rfcPR)),
-    "head": ["ref": .string(rfcBranch), "sha": "a1b2c3", "repo": ["full_name": .string(rfcs)]],
+    "head": ["ref": .string(rfcBranch), "sha": "a1b2c3", "repo": ["full_name": .string(headRepo)]],
     "base": ["ref": "main", "repo": ["full_name": .string(rfcs)]],
   ]
   github.route("repos/\(rfcs)/pulls/\(rfcPR)", etag: "\"pull-\(state)\"", pull.text)
@@ -176,11 +180,51 @@ extension Instance {
     _ = try sbd.attachPlan("\(rfcs)#\(issueNumber)", group: "Flags")
 
     try sbd.poll(all: true)
-    try sbd.poll(all: true)
+    let second = try sbd.poll(all: true)
 
     let gets = requests(github, "GET", to: issuePath)
     #expect(gets.count >= 2)
     #expect(gets.last?.ifNoneMatch != nil)
+    #expect(second["planReads"]?.int == 0)
+  }
+
+  /// GitHub answers one read with a 502. The document didn't change, and
+  /// the next read still clears the error.
+  @Test func failedIssueReadClearsItsErrorAtTheNextRead() throws {
+    let github = try FakeGitHub()
+    github.serveIssue(rfcs, issueNumber, body: document)
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachPlan("\(rfcs)#\(issueNumber)", group: "Flags")
+    try sbd.poll(all: true)
+
+    github.failNextGET(issuePath)
+    try sbd.poll(all: true)
+    #expect(try sbd.plan(id).error?.contains("502") == true)
+
+    try sbd.poll(all: true)
+
+    let plan = try sbd.plan(id)
+    #expect(plan.error == nil)
+    #expect(plan.rows.map(\.text) == [breakerRow])
+  }
+
+  /// #1209's head branch is on a fork, so the file lives in the fork's repo.
+  @Test func prFileOnAForkIsReadAndWrittenInTheFork() throws {
+    let github = try FakeGitHub()
+    servePull(github, headRepo: rfcsFork)
+    github.serveFile(rfcsFork, rfcPath, branch: rfcBranch, content: document)
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachPlan("\(rfcs)#\(rfcPR)", group: "Flags", path: rfcPath)
+    try sbd.poll(all: true)
+    #expect(try sbd.plan(id).rows.map(\.text) == [breakerRow])
+
+    try sbd.sb("plan", "update", id)
+
+    #expect(requests(github, "PUT", to: FakeGitHub.contentsPath(rfcsFork, rfcPath)).count == 1)
+    let content = try #require(github.fileContent(rfcsFork, rfcPath))
+    #expect(try #require(between(content)).contains(header))
   }
 
   @Test(arguments: ["\(rfcs)#\(rfcPR)", url(rfcs, rfcPR)])
@@ -429,13 +473,42 @@ extension Instance {
     try sbd.addGroup("Flags")
     let row = "| 1 | Dedup | Done ([posthog#122179](\(url(posthog, 122179)))) |"
     try sbd.writePlan(sbd.planFile, "| # | Item | Status |\n| --- | --- | --- |\n\(row)\n")
-    _ = try sbd.attachPlan(sbd.planFile, group: "Flags")
+    let id = try sbd.attachPlan(sbd.planFile, group: "Flags")
 
     try sbd.poll(all: true)
     try sbd.poll(all: true)
     try sbd.poll(all: true)
 
+    #expect(try sbd.plan(id).rows.first?.prs.first?.now == .deployed)
     #expect(try sbd.outOfDate(group: "Flags").isEmpty)
+  }
+
+  /// #122179 merged with prod-eu still pending when the plan was attached,
+  /// and then deployed to prod-eu.
+  @Test func rowWhoseMergedPRDeploysIsOutOfDate() throws {
+    let github = try FakeGitHub()
+    let deployed = try #require(
+      FakeGitHub.recorded("github-bodies.json").first { $0["id"]?.string == deployComment }?["body"]?.string)
+    let euPending = deployed.split(separator: "\n", omittingEmptySubsequences: false).map {
+      $0.contains("**prod-eu**") ? "| **prod-eu** | :hourglass_flowing_sand: Pending |  |  |" : String($0)
+    }.joined(separator: "\n")
+    github.edit(comment: deployComment, body: euPending, at: "2026-10-23T22:30:00Z")
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    let row = "| 1 | Dedup | Done ([posthog#122179](\(url(posthog, 122179)))) |"
+    try sbd.writePlan(sbd.planFile, "| # | Item | Status |\n| --- | --- | --- |\n\(row)\n")
+    let id = try sbd.attachPlan(sbd.planFile, group: "Flags")
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+    #expect(try sbd.plan(id).rows.first?.prs.first?.now == .merged)
+    #expect(try sbd.outOfDate(group: "Flags").isEmpty)
+
+    github.edit(comment: deployComment, body: deployed, at: "2026-10-23T22:34:45Z")
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+
+    #expect(try sbd.plan(id).rows.first?.prs.first?.now == .deployed)
+    #expect(try sbd.outOfDate(group: "Flags") == [row])
   }
 
   // MARK: writes
@@ -452,6 +525,21 @@ extension Instance {
     let block = try #require(between(text))
     #expect(block.contains(header))
     #expect(block.contains(url(posthog, 122953)))
+  }
+
+  @Test func updateOfASessionPlanWritesOnlyThatSession() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let owner = try sbd.new(name: "owner")
+    _ = try sbd.new(name: "bystander")
+    try sbd.writePlan(sbd.planFile, document)
+    let id = try sbd.attachPlan(sbd.planFile, session: owner.id)
+
+    try sbd.sb("plan", "update", id)
+
+    let block = try #require(between(try String(contentsOfFile: sbd.planFile, encoding: .utf8)))
+    #expect(block.contains("owner"))
+    #expect(!block.contains("bystander"))
   }
 
   @Test func updateThatChangesNothingLeavesTheFileAlone() throws {
@@ -667,6 +755,26 @@ extension Instance {
     try sbd.waitFor("the second write") { requests(github, "PATCH", to: issuePath).count >= 2 }
     let body = try #require(github.issueBody(rfcs, issueNumber))
     #expect(try #require(between(body)).contains("alpha"))
+  }
+
+  /// Polls that aren't forced write at most once per idle interval, even
+  /// when the table changed.
+  @Test func autoUpdateWritesOncePerIdleInterval() throws {
+    let github = try FakeGitHub()
+    github.serveIssue(rfcs, issueNumber, body: document)
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachPlan("\(rfcs)#\(issueNumber)", group: "Flags")
+    try sbd.sb("plan", "auto", id, "on")
+    try sbd.poll()
+    try sbd.waitFor("the first write") { !requests(github, "PATCH", to: issuePath).isEmpty }
+
+    let s = try sbd.new(name: "alpha")
+    try sbd.sb("group", "move", s.id, "--to", "Flags")
+    try sbd.poll()
+    sleep(1)
+
+    #expect(requests(github, "PATCH", to: issuePath).count == 1)
   }
 
   @Test func autoUpdateOffStopsTheWrites() throws {

@@ -4,8 +4,8 @@ import SwitchboardCore
 /// Reads and writes the plan documents that groups and sessions have
 /// attached. `plans/plan-documents.md` in the notes repo describes them.
 extension GitHubPoller {
-  /// What the poller remembers about one plan's last read.
-  struct PlanRead {
+  /// What the poller remembers about one plan: its last read and its last auto update write.
+  struct TrackedPlan {
     var checked: Int64 = 0
     var modified: Date?
     var etag: String?
@@ -32,17 +32,20 @@ extension GitHubPoller {
   /// error on the plan and doesn't stop the others.
   func refreshPlans(all: Bool, now: Int64, stats: inout Stats) {
     let plans = service.queue.sync { Array(service.plans.values) }
-    planReads = planReads.filter { id, _ in plans.contains { $0.id == id } }
+    trackedPlans = trackedPlans.filter { id, _ in plans.contains { $0.id == id } }
     for plan in plans {
       let due =
         plan.source.kind == .file || all
-        || GitHub.elapsed(since: planReads[plan.id]?.checked, settings.idleMs, now: now)
+        || GitHub.elapsed(since: trackedPlans[plan.id]?.checked, settings.idleMs, now: now)
       guard due else { continue }
       do {
         guard let text = try fetchPlan(plan, all: all, now: now, stats: &stats) else { continue }
         stats.planReads += 1
         service.queue.sync { service.updatePlan(plan.id) { $0.update(from: text, now: now) } }
       } catch {
+        // Without the ETags, the next read gets a 200. That read clears the error even when the document hasn't changed.
+        trackedPlans[plan.id]?.etag = nil
+        trackedPlans[plan.id]?.pullEtag = nil
         service.queue.sync { service.recordPlanError(plan.id, error) }
       }
     }
@@ -51,8 +54,8 @@ extension GitHubPoller {
   /// The document's text, or nil when it hasn't changed since the last read.
   /// With `all`, a file is read whether or not it changed.
   func fetchPlan(_ plan: PlanDocument, all: Bool, now: Int64, stats: inout Stats) throws -> String? {
-    var read = planReads[plan.id] ?? PlanRead()
-    defer { planReads[plan.id] = read }
+    var read = trackedPlans[plan.id] ?? TrackedPlan()
+    defer { trackedPlans[plan.id] = read }
     read.checked = now
     let source = plan.source
     switch source.kind {
@@ -111,12 +114,12 @@ extension GitHubPoller {
     let due = service.queue.sync {
       service.plans.values.filter { p in
         p.autoUpdate && p.statusBlock != nil
-          && (all || GitHub.elapsed(since: planReads[p.id]?.tried, settings.idleMs, now: now))
+          && (all || GitHub.elapsed(since: trackedPlans[p.id]?.tried, settings.idleMs, now: now))
           && Plans.block(service.planTable(p)) != p.statusBlock
       }.map(\.id)
     }
     for id in due.sorted() {
-      planReads[id, default: PlanRead()].tried = now
+      trackedPlans[id, default: TrackedPlan()].tried = now
       if (try? writePlan(id, now: now, stats: &stats)) == true { stats.planWrites += 1 }
     }
   }
@@ -240,8 +243,8 @@ extension GitHubPoller {
   private func contents(_ reply: RESTReply, _ source: PlanSource) throws -> (String, String) {
     let what = "\(source.path ?? "") in PR \(source.ref)"
     guard reply.status == 200, let json = reply.json else { throw failure(reply, what) }
-    // The contents API leaves out the content of a file over 1 MB.
-    guard let encoded = json["content"]?.string, let sha = json["sha"]?.string,
+    // For a file over 1 MB, the contents API sends empty content with the encoding "none".
+    guard json["encoding"]?.string == "base64", let encoded = json["content"]?.string, let sha = json["sha"]?.string,
       let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
     else { throw APIError("GitHub sent no content for \(what)") }
     return (String(decoding: data, as: UTF8.self), sha)
