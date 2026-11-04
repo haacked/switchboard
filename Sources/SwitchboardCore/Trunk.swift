@@ -23,11 +23,11 @@ public enum TrunkQueueState: String, Codable, Sendable {
   /// the state. Only `TrunkComments.state` gives it.
   case unknown
 
-  /// Whether Trunk still holds the PR. false when sbd can't tell.
+  /// Whether Trunk has added the PR to its queue. false when sbd can't tell.
   public var isQueued: Bool {
     switch self {
-    case .submitted, .pending, .testing, .passed, .failing, .queued: true
-    case .merged, .removed, .unknown: false
+    case .pending, .testing, .passed, .failing, .queued: true
+    case .submitted, .merged, .removed, .unknown: false
     }
   }
 }
