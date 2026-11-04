@@ -2,7 +2,7 @@
 
 A macOS app that runs 20 to 100 Claude Code sessions at once and shows which ones need you.
 
-**Status:** v0.1, a first version to try. It runs sessions, shows which need you, stops idle ones, keeps follow-ups that haven't started, and tracks each session's GitHub PR and its Depot CI run. Waits on a time, another session, a PR's checks, reviews, approval, or merge, or a PostHog deploy resolve themselves. It groups sessions and sends one message to a group. Chats come later. The design plan is in `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/plans/switchboard.md`, and v0.1's scope is in `plans/v0.1-app.md` next to it.
+**Status:** v0.1, a first version to try. It runs sessions, shows which need you, stops idle ones, keeps follow-ups that haven't started, and tracks each session's GitHub PR and its Depot CI run. Waits on a time, another session, a PR's checks, reviews, approval, or merge, or a PostHog deploy resolve themselves. It groups sessions, sends one message to a group, and reads and updates plan documents attached to a group. Chats come later. The design plan is in `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/plans/switchboard.md`, and v0.1's scope is in `plans/v0.1-app.md` next to it.
 Each session is a folder, or a new git worktree, with the real Claude Code terminal and a shell. A background service, `sbd`, stops the `claude` process of a session that sits idle, and resumes it when you open the session or send it a message. A stopped session costs a few MB instead of 300 to 500.
 
 ## Install
@@ -112,6 +112,25 @@ sb send --group flag-evals "Rebase onto main."
 `suggest` looks only at ungrouped sessions. Sessions whose branches start with the same words (after the owner, as in `haacked/`), whose PR titles share a scope such as `feat(flags):`, or whose branches and titles share a word, form a suggestion. It names a new group, or an existing group whose sessions or name share the key. A session that you moved to Ungrouped by hand is never suggested. Moving a session, adding it to a group, and accepting a suggestion all count as placing it by hand.
 
 `sb send --group` lists the sessions it sends to, every session in the group except follow-ups that haven't started, and asks for confirmation. Without a terminal it needs `--yes`. Inside a Claude session it refuses without `--yes`, and its message tells Claude to show you the list and pass `--yes` only after you confirm, because session text quotes PR comments and logs that may carry instructions. A message sent inside a session never goes to that session. A group message never answers a session's deferred question.
+
+### Plan documents
+
+A group or a session can have plan documents attached: a local markdown file, a GitHub issue, or a markdown file on an open PR's head branch.
+
+```
+sb plan attach ~/dev/notes/flag-evals.md --group flag-evals
+sb plan attach PostHog/requests-for-comments-internal#1300 --group flag-evals   # an issue, or its URL
+sb plan attach PostHog/requests-for-comments-internal#1209 --path rfcs/flag-evaluations.md --group flag-evals
+sb plan ls [--group G | --session S]
+sb plan get <plan>
+sb plan update <plan>                    # write the status table now
+sb plan auto <plan> on                   # write it on its own when it changes
+sb plan detach <plan>
+```
+
+`sbd` reads each plan with the GitHub poller: a file when it changes, and a GitHub plan once per idle interval with an ETag. It finds every PR URL (`https://github.com/<owner>/<name>/pull/<N>`) in the document. A session whose PR a group's plan links joins that group, unless you placed it by hand or plans of two groups link it. A table row is out of date when a PR it links merged, deployed, or closed after `sbd` first saw the row's current text. `sb group ls` and `sb get` show those rows, and editing a row clears it.
+
+`sb plan update` writes a table of the group's sessions, with each one's state, wait, and PR, between `<!-- sb:status -->` and `<!-- /sb:status -->`, and leaves the rest of the document alone. A plan without those two lines refuses the update. A file is written in place. An issue's body is checked again just before the edit, and the edit retries when someone changed the issue meanwhile. A PR's file is committed to the PR's head branch with its blob SHA, and the commit retries when the file changed. Writing to GitHub publishes, so `sbd` writes only on `sb plan update`, or after `sb plan auto <plan> on`, at most once per idle interval and only when the table changed.
 
 ### Triage
 

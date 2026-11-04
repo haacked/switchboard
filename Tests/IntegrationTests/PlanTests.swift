@@ -316,6 +316,20 @@ extension Instance {
     #expect(try sbd.planIds().isEmpty)
   }
 
+  @Test func sameDocumentAttachedTwiceToOneGroupIsRefused() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    try sbd.writePlan(sbd.planFile, document)
+    let id = try sbd.attachPlan(sbd.planFile, group: "Flags")
+
+    let r = try sbd.run(["plan", "attach", sbd.planFile, "--group", "Flags"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(id))
+    #expect(try sbd.planIds() == [id])
+  }
+
   // MARK: group join
 
   /// Each way a group plan can link #122953.
