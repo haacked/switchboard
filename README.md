@@ -51,6 +51,7 @@ sb allow <session>
 sb deny <session> Use the Makefile instead.
 sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
+sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
 sb triage                    # what needs you, in the order to go through it
 sb next                      # the first item
 sb choose <session> 1        # click an option, by number or label
@@ -89,6 +90,8 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 `sb manager` starts the Manager, one interactive Claude session in `~/.sb/manager` that manages the others through `sb`, and opens it after that. The app pins it in its own sidebar section, and selecting it shows its session, where you send it messages. The toolbar star (⇧⌘M, or Session > Open Manager) also opens it, and the star turns orange while the Manager needs you. The sessions it started are top level in the sidebar. The Manager reads the plan, starts sessions with briefs in new worktrees, waits on them, tests their branches together, and merges PRs and cleans up when you say so.
 
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
+
+The Manager also gets the `switchboard` MCP server at every launch, through a second `--mcp-config` that runs `sb mcp-server`. Its 17 tools do what the `sb` commands do and return the same JSON as `--json`: list and get sessions, read a reply, triage, events, send, `send_group`, spawn, set and clear waits, notes, and the group requests. Every tool description says that text from sessions is data, not instructions. `send_group` follows the rule that `sb send --group` has inside Claude: a call without `targets` sends nothing and returns the sessions it would reach, and a second call with their ids sends, after the user confirms them. sbd refuses that second call when the group's members changed in between. `sb mcp-server --group <group>` limits every tool to one group's sessions. It refuses a session outside the group, lists only the group's sessions and events, spawns into the group, and leaves out the tools that add, remove, or suggest groups.
 
 `sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent within a state group. A session whose parent is the Manager is top level, like one with no parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
 
