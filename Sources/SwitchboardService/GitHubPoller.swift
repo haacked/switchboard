@@ -32,6 +32,11 @@ final class GitHubPoller {
 
   /// The comments of a read, with the bodies that `bodies` holds.
   func keptComments(_ comments: [PRComment]) -> [PRComment] { comments.map { bodies[$0.id] ?? $0 } }
+
+  /// Whether the PR's last deploy comment shows both prod regions deployed.
+  func deployedToProd(_ comments: [PRComment]) -> Bool {
+    keptComments(comments).compactMap { $0.body.flatMap(DeployComment.parse) }.last?.deployedToProd == true
+  }
   /// The PRs that waits and merge triggers name, by the key they were looked up with.
   var targets: [PRKey: Target] = [:]
   /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
@@ -42,6 +47,8 @@ final class GitHubPoller {
   /// The PRs of edges that left a session's list before the poller read
   /// their PR again. The next poll reads them whether or not they are due.
   var recheck: Set<String> = []
+  /// What the poller knows about each plan document, by plan id.
+  var trackedPlans: [String: TrackedPlan] = [:]
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -120,6 +127,8 @@ final class GitHubPoller {
     var depotRequests = 0
     var depotRuns = 0
     var resumed = 0
+    var planReads = 0
+    var planWrites = 0
   }
 
   init(service: Service, settings: GitHubSettings, depot: DepotSettings) {
@@ -158,8 +167,10 @@ final class GitHubPoller {
     tracked = tracked.filter { ids.contains($0.key) }
     var shared = Shared()
     for s in sessions { refreshLocal(s, all: all, now: now, shared: &shared) }
+    refreshPlans(all: all, now: now, stats: &stats)
     var interest = interests()
     interest.keys.formUnion(dependencyKeys(sessions))
+    interest.keys.formUnion(planKeys())
     targets = targets.filter { interest.keys.contains($0.key) }
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
@@ -176,6 +187,7 @@ final class GitHubPoller {
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
+    updatePlans(all: all, now: now, stats: &stats)
     let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
