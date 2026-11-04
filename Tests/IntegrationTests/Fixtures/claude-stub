@@ -2,7 +2,10 @@
 # A stand-in for claude in sbd's integration tests. It runs the hook command
 # from the settings file with the payloads that the real claude sent in the
 # same step, from claude/<step>.jsonl next to this file, which the real
-# claude tier records. It answers each prompt on its own line:
+# claude tier records. Like claude, it turns on bracketed paste mode, so a
+# paste that tmux wraps in ESC[200~ and ESC[201~ is one prompt with its new
+# lines kept, and the next Enter submits it. Outside a paste, each line is a
+# prompt. It answers each prompt:
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
 #   slow <n>         runs a Bash tool call of n seconds
@@ -487,9 +490,24 @@ esac
 trap 'trap "" TERM; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
+printf '\033[?2004h'
 play "$source"
 echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"
+# tmux turns each LF of a paste into CR. The tty in cooked mode turns CR back
+# into LF. A pasted message therefore reaches read as several lines. A line
+# that ends inside a paste adds a new line to the prompt instead of
+# submitting it.
+start=$'\e[200~' end=$'\e[201~' typed='' pasting=''
 while IFS= read -r line; do
-  [ -n "$line" ] && turn "$line"
+  [[ $line == *"$start"* ]] && pasting=1
+  [[ $line == *"$end"* ]] && pasting=''
+  line=${line/"$start"/} line=${line/"$end"/}
+  if [ -n "$pasting" ]; then
+    typed+=$line$'\n'
+    continue
+  fi
+  typed+=$line
+  [ -n "$typed" ] && turn "$typed"
+  typed=''
 done

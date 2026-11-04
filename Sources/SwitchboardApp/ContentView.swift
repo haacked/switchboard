@@ -98,7 +98,7 @@ struct ContentView: View {
           SessionView(session: s).id(s.id)
         } else {
           switch model.mainView {
-          case .queue: QueueView()
+          case .inbox: InboxView()
           case .board: BoardView()
           }
         }
@@ -117,12 +117,12 @@ struct ContentView: View {
       ToolbarItem(placement: .navigation) {
         // No segment is selected while a session shows.
         Picker("View", selection: viewChoice) {
-          Text("Queue (\(model.triage.count))").tag(MainView?.some(.queue))
+          Text("Inbox (\(model.triage.count))").tag(MainView?.some(.inbox))
           Text("Board").tag(MainView?.some(.board))
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .help("Show the Queue (⌘1) or the Board (⌘2)")
+        .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
       ToolbarItem { ManagerButton() }
       ToolbarItem { UsageMenu() }
@@ -285,7 +285,7 @@ struct DeleteButton: View {
 }
 
 /// Opens the Manager, or starts it. The star turns the Needs you color and
-/// fills while the Manager needs you, because the Queue and the Dock badge
+/// fills while the Manager needs you, because the Inbox and the Dock badge
 /// leave it out.
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel

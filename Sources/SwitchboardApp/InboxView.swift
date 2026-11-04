@@ -1,11 +1,11 @@
 import SwiftUI
 import SwitchboardCore
 
-struct QueueView: View {
+struct InboxView: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    if model.triage.isEmpty && model.currentQueueItem == nil {
+    if model.triage.isEmpty && model.currentInboxItem == nil {
       VStack(spacing: 12) {
         Image(systemName: "checkmark.circle").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Nothing needs you").foregroundStyle(.secondary)
@@ -15,7 +15,7 @@ struct QueueView: View {
       HSplitView {
         TriageList()
           .frame(minWidth: 200, idealWidth: 280, maxWidth: 420)
-        if let id = model.currentQueueItem, let session = model.sessions.first(where: { $0.id == id }) {
+        if let id = model.currentInboxItem, let session = model.sessions.first(where: { $0.id == id }) {
           TriageDetail(session: session).id(session.id)
             .frame(minWidth: 340, maxWidth: .infinity)
         } else {
@@ -33,7 +33,7 @@ struct TriageList: View {
 
   var body: some View {
     let items = model.triage
-    let current = model.currentQueueItem
+    let current = model.currentInboxItem
     let repos = model.repoLabels
     ScrollViewReader { proxy in
       ScrollView {
@@ -55,11 +55,11 @@ struct TriageList: View {
         }
         .padding(.vertical, 6)
       }
-      .onChange(of: model.queueJumps, initial: true) {
-        // The rows have no layout yet when the Queue replaces the Board. A scroll
+      .onChange(of: model.inboxJumps, initial: true) {
+        // The rows have no layout yet when the Inbox replaces the Board. A scroll
         // right away often does nothing, so this waits 0.3 s.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-          if let id = model.currentQueueItem { withAnimation { proxy.scrollTo(id) } }
+          if let id = model.currentInboxItem { withAnimation { proxy.scrollTo(id) } }
         }
       }
     }
@@ -98,7 +98,7 @@ struct TriageRow: View {
     .background(RoundedRectangle(cornerRadius: 8).fill(current ? Color.accentColor.opacity(0.14) : Color.clear))
     .padding(.horizontal, 6)
     .contentShape(Rectangle())
-    .onTapGesture { model.queueFocus = session.id }
+    .onTapGesture { model.inboxFocus = session.id }
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(current ? .isSelected : [])
   }

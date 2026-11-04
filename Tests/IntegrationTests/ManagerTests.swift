@@ -79,7 +79,7 @@ import Testing
     try sbd.client.call("triage", as: [SessionSummary].self).map(\.id)
   }
 
-  @Test func theManagersReplyThatReadsAsNeedsYouStaysOutOfTheQueue() throws {
+  @Test func theManagersReplyThatReadsAsNeedsYouStaysOutOfTheInbox() throws {
     let sbd = try Instance()
     let m = try manager(sbd)
     try sbd.waitFor(m.id, "the stub") { $0.live }
@@ -97,7 +97,7 @@ import Testing
     }
   }
 
-  @Test func theManagersCardStaysOutOfTheQueue() throws {
+  @Test func theManagersCardStaysOutOfTheInbox() throws {
     let sbd = try Instance()
     let m = try manager(sbd)
     try sbd.waitFor(m.id, "the stub") { $0.live }
