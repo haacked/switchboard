@@ -260,12 +260,14 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
-      let limit = args["limit"]?.int ?? 200
+      let sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
+      let limit = args["limit"]?.int ?? Event.defaultLimit
       // Without `since`, the newest events, so `sb events` shows what just happened.
       if let since = args["since"]?.int {
-        return try JSON(encoding: store.events(since: Int64(since), session: session, limit: limit))
+        return try JSON(
+          encoding: store.events(since: Int64(since), session: session, sessions: sessions, limit: limit))
       }
-      return try JSON(encoding: store.events(session: session, limit: limit, newest: true))
+      return try JSON(encoding: store.events(session: session, sessions: sessions, limit: limit, newest: true))
     case "answer":
       return try answer(args)
     case "screen":
@@ -292,17 +294,7 @@ public final class Service {
   /// Finds a session by id, by unique id prefix, or by unique name.
   func lookup(_ args: JSON) throws -> String {
     guard let key = args["session"]?.string, !key.isEmpty else { throw APIError("name a session") }
-    return try resolve(key, "session", entries.values.map { ($0.session.id, $0.session.name) })
-  }
-
-  /// The id that `key` names: an id, a unique id prefix, or a unique name.
-  func resolve(_ key: String, _ noun: String, _ items: [(id: String, name: String)]) throws -> String {
-    if items.contains(where: { $0.id == key }) { return key }
-    let matches = items.filter { $0.id.hasPrefix(key) || $0.name == key }
-    guard matches.count == 1 else {
-      throw APIError(matches.isEmpty ? "no \(noun) \(key)" : "\(key) matches \(matches.count) \(noun)s")
-    }
-    return matches[0].id
+    return try resolveRef(key, "session", entries.values.map { ($0.session.id, $0.session.name) })
   }
 
   // MARK: Hooks
@@ -485,12 +477,18 @@ public final class Service {
         prefix: config.branchPrefix, name: args.name,
         exists: { branchOrFolderTaken(repo, $0) })
     }
+    // An unknown group fails here, before prepareFolder makes a worktree.
+    if let group = args.group { _ = try queue.sync { try lookupGroup(["group": .string(group)]) } }
     let folder = try prepareFolder(args)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
   }
 
-  func create(_ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?)) throws -> SessionSummary {
+  /// `configure` changes the session before its first launch.
+  func create(
+    _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?),
+    configure: (inout Session) -> Void = { _ in }
+  ) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
     var session = Session(
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
@@ -498,8 +496,9 @@ public final class Service {
       created: nowMs())
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
-    session.group = groupOfParent(session.parent)
+    session.group = try groupOfNew(args.group, parent: session.parent)
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
+    configure(&session)
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
@@ -562,6 +561,9 @@ public final class Service {
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     args += ["--settings", home.claudeSettings]
     args += mcpArgs
+    if session.manager == true {
+      args += ["--mcp-config", Manager.mcpConfig(sb: sbPath, home: home.path, session: id).text]
+    }
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
     if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }

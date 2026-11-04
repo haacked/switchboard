@@ -146,6 +146,12 @@ public struct Config: Codable, Equatable, Sendable {
 
 extension String {
   public var expandingTilde: String { (self as NSString).expandingTildeInPath }
+
+  /// The repository as sbd should get it. sbd runs in another folder, so a
+  /// path becomes absolute. An `owner/name` or a bare name stays as it is.
+  public var repositoryArgument: String {
+    ["/", "~", "."].contains(where: hasPrefix) ? URL(fileURLWithPath: expandingTilde).standardizedFileURL.path : self
+  }
 }
 
 public func isDirectory(_ path: String) -> Bool {

@@ -29,7 +29,7 @@ extension Service {
       return try newSession(
         NewSession(
           path: checkout, branch: branch, base: text("base"), name: text("name"), prompt: prompt, model: text("model"),
-          parent: text("parent"), account: text("account")))
+          parent: text("parent"), account: text("account"), group: text("group")))
     }
     // A follow-up keeps only `owner/name`. `followup start` finds the checkout again from it.
     guard let repository = named ?? githubRepository(checkout) else {
@@ -37,7 +37,7 @@ extension Service {
     }
     var add: [String: JSON] = ["prompt": .string(prompt), "repository": .string(repository), "branch": .string(branch)]
     if let after { add["after"] = .string(after) }
-    for (from, to) in ["name": "title", "parent": "parent", "model": "model", "account": "account"] {
+    for (from, to) in ["name": "title", "parent": "parent", "model": "model", "account": "account", "group": "group"] {
       if let value = text(from) { add[to] = .string(value) }
     }
     return try addFollowup(.object(add))

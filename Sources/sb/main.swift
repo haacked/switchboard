@@ -138,6 +138,8 @@ let usage = """
                                   first saves a snapshot of every session
     ping                          check that sbd answers
     mcp                           list the shared MCP servers that sbd runs
+    mcp-server [--group G]        run the MCP server for Claude on stdin and stdout.
+                                  --group limits its tools to the group's sessions
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -581,6 +583,8 @@ case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":
   mcp(a)
+case "mcp-server":
+  mcpServer(a)
 case "autocontinue":
   autoContinue(a)
 case "group", "groups":

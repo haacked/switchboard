@@ -27,6 +27,16 @@ public struct APIError: Error, CustomStringConvertible {
   public init(_ description: String) { self.description = description }
 }
 
+/// The id that `key` names: an id, a unique id prefix, or a unique name.
+public func resolveRef(_ key: String, _ noun: String, _ items: [(id: String, name: String)]) throws -> String {
+  if items.contains(where: { $0.id == key }) { return key }
+  let matches = items.filter { $0.id.hasPrefix(key) || $0.name == key }
+  guard matches.count == 1 else {
+    throw APIError(matches.isEmpty ? "no \(noun) \(key)" : "\(key) matches \(matches.count) \(noun)s")
+  }
+  return matches[0].id
+}
+
 /// Arguments of `new`.
 public struct NewSession: Codable, Sendable {
   /// The folder to run in. With `branch` or `worktree`, the repo to make a worktree of.
@@ -45,10 +55,13 @@ public struct NewSession: Codable, Sendable {
   /// The Claude account, by name or folder. Without it, the session uses its
   /// parent's account, else the active account.
   public var account: String?
+  /// The group to join, by id, unique id prefix, or unique name. Without it,
+  /// the session joins its parent's group.
+  public var group: String?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
-    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil
+    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil, group: String? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -59,6 +72,7 @@ public struct NewSession: Codable, Sendable {
     self.model = model
     self.parent = parent
     self.account = account
+    self.group = group
   }
 }
 

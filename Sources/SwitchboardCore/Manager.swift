@@ -21,6 +21,8 @@ public enum Manager {
 
     ## Commands
 
+    Prefer the `switchboard` MCP tools to these commands. A tool does what its command does and returns the same JSON as `--json`. Use the command when no tool covers it, as with `sb done` and `sb rm`.
+
     - `sb ls` lists the sessions by what they need.
     - `sb get s1a2b3` shows one session: its reason, last reply, PR, waits, and notes.
     - `sb new ~/dev/org/repo --branch haacked/fix-cache --base origin/main --name fix-cache --prompt "Fix the cache bug in docs/bug.md. Open a draft PR."` starts a session in a new worktree. The prompt is the session's whole brief, so make it self-contained.
@@ -39,4 +41,12 @@ public enum Manager {
 
     Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Its merge commits are on no remote, so remove that session with `sb rm` and then `git worktree remove --force <cwd>` when you finish.
     """
+
+  /// The Manager's --mcp-config: the Switchboard MCP server, which `sb` runs over stdio.
+  public static func mcpConfig(sb: String, home: String, session: String) -> JSON {
+    let env: JSON = ["SB_HOME": .string(home), "SB_SESSION_ID": .string(session)]
+    return [
+      "mcpServers": ["switchboard": ["type": "stdio", "command": .string(sb), "args": ["mcp-server"], "env": env]]
+    ]
+  }
 }
