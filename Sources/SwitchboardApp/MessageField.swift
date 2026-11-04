@@ -30,7 +30,19 @@ struct MessageField: View {
       TextField("Message Claude…", text: $draft.text, axis: .vertical)
         .lineLimit(1...4)
         .textFieldStyle(.roundedBorder)
-        .onSubmit(send)
+        .onKeyPress(.return, phases: .down) { press in
+          // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
+          let editor = NSApp.keyWindow?.firstResponder as? NSTextView
+          switch Self.keyAction(modifiers: press.modifiers, composing: editor?.hasMarkedText() == true) {
+          case .send:
+            send()
+          case .newline:
+            NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+          case nil:
+            return .ignored
+          }
+          return .handled
+        }
       Button("Send", action: send)
         .keyboardShortcut(shortcut)
         .disabled(
@@ -40,4 +52,18 @@ struct MessageField: View {
   }
 
   private func send() { draft.submit(session, to: model) }
+
+  enum KeyAction { case send, newline }
+
+  /// What Return does in the field. Nil leaves the key to the field. Return then confirms an input
+  /// method's marked text, Option+Return inserts a new line, and Command+Return reaches the Send
+  /// button's shortcut.
+  static func keyAction(modifiers: EventModifiers, composing: Bool) -> KeyAction? {
+    guard !composing else { return nil }
+    switch modifiers.intersection([.shift, .command, .option, .control]) {
+    case []: return .send
+    case .shift: return .newline
+    default: return nil
+    }
+  }
 }

@@ -340,6 +340,58 @@ import Testing
     try sbd.waitFor(s.id, "the reply after copy mode") { $0.lastReply == "Done: after copy mode" }
   }
 
+  /// A message with new lines, an indented line, a blank line, a semicolon,
+  /// and a backslash. A paste that submitted at each new line would end with
+  /// a turn for the last line alone.
+  static let multiline = "Fix two things;\n  - the parser\n\n  - the tests \\ too"
+
+  /// Waits for the turn of the message's last line, then expects claude to
+  /// have submitted the message as one prompt after `first`.
+  func expectMultilineAsOnePrompt(_ sbd: Instance, _ s: SessionSummary, after first: String) throws {
+    let done = try sbd.waitFor(s.id, "the multi-line message's reply", timeout: 20) {
+      $0.lastReply?.hasSuffix("the tests \\ too") == true
+    }
+    let prompts = try sbd.events(s.id).filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
+    #expect(prompts == [first, Self.multiline])
+    #expect(done.lastReply == "Done: \(Self.multiline)")
+  }
+
+  @Test func pastesAMessageWithNewLinesAsOnePrompt() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.waitFor("the prompt to settle") { (try sbd.events(s.id).last.map { nowMs() - $0.t > 1600 }) ?? false }
+
+    #expect(try sbd.sb("send", s.id, Self.multiline) == "pasted\n")
+
+    try expectMultilineAsOnePrompt(sbd, s, after: "hello")
+  }
+
+  @Test func pastesAQueuedMessageWithNewLinesAsOnePrompt() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "slow 2")
+    try sbd.waitFor(s.id, "the turn") { $0.state == .working }
+
+    #expect(try sbd.sb("send", s.id, Self.multiline) == "queued\n")
+
+    try expectMultilineAsOnePrompt(sbd, s, after: "slow 2")
+  }
+
+  @Test func resumesWithAMessageWithNewLinesAsTheLaunchPrompt() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("stop", s.id)
+    try sbd.waitFor(s.id, "claude to exit") { !$0.live }
+
+    #expect(try sbd.sb("send", s.id, Self.multiline) == "resumed\n")
+
+    try expectMultilineAsOnePrompt(sbd, s, after: "hello")
+    #expect(
+      sbd.stubArgs().last
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- \(Self.multiline)")
+  }
+
   @Test func keepsASessionRunningWhileATerminalIsAttached() throws {
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")
