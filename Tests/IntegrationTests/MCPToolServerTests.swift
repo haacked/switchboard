@@ -64,16 +64,19 @@ final class MCPClient {
   private(set) var initialized: JSON = .null
 
   /// Runs `sb mcp-server` against the instance's sbd.
-  convenience init(_ sbd: Instance, group: String? = nil, env extra: [String: String] = [:]) throws {
+  convenience init(_ sbd: Instance, group: String? = nil, env extra: [String: String] = [:], cwd: String? = nil)
+    throws
+  {
     let scope = group.map { ["--group", $0] } ?? []
-    try self.init(command: "\(Instance.bin)/sb", args: ["mcp-server"] + scope, env: sbd.environment(extra))
+    try self.init(command: "\(Instance.bin)/sb", args: ["mcp-server"] + scope, env: sbd.environment(extra), cwd: cwd)
   }
 
-  init(command: String, args: [String], env: [String: String]) throws {
+  init(command: String, args: [String], env: [String: String], cwd: String? = nil) throws {
     _ = MCPClient.ignoreSIGPIPE
     process.executableURL = URL(fileURLWithPath: command)
     process.arguments = args
     process.environment = env
+    if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
     process.standardInput = input
     let out = Pipe()
     let err = Pipe()
@@ -98,8 +101,10 @@ final class MCPClient {
     process.waitUntilExit()
   }
 
-  func send(_ message: JSON) throws {
-    try input.fileHandleForWriting.write(contentsOf: Data((message.text + "\n").utf8))
+  func send(_ message: JSON) throws { try sendLine(message.text) }
+
+  func sendLine(_ line: String) throws {
+    try input.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8))
   }
 
   /// The next line that the server writes. It throws when the server closes
@@ -254,6 +259,29 @@ final class MCPClient {
     #expect(reply["error"]?["code"] == -32601)
   }
 
+  @Test func aCallToAnUnknownToolGetsInvalidParams() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let reply = try mcp.request("tools/call", ["name": "nosuch", "arguments": [:]], id: 5)
+
+    #expect(reply["id"] == 5)
+    #expect(reply["result"] == nil)
+    #expect(reply["error"]?["code"] == -32602)
+  }
+
+  @Test func aLineThatIsNotJSONGetsAParseErrorWithANullId() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    try mcp.sendLine("not json")
+    let reply = try #require(JSON.parse(try mcp.readLine()))
+
+    #expect(reply["id"] == JSON.null)
+    #expect(reply["error"]?["code"] == -32700)
+    #expect(try mcp.toolNames().count == MCPToolServerTests.allTools.count)
+  }
+
   @Test(arguments: ["notifications/initialized", "notifications/cancelled", "nothing/known"])
   func aNotificationGetsNoReply(_ method: String) throws {
     let sbd = try Instance()
@@ -382,6 +410,22 @@ final class MCPClient {
     #expect(kid.parent == parent.id)
     #expect(try sbd.get(kid.id).parent == parent.id)
     try sbd.waitFor(kid.id, "the kid's reply") { $0.lastReply == "Done: hello" }
+  }
+
+  @Test func spawnResolvesARelativeRepositoryAgainstTheServersFolder() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo("widgets")
+    let mcp = try MCPClient(sbd, cwd: (repo as NSString).deletingLastPathComponent)
+
+    let absolute = try mcp.call(
+      "spawn", ["repository": .string(repo), "branch": "b1", "name": "b1", "prompt": "hello"]
+    ).decode(SessionSummary.self)
+    let relative = try mcp.call(
+      "spawn", ["repository": "./widgets", "branch": "b2", "name": "b2", "prompt": "hello"]
+    ).decode(SessionSummary.self)
+
+    #expect(relative.repo != nil)
+    #expect(relative.repo == absolute.repo)
   }
 
   @Test func spawnWithoutACallerHasNoParent() throws {
@@ -779,6 +823,42 @@ final class MCPClient {
     #expect(got.id == s.member.id)
   }
 
+  @Test func aScopedSendReachesAMemberNamedByName() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    let result = try mcp.call("send", ["session": .string(s.member.name), "text": "Rebase on main."])
+
+    #expect(!result.isError)
+    #expect(try sent(sbd, s.member.id) == ["Rebase on main."])
+  }
+
+  @Test func aScopedServerRefusesASessionThatLeftTheGroupAfterItStarted() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+    try sbd.sb("group", "move", s.member.id, "--ungrouped")
+
+    let result = try mcp.call("send", ["session": .string(s.member.id), "text": "hi"])
+
+    #expect(result.isError)
+    #expect(result.text.contains("is not in group"))
+    #expect(try sent(sbd, s.member.id).isEmpty)
+  }
+
+  @Test func aScopedServerFailsOnceItsGroupIsRemoved() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+    try sbd.sb("group", "rm", s.group.id)
+
+    let result = try mcp.call("list_sessions")
+
+    #expect(result.isError)
+    #expect(result.text.contains("is gone"))
+  }
+
   /// Each tool that names a session, with arguments that name `session`.
   enum SessionTool: String, CaseIterable {
     case getSession = "get_session"
@@ -876,6 +956,47 @@ final class MCPClient {
 
     #expect(events.contains { $0.session == s.member.id && $0.kind == "sent" })
     #expect(events.allSatisfy { $0.session == s.member.id })
+  }
+
+  @Test func aScopedEventsMergesTheMembersAndKeepsTheOldestOrTheNewest() throws {
+    let sbd = try Instance()
+    let first = try sbd.new(name: "first")
+    let second = try sbd.new(name: "second")
+    let outside = try sbd.new(name: "outside")
+    let group = try addGroup(sbd, "Flags", first.id, second.id)
+    for text in ["one", "two"] {
+      try sbd.sb("send", first.id, text)
+      try sbd.sb("send", second.id, text)
+    }
+    try sbd.sb("send", outside.id, "outside")
+    let mcp = try MCPClient(sbd, group: group.id)
+
+    let all = try mcp.call("events", ["since": 0, "limit": 10_000]).decode([Event].self)
+    let oldest = try mcp.call("events", ["since": 0, "limit": 2]).decode([Event].self)
+    let newest = try mcp.call("events", ["limit": 2]).decode([Event].self)
+    let groupIDs = try (sbd.events(first.id) + sbd.events(second.id)).map(\.id).sorted()
+
+    #expect(Set(all.map(\.session)) == [first.id, second.id])
+    #expect(all.map(\.id) == all.map(\.id).sorted())
+    #expect(oldest.map(\.id) == Array(groupIDs.prefix(2)))
+    let newestID = try #require(newest.last?.id)
+    // A member's events can arrive after the call, so only the ones up to its newest count.
+    #expect(newest.map(\.id) == Array(groupIDs.filter { $0 <= newestID }.suffix(2)))
+    #expect(try #require(newest.first?.id) > (try #require(oldest.last?.id)))
+  }
+
+  @Test(arguments: [false, true]) func aScopedEventsReadsANegativeLimitAsNoLimit(_ withSince: Bool) throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    try sbd.sb("send", s.member.id, "inside")
+    let mcp = try MCPClient(sbd, group: s.group.id)
+    var args: [String: JSON] = ["limit": -1]
+    if withSince { args["since"] = 0 }
+
+    let events = try mcp.call("events", args).decode([Event].self)
+
+    #expect(events.contains { $0.session == s.member.id && $0.kind == "sent" })
+    #expect(try !mcp.call("list_sessions").isError)
   }
 
   @Test func aScopedTriageReturnsOnlyTheGroupsSessions() throws {
@@ -1041,6 +1162,32 @@ final class MCPClient {
 
     #expect(waiting.id == s.outside.id)
     #expect(try sbd.get(s.outside.id).waits.map(\.by) == [.claude])
+  }
+
+  @Test func aScopedSetWaitRefusesATargetOutsideTheGroup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    let result = try mcp.call(
+      "set_wait", ["session": .string(s.member.id), "kind": "session", "target": .string(s.outside.name)])
+
+    #expect(result.isError)
+    #expect(result.text.contains("is not in group"))
+    #expect(try sbd.get(s.member.id).waits.isEmpty)
+  }
+
+  @Test func aScopedSetWaitWaitsOnAMemberTargetNamedByName() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let peer = try sbd.new(name: "peer")
+    try sbd.sb("group", "move", peer.id, "--to", s.group.id)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    let result = try mcp.call("set_wait", ["session": .string(s.member.id), "kind": "session", "target": "peer"])
+
+    #expect(!result.isError)
+    #expect(try sbd.get(s.member.id).waits.compactMap(\.session?.id) == [peer.id])
   }
 
   // MARK: The Manager's registration

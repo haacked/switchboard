@@ -131,6 +131,9 @@ public struct MCPToolServer: Sendable {
     case "set_wait":
       var wait = try JSONCoding.convert(args, to: WaitRequest.self)
       wait.by = Author.claude.rawValue
+      if scoped != nil, wait.kind == Wait.Kind.session.rawValue, let target = wait.target {
+        wait.target = try sessionID(["session": .string(target)], scoped).string
+      }
       var request = try JSON(encoding: wait).object ?? [:]
       if args["session"] != nil {
         request["session"] = try sessionID(args, scoped)
@@ -225,12 +228,14 @@ public struct MCPToolServer: Sendable {
     var request = pick(args, ["since", "limit"])
     if args["session"] != nil { request["session"] = try sessionID(args, scoped) }
     guard let scoped, request["session"] == nil else { return try client.call("events", request) }
-    let limit = args["limit"]?.int ?? 200
+    let limit = args["limit"]?.int ?? Event.defaultLimit
     let merged = try scoped.group.sessions.flatMap { id in
       var one = request
       one["session"] = .string(id)
       return try client.call("events", one).array ?? []
     }.sorted { ($0["id"]?.int ?? 0) < ($1["id"]?.int ?? 0) }
+    // sbd reads a negative limit as no limit, because SQLite does.
+    guard limit >= 0 else { return .array(merged) }
     // Without `since`, sbd answers with the newest events.
     return .array(Array(args["since"] == nil ? merged.suffix(limit) : merged.prefix(limit)))
   }
@@ -258,10 +263,7 @@ public struct MCPToolServer: Sendable {
   private func spawn(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(
       args, ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after"])
-    // sbd runs in another folder, so a relative path becomes absolute here, as `sb spawn` does.
-    if let repo = args["repository"]?.string, ["/", "~", "."].contains(where: repo.hasPrefix) {
-      request["repository"] = .string(URL(fileURLWithPath: repo.expandingTilde).standardizedFileURL.path)
-    }
+    if let repo = args["repository"]?.string { request["repository"] = .string(repo.repositoryArgument) }
     if let caller { request["parent"] = .string(caller) }
     if let scoped { request["group"] = .string(scoped.group.id) }
     return try client.call("spawn", request, timeout: 300)

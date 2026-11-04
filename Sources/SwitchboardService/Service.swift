@@ -260,7 +260,7 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
-      let limit = args["limit"]?.int ?? 200
+      let limit = args["limit"]?.int ?? Event.defaultLimit
       // Without `since`, the newest events, so `sb events` shows what just happened.
       if let since = args["since"]?.int {
         return try JSON(encoding: store.events(since: Int64(since), session: session, limit: limit))

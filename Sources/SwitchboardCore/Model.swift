@@ -99,6 +99,9 @@ public struct Event: Codable, Equatable, Sendable {
   public var kind: String
   public var data: JSON
 
+  /// The number of events that the `events` request lists when it names no `limit`.
+  public static let defaultLimit = 200
+
   public init(id: Int64 = 0, session: String, t: Int64, kind: String, data: JSON = [:]) {
     self.id = id
     self.session = session

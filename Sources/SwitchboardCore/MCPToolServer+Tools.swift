@@ -56,7 +56,7 @@ extension MCPToolServer {
       [
         "since": integer("An event id. The answer lists the events after it."),
         "session": session,
-        "limit": integer("The maximum number of events to list. Default 200."),
+        "limit": integer("The maximum number of events to list. Default \(Event.defaultLimit)."),
       ]),
     Tool(
       "send",
