@@ -95,6 +95,9 @@ private func prFacts(_ pr: PullRequest, then: [Event] = []) throws -> SessionFac
 
 private let readTheReply = Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
 
+/// The queue states in which Trunk's merge queue holds the PR.
+private let heldByTrunk: [TrunkQueueState] = [.submitted, .pending, .testing, .passed, .failing, .queued]
+
 @Suite struct DepotParsing {
   @Test func failedRunHasItsIdStatusAndHeadCommit() throws {
     let run = try parsedRun(headSha: DepotFixtures.failedHead)
@@ -348,6 +351,13 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(ci(pr) == "Depot CI failed: a (run r1)")
   }
 
+  /// A ci wait is about the PR's own checks, so Trunk's queue doesn't change its outcome.
+  @Test(arguments: heldByTrunk)
+  func depotFailureResolvesACIWaitWhileTrunksQueueHoldsThePR(_ queue: TrunkQueueState) {
+    #expect(
+      ci(withDepot(samplePR(checks: "PENDING", queue: queue), sampleDepot(["a"]))) == "Depot CI failed: a (run r1)")
+  }
+
   @Test(arguments: [Wait.Kind.merge, .queue, .approval])
   func otherKindsIgnoreADepotFailure(_ kind: Wait.Kind) {
     #expect(waitOn(kind).resolution(of: withDepot(samplePR(checks: "PENDING"), sampleDepot(["a"]))) == nil)
@@ -445,6 +455,46 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     pr.checks = "PENDING"
 
     #expect(try verdict(pr) == Verdict(state: .needsYou, reason: reason))
+  }
+
+  /// Trunk queues a PR only after its required checks pass, so a Depot
+  /// failure on a queued PR comes from a job that isn't required. GitHub's
+  /// rollup can still say FAILURE.
+  @Test(arguments: heldByTrunk, ["PENDING", "FAILURE", nil] as [String?])
+  func depotFailureOnAPRInTrunksQueueFiresNoRule(_ queue: TrunkQueueState, _ checks: String?) throws {
+    #expect(try verdict(withDepot(samplePR(checks: checks, queue: queue), Self.failing)) == readTheReply)
+    let approved = samplePR(
+      reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], checks: checks, queue: queue)
+    #expect(try verdict(withDepot(approved, Self.failing)) == readTheReply)
+  }
+
+  /// sbd can't tell whether Trunk holds a PR whose queue status did not load.
+  @Test(arguments: [nil, .unknown] as [TrunkQueueState?], ["PENDING", "FAILURE"])
+  func depotFailureOnAPROutsideTrunksQueueNeedsYou(_ queue: TrunkQueueState?, _ checks: String) throws {
+    #expect(
+      try verdict(withDepot(samplePR(checks: checks, queue: queue), Self.failing))
+        == Verdict(state: .needsYou, reason: "fix Depot CI on #42: Django Tests Pass on Depot and 2 more"))
+  }
+
+  @Test(arguments: heldByTrunk)
+  func idleSessionWithADepotFailureOnAPRInTrunksQueueIsStale(_ queue: TrunkQueueState) throws {
+    let v = try verdict(
+      withDepot(samplePR(checks: "PENDING", queue: queue), Self.failing), now: Attention.staleAfterMs + 10)
+
+    #expect(v.state == .stale)
+  }
+
+  @Test(arguments: heldByTrunk)
+  func failedCIOnAPRInTrunksQueueNeedsNoPRAction(_ queue: TrunkQueueState) throws {
+    #expect(!Attention.needsPRAction(try prFacts(withDepot(samplePR(checks: "PENDING", queue: queue), Self.failing))))
+    #expect(!Attention.needsPRAction(try prFacts(samplePR(checks: "FAILURE", queue: queue))))
+  }
+
+  @Test(arguments: [nil, .unknown, .removed] as [TrunkQueueState?])
+  func depotFailureOnAPROutsideTrunksQueueNeedsPRAction(_ queue: TrunkQueueState?) throws {
+    let f = try prFacts(withDepot(samplePR(checks: "PENDING", queue: queue), Self.failing))
+
+    #expect(Attention.needsPRAction(f))
   }
 
   @Test func depotFailureWinsOverTheApprovedRule() throws {

@@ -26,7 +26,9 @@ extension Attention {
 
   /// The rules for an open PR of a session whose turn has ended: a merged
   /// base, a conflict, requested changes, a removal from Trunk's queue, a
-  /// failed Depot job, and an approval.
+  /// failed Depot job, and an approval. A Depot failure on a PR that Trunk's
+  /// queue holds fires no rule. Trunk queues a PR only after its required
+  /// checks pass, so the failed job is one that the merge does not need.
   static func openPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open else { return nil }
     let n = "#\(pr.number)"
@@ -53,7 +55,7 @@ extension Attention {
       return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue")
     }
     // An approved PR whose Depot job failed can't merge yet.
-    if let run = pr.depotFailure {
+    if pr.queue?.isQueued != true, let run = pr.depotFailure {
       let reason = "fix Depot CI on \(n): "
       return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
     }
@@ -85,11 +87,11 @@ extension Attention {
 
   /// Whether an open, ready PR needs the user after a review wait ended or
   /// when none began: a check failed, or GitHub asks nobody for a review, so
-  /// nobody is reviewing it. A queued PR is excluded, because Trunk acts on
-  /// it. A PR event does not count as session activity, so without this the
-  /// idle time would move the session to Stale.
+  /// nobody is reviewing it. A PR that Trunk's queue holds is excluded,
+  /// because Trunk acts on it. A PR event does not count as session activity,
+  /// so without this the idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
-    guard let pr = facts.pr, pr.state == .open, !pr.draft else { return false }
+    guard let pr = facts.pr, pr.state == .open, !pr.draft, pr.queue?.isQueued != true else { return false }
     return pr.ciFailed || (pr.reviewRequests == [] && pr.queue == nil)
   }
 
