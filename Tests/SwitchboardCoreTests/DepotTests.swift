@@ -95,8 +95,8 @@ private func prFacts(_ pr: PullRequest, then: [Event] = []) throws -> SessionFac
 
 private let readTheReply = Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
 
-/// The queue states in which Trunk's merge queue holds the PR.
-private let heldByTrunk: [TrunkQueueState] = [.submitted, .pending, .testing, .passed, .failing, .queued]
+/// The queue states of a PR that Trunk added to its merge queue.
+private let heldByTrunk: [TrunkQueueState] = [.pending, .testing, .passed, .failing, .queued]
 
 @Suite struct DepotParsing {
   @Test func failedRunHasItsIdStatusAndHeadCommit() throws {
@@ -352,7 +352,7 @@ private let heldByTrunk: [TrunkQueueState] = [.submitted, .pending, .testing, .p
   }
 
   /// A ci wait is about the PR's own checks, so Trunk's queue doesn't change its outcome.
-  @Test(arguments: heldByTrunk)
+  @Test(arguments: [TrunkQueueState.submitted] + heldByTrunk)
   func depotFailureResolvesACIWaitWhileTrunksQueueHoldsThePR(_ queue: TrunkQueueState) {
     #expect(
       ci(withDepot(samplePR(checks: "PENDING", queue: queue), sampleDepot(["a"]))) == "Depot CI failed: a (run r1)")
@@ -469,7 +469,8 @@ private let heldByTrunk: [TrunkQueueState] = [.submitted, .pending, .testing, .p
   }
 
   /// sbd can't tell whether Trunk holds a PR whose queue status did not load.
-  @Test(arguments: [nil, .unknown] as [TrunkQueueState?], ["PENDING", "FAILURE"])
+  /// A submitted PR waits outside the queue until its required checks pass.
+  @Test(arguments: [nil, .unknown, .submitted] as [TrunkQueueState?], ["PENDING", "FAILURE"])
   func depotFailureOnAPROutsideTrunksQueueNeedsYou(_ queue: TrunkQueueState?, _ checks: String) throws {
     #expect(
       try verdict(withDepot(samplePR(checks: checks, queue: queue), Self.failing))
@@ -490,7 +491,7 @@ private let heldByTrunk: [TrunkQueueState] = [.submitted, .pending, .testing, .p
     #expect(!Attention.needsPRAction(try prFacts(samplePR(checks: "FAILURE", queue: queue))))
   }
 
-  @Test(arguments: [nil, .unknown, .removed] as [TrunkQueueState?])
+  @Test(arguments: [nil, .unknown, .removed, .submitted] as [TrunkQueueState?])
   func depotFailureOnAPROutsideTrunksQueueNeedsPRAction(_ queue: TrunkQueueState?) throws {
     let f = try prFacts(withDepot(samplePR(checks: "PENDING", queue: queue), Self.failing))
 
