@@ -71,6 +71,10 @@ public struct Session: Codable, Equatable, Sendable {
   /// True once the user chose the session's group, or chose Ungrouped. A
   /// session that took its parent's group has it false.
   public var placedByHand: Bool?
+  /// The id of the group whose chat this session is. A chat belongs to no group.
+  public var chat: String?
+
+  public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,
@@ -87,6 +91,27 @@ public struct Session: Codable, Equatable, Sendable {
     self.started = false
     self.done = false
     self.waitNote = nil
+  }
+}
+
+/// What a session is for. Only a work session belongs to a group, gets a
+/// triage item, or has a worktree and a PR.
+public enum SessionKind: String, Codable, Sendable {
+  case work
+  case manager
+  case chat
+
+  public init(manager: Bool?, chat: String?) {
+    self = manager == true ? .manager : chat != nil ? .chat : .work
+  }
+
+  /// How a message names a session of this kind, or nil for a work session.
+  public var label: String? {
+    switch self {
+    case .work: nil
+    case .manager: "the Manager"
+    case .chat: "a group chat"
+    }
   }
 }
 
@@ -143,6 +168,12 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var parent: String?
   /// True for the Manager.
   public var manager: Bool?
+  /// Nil in a summary from an older sbd. `sessionKind` reads it.
+  public var kind: SessionKind?
+  /// The id of the group whose chat this session is.
+  public var chat: String?
+
+  public var sessionKind: SessionKind { kind ?? SessionKind(manager: manager, chat: chat) }
   public var followup: Followup?
   /// When the session was added, in ms since the epoch. An imported
   /// follow-up was added on the date of its line.

@@ -32,6 +32,18 @@ public struct MCPToolServer: Sendable {
     self.caller = caller
   }
 
+  /// The --mcp-config that runs this server over stdio for a session's
+  /// claude, limited to `group` when one is given.
+  public static func launchConfig(sb: String, home: String, session: String, group: String?) -> JSON {
+    let env: JSON = ["SB_HOME": .string(home), "SB_SESSION_ID": .string(session)]
+    let args = ["mcp-server"] + (group.map { ["--group", $0] } ?? [])
+    return [
+      "mcpServers": [
+        "switchboard": ["type": "stdio", "command": .string(sb), "args": .array(args.map(JSON.string)), "env": env]
+      ]
+    ]
+  }
+
   /// A server limited to the group that `ref` names by id, unique id prefix, or unique name.
   public static func scoped(to ref: String, client: Client, caller: String?) throws -> MCPToolServer {
     let group = try find(ref, in: client.call("group-ls", as: GroupList.self))

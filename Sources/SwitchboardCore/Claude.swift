@@ -240,12 +240,28 @@ public enum Transcript {
     return folders.map { "\(projects)/\($0)/\(sessionId).jsonl" }.first { FileManager.default.fileExists(atPath: $0) }
   }
 
-  /// Reads the transcript from the end, because transcripts reach 24 MB. Each
-  /// read is twice the size of the one before, up to 4 MB, so a long line
-  /// costs few reads.
+  /// Reads the transcript from the end, because transcripts reach 24 MB.
   public static func tail(_ path: String) -> TranscriptTail {
     var tail = TranscriptTail()
-    guard let file = FileHandle(forReadingAtPath: path), var offset = try? file.seekToEnd() else { return tail }
+    eachLineFromEnd(path) { fold($0, into: &tail) }
+    return tail
+  }
+
+  /// The main conversation's last `limit` messages that have text, oldest first.
+  public static func messages(_ path: String, limit: Int) -> [ChatMessage] {
+    var messages: [ChatMessage] = []
+    eachLineFromEnd(path) { line in
+      if let message = message(line) { messages.append(message) }
+      return messages.count >= limit
+    }
+    return messages.reversed()
+  }
+
+  /// Calls `body` with each non-empty line, last line first, until it returns
+  /// true. Each read is twice the size of the one before, up to 4 MB, so a
+  /// long line costs few reads.
+  static func eachLineFromEnd(_ path: String, _ body: (Data) -> Bool) {
+    guard let file = FileHandle(forReadingAtPath: path), var offset = try? file.seekToEnd() else { return }
     defer { try? file.close() }
     var size: UInt64 = 1 << 16
     // The start of the chunk after the current one, up to its first newline.
@@ -256,14 +272,13 @@ public enum Transcript {
       let count = min(size, offset)
       offset -= count
       size = min(size * 2, 1 << 22)
-      guard (try? file.seek(toOffset: offset)) != nil, let chunk = try? file.read(upToCount: Int(count)) else { break }
+      guard (try? file.seek(toOffset: offset)) != nil, let chunk = try? file.read(upToCount: Int(count)) else { return }
       var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
       for line in lines.reversed() where !line.isEmpty {
-        if fold(line, into: &tail) { return tail }
+        if body(Data(line)) { return }
       }
     }
-    return tail
   }
 
   /// Folds one line into the tail, and returns true at the last reply. The
@@ -275,14 +290,32 @@ public enum Transcript {
     if tail.lastActivity == nil, let t = object["timestamp"]?.string.flatMap(milliseconds) { tail.lastActivity = t }
     guard object["type"]?.string == "assistant", object["isSidechain"]?.bool != true else { return false }
     tail.hasReplies = true
+    let text = text(of: object)
+    guard !text.isEmpty else { return false }
+    tail.lastReply = text
+    return true
+  }
+
+  /// A user or assistant line of the main conversation that has text. A
+  /// user line that holds only tool results has none. A meta line is one
+  /// that claude adds, such as a command's output.
+  static func message(_ line: Data) -> ChatMessage? {
+    guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line),
+      let role = object["type"]?.string.flatMap(ChatMessage.Role.init(rawValue:)),
+      object["isSidechain"]?.bool != true, object["isMeta"]?.bool != true
+    else { return nil }
+    let text = text(of: object)
+    guard !text.isEmpty else { return nil }
+    return ChatMessage(role: role, text: text, t: object["timestamp"]?.string.flatMap(milliseconds))
+  }
+
+  /// The text of a line's message: its string content, or its text blocks.
+  private static func text(of object: JSON) -> String {
     let content = object["message"]?["content"]
     let texts =
       content?.string.map { [$0] }
       ?? (content?.array ?? []).filter { $0["type"]?.string == "text" }.compactMap { $0["text"]?.string }
-    let text = texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return false }
-    tail.lastReply = text
-    return true
+    return texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private static let fractional: ISO8601DateFormatter = {

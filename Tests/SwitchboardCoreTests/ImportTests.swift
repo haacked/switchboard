@@ -28,6 +28,44 @@ private func textBlock(_ text: String) -> JSON { ["type": "text", "text": .strin
 private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash", "input": ["command": "make test"]]
 
 @Suite struct TranscriptTests {
+  @Test func messagesListTheMainConversationsTextOldestFirst() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let meta: JSON = [
+      "type": "user", "isMeta": true, "timestamp": "2026-10-25T10:00:00.500Z",
+      "message": ["role": "user", "content": "Caveat: a command ran."],
+    ]
+    let path = try writeTranscript(
+      [
+        userLine("Fix the parser.", at: "2026-10-25T10:00:00.000Z"),
+        meta,
+        assistantLine([textBlock("I'll look at the parser.")], at: "2026-10-25T10:00:01.000Z"),
+        assistantLine([toolUseBlock], at: "2026-10-25T10:00:02.000Z"),
+        userLine([["type": "tool_result", "tool_use_id": "t1", "content": "ok"]], at: "2026-10-25T10:00:03.000Z"),
+        assistantLine([textBlock("A request blob.")], at: "2026-10-25T10:00:03.500Z", type: "api-request-blob"),
+        assistantLine([textBlock("A subagent's reply.")], at: "2026-10-25T10:00:03.750Z", sidechain: true),
+        assistantLine("Fixed.", at: "2026-10-25T10:00:04.000Z"),
+      ], in: dir)
+
+    let messages = Transcript.messages(path, limit: 50)
+
+    #expect(
+      messages == [
+        ChatMessage(role: .user, text: "Fix the parser.", t: 1_792_922_400_000),
+        ChatMessage(role: .assistant, text: "I'll look at the parser.", t: 1_792_922_401_000),
+        ChatMessage(role: .assistant, text: "Fixed.", t: 1_792_922_404_000),
+      ])
+  }
+
+  @Test func messagesKeepOnlyTheLastOnesUpToTheLimit() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let path = try writeTranscript(
+      (0..<5).map { userLine(.string("m\($0)"), at: "2026-10-25T10:00:0\($0).000Z") }, in: dir)
+
+    #expect(Transcript.messages(path, limit: 2).map(\.text) == ["m3", "m4"])
+  }
+
   @Test func tailReadsTheLastMainReplyAndTheLastTimestamp() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }

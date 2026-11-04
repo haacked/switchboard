@@ -103,6 +103,10 @@ let usage = """
                                   list groups suggested from dependencies, branch
                                   names, and PR titles, or accept or decline one.
                                   A session that you placed by hand never moves
+    chat <group> [--send <text>]  open the group's chat, a session that manages
+                                  the group's sessions, starting it the first
+                                  time. --send sends it a message
+    chat <group> --log            the chat's last messages
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]
@@ -172,7 +176,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline",
+      "--group", "--to", "--note", "--accept", "--decline", "--send",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -267,6 +271,7 @@ func printSession(_ s: SessionSummary) {
   print(
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
+  if let group = s.chat { print("  chat of: group \(group)") }
   print("  folder:  \(s.cwd)")
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
@@ -589,6 +594,8 @@ case "autocontinue":
   autoContinue(a)
 case "group", "groups":
   group(a)
+case "chat":
+  chat(a)
 case "plan", "plans":
   plan(a)
 case "followup", "followups":
