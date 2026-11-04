@@ -49,7 +49,9 @@ final class TrunkPoller {
     }
     guard !due.isEmpty else { return 0 }
     guard let trunk = settings.executable() else {
-      report("can't find trunk at \(settings.path)")
+      report(
+        "can't find trunk (\(settings.path)), so the merge queue state comes from Trunk's comments. Install trunk, or set `trunk.path` in config.json."
+      )
       return 0
     }
     var runs = 0
@@ -83,6 +85,8 @@ final class TrunkPoller {
     switch result {
     case .found, .notFound:
       problem = nil
+    case .notSetUp:
+      break
     case .notLoggedIn:
       report(TrunkPoller.loginNeededMessage)
     case .unrecognized(let text):

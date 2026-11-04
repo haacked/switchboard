@@ -53,6 +53,9 @@ public struct TrunkTimeline: Equatable, Sendable {
     case notFound
     /// trunk has no login, or its login expired. `trunk login` signs in.
     case notLoggedIn
+    /// The folder isn't a checkout that trunk is set up for. A repo can use
+    /// Trunk's merge queue without the `.trunk` folder that the CLI needs.
+    case notSetUp
     /// Output that the parser doesn't know, without its colors.
     case unrecognized(String)
   }
@@ -88,6 +91,7 @@ public struct TrunkTimeline: Equatable, Sendable {
     let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.hasPrefix("✖ User not logged in") { return .notLoggedIn }
     if trimmed.hasPrefix("✖ Item for merge queue instance not found") { return .notFound }
+    if trimmed.hasPrefix("✖ Please run 'trunk init'") { return .notSetUp }
     guard let start = lines.firstIndex(where: { $0.hasPrefix("#") }),
       let header = match(lines[start], headerPattern), let number = Int(header[0])
     else { return .unrecognized(trimmed) }

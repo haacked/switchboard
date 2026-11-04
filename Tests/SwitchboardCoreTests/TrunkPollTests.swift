@@ -85,7 +85,7 @@ private let testingComments = [status(trunkTesting)]
 
   /// Every result except a timeline with entries leaves the queue fields that the comments give.
   static let resultsThatKeepTheComments: [TrunkTimeline.Result?] = [
-    nil, .notFound, .notLoggedIn, .unrecognized("✖ Something new went wrong"), trunkFound([]),
+    nil, .notFound, .notSetUp, .notLoggedIn, .unrecognized("✖ Something new went wrong"), trunkFound([]),
   ]
 
   @Test(arguments: ShownWithTrunk.resultsThatKeepTheComments)
@@ -132,7 +132,9 @@ private let testingComments = [status(trunkTesting)]
     #expect(shown.trunkLoginNeeded == true)
   }
 
-  @Test(arguments: [TrunkTimeline.Result?.none, .notFound, .unrecognized("?"), trunkFound([]), removedTimeline])
+  @Test(arguments: [
+    TrunkTimeline.Result?.none, .notFound, .notSetUp, .unrecognized("?"), trunkFound([]), removedTimeline,
+  ])
   func everyOtherResultDoesNotAskForALogin(_ result: TrunkTimeline.Result?) {
     let shown = GitHub.shown(openPR, testingComments, trunk: result, last: nil)
 

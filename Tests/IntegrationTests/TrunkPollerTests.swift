@@ -410,6 +410,55 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     #expect(pr.trunkLoginNeeded != true)
   }
 
+  @Test func withoutTrunkPollSucceedsAndPingSaysHowToGetIt() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try posthogSession(sbd)
+    try queue(github)
+
+    let poll = try sbd.run("poll")
+
+    #expect(poll.status == 0)
+    #expect(poll.stderr.contains("can't find trunk"))
+    let ping = try #require(try sbd.client.call("ping")["trunk"]?.string)
+    #expect(ping.contains("Trunk's comments"))
+    #expect(ping.contains("trunk.path"))
+    let line = try sbd.sb("get", s.id)
+    #expect(line.contains("Trunk queued"))
+    #expect(!line.contains("trunk login needed"))
+  }
+
+  @Test func withoutTrunkAQueueWaitResolvesFromTheComments() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try posthogSession(sbd)
+    try queue(github)
+    try sbd.poll()
+    try sbd.sb("wait", s.id, "--kind", "queue")
+    github.edit(comment: try trunkComment(github), body: "Removed from the merge queue", at: stamp(3600))
+    try sbd.advanceClock(30_000)
+
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "the merge queue for the session's PR: Trunk removed it from the queue.")
+  }
+
+  @Test func aCheckoutThatTrunkIsNotSetUpForKeepsTheCommentsStateQuietly() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withTrunk(github)
+    let s = try posthogSession(sbd)
+    try queue(github)
+    try sbd.trunkPrints(
+      122953, "\u{1B}[1m\u{1B}[31m✖ Please run 'trunk init' to setup trunk in this repository.\u{1B}[0m\n")
+
+    let result = try sbd.poll()
+
+    #expect(result["trunkRuns"]?.int == 1)
+    #expect(result["trunkError"] == nil)
+    #expect(try sbd.client.call("ping")["trunk"] == nil)
+    #expect(try sbd.get(s.id).pr?.queue == .queued)
+    #expect(try !String(contentsOfFile: sbd.home.log, encoding: .utf8).contains("trunk init"))
+  }
+
   @Test func withoutALoginPollAndPingReportItAndThePRKeepsTheCommentsState() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withTrunk(github)
@@ -481,14 +530,21 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     #expect(pr.queue == .testing)
   }
 
-  @Test func pollWithoutQueuedPRsReportsNoTrunkReads() throws {
+  /// PostHog/charts doesn't use Trunk, so its PRs have no trunk-io comments.
+  @Test func aRepoWithoutTrunkNeverRunsTrunk() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withTrunk(github)
-    _ = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
 
     let result = try #require(JSON.parse(try sbd.sb("poll", "--json")))
+    try sbd.poll(all: true)
 
     #expect(result["trunkRuns"]?.int == 0)
     #expect(result["trunkError"] == nil)
+    #expect(sbd.trunkCalls().isEmpty)
+    #expect(try sbd.client.call("ping")["trunk"] == nil)
+    let pr = try #require(try sbd.get(s.id).pr)
+    #expect(pr.queue == nil)
+    #expect(!pr.line.contains("Trunk"))
   }
 }
