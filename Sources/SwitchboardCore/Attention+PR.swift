@@ -50,7 +50,8 @@ extension Attention {
       return Verdict(state: .needsYou, reason: "address the requested changes on \(n)")
     }
     if pr.queue == .removed {
-      return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue")
+      let label = pr.queueLabel.map { " (\($0))" } ?? ""
+      return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue\(label)")
     }
     // A failed Depot job blocks the merge. Trunk adds a PR to its queue only
     // after its required checks pass, so a failed job on a queued PR is one

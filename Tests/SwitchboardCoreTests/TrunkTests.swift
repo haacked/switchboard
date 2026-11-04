@@ -148,6 +148,7 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
   @Test func trunkErrors() throws {
     #expect(TrunkTimeline.parse(try trunkFixture("not-logged-in"), now: 0) == .notLoggedIn)
     #expect(TrunkTimeline.parse(try trunkFixture("not-found"), now: 0) == .notFound)
+    #expect(TrunkTimeline.parse(try trunkFixture("not-set-up"), now: 0) == .notSetUp)
     #expect(TrunkTimeline.parse("✖ Something new went wrong\n", now: 0) == .unrecognized("✖ Something new went wrong"))
     #expect(TrunkTimeline.parse("", now: 0) == .unrecognized(""))
   }

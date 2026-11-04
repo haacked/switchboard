@@ -117,6 +117,13 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// When the comment that gives `queue` last changed, in milliseconds since
   /// the epoch. nil when `queue` is nil or `.unknown`.
   public var queueAt: Int64?
+  /// Trunk's name for `queue`, such as "Testing" or "Cancelled", and its
+  /// description as markdown. Only `trunk merge status` gives them.
+  public var queueLabel: String?
+  public var queueText: String?
+  /// trunk had no login when sbd asked it about this PR, so `queue` comes
+  /// from the comments.
+  public var trunkLoginNeeded: Bool?
   /// The logins or team slugs whose review GitHub still asks for. A reviewer
   /// leaves the list when they submit a review. nil means the poll did not
   /// read the field, as in events that an older sbd recorded. An empty list
@@ -218,6 +225,10 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var queue: TrunkQueueState?
   /// The Depot run of the head commit.
   public var depot: DepotRun?
+  /// Trunk's name for the queue state, such as "Testing" or "Cancelled", when
+  /// sbd read it from trunk.
+  public var queueLabel: String?
+  public var trunkLoginNeeded: Bool?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -230,6 +241,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
     mergeable = pr.mergeable
     queue = pr.queue
     depot = pr.headDepot
+    queueLabel = pr.queueLabel
+    trunkLoginNeeded = pr.trunkLoginNeeded
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can
@@ -239,6 +252,12 @@ public struct PRSummary: Codable, Equatable, Sendable {
     return url
   }
 
-  /// The PR in one line, such as "#18303 Approved, checks success".
-  public var line: String { "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")" }
+  /// The PR in one line, such as "#18303 Approved, checks success, Trunk
+  /// testing".
+  public var line: String {
+    var line = "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")"
+    if let queue, queue != .unknown { line += ", Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
+    if trunkLoginNeeded == true { line += "; trunk login needed" }
+    return line
+  }
 }

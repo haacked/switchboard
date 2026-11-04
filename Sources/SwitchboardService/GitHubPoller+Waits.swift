@@ -77,7 +77,7 @@ extension GitHubPoller {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
-        case let comments = keptComments(read.comments), case let pr = GitHub.shown(read.pr, comments, last: nil),
+        case let comments = keptComments(read.comments), let pr = shown(id, last: nil),
         let outcome = wait.kind == .deploy ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr),
         !(wait.pr == nil && wait.finishedBeforeSet(pr)),
         confirmed(wait, pr, outcome, polled: read.polled),

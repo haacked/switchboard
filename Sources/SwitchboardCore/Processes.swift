@@ -10,11 +10,13 @@ public struct CommandResult: Sendable {
 /// With `timeout`, the program gets SIGTERM after that many seconds.
 @discardableResult
 public func runCommand(
-  _ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil, timeout: Double? = nil
+  _ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil, timeout: Double? = nil,
+  cwd: String? = nil
 ) throws -> CommandResult {
   let p = Process()
   p.executableURL = URL(fileURLWithPath: executable)
   p.arguments = args
+  if let cwd { p.currentDirectoryURL = URL(fileURLWithPath: cwd) }
   if let env { p.environment = env }
   let out = Pipe()
   let err = Pipe()

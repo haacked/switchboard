@@ -93,7 +93,7 @@ cmd_record() {
 cmd_compare() {
   run="${1:?compare needs a run folder}"
   bin="$T7_ROOT/t7-compare"
-  swiftc -O -parse-as-library -o "$bin" "$root"/Sources/SwitchboardCore/*.swift "$here/lib/t7-compare.swift"
+  swiftc -O -parse-as-library -module-name SwitchboardCore -o "$bin" "$root"/Sources/SwitchboardCore/*.swift "$here/lib/t7-compare.swift"
   "$bin" "$run" | tee "$run/compare.tsv"
 }
 

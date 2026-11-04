@@ -1,0 +1,1 @@
+[1m[31m✖ Please run 'trunk init' to setup trunk in this repository.[0m

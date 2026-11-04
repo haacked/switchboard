@@ -10,6 +10,7 @@ final class GitHubPoller {
   unowned let service: Service
   let settings: GitHubSettings
   let depot: DepotPoller?
+  let trunk: TrunkPoller
   let queue = DispatchQueue(label: "sbd.github")
   private var timer: DispatchSourceTimer?
 
@@ -126,15 +127,17 @@ final class GitHubPoller {
     var merged = 0
     var depotRequests = 0
     var depotRuns = 0
+    var trunkRuns = 0
     var resumed = 0
     var planReads = 0
     var planWrites = 0
   }
 
-  init(service: Service, settings: GitHubSettings, depot: DepotSettings) {
+  init(service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings) {
     self.service = service
     self.settings = settings
     self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
+    self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
   }
 
   func start() {
@@ -177,13 +180,14 @@ final class GitHubPoller {
       // An edge that `recordDependencies` kept reads its PR at once, as a new wait does.
       var waited = waitedOn(interest)
       for id in recheck { waited.created[id] = max(waited.created[id] ?? 0, now) }
-      try readPRs(all: all, now: now, waited: waited, interest: interest, stats: &stats)
+      try readPRs(all: all, now: now, waited: waited, queued: queuedPRs(), stats: &stats)
       try checkDeploys(interest, all: all, now: now, stats: &stats)
     } catch {
       failure = "\(error)"
       logLine("github: \(error)")
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
+    stats.trunkRuns = readTrunk(sessions, all: all, now: now)
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
@@ -196,6 +200,7 @@ final class GitHubPoller {
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
+    if let problem = trunk.problem { result["trunkError"] = .string(problem) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
     return .object(result)
@@ -368,15 +373,15 @@ final class GitHubPoller {
   /// that GitHub reports NOT_FOUND, as after a deletion, leaves its sessions,
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
-  private func readPRs(all: Bool, now: Int64, waited: Waited, interest: Interest, stats: inout Stats) throws {
-    // A PR in `waited.pending` polls like a pending PR. A PR with any open
-    // wait also polls at once when the wait is newer than the last read. That
-    // read can't show what happened after the wait was set.
+  private func readPRs(all: Bool, now: Int64, waited: Waited, queued: Set<String>, stats: inout Stats) throws {
+    // A PR in `waited.pending` or in Trunk's queue polls like a pending PR. A
+    // PR with any open wait also polls at once when the wait is newer than the
+    // last read. That read can't show what happened after the wait was set.
     let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {
       all || (waited.created[$0] ?? 0) > (prs[$0]?.polled ?? 0)
         || GitHub.isDue(
           prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs,
-          idleMs: waited.pending.contains($0) ? settings.pendingMs : settings.idleMs)
+          idleMs: waited.pending.contains($0) || queued.contains($0) ? settings.pendingMs : settings.idleMs)
     }
     var stacked: [String] = []
     var gone: Set<String> = []
@@ -559,9 +564,8 @@ final class GitHubPoller {
     }
     var changed = false
     if let id = t.prId {
-      if let (pr, comments, _) = prs[id] {
+      if let comments = prs[id]?.comments, let shown = shown(id, last: s.facts.pr) {
         let kept = keptComments(comments)
-        let shown = GitHub.shown(pr, kept, last: s.facts.pr)
         if shown != s.facts.pr || kept != s.facts.prComments {
           var data: [String: JSON] = ["pr": (try? JSON(encoding: shown)) ?? .null]
           if kept != s.facts.prComments { data["comments"] = (try? JSON(encoding: kept)) ?? [] }
