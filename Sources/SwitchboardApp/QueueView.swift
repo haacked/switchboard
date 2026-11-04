@@ -34,6 +34,7 @@ struct TriageList: View {
   var body: some View {
     let items = model.triage
     let current = model.currentQueueItem
+    let repos = model.repoLabels
     ScrollViewReader { proxy in
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 2) {
@@ -47,7 +48,7 @@ struct TriageList: View {
                 .padding(.top, 10)
                 .padding(.bottom, 4)
               ForEach(group) { s in
-                TriageRow(session: s, current: s.id == current).id(s.id)
+                TriageRow(session: s, repo: repos[s.id], current: s.id == current).id(s.id)
               }
             }
           }
@@ -68,6 +69,7 @@ struct TriageList: View {
 struct TriageRow: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  let repo: String?
   let current: Bool
 
   var body: some View {
@@ -81,7 +83,7 @@ struct TriageRow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(item?.title ?? session.reason).fontWeight(.medium).lineLimit(2)
         Text(
-          [session.repo.map { ($0 as NSString).lastPathComponent }, session.name, ago(session.since)]
+          [repo, session.name, ago(session.since)]
             .compactMap { $0 }.joined(separator: " · ")
         )
         .font(.caption)

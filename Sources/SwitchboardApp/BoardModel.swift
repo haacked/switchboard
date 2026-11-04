@@ -127,6 +127,10 @@ final class BoardModel: ObservableObject {
 
   var triage: [SessionSummary] { Triage.order(sessions) }
 
+  /// The repo label of each session in the sidebar. The Queue uses the same
+  /// labels. A session therefore shows the same repo in both lists.
+  var repoLabels: [String: String] { RepoLabels.labels(board) }
+
   /// The sessions and the follow-ups that wait to start. A follow-up whose
   /// trigger fired is in both lists until it starts. A follow-up that started
   /// since the last read of follow-ups is in both lists for up to 5 s. The
