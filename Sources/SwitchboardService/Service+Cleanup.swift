@@ -5,9 +5,10 @@ extension Service {
   /// Removes the worktree and the local branch of a session whose PR merged,
   /// and keeps the session in Done. Every check of `checkCleanup` runs first,
   /// and a turn that is running also refuses, so a refusal changes nothing.
-  /// The checks run again after claude stops and the panes close. A refusal
-  /// at that point leaves the session, the folder, and the branch, with the
-  /// panes closed.
+  /// The checks run again after claude exits and the panes close. A claude
+  /// that has not exited 5 s after SIGTERM refuses. Its pane stays open, so
+  /// that a later cleanup finds it. A refusal at that point leaves the
+  /// session, the folder, and the branch.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
   /// keeps the branch and throws.
@@ -22,17 +23,22 @@ extension Service {
     }
     let (repo, branch) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     let fresh = buildSnapshot()
-    try queue.sync {
+    let claudePid: Int? = try queue.sync {
       guard let e = entries[session.id], e.session.cwd == session.cwd, !starting.contains(session.id) else {
         throw APIError("\(session.id) changed while it was being cleaned up")
       }
       try requireNoTurn(e)
       install(fresh)
-      if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
-      host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
+      guard case .running(let pid) = claudeState(session.id) else { return nil }
+      kill(pid_t(pid), SIGTERM)
+      return pid
     }
-    // The panes could write to the folder until they closed. `worktree remove` deletes ignored files.
+    // claude can write to the folder until it exits. `worktree remove` deletes ignored files.
+    if let claudePid, !Processes.waitForExit([claudePid], seconds: 5).isEmpty {
+      throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
+    }
+    host.kill(paneName(session.id, .claude))
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
     var branchError: Error?

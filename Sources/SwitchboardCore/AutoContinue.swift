@@ -117,7 +117,8 @@ public enum AutoContinue {
     if input.session.manager == true { return "the Manager" }
     if !f.cards.isEmpty || f.openPermission != nil || f.openQuestion != nil { return "an open card" }
     if !(input.session.waits ?? []).isEmpty { return "an open wait" }
-    if f.turnRunning || input.busy { return "a turn is running" }
+    if f.turnRunning { return "a turn is running" }
+    if input.busy { return "a message is on its way" }
     if input.process == .starting || (input.process == .running && !f.live) { return "claude is starting or stopping" }
     if input.onScreen { return "on screen" }
     let touched = max(f.lastTouched, input.lastOnScreen)
