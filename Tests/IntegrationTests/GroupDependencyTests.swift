@@ -99,6 +99,25 @@ extension GroupTests {
     #expect(try suggestions(l.sbd).isEmpty)
   }
 
+  /// The absorbed group's plans move to the group that survives. A document
+  /// that both groups have stays attached once, as the survivor's plan.
+  @Test func acceptingAMergeMovesTheAbsorbedGroupsPlans() throws {
+    let l = try linkedGroups()
+    let shared = "\(l.sbd.home.path)/notes/shared.md"
+    let only = "\(l.sbd.home.path)/notes/docs-only.md"
+    try l.sbd.writePlan(shared, "# Shared\n")
+    try l.sbd.writePlan(only, "# Docs only\n")
+    let kept = try l.sbd.attachPlan(shared, group: "Flags")
+    _ = try l.sbd.attachPlan(shared, group: "Docs")
+    let moved = try l.sbd.attachPlan(only, group: "Docs")
+
+    _ = try accept(l.sbd, mergeId(l.flags, l.docs))
+
+    #expect(try l.sbd.planIds().sorted() == [kept, moved].sorted())
+    #expect(try l.sbd.planIds("--group", "Flags").sorted() == [kept, moved].sorted())
+    #expect(try l.sbd.plan(moved).group == l.flags.id)
+  }
+
   @Test func suggestPrintsAMergeAsWhatItDoes() throws {
     let l = try linkedGroups()
 

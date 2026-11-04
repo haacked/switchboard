@@ -21,6 +21,7 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS claude_sessions (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS snapshots (session TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
+    try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
   }
 
@@ -84,6 +85,20 @@ public final class Store {
   public func groups() throws -> [SessionGroup] {
     try query("SELECT json FROM groups ORDER BY id", []) { row in
       try JSONCoding.decode(SessionGroup.self, from: row.text(0))
+    }
+  }
+
+  public func save(plan: PlanDocument) throws {
+    try run("INSERT OR REPLACE INTO plans (id, json) VALUES (?, ?)", [plan.id, try JSONCoding.encode(plan)])
+  }
+
+  public func delete(plan id: String) throws {
+    try run("DELETE FROM plans WHERE id = ?", [id])
+  }
+
+  public func plans() throws -> [PlanDocument] {
+    try query("SELECT json FROM plans ORDER BY id", []) { row in
+      try JSONCoding.decode(PlanDocument.self, from: row.text(0))
     }
   }
 

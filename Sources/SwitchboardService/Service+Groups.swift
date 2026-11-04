@@ -58,7 +58,7 @@ extension Service {
   }
 
   /// Finds a group by id, by unique id prefix, or by unique name.
-  private func lookupGroup(_ args: JSON) throws -> String {
+  func lookupGroup(_ args: JSON) throws -> String {
     guard let key = args["group"]?.string, !key.isEmpty else { throw APIError("name a group") }
     return try resolve(key, "group", groups.values.map { ($0.id, $0.name) })
   }
@@ -80,8 +80,10 @@ extension Service {
     groups[group.id] = group
   }
 
+  /// Deletes the group and detaches its plans.
   private func deleteGroup(_ id: String) throws {
     try store.delete(group: id)
+    try detachPlans { $0.group == id }
     groups[id] = nil
   }
 
@@ -98,7 +100,7 @@ extension Service {
   }
 
   /// The Manager has its own row in the app and belongs to no group.
-  private func groupable(_ session: Session) -> Bool { session.manager != true }
+  func groupable(_ session: Session) -> Bool { session.manager != true }
 
   private func refuseUngroupable(_ ids: [String]) throws {
     if let id = ids.first(where: { entries[$0].map { !groupable($0.session) } ?? false }) {
@@ -106,12 +108,14 @@ extension Service {
     }
   }
 
-  private func members(_ group: String) -> [Session] {
+  func members(_ group: String) -> [Session] {
     entries.values.map(\.session).filter { $0.group == group }.sorted { $0.id < $1.id }
   }
 
   private func groupSummary(_ id: String) -> GroupSummary {
-    GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
+    summary.plans = planSummaries(group: id)
+    return summary
   }
 
   func groupList() -> GroupList {
@@ -143,6 +147,7 @@ extension Service {
     try place(suggestion.sessions, in: id)
     if let merged = suggestion.merge?.group, members(merged).isEmpty {
       try saveGroup(groups[id]!.absorbing(groups[merged]!))
+      try movePlans(from: merged, to: id)
       try deleteGroup(merged)
     }
     return id
