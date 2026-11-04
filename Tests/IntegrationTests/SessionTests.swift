@@ -349,7 +349,7 @@ import Testing
   /// have submitted the message as one prompt after `first`.
   func expectMultilineAsOnePrompt(_ sbd: Instance, _ s: SessionSummary, after first: String) throws {
     let done = try sbd.waitFor(s.id, "the multi-line message's reply", timeout: 20) {
-      $0.lastReply?.hasSuffix("the tests \\ too") == true
+      $0.lastReply?.hasSuffix(Self.multiline.components(separatedBy: "\n").last!) == true
     }
     let prompts = try sbd.events(s.id).filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
     #expect(prompts == [first, Self.multiline])

@@ -30,14 +30,17 @@ struct MessageField: View {
       TextField("Message Claude…", text: $draft.text, axis: .vertical)
         .lineLimit(1...4)
         .textFieldStyle(.roundedBorder)
-        .onKeyPress(.return, phases: .down) { press in
+        // The key handler does not see keypad Enter, which sends here. An input method that passes Return on after composing also sends here.
+        .onSubmit(send)
+        // The handler also takes key repeats. A held Shift+Return would otherwise reach onSubmit and send.
+        .onKeyPress(.return, phases: [.down, .repeat]) { press in
           // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
           let editor = NSApp.keyWindow?.firstResponder as? NSTextView
           switch Self.keyAction(modifiers: press.modifiers, composing: editor?.hasMarkedText() == true) {
           case .send:
             send()
           case .newline:
-            NSApp.sendAction(#selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+            editor?.insertNewlineIgnoringFieldEditor(nil)
           case nil:
             return .ignored
           }
@@ -55,9 +58,9 @@ struct MessageField: View {
 
   enum KeyAction { case send, newline }
 
-  /// What Return does in the field. Nil leaves the key to the field. Return then confirms an input
-  /// method's marked text, Option+Return inserts a new line, and Command+Return reaches the Send
-  /// button's shortcut.
+  /// What Return does in the field. Nil leaves the key to the field. On Return while composing, the
+  /// field confirms the input method's marked text. On Option+Return, it inserts a new line.
+  /// Command+Return reaches the Send button's shortcut.
   static func keyAction(modifiers: EventModifiers, composing: Bool) -> KeyAction? {
     guard !composing else { return nil }
     switch modifiers.intersection([.shift, .command, .option, .control]) {
