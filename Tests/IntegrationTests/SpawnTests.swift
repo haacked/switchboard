@@ -38,13 +38,6 @@ import Testing
     try JSONCoding.decode(GroupSummary.self, from: try sbd.sb(["group", "add", "--json", name] + sessions))
   }
 
-  /// The path with every symlink resolved, since /tmp is a link to /private/tmp.
-  func real(_ path: String) -> String {
-    guard let resolved = realpath(path, nil) else { return path }
-    defer { free(resolved) }
-    return String(cString: resolved)
-  }
-
   func git(_ dir: String, _ args: String...) throws -> CommandResult {
     try runCommand("/usr/bin/git", ["-C", dir] + args)
   }

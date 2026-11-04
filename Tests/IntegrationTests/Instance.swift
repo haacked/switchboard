@@ -6,6 +6,13 @@ struct TestError: Error, CustomStringConvertible {
   let description: String
 }
 
+/// The path with every symlink resolved, as `pwd -P` prints it. /tmp is a link to /private/tmp.
+func real(_ path: String) -> String {
+  guard let resolved = realpath(path, nil) else { return path }
+  defer { free(resolved) }
+  return String(cString: resolved)
+}
+
 extension Home {
   /// Names the test process that owns the home, for Fixtures/reap.
   func setOwner(_ pid: pid_t) throws {
@@ -101,6 +108,8 @@ final class Instance {
       // No test reaches the real Depot API. DepotTests point sbd at a FakeDepot.
       "depot": ["enabled": false],
       "usage": ["pollSeconds": 0, "keychain": false],
+      // No test runs the real trunk. A test that needs one writes a fake here.
+      "trunk": ["path": .string("\(path)/trunk")],
       // Tests that read the stub's arguments don't expect the nudge in them.
       "triage": ["systemPrompt": ""],
     ]

@@ -21,7 +21,7 @@ private func trunkComment(_ id: String = "IC_trunk") -> PRComment {
 
 /// The facts of a session whose turn ended with `reply`, then got its PR.
 /// `then` holds the events that arrive after the PR, such as a prompt that starts a turn.
-private func prFacts(
+func prFacts(
   _ pr: PullRequest?, comments: [PRComment] = [], dirty: Int? = nil, gone: Bool = false, reply: String = "Pushed.",
   then: [Event] = []
 ) throws -> SessionFacts {

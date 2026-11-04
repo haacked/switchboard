@@ -386,11 +386,32 @@ public enum GitHub {
   /// after the base branch moved. The PR then keeps the mergeability that
   /// `last` showed for the same head commit, so a conflict doesn't leave
   /// Needs you and come back.
-  public static func shown(_ pr: PullRequest, _ comments: [PRComment], last: PullRequest?) -> PullRequest {
+  ///
+  /// `trunk` is what `trunk merge status` printed about the PR. A timeline
+  /// gives an open PR's queue state in place of the comments. trunk reads the
+  /// queue itself. The comments lag it.
+  public static func shown(
+    _ pr: PullRequest, _ comments: [PRComment], trunk: TrunkTimeline.Result? = nil, last: PullRequest?
+  ) -> PullRequest {
     var shown = pr
     let change = TrunkComments.change(of: pr, comments)
     shown.queue = change?.state
     shown.queueAt = change?.at.flatMap(Transcript.milliseconds)
+    if pr.state == .open {
+      switch trunk {
+      case .found(let timeline)?:
+        if let entry = timeline.entries.last {
+          shown.queue = entry.state
+          shown.queueAt = entry.time
+          shown.queueLabel = entry.label
+          shown.queueText = entry.text
+        }
+      case .notLoggedIn?:
+        shown.trunkLoginNeeded = true
+      default:
+        break
+      }
+    }
     if pr.mergeable == .unknown, let last, last.id == pr.id, last.headSha == pr.headSha, let kept = last.mergeable {
       shown.mergeable = kept
     }

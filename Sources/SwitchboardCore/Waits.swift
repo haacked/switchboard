@@ -223,9 +223,10 @@ public struct Wait: Codable, Equatable, Sendable {
   ///   when there is no `who`. It holds at any time, since an approval is a
   ///   state.
   /// - `merge`: the PR merged or closed.
-  /// - `queue`: the PR merged or closed, or the trunk-io comments show that
-  ///   Trunk merged it or removed it from the queue after the wait was set. A PR
-  ///   that Trunk has not queued yet keeps the wait open.
+  /// - `queue`: the PR merged or closed, or the queue state shows that Trunk
+  ///   merged it or removed it from the queue after the wait was set. A PR that
+  ///   Trunk has not queued yet keeps the wait open. A state that trunk gave
+  ///   names Trunk's reason for a removal.
   public func resolution(of pr: SwitchboardCore.PullRequest) -> String? {
     let ended: String? =
       switch (pr.state, kind) {
@@ -265,7 +266,9 @@ public struct Wait: Codable, Equatable, Sendable {
       // A status from before the wait can describe an earlier run of the PR.
       guard let at = pr.queueAt, at > created else { return nil }
       switch pr.queue {
-      case .removed?: return "Trunk removed it from the queue"
+      case .removed?:
+        guard let label = pr.queueLabel, let text = pr.queueText else { return "Trunk removed it from the queue" }
+        return "Trunk removed it from the queue (\(label)): \(text)"
       case .merged?: return "Trunk merged it"
       default: return nil
       }

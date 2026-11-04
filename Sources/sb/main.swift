@@ -581,8 +581,10 @@ case "poll":
     print(
       "read \(n("polled")) PRs and looked up \(n("lookups")) in \(n("requests")) requests for \(n("points")) points")
     if n("depotRequests") > 0 { print("read \(n("depotRuns")) Depot runs in \(n("depotRequests")) requests") }
+    if n("trunkRuns") > 0 { print("read \(n("trunkRuns")) PRs from trunk") }
   }
   if let error = result["depotError"]?.string { warn(error) }
+  if let error = result["trunkError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)
@@ -601,6 +603,7 @@ case "ping":
     print(
       "sbd \(result["version"]?.string ?? "") runs with pid \(result["pid"]?.int ?? 0), state in \(result["home"]?.string ?? "")"
     )
+    if let trunk = result["trunk"]?.string { print("trunk: \(trunk)") }
   }
 case "service":
   service(a)

@@ -65,6 +65,8 @@ public final class Service {
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
   var usageReader: UsageReader?
+  /// Why the Trunk poller couldn't read trunk, such as a missing login.
+  var trunkProblem: String?
   /// The account that `sb account use` chose, or nil before the first use.
   var chosenAccount: String?
   var parentNotices = ParentNotices()
@@ -130,7 +132,7 @@ public final class Service {
     // A summary that was running when sbd stopped never finished.
     for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
-    github = GitHubPoller(service: self, settings: config.github, depot: config.depot)
+    github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
     let reader = UsageReader(service: self, settings: config.usage)
     usageReader = reader
     quota = reader
@@ -208,7 +210,11 @@ public final class Service {
   private func dispatch(_ op: String, _ args: JSON) throws -> JSON {
     switch op {
     case "ping":
-      return ["pid": .number(Double(getpid())), "home": .string(home.path), "version": .string(Version.text)]
+      var ping: [String: JSON] = [
+        "pid": .number(Double(getpid())), "home": .string(home.path), "version": .string(Version.text),
+      ]
+      if let trunkProblem { ping["trunk"] = .string(trunkProblem) }
+      return .object(ping)
     case "ls":
       return try JSON(encoding: summaries().filter { $0.state != .notStarted })
     case "get":
