@@ -362,23 +362,20 @@ import Testing
   @Test func pendingWaitsForTheDecision() throws {
     let s = try setup()
     let id = try open(s)
-    let waiter = Process()
-    waiter.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sb")
-    waiter.arguments = ["send", "--pending", String(id), "--timeout", "30", "--json"]
-    waiter.environment = s.sbd.environment()
-    let out = Pipe()
-    waiter.standardOutput = out
-    waiter.standardError = FileHandle.nullDevice
-    try waiter.run()
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var waited: Result<CommandResult, Error>?
+    DispatchQueue(label: "pendingWaitsForTheDecision").async {
+      waited = Result { try s.sbd.run(["send", "--pending", String(id), "--timeout", "30", "--json"]) }
+      done.signal()
+    }
     // Reading the decision once takes long enough for the waiter to poll at least once.
     #expect(try pending(s.sbd, id).decision == .pending)
-    #expect(waiter.isRunning)
+    #expect(done.wait(timeout: .now()) == .timedOut)
 
     try decide(s.sbd, .cli, s.sender.id, id, allow: true)
 
-    let printed = out.fileHandleForReading.readDataToEndOfFile()
-    waiter.waitUntilExit()
-    let result = try decode(GroupSend.self, String(decoding: printed, as: UTF8.self))
+    #expect(done.wait(timeout: .now() + 30 * Instance.timeoutScale) == .success)
+    let result = try decode(GroupSend.self, try #require(waited).get().stdout)
     #expect(result.decision == .sent)
     #expect(Set((result.deliveries ?? []).map(\.session)) == [s.a.id, s.b.id])
   }

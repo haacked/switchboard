@@ -69,7 +69,9 @@ extension MCPToolServer {
         "group": group, "text": string("The message."),
         "pending": integer(
           "The id from an earlier send_group answer. Pass it without text to wait for that request's decision."),
-        "timeout": integer("The number of seconds to wait for the decision when `pending` is set. Default 30."),
+        "timeout": integer(
+          "The number of seconds to wait for the decision when `pending` is set. Default 30, at most \(MCPToolServer.maxPendingWait)."
+        ),
       ]),
     Tool(
       "spawn",

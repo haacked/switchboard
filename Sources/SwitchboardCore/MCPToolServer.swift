@@ -16,6 +16,15 @@ public struct MCPToolServer: Sendable {
 
   static let byClaude = JSON.string(Author.claude.rawValue)
 
+  /// The longest that `send_group` with `pending` waits, in seconds. An MCP
+  /// client stops waiting on a tool call long before an unbounded wait ends.
+  static let maxPendingWait = 120
+
+  /// The `timeout` argument, clamped to 0 through `maxPendingWait` seconds. Default 30.
+  static func pendingWait(_ timeout: JSON?) -> TimeInterval {
+    TimeInterval(min(max(timeout?.int ?? 30, 0), maxPendingWait))
+  }
+
   let client: Client
   /// The group that limits every tool, or nil for every session.
   let scope: (id: String, name: String)?
@@ -239,7 +248,7 @@ public struct MCPToolServer: Sendable {
   /// With `pending`, it waits for the decision on that card instead.
   private func sendGroup(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     if let id = args["pending"]?.int {
-      let status = try client.awaitGroupMessage(Int64(id), timeout: Double(args["timeout"]?.int ?? 30))
+      let status = try client.awaitGroupMessage(Int64(id), timeout: MCPToolServer.pendingWait(args["timeout"]))
       if let scoped, status.group != scoped.group.id {
         throw APIError("message \(id) is outside group \(scoped.group.name)")
       }
