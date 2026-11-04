@@ -1,7 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The right pane of the Queue: what the session needs, the buttons that
+/// The right pane of the Inbox: what the session needs, the buttons that
 /// answer it, its last reply, and a field that talks to the session itself.
 /// The terminals are behind a toggle.
 struct TriageDetail: View {

@@ -1265,7 +1265,7 @@ public final class Service {
       markedDone: s.done)
     out.parent = s.parent
     out.manager = s.manager
-    if Triage.mayQueue(out) { out.triage = Triage.item(e.facts, verdict) }
+    if Triage.mayHaveItem(out) { out.triage = Triage.item(e.facts, verdict) }
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir
