@@ -85,7 +85,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
   }
 
   @Test func aMessageInFlightOrQueuedHoldsItBack() {
-    #expect(blocker { $0.busy = true } == "a turn is running")
+    #expect(blocker { $0.busy = true } == "a message is on its way")
   }
 
   @Test func claudeThatIsStartingHoldsItBack() {
@@ -234,6 +234,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     input.session.manager = true
     input.facts.cards = [Card(event("PermissionRequest", now - hourMs, tool("Bash", ["command": "ls"])))]
     input.facts.turnRunning = true
+    input.busy = true
     input.facts.live = false
     input.facts.lastTouched = now - 5000
     input.facts.autoContinues = [now - 3 * minuteMs, now - 2 * minuteMs, now - minuteMs]
@@ -248,6 +249,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
       ("an open card", { $0.facts.cards = [] }),
       ("an open wait", { $0.session.waits = nil }),
       ("a turn is running", { $0.facts.turnRunning = false }),
+      ("a message is on its way", { $0.busy = false }),
       ("claude is starting or stopping", { $0.process = .stopped }),
       ("on screen", { $0.onScreen = false }),
       ("you touched it 5 s ago", { $0.facts.lastTouched = 0 }),

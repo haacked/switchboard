@@ -22,6 +22,7 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS snapshots (session TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
+    try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
   }
 
   deinit { sqlite3_close(db) }
@@ -99,6 +100,15 @@ public final class Store {
     try query("SELECT json FROM plans ORDER BY id", []) { row in
       try JSONCoding.decode(PlanDocument.self, from: row.text(0))
     }
+  }
+
+  public func decline(suggestion id: String) throws {
+    try run("INSERT OR IGNORE INTO declined_suggestions (id) VALUES (?)", [id])
+  }
+
+  /// The ids of the group suggestions that the user declined.
+  public func declinedSuggestions() throws -> Set<String> {
+    Set(try query("SELECT id FROM declined_suggestions", []) { $0.text(0) })
   }
 
   /// Saves the Claude sessions that sbd offers to import, in one transaction.

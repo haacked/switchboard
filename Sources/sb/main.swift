@@ -99,9 +99,10 @@ let usage = """
     group rm <group>              remove the group; its sessions become ungrouped
     group move <session>... --to <group> | --ungrouped
     group note <group> <text>
-    group suggest [--accept <id>] list groups suggested from branch names and PR
-                                  titles, or accept one. A session that you moved
-                                  to Ungrouped is never suggested
+    group suggest [--accept <id> | --decline <id>]
+                                  list groups suggested from dependencies, branch
+                                  names, and PR titles, or accept or decline one.
+                                  A session that you placed by hand never moves
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]
@@ -169,7 +170,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept",
+      "--group", "--to", "--note", "--accept", "--decline",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

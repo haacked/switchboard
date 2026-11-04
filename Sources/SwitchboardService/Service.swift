@@ -1281,16 +1281,11 @@ public final class Service {
 
   // MARK: Settings
 
-  static let hookEvents = [
-    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-    "PermissionRequest", "Notification", "Stop", "StopFailure", "SubagentStart", "SubagentStop",
-  ]
-
   /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
   /// with no output when sbd is down, so the session shows no hook errors.
   private func writeClaudeSettings() throws {
     var hooks: [String: JSON] = [:]
-    for event in Service.hookEvents {
+    for event in SessionFacts.hookKinds {
       let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
       let handler: JSON = ["type": "command", "command": .string("\(shellQuote(sbPath)) hook"), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]

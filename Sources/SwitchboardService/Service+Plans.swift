@@ -108,6 +108,21 @@ extension Service {
     updatePlan(id) { $0.error = "\(error)" }
   }
 
+  /// Moves the plans of a group that another group absorbed into that group.
+  /// A plan whose document the group already has is detached, so the group
+  /// keeps one plan per document.
+  func movePlans(from old: String, to new: String) throws {
+    for plan in plans.values where plan.group == old {
+      if plans.values.contains(where: { $0.group == new && $0.source == plan.source }) {
+        try detachPlans { $0.id == plan.id }
+      } else {
+        var moved = plan
+        moved.group = new
+        try savePlan(moved)
+      }
+    }
+  }
+
   /// Detaches the plans of a group or a session that is going away.
   func detachPlans(where owned: (PlanDocument) -> Bool) throws {
     for plan in plans.values where owned(plan) {

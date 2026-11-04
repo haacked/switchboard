@@ -90,6 +90,27 @@ import Testing
     #expect(try sbd.get(s.id).claudePid != nil)
   }
 
+  /// The clock resolves the wait. The session's own SessionEnd stays the last event that moves `lastActivity`.
+  @Test func aDateWaitThatNotifiesKeepsTheLastActivity() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h", "--then", "notify")
+    try sbd.waitFor("the stop's SessionEnd", timeout: 10) {
+      try sbd.events(s.id).contains { $0.kind == "SessionEnd" }
+    }
+    let before = try sbd.get(s.id).lastActivity
+    let wait = try #require(try sbd.events(s.id).last { $0.kind == "wait" })
+    #expect(before >= wait.t)
+
+    try sbd.advanceClock(2 * WaitTests.hourMs)
+    let resolved = try sbd.waitFor(
+      "the wait-resolved event", fetch: { try sbd.events(s.id).last { $0.kind == "wait-resolved" } },
+      until: { _ in true })
+
+    #expect(resolved.t > before)
+    #expect(try sbd.get(s.id).lastActivity == before)
+  }
+
   @Test func aDoneSessionsWaitsDontResumeIt() throws {
     let sbd = try Instance()
     let s = try idleSession(sbd)
