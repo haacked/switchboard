@@ -64,11 +64,13 @@ extension MCPToolServer {
       ["session": session, "text": string("The message.")], required: ["session", "text"]),
     Tool(
       "send_group",
-      "Sends a message to every session in a group except the calling session. Leave `targets` out on the first call: it sends nothing and returns the targets. Show that list to the user. After the user confirms it, call again with the same text and the confirmed ids as `targets`. It refuses when the group's sessions changed since the list.",
+      "Asks to send a message to every session in a group except the calling session. It sends nothing itself. Switchboard shows the user the message and its targets, and the user sends or cancels it there. The answer has a `pending` id. Call again with only `pending` to wait up to `timeout` seconds for the decision. The decision is pending, sent, cancelled, or expired. Pending means the user has not decided yet, and the other three are final. A call with the same text opens a second request.",
       [
         "group": group, "text": string("The message."),
-        "targets": strings("The ids of the sessions that the user confirmed."),
-      ], required: ["text"]),
+        "pending": integer(
+          "The id from an earlier send_group answer. Pass it without text to wait for that request's decision."),
+        "timeout": integer("The number of seconds to wait for the decision when `pending` is set. Default 30."),
+      ]),
     Tool(
       "spawn",
       "Starts a session on a new branch in a new worktree of a repository, or with `followup` adds it as a follow-up that has not started. The calling session becomes its parent. The prompt is the new session's whole brief, so make it self-contained.",

@@ -145,12 +145,23 @@ public struct GroupSend: Codable, Equatable, Sendable {
   /// False when the request was not confirmed, so nothing was sent.
   public var sent: Bool
   public var deliveries: [Result]?
+  /// The id of the card that waits for the user's decision, for a request from inside Claude.
+  public var pending: Int64?
+  public var decision: SendDecision?
+  /// When the pending message expires, in ms since the epoch.
+  public var expires: Int64?
 
-  public init(group: String, targets: [Target], sent: Bool, deliveries: [Result]? = nil) {
+  public init(
+    group: String, targets: [Target], sent: Bool, deliveries: [Result]? = nil, pending: Int64? = nil,
+    decision: SendDecision? = nil, expires: Int64? = nil
+  ) {
     self.group = group
     self.targets = targets
     self.sent = sent
     self.deliveries = deliveries
+    self.pending = pending
+    self.decision = decision
+    self.expires = expires
   }
 }
 

@@ -47,6 +47,8 @@ extension Service {
       return ["declined": .string(id)]
     case "send-group":
       return try JSON(encoding: sendGroup(args))
+    case "send-pending":
+      return try JSON(encoding: groupMessageStatus(args))
     default:
       throw APIError("unknown request \(op)")
     }
@@ -162,9 +164,9 @@ extension Service {
   /// Sends the text to every member of the group that can take a message,
   /// only when `confirmed` is true. Without it, it returns the targets. A
   /// confirmed send names the targets that the user confirmed. It refuses
-  /// when the group's targets changed since then. A member's failure doesn't
-  /// stop the others. The message can't answer a member's deferred question,
-  /// because the user confirmed the group and not each session's question.
+  /// when the group's targets changed since then. A confirmed request with
+  /// `from` comes from inside Claude, so it opens a card that lists the
+  /// current targets for the user's decision, and sends nothing.
   private func sendGroup(_ args: JSON) throws -> GroupSend {
     let id = try lookupGroup(args)
     guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
@@ -172,17 +174,24 @@ extension Service {
     let targets = members(id).filter { !$0.waitsToStart && $0.id != from }
     let list = targets.map { GroupSend.Target(id: $0.id, name: $0.name) }
     guard args["confirmed"]?.bool == true else { return GroupSend(group: id, targets: list, sent: false) }
+    if let from { return try openGroupMessage(from: from, group: id, text: text, targets: list) }
     let confirmed = args["targets"]?.array?.compactMap(\.string) ?? []
     guard confirmed.sorted() == targets.map(\.id).sorted() else {
       throw APIError("the sessions to send to changed since they were confirmed. List them again, and confirm again")
     }
-    let results = targets.map { s in
+    return GroupSend(group: id, targets: list, sent: true, deliveries: deliver(text, to: targets.map(\.id)))
+  }
+
+  /// Sends the text to each session. A session's failure doesn't stop the
+  /// others. The message can't answer a session's deferred question, because
+  /// the user confirmed the group and not each session's question.
+  func deliver(_ text: String, to ids: [String]) -> [GroupSend.Result] {
+    ids.map { id in
       do {
-        return GroupSend.Result(session: s.id, delivery: try send(s.id, text, byUser: false))
+        return GroupSend.Result(session: id, delivery: try send(id, text, byUser: false))
       } catch {
-        return GroupSend.Result(session: s.id, error: "\(error)")
+        return GroupSend.Result(session: id, error: "\(error)")
       }
     }
-    return GroupSend(group: id, targets: list, sent: true, deliveries: results)
   }
 }
