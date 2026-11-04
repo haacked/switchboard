@@ -302,6 +302,25 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     #expect(try sbd.get(s.id).pr?.queueLabel == "Cancelled")
   }
 
+  @Test func aRemovalKeepsTrunksLabelAfterTheCommentsShowIt() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withTrunk(github)
+    let s = try posthogSession(sbd)
+    try queue(github)
+    try sbd.trunkPrints(122953, trunkStatus(122953, [submitted, pending, (-60, "✖ Cancelled", cancelledText)]))
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.queueLabel == "Cancelled")
+    github.edit(comment: try trunkComment(github), body: "Removed from the merge queue", at: stamp(-30))
+
+    let after = try sbd.poll(all: true)
+
+    #expect(after["trunkRuns"]?.int == 0)
+    let pr = try #require(try sbd.get(s.id).pr)
+    #expect(pr.queue == .removed)
+    #expect(pr.queueLabel == "Cancelled")
+    try sbd.waitFor(s.id, "the removal reason") { $0.reason.hasSuffix("from its queue (Cancelled)") }
+  }
+
   @Test func aQueueWaitIgnoresATrunkRemovalFromBeforeItWasSet() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withTrunk(github)
@@ -382,8 +401,9 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     case .failed: try sbd.trunkPrints(122953, "", exit: 1)
     }
 
-    try sbd.poll()
+    let result = try sbd.poll()
 
+    if broken == .missing { #expect(result["trunkError"]?.string?.contains("can't find trunk") == true) }
     let pr = try #require(try sbd.get(s.id).pr)
     #expect(pr.queue == .queued)
     #expect(pr.queueLabel == nil)
@@ -406,6 +426,39 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     #expect(pr.trunkLoginNeeded == true)
     #expect(pr.queue == .queued)
     #expect(try sbd.sb("get", s.id).contains("; trunk login needed"))
+  }
+
+  @Test func withoutALoginTheOtherQueuedPRsGetTheSameAnswerWithoutARun() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withTrunk(github)
+    let s = try posthogSession(sbd)
+    try queue(github)
+    try queueOpen122179(github)
+    try sbd.sb("wait", s.id, "--kind", "queue", "--target", "#122179")
+    try sbd.trunkPrints(122953, notLoggedIn, exit: 1)
+    try sbd.trunkPrints(122179, notLoggedIn, exit: 1)
+
+    let result = try sbd.poll()
+
+    #expect(result["trunkRuns"]?.int == 1)
+    #expect(sbd.trunkCalls().count == 1)
+    #expect(try sbd.get(s.id).pr?.trunkLoginNeeded == true)
+  }
+
+  @Test func aMissingLoginClearsOnceNoPRIsInTheQueue() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withTrunk(github)
+    _ = try posthogSession(sbd)
+    try queue(github)
+    try sbd.trunkPrints(122953, notLoggedIn, exit: 1)
+    try sbd.poll()
+    #expect(try sbd.client.call("ping")["trunk"] != nil)
+    github.edit(comment: try trunkComment(github), body: "Removed from the merge queue", at: stamp(-30))
+
+    let result = try sbd.poll(all: true)
+
+    #expect(result["trunkError"] == nil)
+    #expect(try sbd.client.call("ping")["trunk"] == nil)
   }
 
   @Test func aReadWithALoginClearsTheMissingLogin() throws {

@@ -12,10 +12,11 @@ final class TrunkPoller {
   /// The last result for each PR, by node id, and when its read started.
   private var reads: [String: (result: TrunkTimeline.Result, at: Int64)] = [:]
   /// Why the last read couldn't use trunk, such as a missing login. A read
-  /// that trunk answers clears it.
+  /// that prints a timeline or trunk's not-found error clears it. A poll with
+  /// no candidates clears it too.
   private(set) var problem: String?
 
-  static let notLoggedIn =
+  static let loginNeededMessage =
     "trunk is not signed in, so the merge queue state comes from Trunk's comments. Run `trunk login`."
 
   /// A PR that the queue may hold, and a checkout of its repository.
@@ -35,14 +36,15 @@ final class TrunkPoller {
   func result(_ prId: String) -> TrunkTimeline.Result? { reads[prId]?.result }
 
   /// Reads each candidate that is due, or every candidate with `all`, and
-  /// forgets the PRs that are no longer candidates. A candidate whose comments
-  /// changed after its last read is due at once, because that read can
-  /// describe an earlier run of the PR. Once trunk reports no login, the other
-  /// due PRs get the same answer without a run. Returns how many times trunk
-  /// ran.
-  func poll(_ candidates: [Candidate], all: Bool, now: Int64) -> Int {
+  /// forgets the PRs that are neither candidates nor in `keeping`. A
+  /// candidate whose comments changed after its last read is due at once,
+  /// because that read can describe an earlier run of the PR. Once trunk
+  /// reports no login, the other due PRs get the same answer without a run.
+  /// Returns how many times trunk ran.
+  func poll(_ candidates: [Candidate], keeping: Set<String> = [], all: Bool, now: Int64) -> Int {
     let ids = Set(candidates.map(\.prId))
-    reads = reads.filter { ids.contains($0.key) }
+    reads = reads.filter { ids.contains($0.key) || keeping.contains($0.key) }
+    if candidates.isEmpty { problem = nil }
     let due = candidates.filter { c in
       let last = reads[c.prId]?.at
       return all || GitHub.elapsed(since: last, intervalMs, now: now) || (c.changedAt ?? 0) > (last ?? 0)
@@ -59,7 +61,10 @@ final class TrunkPoller {
         reads[c.prId] = (.notLoggedIn, now)
         continue
       }
-      guard let result = read(trunk, c, now: now) else { continue }
+      guard let result = read(trunk, c, now: now) else {
+        reads[c.prId] = nil
+        continue
+      }
       runs += 1
       reads[c.prId] = (result, now)
       loggedOut = result == .notLoggedIn
@@ -81,7 +86,7 @@ final class TrunkPoller {
     case .found, .notFound:
       problem = nil
     case .notLoggedIn:
-      report(TrunkPoller.notLoggedIn)
+      report(TrunkPoller.loginNeededMessage)
     case .unrecognized(let text):
       logLine("trunk: merge status \(c.number) in \(c.cwd) printed \(oneLine(text, max: 200))")
     }
