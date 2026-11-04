@@ -115,6 +115,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
     ("https://github.com/PostHog/posthog/pull/1204#discussion_r1", posthog1204),
     ("https://github.com/PostHog/posthog/pull/1204?x=1", posthog1204),
     ("http://github.com/PostHog/posthog/pull/1204", posthog1204),
+    ("pr:1204", pr1204), ("pr:PostHog/posthog#1204", posthog1204),
   ])
   func readsEachForm(_ text: String, _ pr: Wait.PullRequest) {
     #expect(Wait.PullRequest(parsing: text) == pr)
@@ -124,7 +125,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
     "", "abc", "#", "0", "-3", "12a", "owner#12", "a/b/c#1", "https://github.com/PostHog/posthog/issues/12",
     "#0", "PostHog/posthog#0", "PostHog/posthog#-3", "PostHog/posthog#", "/posthog#12", "PostHog/#12",
     "https://github.com/PostHog/posthog/pull/", "https://github.com/PostHog/posthog/pull/0",
-    "https://github.com/PostHog/posthog/pull/12a", "https://gitlab.com/PostHog/posthog/pull/12",
+    "https://github.com/PostHog/posthog/pull/12a", "https://gitlab.com/PostHog/posthog/pull/12", "pr:", "pr:abc",
   ])
   func refusesWhatIsNotAPR(_ text: String) {
     #expect(Wait.PullRequest(parsing: text) == nil)

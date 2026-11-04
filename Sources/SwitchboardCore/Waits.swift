@@ -69,9 +69,11 @@ public struct Wait: Codable, Equatable, Sendable {
     }
 
     /// Reads `1204`, `#1204`, `owner/name#1204`, or a PR URL such as
-    /// `https://github.com/owner/name/pull/1204/files`.
+    /// `https://github.com/owner/name/pull/1204/files`. A leading `pr:`, as
+    /// in `pr:1204`, is dropped.
     public init?(parsing text: String) {
       var number = text.trimmingCharacters(in: .whitespaces)
+      if number.hasPrefix("pr:") { number.removeFirst(3) }
       if let url = URL(string: number), url.scheme == "https" || url.scheme == "http" {
         let parts = url.path.split(separator: "/").map(String.init)
         guard url.host?.lowercased() == "github.com", parts.count >= 4, parts[2] == "pull" else { return nil }
