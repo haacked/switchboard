@@ -66,7 +66,16 @@ private func followup(_ repository: String?) -> Followup {
 
     let labels = RepoLabels.labels(sessions)
 
-    #expect(labels["none"] == nil)
+    #expect(labels == ["a": "alpha", "b": "beta"])
+  }
+
+  @Test func countsAStartedFollowupWithoutAPRAndAWaitingFollowupForItsRepoAsOneRepo() {
+    let sessions = [
+      session("started", repo: "/Users/me/dev/haacked/switchboard", followup: followup("haacked/switchboard")),
+      session("waiting", followup: followup("haacked/switchboard")),
+    ]
+
+    #expect(RepoLabels.labels(sessions).isEmpty)
   }
 
   @Test func labelsEverySessionWithARepoOnceASecondRepoIsPresent() {
@@ -202,6 +211,7 @@ private func followup(_ repository: String?) -> Followup {
     ("/Users/me/a/switchboard", "/Users/me/b/switchboard", "a/switchboard", "b/switchboard"),
     ("/Users/me/x/a/switchboard", "/Users/me/y/a/switchboard", "x/a/switchboard", "y/a/switchboard"),
     ("/Users/me/dev/switchboard", "/Users/me/old/dev/switchboard", "me/dev/switchboard", "old/dev/switchboard"),
+    ("/Users/me/a/Switchboard", "/Users/me/b/switchboard", "a/Switchboard", "b/switchboard"),
   ])
   func showsTheShortestUniqueTrailingPathForFoldersWithTheSameName(
     _ first: String, _ second: String, _ firstLabel: String, _ secondLabel: String
@@ -275,16 +285,28 @@ private func followup(_ repository: String?) -> Followup {
 
     let labels = RepoLabels.labels(sessions)
 
-    #expect(labels["fork"] == "…acked-long-owner/posthog-repo")
+    #expect(labels["fork"] == "haacked-long-o…/posthog-repo")
   }
 
-  @Test func capsALabelAtThirtyCharactersInAll() {
+  @Test func keepsTheOwnerOfACappedForkLabel() {
+    let sessions = [
+      session("fork", pr: "haacked/terraform-provider-posthog-extra"),
+      session("upstream", pr: "PostHog/terraform-provider-posthog-extra"),
+    ]
+
+    let labels = RepoLabels.labels(sessions)
+
+    #expect(
+      labels == ["fork": "haacked/…rovider-posthog-extra", "upstream": "PostHog/…rovider-posthog-extra"])
+  }
+
+  @Test func keepsTheParentOfACappedFolderLabel() {
     let name = "abcdefghijklmnopqrstuvwxyz0123456789"
-    let sessions = [session("a", repo: "/Users/me/dev/\(name)"), session("o", repo: other)]
+    let sessions = [session("a", repo: "/Users/me/a/\(name)"), session("b", repo: "/Users/me/b/\(name)")]
 
-    let label = RepoLabels.labels(sessions)["a"]
+    let labels = RepoLabels.labels(sessions)
 
-    #expect(label?.count == 30)
+    #expect(labels == ["a": "a/…jklmnopqrstuvwxyz0123456789", "b": "b/…jklmnopqrstuvwxyz0123456789"])
   }
 
   @Test func namesAFolderByItsLastComponentEvenWhenItsPRNamesItDifferently() {
