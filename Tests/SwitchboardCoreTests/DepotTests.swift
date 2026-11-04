@@ -353,7 +353,7 @@ private let heldByTrunk: [TrunkQueueState] = [.pending, .testing, .passed, .fail
 
   /// A ci wait is about the PR's own checks, so Trunk's queue doesn't change its outcome.
   @Test(arguments: [TrunkQueueState.submitted] + heldByTrunk)
-  func depotFailureResolvesACIWaitWhileTrunksQueueHoldsThePR(_ queue: TrunkQueueState) {
+  func depotFailureResolvesACIWaitWhileTrunkHasThePR(_ queue: TrunkQueueState) {
     #expect(
       ci(withDepot(samplePR(checks: "PENDING", queue: queue), sampleDepot(["a"]))) == "Depot CI failed: a (run r1)")
   }

@@ -55,7 +55,7 @@ extension Attention {
     // A failed Depot job blocks the merge. Trunk adds a PR to its queue only
     // after its required checks pass, so a failed job on a queued PR is one
     // that the merge does not need.
-    if !pr.inTrunksQueue, let run = pr.depotFailure {
+    if pr.queue?.isQueued != true, let run = pr.depotFailure {
       let reason = "fix Depot CI on \(n): "
       return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
     }
@@ -91,16 +91,9 @@ extension Attention {
   /// Trunk acts on it. A PR event does not count as session activity, so
   /// without this the idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
-    guard let pr = facts.pr, pr.state == .open, !pr.draft, !pr.inTrunksQueue else { return false }
+    guard let pr = facts.pr, pr.state == .open, !pr.draft, pr.queue?.isQueued != true else { return false }
     return pr.ciFailed || (pr.reviewRequests == [] && pr.queue == nil)
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
-}
-
-extension PullRequest {
-  /// Whether Trunk added the PR to its queue. A submitted PR is not in the
-  /// queue yet. Trunk adds it once its required checks pass. A failed Depot
-  /// job can be one of those checks.
-  fileprivate var inTrunksQueue: Bool { queue.map { $0.isQueued && $0 != .submitted } ?? false }
 }
