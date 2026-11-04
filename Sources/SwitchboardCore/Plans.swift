@@ -167,8 +167,10 @@ public struct PlanRow: Codable, Equatable, Sendable {
     [number.map { "#\($0)" }, item].compactMap { $0 }.joined(separator: " ")
   }
 
-  /// What `sb plan followup` takes to name the row: its `#`, else its item.
-  public var ref: String { number ?? item ?? "" }
+  /// What `sb plan followup` takes to name the row: its `#`, else its item,
+  /// else its text, whichever names only this row. `PlanSummary` fills it in
+  /// for the rows it lists, and the stored record leaves it nil.
+  public var ref: String?
 }
 
 /// A plan attached to a group or a session, with what sbd last read from it.
@@ -273,7 +275,11 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
     links = plan.links.count
     rows = plan.rows.count
     outOfDate = plan.rows.filter(\.outOfDate)
-    canFollowUp = plan.rows.filter { $0.notStarted && $0.followup == nil }
+    canFollowUp = plan.rows.filter { $0.notStarted && $0.followup == nil }.map { row in
+      var row = row
+      row.ref = Plans.ref(of: row, in: plan.rows)
+      return row
+    }
   }
 }
 
@@ -348,7 +354,7 @@ public enum Plans {
       }
       let links = links(in: line)
       let row = cells(line)
-      func cell(_ index: Int?) -> String? { index.flatMap { $0 < row.count ? row[$0] : nil } }
+      func cell(_ index: Int?) -> String? { index.flatMap { $0 < row.count && !row[$0].isEmpty ? row[$0] : nil } }
       let item = cell(columns?.item)
       let status = cell(columns?.status)
       guard !links.isEmpty || notStarted(item: item, status: status) else { continue }
@@ -414,13 +420,15 @@ public enum Plans {
       && cells.allSatisfy { separatorCell.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
   }
 
-  /// The row that `ref` names: by its `#` cell, else by its item, else by
-  /// a prefix of its item that no other row has. Items compare without case.
+  /// The row that `ref` names: by its whole text, else by its `#` cell, else
+  /// by its item, else by a prefix of its item that no other row has. Items
+  /// compare without case.
   public static func row(_ ref: String, in rows: [PlanRow]) throws -> PlanRow {
     let key = ref.trimmingCharacters(in: .whitespaces)
     let number = key.hasPrefix("#") ? String(key.dropFirst()) : key
     let item = key.lowercased()
     let tries: [(PlanRow) -> Bool] = [
+      { $0.text == key },
       { $0.number == number },
       { $0.item?.lowercased() == item },
       { $0.item?.lowercased().hasPrefix(item) == true },
@@ -433,6 +441,13 @@ public enum Plans {
       }
     }
     throw APIError("the plan has no row \(key) that links a PR or reads Not started")
+  }
+
+  /// The first of the row's `#` and item that `row(_:in:)` resolves to this
+  /// row alone, else the row's text. A `#` that two tables share names more
+  /// than one row.
+  static func ref(of row: PlanRow, in rows: [PlanRow]) -> String {
+    [row.number, row.item].compactMap { $0 }.first { (try? Plans.row($0, in: rows))?.text == row.text } ?? row.text
   }
 
   /// The text that `splice` puts between the markers for this table.

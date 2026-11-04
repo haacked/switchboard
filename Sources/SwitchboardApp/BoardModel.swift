@@ -334,12 +334,21 @@ final class BoardModel: ObservableObject {
       finally: { self.answeringSuggestions.remove(id) })
   }
   /// Makes a follow-up from a plan row that reads Not started. The row's
-  /// button stays off until sbd answers.
+  /// button stays off until sbd answers. `then` removes the row when sbd
+  /// makes the follow-up, so its button does not turn back on before the
+  /// refresh lists the plan again.
   func followUp(plan: String, row: String) {
     let key = followUpKey(plan: plan, row: row)
     guard followingUp.insert(key).inserted else { return }
     perform(
-      "plan-followup", ["plan": .string(plan), "row": .string(row)], finally: { self.followingUp.remove(key) })
+      "plan-followup", ["plan": .string(plan), "row": .string(row)],
+      then: { _ in
+        for g in self.groups.indices {
+          guard let p = self.groups[g].plans?.firstIndex(where: { $0.id == plan }) else { continue }
+          self.groups[g].plans?[p].canFollowUp.removeAll { ($0.ref ?? $0.text) == row }
+        }
+      },
+      finally: { self.followingUp.remove(key) })
   }
 
   func isFollowingUp(plan: String, row: String) -> Bool { followingUp.contains(followUpKey(plan: plan, row: row)) }

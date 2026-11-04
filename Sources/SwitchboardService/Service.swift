@@ -1259,13 +1259,13 @@ public final class Service {
   // MARK: Summaries
 
   func summaries() -> [SessionSummary] {
-    let made = planRowFollowups()
-    return entries.keys.map { summary($0, planRows: made) }.sorted {
+    let rowFollowups = planRowFollowups()
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups) }.sorted {
       $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
     }
   }
 
-  func summary(_ id: String, planRows: PlanRowFollowups? = nil) -> SessionSummary {
+  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
     let s = e.session
@@ -1286,7 +1286,7 @@ public final class Service {
     out.cleanup = e.facts.cleanup
     out.group = s.group
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
-    out.plans = planSummaries(session: s, planRows)
+    out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

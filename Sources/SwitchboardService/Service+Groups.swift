@@ -118,9 +118,9 @@ extension Service {
     entries.values.map(\.session).filter { $0.group == group }.sorted { $0.id < $1.id }
   }
 
-  private func groupSummary(_ id: String, _ made: PlanRowFollowups? = nil) -> GroupSummary {
+  private func groupSummary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> GroupSummary {
     var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
-    summary.plans = planSummaries(group: id, made)
+    summary.plans = planSummaries(group: id, rowFollowups: rowFollowups)
     return summary
   }
 
@@ -128,8 +128,8 @@ extension Service {
     let sorted = groups.values.sorted { ($0.name, $0.id) < ($1.name, $1.id) }
     let ungrouped = entries.values.map(\.session).filter { groupable($0) && $0.group.map { groups[$0] == nil } ?? true }
       .map(\.id).sorted()
-    let made = planRowFollowups()
-    return GroupList(groups: sorted.map { groupSummary($0.id, made) }, ungrouped: ungrouped)
+    let rowFollowups = planRowFollowups()
+    return GroupList(groups: sorted.map { groupSummary($0.id, rowFollowups: rowFollowups) }, ungrouped: ungrouped)
   }
 
   func groupSuggestions() throws -> [GroupSuggestion] {

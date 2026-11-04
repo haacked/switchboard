@@ -326,7 +326,7 @@ private func table(_ header: String, _ row: String) -> String {
   @Test func followupStoredByAnOlderSbdDecodesWithoutAPlanRow() throws {
     let f = try JSONCoding.decode(Followup.self, from: #"{"prompt":"Docs","trigger":{"kind":"manual"}}"#)
 
-    #expect(!(f.planRow != nil))
+    #expect(f.planRow == nil)
   }
 
   @Test func readLeavesTheFollowupNil() {
@@ -392,5 +392,41 @@ private func table(_ header: String, _ row: String) -> String {
 
   @Test func rowsCountIncludesTheNotStartedRows() {
     #expect(PlanSummary(plan()).rows == 3)
+  }
+
+  /// Two work tables that each number from 1 share `#` 2, and a row can
+  /// leave its `#` blank. Each listed row's ref names that row alone.
+  @Test func refOfEachListedRowNamesThatRow() throws {
+    var plan = plan()
+    let phase2 =
+      "| # | Item | Status |\n| --- | --- | --- |\n| 1 | Alerts | Not started |\n| 2 | Exports | Not started |\n"
+    let blank = "| # | Item | Status |\n| --- | --- | --- |\n|  | Cleanup | Not started |\n"
+    plan.update(from: workTable + "\n\n" + phase2 + "\n" + blank, now: 2)
+
+    let listed = PlanSummary(plan).canFollowUp
+    #expect(listed.map(\.item) == ["Docs", "Alerts", "Exports", "Cleanup"])
+    #expect(listed.map(\.ref) == ["Docs", "Alerts", "Exports", "Cleanup"])
+    for row in listed { #expect(try Plans.row(try #require(row.ref), in: plan.rows).text == row.text) }
+  }
+
+  @Test func refOfARowWithAUniqueNumberIsTheNumber() {
+    #expect(PlanSummary(plan()).canFollowUp.map(\.ref) == ["2", "4"])
+  }
+
+  @Test func blankNumberCellParsesToNil() throws {
+    let row = try #require(rows("| # | Item | Status |\n| --- | --- | --- |\n|  | Cleanup | Not started |\n").first)
+
+    #expect(row.number == nil)
+  }
+
+  @Test func rowTextNamesTheRowWhenItsNumberIsShared() throws {
+    let a = PlanRow(text: "| 2 | Docs | Not started |", changed: 0, prs: [])
+    let b = PlanRow(text: "| 2 | Exports | Not started |", changed: 0, prs: [])
+    var rows = [a, b]
+    setFields(&rows[0], number: "2", item: "Docs", status: "Not started")
+    setFields(&rows[1], number: "2", item: "Exports", status: "Not started")
+
+    #expect(try Plans.row(b.text, in: rows).text == b.text)
+    #expect(throws: APIError.self) { try Plans.row("2", in: rows) }
   }
 }

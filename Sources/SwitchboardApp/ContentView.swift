@@ -446,7 +446,7 @@ struct PlanFollowupList: View {
   var body: some View {
     ForEach(plans) { plan in
       ForEach(plan.canFollowUp, id: \.text) { row in
-        let ref = row.ref
+        let ref = row.ref ?? row.text
         HStack(alignment: .firstTextBaseline, spacing: 4) {
           Text(row.label).font(.caption).lineLimit(2).help(row.text)
           Spacer(minLength: 0)

@@ -16,8 +16,8 @@ extension Service {
         let session = try lookup(args)
         list = list.filter { $0.session == session }
       }
-      let made = planRowFollowups()
-      return try JSON(encoding: list.map { PlanSummary(reported($0, made)) })
+      let rowFollowups = planRowFollowups()
+      return try JSON(encoding: list.map { PlanSummary(reported($0, rowFollowups)) })
     case "plan-get":
       return try JSON(encoding: reported(plans[try lookupPlan(args)]!, planRowFollowups()))
     case "plan-detach":
@@ -163,25 +163,27 @@ extension Service {
 
   /// The generated table for the plan.
   func planTable(_ plan: PlanDocument) -> String {
-    let made = planRowFollowups()
-    return Plans.table(planSessions(plan).map { summary($0.id, planRows: made) })
+    let rowFollowups = planRowFollowups()
+    return Plans.table(planSessions(plan).map { summary($0.id, rowFollowups: rowFollowups) })
   }
 
-  /// The plans of a group, or nil when it has none. `made` defaults to
+  /// The plans of a group, or nil when it has none. `rowFollowups` defaults to
   /// `planRowFollowups()`, which a caller that summarizes many groups or
   /// sessions computes once and passes.
-  func planSummaries(group: String, _ made: PlanRowFollowups? = nil) -> [PlanSummary]? {
-    nonEmpty(plans.values.filter { $0.group == group }, made)
+  func planSummaries(group: String, rowFollowups: PlanRowFollowups? = nil) -> [PlanSummary]? {
+    nonEmpty(plans.values.filter { $0.group == group }, rowFollowups: rowFollowups)
   }
 
   /// The plans attached to the session and to its group, or nil when there are none.
-  func planSummaries(session s: Session, _ made: PlanRowFollowups? = nil) -> [PlanSummary]? {
-    nonEmpty(plans.values.filter { $0.session == s.id || ($0.group != nil && $0.group == s.group) }, made)
+  func planSummaries(session s: Session, rowFollowups: PlanRowFollowups? = nil) -> [PlanSummary]? {
+    nonEmpty(
+      plans.values.filter { $0.session == s.id || ($0.group != nil && $0.group == s.group) }, rowFollowups: rowFollowups
+    )
   }
 
-  private func nonEmpty(_ list: [PlanDocument], _ made: PlanRowFollowups?) -> [PlanSummary]? {
+  private func nonEmpty(_ list: [PlanDocument], rowFollowups: PlanRowFollowups?) -> [PlanSummary]? {
     guard !list.isEmpty else { return nil }
-    let made = made ?? planRowFollowups()
-    return list.sorted { $0.id < $1.id }.map { PlanSummary(reported($0, made)) }
+    let rowFollowups = rowFollowups ?? planRowFollowups()
+    return list.sorted { $0.id < $1.id }.map { PlanSummary(reported($0, rowFollowups)) }
   }
 }

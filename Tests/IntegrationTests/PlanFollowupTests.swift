@@ -202,6 +202,19 @@ extension Instance {
     #expect(out.contains("prompt:  Docs"))
   }
 
+  /// A row's item comes from text that someone else may have written, so the
+  /// printed prompt shows its control characters as escapes.
+  @Test func printedPromptEscapesControlCharacters() throws {
+    let sbd = try Instance.withGitHub(try FakeGitHub())
+    let row = "| 2 | Docs\u{1b}[2K | Not started |"
+    let (_, id) = try sbd.flagsWithDocument(document.replacingOccurrences(of: docsRow, with: row))
+
+    let out = try sbd.sb(Spec.command(id, "2"))
+
+    #expect(!out.contains("\u{1b}"))
+    #expect(out.contains("prompt:  Docs\\u{1b}[2K"))
+  }
+
   // MARK: refusals
 
   @Test func rowWithAPRLinkIsRefused() throws {
@@ -211,6 +224,7 @@ extension Instance {
     let r = try sbd.run(Spec.command(id, "1"))
 
     #expect(r.status != 0)
+    #expect(r.stderr.contains("posthog#122953"))
     #expect(try sbd.followups().isEmpty)
   }
 
@@ -273,6 +287,7 @@ extension Instance {
     | 4 | Dashboards | Not started |
     | 5 | Write the runbook | Not started |
     | 7 | 2FA rollout | Not started |
+    | 8 | Alerts | Not started |
 
     """
 
@@ -286,6 +301,8 @@ extension Instance {
     // The whole item text, compared without case.
     ("DASHBOARDS", "Dashboards"),
     ("write", "Write the runbook"),
+    // A leading # names the row by its `#` cell.
+    ("#8", "Alerts"),
   ]
 
   @Test func rowIsNamedByNumberThenItemThenUniquePrefix() throws {
@@ -437,6 +454,10 @@ extension Instance {
     let plan = try #require(got.plans?.first { $0.id == id })
     #expect(plan.canFollowUp.map(\.text) == [docsRow])
     #expect(try sbd.sb("get", s.id).contains(Spec.line(id, "2", "Docs")))
+
+    _ = try sbd.planFollowup(id, "2")
+    let after = try JSONCoding.decode(SessionSummary.self, from: try sbd.sb("get", "--json", s.id))
+    #expect(after.plans?.first { $0.id == id }?.canFollowUp.isEmpty == true)
   }
 
   @Test func groupLsShowsCanFollowUp() throws {
@@ -447,6 +468,39 @@ extension Instance {
 
     #expect(plan.canFollowUp.map(\.text) == [docsRow])
     #expect(try sbd.sb("group", "ls").contains(Spec.line(id, "2", "Docs")))
+
+    _ = try sbd.planFollowup(id, "2")
+    let after = try #require(try sbd.groupNamed("Flags").plans?.first { $0.id == id })
+    #expect(after.canFollowUp.isEmpty)
+    #expect(try !sbd.sb("group", "ls").contains(Spec.line(id, "2", "Docs")))
+  }
+
+  /// A second work table numbers from 1 too, so `#` 2 names two rows, and a
+  /// third leaves its row's `#` blank. The ref that the Board sends and that
+  /// `sb plan` prints names each row alone.
+  @Test func eachListedRowFollowsUpByItsRef() throws {
+    let sbd = try Instance.withGitHub(try FakeGitHub())
+    let more = """
+      | # | Item | Status |
+      | --- | --- | --- |
+      | 2 | Exports | Not started |
+
+      | # | Item | Status |
+      | --- | --- | --- |
+      |  | Write the docs | Not started |
+
+      """
+    let (_, id) = try sbd.flagsWithDocument(document + "\n" + more)
+    let listed = try #require(try sbd.planSummaries().first { $0.id == id }).canFollowUp
+    #expect(listed.map(\.ref) == ["Docs", "Exports", "Write the docs"])
+
+    let out = try sbd.sb("plan", "ls")
+    #expect(out.contains("not started: #2 Exports (sb plan followup \(id) Exports)"))
+    #expect(out.contains("not started: Write the docs (sb plan followup \(id) 'Write the docs')"))
+
+    for row in listed {
+      #expect(try sbd.planFollowup(id, try #require(row.ref)).followup?.prompt == row.item)
+    }
   }
 
   // MARK: link and repository

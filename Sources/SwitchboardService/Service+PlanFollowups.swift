@@ -42,17 +42,17 @@ extension Service {
 
   func planRowFollowups() -> PlanRowFollowups {
     guard !plans.isEmpty else { return [:] }
-    var made: PlanRowFollowups = [:]
+    var rowFollowups: PlanRowFollowups = [:]
     for (id, e) in entries {
       guard let ref = e.session.followup?.planRow else { continue }
-      made[ref.source, default: [:]][ref.item] = min(made[ref.source]?[ref.item] ?? id, id)
+      rowFollowups[ref.source, default: [:]][ref.item] = min(rowFollowups[ref.source]?[ref.item] ?? id, id)
     }
-    return made
+    return rowFollowups
   }
 
   /// The plan with each row's follow-up filled in.
-  func reported(_ plan: PlanDocument, _ made: PlanRowFollowups) -> PlanDocument {
-    guard let items = made[plan.source] else { return plan }
+  func reported(_ plan: PlanDocument, _ rowFollowups: PlanRowFollowups) -> PlanDocument {
+    guard let items = rowFollowups[plan.source] else { return plan }
     var out = plan
     for i in out.rows.indices { out.rows[i].followup = out.rows[i].item.flatMap { items[$0] } }
     return out

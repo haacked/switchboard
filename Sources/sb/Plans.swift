@@ -83,7 +83,8 @@ private func printRows(_ p: PlanSummary, indent: String) {
   }
   for row in p.canFollowUp {
     print(
-      "\(indent)not started: \(oneLine(row.label, max: 160)) (sb plan followup \(p.id) \(shellWord(row.ref)))".printable
+      "\(indent)not started: \(oneLine(row.label, max: 160)) (sb plan followup \(p.id) \(shellWord(row.ref ?? row.text)))"
+        .printable
     )
   }
 }
