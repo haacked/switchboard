@@ -164,7 +164,7 @@ public struct MCPToolServer: Sendable {
     case "add_group_note":
       return try client.call(
         "group-note",
-        ["group": try groupRef(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
+        ["group": try groupID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
     case "suggest_groups":
       return try client.call("group-suggest", pick(args, ["accept"]))
     default:
@@ -207,7 +207,7 @@ public struct MCPToolServer: Sendable {
 
   /// The group that `args` names, or the scope's group when it names none. A
   /// scoped server refuses another group.
-  private func groupRef(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
+  private func groupID(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     let ref = args["group"]?.string
     guard let scoped else { return ref.map(JSON.string) ?? .null }
     if let ref, try MCPToolServer.find(ref, in: scoped.list).id != scoped.group.id {
@@ -236,14 +236,14 @@ public struct MCPToolServer: Sendable {
     }.sorted { ($0["id"]?.int ?? 0) < ($1["id"]?.int ?? 0) }
     // sbd reads a negative limit as no limit, because SQLite does.
     guard limit >= 0 else { return .array(merged) }
-    // Without `since`, sbd answers with the newest events.
-    return .array(Array(args["since"] == nil ? merged.suffix(limit) : merged.prefix(limit)))
+    // Without an integer `since`, sbd answers with the newest events.
+    return .array(Array(args["since"]?.int == nil ? merged.suffix(limit) : merged.prefix(limit)))
   }
 
   /// Without `targets`, it lists the targets and sends nothing. With them, it
   /// sends to those sessions. sbd refuses when the group's members changed.
   private func sendGroup(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
-    var request: [String: JSON] = ["group": try groupRef(args, scoped), "text": args["text"] ?? .null]
+    var request: [String: JSON] = ["group": try groupID(args, scoped), "text": args["text"] ?? .null]
     if let caller { request["from"] = .string(caller) }
     guard let targets = args["targets"] else {
       let preview = try client.call("send-group", request)

@@ -643,8 +643,7 @@ final class MCPClient {
     #expect(!preview.sent)
     #expect(Set(preview.targets.map(\.id)) == [a.id, b.id])
     #expect(Set(preview.targets.map(\.name)) == ["alpha", "bravo"])
-    #expect(result.text.contains("targets"))
-    #expect(result.text.contains("confirm"))
+    #expect(result.json?["instruction"]?.string == MCPToolServer.confirmRule)
     #expect(try sent(sbd, a.id).isEmpty)
     #expect(try sent(sbd, b.id).isEmpty)
   }
@@ -960,15 +959,17 @@ final class MCPClient {
 
   @Test func aScopedEventsMergesTheMembersAndKeepsTheOldestOrTheNewest() throws {
     let sbd = try Instance()
-    let first = try sbd.new(name: "first")
-    let second = try sbd.new(name: "second")
-    let outside = try sbd.new(name: "outside")
+    // Idle sessions and notes, which sbd records before it answers, keep
+    // events from arriving between the server's reads of each member.
+    let first = try idle(sbd, name: "first")
+    let second = try idle(sbd, name: "second")
+    let outside = try idle(sbd, name: "outside")
     let group = try addGroup(sbd, "Flags", first.id, second.id)
     for text in ["one", "two"] {
-      try sbd.sb("send", first.id, text)
-      try sbd.sb("send", second.id, text)
+      try sbd.sb("note", first.id, text)
+      try sbd.sb("note", second.id, text)
     }
-    try sbd.sb("send", outside.id, "outside")
+    try sbd.sb("note", outside.id, "outside")
     let mcp = try MCPClient(sbd, group: group.id)
 
     let all = try mcp.call("events", ["since": 0, "limit": 10_000]).decode([Event].self)
@@ -979,9 +980,7 @@ final class MCPClient {
     #expect(Set(all.map(\.session)) == [first.id, second.id])
     #expect(all.map(\.id) == all.map(\.id).sorted())
     #expect(oldest.map(\.id) == Array(groupIDs.prefix(2)))
-    let newestID = try #require(newest.last?.id)
-    // A member's events can arrive after the call, so only the ones up to its newest count.
-    #expect(newest.map(\.id) == Array(groupIDs.filter { $0 <= newestID }.suffix(2)))
+    #expect(newest.map(\.id) == Array(groupIDs.suffix(2)))
     #expect(try #require(newest.first?.id) > (try #require(oldest.last?.id)))
   }
 
@@ -1069,6 +1068,19 @@ final class MCPClient {
     let kid = try mcp.call("spawn", try spawnArgs(sbd, "kid")).decode(SessionSummary.self)
 
     #expect(try sbd.get(kid.id).group == s.group.id)
+  }
+
+  @Test func aSpawnThatNamesAnUnknownGroupMakesNoWorktree() throws {
+    let sbd = try Instance()
+    var args = try spawnArgs(sbd, "kid")
+    args["group"] = "nosuch"
+    let repo = try #require(args["repository"]?.string)
+
+    #expect(throws: (any Error).self) { try sbd.client.call("spawn", args) }
+
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.git(repo, "branch", "--list", "kid").isEmpty)
+    #expect(try sbd.git(repo, "worktree", "list").split(separator: "\n").count == 1)
   }
 
   @Test func aScopedFollowupSpawnLandsInTheGroup() throws {

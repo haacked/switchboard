@@ -475,6 +475,8 @@ public final class Service {
         prefix: config.branchPrefix, name: args.name,
         exists: { branchOrFolderTaken(repo, $0) })
     }
+    // An unknown group fails here, before prepareFolder makes a worktree.
+    if let group = args.group { _ = try queue.sync { try groupOfNew(group, parent: nil) } }
     let folder = try prepareFolder(args)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
