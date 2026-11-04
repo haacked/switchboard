@@ -9,12 +9,10 @@ import Testing
   static let runs = 5
 
   @Test func listAnswersInUnderASecondWithTwentyFiveSessions() throws {
-    let sbd = try Instance()
-    let ids = try (0..<Self.sessions).map { try sbd.new(name: "m\($0)").id }
-    for id in ids { try sbd.waitFor(id, "claude runs", timeout: 30) { $0.claudePid != nil } }
     // A loaded machine slows every process, so a slow answer there says
     // nothing about sbd. Swift Testing in this toolchain can't skip a test
-    // that has started, so the test returns.
+    // that has started, so the test returns. The test reads the load before
+    // it starts its sessions, so their startup does not count toward it.
     let cores = ProcessInfo.processInfo.activeProcessorCount
     var load = [0.0, 0, 0]
     getloadavg(&load, 3)
@@ -22,6 +20,9 @@ import Testing
       print("MeasureTests: skipped the timing, the load average \(load[0]) is above \(cores) cores")
       return
     }
+    let sbd = try Instance()
+    let ids = try (0..<Self.sessions).map { try sbd.new(name: "m\($0)").id }
+    for id in ids { try sbd.waitFor(id, "claude runs", timeout: 30) { $0.claudePid != nil } }
     for args in [["ls"], ["ls", "--json"]] {
       let times = try (0..<Self.runs).map { _ in try ContinuousClock().measure { _ = try sbd.sb(args) } }
       let median = times.sorted()[Self.runs / 2]
