@@ -15,6 +15,18 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
     self.notes = notes
     self.created = created
   }
+
+  /// This group with `other`'s notes added, oldest first. A note of `other`
+  /// whose id this group already uses gets a new id.
+  public func absorbing(_ other: SessionGroup) -> SessionGroup {
+    var kept = self
+    for var note in other.notes {
+      if kept.notes.contains(where: { $0.id == note.id }) { note.id = shortId("n", taken: kept.notes.map(\.id)) }
+      kept.notes.append(note)
+    }
+    kept.notes.sort { $0.t < $1.t }
+    return kept
+  }
 }
 
 /// A group and the ids of its sessions, follow-ups included.
@@ -45,22 +57,60 @@ public struct GroupList: Codable, Equatable, Sendable {
   }
 }
 
-/// A group that sbd proposes: a new one, or more sessions for an existing one.
+/// A group that sbd proposes: a new one, more sessions for an existing one,
+/// or a merge of two groups.
 public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
-  /// Stays the same while the key and the group stay, so `--accept` can name it.
+  /// The group whose sessions a merge moves into `group`. sbd deletes it
+  /// when accepting leaves no session in it.
+  public struct Merge: Codable, Equatable, Sendable {
+    public var group: String
+    public var name: String
+
+    public init(group: String, name: String) {
+      self.group = group
+      self.name = name
+    }
+  }
+
+  /// Stays the same while the groups, sessions, and key it names stay, so
+  /// `--accept` and `--decline` can name it. sbd stores declined ids, so a
+  /// change to an id's format brings back the suggestions the user declined.
   public var id: String
   public var name: String
   /// The group to join, or nil for a new group.
   public var group: String?
+  /// The sessions that accepting moves.
   public var sessions: [String]
   public var reason: String
+  public var merge: Merge?
+  /// The sessions of the merged group that the user placed by hand. Accepting
+  /// leaves them where they are.
+  public var stays: [String]?
 
-  public init(id: String, name: String, group: String?, sessions: [String], reason: String) {
+  public init(
+    id: String, name: String, group: String?, sessions: [String], reason: String, merge: Merge? = nil,
+    stays: [String]? = nil
+  ) {
     self.id = id
     self.name = name
     self.group = group
     self.sessions = sessions
     self.reason = reason
+    self.merge = merge
+    self.stays = stays
+  }
+
+  /// What accepting does, such as `join Flags`.
+  public var action: String {
+    if let merge { return "merge \(merge.name) into \(name)" }
+    return group == nil ? "new group \(name)" : "join \(name)"
+  }
+
+  /// Such as `s1, s2 stay, placed by hand`, with each session's id passed
+  /// through `name`. Nil when no session stays.
+  public func staying(_ name: (String) -> String = { $0 }) -> String? {
+    guard let stays, !stays.isEmpty else { return nil }
+    return "\(stays.map(name).joined(separator: ", ")) \(stays.count == 1 ? "stays" : "stay"), placed by hand"
   }
 }
 
@@ -102,10 +152,7 @@ public struct GroupSend: Codable, Equatable, Sendable {
   }
 }
 
-/// Proposes groups from branch names and PR titles.
-///
-/// The session-dependencies task adds suggestions to merge two groups that a
-/// dependency links. They belong in `make`.
+/// Proposes groups from dependencies between sessions, branch names, and PR titles.
 public enum GroupSuggestions {
   public struct Candidate: Sendable {
     public var id: String
@@ -114,14 +161,28 @@ public enum GroupSuggestions {
     public var group: String?
     /// True once the user chose the session's group, or chose no group.
     public var placedByHand: Bool
+    /// The repo of the session's PR.
+    public var repo: String?
+    /// The number of the session's PR.
+    public var pr: Int?
+    public var dependencies: [Dependency]
 
-    public init(id: String, branch: String?, prTitle: String?, group: String?, placedByHand: Bool) {
+    public init(
+      id: String, branch: String?, prTitle: String?, group: String?, placedByHand: Bool, repo: String? = nil,
+      pr: Int? = nil, dependencies: [Dependency] = []
+    ) {
       self.id = id
       self.branch = branch
       self.prTitle = prTitle
       self.group = group
       self.placedByHand = placedByHand
+      self.repo = repo
+      self.pr = pr
+      self.dependencies = dependencies
     }
+
+    /// In no group, and not placed there by hand.
+    var open: Bool { group == nil && !placedByHand }
   }
 
   /// Ranked from the strongest signal to the weakest.
@@ -194,11 +255,29 @@ public enum GroupSuggestions {
     }
   }
 
-  /// The suggestions, strongest first. Only sessions in no group that the
-  /// user didn't place there by hand are suggested. Each one appears in at
-  /// most one suggestion.
-  public static func make(candidates: [Candidate], groups: [SessionGroup]) -> [GroupSuggestion] {
-    let open = candidates.filter { $0.group == nil && !$0.placedByHand }
+  /// The suggestions, strongest first: merges of groups that a dependency
+  /// links, then joins from a dependency, then joins and new groups from
+  /// keys. A session in no group that the user didn't place there by hand
+  /// appears in at most one join or new group. A suggestion whose id is in
+  /// `declined` is left out.
+  public static func make(candidates: [Candidate], groups: [SessionGroup], declined: Set<String> = [])
+    -> [GroupSuggestion]
+  {
+    let links = Links(candidates: candidates, groups: groups)
+    let merges = links.merges(declined: declined)
+    let kept = keptGroups(merges)
+    let joins = links.joins(declined: declined, kept: kept)
+    let taken = Set(joins.flatMap(\.sessions))
+    let open = candidates.filter { $0.open && !taken.contains($0.id) }
+    return merges + joins + keyed(open, candidates, groups, declined: declined, kept: kept)
+  }
+
+  /// Joins and new groups from keys. A join to a group in `kept` goes to the
+  /// group that `kept` names.
+  static func keyed(
+    _ open: [Candidate], _ candidates: [Candidate], _ groups: [SessionGroup], declined: Set<String>,
+    kept: [String: String]
+  ) -> [GroupSuggestion] {
     var openByKey: [Key: [String]] = [:]
     for c in open {
       for key in keys(branch: c.branch, prTitle: c.prTitle) { openByKey[key, default: []].append(c.id) }
@@ -227,7 +306,8 @@ public enum GroupSuggestions {
       for id in named[slug(key.text)] ?? [] { joins[id, default: 0] += 1 }
       // Ties go to the group whose name sorts first.
       let best = joins.max { a, b in (a.value, names[b.key] ?? "") < (b.value, names[a.key] ?? "") }
-      options.append(Option(key: key, group: best?.key, members: best?.value ?? 0, sessions: sessions))
+      options.append(
+        Option(key: key, group: best.map { kept[$0.key] ?? $0.key }, members: best?.value ?? 0, sessions: sessions))
     }
     options.sort { a, b in
       let (sizeA, sizeB) = (a.sessions.count + a.members, b.sessions.count + b.members)
@@ -240,10 +320,10 @@ public enum GroupSuggestions {
     var taken: Set<String> = []
     var out: [GroupSuggestion] = []
     for option in options {
-      let sessions = option.sessions.filter { !taken.contains($0) }.sorted()
-      guard sessions.count >= (option.group == nil ? 2 : 1) else { continue }
-      taken.formUnion(sessions)
       let id = "\(option.key.kind):\(option.key.text)" + (option.group.map { ":\($0)" } ?? "")
+      let sessions = option.sessions.filter { !taken.contains($0) }.sorted()
+      guard sessions.count >= (option.group == nil ? 2 : 1), !declined.contains(id) else { continue }
+      taken.formUnion(sessions)
       out.append(
         GroupSuggestion(
           id: id, name: option.group.flatMap { names[$0] } ?? option.key.text, group: option.group,

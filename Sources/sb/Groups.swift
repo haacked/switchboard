@@ -42,15 +42,19 @@ func group(_ a: Args) {
       json: a.json)
   case "suggest":
     if let id = a.values["--accept"] { return printGroup(call("group-suggest", ["accept": .string(id)]), json: a.json) }
+    if let id = a.values["--decline"] {
+      let result = call("group-suggest", ["decline": .string(id)])
+      return a.json ? printJSON(result) : print("declined \(id)".printable)
+    }
     let result = call("group-suggest")
     if a.json { return printJSON(result) }
     let suggestions = decode(result, as: [GroupSuggestion].self)
     guard !suggestions.isEmpty else { return print("No suggestions.") }
     for s in suggestions {
-      let action = s.group == nil ? "new group \(s.name)" : "join \(s.name)"
-      print("\(s.id)  \(action): \(s.sessions.joined(separator: ", ")) (\(s.reason))".printable)
+      let stays = s.staying().map { "; \($0)" } ?? ""
+      print("\(s.id)  \(s.action): \(s.sessions.joined(separator: ", ")) (\(s.reason))\(stays)".printable)
     }
-    print("\nAccept one with: sb group suggest --accept <id>")
+    print("\nAccept one with: sb group suggest --accept <id>, or decline it with --decline <id>")
   default:
     die("usage: sb group ls|add|rm|move|note|suggest")
   }

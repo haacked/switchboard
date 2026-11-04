@@ -27,8 +27,11 @@ extension Instance {
 
   /// A git repo on `branch` whose origin is the GitHub repo `repo`, and a
   /// session in it that has answered its first prompt. A `folder` lets two
-  /// sessions work in the same GitHub repo.
-  func session(in repo: String, branch: String, folder: String? = nil) throws -> SessionSummary {
+  /// sessions work in the same GitHub repo. A session with a `parent` takes
+  /// the parent's group, and it is not placed by hand.
+  func session(in repo: String, branch: String, folder: String? = nil, parent: String? = nil) throws
+    -> SessionSummary
+  {
     let path = "\(home.path)/\(folder ?? repo.replacingOccurrences(of: "/", with: "-"))"
     try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
     try git(path, "init", "-q", "-b", "main")
@@ -37,7 +40,9 @@ extension Instance {
       "-m", "first")
     try git(path, "remote", "add", "origin", "https://github.com/\(repo).git")
     try git(path, "checkout", "-q", "-b", branch)
-    let s = try client.call("new", ["path": .string(path), "prompt": "hello"], as: SessionSummary.self)
+    var args: [String: JSON] = ["path": .string(path), "prompt": "hello"]
+    if let parent { args["parent"] = .string(parent) }
+    let s = try client.call("new", args, as: SessionSummary.self)
     return try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
   }
 

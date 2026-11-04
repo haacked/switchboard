@@ -490,3 +490,48 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.selected?.id == "m")
   }
 }
+
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelSuggestions {
+  /// The request that `action` sends to sbd.
+  func request(_ action: (BoardModel) -> Void) async -> (op: String, args: [String: JSON]) {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    return await withCheckedContinuation { sent in
+      model.send = { op, args in
+        sent.resume(returning: (op, args))
+        return .null
+      }
+      action(model)
+    }
+  }
+
+  @Test func acceptSendsGroupSuggestWithTheId() async {
+    let sent = await request { $0.acceptSuggestion("merge:g1:g2") }
+
+    #expect(sent.op == "group-suggest")
+    #expect(sent.args == ["accept": "merge:g1:g2"])
+  }
+
+  @Test func declineSendsGroupSuggestWithTheId() async {
+    let sent = await request { $0.declineSuggestion("dependency:s1:g1") }
+
+    #expect(sent.op == "group-suggest")
+    #expect(sent.args == ["decline": "dependency:s1:g1"])
+  }
+
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.acceptSuggestion("merge:g1:g2")
+    model.declineSuggestion("merge:g1:g2")
+    #expect(model.answeringSuggestions == ["merge:g1:g2"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+}
