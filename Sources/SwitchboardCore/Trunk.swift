@@ -30,6 +30,10 @@ public enum TrunkQueueState: String, Codable, Sendable {
     case .submitted, .merged, .removed, .unknown: false
     }
   }
+
+  /// Whether Trunk holds the PR: submitted, or added to the queue. Trunk can
+  /// still drop a submitted PR, and `trunk merge status` reports it.
+  public var isHeld: Bool { self == .submitted || isQueued }
 }
 
 /// What `trunk merge status <N>` prints about a pull request: a header and a

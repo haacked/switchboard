@@ -59,8 +59,9 @@ private let testingComments = [status(trunkTesting)]
     #expect(shown.trunkLoginNeeded != true)
   }
 
-  /// Comments that show the PR in the queue, a state that didn't load, or the timeline's own final state.
+  /// Comments that show Trunk holding the PR, a state that didn't load, or the timeline's own final state.
   @Test(arguments: [
+    [status(trunkSubmitted)],
     [status(trunkTesting)],
     [status(trunkTesting), PRComment(id: "x", author: "trunk-io[bot]", createdAt: trunkTime, edited: true)],
     [status(trunkCancelled, at: "2026-10-26T00:00:00Z")],
@@ -473,5 +474,18 @@ private final class LauncherHome {
     let missing = FileManager.default.temporaryDirectory.appendingPathComponent("no-home-\(UUID().uuidString)").path
 
     #expect(TrunkSettings.launcherCache(home: missing) == nil)
+  }
+}
+
+@Suite struct TrunkHeld {
+  /// Trunk holds a submitted PR until its branch protection rules pass, then adds it to the queue.
+  @Test(arguments: [TrunkQueueState.submitted, .pending, .testing, .passed, .failing, .queued])
+  func trunkHoldsASubmittedOrQueuedPR(_ state: TrunkQueueState) {
+    #expect(state.isHeld)
+  }
+
+  @Test(arguments: [TrunkQueueState.merged, .removed, .unknown])
+  func trunkHoldsNoFinishedPROrAStateThatDidNotLoad(_ state: TrunkQueueState) {
+    #expect(!state.isHeld)
   }
 }

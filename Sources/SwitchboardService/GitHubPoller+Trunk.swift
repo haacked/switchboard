@@ -10,13 +10,13 @@ extension GitHubPoller {
     return GitHub.shown(read.pr, keptComments(read.comments), trunk: trunk.result(id), last: last)
   }
 
-  /// The PRs that the queue holds as the last reads show them. They poll
-  /// GitHub on the pending interval.
+  /// The PRs that Trunk holds as the last reads show them. They poll GitHub
+  /// on the pending interval.
   func queuedPRs() -> Set<String> {
-    Set(prs.keys.filter { shown($0, last: nil)?.queue?.isQueued == true })
+    Set(prs.keys.filter { shown($0, last: nil)?.queue?.isHeld == true })
   }
 
-  /// Runs trunk for each open PR whose comments show it in the queue, or
+  /// Runs trunk for each open PR whose comments show that Trunk holds it, or
   /// whose comment state didn't load, in a checkout of its repository. A
   /// session's folder is such a checkout when its branch is in the PR's
   /// repository. The session whose PR it is comes first. A PR with no such
@@ -25,7 +25,7 @@ extension GitHubPoller {
     var candidates: [TrunkPoller.Candidate] = []
     for (id, read) in prs.sorted(by: { $0.key < $1.key }) {
       let fromComments = GitHub.shown(read.pr, keptComments(read.comments), last: nil)
-      guard let state = fromComments.queue, state.isQueued || state == .unknown else { continue }
+      guard let state = fromComments.queue, state.isHeld || state == .unknown else { continue }
       let inRepo = sessions.filter { s in
         guard case .branch(let repo, _, _)? = tracked[s.id]?.branch.key else { return false }
         return Dependencies.sameRepo(repo, read.pr.repo) && FileManager.default.fileExists(atPath: s.cwd)
