@@ -83,7 +83,7 @@ extension Service {
   /// Finds a plan by id or unique id prefix, or by its document's text.
   private func lookupPlan(_ args: JSON) throws -> String {
     guard let key = args["plan"]?.string, !key.isEmpty else { throw APIError("name a plan") }
-    return try resolve(key, "plan", plans.values.map { ($0.id, $0.source.text) })
+    return try resolveRef(key, "plan", plans.values.map { ($0.id, $0.source.text) })
   }
 
   private func savePlan(_ plan: PlanDocument) throws {

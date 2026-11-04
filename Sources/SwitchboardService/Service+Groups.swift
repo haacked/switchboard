@@ -60,7 +60,7 @@ extension Service {
   /// Finds a group by id, by unique id prefix, or by unique name.
   func lookupGroup(_ args: JSON) throws -> String {
     guard let key = args["group"]?.string, !key.isEmpty else { throw APIError("name a group") }
-    return try resolve(key, "group", groups.values.map { ($0.id, $0.name) })
+    return try resolveRef(key, "group", groups.values.map { ($0.id, $0.name) })
   }
 
   private func sessionRefs(_ args: JSON) throws -> [String] {

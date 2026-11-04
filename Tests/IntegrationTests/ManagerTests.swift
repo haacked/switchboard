@@ -55,6 +55,24 @@ import Testing
     #expect(try String(contentsOfFile: path, encoding: .utf8) == Manager.guide)
   }
 
+  @Test func theManagerGetsTheSwitchboardServerAtEachLaunchAndOtherSessionsDont() throws {
+    let sbd = try Instance()
+    let m = try manager(sbd)
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("stop", m.id)
+    try sbd.waitFor(m.id, "the stop") { !$0.live }
+    _ = try manager(sbd)
+    try sbd.waitFor(m.id, "the resume") { $0.live }
+    let other = try idle(sbd, name: "other")
+
+    let managerLaunches = sbd.stubArgs().filter { $0.contains(m.claudeSessionId) }
+    let otherLaunches = sbd.stubArgs().filter { $0.contains(other.claudeSessionId) }
+    #expect(managerLaunches.count == 2)
+    #expect(managerLaunches.allSatisfy { MCPToolServerTests.switchboardConfig(in: $0) != nil })
+    #expect(!otherLaunches.isEmpty)
+    #expect(otherLaunches.allSatisfy { !$0.contains(#""switchboard""#) })
+  }
+
   @Test func theGuideNamesOnlyCommandsThatSbHas() throws {
     let sbd = try Instance()
     let usage = try sbd.sb("help")

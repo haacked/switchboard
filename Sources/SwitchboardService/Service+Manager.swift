@@ -13,9 +13,8 @@ extension Service {
       return try queue.sync {
         if let id = managerID() { return .success(try JSON(encoding: summary(id))) }
         let folder = home.managerFolder
-        let created = try create(NewSession(path: folder, name: Manager.name), (folder, nil, nil))
-        try update(created.id) { $0.manager = true }
-        return .success(try JSON(encoding: summary(created.id)))
+        let created = try create(NewSession(path: folder, name: Manager.name), (folder, nil, nil)) { $0.manager = true }
+        return .success(try JSON(encoding: created))
       }
     } catch {
       return .failure("\(error)")
