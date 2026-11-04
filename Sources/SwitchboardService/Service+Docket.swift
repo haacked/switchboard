@@ -31,18 +31,9 @@ extension Service {
     _ = try queue.sync(execute: placement)
     // A bare number that sbd can't complete skips both checks. docket's start_review then names the PR.
     let wanted = DocketRef(input, defaultRepo: DocketRef.defaultRepo(docketHome: docketHome()))
-    if let wanted,
-      let tracked = queue.sync(execute: { () -> SessionSummary? in
-        guard let id = openDocketRow(wanted), entries[id]?.facts.docket.review?.state != "not_started" else {
-          return nil
-        }
-        return summary(id)
-      })
-    {
-      return tracked
-    }
+    if let wanted, let tracked = queue.sync(execute: { trackedDocketRow(wanted) }) { return summary(tracked) }
     let review = try withDocket { client in
-      let listed = try client.listReviews().first { $0.state != "not_started" && wanted?.names($0.pullRequest) == true }
+      let listed = try client.listReviews().first { !$0.restartable && wanted?.names($0.pullRequest) == true }
       return try listed ?? client.startReview(input, existing: existing)
     }
     return try queue.sync {
@@ -102,9 +93,10 @@ extension Service {
     case .success(let listed):
       reviews = listed
     }
+    let parsed = reviews.compactMap { r in DocketRef(r.pullRequest).map { ($0, r) } }
     for id in rows {
       guard let e = entries[id], let pr = e.session.docket.flatMap({ DocketRef($0.pullRequest) }) else { continue }
-      guard let review = reviews.last(where: { pr.names($0.pullRequest) }) else {
+      guard let review = parsed.last(where: { pr.matches($0.0) })?.1 else {
         record(id, "docket", ["closed": true])
         continue
       }
@@ -118,6 +110,12 @@ extension Service {
   private func openDocketRows() -> [String] {
     entries.filter { $0.value.session.docket != nil && !$0.value.facts.docket.closed && !$0.value.session.done }
       .keys.sorted()
+  }
+
+  /// The open row of `pullRequest`, unless docket could not start its review,
+  /// which `start_review` restarts.
+  private func trackedDocketRow(_ pullRequest: DocketRef) -> String? {
+    openDocketRow(pullRequest).flatMap { entries[$0]?.facts.docket.review?.restartable == true ? nil : $0 }
   }
 
   private func openDocketRow(_ pullRequest: DocketRef) -> String? {

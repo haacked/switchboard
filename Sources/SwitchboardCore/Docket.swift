@@ -60,6 +60,9 @@ public struct DocketReview: Codable, Equatable, Sendable {
     self.url = url
     self.state = state
   }
+
+  /// docket's `start_review` restarts a review that did not start, and refuses every other open review.
+  public var restartable: Bool { state == "not_started" }
 }
 
 /// What a running background review is doing. It leaves out docket's
