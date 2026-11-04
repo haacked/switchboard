@@ -54,13 +54,12 @@ public enum RepoLabels {
   /// A longer label keeps its first component. Collisions add components at
   /// the front, so the first component is the one that tells two repos apart.
   static func capped(_ label: String) -> String {
+    func tail(_ s: Substring, _ n: Int) -> String { s.count <= n ? String(s) : "…" + s.suffix(n - 1) }
     guard label.count > maxLength else { return label }
-    guard let slash = label.firstIndex(of: "/") else { return "…" + label.suffix(maxLength - 1) }
+    guard let slash = label.firstIndex(of: "/") else { return tail(label[...], maxLength) }
     var head = String(label[..<slash])
     if head.count > maxLength / 2 { head = head.prefix(maxLength / 2 - 1) + "…" }
-    let rest = label[label.index(after: slash)...]
-    let room = maxLength - head.count - 1
-    return head + "/" + (rest.count <= room ? String(rest) : "…" + rest.suffix(room - 1))
+    return head + "/" + tail(label[label.index(after: slash)...], maxLength - head.count - 1)
   }
 
   /// One repo and its labels, shortest first.
