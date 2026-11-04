@@ -140,7 +140,7 @@ extension Service {
 
   /// The generated table for the plan: the group's sessions, or the plan's session.
   func planTable(_ plan: PlanDocument) -> String {
-    let sessions = plan.group.map(members) ?? entries.values.map(\.session).filter { $0.id == plan.session }
+    let sessions = plan.group.map(members) ?? plan.session.flatMap { entries[$0]?.session }.map { [$0] } ?? []
     return Plans.table(sessions.map(\.id).map(summary))
   }
 

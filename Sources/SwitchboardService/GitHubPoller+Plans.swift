@@ -43,21 +43,31 @@ extension GitHubPoller {
         stats.planReads += 1
         service.queue.sync { service.updatePlan(plan.id) { $0.update(from: text, now: now) } }
       } catch {
-        // Without the ETags, the next read gets a 200. That read clears the error even when the document hasn't changed.
-        trackedPlans[plan.id]?.etag = nil
-        trackedPlans[plan.id]?.pullEtag = nil
         service.queue.sync { service.recordPlanError(plan.id, error) }
       }
     }
   }
 
   /// The document's text, or nil when it hasn't changed since the last read.
-  /// With `all`, a file is read whether or not it changed.
+  /// With `all`, a file is read whether or not it changed. A failed read
+  /// drops the ETags. The next read then gets a 200, which clears the error
+  /// even when the document hasn't changed.
   func fetchPlan(_ plan: PlanDocument, all: Bool, now: Int64, stats: inout Stats) throws -> String? {
     var read = trackedPlans[plan.id] ?? TrackedPlan()
     defer { trackedPlans[plan.id] = read }
     read.checked = now
-    let source = plan.source
+    do {
+      return try download(plan.source, &read, all: all, stats: &stats)
+    } catch {
+      read.etag = nil
+      read.pullEtag = nil
+      throw error
+    }
+  }
+
+  private func download(_ source: PlanSource, _ read: inout TrackedPlan, all: Bool, stats: inout Stats) throws
+    -> String?
+  {
     switch source.kind {
     case .file:
       let path = source.path ?? ""
