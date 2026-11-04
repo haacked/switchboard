@@ -76,7 +76,15 @@ struct FollowupView: View {
     }
   }
 
-  private func detail(_ label: String, _ value: String) -> some View {
+  private func detail(_ label: String, _ value: String) -> some View { DetailRow(label: label, value: value) }
+}
+
+/// A label and a one-line value in a detail Grid.
+struct DetailRow: View {
+  let label: String
+  let value: String
+
+  var body: some View {
     GridRow {
       Text(label).foregroundStyle(.secondary)
       Text(value).textSelection(.enabled).lineLimit(1).truncationMode(.middle)

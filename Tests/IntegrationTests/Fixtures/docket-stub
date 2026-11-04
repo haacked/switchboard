@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""A stand-in for `docket mcp` in sbd's integration tests.
+
+Usage: docket-stub mcp
+
+It speaks newline-delimited JSON-RPC 2.0 on stdin and stdout, and exits when
+stdin closes. It answers `initialize` and `tools/call`, and ignores
+notifications. Its files live in $DOCKET_HOME, which it requires so that a
+test never touches the user's docket:
+
+- stub-reviews.json: the reviews that `list_reviews` returns. A missing file
+  means none. `start_review` appends to it.
+- stub-calls.jsonl: each tool call, as {"tool": name, "arguments": {...}}.
+  The stub appends a call after it reads stub-reviews.json, so a test that
+  sees the call knows which reviews the call read.
+- stub-start-error: when it exists, `start_review` fails with its text.
+- stub-broken: when it exists, the stub exits 1 at startup.
+- stub-list-delay: when it exists, `list_reviews` waits that many seconds
+  after it reads the reviews and logs the call, before it answers.
+"""
+import json
+import os
+import re
+import sys
+import time
+
+if sys.argv[1:] != ["mcp"]:
+    print("usage: docket-stub mcp", file=sys.stderr)
+    sys.exit(2)
+
+home = os.environ.get("DOCKET_HOME")
+if not home:
+    print("docket-stub: DOCKET_HOME is not set", file=sys.stderr)
+    sys.exit(1)
+if os.path.exists(os.path.join(home, "stub-broken")):
+    print("docket-stub: broken on purpose", file=sys.stderr)
+    sys.exit(1)
+
+reviews_file = os.path.join(home, "stub-reviews.json")
+calls_file = os.path.join(home, "stub-calls.jsonl")
+start_error_file = os.path.join(home, "stub-start-error")
+
+
+def normalize(ref):
+    m = re.match(r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)(/.*)?$", ref)
+    return f"{m.group(1)}/{m.group(2)}#{m.group(3)}" if m else ref
+
+
+def read_reviews():
+    try:
+        with open(reviews_file) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+
+
+def write_reviews(reviews):
+    tmp = f"{reviews_file}.{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(reviews, f)
+    os.replace(tmp, reviews_file)
+
+
+def log_call(name, arguments):
+    with open(calls_file, "a") as f:
+        f.write(json.dumps({"tool": name, "arguments": arguments}) + "\n")
+
+
+def text_result(payload):
+    return {"content": [{"type": "text", "text": json.dumps(payload)}], "structuredContent": payload}
+
+
+def error_result(text):
+    return {"content": [{"type": "text", "text": text}], "isError": True}
+
+
+def list_reviews(arguments):
+    reviews = read_reviews()
+    log_call("list_reviews", arguments)
+    try:
+        with open(os.path.join(home, "stub-list-delay")) as f:
+            time.sleep(float(f.read().strip()))
+    except FileNotFoundError:
+        pass
+    return text_result({"reviews": reviews})
+
+
+def start_review(arguments):
+    reviews = read_reviews()
+    log_call("start_review", arguments)
+    if os.path.exists(start_error_file):
+        with open(start_error_file) as f:
+            return error_result(f.read().strip())
+    pr = normalize(arguments.get("pull_request", ""))
+    m = re.match(r"^([^/]+)/([^#]+)#(\d+)$", pr)
+    url = f"https://github.com/{m.group(1)}/{m.group(2)}/pull/{m.group(3)}" if m else ""
+    review = {
+        "pull_request": pr,
+        "url": url,
+        "title": "Stub PR",
+        "author": "someone",
+        "state": "preparing",
+        "engine": "claude",
+        "mode": "background",
+        "submittable": False,
+    }
+    write_reviews(reviews + [review])
+    return text_result({"review": review, "plan": "stub"})
+
+
+tools = {"list_reviews": list_reviews, "start_review": start_review}
+
+
+def answer(request):
+    method = request.get("method")
+    params = request.get("params") or {}
+    if method == "initialize":
+        return {
+            "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "docket", "version": "stub"},
+            }
+        }
+    if method == "tools/call":
+        name = params.get("name")
+        arguments = params.get("arguments") or {}
+        if name not in tools:
+            log_call(name, arguments)
+            return {"result": error_result(f"unknown tool {name}")}
+        return {"result": tools[name](arguments)}
+    return {"error": {"code": -32601, "message": f"method not found: {method}"}}
+
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    reply = {"jsonrpc": "2.0", "id": request["id"], **answer(request)}
+    sys.stdout.write(json.dumps(reply) + "\n")
+    sys.stdout.flush()

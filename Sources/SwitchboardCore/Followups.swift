@@ -204,10 +204,14 @@ extension Session {
   /// True for a follow-up that hasn't started, which has no folder and no
   /// claude. It stays true after its trigger fires, while it shows in Needs you.
   public var waitsToStart: Bool { followup != nil && followup?.started == nil }
+  /// False for a session with no folder, which is a follow-up that hasn't
+  /// started or a docket row. Such a session has no terminals and no claude.
+  public var runsClaude: Bool { !cwd.isEmpty }
 }
 
 extension SessionSummary {
   public var waitsToStart: Bool { followup != nil && followup?.started == nil }
+  public var runsClaude: Bool { !cwd.isEmpty }
 }
 
 extension Attention {

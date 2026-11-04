@@ -27,9 +27,12 @@ extension Service {
   }
 
   /// Refuses to launch claude or open terminals for a session with no
-  /// folder, which is a follow-up that hasn't started.
+  /// folder, which is a follow-up that hasn't started or a docket row.
   func refuseNotStarted(_ session: Session) throws {
     guard session.cwd.isEmpty else { return }
+    if let docket = session.docket {
+      throw APIError("\(session.id) is a docket review of \(docket.pullRequest). It has no terminal. Open it in docket")
+    }
     throw APIError("\(session.id) is a follow-up that hasn't started. Start it with: sb followup start \(session.id)")
   }
 
