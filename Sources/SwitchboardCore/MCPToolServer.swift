@@ -247,7 +247,7 @@ public struct MCPToolServer: Sendable {
     }
     guard let caller else {
       throw APIError(
-        "send_group works only in a session that Switchboard started. Ask the user to send the message from the Switchboard app."
+        "send_group works only in a session that Switchboard started. Ask the user to run sb send --group <group> <text> in their own terminal."
       )
     }
     let request: [String: JSON] = [

@@ -1191,6 +1191,19 @@ final class MCPClient {
     #expect(try sent(sbd, s.outside.id).isEmpty)
   }
 
+  @Test func aScopedSendGroupRefusesToReadAnotherGroupsMessage() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let card = try openPending(
+      MCPClient(sbd, env: inside(s.loose.id)), ["group": .string(s.other.name), "text": "Rebase on main."])
+    let scoped = try MCPClient(sbd, group: s.group.id, env: inside(s.loose.id))
+
+    let result = try scoped.call("send_group", ["pending": .number(Double(card)), "timeout": 0])
+
+    #expect(result.isError)
+    #expect(result.json?["targets"] == nil)
+  }
+
   @Test func aScopedAddGroupNoteDefaultsToTheScopesGroup() throws {
     let sbd = try Instance()
     let s = try scope(sbd)

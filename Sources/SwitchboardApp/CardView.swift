@@ -84,7 +84,9 @@ struct CardView: View {
   private var groupMessage: some View {
     if let message = card.send {
       VStack(alignment: .leading, spacing: 8) {
-        Text(verbatim: "Claude wants to send \(message.summary)").font(.headline)
+        // The Inbox lists other sessions' send cards in this session's pane.
+        let asker = model.sessions.first { $0.id == card.session }?.name ?? card.session
+        Text(verbatim: "\(asker) wants to send \(message.summary)").font(.headline)
         VStack(alignment: .leading, spacing: 2) {
           ForEach(message.targets, id: \.id) { target in
             HStack(spacing: 6) {

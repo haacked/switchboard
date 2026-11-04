@@ -94,7 +94,7 @@ func sendGroup(_ a: Args, group: String) {
   if author == .claude {
     guard let from = ProcessInfo.processInfo.environment["SB_SESSION_ID"] else {
       die(
-        "SB_SESSION_ID is not set. Inside Claude, a message to a group waits for the user's decision in Switchboard. That works only in a session that Switchboard started. Ask the user to send the message from the Switchboard app."
+        "SB_SESSION_ID is not set. Inside Claude, a message to a group waits for the user's decision in Switchboard. That works only in a session that Switchboard started. Ask the user to run sb send --group \(group) with the message in their own terminal."
       )
     }
     args["from"] = .string(from)
@@ -146,9 +146,11 @@ func awaitGroupMessage(_ a: Args, id text: String) {
     print(
       "Nobody decided in time, so the message expired. Nothing was sent. Do not send it again unless the user asks you to."
     )
-  case .sent?, nil:
+  case .sent?:
     print("The user sent the message.")
     printDeliveries(status)
+  case nil:
+    die("sbd returned no decision for message \(id)")
   }
 }
 

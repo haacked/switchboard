@@ -321,6 +321,29 @@ import Testing
     #expect(try sent(s.sbd, s.b.id).isEmpty)
   }
 
+  @Test func chooseSendSendsToTheListedTargets() throws {
+    let s = try setup()
+    _ = try open(s)
+
+    try s.sbd.sb("choose", s.sender.id, "Send")
+
+    #expect(try sent(s.sbd, s.a.id) == ["Rebase on main."])
+    #expect(try sent(s.sbd, s.b.id) == ["Rebase on main."])
+    #expect(try s.sbd.get(s.sender.id).cards.isEmpty)
+  }
+
+  /// Claude reads this text, not the JSON, after `sb send --group` tells it to run `sb send --pending`.
+  @Test(arguments: [true, false]) func pendingTellsClaudeTheDecisionInText(allow: Bool) throws {
+    let s = try setup()
+    let id = try open(s)
+    try decide(s.sbd, .cli, s.sender.id, id, allow: allow)
+
+    let text = try s.sbd.run(["send", "--pending", String(id), "--timeout", "0"]).stdout
+
+    #expect(text.contains("The user sent the message.") == allow)
+    #expect(text.contains("The user cancelled the message.") == !allow)
+  }
+
   @Test(arguments: [true, false]) func theAppsAnswerIsTheDecidedSend(allow: Bool) throws {
     let s = try setup()
     let id = try open(s)
