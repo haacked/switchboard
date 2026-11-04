@@ -150,7 +150,7 @@ final class MCPClient {
 
 @Suite(.timeLimit(.minutes(2))) struct MCPToolServerTests {
   static let allTools: Set<String> = [
-    "list_sessions", "get_session", "read_reply", "triage", "events", "send", "send_group", "new_session", "set_wait",
+    "list_sessions", "get_session", "read_reply", "triage", "events", "send", "send_group", "spawn", "set_wait",
     "clear_wait", "add_note", "list_groups", "add_group", "remove_group", "move_to_group", "add_group_note",
     "suggest_groups",
   ]
@@ -168,6 +168,11 @@ final class MCPClient {
   }
 
   func groupList(_ sbd: Instance) throws -> GroupList { try decode(GroupList.self, sbd.sb("group", "ls", "--json")) }
+
+  /// Arguments of a spawn on a new branch named `name` in a new repo.
+  func spawnArgs(_ sbd: Instance, _ name: String) throws -> [String: JSON] {
+    ["repository": .string(try sbd.makeRepo()), "branch": .string(name), "name": .string(name), "prompt": "hello"]
+  }
 
   /// The text of each message that reached the session.
   func sent(_ sbd: Instance, _ id: String) throws -> [String] {
@@ -366,14 +371,12 @@ final class MCPClient {
     #expect(try sent(sbd, s.id) == ["Rebase on main."])
   }
 
-  @Test func newSessionRecordsTheCallerAsItsParent() throws {
+  @Test func spawnRecordsTheCallerAsItsParent() throws {
     let sbd = try Instance()
     let parent = try sbd.new(name: "parent")
     let mcp = try MCPClient(sbd, env: inside(parent.id))
 
-    let kid = try mcp.call(
-      "new_session", ["path": .string(sbd.work), "name": "kid", "prompt": "hello"]
-    ).decode(SessionSummary.self)
+    let kid = try mcp.call("spawn", try spawnArgs(sbd, "kid")).decode(SessionSummary.self)
 
     #expect(kid.name == "kid")
     #expect(kid.parent == parent.id)
@@ -381,22 +384,22 @@ final class MCPClient {
     try sbd.waitFor(kid.id, "the kid's reply") { $0.lastReply == "Done: hello" }
   }
 
-  @Test func newSessionWithoutACallerHasNoParent() throws {
+  @Test func spawnWithoutACallerHasNoParent() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
-    let s = try mcp.call("new_session", ["path": .string(sbd.work), "name": "loner"]).decode(SessionSummary.self)
+    let s = try mcp.call("spawn", try spawnArgs(sbd, "loner")).decode(SessionSummary.self)
 
     #expect(s.parent == nil)
   }
 
-  @Test func newSessionInsideAGroupedCallerJoinsTheCallersGroup() throws {
+  @Test func spawnInsideAGroupedCallerJoinsTheCallersGroup() throws {
     let sbd = try Instance()
     let parent = try sbd.new(name: "parent")
     let g = try addGroup(sbd, "Flags", parent.id)
     let mcp = try MCPClient(sbd, env: inside(parent.id))
 
-    let kid = try mcp.call("new_session", ["path": .string(sbd.work), "name": "kid"]).decode(SessionSummary.self)
+    let kid = try mcp.call("spawn", try spawnArgs(sbd, "kid")).decode(SessionSummary.self)
 
     #expect(kid.group == g.id)
   }
@@ -926,25 +929,42 @@ final class MCPClient {
     #expect(try groupList(sbd) == before)
   }
 
-  @Test func aScopedNewSessionLandsInTheGroupEvenWhenTheCallerIsInAnother() throws {
+  @Test func aScopedSpawnLandsInTheGroupEvenWhenTheCallerIsInAnother() throws {
     let sbd = try Instance()
     let s = try scope(sbd)
     let mcp = try MCPClient(sbd, group: s.group.id, env: inside(s.outside.id))
 
-    let kid = try mcp.call("new_session", ["path": .string(sbd.work), "name": "kid"]).decode(SessionSummary.self)
+    let kid = try mcp.call("spawn", try spawnArgs(sbd, "kid")).decode(SessionSummary.self)
 
     #expect(kid.parent == s.outside.id)
     #expect(try sbd.get(kid.id).group == s.group.id)
   }
 
-  @Test func aScopedNewSessionWithoutACallerLandsInTheGroup() throws {
+  @Test func aScopedSpawnWithoutACallerLandsInTheGroup() throws {
     let sbd = try Instance()
     let s = try scope(sbd)
     let mcp = try MCPClient(sbd, group: s.group.id)
 
-    let kid = try mcp.call("new_session", ["path": .string(sbd.work), "name": "kid"]).decode(SessionSummary.self)
+    let kid = try mcp.call("spawn", try spawnArgs(sbd, "kid")).decode(SessionSummary.self)
 
     #expect(try sbd.get(kid.id).group == s.group.id)
+  }
+
+  @Test func aScopedFollowupSpawnLandsInTheGroup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id, env: inside(s.outside.id))
+    // A follow-up keeps the repo's owner/name, so the repo needs a github.com remote.
+    let repo = try Repos.create("\(sbd.home.path)/widgets", origin: "https://github.com/acme/widgets.git")
+    let args: [String: JSON] = [
+      "repository": .string(repo), "branch": "later", "prompt": "Clean up.", "followup": true,
+    ]
+
+    let later = try mcp.call("spawn", args).decode(SessionSummary.self)
+
+    #expect(later.state == AttentionState.notStarted)
+    #expect(later.parent == s.outside.id)
+    #expect(try sbd.client.call("get", ["session": .string(later.id)], as: SessionSummary.self).group == s.group.id)
   }
 
   @Test func aScopedListGroupsReturnsOnlyTheScopesGroup() throws {

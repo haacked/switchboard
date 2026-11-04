@@ -126,8 +126,8 @@ public struct MCPToolServer: Sendable {
       return try client.call("send", ["session": try sessionID(args, scoped), "text": args["text"] ?? .null])
     case "send_group":
       return try sendGroup(args, scoped)
-    case "new_session":
-      return try newSession(args, scoped)
+    case "spawn":
+      return try spawn(args, scoped)
     case "set_wait":
       var wait = try JSONCoding.convert(args, to: WaitRequest.self)
       wait.by = Author.claude.rawValue
@@ -254,14 +254,17 @@ public struct MCPToolServer: Sendable {
     return try client.call("send-group", request)
   }
 
-  /// A scoped server starts the session in its group.
-  private func newSession(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
-    guard let path = args["path"]?.string, !path.isEmpty else { throw APIError("new_session needs a path") }
-    var new = try JSONCoding.convert(args, to: NewSession.self)
-    new.path = URL(fileURLWithPath: path.expandingTilde).path
-    new.parent = caller
-    new.group = scoped?.group.id
-    return try client.call("new", try JSON(encoding: new).object ?? [:], timeout: 300)
+  /// A scoped server puts the new session in its group.
+  private func spawn(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
+    var request = pick(
+      args, ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after"])
+    // sbd runs in another folder, so a relative path becomes absolute here, as `sb spawn` does.
+    if let repo = args["repository"]?.string, ["/", "~", "."].contains(where: repo.hasPrefix) {
+      request["repository"] = .string(URL(fileURLWithPath: repo.expandingTilde).standardizedFileURL.path)
+    }
+    if let caller { request["parent"] = .string(caller) }
+    if let scoped { request["group"] = .string(scoped.group.id) }
+    return try client.call("spawn", request, timeout: 300)
   }
 
   /// A scoped server moves its sessions only to Ungrouped, because every other group is out of its scope.

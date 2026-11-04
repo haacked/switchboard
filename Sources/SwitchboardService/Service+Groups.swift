@@ -57,6 +57,12 @@ extension Service {
     parent.flatMap { entries[$0]?.session.group }
   }
 
+  /// The group that a new session joins: the one that `ref` names, else its parent's.
+  func groupOfNew(_ ref: String?, parent: String?) throws -> String? {
+    guard let ref else { return groupOfParent(parent) }
+    return try lookupGroup(["group": .string(ref)])
+  }
+
   /// Finds a group by id, by unique id prefix, or by unique name.
   func lookupGroup(_ args: JSON) throws -> String {
     guard let key = args["group"]?.string, !key.isEmpty else { throw APIError("name a group") }

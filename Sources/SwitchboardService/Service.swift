@@ -492,9 +492,7 @@ public final class Service {
       created: nowMs())
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
-    session.group =
-      try args.group.map { try resolveRef($0, "group", groups.values.map { ($0.id, $0.name) }) }
-      ?? groupOfParent(session.parent)
+    session.group = try groupOfNew(args.group, parent: session.parent)
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     configure(&session)
     entries[id] = Entry(session: session)
