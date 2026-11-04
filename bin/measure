@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Measures sbd with many sessions, for the done criteria in the plan's
+# Phases. It builds sb and sbd in release mode and starts a private sbd under
+# a temporary SB_HOME, with the stub claude from the integration tests, which
+# stays idle at its prompt. For each count, it adds sessions until that many
+# run. It then reports the resident memory of sbd, of the terminals (the tmux
+# server and the panes' shells), of the stub claudes, and of all of them
+# together, and the median wall time of `sb ls` and `sb ls --json`.
+# The stub stands in for claude, so its memory says nothing about claude's.
+# The panes run your login shell, as the installed sbd's do.
+#   bin/measure              measures 25 and then 50 sessions
+#   bin/measure 10 25 100    measures each count in turn
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root=$(pwd)
+counts=("$@")
+if [ ${#counts[@]} -eq 0 ]; then counts=(25 50); fi
+runs=5
+
+echo "Building sb and sbd in release mode…"
+swift build -c release --product sb >/dev/null
+swift build -c release --product sbd >/dev/null
+bin=$(swift build -c release --show-bin-path)
+
+# Fixtures/reap ends a home's processes only for a path of this shape. A
+# Unix socket path can't exceed 103 bytes, so the home stays short.
+home=$(mktemp -d /tmp/sbt.XXXXXX)
+export SB_HOME=$home
+cleanup() { "$root/Tests/IntegrationTests/Fixtures/reap" || true; }
+trap cleanup EXIT
+mkdir -p "$home/work" "$home/account"
+echo $$ >"$home/owner.pid"
+cat >"$home/config.json" <<EOF
+{
+  "claude": "$root/Tests/IntegrationTests/Fixtures/claude-stub",
+  "worktreeRoot": "$home/worktrees",
+  "claudeConfigDirs": [],
+  "github": {"pollSeconds": 0},
+  "depot": {"enabled": false},
+  "usage": {"pollSeconds": 0, "keychain": false},
+  "trunk": {"path": "$home/trunk"}
+}
+EOF
+# The stub writes its transcripts into this account, never into yours.
+CLAUDE_CONFIG_DIR="$home/account" "$bin/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
+sbd=$!
+sb() { "$bin/sb" "$@"; }
+for _ in $(seq 100); do
+  if sb ping >/dev/null 2>&1; then break; fi
+  sleep 0.1
+done
+sb ping >/dev/null
+
+# The median wall time of a command over $runs runs, in milliseconds. One perl
+# times every run, so starting the timer is not part of any run.
+median_ms() {
+  perl -MTime::HiRes=time -e '
+    my $runs = shift; my @t;
+    open(my $out, ">&", \*STDOUT); open(STDOUT, ">", "/dev/null");
+    for (1 .. $runs) { my $s = time; system(@ARGV) == 0 or die "@ARGV failed\n"; push @t, (time - $s) * 1000 }
+    open(STDOUT, ">&", $out); @t = sort { $a <=> $b } @t; printf "%d\n", $t[int($runs / 2)]' "$runs" "$@"
+}
+
+# Prints the resident memory in KB of sbd, of the terminals, and of the stub
+# claudes, which are sbd, the tmux server, and every process under them. tmux
+# runs as a daemon, so it is not sbd's child, but its socket is in the home.
+# A stub's arguments, and its subshells', hold --settings.
+memory_kb() {
+  ps -axo pid=,ppid=,rss=,command= | awk -v sbd="$sbd" -v home="$home/" '
+    { pid[NR] = $1; ppid[NR] = $2; rss[NR] = $3; cmd = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ /, "", cmd); command[NR] = cmd
+      if ($1 == sbd || (cmd ~ /^[^ ]*tmux / && index(cmd, home))) keep[$1] = 1 }
+    END {
+      do { added = 0; for (i = 1; i <= NR; i++) if (!(pid[i] in keep) && (ppid[i] in keep)) { keep[pid[i]] = 1; added = 1 } } while (added)
+      for (i = 1; i <= NR; i++) if (pid[i] in keep) {
+        if (pid[i] == sbd) s += rss[i]; else if (command[i] ~ / --settings /) c += rss[i]; else t += rss[i]
+      }
+      print s + 0, t + 0, c + 0 }'
+}
+
+mb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1024 }'; }
+
+started=0
+row='%-9s %-8s %-10s %-10s %-10s %-10s %-8s %-10s\n'
+printf "$row" sessions live "sbd MB" "terms MB" "stubs MB" "total MB" "ls ms" "json ms"
+for count in "${counts[@]}"; do
+  while [ "$started" -lt "$count" ]; do
+    sb new "$home/work" --name "m$started" >/dev/null
+    started=$((started + 1))
+  done
+  for _ in $(seq 300); do
+    live=$(sb ls --json | jq '[.[] | select(.claudePid)] | length')
+    if [ "$live" -ge "$count" ]; then break; fi
+    sleep 0.1
+  done
+  # Shells read their startup files after the pane starts, so memory settles later.
+  sleep 2
+  read -r sbd_kb term_kb stub_kb <<<"$(memory_kb)"
+  printf "$row" "$count" "$live" "$(mb "$sbd_kb")" "$(mb "$term_kb")" \
+    "$(mb "$stub_kb")" "$(mb $((sbd_kb + term_kb + stub_kb)))" "$(median_ms "$bin/sb" ls)" "$(median_ms "$bin/sb" ls --json)"
+done
+echo "Memory is resident set size. Times are the median of $runs runs. Load: $(uptime | sed 's/.*load averages*: //')"
