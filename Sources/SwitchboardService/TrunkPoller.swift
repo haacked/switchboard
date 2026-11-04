@@ -36,14 +36,12 @@ final class TrunkPoller {
   func result(_ prId: String) -> TrunkTimeline.Result? { reads[prId]?.result }
 
   /// Reads each candidate that is due, or every candidate with `all`, and
-  /// forgets the PRs that are neither candidates nor in `keeping`. A
-  /// candidate whose comments changed after its last read is due at once,
-  /// because that read can describe an earlier run of the PR. Once trunk
-  /// reports no login, the other due PRs get the same answer without a run.
-  /// Returns how many times trunk ran.
-  func poll(_ candidates: [Candidate], keeping: Set<String> = [], all: Bool, now: Int64) -> Int {
-    let ids = Set(candidates.map(\.prId))
-    reads = reads.filter { ids.contains($0.key) || keeping.contains($0.key) }
+  /// forgets the PRs that aren't `known`. A candidate whose comments changed
+  /// after its last read is due at once, because that read can describe an
+  /// earlier run of the PR. Once trunk reports no login, the other due PRs
+  /// get the same answer without a run. Returns how many times trunk ran.
+  func poll(_ candidates: [Candidate], known: Set<String>, all: Bool, now: Int64) -> Int {
+    reads = reads.filter { known.contains($0.key) }
     if candidates.isEmpty { problem = nil }
     let due = candidates.filter { c in
       let last = reads[c.prId]?.at

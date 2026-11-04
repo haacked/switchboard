@@ -388,8 +388,11 @@ public enum GitHub {
   /// Needs you and come back.
   ///
   /// `trunk` is what `trunk merge status` printed about the PR. A timeline
-  /// gives an open PR's queue state in place of the comments. trunk reads the
-  /// queue itself. The comments lag it.
+  /// gives an open PR's queue state in place of the comments while the
+  /// comments show the PR in the queue, show a state that didn't load, or
+  /// show the state that the timeline ends in. trunk reads the queue itself.
+  /// The comments lag it. Comments that show another final state, or none,
+  /// changed after trunk printed the timeline.
   public static func shown(
     _ pr: PullRequest, _ comments: [PRComment], trunk: TrunkTimeline.Result? = nil, last: PullRequest?
   ) -> PullRequest {
@@ -400,7 +403,9 @@ public enum GitHub {
     if pr.state == .open {
       switch trunk {
       case .found(let timeline)?:
-        if let entry = timeline.entries.last {
+        if let entry = timeline.entries.last,
+          let comments = change?.state, comments.isQueued || comments == .unknown || comments == entry.state
+        {
           shown.queue = entry.state
           shown.queueAt = entry.time
           shown.queueLabel = entry.label

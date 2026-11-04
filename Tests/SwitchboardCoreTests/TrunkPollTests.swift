@@ -59,23 +59,28 @@ private let testingComments = [status(trunkTesting)]
     #expect(shown.trunkLoginNeeded != true)
   }
 
+  /// Comments that show the PR in the queue, a state that didn't load, or the timeline's own final state.
   @Test(arguments: [
-    [PRComment](), [status(trunkControl)], [status(trunkTesting)],
+    [status(trunkTesting)],
     [status(trunkTesting), PRComment(id: "x", author: "trunk-io[bot]", createdAt: trunkTime, edited: true)],
+    [status(trunkCancelled, at: "2026-10-26T00:00:00Z")],
   ])
-  func foundTimelineWinsOverEveryCommentState(_ comments: [PRComment]) {
+  func foundTimelineWinsWhileTheCommentsAgreeOrLag(_ comments: [PRComment]) {
     let shown = GitHub.shown(openPR, comments, trunk: removedTimeline, last: nil)
 
     #expect(shown.queue == .removed)
+    #expect(shown.queueLabel == "Cancelled")
   }
 
-  @Test func foundTimelineWinsOverAnOlderOrNewerComment() {
-    // The comment's edit is newer than every trunk entry. trunk still decides.
-    let comments = [status(trunkMerged, at: "2026-10-26T00:00:00Z")]
+  /// Comments that name no state, or a final state other than the timeline's.
+  @Test(arguments: [[PRComment](), [status(trunkControl)], [status(trunkMerged, at: "2026-10-26T00:00:00Z")]])
+  func commentsThatMovedOnWinOverTheTimeline(_ comments: [PRComment]) {
+    let fromComments = GitHub.shown(openPR, comments, last: nil)
 
     let shown = GitHub.shown(openPR, comments, trunk: removedTimeline, last: nil)
 
-    #expect(shown.queue == .removed)
+    #expect(shown.queue == fromComments.queue)
+    #expect(shown.queueLabel == nil)
   }
 
   /// Every result except a timeline with entries leaves the queue fields that the comments give.
