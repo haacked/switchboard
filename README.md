@@ -104,12 +104,15 @@ sb group ls
 sb group move s2abc --to flag-evals      # or --ungrouped
 sb group note flag-evals "rollout doc: …"
 sb group rm flag-evals                   # its sessions become ungrouped
-sb group suggest                         # groups suggested from branch names and PR titles
+sb group suggest                         # groups suggested from dependencies, branch names, and PR titles
 sb group suggest --accept prefix:flag-evaluations
+sb group suggest --decline merge:g2kq7:g8xmp   # never suggest it again
 sb send --group flag-evals "Rebase onto main."
 ```
 
-`suggest` looks only at ungrouped sessions. Sessions whose branches start with the same words (after the owner, as in `haacked/`), whose PR titles share a scope such as `feat(flags):`, or whose branches and titles share a word, form a suggestion. It names a new group, or an existing group whose sessions or name share the key. A session that you moved to Ungrouped by hand is never suggested. Moving a session, adding it to a group, and accepting a suggestion all count as placing it by hand.
+When a session's PR depends on another session's PR and the two sessions are in different groups, `suggest` offers to merge the groups. A PR depends on another when it is stacked on it or names it in a `Depends on` line. The group with more sessions placed by hand keeps its name, then the group with more sessions, then the older one. The merge moves the other group's sessions into it, except sessions that you placed by hand, which stay where they are and which the suggestion lists. When no session is left behind, the other group is deleted and its notes move to the group that kept its name. A merge that would move no session is not suggested. When one end of the dependency has no group, `suggest` offers to add it to the other end's group. These suggestions come before the ones from branch names and PR titles.
+
+`suggest` looks only at ungrouped sessions for the rest. Sessions whose branches start with the same words (after the owner, as in `haacked/`), whose PR titles share a scope such as `feat(flags):`, or whose branches and titles share a word, form a suggestion. It names a new group, or an existing group whose sessions or name share the key. A session that you moved to Ungrouped by hand is never suggested. Moving a session, adding it to a group, and accepting a suggestion all count as placing it by hand. A declined suggestion stays declined, also after sbd restarts. The Board lists the suggestions above the rows, each with Accept and Decline.
 
 `sb send --group` lists the sessions it sends to, every session in the group except follow-ups that haven't started, and asks for confirmation. Without a terminal it needs `--yes`. Inside a Claude session it refuses without `--yes`, and its message tells Claude to show you the list and pass `--yes` only after you confirm, because session text quotes PR comments and logs that may carry instructions. A message sent inside a session never goes to that session. A group message never answers a session's deferred question.
 
