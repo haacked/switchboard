@@ -7,13 +7,15 @@ extension FakeGitHub {
     change(number) { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": .string(state)]]]]] }
   }
 
-  /// Adds a review to the PR's last reviews, and to its verdicts when `verdict`.
+  /// Adds a review of `commit` to the PR's last reviews, and to its verdicts
+  /// when `verdict`.
   func review(
-    _ number: Int, by login: String, _ state: String, at time: String, bot: Bool = false, verdict: Bool = false
+    _ number: Int, by login: String, _ state: String, at time: String, bot: Bool = false, verdict: Bool = false,
+    on commit: String = "abc"
   ) {
     let node: JSON = [
       "author": ["login": .string(login), "__typename": bot ? "Bot" : "User"], "state": .string(state),
-      "submittedAt": .string(time), "commit": ["oid": "abc"],
+      "submittedAt": .string(time), "commit": ["oid": .string(commit)],
     ]
     change(number) { pr in
       for key in verdict ? ["reviews", "latestOpinionatedReviews"] : ["reviews"] {

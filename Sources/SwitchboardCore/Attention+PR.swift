@@ -83,8 +83,6 @@ extension Attention {
         options: [ask("Fix the checks", "Fix the failing Depot CI on \(n): \(failure)")],
         callouts: [Callout(kind: .warning, title: "Depot CI failed on \(n)", body: failure)])
     }
-    // The user dismissed the merge card of this head commit.
-    if facts.currentMerge?.result == .dismissed { return nil }
     if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.
     guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }
@@ -105,7 +103,7 @@ extension Attention {
   /// must act on. It does not rely on `openPR` running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.ready, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
-      !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
+      pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
       !pr.ciFailed, classify(facts.lastReply ?? "") == .other, let line = readyPRLine(facts)
     else { return nil }
     return Verdict(state: .readyForReview, reason: oneLine(line, max: 200))

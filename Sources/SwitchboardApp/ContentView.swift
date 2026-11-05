@@ -626,7 +626,7 @@ struct BoardCard: View {
           CleanupNote(session: s)
           MergeNote(session: s)
           Text(
-            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))"
+            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))\(s.acknowledged == true ? " · acknowledged" : "")"
           )
           .font(.caption2).foregroundStyle(.tertiary)
         }

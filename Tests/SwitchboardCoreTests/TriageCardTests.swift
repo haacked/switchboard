@@ -483,8 +483,8 @@ let sessionCard = TriageSummary(
   }
 
   /// A card written before the PR became ready to merge keeps Merge and
-  /// Dismiss, since the Inbox shows no other merge button for one PR.
-  @Test func aReadyPRAfterTheSessionsCardAddsMergeAndDismiss() throws {
+  /// Acknowledge, since the Inbox shows no other merge button for one PR.
+  @Test func aReadyPRAfterTheSessionsCardAddsMergeAndAcknowledge() throws {
     var f = try carded()
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
@@ -522,7 +522,7 @@ let sessionCard = TriageSummary(
 
     let item = try #require(itemOf(f))
 
-    #expect(item.options.map(\.label) == ["Ship it", "Dismiss"])
+    #expect(item.options.map(\.label) == ["Ship it", "Acknowledge"])
   }
 
   /// A card that has the most callouts still shows the rule's reason first.
@@ -605,13 +605,13 @@ let sessionCard = TriageSummary(
     return f
   }
 
-  @Test func readyToMergeOffersMergeAndDismiss() throws {
+  @Test func readyToMergeOffersMergeAndAcknowledge() throws {
     let f = ended(samplePR(checks: "SUCCESS"))
 
     let item = try #require(itemOf(f))
 
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Merge #42", "Dismiss"])
+    #expect(item.options.map(\.label) == ["Merge #42", "Acknowledge"])
     #expect(item.options.map(\.action) == [.merge, .dismiss])
     #expect(item.options.map(\.recommended) == [true, false])
     #expect(item.primary?.action == .merge)

@@ -23,6 +23,13 @@ extension FakeGitHub {
   fileprivate func setDraft(_ number: Int, _ draft: Bool) {
     change(number) { $0["isDraft"] = .bool(draft) }
   }
+
+  /// Sets the PR's reviewDecision. JSON null is GitHub's answer for a base
+  /// branch that requires no review. nil drops the key, so the poll does not
+  /// read it.
+  fileprivate func decide(_ number: Int, _ decision: JSON?) {
+    change(number) { $0["reviewDecision"] = decision }
+  }
 }
 
 extension Instance {
@@ -49,14 +56,24 @@ extension Instance {
   static let docsBranch = "haacked/flag-calls-move-docs"
   static let docsNumber = 20992
   static let hour: Int64 = 3_600_000
+  /// The fixture's head commit of #18303.
+  static let headCommit = "04e3f33e9804c4ff6fbd57f41ebd75e6c1e50547"
+  static let olderCommit = "0000000000000000000000000000000000000001"
+  static let reviewedAt = "2026-11-01T00:00:00Z"
 
   /// A session on #18303's branch whose PR waits on a review from
-  /// `reviewers`, which the poller has read.
+  /// `reviewers`, with `decision` as its reviewDecision, which the poller
+  /// has read. `wait` opens a wait before the poll, so the other rules give
+  /// Waiting. `configure` edits the fake PR before the session starts.
   func session(
-    _ github: FakeGitHub, _ sbd: Instance, draft: Bool, from reviewers: [String] = ["alice"]
+    _ github: FakeGitHub, _ sbd: Instance, draft: Bool = false, decision: JSON? = "REVIEW_REQUIRED",
+    from reviewers: [String] = ["alice"], wait: String? = nil, configure: (FakeGitHub) -> Void = { _ in }
   ) throws -> SessionSummary {
     github.awaitReview(Self.number, draft: draft, from: reviewers)
+    github.decide(Self.number, decision)
+    configure(github)
     let s = try sbd.session(in: Self.charts, branch: Self.branch)
+    if let wait { try sbd.sb(["wait", s.id] + wait.split(separator: " ").map(String.init)) }
     try sbd.poll()
     return s
   }
@@ -106,7 +123,7 @@ extension Instance {
 
     let got = try sbd.get(s.id)
 
-    #expect(got.reason == "#18303 Fix; review requested from alice, checks success")
+    #expect(got.reason == "#18303 Fix; review required; review requested from alice, checks success")
   }
 
   @Test func sessionInReadyForReviewIsNotInTheInbox() throws {
@@ -235,5 +252,103 @@ extension Instance {
 
     #expect(row["pr"]?["reviewRequests"] == ["alice", "bob"])
     #expect(got["pr"]?["reviewRequests"] == ["alice", "bob"])
+  }
+
+  /// The author pushed after bob's change request, so the PR waits on bob's
+  /// second review.
+  @Test func changesRequestedOnAnOlderCommitIsReadyForReview() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: "CHANGES_REQUESTED", from: ["bob"]) {
+      $0.review(Self.number, by: "bob", "CHANGES_REQUESTED", at: Self.reviewedAt, verdict: true, on: Self.olderCommit)
+    }
+
+    let got = try sbd.get(s.id)
+
+    #expect(got.state == .readyForReview)
+    #expect(
+      got.reason.hasPrefix(
+        "#18303 chore(cdp): document lookup records in the dead-letter runbook; changes requested by bob"))
+  }
+
+  /// No rule requires a review, the checks passed, and nobody is asked, so
+  /// the PR can merge.
+  @Test func prThatNeedsNoReviewIsReadyToMerge() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: .null, from: [])
+
+    #expect(try sbd.get(s.id).state == .readyToMerge)
+  }
+
+  @Test func reviewRequestOnAPRThatNeedsNoReviewIsNotReadyForReview() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: .null, from: ["alice"])
+
+    #expect(try sbd.get(s.id).state == .needsYou)
+  }
+
+  @Test func waitingSessionWhosePRNeedsNoReviewStaysWaitingAndSaysWhy() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: .null, from: [], wait: "CI on #18303")
+
+    let got = try sbd.get(s.id)
+    let printed = try sbd.sb("get", s.id)
+
+    #expect(got.state == .waiting)
+    #expect(got.reason.hasSuffix("; #18303 needs no review"))
+    #expect(printed.contains("needs no review"))
+  }
+
+  @Test func sbGetSaysReviewRequiredInTheColumn() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, wait: "CI on #18303")
+
+    let printed = try sbd.sb("get", s.id)
+
+    #expect(printed.contains("state:   Ready for review: #18303 "))
+    #expect(printed.contains("; review required; review requested from alice"))
+  }
+
+  @Test func approvedPRIsNotReadyForReview() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: "APPROVED", from: [], wait: "CI on #18303") {
+      $0.review(Self.number, by: "alice", "APPROVED", at: Self.reviewedAt, verdict: true, on: Self.headCommit)
+    }
+
+    let got = try sbd.get(s.id)
+
+    #expect(got.state == .waiting)
+    #expect(got.reason.hasSuffix("; #18303 approved"))
+  }
+
+  @Test func waitingSessionWithAnUnreadReviewDecisionSaysTheRuleIsNotRead() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd, decision: nil, wait: "CI on #18303")
+
+    let got = try sbd.get(s.id)
+
+    #expect(got.state == .waiting)
+    #expect(got.reason.hasSuffix("; #18303: GitHub's review rule not read yet"))
+  }
+
+  @Test func approvalMovesTheSessionOutAfterTheNextPoll() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try session(github, sbd)
+    #expect(try sbd.get(s.id).state == .readyForReview)
+    try sbd.advanceClock(Self.hour)
+    github.decide(Self.number, "APPROVED")
+    github.review(Self.number, by: "alice", "APPROVED", at: Self.reviewedAt, verdict: true, on: Self.headCommit)
+    github.change(Self.number) { $0["reviewRequests"] = ["nodes": []] }
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).state == .readyToMerge)
   }
 }

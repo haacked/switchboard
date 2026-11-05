@@ -5,8 +5,8 @@ extension Service {
   static let mergeTimeoutSeconds = 120.0
 
   /// The `merge` request, which merges a Ready to merge session's PR with a
-  /// merge commit, or with `dismiss` takes the session out of Ready to merge
-  /// until its PR's head commit changes. `session` names the session, or `pr`
+  /// merge commit, or with `dismiss` acknowledges the session's Ready to
+  /// merge item. `session` names the session, or `pr`
   /// and an optional `repository` name it by its open PR. After a merge, sbd
   /// resumes the session with a message. A failed merge records gh's error
   /// and fails the request. It changes nothing else.
@@ -20,7 +20,7 @@ extension Service {
       }
       guard !merging.contains(id) else { throw APIError("#\(pr.number) is already merging") }
       if args["dismiss"]?.bool == true {
-        record(id, "merge", try JSON(encoding: MergeAttempt(head: pr.headSha, result: .dismissed)))
+        try acknowledge(id, verdict)
         return (id, nil)
       }
       merging.insert(id)

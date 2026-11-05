@@ -346,7 +346,7 @@ extension Instance {
 
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Merge #18303", "Dismiss"])
+    #expect(item.options.map(\.label) == ["Merge #18303", "Acknowledge"])
     #expect(item.options.map(\.action) == [.merge, .dismiss])
     #expect(item.primary?.action == .merge)
     #expect(sbd.summaryCalls().isEmpty)
@@ -419,20 +419,22 @@ extension Instance {
     #expect(try sbd.messagesFromSbd(s.id) == [MergeTests.message])
   }
 
-  @Test func choosingDismissDismissesWithoutMerging() throws {
+  @Test func choosingAcknowledgeAcknowledgesWithoutMerging() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
     try sbd.poll()
 
-    try sbd.sb("choose", s.id, "Dismiss")
+    try sbd.sb("choose", s.id, "Acknowledge")
 
-    #expect(try sbd.get(s.id).state != .readyToMerge)
+    let got = try sbd.get(s.id)
+    #expect(got.state == .waiting)
+    #expect(got.acknowledged == true)
     #expect(sbd.ghMerges().isEmpty)
   }
 
-  @Test(arguments: ["Merge #18303", "Dismiss", "1", "2"])
-  func chooseRefusesMergeAndDismissInsideClaudeCode(_ option: String) throws {
+  @Test(arguments: ["Merge #18303", "Acknowledge", "1", "2"])
+  func chooseRefusesMergeAndAcknowledgeInsideClaudeCode(_ option: String) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)

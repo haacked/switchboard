@@ -20,8 +20,9 @@ struct OptionRow {
     } else if let (head, tail) = Self.split(label) {
       (title, lead) = (head, tail)
     } else {
-      // The action's name, such as Send or Merge.
-      (title, lead) = (Triage.capitalized(option.action.rawValue), label)
+      // The action's name, such as Send or Merge. The UI calls `dismiss` Acknowledge.
+      let name = option.action == .dismiss ? "acknowledge" : option.action.rawValue
+      (title, lead) = (Triage.capitalized(name), label)
     }
     description = Self.join(lead, option.detail)
   }

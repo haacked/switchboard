@@ -224,7 +224,7 @@ extension Instance {
     #expect(requested.state == .readyForReview)
     #expect(
       requested.reason
-        == "#18303 chore(cdp): document lookup records in the dead-letter runbook; review requested from copilot-pull-request-reviewer, checks success"
+        == "#18303 chore(cdp): document lookup records in the dead-letter runbook; review required; review requested from copilot-pull-request-reviewer, checks success"
     )
     #expect(try sbd.triage().isEmpty)
 
