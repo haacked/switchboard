@@ -577,3 +577,47 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(sent.value == 1)
   }
 }
+
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelPlanFollowups {
+  @Test func followUpSendsPlanFollowupWithThePlanAndRow() async {
+    let sent = await BoardModelSuggestions().request { $0.followUp(plan: "p1", row: "2") }
+
+    #expect(sent.op == "plan-followup")
+    #expect(sent.args == ["plan": "p1", "row": "2"])
+  }
+
+  @Test func ignoresASecondFollowUpWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.followUp(plan: "p1", row: "2")
+    model.followUp(plan: "p1", row: "2")
+    #expect(model.followingUp == ["p1 2"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  /// The row leaves `canFollowUp` in the same turn that turns its button
+  /// back on, before the refresh lists the plan again.
+  @Test func aMadeFollowUpDropsItsRowBeforeTheButtonTurnsBackOn() async throws {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    var plan = PlanDocument(id: "p1", source: PlanSource(kind: .file, path: "/tmp/plan.md"), group: "g", attached: 0)
+    plan.update(from: "| # | Item | Status |\n| --- | --- | --- |\n| 2 | Docs | Not started |\n", now: 1)
+    var group = GroupSummary(SessionGroup(id: "g", name: "G", created: 0), sessions: [])
+    group.plans = [PlanSummary(plan)]
+    model.groups = [group]
+    model.send = { _, _ in .null }
+
+    model.followUp(plan: "p1", row: "2")
+    for _ in 0..<100 where !model.followingUp.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.followingUp.isEmpty)
+    #expect(model.groups.first?.plans?.first?.canFollowUp.isEmpty == true)
+  }
+}

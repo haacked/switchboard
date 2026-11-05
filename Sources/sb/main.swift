@@ -310,8 +310,7 @@ func printImportable(_ list: ImportList, repo: String? = nil) {
     }
   }
   if list.hidden > 0 {
-    let plain = repo?.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil
-    let command = "sb import --all" + (repo.map { " --repo \(plain ? $0 : shellQuote($0))" } ?? "")
+    let command = "sb import --all" + (repo.map { " --repo \(shellWord($0))" } ?? "")
     print("\n\(list.hidden) more outside a worktree. List them with: \(command)".printable)
   }
   if list.sessions.contains(where: \.running) {
