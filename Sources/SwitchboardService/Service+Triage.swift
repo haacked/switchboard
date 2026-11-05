@@ -8,38 +8,75 @@ extension Service {
       return .success(try queue.sync { try JSON(encoding: Triage.order(summaries())) })
     case "choose":
       return handle(try queue.sync { try chooseRequest(args) })
+    case "summary-set":
+      return .success(try queue.sync { try setSummary(args) })
     default:
       return .success(try reply(args))
     }
   }
 
-  /// The request that does what a click on the option does: answer the
-  /// session's card, or send the option's message.
+  /// Records the card that the session wrote for its current turn. A new
+  /// prompt drops it.
+  private func setSummary(_ args: JSON) throws -> JSON {
+    let id = try lookup(args)
+    guard let raw = args["card"] else { throw APIError("summary set needs the card as JSON") }
+    let cleaned = try TriageCard.clean(raw, now: nowMs())
+    let event = record(id, Triage.sessionEvent, try JSON(encoding: cleaned.card))
+    return [
+      "session": .string(id), "event": .number(Double(event.id)),
+      "options": .number(Double(cleaned.card.options.count)),
+      "callouts": .number(Double(cleaned.card.callouts.count)),
+      "dropped": .array(cleaned.dropped.map(JSON.string)),
+    ]
+  }
+
+  /// The request that does what a click on the option does. Each action is a
+  /// request that sbd already has, which makes its own checks.
   private func chooseRequest(_ args: JSON) throws -> Request {
     let id = try lookup(args)
     let name = entries[id]!.session.name
     guard let item = summary(id).triage else { throw APIError("\(name) needs nothing from you") }
     guard !item.options.isEmpty else { throw APIError("\(name) offers no options. Send it a message instead") }
-    // The caller's `ref` names the item that the user saw. `refuseCards` is set
-    // inside Claude Code, which may not approve a prompt.
+    // The caller's `ref` names the item that the user saw.
     if let ref = args["ref"]?.string, ref != item.ref {
       throw APIError("\(name) has a new item since you looked. Look again")
     }
-    if args["refuseCards"]?.bool == true, item.source == .card {
-      throw APIError("choose answers a permission prompt or question for you, so it doesn't run inside Claude Code")
-    }
     guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
     let option = try item.option(key)
-    guard item.source == .card, let card = entries[id]!.facts.cards.first else {
-      return Request(op: "send", args: ["session": .string(id), "text": .string(option.message)])
+    // Claude Code may not approve its own prompt or merge its own PR.
+    if args["insideClaude"]?.bool == true, item.source == .card || option.action.isMerge {
+      throw APIError("choose answers a prompt or merges a PR for you, so it doesn't run inside Claude Code")
     }
-    var answer: [String: JSON] = ["session": .string(id), "card": .number(Double(card.id))]
-    if card.kind != .question {
-      answer["behavior"] = .string(option.message)
-    } else {
-      answer["answers"] = [.string(option.message)]
+    let session = JSON.string(id)
+    switch option.action {
+    case .send:
+      return Request(op: "send", args: ["session": session, "text": .string(option.message ?? option.label)])
+    case .reply:
+      let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      guard !text.isEmpty else { throw APIError("\(option.label) needs the text to send") }
+      return Request(op: "send", args: ["session": session, "text": .string(text)])
+    case .merge:
+      return Request(op: "merge", args: ["session": session])
+    case .dismiss:
+      return Request(op: "merge", args: ["session": session, "dismiss": true])
+    case .wait:
+      var wait = try option.wait.map { try JSON(encoding: $0).object ?? [:] } ?? [:]
+      wait["session"] = session
+      return Request(op: "wait", args: .object(wait))
+    case .done:
+      return Request(op: "done", args: ["session": session])
+    case .allow, .deny, .answer:
+      guard item.source == .card, let card = entries[id]!.facts.cards.first else {
+        throw APIError("\(name) has no prompt to answer")
+      }
+      var answer: [String: JSON] = ["session": session, "card": .number(Double(card.id))]
+      if option.action == .answer {
+        answer["answers"] = [.string(option.message ?? option.label)]
+      } else {
+        answer["behavior"] = .string(option.action.rawValue)
+      }
+      return Request(op: "answer", args: .object(answer))
     }
-    return Request(op: "answer", args: .object(answer))
   }
 
   /// The session's last assistant reply from its transcript, which is read
@@ -77,9 +114,14 @@ extension Service {
     guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)) else {
       return
     }
+    let stop = e.facts.lastStop
+    let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
+    if let skip = summarySkip(e.facts, account: account) {
+      record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])
+      return
+    }
     let session = summary(id)
     guard Triage.mayHaveItem(session) else { return }
-    let stop = e.facts.lastStop
     let input = TriageSummarizer.input(session: session, reply: e.facts.lastReply ?? "")
     var env = ProcessInfo.processInfo.environment.merging(paneEnv(id)) { $1 }
     // A summary call is not a session, so it gets no session id.
@@ -93,9 +135,22 @@ extension Service {
     }
   }
 
+  /// Why the summary call does not run: the session wrote its own card, the
+  /// account has no quota left, or the session had its calls for the hour.
+  private func summarySkip(_ facts: SessionFacts, account: String) -> String? {
+    if facts.sessionSummary != nil { return "the session wrote its card" }
+    if !quota.hasBudget(account: account) { return "no quota left for \(account)" }
+    let now = nowMs()
+    let calls = facts.summaryCalls.filter { now - $0 < AutoContinue.hourMs }.count
+    if calls >= config.triage.perHour { return "\(calls) summaries in the last hour" }
+    return nil
+  }
+
   private func finishSummary(_ id: String, stop: Int64, _ result: Result<TriageSummary, Error>) {
-    // The user moved on while the call ran.
-    guard entries[id]?.facts.lastStop == stop else { return }
+    // A call for a turn the user moved on from still counts toward
+    // `triage.perHour`. applyTriage ignores its summary because its stop no
+    // longer matches.
+    guard entries[id] != nil else { return }
     var data: [String: JSON]
     switch result {
     case .success(let summary):
