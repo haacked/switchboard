@@ -13,7 +13,7 @@ func review(_ a: Args) {
   }
   let target = a.session("review")
   var args = sessionOrPR(target)
-  let reviewers = Array(a.positional.dropFirst())
+  let reviewers = ReviewRequests.reviewers(in: a.positional.dropFirst().joined(separator: " "))
   let dismiss = a.switches.contains("--dismiss")
   if dismiss { args["dismiss"] = true }
   if !reviewers.isEmpty { args["reviewers"] = .array(reviewers.map(JSON.string)) }

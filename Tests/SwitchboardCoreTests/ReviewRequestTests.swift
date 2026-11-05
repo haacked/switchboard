@@ -166,6 +166,27 @@ extension ReviewRequestTests {
         verdict(f)
           == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waiting on 1 subagent"))
     }
+
+    @Test func runningBackgroundJobShowsNoCard() throws {
+      let f = try prFacts(unreviewedPR(), then: [event("job", 4, ["count": 1])])
+
+      #expect(
+        verdict(f)
+          == Verdict(
+            state: .readyForReview, reason: "#42 Fix; review required, checks success; waiting on 1 background job"))
+    }
+
+    @Test func jobThatJustEndedShowsNoCardUntilClaudeCanReportIt() throws {
+      let ended: Int64 = 5
+      let f = try prFacts(unreviewedPR(), then: [event("job", 4, ["count": 1]), event("job", ended, ["count": 0])])
+
+      #expect(
+        Attention.evaluate(session(), f, now: ended + Attention.jobReportMs - 1)
+          == Verdict(
+            state: .readyForReview,
+            reason: "#42 Fix; review required, checks success; waiting for claude to report its background job"))
+      #expect(Attention.evaluate(session(), f, now: ended + Attention.jobReportMs) == card)
+    }
   }
 }
 

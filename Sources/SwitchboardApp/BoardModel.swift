@@ -560,8 +560,9 @@ final class BoardModel: ObservableObject {
     if merge { merging.insert(session) }
     // A merge or a review request waits on gh for up to two minutes. It runs on its own queue so that it does not hold
     // the other actions back.
+    let waitsOnGh = merge || action == .requestReview
     perform(
-      "choose", args, on: action.needsClick ? merges : nil,
+      "choose", args, on: waitsOnGh ? merges : nil,
       finally: {
         self.choosing.remove(key)
         if merge { self.merging.remove(session) }
