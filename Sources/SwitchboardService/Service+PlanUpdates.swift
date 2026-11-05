@@ -83,12 +83,13 @@ extension Service {
   }
 
   /// A row for each session of a plan's group whose PR no row of the plan
-  /// links, unless the user declined it. A plan needs a work table.
+  /// links, unless the user declined it. A plan needs a work table, and an
+  /// artifact plan gets none, because only the group's chat can write it.
   private func rowSuggestions(_ list: [PlanDocument]) throws -> [PlanProposal] {
     let declined = try store.declinedSuggestions()
     var out: [PlanProposal] = []
     for plan in list {
-      guard let group = plan.group, let table = plan.workTable else { continue }
+      guard let group = plan.group, let table = plan.workTable, plan.source.kind != .artifact else { continue }
       let linked = Set(plan.rows.flatMap(\.prs).map(\.link.key))
       for session in members(group).sorted(by: { ($0.name, $0.id) < ($1.name, $1.id) }) {
         guard let pr = entries[session.id]?.facts.pr else { continue }

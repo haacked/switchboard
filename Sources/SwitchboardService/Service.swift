@@ -206,6 +206,8 @@ public final class Service {
         return .success(try planDocumentRequest(request.op, request.args))
       case "plan-propose", "plan-apply":
         return .success(try planProposalDocumentRequest(request.op, request.args))
+      case "plan-artifact-read", "plan-artifact-rewrite", "plan-artifact-apply":
+        return .success(try artifactTurnRequest(request.op, request.args))
       case "plan-followup":
         // `planFollowup` takes the state queue itself.
         return .success(try JSON(encoding: planFollowup(request.args)))
@@ -324,6 +326,8 @@ public final class Service {
       return try planRequest(op, args)
     case "plan-proposals", "plan-reject":
       return try planProposalRequest(op, args)
+    case "plan-artifact-reject", "plan-artifact-report":
+      return try artifactRequest(op, args)
     default:
       throw APIError("unknown request \(op)")
     }

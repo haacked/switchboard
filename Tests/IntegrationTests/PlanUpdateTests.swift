@@ -220,7 +220,7 @@ extension Instance {
     let p = try sbd.waitForUpdateProposal()
 
     #expect(try sbd.plan(id).proposal?.id == p.id)
-    #expect(try sbd.planSummary(id).proposal == p.id)
+    #expect(try sbd.planSummary(id).update == p.id)
   }
 
   @Test func proposalLeavesTheDocumentAlone() throws {

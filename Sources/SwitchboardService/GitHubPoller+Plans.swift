@@ -97,6 +97,8 @@ extension GitHubPoller {
       let (text, _) = try contents(file, source)
       read.etag = file.etag
       return text
+    case .artifact:
+      return nil
     }
   }
 
@@ -180,6 +182,7 @@ extension GitHubPoller {
     case .file: try writeFile(source, change)
     case .issue: try writeIssue(source, change, stats: &stats)
     case .pr: try writePRFile(source, message: message, change, stats: &stats)
+    case .artifact: throw APIError("only the group's chat can write \(source.text)")
     }
   }
 
@@ -192,6 +195,8 @@ extension GitHubPoller {
       let reply = try rest("GET", issuePath(source), stats: &stats)
       guard reply.status == 200, let json = reply.json else { throw failure(reply, "issue \(source.text)") }
       return json["body"]?.string ?? ""
+    case .artifact:
+      throw APIError("only the group's chat can read \(source.text)")
     case .pr:
       let (_, head) = try pullHead(source, stats: &stats)
       return try prFile(source, head, stats: &stats).text

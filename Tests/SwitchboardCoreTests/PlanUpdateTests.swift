@@ -646,6 +646,14 @@ private let updated = document.replacingOccurrences(of: breakerRow, with: doneRo
     #expect(PlanUpdates.due(plan(), now: 0) == .run)
   }
 
+  /// Only the group's chat can write an artifact plan.
+  @Test func artifactPlanWithOutOfDateRowsSkips() {
+    var p = plan()
+    p.source = PlanSource(kind: .artifact, url: "https://claude.ai/artifact/plan")
+    #expect(PlanUpdates.editable(p).isEmpty)
+    #expect(PlanUpdates.due(p, now: 0) == .skip)
+  }
+
   @Test func planWithNoOutOfDateRowSkips() {
     #expect(PlanUpdates.due(plan([:]), now: 0) == .skip)
   }

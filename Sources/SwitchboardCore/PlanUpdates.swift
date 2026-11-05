@@ -88,7 +88,10 @@ public enum PlanUpdates {
   static let cellLength = 500
 
   /// The rows that a batch rewrites: the out-of-date rows with a status cell.
-  public static func editable(_ plan: PlanDocument) -> [PlanRow] { editable(plan.rows) }
+  /// An artifact plan has none, because only the group's chat can write it.
+  public static func editable(_ plan: PlanDocument) -> [PlanRow] {
+    plan.source.kind == .artifact ? [] : editable(plan.rows)
+  }
 
   static func editable(_ rows: [PlanRow]) -> [PlanRow] { rows.filter { $0.outOfDate && $0.statusColumn != nil } }
 

@@ -21,9 +21,11 @@ func plan(_ a: Args) {
     if list.isEmpty { print("No plans. Attach one with: sb plan attach <doc> --group <group>") }
     for p in list { printPlan(p, indent: "") }
   case "attach", "add":
-    guard let doc = words.first else { die("plan attach needs a document") }
+    // `sb plan attach <group> --artifact <url>` names the group first.
+    guard let doc = a.values["--artifact"] ?? words.first else { die("plan attach needs a document") }
     var args: [String: JSON] = ["doc": .string(doc), "cwd": .string(FileManager.default.currentDirectoryPath)]
     if let path = a.values["--path"] { args["path"] = .string(path) }
+    if a.values["--artifact"] != nil, let group = words.first { args["group"] = .string(group) }
     owner(&args)
     printPlanDocument(call("plan-attach", args, timeout: 120), json: a.json)
   case "detach", "rm":
@@ -36,9 +38,14 @@ func plan(_ a: Args) {
     let result = call("plan-update", named("update"), timeout: 120)
     if a.json { return printJSON(result) }
     let p = decode(result, as: PlanDocument.self)
-    print(
-      result["wrote"]?.bool == true ? "wrote the table to \(p.source.text)" : "\(p.source.text) already holds the table"
-    )
+    if p.source.kind == .artifact, result["wrote"]?.bool == true {
+      print("proposed the table for \(p.source.text). Apply it with: sb plan artifact apply \(p.id)")
+    } else {
+      print(
+        result["wrote"]?.bool == true
+          ? "wrote the table to \(p.source.text)" : "\(p.source.text) already holds the table"
+      )
+    }
   case "followup":
     guard words.count == 2 else { die("usage: sb plan followup <plan> <row>") }
     let result = call("plan-followup", ["plan": .string(words[0]), "row": .string(words[1])])
@@ -69,8 +76,10 @@ func plan(_ a: Args) {
     let result = call("plan-reject", ["proposal": .string(id)])
     if a.json { return printJSON(result) }
     print("rejected \(result["rejected"]?.string ?? id)")
+  case "artifact":
+    artifact(a, words)
   default:
-    die("usage: sb plan ls|attach|detach|get|update|followup|auto|propose|proposals|apply|reject")
+    die("usage: sb plan ls|attach|detach|get|update|followup|auto|artifact|propose|proposals|apply|reject")
   }
 }
 
@@ -84,13 +93,43 @@ private func printProposal(_ p: PlanProposal) {
   }
 }
 
+/// `sb plan artifact read|rewrite|apply|reject|report <plan>`.
+private func artifact(_ a: Args, _ words: [String]) {
+  let usage = "usage: sb plan artifact read|rewrite|apply|reject|report <plan>"
+  guard words.count >= 2 else { die(usage) }
+  let command = words[0]
+  let plan = words[1]
+  var args: [String: JSON] = ["plan": .string(plan)]
+  let op: String
+  switch command {
+  case "read", "apply", "reject":
+    op = "plan-artifact-\(command)"
+  case "rewrite":
+    op = "plan-artifact-rewrite"
+    if words.count > 2 { args["rows"] = .array(words.dropFirst(2).map(JSON.string)) }
+  case "report":
+    op = "plan-artifact-report"
+    guard let kind = a.values["--kind"] else { die("plan artifact report needs --kind read|proposal|check|published") }
+    args["kind"] = .string(kind)
+    if let file = a.values["--file"] {
+      args["file"] = .string(URL(fileURLWithPath: file).path)
+    }
+    if let version = a.values["--version"] { args["version"] = .string(version) }
+  default:
+    die(usage)
+  }
+  printPlanDocument(call(op, args, timeout: 300), json: a.json)
+}
+
 private func printPlanDocument(_ result: JSON, json: Bool) {
   if json { return printJSON(result) }
   let p = decode(result, as: PlanDocument.self)
   print("\(p.id)  \(p.source.text)".printable)
   if let group = p.group { print("  group:   \(group)") }
   if let session = p.session { print("  session: \(session)") }
-  print("  read:    \(p.read.map(ago) ?? "never")")
+  print(
+    "  read:    \(p.read.map(ago) ?? "never")\(p.artifact?.stale == true ? " (the copy may be old. Run: sb plan artifact read \(p.id))" : "")"
+  )
   if let error = p.error { print("  error:   \(oneLine(error, max: 200))".printable) }
   if let note = p.updateNote { print("  update:  \(oneLine(note, max: 200))".printable) }
   if let proposal = p.proposal { print("  pending: \(proposal.id) (sb plan apply|reject \(proposal.id))") }
@@ -98,7 +137,15 @@ private func printPlanDocument(_ result: JSON, json: Bool) {
   print(
     "  table:   \(p.statusBlock == nil ? "no \(Plans.startMarker) block" : "yes"), auto update \(p.autoUpdate ? "on" : "off")"
   )
-  printRows(PlanSummary(p), indent: "  ")
+  let summary = PlanSummary(p)
+  printRows(summary, indent: "  ")
+  if let proposal = summary.proposal { printProposal(proposal, plan: p.id, indent: "  ") }
+}
+
+private func printProposal(_ p: ArtifactProposal.Summary, plan: String, indent: String) {
+  let state = p.state == .pending ? "sb plan artifact apply|reject \(plan)" : "publishing"
+  print("\(indent)update:  \(p.rows.isEmpty ? "the status table" : "\(p.rows.count) rows") (\(state))")
+  for line in p.diff { print("\(indent)  \(oneLine(line, max: 200))".printable) }
 }
 
 /// One line for the plan, then a line for each out-of-date row and each row
@@ -107,10 +154,12 @@ func printPlan(_ p: PlanSummary, indent: String) {
   var line =
     "\(indent)plan: \(p.id) \(p.source.text) (\(p.rows) rows, \(p.outOfDate.count) out of date, \(p.canFollowUp.count) to follow up)"
   if let error = p.error { line += ", error: \(oneLine(error, max: 120))" }
-  if let proposal = p.proposal { line += ", update \(proposal) waits for apply or reject" }
+  if let proposal = p.update { line += ", update \(proposal) waits for apply or reject" }
   if let note = p.updateNote { line += ", \(oneLine(note, max: 120))" }
+  if p.copyStale == true { line += ", copy may be old" }
   print(line.printable)
   printRows(p, indent: indent + "  ")
+  if let proposal = p.proposal { printProposal(proposal, plan: p.id, indent: indent + "  ") }
 }
 
 private func printRows(_ p: PlanSummary, indent: String) {
