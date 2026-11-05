@@ -409,8 +409,10 @@ struct BoardView: View {
             ForEach(BoardRows.make(sessions: board, groups: model.groups)) { row in
               Divider()
               HStack(alignment: .top, spacing: 12) {
+                let group = model.groups.first { $0.id == row.group }
                 VStack(alignment: .leading, spacing: 2) {
                   Text(row.title).fontWeight(.semibold).lineLimit(2)
+                  if let group { GroupDescriptionView(group: group) }
                   Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
                     .font(.caption).foregroundStyle(.secondary)
                   if let group = row.group {
@@ -420,7 +422,7 @@ struct BoardView: View {
                         model.chat(of: group) == nil
                           ? "Start a chat that manages this group's sessions" : "Open this group's chat")
                   }
-                  PlanFollowupList(plans: model.groups.first { $0.id == row.group }?.plans ?? [])
+                  PlanFollowupList(plans: group?.plans ?? [])
                 }
                 .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(columns, id: \.self) { state in

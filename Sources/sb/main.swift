@@ -105,10 +105,13 @@ let usage = """
 
   Groups:
     group ls                      list the groups with their sessions, then Ungrouped
-    group add <name> [<session>...] [--note N]
+    group add <name> [<session>...] [--note N] [--description D]
     group rm <group>              remove the group; its sessions become ungrouped
     group move <session>... --to <group> | --ungrouped
     group note <group> <text>
+    group describe <group> <text> | --clear
+                                  set or clear the group's description, at
+                                  most \(SessionGroup.descriptionLimit) characters
     group suggest [--accept <id> | --decline <id>]
                                   list groups suggested from dependencies, branch
                                   names, and PR titles, or accept or decline one.
@@ -193,7 +196,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending",
+      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--description",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -293,6 +296,10 @@ func printSession(_ s: SessionSummary) {
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
   if let group = s.chat { print("  chat of: group \(group)") }
+  if let group = s.group {
+    let description = s.groupDescription.map { ": \($0)" } ?? ""
+    print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
+  }
   print("  folder:  \(s.cwd)")
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
@@ -493,8 +500,12 @@ guard let command = argv.popFirst() else {
 // one.
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
 var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
-// The text of `sb group note` is everything after the group.
-if ["group", "groups"].contains(command), argv.first == "note" { a = Args(argv, literalAfter: 2) }
+// The text of `sb group note` and `sb group describe` is everything after the
+// group. `describe` reads flags instead when the word after the group is one.
+if ["group", "groups"].contains(command), ["note", "describe"].contains(argv.first) {
+  a = Args(argv, literalAfter: 2)
+  if argv.first == "describe", a.positional.count > 2, a.positional[2].hasPrefix("--") { a = Args(argv) }
+}
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {

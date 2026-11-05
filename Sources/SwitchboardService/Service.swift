@@ -305,7 +305,9 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
-    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group", "send-pending":
+    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-suggest",
+      "send-group",
+      "send-pending":
       return try groupRequest(op, args)
     case "plan-ls", "plan-get", "plan-detach", "plan-auto":
       return try planRequest(op, args)
@@ -1316,6 +1318,10 @@ public final class Service {
     out.account = s.claudeConfigDir
     out.cleanup = e.facts.cleanup
     out.group = s.group
+    if let group = s.group.flatMap({ groups[$0] }) {
+      out.groupName = group.name
+      out.groupDescription = group.description
+    }
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
