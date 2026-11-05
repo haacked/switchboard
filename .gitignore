@@ -22,3 +22,6 @@ xcuserdata/
 
 # App bundles from bin/bundle
 build/
+
+# Clones of .build from bin/test --shards
+.build-shards/
