@@ -90,8 +90,8 @@ extension Service {
 
   /// Rewrites the group's chat guide, and tells the chat when its claude
   /// runs. A chat whose claude is not live reads the new guide when it
-  /// starts. The pane outlives a stopped claude, so the check reads `live`
-  /// and not the pane.
+  /// starts. The pane reads `starting` while a stopped claude exits, so the
+  /// check reads `live` and not the pane.
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
     guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }

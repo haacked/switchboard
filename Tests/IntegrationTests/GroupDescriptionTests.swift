@@ -185,16 +185,9 @@ import Testing
     let g = try add(sbd, "Flags")
 
     _ = try describe(sbd, "Flags", "deploy", "--to", "staging", "first")
-
     #expect(try listed(sbd, g.id).description == "deploy --to staging first")
-  }
-
-  @Test func describeKeepsTextThatStartsWithAFlag() throws {
-    let sbd = try Instance()
-    let g = try add(sbd, "Flags")
 
     _ = try describe(sbd, "Flags", "--force pushes are banned")
-
     #expect(try listed(sbd, g.id).description == "--force pushes are banned")
   }
 

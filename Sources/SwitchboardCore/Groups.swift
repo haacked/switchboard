@@ -22,11 +22,16 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
     self.created = created
   }
 
+  /// The text on one line, with each whitespace run, line breaks included, as one space.
+  static func collapsingWhitespace(_ text: String) -> String {
+    text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+  }
+
   /// The description with its whitespace runs joined into single spaces, or
   /// nil when nothing remains. It refuses text over `descriptionLimit`.
   public static func cleanDescription(_ text: String?) throws -> String? {
     guard let text else { return nil }
-    let clean = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    let clean = collapsingWhitespace(text)
     guard clean.count <= descriptionLimit else {
       throw APIError("a group description has at most \(descriptionLimit) characters, and this one has \(clean.count)")
     }
@@ -301,9 +306,10 @@ public enum GroupSuggestions {
     }
   }
 
-  /// The description of a new group made from the key.
-  static func description(_ key: Key) -> String {
-    key.kind == .prefix ? "Sessions on the \(key.text) branch prefix" : "Sessions whose \(reason(key))"
+  /// The description of a new group made from the key, or nil when it is over the length limit.
+  static func description(_ key: Key) -> String? {
+    try? SessionGroup.cleanDescription(
+      key.kind == .prefix ? "Sessions on the \(key.text) branch prefix" : "Sessions whose \(reason(key))")
   }
 
   /// The suggestions, strongest first: merges of groups that a dependency
@@ -379,7 +385,7 @@ public enum GroupSuggestions {
         GroupSuggestion(
           id: id, name: option.group.flatMap { names[$0] } ?? option.key.text, group: option.group,
           sessions: sessions, reason: reason(option.key),
-          description: option.group == nil ? try? SessionGroup.cleanDescription(description(option.key)) : nil))
+          description: option.group == nil ? description(option.key) : nil))
     }
     return out
   }

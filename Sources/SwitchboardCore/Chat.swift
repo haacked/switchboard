@@ -29,7 +29,7 @@ public enum Chat {
 
   /// A line break would end the quote, so every whitespace run becomes one space.
   private static func quoted(_ text: String) -> String {
-    "> " + text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    "> " + SessionGroup.collapsingWhitespace(text)
   }
 
   /// The part of every chat's CLAUDE.md that is the same for each group. It
