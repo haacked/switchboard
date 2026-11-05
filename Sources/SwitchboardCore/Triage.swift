@@ -34,6 +34,10 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   case merge
   /// Keeps the session out of Ready to merge until the PR's head changes.
   case dismiss
+  /// Requests a review of the session's PR from the reviewers that the user picks.
+  case requestReview
+  /// Hides the review card until the PR's head changes.
+  case dismissReview
   /// Sets the option's wait on the session.
   case wait
   /// Marks the session done.
@@ -49,6 +53,10 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
 
   /// Whether the action runs `sb merge`, which also dismisses.
   public var isMerge: Bool { self == .merge || self == .dismiss }
+
+  /// Whether the action acts on the PR for the user, as `sb merge` and
+  /// `sb review` do, so a session may not run it.
+  public var needsClick: Bool { isMerge || self == .requestReview || self == .dismissReview }
 
   /// The actions that a card from a session or the model may name. sbd adds
   /// the others to the cards that it builds from a held prompt or a PR.
@@ -90,6 +98,8 @@ public struct TriageOption: Codable, Equatable, Sendable {
     case .reply: return "Sends the text you type"
     case .merge: return "Merges the PR"
     case .dismiss: return "Hides the merge card until the PR gets a new commit"
+    case .requestReview: return "Requests a review from the reviewers you pick"
+    case .dismissReview: return "Hides the review card until the PR gets a new commit"
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
     case .done: return "Marks the session done"
     case .allow: return "Allows the prompt"
@@ -363,7 +373,7 @@ public enum Triage {
   static func ruleItem(_ verdict: Verdict) -> TriageItem {
     let text = capitalized(verdict.reason)
     return TriageItem(
-      title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",
+      title: title(verdict.reason), kind: verdict.kind, summary: verdict.summary ?? (text.hasSuffix(".") ? text : text + "."),
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 

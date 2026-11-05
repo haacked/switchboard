@@ -43,9 +43,9 @@ extension Service {
     }
     guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
     let option = try item.option(key)
-    // Claude Code may not approve its own prompt or merge its own PR.
-    if args["insideClaude"]?.bool == true, item.source == .card || option.action.isMerge {
-      throw APIError("choose answers a prompt or merges a PR for you, so it doesn't run inside Claude Code")
+    // Claude Code may not approve its own prompt or act on its own PR.
+    if args["insideClaude"]?.bool == true, item.source == .card || option.action.needsClick {
+      throw APIError("choose answers a prompt or acts on a PR for you, so it doesn't run inside Claude Code")
     }
     let session = JSON.string(id)
     switch option.action {
@@ -59,6 +59,15 @@ extension Service {
       return Request(op: "merge", args: ["session": session])
     case .dismiss:
       return Request(op: "merge", args: ["session": session, "dismiss": true])
+    case .requestReview:
+      let reviewers =
+        args["reviewers"]?.array?.compactMap(\.string) ?? ReviewRequests.reviewers(in: args["text"]?.string ?? "")
+      guard !reviewers.isEmpty else {
+        throw APIError("\(option.label) needs the reviewers. `sb review \(name)` lists the suggested ones")
+      }
+      return Request(op: "review", args: ["session": session, "reviewers": .array(reviewers.map(JSON.string))])
+    case .dismissReview:
+      return Request(op: "review", args: ["session": session, "dismiss": true])
     case .wait:
       var wait = try option.wait.map { try JSON(encoding: $0).object ?? [:] } ?? [:]
       wait["session"] = session

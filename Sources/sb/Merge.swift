@@ -10,14 +10,7 @@ func merge(_ a: Args) {
   if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
     die("merge needs your click, so it doesn't run inside Claude Code. Use the merge card in the app.")
   }
-  let target = a.session("merge")
-  var args: [String: JSON] = [:]
-  if let pr = Wait.PullRequest(parsing: target) {
-    args["pr"] = .number(Double(pr.number))
-    if let repository = pr.repository { args["repository"] = .string(repository) }
-  } else {
-    args["session"] = .string(target)
-  }
+  var args = sessionOrPR(a.session("merge"))
   let dismiss = a.switches.contains("--dismiss")
   if dismiss { args["dismiss"] = true }
   // sbd waits up to 120 s for `gh pr merge`.
@@ -26,4 +19,13 @@ func merge(_ a: Args) {
   let s = summary(result)
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
   print(dismiss ? "dismissed \(pr) of \(s.name)" : "merged \(pr) of \(s.name)")
+}
+
+/// The request arguments that name a session, or the session whose open PR
+/// is the PR reference, such as `#N`, `owner/name#N`, or a PR URL.
+func sessionOrPR(_ target: String) -> [String: JSON] {
+  guard let pr = Wait.PullRequest(parsing: target) else { return ["session": .string(target)] }
+  var args: [String: JSON] = ["pr": .number(Double(pr.number))]
+  if let repository = pr.repository { args["repository"] = .string(repository) }
+  return args
 }

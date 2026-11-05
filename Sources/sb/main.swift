@@ -82,6 +82,11 @@ let usage = """
                                   its open PR. --dismiss keeps the session out of Ready to merge until
                                   the PR's head commit changes.
                                   Refuses inside Claude Code
+    review <session|PR> [<reviewer>...] [--dismiss]
+                                  list the suggested reviewers of a session whose PR shows the
+                                  review card, or request a review from each login, org/team,
+                                  or @copilot with gh. --dismiss hides the card until the PR's
+                                  head commit changes. Refuses inside Claude Code
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -103,7 +108,8 @@ let usage = """
     choose <session> <option> [--text T]
                                   click an option, by number or label: run its action,
                                   such as send its message or merge. A reply option
-                                  sends T. Card and merge options refuse inside Claude Code
+                                  sends T, and Request review requests the reviewers in T.
+                                  Card, merge, and review options refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
@@ -600,6 +606,8 @@ case "rm":
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":
   merge(a)
+case "review":
+  review(a)
 case "cleanup":
   let result = call("cleanup", ["session": .string(a.session("cleanup"))], timeout: 300)
   if a.json { printJSON(result) } else { print("cleaned up \(result["cleaned"]?.string ?? "")") }

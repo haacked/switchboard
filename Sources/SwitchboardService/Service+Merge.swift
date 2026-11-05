@@ -12,7 +12,7 @@ extension Service {
   /// and fails the request. It changes nothing else.
   func mergeRequest(_ args: JSON) throws -> JSON {
     let (id, pr): (String, PullRequest?) = try queue.sync {
-      let id = try mergeTarget(args)
+      let id = try sessionByPR(args)
       let e = entries[id]!
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       guard verdict.state == .readyToMerge, let pr = e.facts.pr else {
@@ -47,7 +47,7 @@ extension Service {
 
   /// The session that `session` names, or the one whose open PR has the
   /// number `pr`, in the repository `repository` when it is set.
-  private func mergeTarget(_ args: JSON) throws -> String {
+  func sessionByPR(_ args: JSON) throws -> String {
     guard let number = args["pr"]?.int else { return try lookup(args) }
     let repository = args["repository"]?.string
     let matches = entries.values.filter { e in

@@ -96,6 +96,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var docket = DocketStatus()
   /// The last merge that sbd ran or the user dismissed.
   public var merge: MergeAttempt?
+  /// The last review request that sbd ran or the user dismissed.
+  public var reviewRequest: ReviewRequestAttempt?
   /// Claude Code's permission mode, as the last main-session hook or launch
   /// reported it. SessionStart carries none, so a launch without a mode
   /// leaves it unknown until the next hook.
@@ -242,6 +244,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       dependencies = d["dependencies"].flatMap { try? JSONCoding.convert($0, to: [Dependency].self) } ?? []
     case "merge":
       merge = try? JSONCoding.convert(event.data, to: MergeAttempt.self)
+    case ReviewRequestAttempt.event:
+      reviewRequest = try? JSONCoding.convert(event.data, to: ReviewRequestAttempt.self)
     default:
       break
     }
@@ -286,6 +290,8 @@ public struct Verdict: Equatable, Sendable {
   public var options: [TriageOption] = []
   /// What the user should read before deciding.
   public var callouts: [Callout] = []
+  /// The card's summary for a rule that has more to say than its reason.
+  public var summary: String?
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }
@@ -368,6 +374,7 @@ public enum Attention {
       return Verdict(
         state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
     }
+    if let v = unreviewedPR(facts) { return v }
     return replyVerdict(facts.lastReply ?? "")
   }
 

@@ -53,6 +53,8 @@ public final class Service {
   var starting: Set<String> = []
   /// The sessions whose PR `merge` is merging.
   var merging: Set<String> = []
+  /// The sessions whose PR `review` is asking gh to request a review of.
+  var requestingReview: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -177,6 +179,8 @@ public final class Service {
         return .success(try removeDone(request.args))
       case "merge":
         return .success(try mergeRequest(request.args))
+      case "review":
+        return .success(try reviewRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.

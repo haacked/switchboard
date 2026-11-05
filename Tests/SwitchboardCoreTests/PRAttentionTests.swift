@@ -486,8 +486,8 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(try verdict(samplePR(draft: true, reviewRequests: Self.alex)) == readTheReply)
   }
 
-  @Test func prWithNoRequestedReviewerNeedsYou() throws {
-    #expect(try verdict(samplePR(reviewRequests: [])) == readTheReply)
+  @Test func unreviewedPRWithNoRequestedReviewerShowsTheReviewCard() throws {
+    #expect(try verdict(samplePR(reviewRequests: [])) == Verdict(state: .needsYou, reason: "#42 is ready for review"))
   }
 
   @Test func prWithUnknownRequestsNeedsYou() throws {
@@ -587,10 +587,11 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
   }
 
-  @Test func unreviewedPRWithNoRequestedReviewerNeedsYouEvenAfterTheSessionWentIdle() throws {
+  @Test func unreviewedPRWithNoRequestedReviewerShowsTheReviewCardEvenAfterTheSessionWentIdle() throws {
     let f = try prFacts(samplePR(reviews: [], reviewRequests: []))
 
-    #expect(Attention.evaluate(session(), f, now: Self.stale) == readTheReply)
+    #expect(
+      Attention.evaluate(session(), f, now: Self.stale) == Verdict(state: .needsYou, reason: "#42 is ready for review"))
   }
 
   @Test(arguments: ["FAILURE", "ERROR"])

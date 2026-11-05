@@ -51,6 +51,8 @@ struct DecisionCard: View {
         ForEach(Array(item.options.enumerated()), id: \.offset) { i, option in
           if option.action == .reply {
             ReplyOption(session: session, ref: item.ref, number: i + 1, option: option)
+          } else if option.action == .requestReview {
+            RequestReviewOption(session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary)
           } else {
             OptionButton(
               session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary)
@@ -90,8 +92,8 @@ extension TriageOption {
   }
 }
 
-/// An option's button. A click runs the option's action. The primary one is
-/// filled and answers ⌘⇧Return.
+/// An option's button. A click runs the option's action, or `onClick` when
+/// it is set. The primary one is filled and answers ⌘⇧Return.
 struct OptionButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -99,13 +101,14 @@ struct OptionButton: View {
   let number: Int
   let option: TriageOption
   let primary: Bool
+  var onClick: (() -> Void)?
 
   static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
     let effect = option.effect
     let button = Button {
-      model.choose(session.id, ref: ref, option: number, action: option.action)
+      if let onClick { onClick() } else { model.choose(session.id, ref: ref, option: number, action: option.action) }
     } label: {
       VStack(alignment: .leading, spacing: 2) {
         Text(option.label).fontWeight(.medium)

@@ -481,8 +481,13 @@ final class BoardModel: ObservableObject {
     perform("merge", args, on: merges, finally: { self.merging.remove(id) })
   }
 
-  /// Clicks the item's option. `text` is what the user typed for a reply option.
-  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
+  /// Clicks the item's option. `text` is what the user typed for a reply
+  /// option, and `reviewers` are the reviewers that the user picked for a
+  /// review request.
+  func choose(
+    _ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil,
+    reviewers: [String]? = nil
+  ) {
     let key = "\(session)/\(number)"
     // The Board's merge buttons read `merging`, so a merge from the card shows there too.
     let merge = action.isMerge
@@ -490,6 +495,7 @@ final class BoardModel: ObservableObject {
     guard choosing.insert(key).inserted else { return }
     var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
     if let text { args["text"] = .string(text) }
+    if let reviewers { args["reviewers"] = .array(reviewers.map(JSON.string)) }
     if merge { merging.insert(session) }
     // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
@@ -498,6 +504,21 @@ final class BoardModel: ObservableObject {
         self.choosing.remove(key)
         if merge { self.merging.remove(session) }
       })
+  }
+
+  /// The reviewers that sbd suggests for the session's PR. sbd asks GitHub
+  /// with gh, which can take seconds, so the request runs off the action queue.
+  func reviewSuggestions(_ session: String) async throws -> [ReviewerSuggestion] {
+    let send = send
+    return try await withCheckedThrowingContinuation { done in
+      DispatchQueue.global(qos: .userInitiated).async {
+        done.resume(
+          with: Result {
+            let result = try send("review", ["session": .string(session)])
+            return try JSONCoding.convert(result["suggestions"] ?? [], to: [ReviewerSuggestion].self)
+          })
+      }
+    }
   }
 
   /// Reads the session's newest events for its card's details.
