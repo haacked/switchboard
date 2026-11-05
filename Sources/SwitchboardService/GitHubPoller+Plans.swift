@@ -134,6 +134,7 @@ extension GitHubPoller {
       trackedPlans[id, default: TrackedPlan()].tried = now
       if (try? writePlan(id, now: now, stats: &stats)) == true { stats.planWrites += 1 }
     }
+    service.startDuePlanUpdates(now: now)
   }
 
   /// The PR's stage as this poller last read it, or nil when it hasn't read
@@ -143,11 +144,8 @@ extension GitHubPoller {
     guard let id = targets[.number(repo: link.repo, number: link.number)]?.prId, let read = prs[id] else {
       return nil
     }
-    switch read.pr.state {
-    case .open: return .open
-    case .closed: return .closed
-    case .merged: return deployedToProd(read.comments) ? .deployed : .merged
-    }
+    let stage = PlanStage(read.pr.state)
+    return stage == .merged && deployedToProd(read.comments) ? .deployed : stage
   }
 
   // MARK: Writes
@@ -161,11 +159,8 @@ extension GitHubPoller {
     else { throw APIError("no plan \(id)") }
     let written: String?
     do {
-      switch plan.source.kind {
-      case .file: written = try writeFile(plan.source, table)
-      case .issue: written = try writeIssue(plan.source, table, stats: &stats)
-      case .pr: written = try writePRFile(plan.source, table, stats: &stats)
-      case .artifact: throw APIError("only the group's chat can write \(plan.source.text)")
+      written = try writeDocument(plan.source, message: "Update the Switchboard status table", stats: &stats) {
+        try Plans.splice($0, table)
       }
     } catch {
       service.queue.sync { service.recordPlanError(id, error) }
@@ -176,11 +171,63 @@ extension GitHubPoller {
     return true
   }
 
-  /// Each write returns the new text, or nil when the document already held the table.
-  private func writeFile(_ source: PlanSource, _ table: String) throws -> String? {
+  /// Writes what `change` makes of the document's text. It returns the new
+  /// text, or nil when `change` left the text as it was. `message` is the
+  /// commit message of a PR file's write. A write that finds the document
+  /// edited since its read applies `change` to the new text.
+  func writeDocument(
+    _ source: PlanSource, message: String, stats: inout Stats, _ change: (String) throws -> String
+  ) throws -> String? {
+    switch source.kind {
+    case .file: try writeFile(source, change)
+    case .issue: try writeIssue(source, change, stats: &stats)
+    case .pr: try writePRFile(source, message: message, change, stats: &stats)
+    case .artifact: throw APIError("only the group's chat can write \(source.text)")
+    }
+  }
+
+  /// The document's current text, read without an ETag.
+  func readDocument(_ source: PlanSource, stats: inout Stats) throws -> String {
+    switch source.kind {
+    case .file:
+      return try readFile(source)
+    case .issue:
+      let reply = try rest("GET", issuePath(source), stats: &stats)
+      guard reply.status == 200, let json = reply.json else { throw failure(reply, "issue \(source.text)") }
+      return json["body"]?.string ?? ""
+    case .artifact:
+      throw APIError("only the group's chat can read \(source.text)")
+    case .pr:
+      let (_, head) = try pullHead(source, stats: &stats)
+      return try prFile(source, head, stats: &stats).text
+    }
+  }
+
+  private func readFile(_ source: PlanSource) throws -> String {
     let path = source.path ?? ""
     guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { throw APIError("can't read \(path)") }
-    let new = try Plans.splice(text, table)
+    return text
+  }
+
+  /// The PR and the repo and branch of its head.
+  private func pullHead(_ source: PlanSource, stats: inout Stats) throws -> (JSON, (repo: String, branch: String)) {
+    let pull = try rest("GET", pullPath(source), stats: &stats)
+    guard pull.status == 200, let json = pull.json else { throw failure(pull, "PR \(source.ref)") }
+    return (json, try head(json, source))
+  }
+
+  /// The text and blob SHA of the plan's file on the PR's head branch.
+  private func prFile(_ source: PlanSource, _ head: (repo: String, branch: String), stats: inout Stats) throws
+    -> (text: String, sha: String)
+  {
+    let file = try rest("GET", contentsPath(head.repo, source), query: ["ref": head.branch], stats: &stats)
+    return try contents(file, source)
+  }
+
+  private func writeFile(_ source: PlanSource, _ change: (String) throws -> String) throws -> String? {
+    let path = source.path ?? ""
+    let text = try readFile(source)
+    let new = try change(text)
     guard new != text else { return nil }
     try new.write(toFile: path, atomically: true, encoding: .utf8)
     return new
@@ -188,14 +235,16 @@ extension GitHubPoller {
 
   /// GitHub has no conditional PATCH. Before the PATCH, a GET with the first
   /// read's ETag checks that nobody edited the body since. When `updated_at`
-  /// moved, the table goes into the new body, which is checked again.
-  private func writeIssue(_ source: PlanSource, _ table: String, stats: inout Stats) throws -> String? {
+  /// moved, the change goes into the new body, which is checked again.
+  private func writeIssue(_ source: PlanSource, _ change: (String) throws -> String, stats: inout Stats) throws
+    -> String?
+  {
     let path = issuePath(source)
     var reply = try rest("GET", path, stats: &stats)
     for _ in 0..<GitHubPoller.maxWriteAttempts {
       guard reply.status == 200, let json = reply.json else { throw failure(reply, "issue \(source.text)") }
       let body = json["body"]?.string ?? ""
-      let new = try Plans.splice(body, table)
+      let new = try change(body)
       guard new != body else { return nil }
       let check = try rest("GET", path, etag: reply.etag, stats: &stats)
       if check.status == 304 || (check.status == 200 && check.json?["updated_at"] == json["updated_at"]) {
@@ -210,19 +259,18 @@ extension GitHubPoller {
 
   /// The contents API refuses a write whose blob SHA is stale with a 409.
   /// The write then reads the file again and retries.
-  private func writePRFile(_ source: PlanSource, _ table: String, stats: inout Stats) throws -> String? {
-    let pull = try rest("GET", pullPath(source), stats: &stats)
-    guard pull.status == 200, let json = pull.json else { throw failure(pull, "PR \(source.ref)") }
+  private func writePRFile(
+    _ source: PlanSource, message: String, _ change: (String) throws -> String, stats: inout Stats
+  ) throws -> String? {
+    let (json, head) = try pullHead(source, stats: &stats)
     guard json["state"]?.string == "open" else { throw APIError("PR \(source.ref) is not open") }
-    let head = try head(json, source)
     let path = contentsPath(head.repo, source)
     for _ in 0..<GitHubPoller.maxWriteAttempts {
-      let file = try rest("GET", path, query: ["ref": head.branch], stats: &stats)
-      let (text, sha) = try contents(file, source)
-      let new = try Plans.splice(text, table)
+      let (text, sha) = try prFile(source, head, stats: &stats)
+      let new = try change(text)
       guard new != text else { return nil }
       let body: JSON = [
-        "message": "Update the Switchboard status table", "content": .string(Data(new.utf8).base64EncodedString()),
+        "message": .string(message), "content": .string(Data(new.utf8).base64EncodedString()),
         "sha": .string(sha), "branch": .string(head.branch),
       ]
       let put = try rest("PUT", path, body: body, stats: &stats)

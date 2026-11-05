@@ -74,6 +74,15 @@ extension Instance {
 @Suite(.blocking(timeLimit: .seconds(120))) struct SummaryCardTests {
   // MARK: The session's card
 
+  /// The app shows a label of up to 20 characters on its button, and the detail beside it.
+  @Test func summaryHelpAsksForAShortLabelAndADetail() throws {
+    let sbd = try Instance()
+    let help = try sbd.sb("summary", "help")
+
+    #expect(help.contains("a verb phrase of up to \(TriageCard.buttonLabelLength) characters"))
+    #expect(help.contains("\"detail\" says what the option does"))
+  }
+
   @Test func aSessionsCardBecomesTheItemWithItsButtonsAndNoModelCall() throws {
     let sbd = try Instance()
     try sbd.writeCard("c1", specCard)

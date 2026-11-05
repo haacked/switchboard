@@ -157,6 +157,10 @@ sb plan get <plan>
 sb plan update <plan>                    # write the status table now
 sb plan auto <plan> on                   # write it on its own when it changes
 sb plan followup <plan> <row>            # make a follow-up from a Not started row
+sb plan propose <plan>                   # ask the model to rewrite the out-of-date Status cells now
+sb plan proposals [--group G] [--plan P] # the updates and new rows that wait for you
+sb plan apply <proposal>
+sb plan reject <proposal>
 sb plan detach <plan>
 sb plan attach https://claude.ai/artifact/<id> --group flag-evals   # or: sb plan attach flag-evals --artifact <url>
 sb plan artifact read <plan>             # ask the group's chat to read the artifact again
@@ -169,6 +173,10 @@ sb plan artifact apply|reject <plan>     # publish the pending update, or drop i
 A row of a table with `Item` and `Status` columns that links no PR and whose status reads Not started can become a follow-up. `sb plan ls`, `sb plan get`, `sb group ls`, and `sb get` list those rows, and the Board shows a Follow up button for each under its group's name. `sb plan followup <plan> <row>` names the row by its `#` cell or its item text and adds a follow-up in the plan's group, or under the plan's session, with the item as its title and prompt and the plan as its link. Its repository is the one that the group's sessions share, else the issue's or PR's repository. A row that links a PR, or that already has a follow-up, is refused. Removing the follow-up lets the row make another.
 
 `sb plan update` writes a table of the group's sessions, with each one's state, wait, and PR, between `<!-- sb:status -->` and `<!-- /sb:status -->`, and leaves the rest of the document alone. A plan without those two lines refuses the update. A file is written in place. An issue's body is checked again just before the edit, and the edit retries when someone changed the issue meanwhile. A PR's file is committed to the PR's head branch with its blob SHA, and the commit retries when the file changed. Writing to GitHub publishes, so `sbd` writes only on `sb plan update`, or after `sb plan auto <plan> on`, at most once per idle interval and only when the table changed.
+
+Status cells are prose, so the model writes them. When rows of a plan are out of date, `sbd` runs one headless `claude -p` turn with no tools and no MCP servers, under the account of the group's chat (or the active account when the group has no chat). The turn sees only the out-of-date rows that have a Status column, with each linked PR's stage, as data. It answers with a new Status cell for each row by number. `sbd` builds each new row by replacing only its Status cell, sets today's date on each "status as of" line, and refuses the answer when it names a row it was not given or when the result changes any other line. The result is a proposal: `sb plan proposals` lists it with its diff, the Inbox and the group's chat pane show it with Apply and Reject, `sb plan apply` writes it with the same retries as `sb plan update`, and `sb plan reject` drops it. With `sb plan auto <plan> on`, `sbd` applies it without asking. A batch runs at most once per plan every 30 minutes and only when the out-of-date rows or their PRs' stages changed since the last batch, so a rejected batch is not proposed again. A turn spends quota, so `sbd` skips it when the account has no quota left and says so on the plan (`sb plan get`). `sb plan propose <plan>` runs a batch now, ignoring the 30 minutes. The model and the time limit come from `planUpdates.model` (default `haiku`) and `planUpdates.timeoutSeconds` (120) in `config.json`.
+
+A session in a plan's group whose PR no row of the plan links gets a suggested row for the plan's work table, the table with `Item` and `Status` columns that holds the most rows: the next `#`, the PR's title, and its stage with a link. `sb plan proposals` lists it, Apply adds the row, and Reject declines it for good.
 
 #### Artifact plans
 
@@ -192,7 +200,7 @@ The order is: a held prompt or question; a decision, question, or approval; PR a
 
 Each option has an action, and a click runs a request that sb already has: `send` sends the option's message, `reply` sends text you type, `merge` and `dismiss` do what `sb merge` and `sb merge --dismiss` do, `wait` sets the option's wait, `done` marks the session done, and `allow`, `deny`, and `answer` answer a held prompt. `sb choose <session> <option>` does what a click does, and `--text` gives a reply option its text. Inside Claude Code, `sb choose` refuses to answer a prompt or to merge. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, `perHour` (default 6), and `systemPrompt` (empty turns the nudge off).
 
-In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the option buttons with the recommended one filled (⌘⇧Return clicks it), a text field for a reply option, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. A held prompt shows its card in place of the buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
+In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the options as rows, each a compact button with a short title and what the option does beside it (under it when the pane is narrower than 420 points), with the recommended button filled (⌘⇧Return clicks it), a text field for a reply option, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. A held prompt shows its card in place of the buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
 
 #### Session summaries
 
@@ -203,8 +211,8 @@ A session writes its Inbox card at the end of a turn that needs you, and sbd sho
   "title": "Pick how to land #98",
   "summary": "Opened #98; CI is green.\nTwo review items need a call.",
   "options": [
-    {"label": "Fix items 3 and 5, then merge", "action": "send", "message": "Fix items 3 and 5, then merge.", "recommended": true},
-    {"label": "Merge as is", "action": "merge"},
+    {"label": "Fix + merge", "detail": "Fixes items 3 and 5, then merges", "action": "send", "message": "Fix items 3 and 5, then merge.", "recommended": true},
+    {"label": "Merge", "detail": "Merges as is", "action": "merge"},
     {"label": "Wait for CI", "action": "wait", "wait": {"kind": "ci", "target": "98"}},
     {"label": "Skip", "action": "done"},
     {"label": "Something else", "action": "reply", "placeholder": "What should it do?"}
@@ -214,7 +222,7 @@ A session writes its Inbox card at the end of a turn that needs you, and sbd sho
 ```
 
 - `summary` is required. sbd keeps its first four lines, each up to 200 characters. `title` defaults to the first line.
-- `options` holds up to 6 buttons. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main button, and `detail` adds a line under its label.
+- `options` holds up to 6 buttons. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main button. A `label` of up to 20 characters is the button's title, and `detail` says beside the button what the option does. A longer label (up to 80 characters) moves beside the button: the part before a `: `, ` — `, ` – `, or ` - ` titles the button when it fits, and otherwise the button shows the action's verb, such as Send or Merge.
 - `callouts` holds up to 5 things to read before deciding, each with a `kind` (`warning`, `decision`, or `info`), a `title`, and a `body`.
 
 sbd drops an option with another action or a wait that `sb wait` would refuse, and a callout with no title or another kind, and `sb summary set` prints what it dropped and why. The card is data: sbd shows it and never runs anything from it, and a button only runs its action, which makes its own checks. A merge button, for one, merges only a PR that is ready to merge. `sb summary help` prints the format for a session to follow.

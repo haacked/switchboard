@@ -656,6 +656,34 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 }
 
 @MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelProposalAnswers {
+  @Test(arguments: [(true, "plan-apply"), (false, "plan-reject")])
+  func answerSendsTheOpWithTheProposal(_ apply: Bool, _ op: String) async {
+    let sent = await BoardModelSuggestions().request {
+      apply ? $0.applyProposal("u1") : $0.rejectProposal("u1")
+    }
+
+    #expect(sent.op == op)
+    #expect(sent.args == ["proposal": "u1"])
+  }
+
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.applyProposal("u1")
+    model.rejectProposal("u1")
+    #expect(model.answeringProposals == ["u1"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+}
+
+@MainActor
 @Suite(.timeLimit(.minutes(1))) struct BoardModelArtifactAnswers {
   @Test(arguments: [(true, "plan-artifact-apply"), (false, "plan-artifact-reject")])
   func answerSendsTheOpForApplyOrReject(_ apply: Bool, _ op: String) async {
