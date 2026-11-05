@@ -31,6 +31,7 @@ struct SwitchboardApp: App {
           .disabled(model.presentingSheet)
       }
       CommandMenu("Session") {
+        let acknowledgeTarget = model.acknowledgeTarget
         Button("Next Needing You") { model.selectNextNeedingYou() }
           .keyboardShortcut("j")
         Button("Open Manager") { model.openManager() }
@@ -51,6 +52,11 @@ struct SwitchboardApp: App {
         }
         .keyboardShortcut("d", modifiers: [.command, .shift])
         .disabled(model.selected == nil)
+        Button(acknowledgeTarget?.acknowledgeTitle ?? "Acknowledge") {
+          if let s = model.acknowledgeTarget { model.acknowledge(s.id, undo: s.acknowledged == true) }
+        }
+        .keyboardShortcut("a", modifiers: [.command, .shift])
+        .disabled(acknowledgeTarget?.canAcknowledge != true)
       }
     }
 

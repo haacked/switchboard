@@ -54,9 +54,11 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
-  /// Sessions whose merge or dismissal is on its way to sbd. Their buttons
-  /// stay disabled until sbd replies, so a second click can't merge again.
+  /// Sessions whose merge is on its way to sbd. Their buttons stay disabled
+  /// until sbd replies, so a second click can't merge again.
   @Published var merging: Set<String> = []
+  /// Sessions whose acknowledgment or its undo is on its way to sbd.
+  @Published var acknowledging: Set<String> = []
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -510,12 +512,37 @@ final class BoardModel: ObservableObject {
       finally: { self.answering.remove(card.id) })
   }
 
-  /// Merges the session's PR, or with `dismiss` takes it out of Ready to merge.
-  func merge(_ id: String, dismiss: Bool = false) {
+  func merge(_ id: String) {
     guard merging.insert(id).inserted else { return }
+    perform("merge", ["session": .string(id)], on: merges, finally: { self.merging.remove(id) })
+  }
+
+  /// Takes the session's item out of the Inbox, or with `undo` puts it back.
+  /// The Inbox moves its focus from an acknowledged item to the next one.
+  func acknowledge(_ id: String, undo: Bool = false) {
+    guard acknowledging.insert(id).inserted else { return }
     var args: [String: JSON] = ["session": .string(id)]
-    if dismiss { args["dismiss"] = true }
-    perform("merge", args, on: merges, finally: { self.merging.remove(id) })
+    if undo {
+      args["undo"] = true
+    } else if currentInboxItem == id {
+      moveInbox(by: 1)
+      // A field in the item that scrolls away would keep the keystrokes. A
+      // session's terminal outside the Inbox keeps them.
+      if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
+    }
+    perform(
+      "ack", args,
+      then: { value in
+        // The user put the item back, so the refresh must not notify about it.
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+      },
+      finally: { self.acknowledging.remove(id) })
+  }
+
+  /// The session that the Session menu's Acknowledge acts on: the current
+  /// Inbox item while the Inbox shows, else the selected session.
+  var acknowledgeTarget: SessionSummary? {
+    visibleView == .inbox ? sessions.first { $0.id == currentInboxItem } : selected
   }
 
   /// Clicks the item's option. `text` is what the user typed for a reply option.

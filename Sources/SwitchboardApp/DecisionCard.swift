@@ -53,6 +53,8 @@ struct DecisionCard: View {
     } else if item.source == .fallback {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
+    // A Ready to merge card offers Acknowledge as one of its options.
+    if session.state != .readyToMerge { AcknowledgeButton(session: session, primary: session.isInformational) }
   }
 }
 
