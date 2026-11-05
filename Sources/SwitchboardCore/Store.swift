@@ -106,7 +106,9 @@ public final class Store {
     try run("INSERT OR IGNORE INTO declined_suggestions (id) VALUES (?)", [id])
   }
 
-  /// The ids of the group suggestions that the user declined.
+  /// The ids of the group suggestions and the plan row suggestions that the
+  /// user declined. A group suggestion's id starts with its kind, such as
+  /// `merge:`. A plan row's id starts with its plan's id.
   public func declinedSuggestions() throws -> Set<String> {
     Set(try query("SELECT id FROM declined_suggestions", []) { $0.text(0) })
   }
