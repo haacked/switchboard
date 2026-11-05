@@ -43,7 +43,7 @@ final class BoardModel: ObservableObject {
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
   /// The newest events of the sessions whose card details the Inbox showed,
-  /// newest first, by session id.
+  /// oldest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
   /// Each group chat's last messages, by group id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
@@ -435,11 +435,12 @@ final class BoardModel: ObservableObject {
   /// Clicks the item's option. `text` is what the user typed for a reply option.
   func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
+    // The Board's merge buttons read `merging`, so a merge from the card shows there too.
+    let merge = action == .merge || action == .dismiss
+    if merge, merging.contains(session) { return }
     guard choosing.insert(key).inserted else { return }
     var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
     if let text { args["text"] = .string(text) }
-    // The Board's merge buttons read `merging`, so a merge from the card shows there too.
-    let merge = action == .merge || action == .dismiss
     if merge { merging.insert(session) }
     // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(

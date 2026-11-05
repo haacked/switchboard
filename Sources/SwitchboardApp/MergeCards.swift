@@ -2,9 +2,9 @@ import SwiftUI
 import SwitchboardCore
 
 extension SessionSummary {
-  /// The sessions whose merge card the Inbox shows with this one's: this one
-  /// first, then every other Ready to merge session, oldest first.
-  func mergeCards(all: [SessionSummary]) -> [SessionSummary] {
+  /// The Ready to merge sessions that Merge All merges from this session's
+  /// card: this one first, then the others, oldest first.
+  func readyToMergeSessions(all: [SessionSummary]) -> [SessionSummary] {
     guard state == .readyToMerge else { return [] }
     let others = all.filter { $0.id != id && $0.state == .readyToMerge }.sorted { $0.since < $1.since }
     return [self] + others

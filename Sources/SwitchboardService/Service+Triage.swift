@@ -147,8 +147,10 @@ extension Service {
   }
 
   private func finishSummary(_ id: String, stop: Int64, _ result: Result<TriageSummary, Error>) {
-    // The user moved on while the call ran.
-    guard entries[id]?.facts.lastStop == stop else { return }
+    // A call for a turn the user moved on from still counts toward
+    // `triage.perHour`. applyTriage ignores its summary because its stop no
+    // longer matches.
+    guard entries[id] != nil else { return }
     var data: [String: JSON]
     switch result {
     case .success(let summary):

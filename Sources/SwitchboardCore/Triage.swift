@@ -184,6 +184,12 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.source = source
   }
 
+  init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
+    self.init(
+      title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
+      callouts: summary.callouts, source: source, ref: ref)
+  }
+
   /// The option that the card's main button runs: the recommended one, or
   /// the only one.
   public var primary: TriageOption? {
@@ -273,31 +279,35 @@ public enum Triage {
       item = cardItem(card)
       item.ref = "card:\(card.id)"
     } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
-      item = TriageItem(
-        title: own.title, kind: own.kind, summary: own.summary, options: own.options, callouts: own.callouts,
-        source: .session, ref: "summary:\(facts.sessionSummaryId)")
+      item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
       if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)
       item.ref = "rule:\(item.title)"
     } else {
-      if let summary = facts.triage {
-        item = TriageItem(
-          title: oneLine(summary.title, max: titleLength), kind: summary.kind, summary: summary.summary,
-          options: summary.options, callouts: summary.callouts, source: .summary)
-      } else {
-        item = fallbackItem(facts.lastReply ?? "", verdict)
-      }
+      item = facts.triage.map { TriageItem($0, source: .summary) } ?? fallbackItem(facts.lastReply ?? "", verdict)
       item.ref = "stop:\(facts.lastStop)"
     }
     return item
   }
 
-  /// Puts what a rule found after the session wrote its card first in the
-  /// card's callouts.
+  /// Adds what a rule found after the session wrote its card. The rule's
+  /// reason and callouts come before the card's callouts. The rule's options
+  /// come after the card's options, except an action the card already offers.
+  /// The card's main option stays the main option.
   static func addRule(_ verdict: Verdict, to item: inout TriageItem) {
     let kind: Callout.Kind = verdict.state == .needsYou ? .warning : .info
-    item.callouts.insert(Callout(kind: kind, title: title(verdict.reason)), at: 0)
+    item.callouts.insert(contentsOf: [Callout(kind: kind, title: title(verdict.reason))] + verdict.callouts, at: 0)
+    let lead = item.primary
+    let added = verdict.options.filter { rule in
+      !item.options.contains { $0.action == rule.action && ($0.action != .send || $0.message == rule.message) }
+    }
+    item.options += added.map { option in
+      var option = option
+      if lead != nil { option.recommended = false }
+      return option
+    }
+    if let lead, let i = item.options.firstIndex(of: lead) { item.options[i].recommended = true }
   }
 
   /// Whether the verdict is the one that the session's last reply gives, and

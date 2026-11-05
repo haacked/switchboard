@@ -134,11 +134,11 @@ public enum TriageCard {
       {"summary": "...", "options": [...], "callouts": [...]}
       EOF
 
-    summary   Required. Two to four lines separated by "\\n", each under 200 characters: what you did,
+    summary   Required. Two to four lines separated by "\\n", each under \(lineLength) characters: what you did,
               then what you need from the user.
-    title     Optional. Under 60 characters, what the user does ("Pick how to land #98").
+    title     Optional. Under \(Triage.titleLength) characters, what the user does ("Pick how to land #98").
               It defaults to the summary's first line.
-    options   Up to 6 buttons, each with a label (under 80 characters) and an action:
+    options   Up to \(maxOptions) buttons, each with a label (under \(labelLength) characters) and an action:
                 send    sends "message" to you as the user's reply, so write it as the user would say it
                         ("Yes, push."). Without "message" it sends the label.
                 reply   shows a text field; the user's text comes to you ("placeholder" is its hint)
@@ -148,10 +148,10 @@ public enum TriageCard {
               "recommended": true makes an option the main button. "detail" adds a line under the label.
               Give exactly one option when the next step is obvious. Otherwise give one option per real
               choice, recommend at most one, and leave out filler such as Cancel or Skip.
-    callouts  Optional, and most cards have none. Up to 5 things the user must read before deciding that
+    callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that
               the summary doesn't already say: a conflict, a failing check, a risk, a call you made
               without asking, a destructive step. Each has "kind" (warning, decision, or info), "title"
-              (under 80 characters), and "body" (a sentence or two).
+              (under \(labelLength) characters), and "body" (a sentence or two).
 
     Example, with one obvious next step:
 

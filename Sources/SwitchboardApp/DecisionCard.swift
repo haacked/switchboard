@@ -37,7 +37,7 @@ struct DecisionCard: View {
   @ViewBuilder
   private var actions: some View {
     if session.state == .readyToMerge {
-      MergeBatch(sessions: session.mergeCards(all: model.sessions))
+      MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
       // The card shows the whole tool call, which an approval needs to see.
@@ -76,6 +76,18 @@ extension TriageOption {
     }
     return "\(label), merge #\(pr)"
   }
+
+  /// Whether the button shows `effect` under the label. A session writes the
+  /// label, so the button shows what a click does unless the label is the
+  /// text that a click sends.
+  var showsEffect: Bool { action != .send || (message ?? label) != label }
+
+  /// What VoiceOver reads after the label: the option's detail and what a
+  /// click does.
+  var accessibilityHint: String {
+    guard let detail else { return effect }
+    return detail.hasSuffix(".") ? "\(detail) \(effect)" : "\(detail). \(effect)"
+  }
 }
 
 /// An option's button. A click runs the option's action. The primary one is
@@ -98,8 +110,7 @@ struct OptionButton: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(option.label).fontWeight(.medium)
         if let detail = option.detail { Text(detail).font(.caption).opacity(0.8) }
-        // A click sends this text as the user, so the button shows it.
-        if option.action == .send && option.message != option.label {
+        if option.showsEffect {
           Text(effect).font(.caption).opacity(0.8).lineLimit(3)
         }
       }
@@ -107,10 +118,13 @@ struct OptionButton: View {
       .padding(.vertical, 4)
     }
     .controlSize(.large)
-    .disabled(model.choosing.contains("\(session.id)/\(number)"))
+    .disabled(
+      model.choosing.contains("\(session.id)/\(number)")
+        || ([.merge, .dismiss].contains(option.action) && model.merging.contains(session.id))
+    )
     .help(effect)
     .accessibilityLabel(option.accessibilityLabel(pr: session.pr?.number))
-    .accessibilityHint(effect)
+    .accessibilityHint(option.accessibilityHint)
     if primary {
       button.buttonStyle(.borderedProminent).keyboardShortcut(Self.primaryShortcut)
     } else {

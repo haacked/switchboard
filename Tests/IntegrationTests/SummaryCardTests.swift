@@ -389,7 +389,7 @@ extension Instance {
 
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .session)
-    #expect(item.options.map(\.label) == ["Go on"])
+    #expect(item.options.map(\.label) == ["Go on", "Rebase"])
     let lead = try #require(item.callouts.first)
     #expect(lead.kind == .warning)
     #expect((lead.title + " " + lead.body).contains("#18303 conflicts with main"))

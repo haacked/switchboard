@@ -144,12 +144,47 @@ let sessionCard = TriageSummary(
   }
 
   @Test func keepsTheFieldsOfAWaitThatMakeWaitAccepts() throws {
-    let raw = card(options: [["label": "Wait for CI", "action": "wait", "wait": ["kind": "ci", "target": "98"]]])
+    let raw = card(options: [
+      ["label": "Wait for CI", "action": "wait", "wait": ["kind": "ci", "target": "98", "by": "claude"]]
+    ])
 
     let wait = try #require(try cleaned(raw).card.options.first?.wait)
 
     #expect(wait.kind == "ci")
     #expect(wait.target == "98")
+    #expect(wait.by == nil)
+  }
+
+  @Test(arguments: [nil, "", "  \n "] as [String?])
+  func aSendWithoutAMessageSendsItsLabel(_ message: String?) throws {
+    var option: [String: JSON] = ["label": "Go on", "action": "send"]
+    if let message { option["message"] = .string(message) }
+
+    let kept = try #require(try cleaned(card(options: [.object(option)])).card.options.first)
+
+    #expect(kept.message == "Go on")
+  }
+
+  @Test func aBlankDetailAndPlaceholderAreLeftOut() throws {
+    let raw = card(options: [["label": "Something else", "action": "reply", "detail": "  ", "placeholder": " \n "]])
+
+    let kept = try #require(try cleaned(raw).card.options.first)
+
+    #expect(kept.detail == nil)
+    #expect(kept.placeholder == nil)
+  }
+
+  @Test func longFieldsAreCutToTheirLimits() throws {
+    let long = String(repeating: "x", count: 3_000)
+    let raw = card(
+      options: [["label": .string(long), "action": "send", "message": .string(long)]],
+      callouts: [["kind": "info", "title": "Note", "body": .string(long)]])
+
+    let result = try cleaned(raw).card
+
+    #expect(result.options.first?.label.count == TriageCard.labelLength)
+    #expect(result.options.first?.message?.count == TriageCard.messageLength)
+    #expect(result.callouts.first?.body.count == TriageCard.bodyLength)
   }
 
   @Test func reportsEachDroppedPartAndWhy() throws {
@@ -398,6 +433,19 @@ let sessionCard = TriageSummary(
     #expect(item(f)?.options.map(\.action) == [.allow, .deny])
   }
 
+  /// A dialog in the terminal without a card holds the session's next
+  /// prompt, so the card's buttons would only queue behind it.
+  @Test(arguments: [true, false])
+  func anOpenTerminalDialogWinsOverTheSessionsCard(_ question: Bool) throws {
+    var f = try carded()
+    let call = ToolCall(tool: question ? "AskUserQuestion" : "Bash", summary: "Which fruit?", since: 5)
+    if question { f.openQuestion = call } else { f.openPermission = call }
+
+    let item = try #require(itemOf(f))
+
+    #expect(item.source != .session)
+  }
+
   @Test func aHeldQuestionsOptionsAnswer() {
     let one: JSON = [
       "questions": [
@@ -426,12 +474,55 @@ let sessionCard = TriageSummary(
     let item = try #require(itemOf(f))
 
     #expect(item.source == .session)
-    #expect(item.options == sessionCard.options)
-    #expect(item.callouts.count == sessionCard.callouts.count + 1)
+    #expect(item.options.map(\.label) == sessionCard.options.map(\.label) + ["Rebase"])
+    #expect(item.primary == sessionCard.options.first)
     let lead = try #require(item.callouts.first)
     #expect(lead.kind == .warning)
     #expect((lead.title + " " + lead.body).contains("#42 conflicts with main"))
-    #expect(Array(item.callouts.dropFirst()) == sessionCard.callouts)
+    #expect(Array(item.callouts.suffix(sessionCard.callouts.count)) == sessionCard.callouts)
+  }
+
+  /// A card written before the PR became ready to merge keeps Merge and
+  /// Dismiss, since the Inbox shows no other merge button for one PR.
+  @Test func aReadyPRAfterTheSessionsCardAddsMergeAndDismiss() throws {
+    var f = try carded()
+    f.pr = samplePR(checks: "SUCCESS")
+    f.pr?.trunkConfig = false
+
+    let item = try #require(itemOf(f))
+
+    #expect(item.source == .session)
+    #expect(item.callouts.first?.kind == .info)
+    #expect(item.options.map(\.action) == sessionCard.options.map(\.action) + [.merge, .dismiss])
+    #expect(item.primary == sessionCard.options.first)
+  }
+
+  /// A card with one option and no recommendation keeps that option as the
+  /// main one after the rule's recommended Merge joins it.
+  @Test func aRulesRecommendedOptionDoesNotTakeOverTheCardsOnlyOption() throws {
+    var only = sessionCard
+    only.options = [TriageOption(label: "Go on", action: .send, message: "Go on.")]
+    var f = try carded(only)
+    f.pr = samplePR(checks: "SUCCESS")
+    f.pr?.trunkConfig = false
+
+    let item = try #require(itemOf(f))
+
+    #expect(item.primary?.label == "Go on")
+    #expect(item.options.filter(\.recommended).map(\.label) == ["Go on"])
+  }
+
+  /// A card that already offers a merge does not get a second Merge button.
+  @Test func aCardsOwnMergeOptionIsNotRepeated() throws {
+    var merging = sessionCard
+    merging.options = [TriageOption(label: "Ship it", action: .merge, recommended: true)]
+    var f = try carded(merging)
+    f.pr = samplePR(checks: "SUCCESS")
+    f.pr?.trunkConfig = false
+
+    let item = try #require(itemOf(f))
+
+    #expect(item.options.map(\.label) == ["Ship it", "Dismiss"])
   }
 
   /// A card that has the most callouts still shows the rule's reason first.

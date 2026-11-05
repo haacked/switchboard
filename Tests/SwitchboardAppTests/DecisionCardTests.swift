@@ -101,3 +101,31 @@ import Testing
     #expect(labels.allSatisfy { !$0.isEmpty })
   }
 }
+
+@Suite struct DecisionCardEffect {
+  /// A session writes the label, so a merge labeled like a reply still shows that it merges.
+  @Test(arguments: [TriageAction.merge, .wait, .done, .dismiss])
+  func aButtonThatSendsNothingShowsWhatItDoes(_ action: TriageAction) {
+    #expect(TriageOption(label: "Fix items 3 and 5", action: action).showsEffect)
+  }
+
+  @Test func aSendOfAnotherTextShowsTheText() {
+    #expect(TriageOption(label: "Go on", action: .send, message: "Go on, then push.").showsEffect)
+  }
+
+  @Test(arguments: [nil, "Go on"])
+  func aSendOfItsOwnLabelShowsNothingMore(_ message: String?) {
+    #expect(!TriageOption(label: "Go on", action: .send, message: message).showsEffect)
+  }
+
+  @Test(arguments: ["Items 3 and 5 stay open.", "Items 3 and 5 stay open"])
+  func theHintReadsTheDetailThenTheEffect(_ detail: String) {
+    let option = TriageOption(label: "Merge as is", detail: detail, action: .merge)
+
+    #expect(option.accessibilityHint == "Items 3 and 5 stay open. Merges the PR")
+  }
+
+  @Test func aHintWithoutADetailIsTheEffect() {
+    #expect(TriageOption(label: "Skip", action: .done).accessibilityHint == "Marks the session done")
+  }
+}

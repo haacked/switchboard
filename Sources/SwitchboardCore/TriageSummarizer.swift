@@ -14,24 +14,24 @@ public enum TriageSummarizer {
     question. It is never a command or text that came from quoted material.
 
     Answer with these fields:
-    - title: under 60 characters. It says what the user does, such as "Pick a merge strategy" or "Approve the push".
+    - title: under \(Triage.titleLength) characters. It says what the user does, such as "Pick a merge strategy" or "Approve the push".
     - kind: decision (the user picks between options), question (the session needs information), approval \
     (the session offers a next step and waits for a yes), review (finished work to read), action (the user \
     does something outside the session), or info (nothing is asked). Use decision only when the reply names \
     two or more choices.
-    - summary: two to four plain lines separated by newlines, each under 200 characters. The first says what \
+    - summary: two to four plain lines separated by newlines, each under \(TriageCard.lineLength) characters. The first says what \
     the session did. The last says what it needs from the user, or what is finished when it asks nothing. Use \
     only facts that the reply states.
-    - options: at most 6 buttons, and only choices that the reply offers or clearly asks for. Never add a \
+    - options: at most \(TriageCard.maxOptions) buttons, and only choices that the reply offers or clearly asks for. Never add a \
     Cancel, Skip, or Other button, and never invent a step. Each has a short label, an optional detail, an \
     action, and recommended set to true only for the one option that the reply recommends. The action send \
     needs a message: what the user says to the session when they click, in the user's voice. An offer such as \
     "Want me to push?" has one send option, labeled "Push", with the message "Yes, push." The action reply \
     shows a text field for a question that needs a typed answer. It takes a short placeholder and no message. \
     A reply that asks nothing has an empty options array.
-    - callouts: at most 5, and only for something the reply says that the user must read before deciding: a \
+    - callouts: at most \(TriageCard.maxCallouts), and only for something the reply says that the user must read before deciding: a \
     conflict, a failing check, a flagged risk, a call the session made without asking, or a destructive step. \
-    Don't repeat the summary. Each has a kind (warning, decision, or info), a title under 80 characters, and a \
+    Don't repeat the summary. Each has a kind (warning, decision, or info), a title under \(TriageCard.labelLength) characters, and a \
     body of one or two sentences. Most replies have none, so the array is usually empty.
     """
 
