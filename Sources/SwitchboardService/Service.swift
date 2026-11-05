@@ -697,8 +697,9 @@ public final class Service {
       paste(id, text, queued: false)
       delivery = .pasted
     } else {
-      // A stopped session starts without a prompt when older messages wait
-      // or the live cap is full. Its messages arrive in order after SessionStart.
+      // A stopped session launches without a prompt when older messages wait,
+      // the message has images, the live cap is full, or another start is
+      // queued. Its messages arrive in order after SessionStart.
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
       queueMessage(id, text, byUser: byUser)
       return .queued

@@ -147,6 +147,23 @@ extension Instance {
     #expect(try sbd.liveIds("queued") == [b.id, c.id])
   }
 
+  /// Raising the cap frees a slot, but only the tick fills it. Ticks run
+  /// only when the test moves the clock.
+  @Test func aLaunchWaitsBehindAQueuedStartWhenASlotFrees() throws {
+    let sbd = try instance(cap: 1, extra: ["tickSeconds": 3600])
+    let a = try sbd.new(prompt: "slow 30", name: "a")
+    try sbd.waitFor(a.id, "a's slow tool") { $0.state == .working }
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try waitForQueued(sbd, b.id, cap: 1)
+    try sbd.sb("live", "--set", "2")
+
+    let c = try sbd.new(prompt: "hello", name: "c")
+
+    #expect(try sbd.liveIds("queued") == [b.id, c.id])
+    try sbd.advanceClock(1)
+    #expect(try sbd.liveIds("queued") == [c.id])
+  }
+
   /// `resume` and `open` count against the cap, as `new` does.
   @Test(arguments: ["resume", "open"])
   func aStoppedSessionThatResumesPastTheCapQueues(_ command: String) throws {
@@ -279,6 +296,14 @@ extension Instance {
     #expect(try sbd.capStops(a.id).isEmpty)
     FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
     try sbd.waitFor("the turn that reports the job") { try sbd.events(a.id).filter { $0.kind == "Stop" }.count == 2 }
+
+    // Service.jobReportMs is 5 s.
+    try sbd.advanceClock(5_000)
+    #expect(try !sbd.capStops(a.id).isEmpty)
+    try sbd.waitFor("b's start after a exits", timeout: 20) {
+      try sbd.advanceClock(1)
+      return try sbd.get(b.id).lastReply == "Done: hello"
+    }
   }
 
   // MARK: Which idle session sbd stops
