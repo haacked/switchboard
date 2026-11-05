@@ -155,6 +155,10 @@ check_terminal() {
 
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
   grep -q '^selftest: attached after' "$shots/app.log" || fail "the app never saw the session attach: $(grep '^selftest: gave up' "$shots/app.log")"
+  if [ "${SB_TEST_VISIBLE:-}" != 1 ]; then
+    grep -qx 'selftest: launch accessory active=false alpha=0.0' "$shots/app.log" ||
+      fail "the app did not stay hidden and inactive: $(grep '^selftest: launch' "$shots/app.log")"
+  fi
 
   local got
   got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')

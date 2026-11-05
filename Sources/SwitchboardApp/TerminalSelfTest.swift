@@ -180,6 +180,8 @@ enum TerminalSelfTest {
     pane.window?.makeFirstResponder(pane)
     log("pane \(Int(pane.bounds.width))x\(Int(pane.bounds.height))")
     await pause(1)
+    let policy = NSApp.activationPolicy() == .accessory ? "accessory" : "regular"
+    log("launch \(policy) active=\(NSApp.isActive) alpha=\(pane.window?.alphaValue ?? -1)")
     png(pane, to: "\(folder)/pane-start.png")
 
     key(pane, "a", code: code(for: "a"))
