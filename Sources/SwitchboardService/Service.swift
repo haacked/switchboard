@@ -156,7 +156,7 @@ public final class Service {
   // MARK: Requests
 
   static let actsOnProcesses: Set<String> = [
-    "send", "send-group", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+    "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
     "dependency-resolved",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
@@ -265,6 +265,8 @@ public final class Service {
       return try JSON(encoding: summary(try lookup(args)))
     case "terminals":
       return try JSON(encoding: terminals(try lookup(args)))
+    case "shell":
+      return try shellRequest(args)
     case "open":
       let id = try lookup(args)
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
@@ -579,22 +581,15 @@ public final class Service {
     return env
   }
 
-  /// The two panes' tmux targets. It starts a missing pane, and a shell
+  /// The two panes' tmux targets. It starts a missing Claude pane, and a
+  /// missing shell pane unless the shell is closed. It closes a shell pane
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try requireFolder(session)
     let shell = paneName(id, .shell)
-    switch snapshot.panes[shell] {
-    case nil:
-      try host.create(shell, cwd: session.cwd, env: paneEnv(id))
-      markStarting(shell)
-    case let row? where row.dead:
-      try host.respawn(shell, cwd: session.cwd, env: paneEnv(id), command: nil)
-      markStarting(shell)
-    default:
-      break
-    }
+    if snapshot.panes[shell]?.dead == true { try closeShell(id) }
+    if entries[id]?.session.shellClosed != true { try startShell(id) }
     if snapshot.panes[paneName(id, .claude)] == nil { try launch(id, prompt: nil) }
     return Terminals(tmux: host.tmux, socket: host.socket, claude: paneName(id, .claude), shell: shell)
   }
@@ -1278,6 +1273,7 @@ public final class Service {
       install(fresh)
       let now = nowMs()
       superviseMCPServers(now: now)
+      closeExitedShells()
       for id in entries.keys.sorted() {
         let live = entries[id]?.facts.live ?? false
         switch claudeState(id) {
@@ -1393,6 +1389,7 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
+    out.shellClosed = s.shellClosed
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

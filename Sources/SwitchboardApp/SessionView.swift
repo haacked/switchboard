@@ -25,22 +25,37 @@ struct SessionView: View {
       header
       Divider()
       CardList(cards: session.cards)
-      if session.cleanup?.state == .removed {
+      if !session.hasTerminals {
         Text("Cleanup removed this session's worktree, so it has no terminals.")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
-            paneLabel("Claude")
+            paneLabel("Claude") {
+              if session.shellClosed == true {
+                Button("Open Shell") { model.setShellOpen(session.id, true) }
+                  .help("Start a shell in the session's folder beside the Claude terminal")
+              }
+            }
             TerminalPane(command: terminals.attachCommand(.claude))
           }
           .frame(minWidth: 480, idealWidth: 760)
-          VStack(spacing: 0) {
-            paneLabel("Shell")
-            TerminalPane(command: terminals.attachCommand(.shell))
+          if session.shellClosed != true {
+            VStack(spacing: 0) {
+              paneLabel("Shell") {
+                Button {
+                  model.setShellOpen(session.id, false)
+                } label: {
+                  Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Close Shell")
+                .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
+              }
+              TerminalPane(command: terminals.attachCommand(.shell))
+            }
+            .frame(minWidth: 240, idealWidth: 360)
           }
-          .frame(minWidth: 240, idealWidth: 360)
         }
       } else if let error = ui.terminalsError {
         Text("Can't open the terminals: \(error)")
@@ -59,7 +74,7 @@ struct SessionView: View {
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if session.cleanup?.state == .removed { return }
+      if !session.hasTerminals { return }
       let id = session.id
       let model = model
       // Opening a session resumes a stopped claude. The selection has to rest
@@ -202,13 +217,19 @@ struct SessionView: View {
     .padding(12)
   }
 
-  private func paneLabel(_ text: String) -> some View {
-    Text(text)
-      .font(.caption.bold())
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(.bar)
+  private func paneLabel(_ text: String, @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {
+    HStack {
+      Text(text).font(.caption.bold()).foregroundStyle(.secondary)
+      Spacer()
+      trailing().buttonStyle(.borderless).font(.caption).controlSize(.small)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(.bar)
   }
+}
+
+extension SessionSummary {
+  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
+  var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
 }

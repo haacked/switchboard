@@ -564,6 +564,13 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(sent.args == ["session": "a"])
   }
 
+  @Test(arguments: [true, false]) func setShellOpenSendsShellWithTheSession(open: Bool) async {
+    let sent = await firstRequest { $0.setShellOpen("a", open) }
+
+    #expect(sent.op == "shell")
+    #expect(sent.args == ["session": "a", "open": .bool(open)])
+  }
+
   @Test func ignoresASecondMergeWhileTheFirstRuns() async {
     let sent = await firstRequest { model in
       model.merge("a")

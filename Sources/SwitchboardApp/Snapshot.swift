@@ -30,6 +30,7 @@ enum Snapshot {
     }
     TerminalSelfTest.start(model)
     DraftSelfTest.start(model)
+    ShellSelfTest.start(model)
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
