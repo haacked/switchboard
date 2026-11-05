@@ -18,6 +18,14 @@ public enum MergeMethod: String, Codable, Sendable {
   public var verb: String { enqueues ? "Enqueue" : "Merge" }
 }
 
+extension TriageOption {
+  /// What a click does when the session's PR lands by `mergeMethod`. A merge
+  /// option in a repository with a queue adds the PR to that queue.
+  public func effect(mergeMethod: MergeMethod?) -> String {
+    action == .merge && mergeMethod?.enqueues == true ? "Adds the PR to its merge queue" : effect
+  }
+}
+
 /// A merge that sbd ran or the user dismissed, as a `merge` event recorded it.
 public struct MergeAttempt: Codable, Equatable, Sendable {
   public enum Result: String, Codable, Sendable {
@@ -80,7 +88,7 @@ extension SessionFacts {
 extension Attention {
   /// Ready to merge when the PR targets the default branch, is not a draft,
   /// GitHub reports no conflict, the checks passed, review is satisfied,
-  /// Trunk has not taken it, and no dependency holds it. `openPR` calls it
+  /// Trunk reports no queue state for it, and no dependency holds it. `openPR` calls it
   /// after its blocking rules, its merged and dismissed attempts, and its
   /// GitHub merge queue rule, so the PR is open, outside GitHub's queue, and
   /// the session is idle. A repository whose merge method sbd can't tell

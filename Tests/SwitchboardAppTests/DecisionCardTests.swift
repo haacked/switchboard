@@ -122,16 +122,23 @@ import Testing
   func theHintReadsTheDetailThenTheEffect(_ detail: String) {
     let option = TriageOption(label: "Merge as is", detail: detail, action: .merge)
 
-    #expect(option.accessibilityHint == "Items 3 and 5 stay open. Merges the PR")
+    #expect(option.accessibilityHint(mergeMethod: .merge) == "Items 3 and 5 stay open. Merges the PR")
   }
 
   @Test func aDetailThatEndsInAQuestionGetsNoPeriod() {
     let option = TriageOption(label: "Merge as is", detail: "Leave items 3 and 5?", action: .merge)
 
-    #expect(option.accessibilityHint == "Leave items 3 and 5? Merges the PR")
+    #expect(option.accessibilityHint(mergeMethod: .merge) == "Leave items 3 and 5? Merges the PR")
   }
 
   @Test func aHintWithoutADetailIsTheEffect() {
-    #expect(TriageOption(label: "Skip", action: .done).accessibilityHint == "Marks the session done")
+    #expect(TriageOption(label: "Skip", action: .done).accessibilityHint(mergeMethod: nil) == "Marks the session done")
+  }
+
+  @Test(arguments: [MergeMethod.mergeQueue, .trunk])
+  func anEnqueueHintSaysItAddsThePRToTheQueue(_ method: MergeMethod) {
+    let option = TriageOption(label: "Enqueue #42", action: .merge)
+
+    #expect(option.accessibilityHint(mergeMethod: method) == "Adds the PR to its merge queue")
   }
 }

@@ -67,8 +67,6 @@ extension Instance {
   /// A busy PR in a repository that merges through Trunk: Trunk's comment is
   /// older than the comments the poller reads, so the poller sees only other
   /// bots. The repository's `.trunk` folder still shows the queue.
-  /// Trunk's comment is outside the comments the poller reads, so only the
-  /// repository's `.trunk` folder shows that Trunk merges it.
   @Test func busyPRInATrunkRepositoryIsEnqueuedWithoutAMerge() throws {
     let github = try FakeGitHub()
     github.change(MergeTests.number) {

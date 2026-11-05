@@ -268,26 +268,6 @@ extension FakeGitHub {
     #expect(sbd.ghMerges().isEmpty)
   }
 
-  /// A busy PR in a Trunk repository: Trunk's comment is older than the
-  /// comments the poller reads, so only the `.trunk` folder shows Trunk.
-  @Test func busyPRInATrunkRepositoryEnqueuesWithATrunkComment() throws {
-    let github = try FakeGitHub()
-    github.mergesBy(.trunk)
-    for i in 0..<25 {
-      github.comment(
-        on: MergeTests.number, by: "github-actions[bot]", body: "Deploy preview \(i)",
-        at: String(format: "2026-10-22T06:%02d:00Z", i))
-    }
-    let sbd = try Instance.withMergeStub(github)
-    let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
-    try sbd.poll()
-
-    #expect(try sbd.get(s.id).state == .readyToMerge)
-    try sbd.sb("merge", s.id)
-    #expect(sbd.ghComments() == [Self.trunkComment])
-    #expect(sbd.ghMerges().isEmpty)
-  }
-
   @Test(arguments: [MergeMethod.mergeQueue, .trunk])
   func enqueuePrintsEnqueued(_ method: MergeMethod) throws {
     let github = try FakeGitHub()
@@ -346,6 +326,8 @@ extension FakeGitHub {
     let s = try readySession(github, sbd, method)
 
     try sbd.sb("merge", s.id)
+    if method == .mergeQueue { github.change(MergeTests.number) { $0["isInMergeQueue"] = true } }
+    try sbd.poll(all: true)
     try sbd.poll(all: true)
 
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
@@ -380,7 +362,48 @@ extension FakeGitHub {
     try sbd.poll(all: true)
 
     try sbd.waitFor("the message after the merge") { try !sbd.messagesFromSbd(s.id).isEmpty }
+    #expect(try sbd.messagesFromSbd(s.id).only?.contains("finish the post-merge steps") == true)
     #expect(try sbd.get(s.id).waits.isEmpty)
+  }
+
+  /// GitHub reports no removal state, so an open PR that its merge queue no
+  /// longer holds is the removal. One read is not enough, since a read just
+  /// after the enqueue can come before GitHub queues the PR.
+  @Test func prThatGitHubsMergeQueueDropsResumesTheSessionAfterTwoReads() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(github, sbd, .mergeQueue)
+    try sbd.sb("merge", s.id)
+    github.change(MergeTests.number) { $0["isInMergeQueue"] = true }
+    try sbd.poll(all: true)
+    github.change(MergeTests.number) { $0["isInMergeQueue"] = false }
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.messagesFromSbd(s.id).isEmpty)
+    #expect(try sbd.get(s.id).waits.count == 1)
+
+    try sbd.poll(all: true)
+
+    try sbd.waitFor("the message after the removal") { try !sbd.messagesFromSbd(s.id).isEmpty }
+    #expect(try sbd.messagesFromSbd(s.id).only?.contains("GitHub removed it from the merge queue") == true)
+    #expect(try sbd.get(s.id).waits.isEmpty)
+  }
+
+  /// A PR that GitHub's queue has not taken yet, as when GitHub waits for a
+  /// check, is not a removal.
+  @Test func prThatGitHubsMergeQueueHasNotTakenKeepsTheWait() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(github, sbd, .mergeQueue)
+    try sbd.sb("merge", s.id)
+
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+
+    #expect(try sbd.messagesFromSbd(s.id).isEmpty)
+    #expect(try sbd.get(s.id).waits.count == 1)
   }
 
   @Test(arguments: [MergeMethod.mergeQueue, .trunk])
@@ -419,8 +442,12 @@ extension FakeGitHub {
     let table = try sbd.sb("ls")
 
     let ids = rows.compactMap { $0["id"]?.string }
+    let state = Dictionary(
+      uniqueKeysWithValues: rows.compactMap { r in r["id"]?.string.map { ($0, r["state"]?.string) } })
     #expect(ids.sorted() == [ready.id, enqueued.id, plain.id].sorted())
     #expect(rows.allSatisfy { $0["state"]?.string != nil })
+    #expect(state[enqueued.id] == "waiting")
+    #expect(state[ready.id] == "ready_to_merge")
     for id in [ready.id, enqueued.id, plain.id] {
       #expect(table.components(separatedBy: " \(id) ").count == 2, "\(id) should appear once in `sb ls`")
     }

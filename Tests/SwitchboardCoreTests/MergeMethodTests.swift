@@ -375,29 +375,6 @@ extension MergeMethodTests {
 
       #expect(verdict(f).state != .readyToMerge)
     }
-
-    /// A busy PR in a Trunk repository: Trunk's comment is outside the
-    /// comments the poller reads, so only the `.trunk` folder shows Trunk.
-    @Test func busyPRInATrunkRepositoryIsReadyToEnqueue() throws {
-      let comments = (0..<25).map {
-        PRComment(id: "IC_\($0)", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:\(10 + $0)Z")
-      }
-      let f = try prFacts(landablePR(trunkConfig: true), comments: comments)
-
-      let v = verdict(f)
-
-      #expect(v == Verdict(state: .readyToMerge, reason: "#42 is ready to merge, approved by alice"))
-      #expect(v.options.first?.label == "Enqueue #42")
-    }
-
-    @Test func prWithATrunkCommentIsReadyToEnqueue() throws {
-      let f = try prFacts(landablePR(), comments: [otherBotComment, trunkComment()])
-
-      let v = verdict(f)
-
-      #expect(v.state == .readyToMerge)
-      #expect(v.options.first?.label == "Enqueue #42")
-    }
   }
 }
 
@@ -561,7 +538,7 @@ extension MergeMethodTests {
     @Test func backgroundJobWithASatisfiedReviewIsNotReadyForReview() throws {
       let f = try prFacts(landablePR(checks: "PENDING"), then: [event("job", 3, ["count": 1])])
 
-      #expect(verdict(f).state != .readyForReview)
+      #expect(verdict(f).state == .waiting)
     }
 
     /// The control case: a review that GitHub still requires keeps the

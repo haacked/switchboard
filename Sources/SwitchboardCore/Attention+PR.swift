@@ -145,7 +145,8 @@ extension Attention {
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
 
-  /// ", approved by X and Y", or nothing when nobody approved the PR.
+  /// `separator` followed by " approved by X and Y", or nothing when nobody
+  /// approved the PR.
   static func approvedBy(_ pr: PullRequest, after separator: String = ",") -> String {
     pr.approvers.isEmpty ? "" : "\(separator) approved by \(names(pr.approvers))"
   }
