@@ -29,22 +29,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # The PR API lists at most 3000 files. A compare lists at most 300
+          # and does not say how many it left out, so a full page runs the
+          # tests.
           if [ -n "$PR" ]; then
             files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
-            count=$(gh api "repos/$REPO/pulls/$PR" --jq .changed_files)
+            count=$PR_FILES
           elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
             files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[].filename')
-            count=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files | length')
+            count=$(grep -c . <<<"$files" || true)
+            if [ "$count" -ge 300 ]; then count=0; fi
           else
             files=
             count=0
           fi
           echo "$files"
-          # The APIs list at most 3000 files for a PR and 300 for a compare.
           # A list that comes back empty or short runs the tests.
           listed=$(grep -c . <<<"$files" || true)
           other=$(grep -c -v -E '^[^/]+\.md$' <<<"$files" || true)
@@ -59,19 +63,11 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        shards: [2, 4]
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
       - run: brew install tmux
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
-      - name: Sample CPU
-        run: nohup iostat -w 30 > "$RUNNER_TEMP/iostat.txt" 2>&1 &
-      - run: bin/test --shards ${{ matrix.shards }}
-      - name: CPU samples
-        if: always()
-        run: cat "$RUNNER_TEMP/iostat.txt"
+      # A 3-CPU runner is close to fully busy with 4 integration shards.
+      - run: bin/test --shards 4
