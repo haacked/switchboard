@@ -84,6 +84,13 @@ public enum JSON: Codable, Equatable, Sendable {
     return String(decoding: data, as: UTF8.self)
   }
 
+  /// The value as indented JSON text, for a file that people read.
+  public var prettyText: String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+  }
+
   public static func parse(_ text: String) -> JSON? {
     try? JSONCoding.decoder.decode(JSON.self, from: Data(text.utf8))
   }

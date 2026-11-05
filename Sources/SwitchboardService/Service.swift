@@ -36,6 +36,8 @@ public final class Service {
     var turnProbe = TurnProbe()
     /// When the tick last saw a terminal on the Claude pane.
     var lastOnScreen: Int64 = 0
+    /// When a start of claude queued behind the live cap.
+    var queuedSince: Int64?
 
     /// Whether a message is queued for the session or on its way.
     func messageWaiting(now: Int64) -> Bool {
@@ -74,6 +76,8 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
+  /// The most claude processes that may run at once. `sb live --set` changes it.
+  var liveCap: Int
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
@@ -106,6 +110,7 @@ public final class Service {
     self.host = try TerminalHost(home: home, config: config)
     self.sbPath = sbPath
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
+    self.liveCap = config.liveCap
     guard let git = findExecutable("git") else { throw APIError("can't find git") }
     self.git = git
   }
@@ -311,6 +316,8 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
+    case "live":
+      return try liveRequest(args)
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-suggest",
       "send-group",
       "send-pending":
@@ -588,11 +595,9 @@ public final class Service {
   /// conversation when its transcript exists, and starts it otherwise.
   /// `prompt` becomes the first prompt. The pane runs only claude, so the pane
   /// dies when claude exits. tmux keeps the dead pane's last screen until the
-  /// next launch.
-  func launch(_ id: String, prompt: String?) throws {
-    guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try requireFolder(session)
-    guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
+  /// next launch. Callers go through `launch`, which holds to the live cap.
+  func startClaude(_ id: String, prompt: String?) throws {
+    let session = try requireStartable(id)
     let resume = hasTranscript(session)
     var args = [config.claude]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
@@ -682,24 +687,33 @@ public final class Service {
     // Claude Code does not attach the images of a prompt that starts it, so
     // a message with images waits for a paste.
     let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
-    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches {
-      try launch(id, prompt: text)
+    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches && hasRoom(id) {
+      try startClaude(id, prompt: text)
       delivery = .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
       paste(id, text, queued: false)
       delivery = .pasted
     } else {
-      // A stopped session with older queued messages starts without a
-      // prompt, so its messages arrive in order after SessionStart.
+      // A stopped session starts without a prompt when older messages wait
+      // or the live cap is full. Its messages arrive in order after SessionStart.
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
-      entries[id]!.pending.append(text)
-      delivery = .queued
-      deliverPending(id, after: 0.2)
+      queueMessage(id, text, byUser: byUser)
+      return .queued
     }
     var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
     if !byUser { data["by"] = "sbd" }
     record(id, "sent", .object(data))
     return delivery
+  }
+
+  /// Adds the message to the session's queue. The `sent` event lets a
+  /// restart of sbd rebuild the queue.
+  func queueMessage(_ id: String, _ text: String, byUser: Bool) {
+    entries[id]?.pending.append(text)
+    var data: [String: JSON] = ["text": .string(text), "delivery": .string(Delivery.queued.rawValue)]
+    if !byUser { data["by"] = "sbd" }
+    record(id, "sent", .object(data))
+    deliverPending(id, after: 0.2)
   }
 
   /// Pastes the oldest queued message after `delay`, if claude is ready for
@@ -1305,6 +1319,7 @@ public final class Service {
           entries[id] = e
         }
       }
+      runQueuedStarts(now: now)
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
@@ -1320,19 +1335,24 @@ public final class Service {
   }
 
   func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {
-    guard let e = entries[id], e.facts.live, !e.facts.turnRunning, e.facts.openPermission == nil,
-      e.facts.openQuestion == nil, e.pending.isEmpty
-    else { return false }
+    guard let e = entries[id], isQuiet(id, pid: pid, now: now) else { return false }
     // A background job's process exits up to 1.3 s before claude starts the
     // turn that reports it, so the wait starts again when the job exits.
     let idle = now - max(e.facts.lastActivity, e.lastJobSeen)
     guard idle >= idleStopMs(id) else { return false }
-    if let sent = e.inFlight, now - sent < Service.inFlightMs { return false }
     // A running subagent's tool calls fire hooks. A subagent with no event
     // for twice the idle time lost its SubagentStop, as when sbd was down.
-    guard e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000 else { return false }
-    guard !attached(id) else { return false }
-    return backgroundJobs(pid) == 0
+    return e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000
+  }
+
+  /// Whether the session's claude sits idle with nothing that a stop would
+  /// lose: no turn, prompt, queued or in-flight message, or background job,
+  /// and no terminal on screen. The idle stop and the live cap both need it.
+  func isQuiet(_ id: String, pid: Int, now: Int64) -> Bool {
+    guard let e = entries[id] else { return false }
+    let f = e.facts
+    return f.live && !f.turnRunning && f.openPermission == nil && f.openQuestion == nil
+      && !e.messageWaiting(now: now) && !attached(id) && backgroundJobs(pid) == 0
   }
 
   // MARK: Summaries
@@ -1375,6 +1395,7 @@ public final class Service {
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
     out.permissionMode = e.facts.permissionMode
+    if e.queuedSince != nil { out.reason = queuedReason }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
@@ -1401,4 +1422,8 @@ public final class Service {
 extension SessionFacts {
   /// Whether the claude that the last launch started has reported its SessionStart.
   fileprivate var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
+
+  /// Whether the claude that the last launch started has ended, so that its
+  /// process is exiting.
+  var exiting: Bool { !live && startedSinceLaunch }
 }
