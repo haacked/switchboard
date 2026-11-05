@@ -246,6 +246,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
       lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
     s.triage = kind.map { TriageItem(title: id, kind: $0, summary: "", source: source) }
     s.manager = manager ? true : nil
+    if manager { s.kind = .manager }
     return s
   }
 

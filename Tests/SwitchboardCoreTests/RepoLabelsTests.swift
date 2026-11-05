@@ -12,7 +12,10 @@ private func session(
     reason: "", since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [],
     notes: [], pr: pr.map(prSummary))
   s.followup = followup
-  if manager { s.manager = true }
+  if manager {
+    s.manager = true
+    s.kind = .manager
+  }
   return s
 }
 
