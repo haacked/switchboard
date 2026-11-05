@@ -173,6 +173,8 @@ public final class Service {
         return .success(try remove(request.args))
       case "cleanup":
         return .success(try cleanup(request.args))
+      case "rm-done":
+        return .success(try removeDone(request.args))
       case "merge":
         return .success(try mergeRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
@@ -189,7 +191,7 @@ public final class Service {
         return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
       case "import":
         return .success(try JSON(encoding: importSessions(request.args)))
-      case "triage", "choose", "reply":
+      case "triage", "choose", "reply", "summary-set":
         return try triageRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
@@ -438,12 +440,14 @@ public final class Service {
     var branch: String?
     /// Set by `git worktree lock`, which tools such as Supacode use. `worktree remove` refuses it.
     var locked: Bool
+    /// The lock is Supacode's, which `removeWorktree` asks Supacode to delete.
+    var lockedBySupacode = false
   }
 
   func worktreeEntries(_ repo: String) throws -> [WorktreeEntry] {
     var entries: [WorktreeEntry] = []
-    for line in try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(
-      separator: "\n", omittingEmptySubsequences: true)
+    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"]).split(
+      separator: "\0", omittingEmptySubsequences: true)
     {
       if line.hasPrefix("worktree ") {
         entries.append(
@@ -454,6 +458,7 @@ public final class Service {
         entries[entries.count - 1].branch = String(line.dropFirst("branch refs/heads/".count))
       } else if line == "locked" || line.hasPrefix("locked ") {
         entries[entries.count - 1].locked = true
+        entries[entries.count - 1].lockedBySupacode = Self.isSupacodeLock(line.dropFirst("locked".count))
       }
     }
     return entries
@@ -756,7 +761,7 @@ public final class Service {
   /// it is at the merged PR's head. A remote branch at another commit stays and
   /// the call throws. Without a merged PR for the branch, the remote branch is
   /// left alone and the call succeeds.
-  private func remove(_ args: JSON) throws -> JSON {
+  func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
     let removesRemoteBranch = args["remote_branch"]?.bool == true
@@ -774,24 +779,10 @@ public final class Service {
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
-    var repo: String?
-    var branch: (name: String, tip: String)?
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    if removesWorktree {
-      if folderGone {
-        repo = try checkGoneWorktree(session, mergedPR: pr?.state == .merged)
-      } else {
-        repo = try checkWorktreeIsLossless(
-          session, mergedPR: pr?.state == .merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
-      }
-    }
-    if removesBranch {
-      if folderGone, let repo {
-        branch = try checkGoneBranchIsMerged(repo, session, pr: pr)
-      } else {
-        branch = try checkBranchIsMerged(session, pr: pr)
-      }
-    }
+    let (repo, branch, supacode) = try checkRemoval(
+      session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+      branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
     // A local branch that is already gone still has its remote branch checked.
     let remoteTarget: (repo: String, remote: String, branch: String)? = {
@@ -814,22 +805,22 @@ public final class Service {
     // folder's path through a symlink, so it gets the path that it lists for the worktree.
     if let repo {
       let listed = folderGone ? try worktreeEntry(repo, at: session.cwd)?.path : session.cwd
-      if let listed { _ = try gitOutput(repo, ["worktree", "remove", listed]) }
+      if let listed { try removeWorktree(repo, listed) }
     }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
       do {
-        try deleteMergedBranch(repo, branch, pr: pr)
-        branchRemoved = true
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
       } catch {
         branchError = error
       }
     }
     var remoteRemoved = false
     var remoteError: Error?
-    let localBranchIsGone = branchRemoved || branch == nil
-    if let target = remoteTarget, localBranchIsGone, let pr = mergedPR(pr, of: target.branch) {
+    if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch),
+      let pr = mergedPR(pr, of: target.branch)
+    {
       do {
         remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
       } catch {
@@ -851,7 +842,7 @@ public final class Service {
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     if let branchError, let branch {
-      let remote = removesRemoteBranch ? " It also kept the remote branch, because the local branch stayed." : ""
+      let remote = removesRemoteBranch ? " It also kept the remote branch." : ""
       throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
     }
     if let remoteError {
@@ -862,6 +853,26 @@ public final class Service {
       "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branchRemoved),
       "remote_branch_removed": .bool(remoteRemoved),
     ]
+  }
+
+  /// The checks that `rm` makes before it stops anything. Returns the repo
+  /// when `worktree` is set, and with `branch` the branch to delete and its
+  /// tip. The branch is nil when the folder and the branch are both gone, and
+  /// when Supacode locked the worktree and origin/main doesn't contain the tip.
+  /// `supacode` is true when Supacode locked the worktree.
+  func checkRemoval(
+    _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool
+  ) throws -> (repo: String?, branch: (name: String, tip: String)?, supacode: Bool) {
+    guard worktree else { return (nil, nil, false) }
+    let merged = pr?.state == .merged
+    if folderGone {
+      let repo = try checkGoneWorktree(session, mergedPR: merged)
+      return (repo, branch ? try checkGoneBranchIsMerged(repo, session, pr: pr) : nil, false)
+    }
+    let (repo, supacode) = try checkWorktreeIsLossless(
+      session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
+    guard branch else { return (repo, nil, supacode) }
+    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
@@ -958,15 +969,20 @@ public final class Service {
   /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
   func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
-    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
-      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
-    }
+    let (branch, tip) = try checkedOutBranch(session)
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
     try requireTip(tip, of: branch, inMerged: pr)
     return (branch, tip)
+  }
+
+  /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
+  func checkedOutBranch(_ session: Session) throws -> (name: String, tip: String) {
+    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
+      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
+    }
+    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"]))
   }
 
   /// The PR when it merged `branch`, or nil.
@@ -993,6 +1009,12 @@ public final class Service {
     }
     guard branchExists(repo, branch) else { throw APIError("\(branch) no longer exists.") }
     try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"]), of: branch, inMerged: pr)
+    try requireNotCheckedOut(repo, branch, ignoring: path)
+  }
+
+  /// Throws when a worktree other than the one at `path` has the branch checked out.
+  /// Deleting the ref of a checked-out branch breaks that worktree.
+  func requireNotCheckedOut(_ repo: String, _ branch: String, ignoring path: String? = nil) throws {
     let checkedOut = try worktreeEntries(repo).contains { entry in
       entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)
     }
@@ -1005,6 +1027,11 @@ public final class Service {
   /// check.
   func deleteMergedBranch(_ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?) throws {
     try recheckBranch(repo, branch.name, pr: pr)
+    try deleteBranchRef(repo, branch)
+  }
+
+  /// Deletes the branch's ref at the checked tip, so git refuses when a commit landed after the check.
+  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String)) throws {
     _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
     // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
     _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
@@ -1015,9 +1042,11 @@ public final class Service {
     entries.values.first { $0.session.id != session.id && $0.session.cwd == session.cwd }?.session.id
   }
 
-  /// Returns the session's repo, or throws unless the session's folder is a
-  /// linked worktree of the repo that `new` made it from, no other session runs
-  /// in it, it has no uncommitted file and no file whose change git status
+  /// Returns the session's repo and whether Supacode locked the worktree, or
+  /// throws unless the session's folder is a linked worktree of the repo that
+  /// `new` made it from, no other session runs in it, git doesn't lock it
+  /// unless the lock is Supacode's and sbd can find supacode, it has no
+  /// uncommitted file and no file whose change git status
   /// skips, and HEAD is on a remote branch. With a merged PR, HEAD may instead
   /// be on a local branch, because a squash merge leaves the commits on no
   /// remote branch and `worktree remove` keeps the branch. `worktree remove`
@@ -1026,7 +1055,7 @@ public final class Service {
   /// refuses the removal.
   func checkWorktreeIsLossless(
     _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool
-  ) throws -> String {
+  ) throws -> (repo: String, supacode: Bool) {
     let repo = try worktreeRepo(session)
     if let sharedWith {
       throw APIError(
@@ -1036,7 +1065,7 @@ public final class Service {
     guard let entry = try worktreeEntries(repo).dropFirst().first(where: { samePath($0.path, session.cwd) }) else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
-    if entry.locked { throw lockedError(session.cwd) }
+    if entry.locked && !entry.lockedBySupacode { throw lockedError(session.cwd) }
     let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored)
     guard status.changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
@@ -1044,7 +1073,8 @@ public final class Service {
     try requireNoHiddenChanges(session.cwd)
     if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
-    return repo
+    if entry.lockedBySupacode { _ = try supacodeExecutable() }
+    return (repo, entry.lockedBySupacode)
   }
 
   /// Throws when a tracked file has git's assume-unchanged or skip-worktree
