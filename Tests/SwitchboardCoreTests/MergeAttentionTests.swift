@@ -4,16 +4,20 @@ import Testing
 @testable import SwitchboardCore
 
 /// A PR that every ready-to-merge condition passes: open, not a draft,
-/// mergeable, its checks passed, and no review required.
+/// mergeable, its checks passed, no review required, and a repository that
+/// the poller read has no `.trunk` folder.
 private func readyPR(
   draft: Bool = false, headSha: String = samplePRHead, base: String = "main", defaultBranch: String? = "main",
   mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [],
-  checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil
+  checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil,
+  trunkConfig: Bool? = false
 ) -> PullRequest {
-  samplePR(
+  var pr = samplePR(
     draft: draft, headSha: headSha, base: base, defaultBranch: defaultBranch, mergeable: mergeable,
     reviewDecision: reviewDecision, verdicts: verdicts, checks: checks, mergedBase: mergedBase, queue: queue,
     reviewRequests: reviewRequests)
+  pr.trunkConfig = trunkConfig
+  return pr
 }
 
 private func mergeEvent(_ t: Int64, head: String, _ result: String, error: String? = nil) -> Event {
@@ -153,6 +157,26 @@ extension MergeAttentionTests {
         readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
 
       #expect(verdict(f) == Verdict(state: .needsYou, reason: "enqueue #42, approved by alice"))
+    }
+
+    /// A busy PR in a Trunk repository: Trunk's comment is outside the
+    /// comments the poller reads, so only the repository's `.trunk` folder
+    /// shows the queue.
+    @Test func prInARepositoryWithATrunkFolderIsNotReadyToMerge() throws {
+      let comments = (0..<25).map {
+        PRComment(id: "IC_\($0)", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:\(10 + $0)Z")
+      }
+      let f = try prFacts(
+        readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], trunkConfig: true),
+        comments: comments)
+
+      #expect(verdict(f) == Verdict(state: .needsYou, reason: "enqueue #42, approved by alice"))
+    }
+
+    @Test func prWhoseTrunkFolderWasNotReadIsNotReadyToMerge() throws {
+      let f = try prFacts(readyPR(trunkConfig: nil))
+
+      #expect(verdict(f).state != .readyToMerge)
     }
 
     @Test func prWithOnlyOtherBotCommentsIsReadyToMerge() throws {

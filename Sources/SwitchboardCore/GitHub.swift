@@ -70,7 +70,7 @@ public enum GitHub {
         ... on PullRequest {
           id number url title state isDraft mergedAt closedAt mergeCommit { oid } body
           headRefName headRefOid baseRefName mergeable reviewDecision
-          repository { nameWithOwner defaultBranchRef { name } }
+          repository { nameWithOwner defaultBranchRef { name } trunkConfig: object(expression: "HEAD:.trunk") { id } }
           labels(first: 20) { nodes { name } }
           reviewRequests(first: 20) {
             nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } }
@@ -141,7 +141,8 @@ public enum GitHub {
       checks: nodes(node["commits"]).first?["commit"]?["statusCheckRollup"]?["state"]?.string,
       mergedAt: node["mergedAt"]?.string, closedAt: node["closedAt"]?.string,
       reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string,
-      dependsOn: node["body"]?.string.map { Dependencies.refs(inBody: $0, repo: repo) })
+      dependsOn: node["body"]?.string.map { Dependencies.refs(inBody: $0, repo: repo) },
+      trunkConfig: node["repository"]?["trunkConfig"].map { $0 != .null })
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }
@@ -154,7 +155,29 @@ public enum GitHub {
   public static func parseStatus(_ response: JSON, _ ids: [String]) -> (
     prs: [(pr: PullRequest, comments: [PRComment])], gone: Set<String>
   ) {
-    ((response["data"]?["nodes"]?.array ?? []).compactMap(parsePR), notFoundNodes(response, ids))
+    let unread = trunkConfigErrors(response)
+    let prs = (response["data"]?["nodes"]?.array ?? []).enumerated().compactMap { i, node in
+      parsePR(node).map { parsed in
+        var parsed = parsed
+        if unread(i) { parsed.pr.trunkConfig = nil }
+        return parsed
+      }
+    }
+    return (prs, notFoundNodes(response, ids))
+  }
+
+  /// Whether GitHub reported an error for node `i` at or under its
+  /// repository. GitHub then answers `trunkConfig` with null, which would
+  /// read as a repository without a `.trunk` folder. An error without a path
+  /// counts for every node.
+  static func trunkConfigErrors(_ response: JSON) -> (Int) -> Bool {
+    var nodes: Set<Int> = []
+    for error in response["errors"]?.array ?? [] {
+      guard let path = error["path"]?.array else { return { _ in true } }
+      guard path.first?.string == "nodes", let i = path.dropFirst().first?.int else { continue }
+      if path.count == 2 || path[2].string == "repository" { nodes.insert(i) }
+    }
+    return { nodes.contains($0) }
   }
 
   /// The comments of a body response, and the ids that GitHub reports
