@@ -45,7 +45,12 @@ struct FollowupView: View {
         if let link = followup.link {
           GridRow {
             Text("Link").foregroundStyle(.secondary)
-            if let url = URL(string: link) { Link(link, destination: url).lineLimit(1) } else { Text(link) }
+            // A follow-up made from a file plan links the file's path.
+            if let url = link.hasPrefix("/") ? URL(fileURLWithPath: link) : URL(string: link) {
+              Link(link, destination: url).lineLimit(1)
+            } else {
+              Text(link)
+            }
           }
         }
         if let parent = session.parent {

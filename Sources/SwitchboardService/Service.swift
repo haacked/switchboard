@@ -184,6 +184,9 @@ public final class Service {
         return try triageRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
+      case "plan-followup":
+        // `planFollowup` takes the state queue itself.
+        return .success(try JSON(encoding: planFollowup(request.args)))
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
@@ -1269,10 +1272,13 @@ public final class Service {
   // MARK: Summaries
 
   func summaries() -> [SessionSummary] {
-    entries.keys.map(summary).sorted { $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since }
+    let rowFollowups = planRowFollowups()
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups) }.sorted {
+      $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
+    }
   }
 
-  func summary(_ id: String) -> SessionSummary {
+  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
     let s = e.session
@@ -1293,7 +1299,7 @@ public final class Service {
     out.cleanup = e.facts.cleanup
     out.group = s.group
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
-    out.plans = planSummaries(session: s)
+    out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.

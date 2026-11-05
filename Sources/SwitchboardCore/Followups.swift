@@ -10,6 +10,8 @@ public struct Followup: Codable, Equatable, Sendable {
   /// The branch that the follow-up came up on.
   public var sourceBranch: String?
   public var link: String?
+  /// The plan row that `sb plan followup` made the follow-up from.
+  public var planRow: PlanRowRef?
   public var trigger: Trigger
   /// When the trigger fired, in ms since the epoch. The follow-up then shows
   /// in Needs you. It still doesn't start on its own.
@@ -19,13 +21,26 @@ public struct Followup: Codable, Equatable, Sendable {
 
   public init(
     prompt: String, repository: String? = nil, sourceBranch: String? = nil, link: String? = nil,
-    trigger: Trigger = .manual
+    planRow: PlanRowRef? = nil, trigger: Trigger = .manual
   ) {
     self.prompt = prompt
     self.repository = repository
     self.sourceBranch = sourceBranch
     self.link = link
+    self.planRow = planRow
     self.trigger = trigger
+  }
+
+  /// A row of a plan document. A row has a follow-up while a session's
+  /// `planRow` names the plan's document and the row's item.
+  public struct PlanRowRef: Codable, Equatable, Sendable {
+    public var source: PlanSource
+    public var item: String
+
+    public init(source: PlanSource, item: String) {
+      self.source = source
+      self.item = item
+    }
   }
 
   /// What moves a follow-up to Needs you.

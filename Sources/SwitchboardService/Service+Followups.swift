@@ -52,28 +52,39 @@ extension Service {
     }
     let now = nowMs()
     let trigger = try makeTrigger(on: args["on"]?.string, after: args["after"]?.string, repository, now: now)
+    let followup = Followup(
+      prompt: prompt, repository: repository, sourceBranch: sourceBranch,
+      link: args["link"]?.string ?? Followup.firstLink(prompt), trigger: trigger)
     return try queue.sync {
-      let parent = try args["parent"]?.string.map { try lookup(["session": .string($0)]) }
-      var session = Session(
-        id: shortId("s", taken: entries.keys), name: args["title"]?.string ?? Followup.title(prompt), cwd: "",
-        branch: args["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 },
-        claudeSessionId: UUID().uuidString.lowercased(),
-        model: args["model"]?.string, created: now)
-      session.parent = parent
-      session.group = try groupOfNew(args["group"]?.string, parent: parent)
-      // A follow-up added by a session stays in that session's account.
-      // Without a parent, it takes the active account when it starts.
-      if let ref = args["account"]?.string {
-        session.claudeConfigDir = try resolveAccount(ref)
-      } else if let parent {
-        session.claudeConfigDir = claudeAccount(of: parent)
-      }
-      session.followup = Followup(
-        prompt: prompt, repository: repository, sourceBranch: sourceBranch,
-        link: args["link"]?.string ?? Followup.firstLink(prompt), trigger: trigger)
-      try save(session)
-      return summary(session.id)
+      try insertFollowup(
+        followup, title: args["title"]?.string, branch: args["branch"]?.string, model: args["model"]?.string,
+        parent: args["parent"]?.string, group: args["group"]?.string, account: args["account"]?.string)
     }
+  }
+
+  /// Saves a new follow-up. `parent`, `group`, and `account` are references
+  /// that sbd resolves. It runs on the state queue.
+  func insertFollowup(
+    _ followup: Followup, title: String? = nil, branch: String? = nil, model: String? = nil, parent ref: String? = nil,
+    group: String? = nil, account: String? = nil
+  ) throws -> SessionSummary {
+    let parent = try ref.map { try lookup(["session": .string($0)]) }
+    var session = Session(
+      id: shortId("s", taken: entries.keys), name: title ?? Followup.title(followup.prompt), cwd: "",
+      branch: branch.flatMap { $0.isEmpty ? nil : $0 }, claudeSessionId: UUID().uuidString.lowercased(),
+      model: model, created: nowMs())
+    session.parent = parent
+    session.group = try groupOfNew(group, parent: parent)
+    // A follow-up added by a session stays in that session's account.
+    // Without a parent, it takes the active account when it starts.
+    if let account {
+      session.claudeConfigDir = try resolveAccount(account)
+    } else if let parent {
+      session.claudeConfigDir = claudeAccount(of: parent)
+    }
+    session.followup = followup
+    try save(session)
+    return summary(session.id)
   }
 
   private func save(_ session: Session) throws {

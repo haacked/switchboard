@@ -152,7 +152,7 @@ extension Instance {
     let plan = try sbd.plan(id)
     #expect(plan.source.kind == .file)
     #expect(plan.links == documentLinks)
-    #expect(plan.rows.map(\.text) == [breakerRow])
+    #expect(plan.rows.map(\.text) == [breakerRow, docsRow])
     #expect(plan.error == nil)
   }
 
@@ -169,7 +169,7 @@ extension Instance {
     let plan = try sbd.plan(id)
     #expect(plan.source.kind == .issue)
     #expect(plan.links == documentLinks)
-    #expect(plan.rows.map(\.text) == [breakerRow])
+    #expect(plan.rows.map(\.text) == [breakerRow, docsRow])
   }
 
   @Test func issueRereadSendsTheETag() throws {
@@ -206,7 +206,7 @@ extension Instance {
 
     let plan = try sbd.plan(id)
     #expect(plan.error == nil)
-    #expect(plan.rows.map(\.text) == [breakerRow])
+    #expect(plan.rows.map(\.text) == [breakerRow, docsRow])
   }
 
   /// #1209's head branch is on a fork, so the file lives in the fork's repo.
@@ -218,7 +218,7 @@ extension Instance {
     try sbd.addGroup("Flags")
     let id = try sbd.attachPlan("\(rfcs)#\(rfcPR)", group: "Flags", path: rfcPath)
     try sbd.poll(all: true)
-    #expect(try sbd.plan(id).rows.map(\.text) == [breakerRow])
+    #expect(try sbd.plan(id).rows.map(\.text) == [breakerRow, docsRow])
 
     try sbd.sb("plan", "update", id)
 
@@ -241,7 +241,7 @@ extension Instance {
     let plan = try sbd.plan(id)
     #expect(plan.source.kind == .pr)
     #expect(plan.links == documentLinks)
-    #expect(plan.rows.map(\.text) == [breakerRow])
+    #expect(plan.rows.map(\.text) == [breakerRow, docsRow])
     #expect(requests(github, "GET", to: contentsPath).allSatisfy { $0.query["ref"] == rfcBranch })
   }
 
@@ -474,7 +474,7 @@ extension Instance {
     try sbd.writePlan(sbd.planFile, document.replacingOccurrences(of: breakerRow, with: doneRow))
     try sbd.poll(all: true)
 
-    #expect(try sbd.plan(try sbd.planIds()[0]).rows.map(\.text) == [doneRow])
+    #expect(try sbd.plan(try sbd.planIds()[0]).rows.map(\.text) == [doneRow, docsRow])
     #expect(try sbd.outOfDate(group: "Flags").isEmpty)
     #expect(try sbd.outOfDate(session: s.id).isEmpty)
   }
