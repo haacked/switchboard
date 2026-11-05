@@ -52,6 +52,16 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   /// Whether the action runs `sb merge`, which also acknowledges.
   public var isMerge: Bool { self == .merge || self == .dismiss }
 
+  /// Whether a click waits on gh for up to two minutes, so the app runs it
+  /// apart from its other actions. The switch has no default, so a new
+  /// action must state whether it waits on gh.
+  public var waitsOnGh: Bool {
+    switch self {
+    case .merge, .requestReview: true
+    case .send, .reply, .dismiss, .wait, .done, .allow, .deny, .allowAutoMode, .answer: false
+    }
+  }
+
   /// Whether the action acts on the PR for the user, as `sb merge` and
   /// `sb review` do, so a session may not run it. The switch has no
   /// default, so a new action must state whether it needs a click.

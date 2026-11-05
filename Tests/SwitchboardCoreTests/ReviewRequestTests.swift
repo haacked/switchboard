@@ -298,6 +298,10 @@ extension ReviewRequestTests {
       #expect(action.needsClick)
     }
 
+    @Test func onlyMergeAndRequestReviewWaitOnGh() {
+      #expect(TriageAction.allCases.filter(\.waitsOnGh) == [.merge, .requestReview])
+    }
+
     @Test(arguments: [TriageAction.send, .reply, .wait, .done])
     func sessionActionsDoNotNeedAClick(_ action: TriageAction) {
       #expect(!action.needsClick)
