@@ -7,13 +7,16 @@ let usage = """
   Sessions:
     ls                            list sessions by state
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] start a session in the folder, or in a new
+        [--model M] [--account A] [--no-auto]
+                                  start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
                                   --name. It runs under the account A, else its
-                                  parent's, else the active account
+                                  parent's, else the active account. It starts
+                                  in auto mode unless --no-auto or the autoMode
+                                  setting is false
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
-        [--base REF] [--model M] [--account A]
+        [--base REF] [--model M] [--account A] [--no-auto]
                                   start a session on a new branch B in a new
                                   worktree of R, which is owner/name, a name, or
                                   a folder. Inside a session, that session is
@@ -108,7 +111,12 @@ let usage = """
 
   Permission prompts and questions:
     cards [<session>]             list the open ones
-    allow [--card N] <session>    allow the session's permission prompt
+    allow [--card N] [--auto] <session>
+                                  allow the session's permission prompt. --auto
+                                  also switches the session to auto mode, where
+                                  Claude's classifier decides further
+                                  permissions. A prompt from manual or accept
+                                  edits mode offers it
     deny [--card N] <session> [message]
                                   deny it. With a message, Claude reads it and
                                   goes on. Without one, the turn stops.
@@ -318,6 +326,7 @@ func printSession(_ s: SessionSummary) {
   }
   print("  folder:  \(s.cwd)")
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
+  if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
@@ -541,7 +550,7 @@ case "new":
     worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
-    account: a.values["--account"])
+    account: a.values["--account"], autoMode: a.switches.contains("--no-auto") ? false : nil)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":
