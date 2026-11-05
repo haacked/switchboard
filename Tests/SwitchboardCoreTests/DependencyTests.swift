@@ -183,10 +183,6 @@ private func refs(_ body: String) -> [String] {
   }
 }
 
-private func dependenciesEvent(_ t: Int64, _ deps: [Dependency]) throws -> Event {
-  event("dependencies", t, ["dependencies": try JSON(encoding: deps)])
-}
-
 private func bodyEdge(
   _ number: Int, repo: String = own, deploy: Bool = false, state: PRState? = .open, deployed: Bool? = nil,
   session: String? = nil
@@ -227,10 +223,6 @@ private func stackEdge(_ number: Int, state: PRState? = .open, session: String? 
   }
 }
 
-private func prEvent(_ t: Int64, _ pr: PullRequest?, comments: [PRComment]) throws -> Event {
-  event("pr", t, ["pr": try pr.map { try JSON(encoding: $0) } ?? .null, "comments": try JSON(encoding: comments)])
-}
-
 /// The facts of a session whose turn ended with `reply`, then got its PR and
 /// then its edges. `then` holds the events that arrive after the edges.
 private func edgeFacts(
@@ -249,7 +241,8 @@ private let trunk = PRComment(
   id: "IC_trunk", author: "trunk-io[bot]", createdAt: "2026-10-25T00:00:00Z", body: "<!-- Trunk Merge -->")
 private let readsTheReply = Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
 private let conflict = Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main")
-private let held41 = Verdict(state: .waiting, reason: "waits on #41")
+private let held41 = sampleReadyForReview("waits on #41")
+private let approvedHeld41 = sampleReadyForReview("waits on #41", review: "approved by alice")
 private let replaces41 = Verdict(state: .needsYou, reason: "decide what replaces #41, which closed unmerged")
 private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")])
 
@@ -309,7 +302,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
 @Suite struct BusyBaseAttention {
   static let now: Int64 = 10
-  static let busy = Verdict(state: .waiting, reason: "rebase onto #41 once its turn ends")
+  static let busy = sampleReadyForReview("rebase onto #41 once its turn ends")
 
   private func verdict(_ deps: [Dependency], working: String) throws -> Verdict {
     let f = try edgeFacts(samplePR(mergeable: .conflicting), deps)
@@ -353,7 +346,9 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
       verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)])
     let f = try edgeFacts(pr, [stackEdge(41, session: "s2")])
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) { $0 == "s2" ? .working : nil } == Self.busy)
+    #expect(
+      Attention.evaluate(session(), f, now: Self.now) { $0 == "s2" ? .working : nil }
+        == sampleReadyForReview("rebase onto #41 once its turn ends", review: "changes requested by alice"))
   }
 }
 
@@ -363,19 +358,19 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
   @Test func approvedPRWithAnUnresolvedDependencyIsNotMerged() throws {
     let f = try edgeFacts(approvedByAlice, [bodyEdge(41)])
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) == held41)
+    #expect(Attention.evaluate(session(), f, now: Self.now) == approvedHeld41)
   }
 
   @Test func approvedPRThatTrunkManagesWithAnUnresolvedDependencyIsNotEnqueued() throws {
     let f = try edgeFacts(approvedByAlice, [stackEdge(41)], comments: [trunk])
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) == held41)
+    #expect(Attention.evaluate(session(), f, now: Self.now) == approvedHeld41)
   }
 
   @Test func approvedPRWithAnUnreadDependencyIsNotMerged() throws {
     let f = try edgeFacts(approvedByAlice, [bodyEdge(41, state: nil)])
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) == held41)
+    #expect(Attention.evaluate(session(), f, now: Self.now) == approvedHeld41)
   }
 
   @Test func approvedPRWithAnUndeployedDependencyIsNotMerged() throws {
@@ -383,7 +378,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .waiting, reason: "waits on the deploy of #41"))
+        == sampleReadyForReview("waits on the deploy of #41", review: "approved by alice"))
   }
 
   @Test(arguments: [(false, Bool?.none), (true, Bool?.some(true))])
@@ -423,20 +418,20 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
   @Test func dependencyInAnotherRepoNamesItsRepo() throws {
     #expect(
-      try verdict([bodyEdge(7, repo: "acme/gears")]) == Verdict(state: .waiting, reason: "waits on acme/gears#7"))
+      try verdict([bodyEdge(7, repo: "acme/gears")]) == sampleReadyForReview("waits on acme/gears#7"))
   }
 
   @Test(arguments: [Bool?.some(false), .none])
   func mergedButUndeployedDependencyWaitsOnTheDeploy(_ deployed: Bool?) throws {
     let v = try verdict([bodyEdge(41, deploy: true, state: .merged, deployed: deployed)])
 
-    #expect(v == Verdict(state: .waiting, reason: "waits on the deploy of #41"))
+    #expect(v == sampleReadyForReview("waits on the deploy of #41"))
   }
 
   @Test func mergedButUndeployedDependencyInAnotherRepoNamesItsRepo() throws {
     let v = try verdict([bodyEdge(7, repo: "PostHog/posthog", deploy: true, state: .merged, deployed: false)])
 
-    #expect(v == Verdict(state: .waiting, reason: "waits on the deploy of PostHog/posthog#7"))
+    #expect(v == sampleReadyForReview("waits on the deploy of PostHog/posthog#7"))
   }
 
   @Test(arguments: [PRState?.some(.open), .none])
@@ -465,7 +460,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
   @Test func reviewRequestWinsOverTheDependency() throws {
     #expect(
       try verdict([bodyEdge(41)], pr: samplePR(reviewRequests: ["alex"]))
-        == Verdict(state: .waiting, reason: "review of #42 by alex"))
+        == sampleReadyForReview(review: "review requested from alex"))
   }
 
   @Test func replyWithAQuestionStillNeedsYou() throws {
@@ -495,7 +490,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
     #expect(
       Attention.evaluate(session(wait: "run the app and look"), f, now: Self.now)
-        == Verdict(state: .waiting, reason: "run the app and look"))
+        == sampleReadyForReview("run the app and look"))
   }
 
   @Test(arguments: [

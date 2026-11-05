@@ -1363,6 +1363,7 @@ public final class Service {
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
+    if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
     return out
   }
 
