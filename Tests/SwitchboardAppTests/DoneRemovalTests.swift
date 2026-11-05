@@ -118,9 +118,8 @@ final class SentArgs: @unchecked Sendable {
 @MainActor
 @Suite struct BoardModelDoneRemoval {
   @Test func removesOneSessionPerRequestAndSkipsARequestThatFails() async {
-    _ = NSApplication.shared
     let sent = SentArgs()
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { op, args in
       #expect(op == "rm-done")
       sent.append(args)

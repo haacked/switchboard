@@ -143,7 +143,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct ArtifactPlanTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct ArtifactPlanTests {
   // MARK: attach and read
 
   static let attachForms: [[String]] = [

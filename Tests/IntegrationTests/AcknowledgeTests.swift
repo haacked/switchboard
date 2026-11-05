@@ -16,7 +16,7 @@ extension Instance {
 }
 
 /// `sb ack` takes a session out of the Inbox until its reason changes or a new turn starts.
-@Suite(.timeLimit(.minutes(2))) struct AcknowledgeTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct AcknowledgeTests {
   static let readTheReply = "read its last reply and decide what's next"
 
   /// A session whose first turn ended with an informational reply, so it needs you.

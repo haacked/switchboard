@@ -98,8 +98,7 @@ import Testing
   // MARK: submit(_:to:) through the store
 
   @Test func successfulSendClearsTheStoredDraft() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in .null }
     let drafts = MessageDrafts(folder: folder)
     drafts.draft(for: "a").text = "hello"
@@ -111,8 +110,7 @@ import Testing
   }
 
   @Test func failedSendKeepsTheStoredDraft() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in throw Boom() }
     let drafts = MessageDrafts(folder: folder)
     drafts.draft(for: "a").text = "hello"
@@ -125,8 +123,7 @@ import Testing
   }
 
   @Test func successfulSendLeavesOtherKeysAlone() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in .null }
     let drafts = MessageDrafts(folder: folder)
     drafts.draft(for: "a").text = "hello"
@@ -567,8 +564,7 @@ import Testing
   }
 
   @Test func saveAfterASuccessfulSendLeavesNoDraftToReload() async throws {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in .null }
     let drafts = MessageDrafts(folder: folder)
     let draft = drafts.draft(for: "a")

@@ -72,8 +72,7 @@ struct Refusal: Error, CustomStringConvertible {
 @MainActor
 @Suite struct BoardModelCleanup {
   func model(_ send: @escaping @Sendable (String, [String: JSON]) throws -> JSON) -> BoardModel {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = send
     return model
   }

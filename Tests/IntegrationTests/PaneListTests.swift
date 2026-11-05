@@ -3,7 +3,7 @@ import SwitchboardCore
 import Testing
 
 /// Runs sbd with a tmux whose `list-panes` fails while a flag file exists.
-@Suite struct PaneListTests {
+@Suite(.blocking(timeLimit: .seconds(60))) struct PaneListTests {
   private func failingListPanes() throws -> (tmux: String, flag: String) {
     let real = try #require(findExecutable("tmux"))
     var template = Array("/tmp/sbl.XXXXXX".utf8CString)
@@ -24,7 +24,7 @@ import Testing
     return (script, flag)
   }
 
-  @Test(.timeLimit(.minutes(1))) func aFailedPaneListDoesNotStartThePanesAgain() throws {
+  @Test func aFailedPaneListDoesNotStartThePanesAgain() throws {
     let (tmux, flag) = try failingListPanes()
     defer { try? FileManager.default.removeItem(atPath: (flag as NSString).deletingLastPathComponent) }
     let sbd = try Instance(config: ["tmux": .string(tmux)])

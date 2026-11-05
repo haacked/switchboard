@@ -106,7 +106,7 @@ private func parse(_ r: CommandResult) throws -> JSON {
   try #require(JSON.parse(r.stdout), Comment(rawValue: "stdout: \(r.stdout)\nstderr: \(r.stderr)"))
 }
 
-@Suite(.timeLimit(.minutes(2))) struct DoneRemovalTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DoneRemovalTests {
   // MARK: Removal
 
   @Test func removesMergedDoneSessionsWithTheirWorktreesAndBranches() throws {
@@ -628,7 +628,7 @@ private func calls(_ log: String) -> [String] {
   ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
 }
 
-@Suite(.timeLimit(.minutes(2))) struct SupacodeLockTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct SupacodeLockTests {
   @Test func deleteAllRemovesAWorktreeThatSupacodeLockedThroughSupacode() throws {
     let s = try Setup()
     let kept = try s.finished(.breaker, state: "MERGED")

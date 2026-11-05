@@ -48,19 +48,10 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
   }
 
   @Test func openChatStartsAGroupsFirstChatWithTheGroup() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let sent = await firstRequest { $0.openChat("g1") }
 
-    let sent = await withCheckedContinuation { (sent: CheckedContinuation<(String, [String: JSON]), Never>) in
-      model.send = { op, args in
-        sent.resume(returning: (op, args))
-        return .null
-      }
-      model.openChat("g1")
-    }
-
-    #expect(sent.0 == "chat")
-    #expect(sent.1 == ["group": "g1"])
+    #expect(sent.op == "chat")
+    #expect(sent.args == ["group": "g1"])
   }
 
   @Test func openChatSelectsAChatThatExistsWithoutAskingSbd() {

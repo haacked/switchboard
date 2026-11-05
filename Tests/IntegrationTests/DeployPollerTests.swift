@@ -12,7 +12,7 @@ func deployResponse(_ name: String) throws -> String {
 /// Deploy waits resolve through `sb poll` against the fake GitHub: from the
 /// deploy comment of a PostHog/posthog PR, from a named service's state file
 /// and charts run, and when a PostHog/charts PR merges.
-@Suite(.timeLimit(.minutes(2))) struct DeployPollerTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DeployPollerTests {
   /// The branch of PostHog/posthog#122179, which merged on 2026-10-23 and has
   /// a deploy comment that says Deployed in every environment.
   static let mergedBranch = "posthog/groups-list-two-phase-dedup"

@@ -70,7 +70,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct DeleteSessionTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DeleteSessionTests {
   @Test func deletesTheWorktreeAndTheSessionAndKeepsTheTranscript() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()
