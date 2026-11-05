@@ -332,8 +332,10 @@ public final class Service {
 
   // MARK: Hooks
 
-  /// Records a hook event and returns it, or nil for an unknown session.
-  func hook(_ args: JSON) throws -> Event? {
+  /// Records a hook event and returns it with what the hook prints, or nil
+  /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
+  /// the digest of its children, which sbd records as a `digest` event.
+  func hook(_ args: JSON) throws -> (event: Event, answer: JSON)? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
       return nil
     }
@@ -345,6 +347,7 @@ public final class Service {
       recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
     }
     let event = record(id, kind, payload)
+    var answer: JSON = [:]
     switch kind {
     case "SessionStart":
       // `/clear` and `/resume` in the pane start another conversation, which
@@ -360,6 +363,10 @@ public final class Service {
       deliverPending(id, after: 1.5)
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
+      if let text = digest(id, now: event.t) {
+        record(id, "digest", ["text": .string(text)])
+        answer = ParentDigest.hookOutput(text)
+      }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
       if kind == "Stop" { summarizeTurn(id) }
@@ -368,7 +375,7 @@ public final class Service {
     default:
       break
     }
-    return event
+    return (event, answer)
   }
 
   /// Appends an event to the log and folds it into the session's facts.

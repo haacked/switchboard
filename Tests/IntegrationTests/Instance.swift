@@ -367,6 +367,16 @@ final class Instance {
     }
   }
 
+  /// What the stub's hooks printed for the conversation, oldest first.
+  func hookOutputs(_ claudeSessionId: String) -> [JSON] {
+    let text = (try? String(contentsOfFile: "\(home.path)/hook-output.log", encoding: .utf8)) ?? ""
+    return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().compactMap { record in
+      let fields = record.split(separator: "\t", maxSplits: 1).map(String.init)
+      guard fields.count == 2, fields[0] == claudeSessionId else { return nil }
+      return try? JSONCoding.decoder.decode(JSON.self, from: Data(fields[1].utf8))
+    }
+  }
+
   func events(_ id: String, after: Int64 = 0) throws -> [Event] {
     try client.call(
       "events", ["session": .string(id), "since": .number(Double(after)), "limit": 10_000], as: [Event].self)
