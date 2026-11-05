@@ -98,25 +98,25 @@ struct MessageField: View {
     /// only sets `escapeHint`. The field then handles the key as it would without a draft.
     func escape(at now: Date) -> Bool {
       guard !isEmpty else {
-        otherKey()
+        disarmEscape()
         return false
       }
       if let armedAt, now.timeIntervalSince(armedAt) <= Self.escapeWindow {
         text = ""
         images = []
         error = nil
-        otherKey()
+        disarmEscape()
         return true
       }
       armedAt = now
       DispatchQueue.main.asyncAfter(deadline: .now() + Self.escapeWindow) { [weak self] in
-        if self?.armedAt == now { self?.otherKey() }
+        if self?.armedAt == now { self?.disarmEscape() }
       }
       return false
     }
 
     /// Ends the window in which a second Esc clears the draft.
-    func otherKey() {
+    func disarmEscape() {
       if armedAt != nil { armedAt = nil }
     }
 
@@ -167,9 +167,6 @@ struct MessageField: View {
       if let error = draft.error {
         Text(error).font(.caption).foregroundStyle(.red)
       }
-      if draft.escapeHint {
-        Text("Press Esc again to clear").font(.caption).foregroundStyle(.secondary)
-      }
     }
     .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
       Task { @MainActor in draft.add(paths: await Self.paths(providers)) }
@@ -183,9 +180,12 @@ struct MessageField: View {
       if draft.escapeHint { AccessibilityNotification.Announcement("Press Escape again to clear").post() }
     }
     .onAppear { pasteMonitor = Self.monitorPaste(into: draft) }
+    // The draft outlives the view. Without the reset, a field that is removed while it has focus makes the next
+    // field's paste monitor take Command+V from the terminals.
     .onDisappear {
       pasteMonitor.map(NSEvent.removeMonitor)
       pasteMonitor = nil
+      draft.focused = false
     }
   }
 
@@ -194,11 +194,11 @@ struct MessageField: View {
       .lineLimit(1...4)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
-      .onChange(of: focused) { draft.focused = focused }
+      .onChange(of: focused, initial: true) { draft.focused = focused }
       // An input method that composes takes Esc to cancel the composition.
       .onKeyPress(phases: .down) { press in
         guard press.key == .escape else {
-          draft.otherKey()
+          draft.disarmEscape()
           return .ignored
         }
         return !Self.editorIsComposing && draft.escape(at: Date()) ? .handled : .ignored
@@ -206,6 +206,13 @@ struct MessageField: View {
       .overlay {
         if dropTargeted {
           RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2)
+        }
+      }
+      // The hint sits inside the field, because a row below it would resize the terminals above.
+      .overlay(alignment: .trailing) {
+        if draft.escapeHint {
+          Text("Press Esc again to clear").font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).background(.background).padding(.trailing, 4).allowsHitTesting(false)
         }
       }
       // The key handler does not see keypad Enter, which sends here. An input method that passes Return on after composing also sends here.

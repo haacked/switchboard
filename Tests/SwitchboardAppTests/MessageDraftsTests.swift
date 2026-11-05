@@ -138,7 +138,7 @@ import Testing
     #expect(drafts.draft(for: "b").text == "hello")
   }
 
-  // MARK: escape(at:) and otherKey()
+  // MARK: escape(at:) and disarmEscape()
 
   @Test func firstEscapeOnADraftKeepsItAndPassesTheKeyOn() {
     let draft = MessageField.Draft()
@@ -229,21 +229,21 @@ import Testing
     #expect(draft.text.isEmpty)
   }
 
-  @Test func otherKeyHidesTheHint() {
+  @Test func disarmEscapeHidesTheHint() {
     let draft = MessageField.Draft()
     draft.text = "hello"
     _ = draft.escape(at: t0)
 
-    draft.otherKey()
+    draft.disarmEscape()
 
     #expect(!draft.escapeHint)
   }
 
-  @Test func otherKeyBetweenTwoEscapesKeepsTheDraft() {
+  @Test func disarmEscapeBetweenTwoEscapesKeepsTheDraft() {
     let draft = MessageField.Draft()
     draft.text = "hello"
     _ = draft.escape(at: t0)
-    draft.otherKey()
+    draft.disarmEscape()
 
     let handled = draft.escape(at: t0.addingTimeInterval(0.5))
 
@@ -252,11 +252,11 @@ import Testing
     #expect(draft.escapeHint)
   }
 
-  @Test func otherKeyBetweenEscapesRequiresTwoMoreEscapesToClear() {
+  @Test func disarmEscapeBetweenEscapesRequiresTwoMoreEscapesToClear() {
     let draft = MessageField.Draft()
     draft.text = "hello"
     _ = draft.escape(at: t0)
-    draft.otherKey()
+    draft.disarmEscape()
     _ = draft.escape(at: t0.addingTimeInterval(0.2))
 
     let handled = draft.escape(at: t0.addingTimeInterval(0.4))
@@ -497,6 +497,7 @@ import Testing
   @Test func saveTwiceThenReloadKeepsTheImages() throws {
     let drafts = MessageDrafts(folder: folder)
     drafts.draft(for: "a").add(paths: [try file("a.png")])
+    let ids = drafts.draft(for: "a").images.map(\.id)
     drafts.saveNow()
     let second = MessageDrafts(folder: folder)
 
@@ -505,6 +506,7 @@ import Testing
 
     #expect(third.draft(for: "a").images.map(\.name) == ["a.png"])
     #expect(third.draft(for: "a").images.map(\.data) == [Self.png])
+    #expect(third.draft(for: "a").images.map(\.id) == ids)
     #expect(try imageFiles().count == 1)
   }
 
@@ -516,6 +518,7 @@ import Testing
     drafts.saveNow()
 
     #expect(!draftsJSON().contains("never-typed-in"))
+    #expect(draftsJSON().contains("for b"))
     #expect(try imageFiles().isEmpty)
   }
 
@@ -581,6 +584,62 @@ import Testing
     #expect(MessageDrafts(folder: folder).draft(for: "a").isEmpty)
   }
 
+  @Test func anEditSavesWithoutSaveNow() async {
+    let drafts = MessageDrafts(folder: folder)
+
+    drafts.draft(for: "a").text = "typed"
+    await settle { self.draftsJSON().contains("typed") }
+
+    #expect(draftsJSON().contains("typed"))
+  }
+
+  @Test func anEditToALoadedDraftSavesWithoutSaveNow() async {
+    let first = MessageDrafts(folder: folder)
+    first.draft(for: "a").text = "saved"
+    first.saveNow()
+    let drafts = MessageDrafts(folder: folder)
+
+    drafts.draft(for: "a").text = "edited"
+    await settle { self.draftsJSON().contains("edited") }
+
+    #expect(draftsJSON().contains("edited"))
+  }
+
+  @Test func aPruneSavesWithoutSaveNow() async {
+    let drafts = MessageDrafts(folder: folder)
+    drafts.draft(for: "a").text = "for a"
+    drafts.draft(for: "b").text = "for b"
+    drafts.saveNow()
+
+    drafts.prune(keeping: ["b"])
+    await settle { !self.draftsJSON().contains("for a") }
+
+    #expect(!draftsJSON().contains("for a"))
+    #expect(draftsJSON().contains("for b"))
+  }
+
+  @Test func loadSkipsAMissingImageFileAndKeepsTheRest() throws {
+    let drafts = MessageDrafts(folder: folder)
+    let draft = drafts.draft(for: "a")
+    draft.text = "look"
+    draft.add(paths: [try file("a.png"), try file("b.gif", Self.gif)])
+    drafts.saveNow()
+    try FileManager.default.removeItem(atPath: "\(folder)/\(draft.images[0].id.uuidString)")
+
+    let reloaded = MessageDrafts(folder: folder).draft(for: "a")
+
+    #expect(reloaded.text == "look")
+    #expect(reloaded.images.map(\.name) == ["b.gif"])
+  }
+
+  @Test func loadOfAnUndecodableIndexLoadsNoDrafts() throws {
+    try Data("not json".utf8).write(to: URL(fileURLWithPath: "\(folder)/drafts.json"))
+
+    let drafts = MessageDrafts(folder: folder)
+
+    #expect(drafts.draft(for: "a").isEmpty)
+  }
+
   @Test func storeOnAMissingFolderLoadsNoDrafts() {
     let drafts = MessageDrafts(folder: "\(root)/missing")
 
@@ -624,7 +683,7 @@ import Testing
     #expect(model.messageDraft(for: needsItem("a")).text == "kept")
   }
 
-  @Test func aChatPaneAndItsTerminalViewShareOneDraft() {
+  @Test func twoChatSessionsOfOneGroupShareOneDraft() {
     let model = appliedModel([chatItem("c", group: "g")])
     #expect(model.messageDraft(for: chatItem("c", group: "g")) === model.messageDraft(for: chatItem("d", group: "g")))
   }

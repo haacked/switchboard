@@ -93,7 +93,7 @@ final class BoardModel: ObservableObject {
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
   /// What the user typed in each message field and has not sent.
-  let messageDrafts: MessageDrafts
+  private let messageDrafts: MessageDrafts
 
   /// Without `draftsFolder`, the message drafts last only while the model does.
   init(draftsFolder: String? = nil) {

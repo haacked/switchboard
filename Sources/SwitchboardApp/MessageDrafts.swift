@@ -81,7 +81,9 @@ final class MessageDrafts {
     let files = FileManager.default
     func url(_ name: String) -> URL { URL(fileURLWithPath: "\(folder)/\(name)") }
     do {
-      try files.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      // The drafts hold text that the user has not sent, so only the user can read them.
+      try files.createDirectory(
+        atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
       for (name, data) in images where !files.fileExists(atPath: url(name).path) {
         try data.write(to: url(name), options: .atomic)
       }
@@ -97,9 +99,7 @@ final class MessageDrafts {
   private nonisolated static let index = "drafts.json"
   private static let saveDelay: TimeInterval = 0.5
 
-  private func path(_ name: String) -> String { "\(folder ?? "")/\(name)" }
-
-  /// Saves follow the text and the images only. The Esc hint and the error are not saved.
+  /// Only a change to the text or the images schedules a save. The Esc hint and the error are not saved.
   private func add(_ draft: MessageField.Draft, for key: String) {
     drafts[key] = draft
     changes[key] = draft.$text.dropFirst().map { _ in }.merge(with: draft.$images.dropFirst().map { _ in })
@@ -115,14 +115,14 @@ final class MessageDrafts {
   }
 
   private func load() {
-    guard folder != nil, let data = FileManager.default.contents(atPath: path(Self.index)),
+    guard let folder, let data = FileManager.default.contents(atPath: "\(folder)/\(Self.index)"),
       let saved = try? JSONCoding.decoder.decode([String: Saved].self, from: data)
     else { return }
     for (key, entry) in saved {
       let draft = MessageField.Draft()
       draft.text = entry.text
       for image in entry.images {
-        guard let bytes = FileManager.default.contents(atPath: path(image.id.uuidString)) else { continue }
+        guard let bytes = FileManager.default.contents(atPath: "\(folder)/\(image.id.uuidString)") else { continue }
         draft.append(id: image.id, name: image.name, data: bytes)
       }
       add(draft, for: key)
