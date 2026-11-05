@@ -114,7 +114,7 @@ extension Instance {
     let s = try sbd.new(prompt: "perm touch x")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     #expect(throws: APIError.self) {
-      _ = try sbd.client.call("choose", ["session": .string(s.id), "option": "1", "refuseCards": true])
+      _ = try sbd.client.call("choose", ["session": .string(s.id), "option": "1", "insideClaude": true])
     }
     #expect(try sbd.cards().count == 1)
   }
@@ -123,7 +123,7 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask")
     try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }
-    #expect(try sbd.sb("triage").contains("sends: Use Postgres."))
+    #expect(try sbd.sb("triage").contains("Sends: Use Postgres."))
   }
 
   @Test func doesNotSummarizeTheManagersReplies() throws {
@@ -255,7 +255,8 @@ extension Instance {
     #expect(item.source == .rule)
     #expect(item.kind == .approval)
     #expect(item.title == "#18303 is ready to merge, approved by stamphog")
-    #expect(item.options.isEmpty)
+    #expect(item.options.map(\.label) == ["Merge #18303", "Acknowledge"])
+    #expect(item.options.map(\.action) == [.merge, .dismiss])
   }
 
   @Test func ordersTheListByGroupThenAge() throws {

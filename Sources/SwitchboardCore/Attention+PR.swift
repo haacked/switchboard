@@ -36,10 +36,19 @@ extension Attention {
       return Verdict(state: .waiting, reason: "\(n) merged; GitHub has not reported it yet")
     }
     if let base = pr.mergedBase {
-      return Verdict(state: .needsYou, reason: "retarget \(n); its base #\(base) merged")
+      return Verdict(
+        state: .needsYou, reason: "retarget \(n); its base #\(base) merged",
+        options: [ask("Retarget", "Retarget \(n); its base #\(base) merged.")])
     }
     if pr.mergeable == .conflicting {
-      return Verdict(state: .needsYou, reason: oneLine("rebase; \(n) conflicts with \(pr.base)"))
+      return Verdict(
+        state: .needsYou, reason: oneLine("rebase; \(n) conflicts with \(pr.base)"),
+        options: [ask("Rebase", "Rebase onto \(pr.base), resolve the conflicts, and push.")],
+        callouts: [
+          Callout(
+            kind: .warning, title: oneLine("\(n) conflicts with \(pr.base)", max: TriageCard.labelLength),
+            body: "GitHub can't merge it until the conflicts are resolved.")
+        ])
     }
     // A push after the review moves the head commit, and the PR then waits
     // for the reviewer.
@@ -49,21 +58,30 @@ extension Attention {
     .map(\.author).sorted()
     if !current.isEmpty {
       return Verdict(
-        state: .needsYou, reason: oneLine("address the changes that \(names(current)) requested on \(n)"))
+        state: .needsYou, reason: oneLine("address the changes that \(names(current)) requested on \(n)"),
+        options: [ask("Address the review", "Address the changes that \(names(current)) requested on \(n).")])
     }
     if pr.changesRequestedBy.isEmpty && pr.reviewDecision == .changesRequested {
-      return Verdict(state: .needsYou, reason: "address the requested changes on \(n)")
+      return Verdict(
+        state: .needsYou, reason: "address the requested changes on \(n)",
+        options: [ask("Address the review", "Address the requested changes on \(n).")])
     }
     if pr.queue == .removed {
       let label = pr.queueLabel.map { " (\($0))" } ?? ""
-      return Verdict(state: .needsYou, reason: "find out why Trunk removed \(n) from its queue\(label)")
+      return Verdict(
+        state: .needsYou, reason: "find out why Trunk removed \(n) from its queue\(label)",
+        options: [ask("Find out why", "Find out why Trunk removed \(n) from its queue\(label), and tell me.")])
     }
     // A failed Depot job blocks the merge. Trunk adds a PR to its queue only
     // after its required checks pass, so a failed job on a queued PR is one
     // that the merge does not need.
     if pr.queue?.isQueued != true, let run = pr.depotFailure {
       let reason = "fix Depot CI on \(n): "
-      return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
+      let failure = run.failureSummary(max: TriageCard.lineLength)
+      return Verdict(
+        state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count),
+        options: [ask("Fix the checks", "Fix the failing Depot CI on \(n): \(failure)")],
+        callouts: [Callout(kind: .warning, title: "Depot CI failed on \(n)", body: failure)])
     }
     if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.
@@ -71,7 +89,8 @@ extension Attention {
     switch pr.queue {
     case nil:
       return Verdict(
-        state: .needsYou, reason: oneLine("\(facts.usesTrunk ? "enqueue" : "merge") \(n)\(approvedBy(pr))"))
+        state: .needsYou, reason: oneLine("\(facts.usesTrunk ? "enqueue" : "merge") \(n)\(approvedBy(pr))"),
+        options: facts.usesTrunk ? [ask("Enqueue", "Add \(n) to the Trunk merge queue.")] : [])
     case .unknown:
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
     default:
@@ -105,5 +124,13 @@ extension Attention {
   /// ", approved by X and Y", or nothing when nobody approved the PR.
   static func approvedBy(_ pr: PullRequest) -> String {
     pr.approvers.isEmpty ? "" : ", approved by \(names(pr.approvers))"
+  }
+}
+
+extension Attention {
+  /// The one option of a rule whose next step the session takes: it sends
+  /// `message` to the session.
+  static func ask(_ label: String, _ message: String) -> TriageOption {
+    TriageOption(label: label, action: .send, message: message, recommended: true)
   }
 }

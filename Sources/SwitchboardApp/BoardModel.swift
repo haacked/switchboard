@@ -29,7 +29,9 @@ final class BoardModel: ObservableObject {
   @Published var confirmingCleanup: String?
   /// The ids of the sessions whose cleanup is running.
   @Published var cleaningUp: Set<String> = []
-  var presentingSheet: Bool { showingNew || showingImport }
+  /// The Delete All sheet's state, or nil while it is closed.
+  @Published var doneRemoval: DoneRemoval?
+  var presentingSheet: Bool { showingNew || showingImport || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox
   /// The Inbox item that the user last moved to.
@@ -42,6 +44,9 @@ final class BoardModel: ObservableObject {
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
+  /// The newest events of the sessions whose card details the Inbox showed,
+  /// oldest first, by session id.
+  @Published var recentEvents: [String: [Event]] = [:]
   /// Each group chat's last messages, by group id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
@@ -436,7 +441,10 @@ final class BoardModel: ObservableObject {
     if undo {
       args["undo"] = true
     } else if currentInboxItem == id {
-      moveInboxFocus(after: id)
+      moveInbox(by: 1)
+      // A field in the item that scrolls away would keep the keystrokes. A
+      // session's terminal outside the Inbox keeps them.
+      if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
     perform(
       "ack", args,
@@ -453,13 +461,38 @@ final class BoardModel: ObservableObject {
     visibleView == .inbox ? sessions.first { $0.id == currentInboxItem } : selected
   }
 
-  func choose(_ session: String, ref: String, option number: Int) {
+  /// Clicks the item's option. `text` is what the user typed for a reply option.
+  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
+    // The Board's merge buttons read `merging`, so a merge from the card shows there too.
+    let merge = action.isMerge
+    if merge, merging.contains(session) { return }
     guard choosing.insert(key).inserted else { return }
+    var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
+    if let text { args["text"] = .string(text) }
+    if merge { merging.insert(session) }
+    // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
-      "choose", ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)],
-      finally: { self.choosing.remove(key) })
+      "choose", args, on: merge ? merges : nil,
+      finally: {
+        self.choosing.remove(key)
+        if merge { self.merging.remove(session) }
+      })
   }
+
+  /// Reads the session's newest events for its card's details.
+  func loadEvents(_ session: String) {
+    let client = client
+    poller.async {
+      let events = try? client.call(
+        "events", ["session": .string(session), "limit": .number(Double(Self.recentEventCount))], as: [Event].self)
+      Task { @MainActor in
+        if let events, self.recentEvents[session] != events { self.recentEvents[session] = events }
+      }
+    }
+  }
+
+  static let recentEventCount = 10
 
   /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ group: String) {
@@ -525,22 +558,17 @@ final class BoardModel: ObservableObject {
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
-        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
     }
 
-    private static func list(_ parts: [String]) -> String {
+    static func list(_ parts: [String]) -> String {
       switch parts.count {
       case 0, 1: parts.joined()
       case 2: parts.joined(separator: " and ")
       default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
       }
     }
-  }
-
-  /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
-  nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
-    s.state == .done && s.kind == .work && !s.waitsToStart
   }
 
   nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {
@@ -641,6 +669,16 @@ final class BoardModel: ObservableObject {
     inboxJumps += 1
   }
 
+  /// Focuses the Inbox item `step` places after the current one, around the
+  /// end of the list.
+  func moveInbox(by step: Int) {
+    let list = triage
+    guard !list.isEmpty else { return }
+    let i = list.firstIndex { $0.id == currentInboxItem } ?? (step > 0 ? -1 : 0)
+    inboxFocus = list[((i + step) % list.count + list.count) % list.count].id
+    inboxJumps += 1
+  }
+
   /// Moves to the next Inbox item while the Inbox shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
@@ -648,24 +686,14 @@ final class BoardModel: ObservableObject {
     let list = showingInbox ? triage : needsUser
     guard !list.isEmpty else { return }
     if showingInbox {
-      moveInboxFocus(after: currentInboxItem)
+      moveInbox(by: 1)
+      // A field in the item that scrolls away would keep the keystrokes.
+      NSApp.keyWindow?.makeFirstResponder(nil)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {
       selection = list[(i + 1) % list.count].id
     } else {
       selection = list[0].id
     }
-  }
-
-  /// Focuses the Inbox item after `id`, or the first one after the last.
-  private func moveInboxFocus(after id: String?) {
-    let list = triage
-    guard !list.isEmpty else { return }
-    let i = list.firstIndex { $0.id == id } ?? -1
-    inboxFocus = list[(i + 1) % list.count].id
-    inboxJumps += 1
-    // A field in the item that scrolls away would keep the keystrokes. A
-    // session's terminal outside the Inbox keeps them.
-    if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
   }
 
   /// Starts sbd as a launchd agent with the `sb` that ships next to the app.

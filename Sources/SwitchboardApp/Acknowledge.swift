@@ -9,10 +9,11 @@ extension SessionSummary {
   var acknowledgeTitle: String { acknowledged == true ? "Undo Acknowledge" : "Acknowledge" }
 
   /// Whether the session's item only tells the user something: it needs
-  /// you, no card or dialog waits for an answer, and it offers no choice.
+  /// you, no card or dialog waits for an answer, and it offers no option.
+  /// An item with options has its own primary button.
   var isInformational: Bool {
     guard state == .needsYou, cards.isEmpty, !openPrompt, let item = triage else { return false }
-    return item.kind == .info || item.options.isEmpty
+    return item.options.isEmpty
   }
 }
 
@@ -33,7 +34,7 @@ struct AcknowledgeButton: View {
           ? "Put the session back in the Inbox"
           : "Mark it as seen. It leaves the Inbox until its reason changes or a new turn starts (⇧⌘A)")
     if primary {
-      button.buttonStyle(.borderedProminent)
+      button.buttonStyle(.borderedProminent).keyboardShortcut(OptionButton.primaryShortcut)
     } else {
       button.buttonStyle(.bordered)
     }

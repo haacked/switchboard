@@ -54,6 +54,11 @@ extension Attention {
       !facts.dependencies.contains(where: \.holds)
     else { return nil }
     return Verdict(
-      state: .readyToMerge, reason: oneLine("#\(pr.number) is ready to merge\(approvedBy(pr))"), kind: .approval)
+      state: .readyToMerge, reason: oneLine("#\(pr.number) is ready to merge\(approvedBy(pr))"), kind: .approval,
+      options: [
+        TriageOption(label: "Merge #\(pr.number)", action: .merge, recommended: true),
+        TriageOption(label: "Acknowledge", action: .dismiss),
+      ],
+      callouts: facts.mergeError.map { [Callout(kind: .warning, title: "The last merge failed", body: $0)] } ?? [])
   }
 }

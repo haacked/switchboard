@@ -2,58 +2,23 @@ import SwiftUI
 import SwitchboardCore
 
 extension SessionSummary {
-  /// The sessions whose merge card the Inbox shows with this one's: this one
-  /// first, then every other Ready to merge session, oldest first.
-  func mergeCards(all: [SessionSummary]) -> [SessionSummary] {
+  /// The Ready to merge sessions that Merge All merges from this session's
+  /// card: this one first, then the others, oldest first.
+  func readyToMergeSessions(all: [SessionSummary]) -> [SessionSummary] {
     guard state == .readyToMerge else { return [] }
     let others = all.filter { $0.id != id && $0.state == .readyToMerge }.sorted { $0.since < $1.since }
     return [self] + others
   }
 }
 
-/// A Ready to merge session's PR, with Merge and Acknowledge. Merge runs
-/// `gh pr merge --merge` in sbd.
-struct MergeCard: View {
-  @EnvironmentObject var model: BoardModel
-  let session: SessionSummary
-
-  private var merging: Bool { model.merging.contains(session.id) }
-
-  var body: some View {
-    if let pr = session.pr {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(alignment: .firstTextBaseline) {
-          Text(verbatim: "#\(pr.number)").font(.headline)
-          Text(pr.title).fontWeight(.medium).lineLimit(2).textSelection(.enabled)
-        }
-        Text([session.name, pr.repo, "checks passed"].joined(separator: " · "))
-          .font(.caption).foregroundStyle(.secondary)
-        MergeNote(session: session, lines: 4)
-        HStack {
-          Button(merging ? "Merging…" : "Merge") { model.merge(session.id) }
-          AcknowledgeButton(session: session)
-        }
-        .disabled(merging)
-      }
-      .padding(10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(RoundedRectangle(cornerRadius: 8).fill(AttentionState.readyToMerge.color.opacity(0.07)))
-      .overlay(RoundedRectangle(cornerRadius: 8).stroke(AttentionState.readyToMerge.color.opacity(0.35)))
-      .accessibilityElement(children: .contain)
-      .accessibilityLabel("Merge #\(pr.number)")
-    }
-  }
-}
-
 /// gh's error from a failed merge, or nothing.
 struct MergeNote: View {
   let session: SessionSummary
-  let lines: Int
 
   var body: some View {
     if let error = session.mergeError {
       Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
-        .lineLimit(lines).help(error)
+        .lineLimit(2).help(error)
     }
   }
 }

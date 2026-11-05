@@ -451,6 +451,6 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
     #expect(triage?.source == .card)
     #expect(triage?.kind == .approval)
     #expect(triage?.ref == "card:7")
-    #expect(triage?.options.map(\.message) == ["allow", "deny"])
+    #expect(triage?.options.map(\.action) == [.allow, .deny])
   }
 }
