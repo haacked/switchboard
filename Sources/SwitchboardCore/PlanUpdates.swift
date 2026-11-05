@@ -232,7 +232,8 @@ public enum PlanUpdates {
       guard let line = Plans.replacingCell(old, column, with: text) else {
         throw APIError("row \(n) has no status cell")
       }
-      if line != old { edits.append(PlanEdit(old: old, new: line)) }
+      // A padded cell that the model repeats differs from `old` only in its spaces.
+      if Plans.cells(line) != Plans.cells(old) { edits.append(PlanEdit(old: old, new: line)) }
     }
     guard !edits.isEmpty else { return [] }
     return edits + dateEdits(markdown, today: today, timeZone: timeZone)
@@ -253,9 +254,11 @@ public enum PlanUpdates {
   private static let dateShapes: [(NSRegularExpression, String)] = [
     (#"\d{4}-\d{2}-\d{2}"#, "yyyy-MM-dd"),
     (#"(\#(months)) \d{1,2}, \d{4}"#, "MMMM d, yyyy"),
-    (#"(\#(shortMonths))\.? \d{1,2}, \d{4}"#, "MMM d, yyyy"),
+    (#"(\#(shortMonths)) \d{1,2}, \d{4}"#, "MMM d, yyyy"),
+    (#"(\#(shortMonths))\. \d{1,2}, \d{4}"#, "MMM. d, yyyy"),
     (#"\d{1,2} (\#(months)) \d{4}"#, "d MMMM yyyy"),
-    (#"\d{1,2} (\#(shortMonths))\.? \d{4}"#, "d MMM yyyy"),
+    (#"\d{1,2} (\#(shortMonths)) \d{4}"#, "d MMM yyyy"),
+    (#"\d{1,2} (\#(shortMonths))\. \d{4}"#, "d MMM. yyyy"),
   ].map { (try! NSRegularExpression(pattern: "(?<![A-Za-z0-9])(?:\($0.0))(?![A-Za-z0-9])"), $0.1) }
 
   static func isDateLine(_ line: String) -> Bool { line.lowercased().contains(asOf) }
@@ -269,7 +272,14 @@ public enum PlanUpdates {
       regex.firstMatch(in: line, range: from).map { ($0.range, format) }
     }.min { $0.0.location < $1.0.location }
     guard let (range, format) = found, let r = Range(range, in: line) else { return nil }
-    return line.replacingCharacters(in: r, with: Wait.formatter(format, timeZone).string(from: today))
+    var date = Wait.formatter(format, timeZone).string(from: today)
+    // The formatter writes September as "Sep". A line that spelled it "Sept" keeps that spelling.
+    if line[r].range(of: #"Sept(?![a-z])"#, options: .regularExpression) != nil,
+      let sep = date.range(of: #"Sep(?![a-z])"#, options: .regularExpression)
+    {
+      date.replaceSubrange(sep, with: "Sept")
+    }
+    return line.replacingCharacters(in: r, with: date)
   }
 
   /// The line with every date it holds removed.
@@ -315,6 +325,17 @@ public enum PlanUpdates {
       }
     }
     return lines.text
+  }
+
+  /// The document with an update's row edits made and, when they changed it,
+  /// today's date on each "status as of" line. It ignores the proposal's own
+  /// date edits, because the user may have changed the date line since then.
+  public static func applyUpdate(
+    _ markdown: String, _ edits: [PlanEdit], today: Date, timeZone: TimeZone = .current
+  ) throws -> String {
+    let new = try apply(markdown, edits.filter { $0.every != true })
+    guard new != markdown else { return new }
+    return try apply(new, dateEdits(new, today: today, timeZone: timeZone))
   }
 
   /// Refuses `new` unless it differs from `old` only in the status cells of

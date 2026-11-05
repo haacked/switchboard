@@ -465,6 +465,39 @@ extension Instance {
     #expect(sbd.planText == byHand)
   }
 
+  /// The user bumps the date line by hand while the proposal waits. The key
+  /// of the batch covers only the out-of-date rows, so no new batch replaces it.
+  @Test func applyAfterTheDateLineChangedWritesTheRowAndTodaysDate() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try sbd.mergeBreakerInFile(github)
+    let p = try sbd.waitForUpdateProposal()
+    let byHand = document.replacingOccurrences(of: "Status as of 2026-11-01.", with: "Status as of 2026-11-03.")
+      .replacingOccurrences(of: docsRow, with: "| 2 | Docs | Drafted by Alex |")
+    try sbd.writePlan(sbd.planFile, byHand)
+
+    try sbd.applyProposal(p.id)
+
+    #expect(sbd.planText.contains(doneRow))
+    #expect(sbd.planText.contains("| 2 | Docs | Drafted by Alex |"))
+    #expect(!sbd.planText.contains("Status as of 2026-11-03."))
+    #expect(sbd.planText.contains("Status as of "))
+  }
+
+  @Test func pollAfterTheRowIsFixedByHandDropsTheProposal() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let id = try sbd.mergeBreakerInFile(github)
+    _ = try sbd.waitForUpdateProposal()
+    try sbd.writePlan(sbd.planFile, document.replacingOccurrences(of: breakerRow, with: doneRow))
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.updateProposals().isEmpty)
+    #expect(try sbd.plan(id).proposal == nil)
+    #expect(try sbd.plan(id).updateNote == nil)
+  }
+
   /// A new batch gets a new id, so an Apply of the proposal it replaced is refused.
   @Test func applyOfAReplacedProposalIsRefused() throws {
     let github = try FakeGitHub()

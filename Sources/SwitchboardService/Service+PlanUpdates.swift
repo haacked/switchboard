@@ -224,7 +224,12 @@ extension Service {
       throw error
     }
     guard job.plan.autoUpdate else { return (proposal, false) }
-    try applyProposal(proposal, github: github)
+    do {
+      try applyProposal(proposal, github: github)
+    } catch {
+      queue.sync { updatePlan(id) { $0.updateNote = "auto update couldn't apply \(proposal.id): \(error)" } }
+      throw error
+    }
     return (proposal, true)
   }
 
@@ -237,10 +242,12 @@ extension Service {
     let olds = Set(proposal.edits.compactMap(\.old))
     let rows = plan.rows.filter { olds.contains($0.text) }
     var stats = GitHubPoller.Stats()
+    let today = Date(timeIntervalSince1970: Double(nowMs()) / 1000)
     let written = try github.queue.sync {
       try github.writeDocument(plan.source, message: proposal.title, stats: &stats) { text in
-        let new = try PlanUpdates.apply(text, proposal.edits)
-        if proposal.kind == .update { try PlanUpdates.verify(old: text, new: new, rows: rows) }
+        guard proposal.kind == .update else { return try PlanUpdates.apply(text, proposal.edits) }
+        let new = try PlanUpdates.applyUpdate(text, proposal.edits, today: today)
+        try PlanUpdates.verify(old: text, new: new, rows: rows)
         return new
       }
     }
