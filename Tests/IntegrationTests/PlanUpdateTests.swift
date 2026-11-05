@@ -754,3 +754,92 @@ extension Instance {
     #expect(try sbd.rowSuggestions().map(\.plan) == [withTable])
   }
 }
+
+extension PlanUpdateTests {
+  /// Flags and Other each have a file plan whose row links #122953, and each
+  /// plan has an update that waits after #122953 merged. The fake must
+  /// outlive the test, so it comes back too.
+  private func updatesInTwoGroups() throws -> (FakeGitHub, Instance, flags: String, other: String) {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    var other = ""
+    let flags = try sbd.mergeBreaker(github) { sbd in
+      try sbd.addGroup("Other")
+      let otherFile = "\(sbd.home.path)/notes/other.md"
+      try sbd.writePlan(otherFile, document)
+      other = try sbd.attachPlan(otherFile, group: "Other")
+      try sbd.writePlan(sbd.planFile, document)
+      return try sbd.attachPlan(sbd.planFile, group: "Flags")
+    }
+    _ = try sbd.waitFor("both plans' updates", fetch: { try sbd.updateProposals() }) { $0.count == 2 }
+    return (github, sbd, flags, other)
+  }
+
+  @Test func proposalsWithAGroupListOnlyThatGroupsPlans() throws {
+    let (_, sbd, flags, other) = try updatesInTwoGroups()
+
+    #expect(try sbd.planProposals("--group", "Flags").map(\.plan) == [flags])
+    #expect(try sbd.planProposals("--group", "Other").map(\.plan) == [other])
+  }
+
+  @Test func proposalsWithAPlanListOnlyThatPlan() throws {
+    let (_, sbd, flags, other) = try updatesInTwoGroups()
+
+    #expect(try sbd.planProposals("--plan", flags).map(\.plan) == [flags])
+    #expect(try sbd.planProposals("--plan", other).map(\.plan) == [other])
+  }
+
+  @Test(arguments: [["--group", "Nope"], ["--plan", "pnope"]])
+  func proposalsForAGroupOrPlanThatDoesNotExistAreRefused(_ args: [String]) throws {
+    let (_, sbd, _, _) = try updatesInTwoGroups()
+
+    #expect(try sbd.run(Spec.proposals(args)).status != 0)
+  }
+}
+
+/// One real update turn: the installed claude with Haiku answers for a plan
+/// whose PR merged, and sbd turns the answer into a proposal.
+@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .timeLimit(.minutes(5)))
+struct PlanUpdateClaudeTests {
+  /// Checks the row edit that Haiku's answer made and prints it, so a run
+  /// shows what the model wrote.
+  private func checkRowEdit(_ proposal: PlanProposal, _ what: String) throws {
+    let line = try #require(proposal.edits.first { $0.old == breakerRow }?.new, "\(what) has no edit for the row")
+    print("Haiku wrote (\(what)): \(line)")
+    let cells = line.split(separator: "|", omittingEmptySubsequences: false).dropFirst().dropLast().map {
+      $0.trimmingCharacters(in: .whitespaces)
+    }
+    #expect(cells.count == 3)
+    #expect(Array(cells.prefix(2)) == ["1", "Breaker counts"])
+    let status = cells.last ?? ""
+    #expect(status.contains(url(posthog, 122953)), "the new cell drops the PR link: \(status)")
+    #expect(!status.lowercased().contains("in review"), "the new cell still reads In review: \(status)")
+  }
+
+  @Test func haikuRewritesTheMergedRowsStatusCell() throws {
+    let claude = try #require(ClaudeTier.claude, "can't find claude. Set SB_TEST_CLAUDE_PATH to its path")
+    let github = try FakeGitHub()
+    let sbd = try Instance(
+      inheriting: .runner,
+      config: [
+        "claude": .string(claude), "tickSeconds": 1,
+        "github": [
+          "gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url), "pollSeconds": 0,
+        ],
+        "planUpdates": ["model": "haiku", "timeoutSeconds": 120],
+      ])
+    let id = try sbd.mergeBreakerInFile(github)
+
+    // The poll that saw the merge starts a batch on its own.
+    let (auto, note) = try sbd.waitFor(
+      "the poll's batch", timeout: 150,
+      fetch: { (try sbd.updateProposals().first, try sbd.plan(id).updateNote) },
+      until: { $0.0 != nil || ($0.1 != nil && $0.1?.contains(Spec.waits) == false) })
+    let first = try #require(auto, "the batch made no proposal: \(note ?? "no note")")
+    try checkRowEdit(first, "the poll's batch")
+    #expect(first.edits.contains { $0.old?.hasPrefix("Status as of") == true })
+
+    let again = try sbd.propose(id)
+    try checkRowEdit(again, "sb plan propose")
+  }
+}
