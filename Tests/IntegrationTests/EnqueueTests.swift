@@ -28,7 +28,7 @@ extension FakeGitHub {
 /// The merge column holds every session whose PR passed review and can land.
 /// Its card merges the PR, or enqueues it in a repository that merges through
 /// a queue.
-@Suite(.timeLimit(.minutes(2))) struct EnqueueTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct EnqueueTests {
   /// When stamphog approved #18303, as the fixture records it.
   static let approvedAt = "2026-10-25T20:56:17Z"
   static let unknownReason =
