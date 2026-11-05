@@ -566,6 +566,16 @@ final class BoardModel: ObservableObject {
       })
   }
 
+  /// Submits a multi-select card's ticked options, by number, as one reply.
+  func choose(_ session: String, ref: String, picks: [String]) {
+    let key = "\(session)/picks"
+    guard !picks.isEmpty, choosing.insert(key).inserted else { return }
+    let args: [String: JSON] = [
+      "session": .string(session), "options": .array(picks.map(JSON.string)), "ref": .string(ref),
+    ]
+    perform("choose", args, finally: { self.choosing.remove(key) })
+  }
+
   /// Reads the session's newest events for its card's details.
   func loadEvents(_ session: String) {
     let client = client

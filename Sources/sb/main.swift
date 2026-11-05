@@ -108,7 +108,9 @@ let usage = """
     choose <session> <option> [--text T]
                                   click an option, by number or label: run its action,
                                   such as send its message or merge. A reply option
-                                  sends T. Card and merge options refuse inside Claude Code
+                                  sends T. On a pick-any card, options separated by
+                                  commas (1,3) go as one reply. Card and merge options
+                                  refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID

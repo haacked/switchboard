@@ -126,7 +126,8 @@ struct CardView: View {
   }
 
   private var questions: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    let answers = answers
+    return VStack(alignment: .leading, spacing: 14) {
       if card.deferred {
         Label("Claude stopped waiting for this answer. Answering resumes the session.", systemImage: "moon.zzz")
           .font(.caption)
@@ -146,36 +147,60 @@ struct CardView: View {
             if q.multiSelect { Text("pick any").font(.caption).foregroundStyle(.secondary) }
           }
           ForEach(q.options, id: \.label) { option in
+            let on = draft.picks[i]?.contains(option.label) == true
             Button {
-              pick(i, option.label, multiSelect: q.multiSelect)
-            } label: {
-              HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: icon(i, option.label, multiSelect: q.multiSelect))
-                  .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                  Text(option.label)
-                  if let description = option.description {
-                    Text(description).font(.caption).foregroundStyle(.secondary)
-                  }
-                }
+              if oneClick {
+                model.answer(card, answers: [option.label])
+              } else {
+                pick(i, option.label, multiSelect: q.multiSelect)
               }
-              .contentShape(Rectangle())
+            } label: {
+              OptionCardLabel(
+                mark: oneClick ? .go : q.multiSelect ? .checkbox(on) : .radio(on), title: option.label,
+                description: option.description)
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(draft.picks[i]?.contains(option.label) == true ? .isSelected : [])
+            .buttonStyle(OptionCardStyle(ticked: on))
+            .accessibilityAddTraits(on ? .isSelected : [])
           }
-          TextField(
-            "Or type an answer",
-            text: Binding(get: { draft.typed[i] ?? "" }, set: { draft.typed[i] = $0 })
-          )
-          .textFieldStyle(.roundedBorder)
-          .frame(maxWidth: 360)
+          HStack {
+            TextField(
+              "Or type an answer",
+              text: Binding(get: { draft.typed[i] ?? "" }, set: { draft.typed[i] = $0 })
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 360)
+            .onSubmit { if oneClick { submit(answers) } }
+            // A click on a box answers this question, so only typed text needs a button.
+            if oneClick { Button("Send") { submit(answers) }.disabled(answers[0].isEmpty) }
+          }
         }
       }
-      Button("Answer") { model.answer(card, answers: answers) }
-        .buttonStyle(.borderedProminent)
-        .disabled(answers.contains(where: \.isEmpty))
+      if !oneClick {
+        let ready = !answers.contains(where: \.isEmpty)
+        Button {
+          submit(answers)
+        } label: {
+          OptionCardLabel(
+            mark: .go, title: "Submit",
+            note: ready ? nil : card.questions.count == 1 ? OptionPicks.prompt : "Answer each question.")
+        }
+        .buttonStyle(OptionCardStyle(prominent: ready))
+        .disabled(!ready)
+      }
     }
+  }
+
+  /// Whether a click on an option answers the card at once: one question
+  /// that takes one option. Any other card waits for Submit.
+  static func answersOnClick(_ questions: [Question]) -> Bool {
+    questions.count == 1 && questions.first?.multiSelect == false
+  }
+
+  private var oneClick: Bool { Self.answersOnClick(card.questions) }
+
+  /// Answers the card once every question has an answer.
+  private func submit(_ answers: [String]) {
+    if !answers.contains(where: \.isEmpty) { model.answer(card, answers: answers) }
   }
 
   private func pick(_ i: Int, _ label: String, multiSelect: Bool) {
@@ -187,11 +212,6 @@ struct CardView: View {
     }
     draft.picks[i] = picked
     draft.typed[i] = nil
-  }
-
-  private func icon(_ i: Int, _ label: String, multiSelect: Bool) -> String {
-    let on = draft.picks[i]?.contains(label) == true
-    return multiSelect ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle")
   }
 
   /// One answer per question: its typed text, or its picks in the options' order.
