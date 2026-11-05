@@ -95,6 +95,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var mergeable: Mergeable?
   /// GitHub leaves it nil when the base branch requires no review.
   public var reviewDecision: ReviewDecision?
+  /// Whether the poll read `reviewDecision`, so that a nil there means the
+  /// base branch requires no review. nil in events that an older sbd
+  /// recorded.
+  public var reviewDecisionRead: Bool?
   /// Each reviewer's last approval or change request.
   public var verdicts: [Review]
   /// The last 20 reviews, oldest first.
@@ -147,7 +151,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
     reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
-    trunkConfig: Bool? = nil
+    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil
   ) {
     self.id = id
     self.number = number
@@ -175,6 +179,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.depot = depot
     self.dependsOn = dependsOn
     self.trunkConfig = trunkConfig
+    self.reviewDecisionRead = reviewDecisionRead
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
@@ -193,6 +198,18 @@ public struct PullRequest: Codable, Equatable, Sendable {
     case nil:
       if !changesRequestedBy.isEmpty { return .changesRequested }
       return approvers.isEmpty ? .notApproved : .approved
+    }
+  }
+
+  /// Whether the base branch's rules ask for a review that GitHub does not
+  /// count as given: true for REVIEW_REQUIRED and CHANGES_REQUESTED, false
+  /// for APPROVED and for a branch that requires no review. nil when the
+  /// poll did not read the decision.
+  public var needsReview: Bool? {
+    switch reviewDecision {
+    case .reviewRequired, .changesRequested: true
+    case .approved: false
+    case nil: reviewDecisionRead == true ? false : nil
     }
   }
 

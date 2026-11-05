@@ -102,7 +102,7 @@ extension Instance {
     #expect(sbd.ghEdits() == ["pr edit 18303 --repo PostHog/charts --add-reviewer ann,@copilot"])
     let got = try sbd.get(s.id)
     #expect(got.state == .readyForReview)
-    #expect(got.reason == "#18303 Fix; review requested from ann and @copilot, checks success")
+    #expect(got.reason == "#18303 Fix; review required; review requested from ann and @copilot, checks success")
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
   }
 
@@ -145,7 +145,7 @@ extension Instance {
 
     let got = try sbd.get(s.id)
     #expect(got.state == .readyForReview)
-    #expect(got.reason == "#18303 Fix; review requested from ann, checks success")
+    #expect(got.reason == "#18303 Fix; review required; review requested from ann, checks success")
   }
 
   @Test func failedRequestKeepsTheCardAndShowsGhsError() throws {

@@ -82,6 +82,11 @@ final class BoardModel: ObservableObject {
   @Published var groups: [GroupSummary] = []
   /// The group suggestions, read with the follow-ups.
   @Published var suggestions: [GroupSuggestion] = []
+  /// The plan updates and new plan rows that wait for the user, read with the follow-ups.
+  @Published var planProposals: [PlanProposal] = []
+  /// Plan proposals whose Apply or Reject is on its way to sbd. Applying
+  /// writes to GitHub, so their buttons stay off until sbd replies.
+  @Published var answeringProposals: Set<String> = []
   /// The Claude accounts, read with the follow-ups.
   @Published var accounts: [AccountInfo] = []
   /// Each account's last usage reading.
@@ -105,6 +110,9 @@ final class BoardModel: ObservableObject {
   /// Merges wait on `gh pr merge` for up to 120 s each, so they run apart
   /// from other actions and from each other.
   private let merges = DispatchQueue(label: "switchboard.merges", attributes: .concurrent)
+  /// A plan apply waits for sbd's GitHub poll and then writes to GitHub, so
+  /// it runs apart from other actions too.
+  private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
   /// The session that `create` or `openManager` selected before a refresh
@@ -201,11 +209,13 @@ final class BoardModel: ObservableObject {
       let accounts = readFollowups ? try? client.accounts() : nil
       let groups = try? client.call("group-ls", as: GroupList.self).groups
       let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
+      let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
       let usage = readUsage ? try? client.usage() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
+        if let proposals, self.planProposals != proposals { self.planProposals = proposals }
         if let usage, self.usage != usage { self.usage = usage }
         self.apply(result, followups: more)
       }
@@ -387,11 +397,30 @@ final class BoardModel: ObservableObject {
   /// before the refresh lists the suggestions again. The removal keeps the
   /// row's buttons from turning back on for a suggestion that sbd no longer has.
   private func answerSuggestion(_ id: String, _ key: String) {
-    guard answeringSuggestions.insert(id).inserted else { return }
-    perform(
-      "group-suggest", [key: .string(id)], then: { _ in self.suggestions.removeAll { $0.id == id } },
-      finally: { self.answeringSuggestions.remove(id) })
+    answer(id, in: \.answeringSuggestions, "group-suggest", [key: .string(id)]) {
+      $0.suggestions.removeAll { $0.id == id }
+    }
   }
+
+  /// Sends an answer to an item once. `answering` holds the item's id until
+  /// sbd replies. `remove` takes the item out of its list when sbd takes the
+  /// answer.
+  private func answer(
+    _ id: String, in answering: ReferenceWritableKeyPath<BoardModel, Set<String>>, _ op: String,
+    _ args: [String: JSON], on queue: DispatchQueue? = nil, remove: @escaping (BoardModel) -> Void
+  ) {
+    guard self[keyPath: answering].insert(id).inserted else { return }
+    perform(op, args, on: queue, then: { _ in remove(self) }, finally: { self[keyPath: answering].remove(id) })
+  }
+  func applyProposal(_ id: String) { answerProposal(id, "plan-apply", on: planWrites) }
+  func rejectProposal(_ id: String) { answerProposal(id, "plan-reject") }
+
+  private func answerProposal(_ id: String, _ op: String, on queue: DispatchQueue? = nil) {
+    answer(id, in: \.answeringProposals, op, ["proposal": .string(id)], on: queue) {
+      $0.planProposals.removeAll { $0.id == id }
+    }
+  }
+
   /// Makes a follow-up from a plan row that reads Not started. The row's
   /// button stays off until sbd answers. `then` removes the row when sbd
   /// makes the follow-up, so its button does not turn back on before the

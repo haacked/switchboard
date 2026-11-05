@@ -136,14 +136,14 @@ extension Service {
     let session = summary(id)
     guard Triage.mayHaveItem(session) else { return }
     let input = TriageSummarizer.input(session: session, reply: e.facts.lastReply ?? "")
-    var env = ProcessInfo.processInfo.environment.merging(paneEnv(id)) { $1 }
-    // A summary call is not a session, so it gets no session id.
-    env["SB_SESSION_ID"] = nil
-    if let account = config.triage.account {
-      ClaudeAccount.apply(account, to: &env)
-    }
+    let env = headlessEnv(session: id, account: config.triage.account)
     triageJobs.addOperation { [self] in
-      let result = Result { try runSummary(input, env: env) }
+      let result = Result {
+        try TriageSummarizer.parse(
+          runHeadless(
+            TriageSummarizer.arguments(model: config.triage.model), input: input, env: env, folder: home.path,
+            timeout: config.triage.timeoutSeconds))
+      }
       queue.async { self.finishSummary(id, stop: stop, result) }
     }
   }
@@ -175,46 +175,4 @@ extension Service {
     data["stop"] = .number(Double(stop))
     record(id, "triage", .object(data))
   }
-
-  /// Runs `claude -p` with the input on stdin, in the state folder, and ends
-  /// it after the configured timeout.
-  private func runSummary(_ input: String, env: [String: String]) throws -> TriageSummary {
-    guard let claude = findExecutable(config.claude) else { throw APIError("can't find \(config.claude)") }
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: claude)
-    p.arguments = TriageSummarizer.arguments(model: config.triage.model)
-    p.environment = env
-    p.currentDirectoryURL = URL(fileURLWithPath: home.path)
-    let stdin = Pipe()
-    let stdout = Pipe()
-    p.standardInput = stdin
-    p.standardOutput = stdout
-    p.standardError = FileHandle.nullDevice
-    try p.run()
-    let timedOut = Flag()
-    let limit = DispatchWorkItem {
-      timedOut.set()
-      p.terminate()
-    }
-    DispatchQueue.global().asyncAfter(deadline: .now() + config.triage.timeoutSeconds, execute: limit)
-    stdin.fileHandleForWriting.write(Data(input.utf8))
-    try? stdin.fileHandleForWriting.close()
-    let output = stdout.fileHandleForReading.readDataToEndOfFile()
-    p.waitUntilExit()
-    limit.cancel()
-    if timedOut.isSet { throw APIError("timed out after \(Int(config.triage.timeoutSeconds)) s") }
-    guard p.terminationStatus == 0 else {
-      throw APIError(
-        "claude exited with status \(p.terminationStatus): \(oneLine(String(decoding: output, as: UTF8.self), max: 200))"
-      )
-    }
-    return try TriageSummarizer.parse(String(decoding: output, as: UTF8.self))
-  }
-}
-
-private final class Flag: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value = false
-  var isSet: Bool { lock.withLock { value } }
-  func set() { lock.withLock { value = true } }
 }

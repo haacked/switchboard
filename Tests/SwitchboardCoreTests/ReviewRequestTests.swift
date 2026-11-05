@@ -8,8 +8,8 @@ import Testing
 /// is not ready to merge.
 private func unreviewedPR(
   draft: Bool = false, headSha: String = samplePRHead, base: String = "main", mergeable: Mergeable? = .mergeable,
-  reviewDecision: ReviewDecision? = .reviewRequired, verdicts: [Review] = [], reviews: [Review] = [],
-  checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil,
+  reviewDecision: ReviewDecision? = .reviewRequired, reviewDecisionRead: Bool? = true, verdicts: [Review] = [],
+  reviews: [Review] = [], checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil,
   reviewRequests: [String]? = []
 ) -> PullRequest {
   var pr = samplePR(
@@ -18,6 +18,7 @@ private func unreviewedPR(
     reviewRequests: reviewRequests)
   pr.title = "Fix"
   pr.trunkConfig = false
+  pr.reviewDecisionRead = reviewDecisionRead
   return pr
 }
 
@@ -88,7 +89,6 @@ extension ReviewRequestTests {
     @Test(arguments: [
       ("checks pending", unreviewedPR(checks: "PENDING"), "Checks pending"),
       ("no checks", unreviewedPR(checks: nil), "No checks"),
-      ("no review required", unreviewedPR(reviewDecision: nil, checks: "PENDING"), "Checks pending"),
       (
         "a pending review of the user's own", unreviewedPR(reviews: [sampleVerdict("me", "PENDING")]),
         "Checks success"
@@ -103,6 +103,8 @@ extension ReviewRequestTests {
 
     @Test(arguments: [
       ("draft", unreviewedPR(draft: true)),
+      ("no review required", unreviewedPR(reviewDecision: nil, checks: "PENDING")),
+      ("review rule not read", unreviewedPR(reviewDecision: nil, reviewDecisionRead: nil, checks: "PENDING")),
       ("review requests not read", unreviewedPR(reviewRequests: nil)),
       ("a reviewer requested", unreviewedPR(reviewRequests: ["ann"])),
       ("a team requested", unreviewedPR(reviewRequests: ["widgets-team"])),
@@ -189,7 +191,8 @@ extension ReviewRequestTests {
       #expect(
         verdict(f)
           == Verdict(
-            state: .readyForReview, reason: "#42 Fix; review requested from alice and @copilot, checks success"))
+            state: .readyForReview,
+            reason: "#42 Fix; review required; review requested from alice and @copilot, checks success"))
     }
 
     @Test func requestedSessionWithRunningSubagentsNamesTheReviewers() throws {
@@ -200,7 +203,9 @@ extension ReviewRequestTests {
         ])
 
       #expect(
-        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from alice, checks success"))
+        verdict(f)
+          == Verdict(
+            state: .readyForReview, reason: "#42 Fix; review required; review requested from alice, checks success"))
     }
 
     @Test func requestedSessionThatGotAReviewNeedsYou() throws {
@@ -229,7 +234,9 @@ extension ReviewRequestTests {
         ])
 
       #expect(
-        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from alice, checks success"))
+        verdict(f)
+          == Verdict(
+            state: .readyForReview, reason: "#42 Fix; review required; review requested from alice, checks success"))
     }
 
     @Test func newCommitAfterARequestShowsTheCardAgainWhenNobodyIsAsked() throws {

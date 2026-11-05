@@ -56,11 +56,12 @@ extension PullRequest {
 
 extension Attention {
   /// The open PR of a session whose last reply asks nothing and offers
-  /// nothing, when the PR waits for a reviewer and nothing else: it is not a
-  /// draft, not approved, and not in Trunk's queue, and it has no failed
-  /// check or Depot job, no conflict, and no merged base.
+  /// nothing, when the PR waits for a reviewer and nothing else: the base
+  /// branch's rules ask for a review that GitHub does not count as given, the
+  /// PR is not a draft and not in Trunk's queue, and it has no failed check or
+  /// Depot job, no conflict, and no merged base.
   static func reviewablePR(_ facts: SessionFacts) -> PullRequest? {
-    guard let pr = facts.pr, pr.ready, !pr.isApproved, !pr.ciFailed, pr.mergeable != .conflicting,
+    guard let pr = facts.pr, pr.ready, pr.needsReview == true, !pr.ciFailed, pr.mergeable != .conflicting,
       pr.mergedBase == nil, pr.queue == nil, classify(facts.lastReply ?? "") == .other
     else { return nil }
     return pr
