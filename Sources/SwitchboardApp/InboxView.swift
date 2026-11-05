@@ -37,7 +37,7 @@ struct TriageList: View {
     ScrollViewReader { proxy in
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 2) {
-          ForEach([AttentionState.needsYou, .canContinue], id: \.self) { state in
+          ForEach(AttentionState.inbox, id: \.self) { state in
             let group = items.filter { $0.state == state }
             if !group.isEmpty {
               Text("\(state.title) (\(group.count))")

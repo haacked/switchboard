@@ -253,8 +253,8 @@ extension Instance {
     try sbd.poll()
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .rule)
-    #expect(item.kind == .action)
-    #expect(item.title == "Merge #18303, approved by stamphog")
+    #expect(item.kind == .approval)
+    #expect(item.title == "#18303 is ready to merge, approved by stamphog")
     #expect(item.options.isEmpty)
   }
 

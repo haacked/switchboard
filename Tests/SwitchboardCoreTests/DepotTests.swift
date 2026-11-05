@@ -442,7 +442,7 @@ private let heldByTrunk: [TrunkQueueState] = [.pending, .testing, .passed, .fail
 
   @Test(arguments: [
     (samplePR(base: "haacked/parent", mergedBase: 41), "retarget #42; its base #41 merged"),
-    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with its base"),
+    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with main"),
     (
       samplePR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)]),
       "address the changes that alice requested on #42"

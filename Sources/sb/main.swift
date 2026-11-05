@@ -63,6 +63,12 @@ let usage = """
     cleanup <session>             remove the worktree and the local branch of a session whose PR merged,
                                   and keep the session in Done. Refuses uncommitted files, commits
                                   after the merge, a running turn, and a folder sbd didn't make.
+    merge <session|PR> [--dismiss]
+                                  merge a Ready to merge session's PR with a merge commit, then resume
+                                  the session. A PR (#N, owner/name#N, or a URL) names the session by
+                                  its open PR. --dismiss keeps the
+                                  session out of Ready to merge until the PR's head commit changes.
+                                  Refuses inside Claude Code
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -539,6 +545,8 @@ case "rm":
       "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
     ])
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
+case "merge":
+  merge(a)
 case "cleanup":
   let result = call("cleanup", ["session": .string(a.session("cleanup"))], timeout: 300)
   if a.json { printJSON(result) } else { print("cleaned up \(result["cleaned"]?.string ?? "")") }

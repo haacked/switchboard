@@ -47,6 +47,9 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
+  /// Sessions whose merge or dismissal is on its way to sbd. Their buttons
+  /// stay disabled until sbd replies, so a second click can't merge again.
+  @Published var merging: Set<String> = []
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -87,6 +90,9 @@ final class BoardModel: ObservableObject {
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
   private let worker = DispatchQueue(label: "switchboard.actions")
+  /// Merges wait on `gh pr merge` for up to 120 s each, so they run apart
+  /// from other actions and from each other.
+  private let merges = DispatchQueue(label: "switchboard.merges", attributes: .concurrent)
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
   /// The session that `create` or `openManager` selected before a refresh
@@ -99,7 +105,7 @@ final class BoardModel: ObservableObject {
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
-  var needsYou: [SessionSummary] { sessions.filter { $0.state == .needsYou && Triage.mayHaveItem($0) } }
+  var needsYou: [SessionSummary] { sessions.filter { $0.state.needsUser && Triage.mayHaveItem($0) } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
 
@@ -237,7 +243,7 @@ final class BoardModel: ObservableObject {
   /// The sessions that just started needing the user.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard s.state == .needsYou, Triage.mayHaveItem(s), let known = knownStates[s.id], known != .needsYou
+      guard s.state.needsUser, Triage.mayHaveItem(s), let known = knownStates[s.id], !known.needsUser
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
@@ -258,10 +264,11 @@ final class BoardModel: ObservableObject {
   /// Runs a request off the main thread, then refreshes. `finally` runs
   /// whether the request succeeds or fails.
   func perform(
-    _ op: String, _ args: [String: JSON], then: ((JSON) -> Void)? = nil, finally: (() -> Void)? = nil
+    _ op: String, _ args: [String: JSON], on queue: DispatchQueue? = nil, then: ((JSON) -> Void)? = nil,
+    finally: (() -> Void)? = nil
   ) {
     let send = send
-    worker.async {
+    (queue ?? worker).async {
       let result = Result { try send(op, args) }
       Task { @MainActor in
         switch result {
@@ -366,6 +373,14 @@ final class BoardModel: ObservableObject {
         if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
       },
       finally: { self.answering.remove(card.id) })
+  }
+
+  /// Merges the session's PR, or with `dismiss` takes it out of Ready to merge.
+  func merge(_ id: String, dismiss: Bool = false) {
+    guard merging.insert(id).inserted else { return }
+    var args: [String: JSON] = ["session": .string(id)]
+    if dismiss { args["dismiss"] = true }
+    perform("merge", args, on: merges, finally: { self.merging.remove(id) })
   }
 
   func choose(_ session: String, ref: String, option number: Int) {
