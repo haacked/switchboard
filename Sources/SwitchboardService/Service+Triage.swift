@@ -116,19 +116,17 @@ extension Service {
 
   // MARK: Summaries
 
-  /// Starts the summary of the turn that just ended, when its last reply
-  /// decides the session's state and no card or rule does. The result is a
-  /// `triage` event keyed by the Stop event. sbd calls it after each event
-  /// and tick that leaves the reply deciding the state. A turn gets one
-  /// attempt per run of sbd.
-  func summarizeTurn(_ id: String) {
-    guard config.triage.enabled, let e = entries[id] else { return }
-    guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)) else {
-      return
-    }
+  /// Starts the summary of the turn that just ended, when `verdict`, the
+  /// session's current verdict, comes from the last reply and no card or
+  /// rule decides it. The result is a `triage` event keyed by the Stop event.
+  /// sbd calls it after each event and tick, and once at startup. A turn gets
+  /// one attempt per run of sbd.
+  func summarizeTurn(_ id: String, _ verdict: Verdict) {
+    guard config.triage.enabled, let e = entries[id], Triage.needsSummary(e.facts, verdict) else { return }
     let stop = e.facts.lastStop
-    guard summaryAttempts[id] != stop else { return }
-    summaryAttempts[id] = stop
+    guard e.summaryAttempt != stop else { return }
+    // A skip records an event, which calls this again. The attempt ends that call.
+    entries[id]?.summaryAttempt = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
     if let skip = summarySkip(e.facts, account: account) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])

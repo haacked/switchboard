@@ -232,22 +232,34 @@ extension Instance {
   /// $SB_HOME/report.
   @Test func summarizesATurnOnceItsBackgroundJobEnds() throws {
     let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
-    let s = try sbd.new()
-    try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
-    try sbd.sb("send", s.id, "background 100 held")
-    try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
-    // No tick has run since the Stop, so the Stop itself counted the job.
+    let s = try sbd.startHeldJob()
     #expect(try sbd.get(s.id).state == .waiting)
     #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" })
 
-    let job = try #require(sbd.stubPid("job.pid"))
-    kill(job, SIGTERM)
-    try sbd.waitFor("the job to exit") { kill(job, 0) != 0 }
-    try sbd.advanceClock(1)
+    try sbd.endJob()
+    // claude may still report the job in a turn of its own.
+    Thread.sleep(forTimeInterval: 1)
+    #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" })
+    try sbd.advanceClock(Attention.jobReportMs)
 
     let event = try sbd.waitForTriageEvent(s.id)
-    #expect(event.data["stop"]?.int.map(Int64.init) == (try sbd.events(s.id).last { $0.kind == "Stop" })?.id)
+    #expect(event.data["stop"]?.int.map(Int64.init) == (try sbd.lastStop(s.id)))
     #expect(event.data["skipped"] == nil)
+    #expect(sbd.summaryCalls().count == 1)
+  }
+
+  /// claude reports the job in a turn of its own once the job exits. sbd
+  /// summarizes that turn and not the one that started the job.
+  @Test func summarizesTheTurnThatReportsABackgroundJobOnly() throws {
+    let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
+    let s = try sbd.startHeldJob()
+    try sbd.endJob()
+
+    try sbd.reportJob(s.id)
+    let event = try sbd.waitForTriageEvent(s.id)
+
+    #expect(event.data["stop"]?.int.map(Int64.init) == (try sbd.lastStop(s.id)))
+    Thread.sleep(forTimeInterval: 1)
     #expect(sbd.summaryCalls().count == 1)
   }
 
@@ -265,7 +277,7 @@ extension Instance {
     try sbd.poll()
     try sbd.sb("send", s.id, "again")
     try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
-    let stop = try #require(try sbd.events(s.id).last { $0.kind == "Stop" }).id
+    let stop = try #require(try sbd.lastStop(s.id))
     #expect(try sbd.get(s.id).reason == "rebase; #18303 conflicts with main")
     #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" || $0.id < stop })
 
@@ -300,6 +312,8 @@ extension Instance {
     try sbd.sb("wait", s.id, "Alex will reply")
     try sbd.sb("wait", s.id, "--clear")
 
+    // A second call would log itself within a second.
+    Thread.sleep(forTimeInterval: 1)
     #expect(sbd.summaryCalls().count == 1)
     #expect(try sbd.events(s.id).filter { $0.kind == "triage" }.count == 1)
   }

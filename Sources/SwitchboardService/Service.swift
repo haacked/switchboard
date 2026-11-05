@@ -36,6 +36,10 @@ public final class Service {
     var turnProbe = TurnProbe()
     /// When the tick last saw a terminal on the Claude pane.
     var lastOnScreen: Int64 = 0
+    /// The Stop event of the last turn whose summary this sbd started or
+    /// skipped. A turn gets one attempt per run of sbd, so a restart retries
+    /// a summary that failed.
+    var summaryAttempt: Int64 = 0
 
     /// Whether a message is queued for the session or on its way.
     func messageWaiting(now: Int64) -> Bool {
@@ -55,10 +59,6 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
-  /// The Stop event of each session's last turn whose summary this sbd
-  /// started or skipped. A turn gets one attempt per run of sbd, so a
-  /// restart retries a summary that failed.
-  var summaryAttempts: [String: Int64] = [:]
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -142,7 +142,9 @@ public final class Service {
     try? refreshManagerGuide()
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
-    for id in entries.keys { summarizeTurn(id) }
+    for (id, e) in entries {
+      summarizeTurn(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+    }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
     let reader = UsageReader(service: self, settings: config.usage)
@@ -394,7 +396,7 @@ public final class Service {
       entries[id] = e
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
-      if Triage.needsSummary(e.facts, verdict) { summarizeTurn(id) }
+      summarizeTurn(id, verdict)
     }
     releaseCards(id)
     return event
@@ -1313,7 +1315,7 @@ public final class Service {
         if var e = entries[id] {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
-          if Triage.needsSummary(e.facts, verdict) { summarizeTurn(id) }
+          summarizeTurn(id, verdict)
         }
       }
       // A resolved `resume` wait can launch claude.

@@ -39,6 +39,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// Background jobs that run under claude, as the last `job` event counted
   /// them. A job sends no hooks, so sbd's tick finds it in the process list.
   public var jobs = 0
+  /// When the last background job exited, until the next turn starts or
+  /// stops. An event records the exit, so it replays after a restart.
+  public var jobsEndedAt: Int64?
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
   /// When the state last changed. `Attention.track` sets it.
@@ -157,7 +160,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       // A reply means that the user sent a prompt before it.
       if d["hasReplies"]?.bool == true { prompts = max(prompts, 1) }
     case "job":
-      jobs = d["count"]?.int ?? 0
+      let count = d["count"]?.int ?? 0
+      if count == 0, jobs > 0 { jobsEndedAt = event.t }
+      jobs = count
     case "SessionEnd", "stopped", "exited":
       live = false
       jobs = 0
@@ -166,6 +171,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "UserPromptSubmit":
       if userPrompt { prompts += 1 }
       startTurn(event.t)
+      jobsEndedAt = nil
       runningTool = nil
       openPermission = nil
       openQuestion = nil
@@ -214,6 +220,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       }
     case "Stop":
       endTurn()
+      jobsEndedAt = nil
       lastReply = d["last_assistant_message"]?.string
     case "StopFailure", "idle":
       // An API or usage limit error ends the turn without a Stop. So does
@@ -270,6 +277,15 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   }
 }
 
+extension SessionFacts {
+  /// Whether claude may still report a background job that exited after the
+  /// last turn ended.
+  public func mayReportJob(now: Int64) -> Bool {
+    guard let ended = jobsEndedAt else { return false }
+    return now - ended < Attention.jobReportMs
+  }
+}
+
 /// What decided a verdict.
 public enum VerdictSource: Equatable, Sendable {
   /// The session's last reply.
@@ -320,6 +336,10 @@ public enum Attention {
   /// A subagent with no event for this long is taken to have lost its
   /// SubagentStop, as when sbd was down.
   public static let subagentQuietMs: Int64 = 30 * 60 * 1000
+  /// claude reports a background job in a turn of its own up to 1.3 s after
+  /// the job exits. The session waits this long for that turn, whose reply
+  /// replaces the last one.
+  public static let jobReportMs: Int64 = 2_000
 
   /// `stateOf` gives another session's last state, which the dependency
   /// rules read for the session of a stack base.
@@ -370,9 +390,12 @@ public enum Attention {
       return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
     // A question still needs the user's answer while a job runs.
-    if facts.jobs > 0, !classify(facts.lastReply ?? "").isQuestion {
-      return Verdict(
-        state: .waiting, reason: "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")")
+    if facts.jobs > 0 || facts.mayReportJob(now: now), !classify(facts.lastReply ?? "").isQuestion {
+      let reason =
+        facts.jobs > 0
+        ? "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")"
+        : "waiting for claude to report its background job"
+      return Verdict(state: .waiting, reason: reason)
     }
     if let v = unreviewedPR(facts) { return v }
     return replyVerdict(facts.lastReply ?? "")
