@@ -6,6 +6,8 @@ import AppKit
 /// tests and snapshots see the same views. SB_TEST_VISIBLE=1 makes such a launch behave like a normal one.
 @MainActor
 enum BackgroundLaunch {
+  /// A new hook that drives the app with no one watching belongs here. A hook that only chooses what to show, such
+  /// as SB_SELECT, does not.
   static let hooks = ["SB_SNAPSHOT", "SB_TERMINAL_TEST", "SB_DRAFT_TEST", "SB_QUIT_FILE"]
 
   static func applies(to env: [String: String]) -> Bool {
@@ -13,13 +15,14 @@ enum BackgroundLaunch {
   }
 
   /// Runs from `applicationDidFinishLaunching`. SwiftUI has ordered in the main window by then. The screen has
-  /// not drawn it yet. A sheet opens later, so every window update checks for new windows.
+  /// not drawn it yet.
   static func start() {
     NSApp.setActivationPolicy(.accessory)
     NSApp.windows.forEach(hide)
     hideWindowsAsTheyUpdate()
   }
 
+  /// A sheet opens after launch, so every window update checks for new windows.
   @discardableResult
   static func hideWindowsAsTheyUpdate(_ center: NotificationCenter = .default) -> NSObjectProtocol {
     center.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { note in

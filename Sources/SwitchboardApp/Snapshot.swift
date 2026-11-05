@@ -9,10 +9,6 @@ import Foundation
 /// leaves out the window's background, so a snapshot run uses the light
 /// appearance, whose text reads on the white that remains. SwiftTerm draws
 /// text in layers that the drawing misses, so `sb screen` checks terminals.
-/// `BackgroundLaunch.hooks` lists the hooks that run the app hidden and
-/// without focus. A new hook that drives the app with no one watching, as
-/// SB_SNAPSHOT and SB_QUIT_FILE do, belongs there too. A hook that only
-/// chooses what to show, such as SB_SELECT, does not.
 @MainActor
 enum Snapshot {
   static func start(_ model: BoardModel) {
