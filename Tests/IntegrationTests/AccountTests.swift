@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct AccountTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct AccountTests {
   func decode(_ text: String) throws -> SessionSummary { try JSONCoding.decode(SessionSummary.self, from: text) }
 
   func accounts(_ sbd: Instance) throws -> [AccountInfo] {

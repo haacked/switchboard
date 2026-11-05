@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct ChatTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct ChatTests {
   func decode<T: Decodable>(_ type: T.Type, _ text: String) throws -> T { try JSONCoding.decode(type, from: text) }
 
   func addGroup(_ sbd: Instance, _ name: String, _ sessions: String...) throws -> GroupSummary {

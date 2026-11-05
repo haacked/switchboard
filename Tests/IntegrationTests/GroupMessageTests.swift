@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct GroupMessageTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct GroupMessageTests {
   func decode<T: Decodable>(_ type: T.Type, _ text: String) throws -> T { try JSONCoding.decode(type, from: text) }
 
   /// The environment of a command that Claude runs inside the session.

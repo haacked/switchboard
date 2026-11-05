@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct AutoModeTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct AutoModeTests {
   /// A session outside auto mode, whose permission card is open.
   func asked(_ prompt: String = "perm touch x") throws -> (Instance, SessionSummary, Card) {
     let sbd = try Instance()

@@ -15,8 +15,7 @@ struct Boom: Error {}
 @Suite struct BoardModelSend {
 
   @Test func doesNotReportASendThatFailed() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in throw Boom() }
     let sent = Counter()
     model.send("a", "hello") { sent.increment() }
@@ -26,8 +25,7 @@ struct Boom: Error {}
   }
 
   @Test func reportsASendThatSucceeded() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in .null }
     let sent = Counter()
     model.send("a", "hello") { sent.increment() }
@@ -36,8 +34,7 @@ struct Boom: Error {}
   }
 
   @Test func ignoresASecondSendWhileTheFirstIsPending() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     let requests = Counter()
     model.send = { _, _ in
       requests.increment()
@@ -56,8 +53,7 @@ struct Boom: Error {}
   }
 
   @Test func allowsASendAfterAFailedOne() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in throw Boom() }
     model.send("a", "hello")
     await settle { model.actionError != nil }
@@ -90,8 +86,7 @@ struct Boom: Error {}
   }
 
   @Test func keepsTheTextWhenTheSendFails() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in throw Boom() }
     let draft = MessageField.Draft()
     draft.text = "hello"
@@ -102,8 +97,7 @@ struct Boom: Error {}
   }
 
   @Test func clearsTheTextWhenTheSendSucceeds() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.send = { _, _ in .null }
     let draft = MessageField.Draft()
     draft.text = "hello"

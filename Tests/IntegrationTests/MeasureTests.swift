@@ -4,7 +4,7 @@ import Testing
 
 /// Phase 1's done criterion: `sb ls` answers in under 1 s with 25 sessions.
 /// bin/measure reports the same timings and the memory.
-@Suite struct MeasureTests {
+@Suite(.blocking()) struct MeasureTests {
   static let sessions = 25
   static let runs = 5
 
