@@ -7,8 +7,9 @@ extension Service {
 
   func liveCount() -> Int { liveEntries().count }
 
-  /// Whether a launch of the session would start claude now instead of queueing.
-  func hasRoom(_ id: String) -> Bool { entries[id]?.queuedSince == nil && liveCount() < liveCap }
+  /// Whether a launch would start claude now instead of queueing. A launch
+  /// waits behind any queued start, so the oldest start takes the next free slot.
+  func hasRoom() -> Bool { !entries.values.contains { $0.queuedSince != nil } && liveCount() < liveCap }
 
   var queuedReason: String { "queued: \(liveCount()) of \(liveCap) live" }
 
@@ -24,7 +25,7 @@ extension Service {
   /// until the tick finds a free slot, and its prompt becomes a queued
   /// message, so that a restart of sbd keeps it.
   func launch(_ id: String, prompt: String?) throws {
-    guard !hasRoom(id) else { return try startClaude(id, prompt: prompt) }
+    if hasRoom() { return try startClaude(id, prompt: prompt) }
     _ = try requireStartable(id)
     if entries[id]?.queuedSince == nil {
       entries[id]?.queuedSince = nowMs()
@@ -46,13 +47,15 @@ extension Service {
       entries[id]?.queuedSince = nil
       do {
         try startClaude(id, prompt: nil)
-        live.append(next)
+        live.append(entries[id]!)
       } catch {
         logLine("can't start queued \(id): \(error)")
       }
     }
+    let freeSlots = liveCap - live.count
     // A session that sbd stopped keeps its slot until its claude exits.
-    let needed = queued.count - (liveCap - live.count) - live.filter(\.facts.exiting).count
+    let exiting = live.filter(\.facts.exiting).count
+    let needed = queued.count - freeSlots - exiting
     guard needed > 0 else { return }
     for id in stoppable(now: now).prefix(needed) {
       try? stop(id, reason: "the live cap of \(liveCap) needs the slot")
@@ -67,12 +70,15 @@ extension Service {
   }
 
   /// The sessions that sbd may stop to free a slot, in the order to stop
-  /// them. Each one is quiet, with no card open except a deferred one and no
-  /// subagent. Sessions in Done or with an open wait come first, then the
-  /// rest, each longest idle first.
+  /// them. Each one is quiet, with no card open except a deferred one, no
+  /// subagent, and no background job seen in the last `jobReportMs`.
+  /// Sessions in Done or with an open wait come first, then the rest, each
+  /// longest idle first.
   private func stoppable(now: Int64) -> [String] {
     let candidates = entries.values.filter { e in
-      guard case .running(let pid) = claudeState(e.session.id) else { return false }
+      guard case .running(let pid) = claudeState(e.session.id), now - e.lastJobSeen >= Service.jobReportMs else {
+        return false
+      }
       return isQuiet(e.session.id, pid: pid, now: now) && e.facts.cards.allSatisfy(\.deferred)
         && e.facts.subagents.isEmpty
     }
@@ -80,9 +86,13 @@ extension Service {
       e.session.done || e.facts.lastState == .done || !(e.session.waits ?? []).isEmpty ? 0 : 1
     }
     return candidates.sorted {
-      (tier($0), $0.facts.lastActivity, $0.session.id) < (tier($1), $1.facts.lastActivity, $1.session.id)
+      (tier($0), $0.idleSince, $0.session.id) < (tier($1), $1.idleSince, $1.session.id)
     }.map(\.session.id)
   }
+
+  /// A background job's process exits up to 1.3 s before claude starts the
+  /// turn that reports it. A stop in that gap loses the report.
+  static let jobReportMs: Int64 = 5_000
 
   /// Sets the cap when the request names `cap`, and returns the status. A
   /// new cap is saved in config.json and holds at once.

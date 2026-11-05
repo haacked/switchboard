@@ -31,6 +31,8 @@ public final class Service {
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
     var lastJobSeen: Int64 = 0
+    /// The time that the idle wait counts from.
+    var idleSince: Int64 { max(facts.lastActivity, lastJobSeen) }
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
@@ -595,7 +597,8 @@ public final class Service {
   /// conversation when its transcript exists, and starts it otherwise.
   /// `prompt` becomes the first prompt. The pane runs only claude, so the pane
   /// dies when claude exits. tmux keeps the dead pane's last screen until the
-  /// next launch. Callers go through `launch`, which holds to the live cap.
+  /// next launch. It ignores the live cap. Callers use `launch` unless they
+  /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
     let session = try requireStartable(id)
     let resume = hasTranscript(session)
@@ -687,7 +690,7 @@ public final class Service {
     // Claude Code does not attach the images of a prompt that starts it, so
     // a message with images waits for a paste.
     let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
-    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches && hasRoom(id) {
+    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches && hasRoom() {
       try startClaude(id, prompt: text)
       delivery = .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
@@ -700,9 +703,7 @@ public final class Service {
       queueMessage(id, text, byUser: byUser)
       return .queued
     }
-    var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
-    if !byUser { data["by"] = "sbd" }
-    record(id, "sent", .object(data))
+    recordSent(id, text, delivery, byUser: byUser)
     return delivery
   }
 
@@ -710,10 +711,14 @@ public final class Service {
   /// restart of sbd rebuild the queue.
   func queueMessage(_ id: String, _ text: String, byUser: Bool) {
     entries[id]?.pending.append(text)
-    var data: [String: JSON] = ["text": .string(text), "delivery": .string(Delivery.queued.rawValue)]
+    recordSent(id, text, .queued, byUser: byUser)
+    deliverPending(id, after: 0.2)
+  }
+
+  private func recordSent(_ id: String, _ text: String, _ delivery: Delivery, byUser: Bool) {
+    var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
     if !byUser { data["by"] = "sbd" }
     record(id, "sent", .object(data))
-    deliverPending(id, after: 0.2)
   }
 
   /// Pastes the oldest queued message after `delay`, if claude is ready for
@@ -1338,7 +1343,7 @@ public final class Service {
     guard let e = entries[id], isQuiet(id, pid: pid, now: now) else { return false }
     // A background job's process exits up to 1.3 s before claude starts the
     // turn that reports it, so the wait starts again when the job exits.
-    let idle = now - max(e.facts.lastActivity, e.lastJobSeen)
+    let idle = now - e.idleSince
     guard idle >= idleStopMs(id) else { return false }
     // A running subagent's tool calls fire hooks. A subagent with no event
     // for twice the idle time lost its SubagentStop, as when sbd was down.

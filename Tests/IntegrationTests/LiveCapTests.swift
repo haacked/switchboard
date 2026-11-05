@@ -130,10 +130,10 @@ extension Instance {
 
     let text = try sbd.sb("live")
 
-    #expect(text.contains("2"), "\(text)")
+    #expect(text.contains("2 of 2 claude processes live, 1 queued"), "\(text)")
     #expect(text.contains("alpha-busy"), "\(text)")
     #expect(text.contains("bravo-busy"), "\(text)")
-    #expect(text.contains("charlie-queued"), "\(text)")
+    #expect(text.contains("charlie-queued  queued"), "\(text)")
   }
 
   @Test func theQueuedListKeepsTheOrderOfTheStarts() throws {
@@ -194,6 +194,21 @@ extension Instance {
     #expect(try sbd.liveIds("queued") == [c.id])
   }
 
+  @Test func aQueuedStartsPromptSurvivesARestart() throws {
+    let sbd = try instance(cap: 1)
+    let (a, detach) = try onScreenSession(sbd, name: "a")
+    defer { detach() }
+    let c = try sbd.new(prompt: "hello", name: "c")
+    try waitForQueued(sbd, c.id, cap: 1)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try waitForQueued(sbd, c.id, cap: 1)
+    try sbd.sb("stop", a.id)
+
+    try sbd.waitFor(c.id, "the queued prompt's reply") { $0.lastReply == "Done: hello" }
+  }
+
   @Test func raisingTheCapRunsAQueuedStartAtOnce() throws {
     let sbd = try instance(cap: 1)
     _ = try busySession(sbd, name: "a")
@@ -242,6 +257,28 @@ extension Instance {
     #expect(after.cards.count == 1)
     #expect(try !sbd.events(a.id).contains { $0.kind == "stopped" })
     #expect(try sbd.get(b.id).reason == queuedReason(cap: 1))
+  }
+
+  /// claude starts the turn that reports a background job up to 1.3 s after
+  /// the job's process exits. The stub starts that turn only after the test
+  /// creates $SB_HOME/report. Ticks run only when the test moves the clock.
+  @Test func aSessionWhoseBackgroundJobJustExitedIsNotStopped() throws {
+    let sbd = try instance(cap: 1, extra: ["tickSeconds": 3600])
+    let a = try sbd.new(prompt: "background 100 held", name: "a")
+    try sbd.waitFor(a.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try waitForQueued(sbd, b.id, cap: 1)
+    try sbd.advanceClock(1)
+
+    let job = try #require(sbd.stubPid("job.pid"))
+    kill(job, SIGTERM)
+    try sbd.waitFor("the job to exit") { kill(job, 0) != 0 }
+    try sbd.advanceClock(1)
+
+    #expect(try sbd.get(a.id).live)
+    #expect(try sbd.capStops(a.id).isEmpty)
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
+    try sbd.waitFor("the turn that reports the job") { try sbd.events(a.id).filter { $0.kind == "Stop" }.count == 2 }
   }
 
   // MARK: Which idle session sbd stops
@@ -297,6 +334,23 @@ extension Instance {
     try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
     #expect(try !sbd.capStops(older.id).isEmpty)
     #expect(try sbd.get(newer.id).claudePid == newer.claudePid)
+  }
+
+  /// The stub waits 5 s after SIGTERM before it exits, so ticks see the
+  /// older session still running after sbd stopped it. Those ticks must not
+  /// stop a second session for the same queued start.
+  @Test func aSessionThatIsExitingKeepsItsSlotUntilItExits() throws {
+    let sbd = try instance(cap: 2)
+    let older = try sbd.new(prompt: "linger 5", name: "older")
+    try sbd.waitFor(older.id, "older's reply") { $0.lastReply == "I'll linger 5 s when I stop." && $0.claudePid != nil }
+    let newer = try idleSession(sbd, name: "newer")
+
+    let c = try sbd.new(prompt: "hello", name: "c")
+
+    try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
+    #expect(try !sbd.capStops(older.id).isEmpty)
+    #expect(try sbd.get(newer.id).claudePid == newer.claudePid)
+    #expect(try !sbd.events(newer.id).contains { $0.kind == "stopped" })
   }
 
   @Test func anAttachedSessionIsNotStopped() throws {
@@ -363,6 +417,16 @@ extension Instance {
     try sbd.waitFor(a.id, "the message's reply") { $0.lastReply == "Done: again" }
   }
 
+  @Test func aNewChatWhoseStartQueuesAnswersQueued() throws {
+    let sbd = try instance(cap: 1)
+    _ = try busySession(sbd, name: "a")
+    try sbd.sb("group", "add", "Flags")
+
+    let reply = JSON.parse(try sbd.sb("chat", "Flags", "--send", "hello", "--json"))
+
+    #expect(reply?["delivery"]?.string == "queued")
+  }
+
   // MARK: sb live --set
 
   @Test func setChangesTheCapThatSbLiveShows() throws {
@@ -372,6 +436,7 @@ extension Instance {
 
     #expect(result?["cap"]?.int == 5)
     #expect(try sbd.liveStatus()["cap"]?.int == 5)
+    #expect(try sbd.autoContinueStatus().liveCap == 5)
   }
 
   @Test func setSavesTheCapAndKeepsTheOtherKeys() throws {
@@ -402,6 +467,16 @@ extension Instance {
     let r = try sbd.run("live", "--set", value)
 
     #expect(r.status != 0)
+    #expect(try sbd.config() == before)
+    #expect(try sbd.liveStatus()["cap"]?.int == 2)
+  }
+
+  @Test(arguments: [JSON.number(0), .number(-1), .number(1.5), .string("2")])
+  func theServiceRefusesACapThatIsNotAWholeNumberOfAtLeastOne(_ cap: JSON) throws {
+    let sbd = try instance(cap: 2)
+    let before = try sbd.config()
+
+    #expect(throws: (any Error).self) { try sbd.client.call("live", ["cap": cap]) }
     #expect(try sbd.config() == before)
     #expect(try sbd.liveStatus()["cap"]?.int == 2)
   }
