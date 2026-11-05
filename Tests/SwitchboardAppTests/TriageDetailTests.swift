@@ -23,6 +23,13 @@ import Testing
     #expect(TriageDetail.pane(for: s, showingTerminal: true) == .terminal)
   }
 
+  @Test func showsTheSummaryOfADocketRowWhileTerminalIsOn() {
+    var s = session(waitsToStart: false)
+    s.cwd = ""
+    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
+    #expect(TriageDetail.pane(for: s, showingTerminal: true) == .summary)
+  }
+
   @Test func showsTheTerminalOfAStartedSessionWhileTerminalIsOn() {
     #expect(TriageDetail.pane(for: session(waitsToStart: false), showingTerminal: true) == .terminal)
   }

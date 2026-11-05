@@ -95,6 +95,8 @@ struct ContentView: View {
         }
         if let s = model.selected, let f = s.followup, f.started == nil {
           FollowupView(session: s, followup: f).id(s.id)
+        } else if let s = model.selected, let d = s.docket {
+          DocketView(session: s, docket: d).id(s.id)
         } else if let s = model.selected, let group = s.chat {
           ChatView(session: s, group: group).id(s.id)
         } else if let s = model.selected {
@@ -328,7 +330,10 @@ struct SessionRow: View {
         .frame(width: 8, height: 8)
         .opacity(session.live ? 1 : 0.35)
         .padding(.top, 5)
-        .help(session.waitsToStart ? "not started" : session.live ? "claude is running" : "claude is stopped")
+        .help(
+          session.waitsToStart
+            ? "not started"
+            : !session.runsClaude ? "docket review" : session.live ? "claude is running" : "claude is stopped")
       VStack(alignment: .leading, spacing: 2) {
         HStack {
           Text(session.name).fontWeight(.medium).lineLimit(1)
@@ -545,8 +550,10 @@ struct BoardCard: View {
           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
           CleanupNote(session: s)
           MergeNote(session: s)
-          Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
-            .font(.caption2).foregroundStyle(.tertiary)
+          Text(
+            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))"
+          )
+          .font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
