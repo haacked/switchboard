@@ -785,10 +785,11 @@ public final class Service {
     }()
     let fresh = buildSnapshot()
     try queue.sync {
-      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
+      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
+        !merging.contains(session.id)
+      else {
         throw APIError("\(session.id) changed while it was being removed")
       }
-      guard !merging.contains(session.id) else { throw APIError("\(session.id) is merging its PR") }
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
       try store.checkDeletable(session: session.id)
       install(fresh)
@@ -822,10 +823,11 @@ public final class Service {
     }
     try queue.sync {
       // A follow-up can start between the two steps.
-      guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
-        throw APIError("\(session.id) started while it was being removed")
+      guard !starting.contains(session.id), !merging.contains(session.id),
+        entries[session.id]?.session.cwd == session.cwd
+      else {
+        throw APIError("\(session.id) changed while it was being removed")
       }
-      guard !merging.contains(session.id) else { throw APIError("\(session.id) is merging its PR") }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
       entries[session.id] = nil
