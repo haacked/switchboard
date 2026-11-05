@@ -3,7 +3,7 @@ import Testing
 
 @testable import SwitchboardCore
 
-private func prEvent(_ t: Int64, _ pr: PullRequest?, comments: [PRComment] = []) throws -> Event {
+func prEvent(_ t: Int64, _ pr: PullRequest?, comments: [PRComment] = []) throws -> Event {
   event("pr", t, ["pr": try pr.map { try JSON(encoding: $0) } ?? .null, "comments": try JSON(encoding: comments)])
 }
 
@@ -397,7 +397,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let f = try prFacts(samplePR(mergeable: .conflicting))
 
     #expect(
-      Attention.evaluate(session(wait: "CI on #42"), f, now: Self.now) == Verdict(state: .waiting, reason: "CI on #42"))
+      Attention.evaluate(session(wait: "CI on #42"), f, now: Self.now) == sampleReadyForReview("CI on #42"))
   }
 
   @Test func runningTurnWinsOverAConflictingPR() throws {
@@ -444,7 +444,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   static let alex = ["alex"]
   static let stale = Attention.staleAfterMs + 10
   static let commented = [Review(author: "alex", state: "COMMENTED")]
-  static let waits = Verdict(state: .waiting, reason: "review of #42 by alex")
+  static let waits = sampleReadyForReview(review: "review requested from alex")
 
   private func verdict(_ pr: PullRequest, reply: String = "Opened the PR.") throws -> Verdict {
     Attention.evaluate(session(), try prFacts(pr, reply: reply), now: Self.now)
@@ -461,12 +461,17 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   @Test func botAndTeamReviewersAreNamedLikePeople() throws {
     let v = try verdict(samplePR(reviewRequests: ["copilot-pull-request-reviewer", "acme/flags"]))
 
-    #expect(v == Verdict(state: .waiting, reason: "review of #42 by copilot-pull-request-reviewer and acme/flags"))
+    #expect(v == sampleReadyForReview(review: "review requested from copilot-pull-request-reviewer and acme/flags"))
   }
 
   @Test func pendingChecksStillWait() throws {
-    #expect(try verdict(samplePR(checks: "PENDING", reviewRequests: Self.alex)) == Self.waits)
-    #expect(try verdict(samplePR(checks: "SUCCESS", reviewRequests: Self.alex)) == Self.waits)
+    let alex = "review requested from alex"
+    #expect(
+      try verdict(samplePR(checks: "PENDING", reviewRequests: Self.alex))
+        == sampleReadyForReview(review: alex, checks: "checks pending"))
+    #expect(
+      try verdict(samplePR(checks: "SUCCESS", reviewRequests: Self.alex))
+        == sampleReadyForReview(review: alex, checks: "checks success"))
   }
 
   @Test func pushAfterRequestedChangesWaitsForTheReReview() throws {
@@ -474,7 +479,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let v = try verdict(
       samplePR(reviewDecision: .changesRequested, verdicts: [stale], reviewRequests: Self.alex))
 
-    #expect(v == Self.waits)
+    #expect(v == sampleReadyForReview(review: "changes requested by alex; review requested from alex"))
   }
 
   @Test func draftPRNeedsYou() throws {
@@ -559,7 +564,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(wait: "run the app and look"), f, now: Self.now)
-        == Verdict(state: .waiting, reason: "run the app and look"))
+        == sampleReadyForReview("run the app and look", review: "review requested from alex"))
   }
 
   @Test func reviewSubmittedMovesTheSessionBackToNeedsYou() throws {

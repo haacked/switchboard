@@ -6,6 +6,8 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
   /// An idle session whose PR can merge now.
   case readyToMerge = "ready_to_merge"
   case canContinue = "can_continue"
+  /// A session that the other rules put in Waiting and whose PR is open and not a draft.
+  case readyForReview = "ready_for_review"
   case waiting
   case working
   case done
@@ -18,6 +20,7 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
     case .needsYou: "Needs you"
     case .readyToMerge: "Ready to merge"
     case .canContinue: "Claude can continue"
+    case .readyForReview: "Ready for review"
     case .waiting: "Waiting"
     case .working: "Working"
     case .done: "Done"

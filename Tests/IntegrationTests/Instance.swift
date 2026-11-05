@@ -278,6 +278,11 @@ final class Instance {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
   }
 
+  /// sbd's clock, in ms since the epoch.
+  func now() throws -> Int64 {
+    Int64(try #require(try client.call("clock")["now"]?.int))
+  }
+
   /// Waits until the stub reports the session to `claude agents` with the status.
   func waitForStubStatus(_ s: SessionSummary, _ status: String) throws {
     try waitFor("the stub to report \(status)") {

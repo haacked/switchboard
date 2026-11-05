@@ -100,15 +100,15 @@ extension Attention {
     }
   }
 
-  /// Waiting while an open PR needs only the review that GitHub still asks
-  /// for. Each condition keeps a case in Needs you that someone must act on.
-  /// It does not rely on `openPR` running first.
+  /// Ready for review while an open PR needs only the review that GitHub
+  /// still asks for. Each condition keeps a case in Needs you that someone
+  /// must act on. It does not rely on `openPR` running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.state == .open, !pr.draft, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
+    guard let pr = facts.pr, pr.ready, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
       !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
-      !pr.ciFailed, classify(facts.lastReply ?? "") == .other
+      !pr.ciFailed, classify(facts.lastReply ?? "") == .other, let line = readyPRLine(facts)
     else { return nil }
-    return Verdict(state: .waiting, reason: oneLine("review of #\(pr.number) by \(names(reviewers))"))
+    return Verdict(state: .readyForReview, reason: oneLine(line, max: 200))
   }
 
   /// Whether an open, ready PR needs the user after a review wait ended or
@@ -117,7 +117,7 @@ extension Attention {
   /// Trunk acts on it. A PR event does not count as session activity, so
   /// without this the idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
-    guard let pr = facts.pr, pr.state == .open, !pr.draft, pr.queue?.isQueued != true else { return false }
+    guard let pr = facts.pr, pr.ready, pr.queue?.isQueued != true else { return false }
     return pr.ciFailed || (pr.reviewRequests == [] && pr.queue == nil)
   }
 

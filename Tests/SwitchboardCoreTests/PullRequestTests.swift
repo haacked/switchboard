@@ -18,6 +18,15 @@ func samplePR(
     queue: queue, reviewRequests: reviewRequests)
 }
 
+/// What `Attention.evaluate` gives for samplePR's session, whose PR #42 has
+/// no title, when its other rules give Waiting. `waiting` is that verdict's
+/// reason, and nil when the review request gave it.
+func sampleReadyForReview(
+  _ waiting: String? = nil, review: String = "no review requested", checks: String = "no checks"
+) -> Verdict {
+  Verdict(state: .readyForReview, reason: "#42; \(review), \(checks)" + (waiting.map { "; \($0)" } ?? ""))
+}
+
 func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) -> Review {
   Review(author: author, state: state, submittedAt: "2026-10-25T00:00:00Z", commit: commit)
 }
