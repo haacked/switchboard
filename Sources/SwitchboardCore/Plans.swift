@@ -67,6 +67,15 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
   /// `owner/name#N` of an issue or a PR.
   public var ref: String { "\(repo ?? "")#\(number ?? 0)" }
 
+  /// The file's path, or the URL of the issue or the PR.
+  public var link: String {
+    switch kind {
+    case .file: path ?? ""
+    case .issue: "https://github.com/\(repo ?? "")/issues/\(number ?? 0)"
+    case .pr: "https://github.com/\(repo ?? "")/pull/\(number ?? 0)"
+    }
+  }
+
   /// The path, `owner/name#N`, or `owner/name#N:path`.
   public var text: String {
     switch kind {
@@ -99,7 +108,8 @@ public enum PlanStage: String, Codable, Sendable {
   case open, merged, deployed, closed
 }
 
-/// A table row of a plan that links at least one PR.
+/// A table row of a plan that links at least one PR, or that links none and
+/// whose status reads Not started.
 public struct PlanRow: Codable, Equatable, Sendable {
   public struct PR: Codable, Equatable, Sendable {
     public var repo: String
@@ -131,6 +141,15 @@ public struct PlanRow: Codable, Equatable, Sendable {
   /// When sbd first saw this text, in ms since the epoch.
   public var changed: Int64
   public var prs: [PR]
+  /// The cells of the row's `#`, `Item`, and `Status` columns, or nil when
+  /// its table has no such column.
+  public var number: String?
+  public var item: String?
+  public var status: String?
+  /// The follow-up made from the row. sbd fills it in when it reports the
+  /// plan, and the stored record leaves it nil. The follow-up's
+  /// `planRow` is what records the link.
+  public var followup: String?
 
   public init(text: String, changed: Int64, prs: [PR]) {
     self.text = text
@@ -139,6 +158,19 @@ public struct PlanRow: Codable, Equatable, Sendable {
   }
 
   public var outOfDate: Bool { prs.contains(where: \.advanced) }
+
+  /// The row links no PR, names an item, and its status reads Not started.
+  public var notStarted: Bool { prs.isEmpty && Plans.notStarted(item: item, status: status) }
+
+  /// The row's `#` and item, as `sb plan` prints it.
+  public var label: String {
+    [number.map { "#\($0)" }, item].compactMap { $0 }.joined(separator: " ")
+  }
+
+  /// What `sb plan followup` takes to name the row: its `#`, else its item,
+  /// else its text, whichever names only this row. `PlanSummary` fills it in
+  /// for the rows it lists, and the stored record leaves it nil.
+  public var ref: String?
 }
 
 /// A plan attached to a group or a session, with what sbd last read from it.
@@ -185,8 +217,15 @@ public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
     var seen: Set<String> = []
     rows = content.rows.compactMap { row in
       guard seen.insert(row.text).inserted else { return nil }
-      return old[row.text]
+      // A record from an older sbd lacks the cells, and a header change can
+      // move them without changing the row's text.
+      var kept =
+        old[row.text]
         ?? PlanRow(text: row.text, changed: now, prs: row.links.map { PlanRow.PR(repo: $0.repo, number: $0.number) })
+      kept.number = row.number
+      kept.item = row.item
+      kept.status = row.status
+      return kept
     }
     statusBlock = content.statusBlock
     read = now
@@ -222,6 +261,8 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
   public var links: Int
   public var rows: Int
   public var outOfDate: [PlanRow]
+  /// The Not started rows that have no follow-up yet.
+  public var canFollowUp: [PlanRow]
 
   public init(_ plan: PlanDocument) {
     id = plan.id
@@ -234,6 +275,11 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
     links = plan.links.count
     rows = plan.rows.count
     outOfDate = plan.rows.filter(\.outOfDate)
+    canFollowUp = plan.rows.filter { $0.notStarted && $0.followup == nil }.map { row in
+      var row = row
+      row.ref = Plans.ref(of: row, in: plan.rows)
+      return row
+    }
   }
 }
 
@@ -246,6 +292,9 @@ public enum Plans {
     public struct Row: Equatable, Sendable {
       public var text: String
       public var links: [PlanLink]
+      public var number: String?
+      public var item: String?
+      public var status: String?
     }
 
     public var links: [PlanLink]
@@ -291,13 +340,77 @@ public enum Plans {
     }
     let lines = outside.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     var rows: [Content.Row] = []
-    for (i, line) in lines.enumerated() where line.hasPrefix("|") && !isSeparator(line) {
+    var columns: Columns?
+    for (i, line) in lines.enumerated() {
+      guard line.hasPrefix("|") else {
+        columns = nil
+        continue
+      }
+      if isSeparator(line) { continue }
       // The line above a separator is the table's header.
-      if i + 1 < lines.count, isSeparator(lines[i + 1]) { continue }
+      if i + 1 < lines.count, isSeparator(lines[i + 1]) {
+        columns = Columns(header: cells(line))
+        continue
+      }
       let links = links(in: line)
-      if !links.isEmpty { rows.append(Content.Row(text: line, links: links)) }
+      let row = cells(line)
+      func cell(_ index: Int?) -> String? { index.flatMap { $0 < row.count && !row[$0].isEmpty ? row[$0] : nil } }
+      let item = cell(columns?.item)
+      let status = cell(columns?.status)
+      guard !links.isEmpty || notStarted(item: item, status: status) else { continue }
+      rows.append(Content.Row(text: line, links: links, number: cell(columns?.number), item: item, status: status))
     }
     return Content(links: links(in: outside), rows: rows, statusBlock: block)
+  }
+
+  /// Where a table's `#`, `Item`, and `Status` columns are. A table without
+  /// both `Item` and `Status` has none of them.
+  struct Columns {
+    var number: Int?
+    var item: Int?
+    var status: Int?
+
+    init(header: [String]) {
+      let names = header.map { $0.lowercased() }
+      guard let item = names.firstIndex(of: "item"), let status = names.firstIndex(of: "status") else { return }
+      self.item = item
+      self.status = status
+      number = names.firstIndex(of: "#")
+    }
+  }
+
+  /// The trimmed cells of a table line, which starts with `|`. A `|` after
+  /// a backslash belongs to its cell and reads as `|`.
+  static func cells(_ line: String) -> [String] {
+    var cells: [String] = []
+    var current = ""
+    var escaped = false
+    for ch in line.dropFirst() {
+      if escaped {
+        if ch != "|" { current.append("\\") }
+        current.append(ch)
+        escaped = false
+      } else if ch == "\\" {
+        escaped = true
+      } else if ch == "|" {
+        cells.append(current)
+        current = ""
+      } else {
+        current.append(ch)
+      }
+    }
+    if escaped { current.append("\\") }
+    // The text after the last `|` is a cell only when the line has no trailing `|`.
+    if !current.trimmingCharacters(in: .whitespaces).isEmpty { cells.append(current) }
+    return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+  }
+
+  /// Whether a row names an item and its status cell reads Not started,
+  /// ignoring case and the marks around it, such as `**Not started**` or
+  /// `Not started.`.
+  static func notStarted(item: String?, status: String?) -> Bool {
+    guard item?.isEmpty == false, let status else { return false }
+    return status.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased() == "not started"
   }
 
   static func isSeparator(_ line: String) -> Bool {
@@ -305,6 +418,36 @@ public enum Plans {
     let cells = line.split(separator: "|", omittingEmptySubsequences: true).map(String.init)
     return !cells.isEmpty
       && cells.allSatisfy { separatorCell.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+  }
+
+  /// The row that `ref` names: by its whole text, else by its `#` cell, else
+  /// by its item, else by a prefix of its item that no other row has. Items
+  /// compare without case.
+  public static func row(_ ref: String, in rows: [PlanRow]) throws -> PlanRow {
+    let key = ref.trimmingCharacters(in: .whitespaces)
+    let number = key.hasPrefix("#") ? String(key.dropFirst()) : key
+    let item = key.lowercased()
+    let tries: [(PlanRow) -> Bool] = [
+      { $0.text == key },
+      { $0.number == number },
+      { $0.item?.lowercased() == item },
+      { $0.item?.lowercased().hasPrefix(item) == true },
+    ]
+    for matches in tries {
+      let found = rows.filter(matches)
+      if found.count == 1 { return found[0] }
+      if found.count > 1 {
+        throw APIError("\(key) names \(found.count) rows: \(found.map(\.label).joined(separator: ", "))")
+      }
+    }
+    throw APIError("the plan has no row \(key) that links a PR or reads Not started")
+  }
+
+  /// The first of the row's `#` and item that `row(_:in:)` resolves to this
+  /// row alone, else the row's text. A `#` that two tables share names more
+  /// than one row.
+  static func ref(of row: PlanRow, in rows: [PlanRow]) -> String {
+    [row.number, row.item].compactMap { $0 }.first { (try? Plans.row($0, in: rows))?.text == row.text } ?? row.text
   }
 
   /// The text that `splice` puts between the markers for this table.

@@ -207,12 +207,13 @@ private func url(_ repo: String, _ number: Int) -> String { "https://github.com/
     | 3 | Runbook | Done ([charts#18303](\(url("PostHog/charts", 18303))), [posthog#122896](\(url("PostHog/posthog", 122896)))) |
     """
 
-  @Test func rowIsATableLineWithAPRLink() {
+  @Test func rowIsATableLineWithAPRLinkOrANotStartedStatus() {
     let rows = Plans.parse(PlanRowParsing.table).rows
 
     #expect(
       rows.map(\.text) == [
         "| 1 | Breaker counts | In review ([posthog#122953](\(url("PostHog/posthog", 122953)))) |",
+        "| 2 | Docs | Not started |",
         "| 3 | Runbook | Done ([charts#18303](\(url("PostHog/charts", 18303))), [posthog#122896](\(url("PostHog/posthog", 122896)))) |",
       ])
   }
@@ -223,6 +224,7 @@ private func url(_ repo: String, _ number: Int) -> String { "https://github.com/
     #expect(
       rows.map(\.links) == [
         [pr("PostHog/posthog", 122953)],
+        [],
         [pr("PostHog/charts", 18303), pr("PostHog/posthog", 122896)],
       ])
   }

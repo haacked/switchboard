@@ -405,6 +405,7 @@ struct BoardView: View {
                   Text(row.title).fontWeight(.semibold).lineLimit(2)
                   Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
                     .font(.caption).foregroundStyle(.secondary)
+                  PlanFollowupList(plans: model.groups.first { $0.id == row.group }?.plans ?? [])
                 }
                 .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(columns, id: \.self) { state in
@@ -441,6 +442,32 @@ struct BoardView: View {
           }
           .background(.background)
         }
+      }
+    }
+  }
+}
+
+/// The plan rows of a group that read Not started and have no follow-up,
+/// each with a button that makes one.
+struct PlanFollowupList: View {
+  @EnvironmentObject var model: BoardModel
+  let plans: [PlanSummary]
+
+  var body: some View {
+    ForEach(plans) { plan in
+      ForEach(plan.canFollowUp, id: \.text) { row in
+        let ref = row.ref ?? row.text
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+          Text(row.label).font(.caption).lineLimit(2).help(row.text)
+          Spacer(minLength: 0)
+          Button("Follow up") { model.followUp(plan: plan.id, row: ref) }
+            .controlSize(.small)
+            .disabled(model.isFollowingUp(plan: plan.id, row: ref))
+            .accessibilityLabel("Follow up: \(row.item ?? ref)")
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plan-row-\(plan.id)-\(ref)")
       }
     }
   }

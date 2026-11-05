@@ -77,7 +77,7 @@ func printFollowup(_ s: SessionSummary) {
   if let branch = s.branch { print("  branch:  \(branch)") }
   if let link = f.link { print("  link:    \(link)") }
   if let parent = s.parent { print("  parent:  \(parent)") }
-  print("  prompt:  \(f.prompt)")
+  print("  prompt:  \(f.prompt)".printable)
 }
 
 func followupRef(_ a: Args, _ command: String) -> String {
