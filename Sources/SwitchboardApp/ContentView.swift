@@ -428,7 +428,9 @@ struct BoardView: View {
                         model.chat(of: group) == nil
                           ? "Start a chat that manages this group's sessions" : "Open this group's chat")
                   }
-                  PlanFollowupList(plans: model.groups.first { $0.id == row.group }?.plans ?? [])
+                  let plans = model.groups.first { $0.id == row.group }?.plans ?? []
+                  PlanFollowupList(plans: plans)
+                  PlanArtifactList(plans: plans)
                 }
                 .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(columns, id: \.self) { state in
@@ -496,6 +498,64 @@ struct PlanFollowupList: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("plan-row-\(plan.id)-\(ref)")
       }
+    }
+  }
+}
+
+/// A group's artifact plans: whether sbd's copy may be old, and a pending
+/// update's diff with Apply and Reject.
+struct PlanArtifactList: View {
+  @EnvironmentObject var model: BoardModel
+  /// The plan whose full diff the popover shows.
+  @State private var diffShown: String?
+  let plans: [PlanSummary]
+
+  var body: some View {
+    ForEach(plans.filter { $0.source.kind == .artifact }) { plan in
+      VStack(alignment: .leading, spacing: 4) {
+        if let error = plan.error {
+          Text(error).font(.caption).foregroundStyle(.red).lineLimit(3).help(error)
+        }
+        if plan.copyStale == true {
+          Text(plan.read == nil ? "No copy of the artifact yet" : "Copy of the artifact may be old")
+            .font(.caption).foregroundStyle(.orange)
+            .help("sb plan artifact read \(plan.id) asks the chat to read it again")
+        }
+        if let proposal = plan.proposal {
+          let diffText = proposal.diff.joined(separator: "\n")
+          Text(proposal.rows.isEmpty ? "Status table update" : "Update to \(proposal.rows.count) rows")
+            .font(.caption.bold())
+          Text(diffText)
+            .font(.caption.monospaced()).lineLimit(12).textSelection(.enabled)
+          Button("Show changes") { diffShown = plan.id }
+            .buttonStyle(.link).font(.caption)
+            .popover(
+              isPresented: Binding(get: { diffShown == plan.id }, set: { if !$0 { diffShown = nil } })
+            ) {
+              ScrollView([.vertical, .horizontal]) {
+                Text(diffText)
+                  .font(.caption.monospaced()).textSelection(.enabled).fixedSize().padding()
+              }
+              .frame(width: 640, height: 360)
+            }
+          // Reject stays available while publishing. A chat whose read or
+          // publish fails never reports, and sbd refuses a new update until
+          // the proposal goes.
+          HStack {
+            if proposal.state == .pending {
+              Button("Apply") { model.answerArtifact(plan: plan.id, apply: true) }
+            } else {
+              Text("Publishing").font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Reject") { model.answerArtifact(plan: plan.id, apply: false) }
+          }
+          .controlSize(.small)
+          .disabled(model.answeringArtifacts.contains(plan.id))
+        }
+      }
+      .padding(.top, 4)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("plan-artifact-\(plan.id)")
     }
   }
 }

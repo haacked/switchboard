@@ -70,6 +70,9 @@ final class BoardModel: ObservableObject {
   @Published var answeringSuggestions: Set<String> = []
   /// The plan rows, as `<plan> <row>`, whose follow-up sbd is making.
   @Published var followingUp: Set<String> = []
+  /// Artifact plans whose Apply or Reject is on its way to sbd. Their buttons
+  /// stay disabled until sbd replies, so a second click can't answer again.
+  @Published var answeringArtifacts: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -378,16 +381,33 @@ final class BoardModel: ObservableObject {
     guard followingUp.insert(key).inserted else { return }
     perform(
       "plan-followup", ["plan": .string(plan), "row": .string(row)],
-      then: { _ in
-        for g in self.groups.indices {
-          guard let p = self.groups[g].plans?.firstIndex(where: { $0.id == plan }) else { continue }
-          self.groups[g].plans?[p].canFollowUp.removeAll { ($0.ref ?? $0.text) == row }
-        }
-      },
+      then: { _ in self.changePlan(plan) { $0.canFollowUp.removeAll { ($0.ref ?? $0.text) == row } } },
       finally: { self.followingUp.remove(key) })
   }
 
+  /// Changes the plan's summary in each group that lists it, before the
+  /// next refresh lists the plan again.
+  private func changePlan(_ id: String, _ change: (inout PlanSummary) -> Void) {
+    for g in groups.indices {
+      guard let p = groups[g].plans?.firstIndex(where: { $0.id == id }) else { continue }
+      change(&groups[g].plans![p])
+    }
+  }
+
   func isFollowingUp(plan: String, row: String) -> Bool { followingUp.contains(followUpKey(plan: plan, row: row)) }
+
+  /// Applies or rejects an artifact plan's pending update. Apply asks the
+  /// group's chat to publish it.
+  func answerArtifact(plan: String, apply: Bool) {
+    guard answeringArtifacts.insert(plan).inserted else { return }
+    perform(
+      apply ? "plan-artifact-apply" : "plan-artifact-reject", ["plan": .string(plan)],
+      then: { result in
+        guard let doc = try? JSONCoding.convert(result, to: PlanDocument.self) else { return }
+        self.changePlan(plan) { $0 = PlanSummary(doc) }
+      },
+      finally: { self.answeringArtifacts.remove(plan) })
+  }
 
   private func followUpKey(plan: String, row: String) -> String { "\(plan) \(row)" }
 
