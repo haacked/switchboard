@@ -103,7 +103,7 @@ extension Attention {
   /// must act on. It does not rely on `openPR` running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.ready, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
-      !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
+      pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
       !pr.ciFailed, classify(facts.lastReply ?? "") == .other, let line = readyPRLine(facts)
     else { return nil }
     return Verdict(state: .readyForReview, reason: oneLine(line, max: 200))
