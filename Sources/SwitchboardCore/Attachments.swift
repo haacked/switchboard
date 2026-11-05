@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 /// of their own.
 public enum Attachments {
   public static let limit = 20 * 1024 * 1024
+  /// The most images one message carries. The app and `sb` hold every image of a message in memory and send
+  /// them in one request.
+  public static let countLimit = 20
+  public static let totalLimit = 100 * 1024 * 1024
   public static let extensions = Set(Kind.allCases.map(\.rawValue)).union(["jpg"])
 
   public enum Kind: String, CaseIterable, Sendable {
@@ -38,6 +42,14 @@ public enum Attachments {
 
   private static func tooLarge(_ name: String) -> APIError {
     APIError("\(name) is larger than \(limit / 1024 / 1024) MB.")
+  }
+
+  /// Refuses a message of more than `countLimit` images or more than `totalLimit` bytes of them.
+  public static func checkMessage(count: Int, total: Int) throws {
+    guard count <= countLimit else { throw APIError("a message can carry at most \(countLimit) images.") }
+    guard total <= totalLimit else {
+      throw APIError("a message's images can total at most \(totalLimit / 1024 / 1024) MB.")
+    }
   }
 
   /// Checks the name's extension, the size, and the content.

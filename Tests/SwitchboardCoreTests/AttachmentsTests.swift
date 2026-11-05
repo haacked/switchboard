@@ -88,6 +88,29 @@ func scratchFolder() throws -> String {
   @Test func limitsAnImageTo20MB() {
     #expect(Attachments.limit == 20 * 1024 * 1024)
   }
+
+  @Test func limitsAMessageTo20ImagesAnd100MB() {
+    #expect(Attachments.countLimit == 20)
+    #expect(Attachments.totalLimit == 100 * 1024 * 1024)
+  }
+}
+
+@Suite struct AttachmentsMessageLimitTests {
+  @Test func acceptsAMessageAtBothLimits() throws {
+    try Attachments.checkMessage(count: Attachments.countLimit, total: Attachments.totalLimit)
+  }
+
+  @Test func refusesOneImageOverTheCountLimit() {
+    #expect(
+      refusal { try Attachments.checkMessage(count: Attachments.countLimit + 1, total: 0) }
+        == "a message can carry at most 20 images.")
+  }
+
+  @Test func refusesOneByteOverTheTotalLimit() {
+    #expect(
+      refusal { try Attachments.checkMessage(count: 2, total: Attachments.totalLimit + 1) }
+        == "a message's images can total at most 100 MB.")
+  }
 }
 
 @Suite struct AttachmentsValidateTests {

@@ -15,11 +15,16 @@ func sendCommand(_ a: Args) {
   if text.isEmpty && paths.isEmpty { die("send needs text") }
   var args: [String: JSON] = ["session": .string(a.session("send")), "text": .string(text)]
   if !paths.isEmpty {
+    var total = 0
+    do { try Attachments.checkMessage(count: paths.count, total: 0) } catch { die("\(error)") }
     args["images"] = .array(
       paths.map { path in
         let file = URL(fileURLWithPath: path.expandingTilde)
         do {
-          return Attachments.json(name: file.lastPathComponent, data: try Attachments.read(path: file.path))
+          let data = try Attachments.read(path: file.path)
+          total += data.count
+          try Attachments.checkMessage(count: paths.count, total: total)
+          return Attachments.json(name: file.lastPathComponent, data: data)
         } catch {
           die("\(error)")
         }

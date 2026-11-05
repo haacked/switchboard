@@ -2,7 +2,6 @@ import AppKit
 import ImageIO
 import SwiftUI
 import SwitchboardCore
-import UniformTypeIdentifiers
 
 /// A field that sends the session's Claude a message, with images dropped on it or pasted into it.
 struct MessageField: View {
@@ -17,7 +16,7 @@ struct MessageField: View {
 
     @Published var text = ""
     @Published var images: [Image] = []
-    /// Why the last dropped or pasted file was not added.
+    /// Why the last drop or paste left files out.
     @Published var error: String?
     /// The time of the first Esc. A second Esc within `escapeWindow` of it clears the draft.
     @Published private var armedAt: Date?
@@ -45,26 +44,60 @@ struct MessageField: View {
       error = nil
     }
 
-    /// Adds each image file, and sets `error` for each file that is not one.
+    /// Adds each image file in order, and sets `error` for each file that is not one.
     func add(paths: [String]) {
+      attach(paths.map { path in ((path as NSString).lastPathComponent, { try Attachments.read(path: path) }) })
+    }
+
+    /// Adds each file in order while the message stays within `Attachments.checkMessage`. It leaves out a file
+    /// that fails to read or would pass a limit, and `error` names that file. The files after it still attach.
+    /// A file past the count limit is not read.
+    private func attach(_ files: [(name: String, read: () throws -> Data)]) {
       var refused: [String] = []
-      for path in paths {
+      var overLimit: [(reason: String, names: [String])] = []
+      func leaveOut(_ name: String, _ error: any Error) {
+        let reason = "\(error)"
+        if let i = overLimit.firstIndex(where: { $0.reason == reason }) {
+          overLimit[i].names.append(name)
+        } else {
+          overLimit.append((reason, [name]))
+        }
+      }
+      var total = images.reduce(0) { $0 + $1.data.count }
+      for file in files {
         do {
-          let data = try Attachments.read(path: path)
-          append(name: (path as NSString).lastPathComponent, data: data)
+          try Attachments.checkMessage(count: images.count + 1, total: total)
+        } catch {
+          leaveOut(file.name, error)
+          continue
+        }
+        let data: Data
+        do {
+          data = try file.read()
         } catch {
           refused.append("\(error)")
+          continue
         }
+        do {
+          try Attachments.checkMessage(count: images.count + 1, total: total + data.count)
+        } catch {
+          leaveOut(file.name, error)
+          continue
+        }
+        append(name: file.name, data: data)
+        total += data.count
+      }
+      for (reason, names) in overLimit {
+        refused.append("\(names.joined(separator: ", ")) \(names.count == 1 ? "isn't" : "aren't") attached: \(reason)")
       }
       error = refused.isEmpty ? nil : refused.joined(separator: " ")
     }
 
     /// Adds the pasteboard's images and returns true, or returns false and leaves the paste to the
-    /// text field. It takes file URLs when every one names an image file, and PNG or TIFF data when
-    /// the pasteboard has no text.
+    /// text field. It takes file URLs when every one names an image file, and the PNG or TIFF data of
+    /// each item when no item has text.
     func paste(from pasteboard: NSPasteboard) -> Bool {
-      let urls =
-        pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+      let urls = pasteboard.fileURLs
       if !urls.isEmpty {
         guard urls.allSatisfy({ Attachments.extensions.contains($0.pathExtension.lowercased()) }) else {
           return false
@@ -72,18 +105,23 @@ struct MessageField: View {
         add(paths: urls.map(\.path))
         return true
       }
-      guard pasteboard.string(forType: .string) == nil else { return false }
-      if let png = pasteboard.data(forType: .png) {
-        append(name: Self.pastedName, data: png)
-      } else if let tiff = pasteboard.data(forType: .tiff),
-        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
-      {
-        append(name: Self.pastedName, data: png)
-      } else {
-        return false
-      }
-      error = nil
+      let items = pasteboard.pasteboardItems ?? []
+      guard !items.contains(where: { $0.types.contains(.string) }) else { return false }
+      let images = items.filter { $0.types.contains(.png) || $0.types.contains(.tiff) }
+      guard !images.isEmpty else { return false }
+      attach(images.map { item in (Self.pastedName, { try Self.png(item) }) })
       return true
+    }
+
+    /// The item's PNG data, or its TIFF data converted to PNG.
+    private static func png(_ item: NSPasteboardItem) throws -> Data {
+      let png =
+        item.data(forType: .png)
+        ?? item.data(forType: .tiff).flatMap {
+          NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:])
+        } ?? Data()
+      _ = try Attachments.validate(name: pastedName, data: png)
+      return png
     }
 
     func remove(_ id: Image.ID) {
@@ -168,10 +206,7 @@ struct MessageField: View {
         Text(error).font(.caption).foregroundStyle(.red)
       }
     }
-    .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-      Task { @MainActor in draft.add(paths: await Self.paths(providers)) }
-      return true
-    }
+    .overlay { FileDropTarget(isTargeted: $dropTargeted) { draft.add(paths: $0.map(\.path)) } }
     // A refused paste or drop changes neither the text nor the chips, so VoiceOver would say nothing.
     .onChange(of: draft.error) {
       if let error = draft.error { AccessibilityNotification.Announcement(error).post() }
@@ -258,19 +293,6 @@ struct MessageField: View {
   /// The chip's VoiceOver label. Activating the chip removes the image.
   static func chipLabel(_ name: String) -> String { "Image: \(name), remove" }
 
-  /// The file paths that dropped items name.
-  private static func paths(_ providers: [NSItemProvider]) async -> [String] {
-    var paths: [String] = []
-    for provider in providers {
-      if let url = try? await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) as? Data,
-        let path = URL(dataRepresentation: url, relativeTo: nil)?.path
-      {
-        paths.append(path)
-      }
-    }
-    return paths
-  }
-
   /// Watches for Command+V while the field has focus. The menu's Paste item takes the key before the
   /// field sees it, and the field editor ignores image data. A local monitor sees the key first.
   private static func monitorPaste(into draft: Draft, when focus: Focus) -> Any? {
@@ -303,5 +325,117 @@ struct MessageField: View {
     case .shift: return .newline
     default: return nil
     }
+  }
+}
+
+/// Takes files dropped anywhere on the message field. AppKit gives a drag to the frontmost view that registered
+/// one of its types. SwiftUI does not keep this view's AppKit host in front of the text field's host. A text
+/// field with focus edits through the window's field editor, which takes a file drop and inserts the first
+/// file's path as text. So while that editor edits the field under this view, the editor takes no drags, and
+/// this view inserts dropped text through the editor at the drop point. The editor registers its types again
+/// on each edit, so the view removes them again after each SwiftUI update. Clicks pass through this view.
+struct FileDropTarget: NSViewRepresentable {
+  @Binding var isTargeted: Bool
+  let drop: ([URL]) -> Void
+
+  func makeNSView(context: Context) -> DropView { DropView() }
+
+  func updateNSView(_ view: DropView, context: Context) {
+    view.drop = drop
+    view.targeted = { isTargeted = $0 }
+    DispatchQueue.main.async { view.limitFieldEditor() }
+  }
+
+  static func dismantleNSView(_ view: DropView, coordinator: ()) { view.releaseFieldEditor() }
+
+  final class DropView: NSView {
+    var drop: ([URL]) -> Void = { _ in }
+    var targeted: (Bool) -> Void = { _ in }
+
+    /// Which drop view limited each field editor. Every text field in a window shares one field editor, so
+    /// focus that moves between two message fields can reach the new field's view before the old one's.
+    private static let limiters = NSMapTable<NSTextView, DropView>.weakToWeakObjects()
+    private weak var limited: NSTextView?
+    /// What the drag that is over the view would do, which `draggingEntered` decides once per drag.
+    private var operation: NSDragOperation = []
+
+    override init(frame: NSRect) {
+      super.init(frame: frame)
+      registerForDraggedTypes([.fileURL, .string])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// The window's field editor while it edits a text field under this view.
+    private var fieldEditor: NSTextView? {
+      guard let editor = window?.firstResponder as? NSTextView, editor.isFieldEditor,
+        let field = editor.delegate as? NSView,
+        convert(bounds, to: nil).intersects(field.convert(field.bounds, to: nil))
+      else { return nil }
+      return editor
+    }
+
+    /// Takes every drag from the window's field editor while it edits a text field under this view, and
+    /// gives back the editor's own types once it edits another field or none.
+    func limitFieldEditor() {
+      guard let editor = fieldEditor else { return releaseFieldEditor() }
+      limit(editor)
+    }
+
+    func limit(_ editor: NSTextView) {
+      if limited === editor, editor.registeredDraggedTypes.isEmpty { return }
+      if limited !== editor { releaseFieldEditor() }
+      editor.unregisterDraggedTypes()
+      limited = editor
+      Self.limiters.setObject(self, forKey: editor)
+    }
+
+    func releaseFieldEditor() {
+      guard let editor = limited else { return }
+      limited = nil
+      guard Self.limiters.object(forKey: editor) === self else { return }
+      Self.limiters.removeObject(forKey: editor)
+      editor.updateDragTypeRegistration()
+    }
+
+    /// Files become images. Text goes into the field when the field has focus, as the editor would insert it.
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+      let pasteboard = sender.draggingPasteboard
+      let files = !pasteboard.fileURLs.isEmpty
+      operation = files || (fieldEditor != nil && pasteboard.string(forType: .string) != nil) ? .copy : []
+      targeted(files)
+      return operation
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { operation }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) { targeted(false) }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) { targeted(false) }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+      targeted(false)
+      let pasteboard = sender.draggingPasteboard
+      let urls = pasteboard.fileURLs
+      if !urls.isEmpty {
+        drop(urls)
+        return true
+      }
+      guard let editor = fieldEditor, let text = pasteboard.string(forType: .string), let window else { return false }
+      let index = editor.characterIndexForInsertion(at: window.convertPoint(toScreen: sender.draggingLocation))
+      let at = NSRange(location: min(index, (editor.string as NSString).length), length: 0)
+      editor.setSelectedRange(at)
+      editor.insertText(text, replacementRange: at)
+      return true
+    }
+  }
+}
+
+extension NSPasteboard {
+  /// The file URLs on the pasteboard, in the order of its items.
+  var fileURLs: [URL] {
+    readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
   }
 }
