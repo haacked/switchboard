@@ -104,7 +104,7 @@ struct MenuBarLabel: View {
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
-    let count = model.needsYou.count
+    let count = model.needsUser.count
     Group {
       if count == 0 {
         Image(systemName: "square.grid.3x3")
@@ -129,10 +129,10 @@ struct MenuBarContent: View {
   var body: some View {
     if model.unreachable != nil {
       Text("sbd isn't running")
-    } else if model.needsYou.isEmpty {
+    } else if model.needsUser.isEmpty {
       Text("Nothing needs you")
     } else {
-      ForEach(model.needsYou) { s in
+      ForEach(model.needsUser) { s in
         Button("\(s.name): \(s.reason)") {
           model.selection = s.id
           show()

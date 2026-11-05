@@ -3,6 +3,8 @@ import Foundation
 /// The board's columns. Their order is the order the board shows them.
 public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable {
   case needsYou = "needs_you"
+  /// An idle session whose PR can merge now.
+  case readyToMerge = "ready_to_merge"
   case canContinue = "can_continue"
   case waiting
   case working
@@ -14,6 +16,7 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
   public var title: String {
     switch self {
     case .needsYou: "Needs you"
+    case .readyToMerge: "Ready to merge"
     case .canContinue: "Claude can continue"
     case .waiting: "Waiting"
     case .working: "Working"
@@ -22,6 +25,13 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
     case .notStarted: "Not started"
     }
   }
+
+  /// Whether the session waits for the user: Needs you, or Ready to merge,
+  /// which waits for the user's click on Merge.
+  public var needsUser: Bool { self == .needsYou || self == .readyToMerge }
+
+  /// The states whose sessions the Inbox lists, in its order.
+  public static let inbox: [AttentionState] = [.needsYou, .readyToMerge, .canContinue]
 
   public static func < (a: AttentionState, b: AttentionState) -> Bool {
     allCases.firstIndex(of: a)! < allCases.firstIndex(of: b)!
@@ -168,6 +178,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var plans: [PlanSummary]?
   /// The review that a docket row tracks, or nil for any other session.
   public var docket: DocketSummary?
+  /// gh's error from the last failed merge of the PR's head commit.
+  public var mergeError: String?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

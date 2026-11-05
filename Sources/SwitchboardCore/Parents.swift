@@ -32,6 +32,7 @@ public enum ParentNotice {
     if after.state != before.state {
       switch after.state {
       case .needsYou: lines.append("\(name) (\(id)) needs you: \(oneLine(reason))")
+      case .readyToMerge: lines.append("\(name) (\(id)): \(oneLine(reason))")
       case .done: lines.append("\(name) (\(id)) is done")
       default: break
       }

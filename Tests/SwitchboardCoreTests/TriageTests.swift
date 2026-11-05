@@ -84,8 +84,8 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     let item = item(f)
     #expect(item?.source == .rule)
     #expect(item?.kind == .action)
-    #expect(item?.title == "Rebase: #1204 conflicts with its base")
-    #expect(item?.summary == "Rebase; #1204 conflicts with its base.")
+    #expect(item?.title == "Rebase: #1204 conflicts with main")
+    #expect(item?.summary == "Rebase; #1204 conflicts with main.")
     #expect(item?.options.isEmpty == true)
   }
 

@@ -5,6 +5,7 @@ extension AttentionState {
   var color: Color {
     switch self {
     case .needsYou: .orange
+    case .readyToMerge: .mint
     case .canContinue: .blue
     case .waiting: .purple
     case .working: .green
@@ -539,6 +540,7 @@ struct BoardCard: View {
           }
           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
           CleanupNote(session: s)
+          MergeNote(session: s, lines: 2)
           Text(
             "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))"
           )
@@ -552,6 +554,7 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
+        if s.state == .readyToMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if BoardModel.canDelete(s) { DeleteButton(session: s) }
       }

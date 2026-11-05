@@ -143,7 +143,7 @@ public enum Triage {
   /// The session's item, or nil when it needs nothing from the user.
   /// `verdict` is the session's attention verdict.
   public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    guard verdict.state == .needsYou || verdict.state == .canContinue else { return nil }
+    guard AttentionState.inbox.contains(verdict.state) else { return nil }
     var item: TriageItem
     if let card = facts.cards.first {
       item = cardItem(card)
@@ -174,7 +174,7 @@ public enum Triage {
   /// session's state, and no summary exists yet.
   public static func needsSummary(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
     facts.lastStop != 0 && facts.triage == nil && !(facts.lastReply ?? "").isEmpty
-      && (verdict.state == .needsYou || verdict.state == .canContinue) && fromReply(facts, verdict)
+      && AttentionState.inbox.contains(verdict.state) && fromReply(facts, verdict)
   }
 
   static func cardItem(_ card: Card) -> TriageItem {

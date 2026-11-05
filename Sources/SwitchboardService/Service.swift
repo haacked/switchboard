@@ -51,6 +51,8 @@ public final class Service {
   var entries: [String: Entry] = [:]
   /// The follow-ups that `followup start` is starting.
   var starting: Set<String> = []
+  /// The sessions whose PR `merge` is merging.
+  var merging: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -166,6 +168,8 @@ public final class Service {
         return .success(try remove(request.args))
       case "cleanup":
         return .success(try cleanup(request.args))
+      case "merge":
+        return .success(try mergeRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -757,6 +761,7 @@ public final class Service {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      guard !merging.contains(id) else { throw APIError("\(id) is merging its PR") }
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
@@ -786,7 +791,9 @@ public final class Service {
     }()
     let fresh = buildSnapshot()
     try queue.sync {
-      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
+      guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
+        !merging.contains(session.id)
+      else {
         throw APIError("\(session.id) changed while it was being removed")
       }
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
@@ -822,8 +829,10 @@ public final class Service {
     }
     try queue.sync {
       // A follow-up can start between the two steps.
-      guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
-        throw APIError("\(session.id) started while it was being removed")
+      guard !starting.contains(session.id), !merging.contains(session.id),
+        entries[session.id]?.session.cwd == session.cwd
+      else {
+        throw APIError("\(session.id) changed while it was being removed")
       }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
@@ -1301,6 +1310,7 @@ public final class Service {
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
+    out.mergeError = e.facts.mergeError
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

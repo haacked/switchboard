@@ -182,7 +182,7 @@ import Testing
     let told = try sbd.waitFor(parent.id, "the PR message", timeout: 30) { $0.lastReply?.contains("opened PR") == true }
     #expect(
       told.lastReply
-        == "Done: Switchboard: sessions you started changed: kid (\(kid.id)) opened PR #18303: https://github.com/PostHog/charts/pull/18303."
+        == "Done: Switchboard: sessions you started changed: kid (\(kid.id)) opened PR #18303: https://github.com/PostHog/charts/pull/18303; kid (\(kid.id)): #18303 is ready to merge, approved by stamphog."
     )
   }
 

@@ -26,15 +26,20 @@ extension Attention {
 
   /// The rules for an open PR of a session whose turn has ended: a merged
   /// base, a conflict, requested changes, a removal from Trunk's queue, a
-  /// failed Depot job outside Trunk's queue, and an approval.
+  /// failed Depot job outside Trunk's queue, a PR ready to merge, and an
+  /// approval.
   static func openPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open else { return nil }
     let n = "#\(pr.number)"
+    // sbd merged the PR, and the poller has not read the merge yet.
+    if facts.currentMerge?.result == .merged {
+      return Verdict(state: .waiting, reason: "\(n) merged; GitHub has not reported it yet")
+    }
     if let base = pr.mergedBase {
       return Verdict(state: .needsYou, reason: "retarget \(n); its base #\(base) merged")
     }
     if pr.mergeable == .conflicting {
-      return Verdict(state: .needsYou, reason: "rebase; \(n) conflicts with its base")
+      return Verdict(state: .needsYou, reason: oneLine("rebase; \(n) conflicts with \(pr.base)"))
     }
     // A push after the review moves the head commit, and the PR then waits
     // for the reviewer.
@@ -60,14 +65,15 @@ extension Attention {
       let reason = "fix Depot CI on \(n): "
       return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
     }
+    // The user dismissed the merge card of this head commit.
+    if facts.currentMerge?.result == .dismissed { return nil }
+    if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.
     guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }
-    let by = pr.approvers.isEmpty ? "" : ", approved by \(names(pr.approvers))"
     switch pr.queue {
     case nil:
-      // A repo without Trunk has no trunk-io comments, and its PRs merge directly.
-      let trunk = facts.prComments.contains { $0.author == TrunkComments.author }
-      return Verdict(state: .needsYou, reason: oneLine("\(trunk ? "enqueue" : "merge") \(n)\(by)"))
+      return Verdict(
+        state: .needsYou, reason: oneLine("\(facts.usesTrunk ? "enqueue" : "merge") \(n)\(approvedBy(pr))"))
     case .unknown:
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
     default:
@@ -97,4 +103,9 @@ extension Attention {
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
+
+  /// ", approved by X and Y", or nothing when nobody approved the PR.
+  static func approvedBy(_ pr: PullRequest) -> String {
+    pr.approvers.isEmpty ? "" : ", approved by \(names(pr.approvers))"
+  }
 }

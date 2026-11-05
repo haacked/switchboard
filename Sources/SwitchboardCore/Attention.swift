@@ -88,6 +88,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var dependencies: [Dependency] = []
   /// What a docket row's `docket` events say.
   public var docket = DocketStatus()
+  /// The last merge that sbd ran or the user dismissed.
+  public var merge: MergeAttempt?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -222,6 +224,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       cleanedUp = CleanupStatus(state: .removed, reason: kept.map { "kept \($0)" })
     case "dependencies":
       dependencies = d["dependencies"].flatMap { try? JSONCoding.convert($0, to: [Dependency].self) } ?? []
+    case "merge":
+      merge = try? JSONCoding.convert(event.data, to: MergeAttempt.self)
     default:
       break
     }
