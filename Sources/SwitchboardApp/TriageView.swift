@@ -81,7 +81,9 @@ struct TriageDetail: View {
       if !item.summary.isEmpty { Text(item.summary).textSelection(.enabled) }
       if item.source == .card {
         // The card shows the whole tool call, which an approval needs to see.
-        ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+        let cards = Card.inbox(session, all: model.sessions)
+        GroupMessageBatch(cards: cards.filter { $0.kind == .send })
+        ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
       } else if !item.options.isEmpty {
         ForEach(Array(item.options.enumerated()), id: \.offset) { i, option in
           OptionButton(

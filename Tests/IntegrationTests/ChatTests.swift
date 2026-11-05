@@ -98,6 +98,22 @@ import Testing
 
   // MARK: The session and its folder
 
+  @Test func aGroupMessageFromTheChatWaitsOnACardOnTheChatAndSendsNothing() throws {
+    let sbd = try Instance()
+    let member = try sbd.new(name: "member")
+    _ = try addGroup(sbd, "Flags", member.id)
+    let c = try chat(sbd, "Flags")
+    try sbd.waitFor(c.id, "the stub") { $0.live }
+    let config = try #require(launchConfigs(sbd, c).first ?? nil)
+    let mcp = try MCPClient(server: try #require(config["mcpServers"]?["switchboard"]))
+
+    let result = try mcp.call("send_group", ["text": "rebase on main"])
+
+    #expect(!result.isError)
+    #expect(try sbd.get(c.id).cards.map(\.kind) == [.send])
+    #expect(try sbd.get(member.id).cards.isEmpty)
+  }
+
   @Test func chatCreatesASessionNamedForTheGroupInItsFolderWithTheGuide() throws {
     let sbd = try Instance()
     let flags = try addGroup(sbd, "Flags")

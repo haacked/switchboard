@@ -160,12 +160,27 @@ public final class Store {
     args.append(limit)
     let order = newest ? "DESC" : "ASC"
     let rows = try query(
-      "SELECT id, session, t, kind, data FROM events WHERE id > ?\(filter) ORDER BY id \(order) LIMIT ?", args
-    ) { row in
-      Event(
-        id: row.int(0), session: row.text(1), t: row.int(2), kind: row.text(3), data: JSON.parse(row.text(4)) ?? .null)
-    }
+      "\(Store.eventColumns) WHERE id > ?\(filter) ORDER BY id \(order) LIMIT ?", args, Store.event)
     return newest ? rows.reversed() : rows
+  }
+
+  private static let eventColumns = "SELECT id, session, t, kind, data FROM events"
+
+  private static func event(_ row: Row) -> Event {
+    Event(
+      id: row.int(0), session: row.text(1), t: row.int(2), kind: row.text(3), data: JSON.parse(row.text(4)) ?? .null)
+  }
+
+  public func event(id: Int64) throws -> Event? {
+    try query("\(Store.eventColumns) WHERE id = ?", [id], Store.event).first
+  }
+
+  /// The `send_decided` event that closed the session's group message card with this id.
+  public func decision(card: Int64, session: String) throws -> Event? {
+    try query(
+      "\(Store.eventColumns) WHERE session = ? AND id > ? AND kind = 'send_decided' AND json_extract(data, '$.card') = ? LIMIT 1",
+      [session, card, card], Store.event
+    ).first
   }
 
   /// Records that an import read this line of Followups.md. Removing the

@@ -44,6 +44,8 @@ struct ChatView: View {
           .onChange(of: messages.last, initial: true) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
         }
         Divider()
+        // The Inbox leaves out a chat's cards, such as a group message that waits for the user, so they show here.
+        CardList(cards: session.cards)
         MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
           .padding(8)
       }

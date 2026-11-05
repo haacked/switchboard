@@ -34,7 +34,7 @@ extension Service {
       return Request(op: "send", args: ["session": .string(id), "text": .string(option.message)])
     }
     var answer: [String: JSON] = ["session": .string(id), "card": .number(Double(card.id))]
-    if card.kind == .permission {
+    if card.kind != .question {
       answer["behavior"] = .string(option.message)
     } else {
       answer["answers"] = [.string(option.message)]

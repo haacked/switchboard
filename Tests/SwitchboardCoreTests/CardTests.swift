@@ -334,3 +334,123 @@ let turnEnds = [
     #expect(Decision.deny(message: nil).hookOutput == output(["behavior": "deny", "interrupt": true]))
   }
 }
+
+/// The data of a `send_pending` event for a message to alpha and bravo in Flags.
+func sendPendingData(text: String = "Rebase on main.") -> [String: JSON] {
+  [
+    "group": "gabc23", "groupName": "Flags", "text": .string(text),
+    "targets": [["id": "s2", "name": "alpha"], ["id": "s3", "name": "bravo"]], "expires": 3_600_010,
+  ]
+}
+
+/// A `send_pending` event 7, so its card's id is 7.
+func sendPending(text: String = "Rebase on main.") -> Event {
+  Event(id: 7, session: "s1", t: 10, kind: "send_pending", data: .object(sendPendingData(text: text)))
+}
+
+func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
+  event("send_decided", t, ["card": .number(Double(card)), "decision": .string(decision)])
+}
+
+@Suite struct SendCards {
+  @Test func aSendPendingEventOpensASendCard() throws {
+    let cards = facts([sendPending()]).cards
+
+    let card = try #require(cards.first)
+    #expect(cards.count == 1)
+    #expect(card.id == 7)
+    #expect(card.session == "s1")
+    #expect(card.kind == .send)
+    #expect(card.since == 10)
+    #expect(!card.deferred)
+  }
+
+  @Test func aSendCardHoldsTheMessage() {
+    let card = facts([sendPending()]).cards.first
+
+    #expect(
+      card?.send
+        == GroupMessage(
+          group: "gabc23", groupName: "Flags", text: "Rebase on main.",
+          targets: [GroupSend.Target(id: "s2", name: "alpha"), GroupSend.Target(id: "s3", name: "bravo")],
+          expires: 3_600_010))
+  }
+
+  @Test(arguments: ["Say \"hi\"\nthen\tstop", "null", "\u{1B}[2K\\u{1b}", "{\"targets\": []}", "  42  "])
+  func aSendCardKeepsTheTextExactly(_ text: String) {
+    #expect(facts([sendPending(text: text)]).cards.first?.send?.text == text)
+  }
+
+  @Test func aPermissionCardHasNoMessage() {
+    #expect(facts(permissionTurn()).cards.first?.send == nil)
+  }
+
+  @Test(arguments: turnEnds) func aSendCardSurvivesTheEndOfTheTurn(_ end: Event) {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), sendPending(), end])
+
+    #expect(f.cards.map(\.id) == [7])
+  }
+
+  @Test(
+    arguments: ["PostToolUse", "PostToolUseFailure"],
+    [
+      tool("send_group", [:]), tool("mcp__switchboard__send_group", ["group": "Flags", "text": "Rebase on main."]),
+      tool("Bash", ["command": "sb send --group Flags Rebase"]),
+    ])
+  func aSendCardSurvivesAToolCallFinishing(_ kind: String, _ call: [String: JSON]) {
+    let f = facts([sendPending(), event(kind, 11, call)])
+
+    #expect(f.cards.map(\.id) == [7])
+  }
+
+  @Test func theEndOfTheTurnRemovesAPermissionCardAndKeepsASendCard() {
+    let f = facts(permissionTurn() + [sendPending(), event("Stop", 11, ["last_assistant_message": "ok"])])
+
+    #expect(f.cards.map(\.kind) == [.send])
+  }
+
+  @Test(arguments: ["sent", "cancelled", "expired"]) func sendDecidedClosesItsCard(_ decision: String) {
+    #expect(facts([sendPending(), sendDecided(7, decision)]).cards.isEmpty)
+  }
+
+  @Test func sendDecidedForAnotherCardLeavesTheCard() {
+    #expect(facts([sendPending(), sendDecided(99, "sent")]).cards.map(\.id) == [7])
+  }
+
+  @Test func sendDecidedClosesOnlyItsOwnCard() {
+    let second = Event(id: 9, session: "s1", t: 12, kind: "send_pending", data: .object(sendPendingData()))
+
+    let f = facts([sendPending(), second, sendDecided(7, "sent")])
+
+    #expect(f.cards.map(\.id) == [9])
+  }
+
+  /// The held requests end with sbd, but a group message waits in the event log.
+  @Test func aRestartOfSbdKeepsASendCard() {
+    var replay = SessionReplay.replaying(permissionTurn() + [sendPending()], session: session())
+
+    replay.restarted()
+
+    #expect(replay.facts.cards.map(\.id) == [7])
+  }
+
+  @Test func anOpenSendCardNeedsYouToConfirm() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), sendPending(), event("Stop", 11)])
+
+    let verdict = Attention.evaluate(session(), f, now: 12)
+
+    #expect(verdict.state == .needsYou)
+    #expect(verdict.reason.hasPrefix("confirm"))
+  }
+
+  @Test func aSendCardIsAnApprovalWithAllowAndDeny() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), sendPending(), event("Stop", 11)])
+
+    let triage = item(f, now: 12)
+
+    #expect(triage?.source == .card)
+    #expect(triage?.kind == .approval)
+    #expect(triage?.ref == "card:7")
+    #expect(triage?.options.map(\.message) == ["allow", "deny"])
+  }
+}
