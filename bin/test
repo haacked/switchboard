@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs the unit and integration tests. With --claude first, it also runs the
 # tests that drive the installed claude with Haiku, which take minutes and use
-# some of your Claude quota. With --shards N, it splits the tests across N
-# swift test processes that run at once. The Command Line Tools' build system
+# some of your Claude quota. With --shards N, it splits the integration tests
+# across N swift test processes, and runs the other tests in one more, all at
+# once. The Command Line Tools' build system
 # can leave out the folder that holds Swift Testing's macro plugin. This script
 # passes that folder to the compiler when it exists.
 set -euo pipefail
@@ -33,17 +34,18 @@ shards() {
   list=$(swift test list --skip-build | grep /)
   local total
   total=$(grep -c . <<<"$list")
-  # Each top-level suite goes to the shard with the fewest integration tests.
-  # The other targets take seconds, so they weigh nothing.
+  # Each integration suite goes to the shard with the fewest integration
+  # tests. The other targets take seconds and run in one more process, so
+  # their time limits never wait behind integration tests that block threads.
   local plan
   plan=$(cut -d/ -f1 <<<"$list" | sort | uniq -c | sort -rn | awk -v n="$n" '
-    { w = ($2 ~ /^IntegrationTests\./) ? $1 : 0
-      best = 0
+    $2 !~ /^IntegrationTests($|\.)/ { print n, $2; next }
+    { best = 0
       for (i = 1; i < n; i++) if (load[i] < load[best]) best = i
-      load[best] += w
+      load[best] += $1
       print best, $2 }')
   local i matched=0 patterns=()
-  for ((i = 0; i < n; i++)); do
+  for ((i = 0; i <= n; i++)); do
     local keys
     keys=$(awk -v i="$i" '$1 == i { gsub(/\./, "\\.", $2); printf "%s|", $2 }' <<<"$plan")
     [ -n "$keys" ] || continue
