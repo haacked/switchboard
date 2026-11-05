@@ -383,6 +383,85 @@ extension AcknowledgeTests {
       #expect(v.state == .working)
       #expect(!v.acknowledged)
     }
+
+    /// The acknowledgment of the Inbox verdict that `events` give.
+    private func ackOfCurrentVerdict(_ events: [Event], at t: Int64) throws -> Event {
+      let v = Attention.evaluate(session(), facts(events), now: now)
+      return try ackEvent(t, v.state, v.reason)
+    }
+
+    @Test func sameCommandPromptInTheSameTurnBringsTheSessionBack() throws {
+      var events = promptTurn(touchCall, touch)
+      events += [
+        try ackOfCurrentVerdict(events, at: 3),
+        event("PostToolUse", 4, touchCall),
+        event("PreToolUse", 5, tool("Bash", ["command": "touch x"], id: "b2")),
+        Event(id: 7, session: "s1", t: 6, kind: "PermissionRequest", data: .object(touch)),
+      ]
+
+      let v = verdict(facts(events))
+
+      #expect(v == Verdict(state: .needsYou, reason: "approve `touch x`"))
+      #expect(!v.acknowledged)
+    }
+
+    @Test func sameQuestionInTheSameTurnBringsTheSessionBack() throws {
+      var events = [event("UserPromptSubmit", 0, ["prompt": "go"]), event("PreToolUse", 1, ask())]
+      events += [
+        try ackOfCurrentVerdict(events, at: 2),
+        event("PostToolUse", 3, ask()),
+        event("PreToolUse", 4, ask(id: "q2")),
+      ]
+
+      let v = verdict(facts(events))
+
+      #expect(v.state == .needsYou)
+      #expect(!v.acknowledged)
+    }
+
+    @Test func sameGroupMessageWhileIdleBringsTheSessionBack() throws {
+      var events = turn("Done.") + [sendPending()]
+      events += [
+        try ackOfCurrentVerdict(events, at: 11),
+        sendDecided(7, "send", t: 12),
+        Event(id: 9, session: "s1", t: 13, kind: "send_pending", data: .object(sendPendingData())),
+      ]
+
+      let v = verdict(facts(events))
+
+      #expect(v.state == .needsYou)
+      #expect(!v.acknowledged)
+    }
+
+    /// A prompt that only a Notification reported has no card and no PermissionRequest.
+    @Test func sameNotificationPromptInTheSameTurnBringsTheSessionBack() throws {
+      let prompt: [String: JSON] = [
+        "notification_type": "permission_prompt", "message": "Claude needs your permission",
+      ]
+      var events = [
+        event("UserPromptSubmit", 0, ["prompt": "go"]),
+        event("PreToolUse", 1, tool("Bash", ["command": "ls"], id: "b1")),
+        event("Notification", 2, prompt),
+      ]
+      events += [
+        try ackOfCurrentVerdict(events, at: 3),
+        event("PostToolUse", 4, tool("Bash", ["command": "ls"], id: "b1")),
+        event("PreToolUse", 5, tool("Bash", ["command": "ls"], id: "b2")),
+        event("Notification", 6, prompt),
+      ]
+
+      let v = verdict(facts(events))
+
+      #expect(v == Verdict(state: .needsYou, reason: "approve Claude needs your permission"))
+      #expect(!v.acknowledged)
+    }
+
+    @Test func acknowledgedPromptStaysAcknowledged() throws {
+      var events = promptTurn(touchCall, touch)
+      events.append(try ackOfCurrentVerdict(events, at: 3))
+
+      #expect(verdict(facts(events)).acknowledged)
+    }
   }
 }
 
@@ -420,7 +499,7 @@ extension AcknowledgeTests {
     @Test func staleVerdictIgnoresAMatchingAcknowledgment() throws {
       let f = facts(turn("Done.") + [try ackEvent(2, .stale, "idle for 3 days")])
 
-      let v = Attention.evaluate(session(), f, now: 3 * Attention.dayMs + 2)
+      let v = Attention.shown(Attention.evaluate(session(), f, now: 3 * Attention.dayMs + 2), f)
 
       #expect(v == Verdict(state: .stale, reason: "idle for 3 days"))
       #expect(!v.acknowledged)

@@ -116,6 +116,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let d = event.data
     if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
+    let promptsBefore = openPrompts
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.
     let fromSubagent = event.fromSubagent
@@ -230,7 +231,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
     applyAutoContinue(event, userPrompt: userPrompt)
-    applyAcknowledgment(event)
+    applyAcknowledgment(event, promptsBefore: promptsBefore)
   }
 
   private mutating func startTurn(_ t: Int64) {

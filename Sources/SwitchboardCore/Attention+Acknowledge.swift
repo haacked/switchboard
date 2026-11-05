@@ -19,13 +19,34 @@ public struct Acknowledgment: Codable, Equatable, Sendable {
   }
 }
 
+/// The cards, the permission prompt, and the question that wait on the user.
+struct OpenPrompts {
+  var cards: Set<Int64>
+  var permission: ToolCall?
+  var question: ToolCall?
+
+  /// Whether a card, a prompt, or a question is open here that was not open in `before`.
+  func opened(since before: OpenPrompts) -> Bool {
+    !cards.isSubset(of: before.cards) || (permission != nil && permission != before.permission)
+      || (question != nil && question != before.question)
+  }
+}
+
 extension SessionFacts {
-  /// `startTurn` clears the acknowledgment, so it covers one turn.
-  mutating func applyAcknowledgment(_ event: Event) {
+  var openPrompts: OpenPrompts {
+    OpenPrompts(cards: Set(cards.map(\.id)), permission: openPermission, question: openQuestion)
+  }
+
+  /// `startTurn` clears the acknowledgment, so it covers one turn. A prompt
+  /// that opens after `before` clears it too, because a new prompt is a new
+  /// item even when its reason repeats the acknowledged one. sbd records
+  /// `ack` after the prompt that it covers, so this never clears the
+  /// acknowledgment of the prompt that the user saw.
+  mutating func applyAcknowledgment(_ event: Event, promptsBefore before: OpenPrompts) {
     switch event.kind {
     case "ack": acknowledgment = try? JSONCoding.convert(event.data, to: Acknowledgment.self)
     case "unack": acknowledgment = nil
-    default: break
+    default: if openPrompts.opened(since: before) { acknowledgment = nil }
     }
   }
 }

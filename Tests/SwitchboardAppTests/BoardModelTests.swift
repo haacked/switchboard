@@ -685,6 +685,56 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 
     #expect(model.acknowledging.isEmpty)
   }
+
+  func inboxModel(focus: String) -> BoardModel {
+    let model = appliedModel([needsItem("a"), needsItem("b"), needsItem("c")])
+    model.send = { _, _ in .null }
+    model.show(.inbox)
+    model.inboxFocus = focus
+    return model
+  }
+
+  @Test func acknowledgingTheCurrentItemFocusesTheNextOne() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("b")
+    #expect(model.inboxFocus == "c")
+  }
+
+  @Test func acknowledgingAnotherItemLeavesTheFocus() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("c")
+    #expect(model.inboxFocus == "b")
+  }
+
+  @Test func undoLeavesTheFocus() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("b", undo: true)
+    #expect(model.inboxFocus == "b")
+  }
+
+  @Test func acknowledgeTargetIsTheCurrentInboxItemWhileTheInboxShows() {
+    #expect(inboxModel(focus: "b").acknowledgeTarget?.id == "b")
+  }
+
+  /// A selection shows the session's terminals in place of the Inbox.
+  @Test func acknowledgeTargetIsTheSelectionOutsideTheInbox() {
+    let model = inboxModel(focus: "b")
+    model.selection = "a"
+    #expect(model.acknowledgeTarget?.id == "a")
+  }
+
+  @Test func undoDoesNotNotifyAboutTheRestoredItem() async throws {
+    var acked = needsItem("a", state: .waiting)
+    acked.acknowledged = true
+    let model = appliedModel([acked])
+    let restored = try JSON(encoding: needsItem("a"))
+    model.send = { _, _ in restored }
+
+    model.acknowledge("a", undo: true)
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.sessionsToNotify([needsItem("a")]).isEmpty)
+  }
 }
 
 /// Whether the Inbox makes Acknowledge the item's primary button.

@@ -438,7 +438,13 @@ final class BoardModel: ObservableObject {
     } else if currentInboxItem == id {
       moveInboxFocus(after: id)
     }
-    perform("ack", args, finally: { self.acknowledging.remove(id) })
+    perform(
+      "ack", args,
+      then: { value in
+        // The user put the item back, so the refresh must not notify about it.
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+      },
+      finally: { self.acknowledging.remove(id) })
   }
 
   /// The session that the Session menu's Acknowledge acts on: the current
@@ -657,8 +663,9 @@ final class BoardModel: ObservableObject {
     let i = list.firstIndex { $0.id == id } ?? -1
     inboxFocus = list[(i + 1) % list.count].id
     inboxJumps += 1
-    // A field in the item that scrolls away would keep the keystrokes.
-    NSApp.keyWindow?.makeFirstResponder(nil)
+    // A field in the item that scrolls away would keep the keystrokes. A
+    // session's terminal outside the Inbox keeps them.
+    if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
   }
 
   /// Starts sbd as a launchd agent with the `sb` that ships next to the app.
