@@ -36,7 +36,7 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
     let model = appliedModel([chatItem("c", group: "g1"), needsItem("a")])
 
     #expect(model.triage.map(\.id) == ["a"])
-    #expect(model.needsYou.map(\.id) == ["a"])
+    #expect(model.needsUser.map(\.id) == ["a"])
   }
 
   @Test func chatOfAGroupFindsThatGroupsChatOnly() {

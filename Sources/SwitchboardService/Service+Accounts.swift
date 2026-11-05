@@ -42,7 +42,7 @@ extension Service {
     let active = activeAccount
     var folders = accounts
     if !folders.contains(active) { folders.insert(active, at: 0) }
-    let counts = Dictionary(grouping: entries.keys.filter { !entries[$0]!.session.waitsToStart }) {
+    let counts = Dictionary(grouping: entries.keys.filter { entries[$0]!.session.runsClaude }) {
       claudeAccount(of: $0)
     }
     return folders.map {

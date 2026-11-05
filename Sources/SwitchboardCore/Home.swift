@@ -107,6 +107,7 @@ public struct Config: Codable, Equatable, Sendable {
   public var triage = TriageSettings()
   public var autoContinue = AutoContinueSettings()
   public var usage = UsageSettings()
+  public var docket = DocketSettings()
 
   public init() {}
 
@@ -146,6 +147,7 @@ public struct Config: Codable, Equatable, Sendable {
     triage = try c.decodeIfPresent(TriageSettings.self, forKey: .triage) ?? d.triage
     autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
     usage = try c.decodeIfPresent(UsageSettings.self, forKey: .usage) ?? d.usage
+    docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
   }
 }
 
