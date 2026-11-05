@@ -269,7 +269,7 @@ extension ReadyForReviewTests {
       #expect(verdict(f, session(wait: wait)) == Verdict(state: .waiting, reason: reason))
     }
 
-    @Test func prWithoutAPRStaysWaiting() throws {
+    @Test func sessionWithoutAPRStaysWaiting() throws {
       let f = try prFacts(nil)
 
       #expect(verdict(f, session(wait: "CI on #42")) == Verdict(state: .waiting, reason: "CI on #42"))

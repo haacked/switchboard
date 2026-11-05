@@ -254,8 +254,6 @@ public struct SessionFacts: Codable, Equatable, Sendable {
 public enum VerdictSource: Equatable, Sendable {
   /// The session's last reply.
   case reply
-  /// The review that GitHub still asks for on the PR.
-  case review
   /// Any other rule.
   case rule
 }

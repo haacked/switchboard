@@ -3,18 +3,23 @@ import Foundation
 extension Attention {
   /// Ready for review when the other rules leave the session Waiting and its
   /// PR is open, not a draft, not in Trunk's queue, and not merged by sbd.
-  /// Every other state keeps its session. A session therefore stays in Needs
-  /// you, Ready to merge, Claude can continue, or Working. The reason keeps a
-  /// wait's or a dependency's line after the PR's.
+  /// A session therefore stays in Needs you, Ready to merge, Claude can
+  /// continue, or Working. The reason keeps a wait's or a dependency's line
+  /// after the PR's.
   static func readyForReview(_ verdict: Verdict, _ facts: SessionFacts) -> Verdict? {
-    guard verdict.state == .waiting, let pr = facts.pr, pr.ready, pr.queue?.isQueued != true,
-      facts.currentMerge?.result != .merged
+    guard verdict.state == .waiting, let line = readyPRLine(facts) else { return nil }
+    return Verdict(state: .readyForReview, reason: oneLine("\(line); \(verdict.reason)", max: 200), kind: verdict.kind)
+  }
+
+  /// "#N title; review state, checks" for a PR that can be in Ready for
+  /// review. Nil for a draft, a closed PR, a PR in Trunk's queue, or a PR
+  /// that sbd merged.
+  static func readyPRLine(_ facts: SessionFacts) -> String? {
+    guard let pr = facts.pr, pr.ready, pr.queue?.isQueued != true, facts.currentMerge?.result != .merged
     else { return nil }
     let checks = pr.checks.map { "checks \($0.lowercased())" } ?? "no checks"
     let title = pr.title.isEmpty ? "" : " \(pr.title)"
-    var reason = "#\(pr.number)\(title); \(reviewState(pr)), \(checks)"
-    if verdict.source != .review { reason += "; \(verdict.reason)" }
-    return Verdict(state: .readyForReview, reason: oneLine(reason, max: 200), kind: verdict.kind)
+    return "#\(pr.number)\(title); \(reviewState(pr)), \(checks)"
   }
 
   /// Who approved, who requested changes, and whose review GitHub still asks
