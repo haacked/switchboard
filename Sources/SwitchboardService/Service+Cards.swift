@@ -77,7 +77,8 @@ extension Service {
   /// Answers a card: allow, deny with an optional message, or `answers`, one
   /// per question. A held card answers through its hook. A deferred question
   /// answers with a message to the session. A card whose hook closed answers
-  /// by typing into the terminal.
+  /// by typing into the terminal. An allow with `autoMode` also switches the
+  /// session to auto mode, which only a held card's hook can do.
   func answer(_ args: JSON) throws -> JSON {
     let card = try chosenCard(args)
     let id = card.session
@@ -96,6 +97,7 @@ extension Service {
     // What the hook prints, and what sbd types when Claude Code no longer
     // waits on the hook.
     let reply: (decision: Decision, typed: TypedAnswer)
+    let autoMode = args["autoMode"]?.bool == true
     if let given = args["answers"]?.array {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
@@ -106,7 +108,11 @@ extension Service {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
-        reply = (.allow(updatedInput: nil), .yes)
+        if autoMode {
+          if let refusal = card.autoModeRefusal { throw autoModeRefused(refusal) }
+          data["permission_mode"] = .string(PermissionMode.auto)
+        }
+        reply = (.allow(updatedInput: nil, autoMode: autoMode), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
       case "deny":
@@ -121,8 +127,11 @@ extension Service {
     // checks again first.
     if let request = held[card.id], !request.hookGone() {
       request.resolve(reply.decision.hookOutput)
+      if autoMode { try update(id) { $0.autoMode = true } }
       return answered("hook")
     }
+    // The hook can close after the check above.
+    guard !autoMode else { throw autoModeRefused(card.hookClosedRefusal) }
     guard !card.deferred else {
       throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
     }
@@ -145,6 +154,8 @@ extension Service {
       return result
     }
   }
+
+  private func autoModeRefused(_ reason: String) -> APIError { APIError("\(reason). Allow it without auto mode") }
 
   /// Defers each held question that has been open for `idleStopSeconds`,
   /// unless a terminal shows its session. The stop rule then leaves claude

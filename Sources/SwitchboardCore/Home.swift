@@ -77,6 +77,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var shell: String?
   /// Extra arguments for every claude command, such as --permission-mode.
   public var claudeArgs: [String] = []
+  /// Whether new sessions start claude in auto mode. `sb new --no-auto` opts one out.
+  public var autoMode = true
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
   /// Lets the `clock` request move sbd's clock forward. Only tests set it.
@@ -123,6 +125,7 @@ public struct Config: Codable, Equatable, Sendable {
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)
     shell = try c.decodeIfPresent(String.self, forKey: .shell)
     claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
+    autoMode = try c.decodeIfPresent(Bool.self, forKey: .autoMode) ?? d.autoMode
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
     // This skips a server that doesn't decode, such as a stdio one copied from

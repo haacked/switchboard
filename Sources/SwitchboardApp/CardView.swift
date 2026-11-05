@@ -51,6 +51,9 @@ struct CardView: View {
       HStack {
         Button("Allow") { model.answer(card, behavior: "allow") }
           .buttonStyle(.borderedProminent)
+        if card.offersAutoMode {
+          Button(PermissionMode.approveLabel) { model.answer(card, behavior: "allow", autoMode: true) }
+        }
         Button("Deny", action: deny)
         TextField("Message for Claude (optional)", text: $draft.message)
           .textFieldStyle(.roundedBorder)
@@ -59,6 +62,9 @@ struct CardView: View {
       Text("Deny without a message stops the turn. With a message, Claude reads it and goes on.")
         .font(.caption)
         .foregroundStyle(.secondary)
+      if card.offersAutoMode {
+        Text(PermissionMode.autoModeNote).font(.caption).foregroundStyle(.secondary)
+      }
     }
   }
 

@@ -12,6 +12,7 @@ func spawn(_ a: Args) {
     if let value = a.values[flag] { args[key] = .string(value) }
   }
   if a.switches.contains("--followup") { args["followup"] = .bool(true) }
+  if a.switches.contains("--no-auto") { args["autoMode"] = .bool(false) }
   if author == .claude, let parent = ProcessInfo.processInfo.environment["SB_SESSION_ID"] {
     args["parent"] = .string(parent)
   }

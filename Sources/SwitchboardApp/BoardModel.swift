@@ -402,11 +402,15 @@ final class BoardModel: ObservableObject {
     showWindow?()
   }
 
-  /// Answers a card: allow, deny with an optional message, or one answer per question.
-  func answer(_ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil) {
+  /// Answers a card: allow, deny with an optional message, or one answer per
+  /// question. `autoMode` with allow also switches the session to auto mode.
+  func answer(
+    _ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil, autoMode: Bool = false
+  ) {
     guard answering.insert(card.id).inserted else { return }
     var args: [String: JSON] = ["session": .string(card.session), "card": .number(Double(card.id))]
     if let behavior { args["behavior"] = .string(behavior) }
+    if autoMode { args["autoMode"] = true }
     if !message.isEmpty { args["message"] = .string(message) }
     if let answers { args["answers"] = .array(answers.map(JSON.string)) }
     // A sent group message succeeds even when some targets fail, so the

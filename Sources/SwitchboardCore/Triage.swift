@@ -22,10 +22,13 @@ public enum TriageSource: String, Codable, Sendable {
 }
 
 /// A choice that the user clicks. For a `card` item, `message` is the answer
-/// that `choose` gives the card: `allow` or `deny` for a permission prompt, and
-/// the option's label for a question. For other items it is the text that the
-/// session receives.
+/// that `choose` gives the card: `allow`, `deny`, or `TriageOption.allowAutoMode` for a
+/// permission prompt, and the option's label for a question. For other items
+/// it is the text that the session receives.
 public struct TriageOption: Codable, Equatable, Sendable {
+  /// The message of a permission card's option that allows the call and switches the session to auto mode.
+  public static let allowAutoMode = "allow-auto-mode"
+
   public var label: String
   public var detail: String?
   public var message: String
@@ -193,7 +196,10 @@ public enum Triage {
         options: [
           TriageOption(label: "Allow", message: "allow", recommended: true),
           TriageOption(label: "Deny", message: "deny"),
-        ], source: .card)
+        ]
+          + (card.offersAutoMode
+            ? [TriageOption(label: PermissionMode.approveLabel, message: TriageOption.allowAutoMode)] : []),
+        source: .card)
     }
     let first = card.questions.first
     // Several questions, or a multi-select one, take more than a click.

@@ -58,7 +58,8 @@ extension Service {
     return try queue.sync {
       try insertFollowup(
         followup, title: args["title"]?.string, branch: args["branch"]?.string, model: args["model"]?.string,
-        parent: args["parent"]?.string, group: args["group"]?.string, account: args["account"]?.string)
+        parent: args["parent"]?.string, group: args["group"]?.string, account: args["account"]?.string,
+        autoMode: args["autoMode"]?.bool)
     }
   }
 
@@ -66,7 +67,7 @@ extension Service {
   /// that sbd resolves. It runs on the state queue.
   func insertFollowup(
     _ followup: Followup, title: String? = nil, branch: String? = nil, model: String? = nil, parent ref: String? = nil,
-    group: String? = nil, account: String? = nil
+    group: String? = nil, account: String? = nil, autoMode: Bool? = nil
   ) throws -> SessionSummary {
     let parent = try ref.map { try lookup(["session": .string($0)]) }
     var session = Session(
@@ -83,6 +84,7 @@ extension Service {
       session.claudeConfigDir = claudeAccount(of: parent)
     }
     session.followup = followup
+    session.autoMode = autoMode ?? config.autoMode
     try save(session)
     return summary(session.id)
   }
@@ -299,6 +301,7 @@ extension Service {
           id: shortId("s", taken: entries.keys), name: title, cwd: "", claudeSessionId: UUID().uuidString.lowercased(),
           created: item.added ?? now)
         session.followup = followup
+        session.autoMode = config.autoMode
         try save(session)
         try store.recordImport(item.key)
         imported.append(summary(session.id))

@@ -90,6 +90,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var docket = DocketStatus()
   /// The last merge that sbd ran or the user dismissed.
   public var merge: MergeAttempt?
+  /// Claude Code's permission mode, as the last main-session hook or launch
+  /// reported it. SessionStart carries none, so a launch without a mode
+  /// leaves it unknown until the next hook.
+  public var permissionMode: String?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -120,6 +124,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     // A subagent's tool calls don't change what the main session waits on.
     let fromSubagent = event.fromSubagent
     let tool = d["tool_name"]?.string ?? ""
+    if !fromSubagent, let mode = d["permission_mode"]?.string { permissionMode = mode }
     switch event.kind {
     case "SessionStart":
       live = true
@@ -133,6 +138,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       docket.apply(d)
     case "started", "resumed":
       lastLaunch = event.t
+      permissionMode = d["permission_mode"]?.string
     case "imported":
       // The transcript's last line, not the import, is the session's last activity.
       if let t = d["lastActivity"]?.int { lastActivity = Int64(t) }
