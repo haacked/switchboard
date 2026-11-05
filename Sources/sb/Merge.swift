@@ -26,6 +26,6 @@ func merge(_ a: Args) {
   if a.json { return printJSON(result) }
   let s = summary(result)
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
-  let verb = dismiss ? "dismissed" : s.pr?.mergeMethod?.enqueues == true ? "enqueued" : "merged"
+  let verb = dismiss ? "dismissed" : (s.pr?.mergeMethod ?? .merge).pastTense
   print("\(verb) \(pr) of \(s.name)")
 }

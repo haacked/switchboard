@@ -16,14 +16,8 @@ public enum MergeMethod: String, Codable, Sendable {
 
   /// The button's word for landing the PR this way.
   public var verb: String { enqueues ? "Enqueue" : "Merge" }
-}
 
-extension TriageOption {
-  /// What a click does when the session's PR lands by `mergeMethod`. A merge
-  /// option in a repository with a queue adds the PR to that queue.
-  public func effect(mergeMethod: MergeMethod?) -> String {
-    action == .merge && mergeMethod?.enqueues == true ? "Adds the PR to its merge queue" : effect
-  }
+  public var pastTense: String { enqueues ? "enqueued" : "merged" }
 }
 
 /// A merge that sbd ran or the user dismissed, as a `merge` event recorded it.
