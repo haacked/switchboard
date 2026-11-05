@@ -28,7 +28,7 @@ extension Service {
       guard !ids.isEmpty else { throw APIError("group move needs a session") }
       let group = args["ungrouped"]?.bool == true ? nil : try lookupGroup(args)
       try place(ids, in: group)
-      return try JSON(encoding: ids.map(summary))
+      return try JSON(encoding: ids.map { summary($0) })
     case "group-note":
       let id = try lookupGroup(args)
       var group = groups[id]!
@@ -126,9 +126,9 @@ extension Service {
     entries.values.map(\.session).filter { $0.group == group }.sorted { $0.id < $1.id }
   }
 
-  private func groupSummary(_ id: String) -> GroupSummary {
+  private func groupSummary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> GroupSummary {
     var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
-    summary.plans = planSummaries(group: id)
+    summary.plans = planSummaries(group: id, rowFollowups: rowFollowups)
     return summary
   }
 
@@ -136,7 +136,8 @@ extension Service {
     let sorted = groups.values.sorted { ($0.name, $0.id) < ($1.name, $1.id) }
     let ungrouped = entries.values.map(\.session).filter { groupable($0) && $0.group.map { groups[$0] == nil } ?? true }
       .map(\.id).sorted()
-    return GroupList(groups: sorted.map { groupSummary($0.id) }, ungrouped: ungrouped)
+    let rowFollowups = planRowFollowups()
+    return GroupList(groups: sorted.map { groupSummary($0.id, rowFollowups: rowFollowups) }, ungrouped: ungrouped)
   }
 
   func groupSuggestions() throws -> [GroupSuggestion] {

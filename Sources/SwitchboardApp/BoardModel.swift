@@ -58,6 +58,8 @@ final class BoardModel: ObservableObject {
   /// Group suggestions whose Accept or Decline is on its way to sbd. Their
   /// rows stay disabled until sbd replies, so a second click can't answer again.
   @Published var answeringSuggestions: Set<String> = []
+  /// The plan rows, as `<plan> <row>`, whose follow-up sbd is making.
+  @Published var followingUp: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -132,6 +134,10 @@ final class BoardModel: ObservableObject {
   }
 
   var triage: [SessionSummary] { Triage.order(sessions) }
+
+  /// The repo label of each session in the sidebar. The Inbox uses the same
+  /// labels. A session therefore shows the same repo in both lists.
+  var repoLabels: [String: String] { RepoLabels.labels(board) }
 
   /// The sessions and the follow-ups that wait to start. A follow-up whose
   /// trigger fired is in both lists until it starts. A follow-up that started
@@ -349,6 +355,28 @@ final class BoardModel: ObservableObject {
       "group-suggest", [key: .string(id)], then: { _ in self.suggestions.removeAll { $0.id == id } },
       finally: { self.answeringSuggestions.remove(id) })
   }
+  /// Makes a follow-up from a plan row that reads Not started. The row's
+  /// button stays off until sbd answers. `then` removes the row when sbd
+  /// makes the follow-up, so its button does not turn back on before the
+  /// refresh lists the plan again.
+  func followUp(plan: String, row: String) {
+    let key = followUpKey(plan: plan, row: row)
+    guard followingUp.insert(key).inserted else { return }
+    perform(
+      "plan-followup", ["plan": .string(plan), "row": .string(row)],
+      then: { _ in
+        for g in self.groups.indices {
+          guard let p = self.groups[g].plans?.firstIndex(where: { $0.id == plan }) else { continue }
+          self.groups[g].plans?[p].canFollowUp.removeAll { ($0.ref ?? $0.text) == row }
+        }
+      },
+      finally: { self.followingUp.remove(key) })
+  }
+
+  func isFollowingUp(plan: String, row: String) -> Bool { followingUp.contains(followUpKey(plan: plan, row: row)) }
+
+  private func followUpKey(plan: String, row: String) -> String { "\(plan) \(row)" }
+
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first.
   func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {
