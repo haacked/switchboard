@@ -56,6 +56,12 @@ public struct DoneRemovalResult: Codable, Equatable, Sendable {
     self.skipped = skipped
     self.partial = partial
   }
+
+  public mutating func add(_ other: DoneRemovalResult) {
+    removed += other.removed
+    skipped += other.skipped
+    partial += other.partial
+  }
 }
 
 extension SessionSummary {

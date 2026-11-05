@@ -35,14 +35,6 @@ enum DoneRemovalText {
   }
 }
 
-extension DoneRemovalResult {
-  mutating func add(_ other: DoneRemovalResult) {
-    removed += other.removed
-    skipped += other.skipped
-    partial += other.partial
-  }
-}
-
 extension BoardModel {
   /// The arguments of the Done delete icon's `rm`: the worktree, and the
   /// branch and the remote branch when the PR merged.

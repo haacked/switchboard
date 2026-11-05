@@ -5,6 +5,9 @@ import SwitchboardCore
 /// then removes. Without a terminal or inside Claude, it needs --yes. With
 /// --json and without --yes, it prints the plan and removes nothing.
 func removeDone(_ a: Args) {
+  if let session = a.positional.first {
+    die("rm --done removes every Done session, so it takes no session. Run sb rm \(session) to remove one.")
+  }
   if a.switches.contains("--delete-branch") {
     die("rm --done deletes a branch only when its PR merged it. Pass --worktree for that.")
   }
@@ -31,9 +34,12 @@ func removeDone(_ a: Args) {
     confirm(verb: "remove", count, text, refused: "removed nothing")
   }
   args["confirmed"] = true
-  args["targets"] = .array(plan.remove.map { .string($0.id) })
-  var done = decode(call("rm-done", args, timeout: 600), as: DoneRemovalResult.self)
-  done.skipped = plan.skip + done.skipped
+  var done = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
+  // One request per session keeps each removal within its own timeout, as the app does.
+  for item in plan.remove {
+    args["targets"] = .array([.string(item.id)])
+    done.add(decode(call("rm-done", args, timeout: 300), as: DoneRemovalResult.self))
+  }
   if a.json { return printResult(done) }
   print("removed \(done.removed.count), skipped \(done.skipped.count)")
   for s in done.partial { print("  \(s.id)  \(s.name): \(s.reason)".printable) }

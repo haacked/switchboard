@@ -52,26 +52,33 @@ extension Service {
   }
 
   /// Sorts the sessions into those that `rm` would remove and those it
-  /// refuses, by running `rm`'s checks.
+  /// refuses, by running `rm`'s checks. The checks only read git, so they run
+  /// concurrently.
   private func planDoneRemoval(_ ids: [String], worktree: Bool, remoteBranch: Bool) -> DoneRemovalPlan {
-    var plan = DoneRemovalPlan(remove: [], skip: [])
-    for id in ids {
+    let outcomes: [Result<DoneRemovalPlan.Item, NotDone>] = concurrentMap(ids) { id in
       switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch) {
-      case .failure(let skip):
-        plan.skip.append(skip.skip)
+      case .failure(let notDone):
+        return .failure(notDone)
       case .success(let t):
         do {
           let checked = try checkRemoval(
             t.session, pr: t.pr, sharedWith: t.sharedWith,
             folderGone: !FileManager.default.fileExists(atPath: t.session.cwd), worktree: t.worktree,
             branch: t.branch)
-          plan.remove.append(
+          return .success(
             .init(
               id: id, name: t.session.name, pr: t.pr?.number, worktree: t.worktree ? t.session.cwd : nil,
               branch: checked.branch?.name, remoteBranch: t.remoteBranch))
         } catch {
-          plan.skip.append(.init(id: id, name: t.session.name, reason: "\(error)"))
+          return .failure(NotDone(skip: .init(id: id, name: t.session.name, reason: "\(error)")))
         }
+      }
+    }
+    var plan = DoneRemovalPlan(remove: [], skip: [])
+    for outcome in outcomes {
+      switch outcome {
+      case .success(let item): plan.remove.append(item)
+      case .failure(let notDone): plan.skip.append(notDone.skip)
       }
     }
     return plan
