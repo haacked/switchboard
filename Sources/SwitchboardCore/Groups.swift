@@ -45,7 +45,7 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
       kept.notes.append(note)
     }
     if kept.description == nil {
-      kept.description = other.description ?? "Merged from \(name) and \(other.name)"
+      kept.description = other.description ?? (try? Self.cleanDescription("Merged from \(name) and \(other.name)"))
     } else if let theirs = other.description, theirs != kept.description {
       kept.notes.append(
         Note(
@@ -303,11 +303,7 @@ public enum GroupSuggestions {
 
   /// The description of a new group made from the key.
   static func description(_ key: Key) -> String {
-    switch key.kind {
-    case .prefix: "Sessions on the \(key.text) branch prefix"
-    case .scope: "Sessions whose PR titles have the scope \(key.text)"
-    case .word: "Sessions whose branches or PR titles share the word \(key.text)"
-    }
+    key.kind == .prefix ? "Sessions on the \(key.text) branch prefix" : "Sessions whose \(reason(key))"
   }
 
   /// The suggestions, strongest first: merges of groups that a dependency

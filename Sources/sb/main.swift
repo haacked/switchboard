@@ -513,10 +513,13 @@ guard let command = argv.popFirst() else {
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
 var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
 // The text of `sb group note` and `sb group describe` is everything after the
-// group. `describe` reads flags instead when the word after the group is one.
+// group. `describe` reads flags instead when the word after the group is
+// `--clear` or `--json`.
 if ["group", "groups"].contains(command), ["note", "describe"].contains(argv.first) {
   a = Args(argv, literalAfter: 2)
-  if argv.first == "describe", a.positional.count > 2, a.positional[2].hasPrefix("--") { a = Args(argv) }
+  if argv.first == "describe", a.positional.count > 2, ["--clear", "--json"].contains(a.positional[2]) {
+    a = Args(argv)
+  }
 }
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 

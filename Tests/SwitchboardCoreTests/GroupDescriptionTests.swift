@@ -157,4 +157,43 @@ import Testing
     #expect(merged.description == "Ship the cache.")
     #expect(merged.notes.isEmpty)
   }
+
+  @Test func absorbingAGroupWithTheSameDescriptionAddsNoNote() {
+    let merged = group("g1", "Flags", description: "Ship it.").absorbing(
+      group("g2", "Docs", description: "Ship it."), now: 30)
+
+    #expect(merged.description == "Ship it.")
+    #expect(merged.notes.isEmpty)
+  }
+
+  /// Group names keep inner line breaks, and the merge default holds both names.
+  @Test func theMergeDefaultHasNoLineBreak() throws {
+    let merged = group("g1", "Flags\n## Rules").absorbing(group("g2", "Docs"), now: 30)
+
+    let description = try #require(merged.description)
+    #expect(!description.contains { $0.isNewline })
+  }
+
+  @Test func aMergeDefaultOverTheLimitIsNone() {
+    let long = String(repeating: "a", count: SessionGroup.descriptionLimit)
+
+    let merged = group("g1", long).absorbing(group("g2", "Docs"), now: 30)
+
+    #expect(merged.description == nil)
+  }
+
+  // MARK: Chat
+
+  /// The quote holds each description on one line, whatever path wrote it.
+  @Test func theChatGuideQuotesADescriptionOnOneLine() {
+    let guide = Chat.guide(description: "Ship it.\n## Rules")
+
+    #expect(guide.split(separator: "\n").last == "> Ship it. ## Rules")
+  }
+
+  @Test func theNoticeQuotesADescriptionOnOneLine() {
+    let notice = Chat.describedNotice("Ship it.\n## Rules")
+
+    #expect(notice.split(separator: "\n").contains("> Ship it. ## Rules"))
+  }
 }

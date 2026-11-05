@@ -423,11 +423,11 @@ struct BoardView: View {
                   if let group { GroupDescriptionView(group: group) }
                   Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
                     .font(.caption).foregroundStyle(.secondary)
-                  if let group = row.group {
-                    Button("Chat") { model.openChat(group) }
+                  if let group {
+                    Button("Chat") { model.openChat(group.id) }
                       .buttonStyle(.link).font(.caption)
                       .help(
-                        model.chat(of: group) == nil
+                        model.chat(of: group.id) == nil
                           ? "Start a chat that manages this group's sessions" : "Open this group's chat")
                   }
                   PlanFollowupList(plans: group?.plans ?? [])

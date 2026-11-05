@@ -98,12 +98,19 @@ extension Service {
     return group
   }
 
-  /// A changed description also rewrites the group chat's guide and tells the chat.
+  /// A changed description also rewrites the group chat's guide and tells the
+  /// chat. A failure there is logged, because the group is already saved and a
+  /// merge still has to move its plans and delete the absorbed group.
   private func saveGroup(_ group: SessionGroup) throws {
     let described = groups[group.id].map { $0.description != group.description } ?? false
     try store.save(group: group)
     groups[group.id] = group
-    if described { try groupDescribed(group.id) }
+    guard described else { return }
+    do {
+      try groupDescribed(group.id)
+    } catch {
+      logLine("groups: can't update the chat of \(group.id) with its description: \(error)")
+    }
   }
 
   /// Deletes the group, detaches its plans, and marks its chat done.

@@ -13,12 +13,21 @@ struct GroupDescriptionView: View {
 
   var body: some View {
     if editing {
-      TextField("Description", text: $draft)
+      TextField("Description", text: $draft, axis: .vertical)
+        .lineLimit(1...5)
         .font(.caption)
         .textFieldStyle(.roundedBorder)
         .focused($focused)
         .onAppear { focused = true }
+        // The key handler does not see keypad Enter, which saves here.
         .onSubmit(save)
+        // A vertical field would otherwise insert a line break on Return. A description is one line, so every Return saves.
+        .onKeyPress(.return) {
+          // An input method that is composing text takes Return to confirm the composition.
+          if (NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() == true { return .ignored }
+          save()
+          return .handled
+        }
         .onExitCommand { editing = false }
         .onChange(of: focused) { _, now in if !now && editing { save() } }
         .accessibilityLabel("Description of \(group.name)")
@@ -38,14 +47,14 @@ struct GroupDescriptionView: View {
       }
       .buttonStyle(.plain)
       .help(group.description ?? "Describe what this group is for")
-      .accessibilityLabel(group.description ?? "No description")
+      .accessibilityLabel(group.description ?? "Add a description")
       .accessibilityHint("Edit description")
       .accessibilityIdentifier("group-description-\(group.id)")
     }
   }
 
+  /// Text that the model refuses stays in the open field, so the user can shorten it.
   private func save() {
-    editing = false
-    model.describeGroup(group.id, draft)
+    if model.describeGroup(group.id, draft) { editing = false }
   }
 }

@@ -189,6 +189,15 @@ import Testing
     #expect(try listed(sbd, g.id).description == "deploy --to staging first")
   }
 
+  @Test func describeKeepsTextThatStartsWithAFlag() throws {
+    let sbd = try Instance()
+    let g = try add(sbd, "Flags")
+
+    _ = try describe(sbd, "Flags", "--force pushes are banned")
+
+    #expect(try listed(sbd, g.id).description == "--force pushes are banned")
+  }
+
   @Test func describeRefusesAGroupItCantFind() throws {
     let sbd = try Instance()
     let g = try add(sbd, "Flags")
@@ -346,6 +355,18 @@ import Testing
     #expect(try listed(sbd, set.id).description == "Set when added.")
     #expect(try listed(sbd, described.id).description == "Set by describe.")
     #expect(try listed(sbd, cleared.id).description == nil)
+  }
+
+  @Test func sbdKeepsTheDescriptionInTheChatGuideAtEachStart() throws {
+    let sbd = try Instance()
+    _ = try add(sbd, "Flags", description: "Ship the cache.")
+    let c = try ChatTests().chat(sbd, "Flags")
+    let path = "\(c.cwd)/CLAUDE.md"
+    try "stale".write(toFile: path, atomically: true, encoding: .utf8)
+
+    try sbd.restart(setting: "tickSeconds", to: 0.2)
+
+    #expect(try String(contentsOfFile: path, encoding: .utf8) == Chat.guide(description: "Ship the cache."))
   }
 
   @Test func movingSessionsInAndOutKeepsTheDescription() throws {
@@ -512,6 +533,22 @@ import Testing
 
   // MARK: The chat's context
 
+  /// The group is saved before sbd rewrites the chat's guide, so a guide that
+  /// can't be written must not fail the describe.
+  @Test func describeSavesWhenTheChatGuideCannotBeWritten() throws {
+    let sbd = try Instance()
+    let g = try add(sbd, "Flags")
+    let c = try ChatTests().chat(sbd, "Flags")
+    let guide = "\(c.cwd)/CLAUDE.md"
+    try FileManager.default.removeItem(atPath: guide)
+    try FileManager.default.createDirectory(atPath: guide, withIntermediateDirectories: false)
+
+    let described = try describe(sbd, "Flags", "Ship the cache.")
+
+    #expect(described.description == "Ship the cache.")
+    #expect(try listed(sbd, g.id).description == "Ship the cache.")
+  }
+
   /// Where the description came from.
   enum DescribedBy: CaseIterable { case add, describe }
 
@@ -608,6 +645,7 @@ import Testing
     try sbd.waitFor(c.id, "the stop") { !$0.live }
 
     _ = try describe(sbd, "Flags", "Ship the cache first.")
+    #expect(try !sbd.get(c.id).live)
     let again = try liveChat(sbd, "Flags")
 
     #expect(again.id == c.id)

@@ -66,4 +66,13 @@ import Testing
     #expect(model.groups[0].description == "Flag evaluation")
     #expect(model.actionError?.contains("280") == true)
   }
+
+  /// The description field stays open only when the model refuses the text.
+  @Test func onlyRefusedTextReportsFailure() {
+    let model = model(description: "Flag evaluation")
+    model.send = { _, _ in .null }
+
+    #expect(model.describeGroup("g1", "Flag evaluation"))
+    #expect(!model.describeGroup("g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1)))
+  }
 }
