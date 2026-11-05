@@ -3,9 +3,6 @@
 # that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
 # app's terminal, as `sb screen` shows them. It opens the app's window, so it
 # needs a logged-in macOS session with a display, and bin/test never runs it.
-# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, or SB_DRAFT_TEST, so the app
-# runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
-# normal launch does.
 # It then quits the app, and separately kills it, and starts it again each
 # time. It checks through sb and tmux that the session and both its panes are
 # the same processes with the same screens.
@@ -16,6 +13,9 @@
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, or SB_DRAFT_TEST, so the app
+# runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
+# normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD

@@ -25,21 +25,22 @@ struct BackgroundLaunchTests {
     #expect(BackgroundLaunch.applies(to: ["SB_SNAPSHOT": "/tmp/x.png", "SB_TEST_VISIBLE": "0"]))
   }
 
-  @Test func hiddenWindowIsTransparentAndIgnoresTheMouse() {
+  private func window(_ style: NSWindow.StyleMask = [.titled]) -> NSWindow {
     _ = NSApplication.shared
-    let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+    return NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: style, backing: .buffered, defer: true)
+  }
+
+  @Test func hiddenWindowIsTransparentAndIgnoresTheMouse() {
+    let window = window()
     BackgroundLaunch.hide(window)
     #expect(window.alphaValue == 0)
     #expect(window.ignoresMouseEvents)
   }
 
   @Test func hiddenSheetIsTransparentAndIgnoresTheMouse() {
-    _ = NSApplication.shared
-    let parent = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
-    let sheet = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+    let parent = window()
+    let sheet = window()
     parent.beginSheet(sheet)
     defer { parent.endSheet(sheet) }
     #expect(sheet.sheetParent === parent)
@@ -49,9 +50,7 @@ struct BackgroundLaunchTests {
   }
 
   @Test func statusItemWindowStaysVisible() {
-    _ = NSApplication.shared
-    let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 30, height: 22), styleMask: [.borderless], backing: .buffered, defer: true)
+    let window = window([.borderless])
     window.level = .statusBar
     BackgroundLaunch.hide(window)
     #expect(window.alphaValue == 1)
