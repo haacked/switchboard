@@ -6,11 +6,15 @@ public struct PlanEdit: Codable, Equatable, Sendable {
   public var old: String?
   public var new: String
   public var after: String?
+  /// True when `new` replaces every line that reads `old`, as for identical
+  /// "status as of" lines. Otherwise `old` must match exactly one line.
+  public var every: Bool?
 
-  public init(old: String? = nil, new: String, after: String? = nil) {
+  public init(old: String? = nil, new: String, after: String? = nil, every: Bool? = nil) {
     self.old = old
     self.new = new
     self.after = after
+    self.every = every
   }
 }
 
@@ -280,7 +284,7 @@ public enum PlanUpdates {
       guard isDateLine(line), let new = dated(line, today: today, timeZone: timeZone), new != line,
         !edits.contains(where: { $0.old == line })
       else { continue }
-      edits.append(PlanEdit(old: line, new: new))
+      edits.append(PlanEdit(old: line, new: new, every: true))
     }
     return edits
   }
@@ -288,22 +292,21 @@ public enum PlanUpdates {
   // MARK: Apply and verify
 
   /// The document with the edits made. Each edit's line must match exactly
-  /// one line outside the generated table, except that a "status as of" edit
-  /// sets every line that matches it. `dateEdits` writes one edit for
-  /// identical date lines. Lines keep their indent and their line end.
+  /// one line outside the generated table, unless the edit sets `every`.
+  /// Lines keep their indent and their line end.
   public static func apply(_ markdown: String, _ edits: [PlanEdit]) throws -> String {
     var lines = Lines(markdown)
     for edit in edits {
       guard let anchor = edit.old ?? edit.after else { continue }
       let found = lines.outside.filter { lines.trimmed($0) == anchor }
-      let everyCopy = edit.old.map { isDateLine($0) && !$0.hasPrefix("|") } ?? false
-      guard everyCopy ? !found.isEmpty : found.count == 1 else {
+      let every = edit.old != nil && edit.every == true
+      guard !found.isEmpty, every || found.count == 1 else {
         throw APIError(
           "the plan changed since the proposal: \(found.isEmpty ? "no line reads" : "\(found.count) lines read") \(oneLine(anchor, max: 120))"
         )
       }
       if edit.old != nil {
-        for i in everyCopy ? found : [found[0]] { lines.replace(i, with: edit.new) }
+        for i in every ? found : [found[0]] { lines.replace(i, with: edit.new) }
       } else {
         lines.insert(edit.new, after: found[0])
       }

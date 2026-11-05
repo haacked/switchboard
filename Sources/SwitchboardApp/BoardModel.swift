@@ -382,11 +382,11 @@ final class BoardModel: ObservableObject {
     guard self[keyPath: answering].insert(id).inserted else { return }
     perform(op, args, on: queue, then: { _ in remove(self) }, finally: { self[keyPath: answering].remove(id) })
   }
-  func applyProposal(_ id: String) { answerProposal(id, "plan-apply") }
+  func applyProposal(_ id: String) { answerProposal(id, "plan-apply", on: planWrites) }
   func rejectProposal(_ id: String) { answerProposal(id, "plan-reject") }
 
-  private func answerProposal(_ id: String, _ op: String) {
-    answer(id, in: \.answeringProposals, op, ["proposal": .string(id)], on: op == "plan-apply" ? planWrites : nil) {
+  private func answerProposal(_ id: String, _ op: String, on queue: DispatchQueue? = nil) {
+    answer(id, in: \.answeringProposals, op, ["proposal": .string(id)], on: queue) {
       $0.planProposals.removeAll { $0.id == id }
     }
   }
