@@ -14,11 +14,15 @@ extension Instance {
     ])
   }
 
-  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
-  func ghMerges() -> [String] {
+  /// The lines of the stub's call log, oldest first. A call with a
+  /// multi-line argument takes several lines.
+  func ghCalls() -> [String] {
     let text = (try? String(contentsOfFile: "\(home.path)/gh-calls.log", encoding: .utf8)) ?? ""
-    return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix("pr merge ") }
+    return text.split(separator: "\n").map(String.init)
   }
+
+  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
+  func ghMerges() -> [String] { ghCalls().filter { $0.hasPrefix("pr merge ") } }
 
   /// Makes the stub's `gh pr merge` print `text` to stderr and exit 1.
   func ghMergeFails(with text: String) throws {

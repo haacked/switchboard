@@ -55,8 +55,14 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   public var isMerge: Bool { self == .merge || self == .dismiss }
 
   /// Whether the action acts on the PR for the user, as `sb merge` and
-  /// `sb review` do, so a session may not run it.
-  public var needsClick: Bool { isMerge || self == .requestReview || self == .dismissReview }
+  /// `sb review` do, so a session may not run it. The switch has no
+  /// default, so a new action must state whether it needs a click.
+  public var needsClick: Bool {
+    switch self {
+    case .merge, .dismiss, .requestReview, .dismissReview: true
+    case .send, .reply, .wait, .done, .allow, .deny, .allowAutoMode, .answer: false
+    }
+  }
 
   /// The actions that a card from a session or the model may name. sbd adds
   /// the others to the cards that it builds from a held prompt or a PR.
@@ -373,7 +379,8 @@ public enum Triage {
   static func ruleItem(_ verdict: Verdict) -> TriageItem {
     let text = capitalized(verdict.reason)
     return TriageItem(
-      title: title(verdict.reason), kind: verdict.kind, summary: verdict.summary ?? (text.hasSuffix(".") ? text : text + "."),
+      title: title(verdict.reason), kind: verdict.kind,
+      summary: verdict.summary ?? (text.hasSuffix(".") ? text : text + "."),
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 

@@ -100,13 +100,13 @@ extension Attention {
     }
   }
 
-  /// Ready for review while an open PR needs only the review that GitHub
-  /// still asks for. Each condition keeps a case in Needs you that someone
-  /// must act on. It does not rely on `openPR` running first.
+  /// Ready for review while an open PR needs only the review that GitHub,
+  /// or a request that sbd ran, still asks for. Each condition keeps a case
+  /// in Needs you that someone must act on. It does not rely on `openPR`
+  /// running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.ready, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
-      !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
-      !pr.ciFailed, classify(facts.lastReply ?? "") == .other, let line = readyPRLine(facts)
+    guard reviewablePR(facts) != nil, let reviewers = facts.requestedReviewers, !reviewers.isEmpty,
+      let line = readyPRLine(facts)
     else { return nil }
     return Verdict(state: .readyForReview, reason: oneLine(line, max: 200))
   }
@@ -118,7 +118,7 @@ extension Attention {
   /// without this the idle time would move the session to Stale.
   static func needsPRAction(_ facts: SessionFacts) -> Bool {
     guard let pr = facts.pr, pr.ready, pr.queue?.isQueued != true else { return false }
-    return pr.ciFailed || (pr.reviewRequests == [] && pr.queue == nil)
+    return pr.ciFailed || (facts.requestedReviewers == [] && pr.queue == nil)
   }
 
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }

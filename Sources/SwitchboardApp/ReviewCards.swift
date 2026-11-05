@@ -17,9 +17,9 @@ struct RequestReviewOption: View {
     OptionButton(session: session, ref: ref, number: number, option: option, title: title, primary: primary) {
       picking = true
     }
-      .popover(isPresented: $picking, arrowEdge: .bottom) {
-        ReviewerPicker(session: session, ref: ref, number: number, isPresented: $picking)
-      }
+    .popover(isPresented: $picking, arrowEdge: .bottom) {
+      ReviewerPicker(session: session, ref: ref, number: number)
+    }
   }
 }
 
@@ -30,7 +30,7 @@ struct ReviewerPicker: View {
   let session: SessionSummary
   let ref: String
   let number: Int
-  @Binding var isPresented: Bool
+  @Environment(\.dismiss) private var dismiss
   @State private var suggestions: [ReviewerSuggestion]?
   @State private var error: String?
   @State private var picked: Set<String> = []
@@ -58,11 +58,12 @@ struct ReviewerPicker: View {
       }
       HStack {
         Spacer()
-        Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
         Button("Request Review") {
           let reviewers = ReviewerPicker.chosen(suggestions ?? [], picked)
-          model.choose(session.id, ref: ref, option: number, action: .requestReview, reviewers: reviewers)
-          isPresented = false
+          model.choose(
+            session.id, ref: ref, option: number, action: .requestReview, text: reviewers.joined(separator: ","))
+          dismiss()
         }
         .keyboardShortcut(.defaultAction)
         .disabled(picked.isEmpty || model.choosing.contains("\(session.id)/\(number)"))

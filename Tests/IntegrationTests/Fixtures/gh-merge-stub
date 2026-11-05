@@ -5,8 +5,8 @@
 # test can keep the merge running. It then prints $SB_HOME/gh-merge-error to
 # stderr and exits 1 when that file exists, and exits 0 otherwise. `gh pr
 # edit` does the same with $SB_HOME/gh-edit-gate and $SB_HOME/gh-edit-error.
-# `gh api graphql` prints $SB_HOME/gh-graphql.json when that file exists, and
-# otherwise a PR by haacked for which GitHub suggests ann and haacked.
+# `gh api graphql` prints a PR by haacked for which GitHub suggests ann and
+# haacked.
 printf '%s\n' "$*" >>"$SB_HOME/gh-calls.log"
 case "$1 $2" in
 "auth token")
@@ -27,11 +27,7 @@ case "$1 $2" in
   fi
   ;;
 "api graphql")
-  if [ -f "$SB_HOME/gh-graphql.json" ]; then
-    cat "$SB_HOME/gh-graphql.json"
-  else
-    echo '{"data":{"repository":{"pullRequest":{"author":{"login":"haacked"},"suggestedReviewers":[{"isAuthor":true,"isCommenter":false,"reviewer":{"login":"ann"}},{"isAuthor":true,"isCommenter":true,"reviewer":{"login":"haacked"}}]}}}}'
-  fi
+  echo '{"data":{"node":{"author":{"login":"haacked"},"suggestedReviewers":[{"isAuthor":true,"isCommenter":false,"reviewer":{"login":"ann"}},{"isAuthor":true,"isCommenter":true,"reviewer":{"login":"haacked"}}]}}}'
   ;;
 *)
   exit 1

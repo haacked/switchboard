@@ -60,8 +60,7 @@ extension Service {
     case .dismiss:
       return Request(op: "merge", args: ["session": session, "dismiss": true])
     case .requestReview:
-      let reviewers =
-        args["reviewers"]?.array?.compactMap(\.string) ?? ReviewRequests.reviewers(in: args["text"]?.string ?? "")
+      let reviewers = ReviewRequests.reviewers(in: args["text"]?.string ?? "")
       guard !reviewers.isEmpty else {
         throw APIError("\(option.label) needs the reviewers. `sb review \(name)` lists the suggested ones")
       }

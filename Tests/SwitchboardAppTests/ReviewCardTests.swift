@@ -15,29 +15,31 @@ import Testing
         sent.resume(returning: (op, args))
         return .null
       }
-      model.choose("s1", ref: "rule:x", option: 1, action: .requestReview, reviewers: ["ann", "@copilot"])
+      model.choose("s1", ref: "rule:x", option: 1, action: .requestReview, text: "ann,@copilot")
     }
 
     #expect(sent.0 == "choose")
-    #expect(sent.1 == ["session": "s1", "option": "1", "ref": "rule:x", "reviewers": ["ann", "@copilot"]])
+    #expect(sent.1 == ["session": "s1", "option": "1", "ref": "rule:x", "text": "ann,@copilot"])
   }
 
   @Test func reviewSuggestionsAsksSbdAndReadsTheSuggestions() async throws {
     let model = BoardModel()
-    let asked = Box<(String, [String: JSON])>()
+    let asked = MessageAttachmentTests.Sent()
     model.send = { op, args in
-      asked.set((op, args))
+      asked.add(op, args)
       return [
         "session": "s1",
-        "suggestions": [["login": "ann", "reason": "committed to the changed files"], ["login": "@copilot", "reason": "x"]],
+        "suggestions": [
+          ["login": "ann", "reason": "committed to the changed files"], ["login": "@copilot", "reason": "x"],
+        ],
       ]
     }
 
     let got = try await model.reviewSuggestions("s1")
 
     #expect(got.map(\.login) == ["ann", "@copilot"])
-    #expect(asked.value?.0 == "review")
-    #expect(asked.value?.1 == ["session": "s1"])
+    #expect(asked.all.map(\.op) == ["review"])
+    #expect(asked.all.first?.args == ["session": "s1"])
   }
 
   @Test func reviewSuggestionsPassesSbdsErrorOn() async {
@@ -52,12 +54,4 @@ import Testing
 
     #expect(ReviewerPicker.chosen(suggestions, ["@copilot", "ann"]) == ["ann", "@copilot"])
   }
-}
-
-/// A value that a request on another thread sets.
-private final class Box<T>: @unchecked Sendable {
-  private let lock = NSLock()
-  private var stored: T?
-  var value: T? { lock.withLock { stored } }
-  func set(_ v: T) { lock.withLock { stored = v } }
 }

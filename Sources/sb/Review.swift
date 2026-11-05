@@ -29,5 +29,8 @@ func review(_ a: Args) {
   }
   let s = summary(result)
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
-  print(dismiss ? "dismissed the review card of \(pr) of \(s.name)" : "requested a review of \(pr) from \(reviewers.joined(separator: ", "))")
+  print(
+    dismiss
+      ? "dismissed the review card of \(pr) of \(s.name)"
+      : "requested a review of \(pr) from \(reviewers.joined(separator: ", "))")
 }

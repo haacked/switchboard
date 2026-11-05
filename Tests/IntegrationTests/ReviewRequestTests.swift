@@ -29,9 +29,9 @@ extension Instance {
   /// The arguments of each `gh pr edit` that the stub ran, oldest first.
   fileprivate func ghEdits() -> [String] { ghCalls().filter { $0.hasPrefix("pr edit ") } }
 
-  fileprivate func ghCalls() -> [String] {
-    let text = (try? String(contentsOfFile: "\(home.path)/gh-calls.log", encoding: .utf8)) ?? ""
-    return text.split(separator: "\n").map(String.init)
+  /// Makes the stub's `gh pr edit` print `text` to stderr and exit 1.
+  fileprivate func ghEditFails(with text: String) throws {
+    try text.write(toFile: "\(home.path)/gh-edit-error", atomically: true, encoding: .utf8)
   }
 }
 
@@ -78,7 +78,7 @@ extension Instance {
     #expect(!printed.contains("haacked "))
     #expect(sbd.ghEdits().isEmpty)
     let query = try #require(sbd.ghCalls().first { $0.hasPrefix("api graphql ") })
-    #expect(query.contains("-F owner=PostHog -F name=charts -F number=18303"))
+    #expect(query.hasPrefix("api graphql -f id=\(github.pr(Self.number)["id"]!.string!) -f query="))
   }
 
   @Test func reviewJSONListsTheSuggestions() throws {
@@ -106,6 +106,34 @@ extension Instance {
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
   }
 
+  @Test func secondRequestWhileOneRunsIsRefusedAndGhRunsOnce() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try unreviewedSession(github, sbd)
+    let gate = "\(sbd.home.path)/gh-edit-gate"
+    guard mkfifo(gate, 0o600) == 0 else { throw TestError(description: "mkfifo failed") }
+    let first = Process()
+    first.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sb")
+    first.arguments = ["review", s.id, "ann"]
+    first.environment = sbd.environment()
+    first.standardOutput = FileHandle.nullDevice
+    first.standardError = FileHandle.nullDevice
+    try first.run()
+    try sbd.waitFor("gh to start the request") { sbd.ghEdits().count == 1 }
+
+    let second = try sbd.run(["review", s.id, "bob"])
+
+    // Opening the FIFO for writing lets the stub's read finish.
+    let writer = try #require(FileHandle(forWritingAtPath: gate))
+    writer.write(Data("go\n".utf8))
+    try writer.close()
+    first.waitUntilExit()
+    #expect(second.status != 0)
+    #expect(second.stderr.contains("#18303 already has a review request running"))
+    #expect(first.terminationStatus == 0)
+    #expect(sbd.ghEdits() == ["pr edit 18303 --repo PostHog/charts --add-reviewer ann"])
+  }
+
   @Test func sessionStaysInReadyForReviewOnceGitHubListsTheReviewer() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
@@ -125,7 +153,7 @@ extension Instance {
     let sbd = try Instance.withMergeStub(github)
     let s = try unreviewedSession(github, sbd)
     let error = "could not request reviewer: 'nobody' not found"
-    try error.write(toFile: "\(sbd.home.path)/gh-edit-error", atomically: true, encoding: .utf8)
+    try sbd.ghEditFails(with: error)
 
     let r = try sbd.run(["review", s.id, "nobody"])
 

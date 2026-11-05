@@ -57,7 +57,7 @@ func choose(_ a: Args) {
   guard let item = summary(call("get", ["session": .string(id)])).triage else { die("\(id) needs nothing from you") }
   var args: [String: JSON] = ["session": .string(id), "option": .string(key), "ref": .string(item.ref)]
   if let text { args["text"] = .string(text) }
-  // A choice can allow, answer, merge, or request a review, which `allow`, `answer`, `merge`, and `review` refuse
+  // A choice can allow, answer, merge, or request a review. `allow`, `answer`, `merge`, and `review` refuse those
   // inside Claude Code.
   if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil { args["insideClaude"] = true }
   // A merge option waits up to two minutes for `gh pr merge`, as `sb merge` does.

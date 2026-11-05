@@ -19,16 +19,16 @@ extension Attention {
     else { return nil }
     let checks = pr.checks.map { "checks \($0.lowercased())" } ?? "no checks"
     let title = pr.title.isEmpty ? "" : " \(pr.title)"
-    return "#\(pr.number)\(title); \(reviewState(pr)), \(checks)"
+    return "#\(pr.number)\(title); \(reviewState(pr, requested: facts.requestedReviewers)), \(checks)"
   }
 
   /// Who approved, who requested changes, and whose review GitHub still asks
   /// for. When nobody did any of these, whether GitHub requires a review.
-  static func reviewState(_ pr: PullRequest) -> String {
+  static func reviewState(_ pr: PullRequest, requested: [String]?) -> String {
     var parts: [String] = []
     if !pr.approvers.isEmpty { parts.append("approved by \(names(pr.approvers))") }
     if !pr.changesRequestedBy.isEmpty { parts.append("changes requested by \(names(pr.changesRequestedBy))") }
-    if let requested = pr.reviewRequests, !requested.isEmpty {
+    if let requested, !requested.isEmpty {
       parts.append("review requested from \(names(requested))")
     }
     if parts.isEmpty { parts.append(pr.reviewDecision == .reviewRequired ? "review required" : "no review requested") }

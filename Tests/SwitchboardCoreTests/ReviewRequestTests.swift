@@ -46,7 +46,9 @@ extension ReviewRequestTests {
     @Test func reviewRequestEventSetsTheAttempt() {
       let f = facts([reviewRequestEvent(1, "requested", reviewers: ["alice", "@copilot"])])
 
-      #expect(f.reviewRequest == ReviewRequestAttempt(head: samplePRHead, result: .requested, reviewers: ["alice", "@copilot"]))
+      #expect(
+        f.reviewRequest
+          == ReviewRequestAttempt(head: samplePRHead, result: .requested, reviewers: ["alice", "@copilot"]))
     }
 
     @Test func attemptOnAnOlderHeadIsNotCurrent() throws {
@@ -123,6 +125,12 @@ extension ReviewRequestTests {
       #expect(!verdict(f).options.contains { $0.action == .requestReview }, "\(label)")
     }
 
+    @Test func prWithAFailedDepotJobShowsNoCard() throws {
+      let f = try prFacts(withDepot(unreviewedPR(checks: "PENDING"), try parsedRun()))
+
+      #expect(verdict(f) != card)
+    }
+
     @Test func prThatCanMergeWithoutAReviewIsReadyToMerge() throws {
       let f = try prFacts(unreviewedPR(reviewDecision: nil))
 
@@ -153,7 +161,9 @@ extension ReviewRequestTests {
     @Test func runningSubagentsShowNoCard() throws {
       let f = try prFacts(unreviewedPR(), then: [event("SubagentStart", 4, ["agent_id": "a1"])])
 
-      #expect(verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waiting on 1 subagent"))
+      #expect(
+        verdict(f)
+          == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waiting on 1 subagent"))
     }
   }
 }
@@ -182,6 +192,28 @@ extension ReviewRequestTests {
             state: .readyForReview, reason: "#42 Fix; review requested from alice and @copilot, checks success"))
     }
 
+    @Test func requestedSessionWithRunningSubagentsNamesTheReviewers() throws {
+      let f = try prFacts(
+        unreviewedPR(),
+        then: [
+          reviewRequestEvent(5, "requested", reviewers: ["alice"]), event("SubagentStart", 6, ["agent_id": "a1"]),
+        ])
+
+      #expect(
+        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from alice, checks success"))
+    }
+
+    @Test func requestedSessionThatGotAReviewNeedsYou() throws {
+      let f = try prFacts(
+        unreviewedPR(),
+        then: [
+          reviewRequestEvent(5, "requested", reviewers: ["alice"]),
+          try prEvent(6, unreviewedPR(reviews: [sampleVerdict("alice", "COMMENTED")])),
+        ])
+
+      #expect(verdict(f) == readTheReply)
+    }
+
     @Test func requestedSessionIsNotInTheInbox() throws {
       let f = try prFacts(unreviewedPR(), then: [reviewRequestEvent(5, "requested", reviewers: ["alice"])])
 
@@ -192,16 +224,20 @@ extension ReviewRequestTests {
       let f = try prFacts(
         unreviewedPR(),
         then: [
-          reviewRequestEvent(5, "requested", reviewers: ["alice"]), try prEvent(6, unreviewedPR(reviewRequests: ["alice"])),
+          reviewRequestEvent(5, "requested", reviewers: ["alice"]),
+          try prEvent(6, unreviewedPR(reviewRequests: ["alice"])),
         ])
 
-      #expect(verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from alice, checks success"))
+      #expect(
+        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from alice, checks success"))
     }
 
     @Test func newCommitAfterARequestShowsTheCardAgainWhenNobodyIsAsked() throws {
       let f = try prFacts(
         unreviewedPR(),
-        then: [reviewRequestEvent(5, "requested", reviewers: ["alice"]), try prEvent(6, unreviewedPR(headSha: "head2"))])
+        then: [
+          reviewRequestEvent(5, "requested", reviewers: ["alice"]), try prEvent(6, unreviewedPR(headSha: "head2")),
+        ])
 
       #expect(verdict(f) == card)
     }
@@ -212,8 +248,9 @@ extension ReviewRequestTests {
       let v = verdict(f)
 
       #expect(v == card)
-      #expect(v.callouts == [Callout(kind: .warning, title: "The last review request failed", body: "could not resolve user")])
-      #expect(f.reviewRequestError == "could not resolve user")
+      #expect(
+        v.callouts == [Callout(kind: .warning, title: "The last review request failed", body: "could not resolve user")]
+      )
     }
   }
 }
@@ -253,7 +290,9 @@ extension ReviewRequestTests {
         ["isAuthor": .bool(isAuthor), "isCommenter": .bool(isCommenter), "reviewer": ["login": .string(login)]]
       }
       return [
-        "data": ["repository": ["pullRequest": ["author": ["login": .string(author)], "suggestedReviewers": .array(nodes)]]]
+        "data": [
+          "node": ["author": ["login": .string(author)], "suggestedReviewers": .array(nodes)]
+        ]
       ]
     }
 
@@ -286,7 +325,7 @@ extension ReviewRequestTests {
     }
 
     @Test func responseWithoutAPRThrows() {
-      #expect(throws: (any Error).self) { try ReviewRequests.suggestions(from: ["data": ["repository": .null]]) }
+      #expect(throws: (any Error).self) { try ReviewRequests.suggestions(from: ["data": ["node": .null]]) }
     }
 
     @Test(arguments: ["alice", "a-1", "acme/widgets-team", "acme/team.name_2", "@copilot"])

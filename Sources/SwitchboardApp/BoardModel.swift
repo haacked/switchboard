@@ -482,12 +482,8 @@ final class BoardModel: ObservableObject {
   }
 
   /// Clicks the item's option. `text` is what the user typed for a reply
-  /// option, and `reviewers` are the reviewers that the user picked for a
-  /// review request.
-  func choose(
-    _ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil,
-    reviewers: [String]? = nil
-  ) {
+  /// option, or the reviewers, separated by commas, for a review request.
+  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
     // The Board's merge buttons read `merging`, so a merge from the card shows there too.
     let merge = action.isMerge
@@ -495,11 +491,11 @@ final class BoardModel: ObservableObject {
     guard choosing.insert(key).inserted else { return }
     var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
     if let text { args["text"] = .string(text) }
-    if let reviewers { args["reviewers"] = .array(reviewers.map(JSON.string)) }
     if merge { merging.insert(session) }
-    // A merge runs gh for up to two minutes, so it does not hold the other actions back.
+    // A merge or a review request waits on gh for up to two minutes. It runs on its own queue so that it does not hold
+    // the other actions back.
     perform(
-      "choose", args, on: merge ? merges : nil,
+      "choose", args, on: action.needsClick ? merges : nil,
       finally: {
         self.choosing.remove(key)
         if merge { self.merging.remove(session) }
@@ -507,7 +503,7 @@ final class BoardModel: ObservableObject {
   }
 
   /// The reviewers that sbd suggests for the session's PR. sbd asks GitHub
-  /// with gh, which can take seconds, so the request runs off the action queue.
+  /// with gh, which can take seconds. The request runs off the action queue.
   func reviewSuggestions(_ session: String) async throws -> [ReviewerSuggestion] {
     let send = send
     return try await withCheckedThrowingContinuation { done in

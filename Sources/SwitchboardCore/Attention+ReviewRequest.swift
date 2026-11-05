@@ -35,49 +35,59 @@ extension SessionFacts {
     return reviewRequest
   }
 
-  /// gh's error from a failed review request at the PR's current head commit.
-  public var reviewRequestError: String? {
-    guard let attempt = currentReviewRequest, attempt.result == .failed else { return nil }
-    return attempt.error
+  /// The reviewers whose review is asked for: the ones that GitHub lists, or
+  /// the ones that sbd asked for at the head commit while GitHub lists none
+  /// and nobody has reviewed the PR. GitHub lists them after the next poll.
+  /// nil when the poll did not read GitHub's list.
+  public var requestedReviewers: [String]? {
+    guard let pr, let listed = pr.reviewRequests else { return nil }
+    guard listed.isEmpty, !pr.hasReview, let attempt = currentReviewRequest, attempt.result == .requested else {
+      return listed
+    }
+    return attempt.reviewers ?? []
   }
 }
 
+extension PullRequest {
+  /// Whether someone submitted a review. A pending review is the viewer's
+  /// own draft, which nobody else sees.
+  public var hasReview: Bool { reviews.contains { $0.state != "PENDING" } }
+}
+
 extension Attention {
-  /// The review card for an idle session whose open PR is not a draft, has
-  /// no review other than a pending one, has no reviewer that GitHub asks
-  /// for, is not approved, has no failed checks, has no conflict or merged
-  /// base, is not in Trunk's queue, and is not held by a dependency, and
-  /// whose last reply asks nothing and offers nothing. A request at the
-  /// current head commit moves the session to Ready for review with the
-  /// reviewers it named, and a dismissal at that commit leaves the reply's
-  /// verdict. `rules` calls it after the rules for running subagents and
-  /// jobs.
-  static func unreviewedPR(_ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.ready, pr.reviewRequests == [], !pr.reviews.contains(where: { $0.state != "PENDING" }),
-      !pr.isApproved, !pr.checksFailed, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
-      !facts.dependencies.contains(where: \.holds), classify(facts.lastReply ?? "") == .other
+  /// The open PR of a session whose last reply asks nothing and offers
+  /// nothing, when the PR waits for a reviewer and nothing else: it is not a
+  /// draft, not approved, and not in Trunk's queue, and it has no failed
+  /// check or Depot job, no conflict, and no merged base.
+  static func reviewablePR(_ facts: SessionFacts) -> PullRequest? {
+    guard let pr = facts.pr, pr.ready, !pr.isApproved, !pr.ciFailed, pr.mergeable != .conflicting,
+      pr.mergedBase == nil, pr.queue == nil, classify(facts.lastReply ?? "") == .other
     else { return nil }
-    let attempt = facts.currentReviewRequest
-    switch attempt?.result {
-    case .dismissed:
-      return nil
-    case .requested:
-      var asked = facts
-      asked.pr?.reviewRequests = attempt?.reviewers ?? []
-      return readyPRLine(asked).map { Verdict(state: .readyForReview, reason: oneLine($0, max: 200)) }
-    case .failed, nil:
-      let checks = pr.checks.map { "Checks \($0.lowercased())" } ?? "No checks"
-      return Verdict(
-        state: .needsYou, reason: "#\(pr.number) is ready for review",
-        options: [
-          TriageOption(label: "Request review", action: .requestReview, recommended: true),
-          TriageOption(label: "Dismiss", action: .dismissReview),
-        ],
-        callouts: facts.reviewRequestError.map { [Callout(kind: .warning, title: "The last review request failed", body: $0)] }
-          ?? [],
-        summary: "\(oneLine("#\(pr.number) \(pr.title)", max: 200))\n\(checks). Nobody has reviewed it, and GitHub asks nobody to."
-      )
-    }
+    return pr
+  }
+
+  /// The review card for a reviewable PR that nobody has reviewed, that has
+  /// no requested reviewer, and that no dependency holds. A dismissal at the
+  /// current head commit hides it. A request at that commit names reviewers,
+  /// so `awaitingReview` takes the session. `rules` calls it after the rules
+  /// for running subagents and jobs.
+  static func unreviewedPR(_ facts: SessionFacts) -> Verdict? {
+    guard let pr = reviewablePR(facts), facts.requestedReviewers == [], !pr.hasReview,
+      !facts.dependencies.contains(where: \.holds), facts.currentReviewRequest?.result != .dismissed
+    else { return nil }
+    let checks = pr.checks.map { "Checks \($0.lowercased())" } ?? "No checks"
+    return Verdict(
+      state: .needsYou, reason: "#\(pr.number) is ready for review",
+      options: [
+        TriageOption(label: "Request review", action: .requestReview, recommended: true),
+        TriageOption(label: "Dismiss", action: .dismissReview),
+      ],
+      callouts: facts.currentReviewRequest?.error.map {
+        [Callout(kind: .warning, title: "The last review request failed", body: $0)]
+      } ?? [],
+      summary:
+        "\(oneLine("#\(pr.number) \(pr.title)", max: 200))\n\(checks). Nobody has reviewed it, and GitHub asks nobody to."
+    )
   }
 }
 
@@ -103,9 +113,9 @@ public enum ReviewRequests {
   /// people who committed to or reviewed the changed files. The PR's author
   /// is left out, and Copilot comes last.
   public static let suggestionsQuery = """
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
+    query($id: ID!) {
+      node(id: $id) {
+        ... on PullRequest {
           author { login }
           suggestedReviewers { isAuthor isCommenter reviewer { login } }
         }
@@ -114,7 +124,7 @@ public enum ReviewRequests {
     """
 
   public static func suggestions(from response: JSON) throws -> [ReviewerSuggestion] {
-    guard let pr = response["data"]?["repository"]?["pullRequest"], pr != .null else {
+    guard let pr = response["data"]?["node"], pr != .null else {
       throw APIError("GitHub returned no PR for the suggested reviewers")
     }
     let author = pr["author"]?["login"]?.string
@@ -137,7 +147,8 @@ public enum ReviewRequests {
   /// reading as one of gh's flags.
   public static func isValidReviewer(_ text: String) -> Bool {
     text == copilot
-      || text.range(of: #"\A[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9._-]*)?\z"#, options: .regularExpression)
+      || text.range(
+        of: #"\A[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9._-]*)?\z"#, options: .regularExpression)
         != nil
   }
 
