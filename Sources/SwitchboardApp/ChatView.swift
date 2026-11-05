@@ -46,8 +46,11 @@ struct ChatView: View {
         Divider()
         // The Inbox leaves out a chat's cards, such as a group message that waits for the user, so they show here.
         CardList(cards: session.cards)
-        MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
-          .padding(8)
+        MessageField(
+          session: session.id, draft: model.messageDraft(for: session),
+          shortcut: KeyboardShortcut(.return, modifiers: [.command])
+        )
+        .padding(8)
       }
     }
     // A tool call changes lastActivity, so the log reloads only when the reply or the state changes.

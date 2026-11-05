@@ -22,6 +22,8 @@ public struct Home: Sendable {
   /// The folder of the account that `sb account use` chose, or no file.
   public var activeAccount: String { "\(path)/account" }
   public var log: String { "\(path)/sbd.log" }
+  /// Where the app saves the message fields' unsent text and images.
+  public var drafts: String { "\(path)/drafts" }
   /// Holds `on` while `sb autocontinue on` is in force.
   public var autoContinue: String { "\(path)/auto-continue" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.

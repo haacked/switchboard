@@ -92,6 +92,13 @@ final class BoardModel: ObservableObject {
   /// What the user picked or typed on each open card, by card id. The Inbox
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
+  /// What the user typed in each message field and has not sent.
+  let messageDrafts: MessageDrafts
+
+  /// Without `draftsFolder`, the message drafts last only while the model does.
+  init(draftsFolder: String? = nil) {
+    messageDrafts = MessageDrafts(folder: draftsFolder)
+  }
 
   let client = Client()
   /// Sends one request to sbd. Tests replace it.
@@ -245,6 +252,7 @@ final class BoardModel: ObservableObject {
       if loaded { sessionsToNotify(list).forEach(notify) }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
+      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)))
       if !sameShown(sessions, list) { sessions = list }
       let listed = Set(board.map(\.id))
       if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
@@ -512,6 +520,10 @@ final class BoardModel: ObservableObject {
         if let text, self.replies[session] != text { self.replies[session] = text }
       }
     }
+  }
+
+  func messageDraft(for session: SessionSummary) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.key(for: session))
   }
 
   func draft(for card: Card) -> CardView.Draft {
