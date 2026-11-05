@@ -57,6 +57,11 @@
 # exit 1, and SLOW-SUMMARY makes it hang. It appends the arguments to
 # $SB_HOME/summary-calls.log, and keeps the last prompt in
 # $SB_HOME/summary-input.txt.
+# A `claude -p` prompt that holds <rows> is the plan update call instead. It
+# prints $SB_HOME/plan-answer.json, a fixture that the test writes, as the
+# structured output in the same envelope, or {"rows":[]} when the file is
+# missing. It appends the arguments to $SB_HOME/plan-calls.log and not to
+# summary-calls.log, and keeps the last prompt in $SB_HOME/plan-input.txt.
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read. It adds a row for each session
 # that is in the middle of an interrupt or a slow tool call, which are the
@@ -81,6 +86,13 @@
 args=("$@")
 if [ "${1-}" = -p ]; then
   input=$(cat)
+  if [[ $input == *"<rows>"* ]]; then
+    printf '%s\0' "${args[*]}" >>"$SB_HOME/plan-calls.log"
+    printf '%s' "$input" >"$SB_HOME/plan-input.txt"
+    out=$(cat "$SB_HOME/plan-answer.json" 2>/dev/null) || out='{"rows":[]}'
+    jq -nc --argjson o "$out" '{type: "result", subtype: "success", is_error: false, result: ($o | tojson), structured_output: $o}'
+    exit 0
+  fi
   printf '%s\0' "${args[*]}" >>"$SB_HOME/summary-calls.log"
   printf '%s' "$input" >"$SB_HOME/summary-input.txt"
   case $input in

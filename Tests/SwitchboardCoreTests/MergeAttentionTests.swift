@@ -246,7 +246,7 @@ extension MergeAttentionTests {
     }
 
     @Test func readyPRWithAnOpenWaitIsReadyForReview() throws {
-      let f = try prFacts(readyPR())
+      let f = try prFacts(readyPR(reviewDecision: .reviewRequired))
 
       #expect(
         verdict(f, session(wait: "the deploy of #42"))
