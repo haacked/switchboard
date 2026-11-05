@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import SwitchboardCore
 import Testing
 
@@ -54,17 +55,21 @@ import Testing
   }
 
   /// Waits for the sent event and the reply to the message with the copies, and returns the sent text.
+  /// Claude Code attaches the images only when their paths arrive as a paste of their own.
   @discardableResult
   private func expectDelivered(_ sbd: Instance, _ id: String, text: String, copies: [String]) throws -> String {
     let accepted = messages(sbd, text: text, copies: copies)
     let sent = try #require(try sentTexts(sbd, id).last)
     #expect(accepted.contains(sent))
     try sbd.waitFor(id, "the reply to the message with images", timeout: 20) { $0.lastReply == "Done: \(sent)" }
+    let paths = String(sent.split(separator: "\n").last ?? "")
+    let input = (try? String(contentsOfFile: "\(sbd.home.path)/stub-input.log", encoding: .utf8)) ?? ""
+    #expect(input.contains("\u{1B}[200~\(paths)\u{1B}[201~"))
     return sent
   }
 
   /// A request near the limit is a line of about 27 MB of base64.
-  @Test func sendsAnImageJustUnderTheLimit() throws {
+  @Test func sendsAnImageAtTheLimit() throws {
     let sbd = try Instance()
     let s = try readySession(sbd)
     var data = Self.png
@@ -120,6 +125,21 @@ import Testing
     try expectDelivered(sbd, s.id, text: "compare these", copies: [try copy(of: "b"), try copy(of: "a")])
   }
 
+  /// The app names every pasted image the same, and the copies of one message share a timestamp.
+  @Test func numbersTheCopiesOfImagesWithTheSameName() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let image = Attachments.json(name: "Pasted image.png", data: Self.png)
+
+    _ = try sbd.client.call("send", ["session": .string(s.id), "text": "two", "images": [image, image]])
+
+    let files = copies(sbd, s.id)
+    try #require(files.count == 2)
+    let first = try #require(files.first { name($0).hasSuffix("-Pasted-image.png") })
+    let second = try #require(files.first { name($0).hasSuffix("-Pasted-image-2.png") })
+    try expectDelivered(sbd, s.id, text: "two", copies: [first, second])
+  }
+
   @Test func sendsAnImageWithoutText() throws {
     let sbd = try Instance()
     let s = try readySession(sbd)
@@ -155,6 +175,37 @@ import Testing
     let files = copies(sbd, s.id)
     try #require(files.count == 1)
     #expect(name(files[0]).range(of: #"^[0-9]+-photo(\.png)?\.jpg$"#, options: .regularExpression) != nil)
+  }
+
+  /// A 2×2 HEIC that ImageIO wrote, or nil on a machine whose ImageIO can't encode HEIC.
+  static let heic: Data? = {
+    guard
+      let context = CGContext(
+        data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+      let image = context.makeImage()
+    else { return nil }
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil) else {
+      return nil
+    }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination), data.length > 0 else { return nil }
+    return data as Data
+  }()
+
+  /// Claude Code does not attach a HEIC, so sbd keeps a PNG copy.
+  @Test(.enabled(if: AttachmentTests.heic != nil)) func savesAHEICAsAPNGCopy() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let original = try picture(sbd, "photo.heic", try #require(Self.heic))
+
+    try sbd.sb("send", s.id, "--image", original, "look")
+
+    let files = copies(sbd, s.id)
+    try #require(files.count == 1)
+    #expect(name(files[0]).range(of: #"^[0-9]+-photo\.png$"#, options: .regularExpression) != nil)
+    #expect(Attachments.kind(of: try Data(contentsOf: URL(fileURLWithPath: files[0]))) == .png)
   }
 
   @Test func replacesCharactersOutsideTheSafeSetInTheName() throws {
@@ -248,7 +299,24 @@ import Testing
           ],
         ])
     }
+    #expect(copies(sbd, s.id).isEmpty)
     #expect(try sentTexts(sbd, s.id) == before)
+  }
+
+  /// sbd saves the copies before the send, so a send that it then refuses must remove them.
+  @Test func keepsNoCopyWhenTheSendIsRefused() throws {
+    let sbd = try Instance()
+    let parent = try sbd.new(name: "parent")
+    let out = try sbd.sb(
+      ["followup", "add", "--json", "--repo", "acme/widgets", "Fix the cache."], env: ["SB_SESSION_ID": parent.id])
+    let f = try JSONCoding.decode(SessionSummary.self, from: out)
+
+    let refused = failure(
+      sbd, "send",
+      ["session": .string(f.id), "text": "look", "images": [Attachments.json(name: "shot.png", data: Self.png)]])
+
+    #expect(refused.contains("hasn't started"))
+    #expect(copies(sbd, f.id).isEmpty)
   }
 
   @Test func refusesASymlinkInSb() throws {

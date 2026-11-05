@@ -69,9 +69,20 @@ public enum Attachments {
   }
 
   /// Converts a HEIC image to PNG. Claude Code does not attach HEIC files.
+  /// The PNG's pixels are upright. A camera HEIC stores a portrait photo as
+  /// landscape pixels and an orientation, and the model reads only pixels.
   public static func png(fromHEIC data: Data) throws -> Data {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-      let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+      let width = properties[kCGImagePropertyPixelWidth] as? Int,
+      let height = properties[kCGImagePropertyPixelHeight] as? Int,
+      let image = CGImageSourceCreateThumbnailAtIndex(
+        source, 0,
+        [
+          kCGImageSourceCreateThumbnailFromImageAlways: true,
+          kCGImageSourceCreateThumbnailWithTransform: true,
+          kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+        ] as CFDictionary)
     else { throw APIError("can't read the HEIC image.") }
     let out = NSMutableData()
     guard let destination = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else {

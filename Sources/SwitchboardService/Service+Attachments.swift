@@ -3,11 +3,11 @@ import SwitchboardCore
 
 extension Service {
   /// Saves a `send` request's images in the session's attachments folder and
-  /// returns a plain `send` whose text ends with their paths. It runs off the
-  /// state queue. Each image arrives as its bytes, because sbd can't read the
-  /// folders that macOS protects, such as ~/Desktop, where screenshots land.
-  /// It keeps nothing when it refuses one image.
-  func savingImages(_ request: Request) throws -> Request {
+  /// returns a plain `send` whose text ends with their paths, and the paths.
+  /// It runs off the state queue. Each image arrives as its bytes, because
+  /// sbd can't read the folders that macOS protects, such as ~/Desktop, where
+  /// screenshots land. It keeps nothing when it refuses one image.
+  func savingImages(_ request: Request) throws -> (send: Request, saved: [String]) {
     let id = try queue.sync { try lookup(request.args) }
     guard let images = request.args["images"]?.array, !images.isEmpty else {
       throw APIError("send needs images when it names them")
@@ -35,7 +35,7 @@ extension Service {
     args["images"] = nil
     args["session"] = .string(id)
     args["text"] = .string(Attachments.message(text: args["text"]?.string ?? "", paths: paths))
-    return Request(op: "send", args: .object(args))
+    return (Request(op: "send", args: .object(args)), paths)
   }
 
   /// The name's characters that a shell and Claude Code's path detection

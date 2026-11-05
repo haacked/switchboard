@@ -277,6 +277,37 @@ import Testing
     #expect(draft.images.map(\.name) == ["a.png"])
   }
 
+  // MARK: submit(_:to:)
+
+  @Test func submitSendsAnImageWithoutText() async throws {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let requests = Sent()
+    model.send = { op, args in
+      requests.add(op, args)
+      return .null
+    }
+    let draft = MessageField.Draft()
+    draft.add(paths: [try file("a.png")])
+
+    draft.submit("a", to: model)
+    for _ in 0..<300 where !draft.images.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+
+    let request = try #require(requests.all.first)
+    #expect(request.op == "send")
+    #expect(request.args["text"]?.string == "")
+    #expect(request.args["images"] == .array([Attachments.json(name: "a.png", data: Self.png)]))
+    #expect(draft.images.isEmpty)
+  }
+
+  /// The requests that the model's `send` received.
+  final class Sent: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests: [(op: String, args: [String: JSON])] = []
+    var all: [(op: String, args: [String: JSON])] { lock.withLock { requests } }
+    func add(_ op: String, _ args: [String: JSON]) { lock.withLock { requests.append((op, args)) } }
+  }
+
   // MARK: chipLabel(_:)
 
   @Test func chipLabelNamesTheImageAndTheRemoveAction() {

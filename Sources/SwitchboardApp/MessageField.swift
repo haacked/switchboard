@@ -140,6 +140,10 @@ struct MessageField: View {
       Task { @MainActor in draft.add(paths: await Self.paths(providers)) }
       return true
     }
+    // A refused paste or drop changes neither the text nor the chips, so VoiceOver would say nothing.
+    .onChange(of: draft.error) {
+      if let error = draft.error { AccessibilityNotification.Announcement(error).post() }
+    }
     .onAppear { pasteMonitor = Self.monitorPaste(into: draft) }
     .onDisappear {
       pasteMonitor.map(NSEvent.removeMonitor)

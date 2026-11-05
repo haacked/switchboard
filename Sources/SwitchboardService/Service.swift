@@ -206,7 +206,11 @@ public final class Service {
         // to list the accounts, and a refresh waits on the network.
         return .success(try JSON(encoding: usageRequest(request.args)))
       case "send" where request.args["images"] != nil:
-        return handle(try savingImages(request), hookGone: hookGone)
+        let (send, saved) = try savingImages(request)
+        let response = handle(send, hookGone: hookGone)
+        // A refused send queued nothing, so no message names the copies.
+        if !response.ok { for path in saved { try? FileManager.default.removeItem(atPath: path) } }
+        return response
       default:
         break
       }

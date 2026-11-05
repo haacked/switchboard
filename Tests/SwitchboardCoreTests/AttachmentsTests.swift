@@ -172,7 +172,7 @@ func scratchFolder() throws -> String {
     try onePixelPNG.write(to: URL(fileURLWithPath: "\(dir)/real.png"))
     try FileManager.default.createSymbolicLink(atPath: "\(dir)/link.png", withDestinationPath: "\(dir)/real.png")
 
-    #expect(refusal { try Attachments.read(path: "\(dir)/link.png") } != nil)
+    #expect(refusal { try Attachments.read(path: "\(dir)/link.png") } == "link.png is a symlink.")
   }
 
   @Test func refusesASymlinkWithARelativeTarget() throws {
@@ -189,7 +189,7 @@ func scratchFolder() throws -> String {
     defer { try? FileManager.default.removeItem(atPath: dir) }
     try FileManager.default.createDirectory(atPath: "\(dir)/folder.png", withIntermediateDirectories: true)
 
-    #expect(refusal { try Attachments.read(path: "\(dir)/folder.png") } != nil)
+    #expect(refusal { try Attachments.read(path: "\(dir)/folder.png") } == "folder.png isn't an image.")
   }
 
   @Test func refusesAMissingFile() throws {
@@ -263,9 +263,12 @@ final class Locked<T>: @unchecked Sendable {
 
 @Suite struct AttachmentsHEICTests {
   /// A 4×4 HEIC that ImageIO wrote, or nil on a machine whose ImageIO can't encode HEIC.
-  static let sample: Data? = {
-    let width = 4
-    let height = 4
+  static let sample = heic(width: 4, height: 4)
+
+  /// An 8×4 HEIC whose orientation turns it into a 4×8 portrait, as a camera stores one.
+  static let portrait = heic(width: 8, height: 4, orientation: 6)
+
+  static func heic(width: Int, height: Int, orientation: Int? = nil) -> Data? {
     guard
       let context = CGContext(
         data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -278,10 +281,11 @@ final class Locked<T>: @unchecked Sendable {
     guard let destination = CGImageDestinationCreateWithData(data, "public.heic" as CFString, 1, nil) else {
       return nil
     }
-    CGImageDestinationAddImage(destination, image, nil)
+    let properties = orientation.map { [kCGImagePropertyOrientation: $0] as CFDictionary }
+    CGImageDestinationAddImage(destination, image, properties)
     guard CGImageDestinationFinalize(destination), data.length > 0 else { return nil }
     return data as Data
-  }()
+  }
 
   @Test(.enabled(if: AttachmentsHEICTests.sample != nil)) func sniffsAnImageIOHEICAsHEIC() throws {
     let heic = try #require(Self.sample)
@@ -306,6 +310,17 @@ final class Locked<T>: @unchecked Sendable {
     let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
     #expect(image.width == 4)
     #expect(image.height == 4)
+  }
+
+  @Test(.enabled(if: AttachmentsHEICTests.portrait != nil)) func turnsAPortraitHEICUpright() throws {
+    let heic = try #require(Self.portrait)
+
+    let png = try Attachments.png(fromHEIC: heic)
+
+    let source = try #require(CGImageSourceCreateWithData(png as CFData, nil))
+    let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    #expect(image.width == 4)
+    #expect(image.height == 8)
   }
 
   @Test func refusesToConvertDataThatIsNotAnImage() {
