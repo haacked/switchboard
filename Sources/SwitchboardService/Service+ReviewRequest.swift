@@ -45,7 +45,9 @@ extension Service {
       ]
     }
     defer { queue.sync { _ = requestingReview.remove(id) } }
-    let error = runReviewRequest(pr, reviewers)
+    let error = ghError(
+      ["pr", "edit", String(pr.number), "--repo", pr.repo, "--add-reviewer", reviewers.joined(separator: ",")],
+      timeout: Service.reviewTimeoutSeconds)
     return try queue.sync {
       guard entries[id] != nil else { throw APIError("\(id) was removed") }
       let attempt = ReviewRequestAttempt(
@@ -64,13 +66,5 @@ extension Service {
       timeout: Service.reviewTimeoutSeconds)
     guard let json = JSON.parse(output) else { throw APIError("gh api graphql printed no JSON") }
     return try ReviewRequests.suggestions(from: json)
-  }
-
-  /// Runs `gh pr edit --add-reviewer` and returns its error, or nil when it
-  /// requested the review.
-  private func runReviewRequest(_ pr: PullRequest, _ reviewers: [String]) -> String? {
-    ghError(
-      ["pr", "edit", String(pr.number), "--repo", pr.repo, "--add-reviewer", reviewers.joined(separator: ",")],
-      timeout: Service.reviewTimeoutSeconds)
   }
 }

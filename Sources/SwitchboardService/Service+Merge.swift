@@ -33,7 +33,11 @@ extension Service {
       }
     }
     defer { queue.sync { _ = merging.remove(id) } }
-    let error = runMerge(pr)
+    // `--match-head-commit` makes GitHub refuse the merge when a push landed
+    // after the session became Ready to merge.
+    let error = ghError(
+      ["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha],
+      timeout: Service.mergeTimeoutSeconds)
     return try queue.sync {
       let attempt = MergeAttempt(head: pr.headSha, result: error == nil ? .merged : .failed, error: error)
       record(id, "merge", try JSON(encoding: attempt))
@@ -63,15 +67,6 @@ extension Service {
           + matches.map { "\($0.name) (\($0.id))" }.joined(separator: ", "))
     }
     return matches[0].id
-  }
-
-  /// Runs `gh pr merge` and returns its error, or nil when it merged.
-  /// `--match-head-commit` makes GitHub refuse the merge when a push landed
-  /// after the session became Ready to merge.
-  private func runMerge(_ pr: PullRequest) -> String? {
-    ghError(
-      ["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha],
-      timeout: Service.mergeTimeoutSeconds)
   }
 
   /// Runs gh and returns its error, or nil when it exited 0.

@@ -18,10 +18,6 @@ public struct ReviewRequestAttempt: Codable, Equatable, Sendable {
   public var reviewers: [String]?
   /// gh's error when the request failed.
   public var error: String?
-  /// Whether a poll at `head` listed a requested reviewer after the request.
-  /// `SessionFacts.apply` sets it from `pr` events, so a `review-request`
-  /// event's data never carries it.
-  public var listed: Bool?
 
   public init(head: String, result: Result, reviewers: [String]? = nil, error: String? = nil) {
     self.head = head
@@ -42,17 +38,23 @@ extension SessionFacts {
   /// The reviewers whose review is asked for: the ones that GitHub lists, or
   /// the ones that sbd asked for at the head commit while GitHub lists none
   /// and nobody has reviewed the PR. GitHub lists them after the next poll.
-  /// Once a poll has listed them, GitHub's list decides, so a request removed
-  /// on GitHub shows the review card again. nil when the poll did not read
-  /// GitHub's list.
+  /// Once a poll lists them, `applyReviewListing` drops the request, so a
+  /// request removed on GitHub shows the review card again. nil when the
+  /// poll did not read GitHub's list.
   public var requestedReviewers: [String]? {
     guard let pr, let listed = pr.reviewRequests else { return nil }
-    guard listed.isEmpty, !pr.hasReview, let attempt = currentReviewRequest, attempt.result == .requested,
-      attempt.listed != true
-    else {
+    guard listed.isEmpty, !pr.hasReview, let attempt = currentReviewRequest, attempt.result == .requested else {
       return listed
     }
     return attempt.reviewers ?? []
+  }
+}
+
+extension SessionFacts {
+  /// Drops sbd's review request once a poll at its head commit lists a
+  /// requested reviewer. GitHub's list decides from then on.
+  mutating func applyReviewListing() {
+    if currentReviewRequest?.result == .requested, pr?.reviewRequests?.isEmpty == false { reviewRequest = nil }
   }
 }
 

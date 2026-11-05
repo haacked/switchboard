@@ -33,6 +33,11 @@ extension Instance {
   fileprivate func ghEditFails(with text: String) throws {
     try text.write(toFile: "\(home.path)/gh-edit-error", atomically: true, encoding: .utf8)
   }
+
+  /// Makes the stub's `gh pr edit` succeed again.
+  fileprivate func ghEditSucceeds() throws {
+    try FileManager.default.removeItem(atPath: "\(home.path)/gh-edit-error")
+  }
 }
 
 /// A session whose open PR nobody reviewed and GitHub asks nobody to review
@@ -163,7 +168,7 @@ extension Instance {
     #expect(got.reason == Self.card)
     #expect(got.triage?.callouts.contains { $0.kind == .warning && $0.body.contains(error) } == true)
 
-    try FileManager.default.removeItem(atPath: "\(sbd.home.path)/gh-edit-error")
+    try sbd.ghEditSucceeds()
     try sbd.sb("review", s.id, "ann")
 
     #expect(try sbd.get(s.id).state == .readyForReview)
