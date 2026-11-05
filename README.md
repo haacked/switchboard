@@ -366,3 +366,4 @@ The stub plays the hook payloads that `bin/test --claude` records in `Tests/Inte
 `spikes/phase0/` holds the Phase 0 tests that measured the Claude Code and GitHub behaviors this relies on.
 
 `SwitchboardCore/Deploys.swift` reads PostHog's deploy signals: the deploy comment on PostHog/posthog PRs, the PostHog/charts state files, and the charts deploy runs' sync jobs. `SwitchboardCore/DeployWaits.swift` turns them into a deploy wait's outcome, and `GitHubPoller+Deploys.swift` makes the REST calls.
+
