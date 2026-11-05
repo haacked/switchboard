@@ -244,22 +244,22 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   }
 
   @Test func offersTheIconOnADoneSession() {
-    #expect(BoardModel.canDelete(done()))
+    #expect(done().isRemovableDone)
   }
 
   @Test func neverOffersTheIconOnTheManager() {
-    #expect(!BoardModel.canDelete(done(manager: true)))
+    #expect(!done(manager: true).isRemovableDone)
   }
 
   @Test func neverOffersTheIconOnAFollowupThatHasNotStarted() {
     var s = done()
     s.followup = Followup(prompt: "p")
-    #expect(!BoardModel.canDelete(s))
+    #expect(!s.isRemovableDone)
   }
 
   @Test func neverOffersTheIconOutsideTheDoneColumn() {
     for state in AttentionState.allCases where state != .done {
-      #expect(!BoardModel.canDelete(done(state: state)))
+      #expect(!done(state: state).isRemovableDone)
     }
   }
 

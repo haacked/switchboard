@@ -60,6 +60,12 @@ let usage = """
                                   session's PR is merged and the branch has no commit after it.
                                   --delete-remote-branch also deletes the branch on its remote, and keeps
                                   it, with an error, unless it is at the merged PR's head
+    rm --done [--worktree [--delete-remote-branch]] [--yes]
+                                  remove every Done session the same way, after listing
+                                  them and the ones whose checks fail, which it skips.
+                                  --worktree also deletes each branch whose PR merged.
+                                  Without a terminal or inside Claude, it needs --yes.
+                                  With --json and without --yes, it removes nothing
     cleanup <session>             remove the worktree and the local branch of a session whose PR merged,
                                   and keep the session in Done. Refuses uncommitted files, commits
                                   after the merge, a running turn, and a folder sbd didn't make.
@@ -551,6 +557,8 @@ case "send":
   if text.isEmpty { die("send needs text") }
   let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
   if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
+case "rm" where a.switches.contains("--done"):
+  removeDone(a)
 case "rm":
   let result = call(
     "rm",

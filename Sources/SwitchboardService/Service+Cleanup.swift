@@ -21,7 +21,8 @@ extension Service {
       try requireNoTurn(e)
       return (e.session, e.facts.pr, sharedSession(e.session))
     }
-    let (repo, branch) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
+    let (repo, branch, supacode) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
+    let branchName = branch?.name ?? session.branch ?? ""
     let fresh = buildSnapshot()
     let claudePid: Int? = try queue.sync {
       guard let e = entries[session.id], e.session.cwd == session.cwd, !starting.contains(session.id) else {
@@ -40,25 +41,28 @@ extension Service {
     }
     host.kill(paneName(session.id, .claude))
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
-    _ = try gitOutput(repo, ["worktree", "remove", session.cwd])
+    try removeWorktree(repo, session.cwd)
+    var branchRemoved = false
     var branchError: Error?
-    do {
-      try deleteMergedBranch(repo, branch, pr: pr)
-    } catch {
-      branchError = error
+    if let branch {
+      do {
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
+      } catch {
+        branchError = error
+      }
     }
     queue.sync {
       record(
         session.id, "cleanup",
         [
-          "worktree": .string(session.cwd), "branch": .string(branch.name),
-          "branch_removed": .bool(branchError == nil),
+          "worktree": .string(session.cwd), "branch": .string(branchName),
+          "branch_removed": .bool(branchRemoved),
         ])
     }
     if let branchError {
-      throw APIError("Removed the worktree of \(session.id), and kept \(branch.name): \(branchError)")
+      throw APIError("Removed the worktree of \(session.id), and kept \(branchName): \(branchError)")
     }
-    return ["cleaned": .string(session.id), "worktree": .string(session.cwd), "branch": .string(branch.name)]
+    return ["cleaned": .string(session.id), "worktree": .string(session.cwd), "branch": .string(branchName)]
   }
 
   /// The message of the first cleanup check that fails for the session with
@@ -83,9 +87,10 @@ extension Service {
   /// folder exists, and `checkWorktreeIsLossless` and `checkBranchIsMerged`
   /// pass. Those two refuse a shared, locked, or dirty worktree, ignored files
   /// that are not build output, and a branch whose tip is not the merged PR's
-  /// head commit.
+  /// head commit. A worktree that Supacode locked passes the lock check, and
+  /// its branch follows `supacodeBranch`, which may keep it.
   private func checkCleanup(_ session: Session, pr: PullRequest?, sharedWith: String?) throws -> (
-    repo: String, branch: (name: String, tip: String)
+    repo: String, branch: (name: String, tip: String)?, supacode: Bool
   ) {
     guard let pr, pr.state != .open else { throw APIError("\(session.id) has no merged PR.") }
     guard pr.state == .merged else {
@@ -97,9 +102,9 @@ extension Service {
     guard FileManager.default.fileExists(atPath: session.cwd) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
     }
-    let repo = try checkWorktreeIsLossless(
+    let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true)
-    return (repo, try checkBranchIsMerged(session, pr: pr))
+    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// Throws for a follow-up that hasn't started, and for a session whose
