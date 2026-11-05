@@ -12,7 +12,8 @@
 # Then it closes the shell pane of the Manager, a work session, and a chat
 # through the app's ShellSelfTest: the pane's close button, `exit`, Ctrl-D, and
 # the Session menu. It checks that the shell stays closed after a relaunch and
-# a switch to another session, that Open Shell starts it again, and that the
+# a switch to another session, that Open Shell starts it again, that the pane
+# attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
@@ -373,6 +374,14 @@ check_shell() {
   [ "$(app menu Session Open Shell)" = ran ] || fail "the Session menu has no Open Shell"
   wait_for 60 has_clients "$work-shell" || fail "the menu's Open Shell did not open the shell"
   remember_claude "$work"
+  # A shell that closes and opens again before the app's next refresh leaves the pane on screen.
+  exited() { shell_gone "$work" || tmux -S "$tmux_socket" display -p -t "=$work-shell:" '#{pane_dead}' | grep -q 1; }
+  app type exit >/dev/null
+  wait_for 10 exited || fail "exit did not end the work session's shell"
+  sb shell "$work" --open >/dev/null
+  wait_for 30 has_clients "$work-shell" || fail "the shell pane did not attach to the reopened shell"
+  wait_for 10 panes_are 2 || fail "the reopened shell has no pane"
+  same_claude "$work"
   [ "$(app menu Session Close Shell)" = ran ] || fail "the Session menu has no Close Shell"
   closes "$work" "the menu's Close Shell"
   end_app

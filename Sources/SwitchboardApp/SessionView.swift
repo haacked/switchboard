@@ -11,6 +11,8 @@ final class SessionViewState: ObservableObject {
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
   @Published var removeOptions: RemoveOptions?
+  /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
+  @Published var shellAttach = 0
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -52,8 +54,9 @@ struct SessionView: View {
                 .accessibilityLabel("Close Shell")
                 .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
               }
-              TerminalPane(command: terminals.attachCommand(.shell))
+              TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
             }
+            .id(ui.shellAttach)
             .frame(minWidth: 240, idealWidth: 360)
           }
         }
@@ -96,6 +99,16 @@ struct SessionView: View {
       }
     }
     .sheet(isPresented: $ui.confirmingRemove) { removeSheet }
+  }
+
+  /// The shell pane's tmux client exits when sbd ends the shell's tmux session. A shell that closed and
+  /// opened again between two refreshes leaves `shellClosed` unchanged, so the pane attaches again
+  /// while sbd still reports the shell open. The wait lets a closed shell reach the summary first.
+  private func reattachShell() {
+    let id = session.id
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model, ui] in
+      if let s = model.selected, s.id == id, s.shellClosed != true { ui.shellAttach += 1 }
+    }
   }
 
   /// A confirmation dialog can't hold toggles, so the options are in a sheet.

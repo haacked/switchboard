@@ -9,6 +9,9 @@ extension Service {
   func shellRequest(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
     guard let open = args["open"]?.bool else { throw APIError("shell needs open true or false") }
+    guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    // A follow-up keeps no closed flag before it starts, so its first shell opens.
+    try requireFolder(session)
     if open {
       try openShell(id)
     } else {
@@ -18,19 +21,20 @@ extension Service {
   }
 
   /// Records the shell as closed and ends its tmux session, which also ends
-  /// each terminal attached to it.
+  /// each terminal attached to it. A snapshot that began before the kill can
+  /// no longer replace the pane list, so it can't show the pane again.
   func closeShell(_ id: String) throws {
     if entries[id]?.session.shellClosed != true { try update(id) { $0.shellClosed = true } }
     let name = paneName(id, .shell)
     host.kill(name)
     snapshot.panes[name] = nil
+    snapshot.taken = nowMs()
   }
 
+  /// Starts the shell, then records it as open. A shell that fails to start stays closed.
   func openShell(_ id: String) throws {
-    guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    try requireFolder(session)
-    if session.shellClosed == true { try update(id) { $0.shellClosed = nil } }
     try startShell(id)
+    if entries[id]?.session.shellClosed == true { try update(id) { $0.shellClosed = nil } }
   }
 
   /// Starts a missing shell pane, and starts a dead one again.

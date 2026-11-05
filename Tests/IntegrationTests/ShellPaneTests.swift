@@ -88,6 +88,15 @@ import Testing
     #expect(try !has(sbd, t.shell))
   }
 
+  @Test(arguments: [true, false]) func shellRefusesAFollowupThatHasNotStarted(open: Bool) throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache. It reads twice.", "repository": "acme/widgets"])
+    let error = failure(sbd, "shell", ["session": .string(f.id), "open": .bool(open)])
+    #expect(error.contains("hasn't started"))
+    let listed = try JSONCoding.decode([SessionSummary].self, from: try sbd.sb("followup", "ls", "--json"))
+    #expect(listed.first { $0.id == f.id }?.shellClosed == nil)
+  }
+
   @Test func shellNeedsOpenOrClose() throws {
     let sbd = try Instance()
     let s = try sbd.new()
