@@ -86,6 +86,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
+  /// The last merge that sbd ran or the user dismissed.
+  public var merge: MergeAttempt?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -218,6 +220,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       cleanedUp = CleanupStatus(state: .removed, reason: kept.map { "kept \($0)" })
     case "dependencies":
       dependencies = d["dependencies"].flatMap { try? JSONCoding.convert($0, to: [Dependency].self) } ?? []
+    case "merge":
+      merge = try? JSONCoding.convert(event.data, to: MergeAttempt.self)
     default:
       break
     }

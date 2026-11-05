@@ -215,7 +215,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
   @Test(arguments: [
     (samplePR(base: "haacked/parent", mergedBase: 41), "retarget #42; its base #41 merged"),
-    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with its base"),
+    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with main"),
     (
       samplePR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)]),
       "address the changes that alice requested on #42"
@@ -356,7 +356,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     (PRAttention.everyRule, "retarget #42; its base #41 merged"),
     (
       samplePR(mergeable: .conflicting, reviewDecision: .approved, verdicts: PRAttention.everyRule.verdicts),
-      "rebase; #42 conflicts with its base"
+      "rebase; #42 conflicts with main"
     ),
     (
       samplePR(reviewDecision: .approved, verdicts: PRAttention.everyRule.verdicts),
@@ -374,7 +374,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(), f, now: Attention.staleAfterMs + 10)
-        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
   }
 
   @Test func openPRRuleWinsOverARunningJob() throws {
@@ -382,7 +382,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
   }
 
   @Test func openPRRuleWinsOverAnOffer() throws {
@@ -390,7 +390,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+        == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
   }
 
   @Test func openWaitWinsOverAConflictingPR() throws {
@@ -416,17 +416,17 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   // The recorded PRs, with the comments that the poller would read bodies for.
 
   @Test(arguments: [
-    (18303, "merge #18303, approved by stamphog"),
-    (20992, "merge #20992, approved by gewenyu99"),
-    (1209, readTheReply.reason),
-    (122953, readTheReply.reason),
+    (18303, AttentionState.readyToMerge, "#18303 is ready to merge, approved by stamphog"),
+    (20992, .readyToMerge, "#20992 is ready to merge, approved by gewenyu99"),
+    (1209, .needsYou, readTheReply.reason),
+    (122953, .needsYou, readTheReply.reason),
   ])
-  func recordedOpenPR(_ number: Int, _ reason: String) throws {
+  func recordedOpenPR(_ number: Int, _ state: AttentionState, _ reason: String) throws {
     let node = try #require(GitHubFixtures.statusNode(number))
     let parsed = try #require(GitHub.parsePR(node))
     let f = try prFacts(parsed.pr, comments: parsed.comments.filter { GitHub.bodyAuthors.contains($0.author) })
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: .needsYou, reason: reason))
+    #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: state, reason: reason))
   }
 
   @Test(arguments: [(122179, "#122179 merged; archive the worktree"), (121847, "#121847 closed; archive the worktree")])
@@ -497,7 +497,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   @Test func conflictNeedsYou() throws {
     let v = try verdict(samplePR(mergeable: .conflicting, reviewRequests: Self.alex))
 
-    #expect(v == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with its base"))
+    #expect(v == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
   }
 
   @Test func changesRequestedOnTheCurrentCommitNeedYou() throws {

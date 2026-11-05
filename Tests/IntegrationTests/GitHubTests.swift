@@ -95,8 +95,8 @@ extension Instance {
     let after = try sbd.get(s.id)
     #expect(after.pr?.number == 18303)
     #expect(after.pr?.status == .approved)
-    #expect(after.state == .needsYou)
-    #expect(after.reason == "merge #18303, approved by stamphog")
+    #expect(after.state == .readyToMerge)
+    #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
     #expect(github.requests.map(\.kind) == ["lookup", "status"])
     #expect(github.requests.first?.ids == ["PostHog/charts:haacked/cdp-dlq-runbook-lookup-step"])
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
@@ -118,12 +118,12 @@ extension Instance {
       try sbd.poll(all: true)
       return try sbd.get(s.id).reason
     }
-    #expect(try reason { $0["mergeable"] = "CONFLICTING" } == "rebase; #18303 conflicts with its base")
+    #expect(try reason { $0["mergeable"] = "CONFLICTING" } == "rebase; #18303 conflicts with main")
     // A pr event carries the comments only when they changed.
     #expect(try sbd.events(s.id).last { $0.kind == "pr" }?.data["comments"] == nil)
     // GitHub answers UNKNOWN while it computes mergeability again, as after
     // the base moved. A push changes the head commit, which can fix the conflict.
-    #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with its base")
+    #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with main")
     #expect(try reason { $0["headRefOid"] = "pushed" } == "merge #18303, approved by stamphog")
     #expect(
       try reason {
@@ -424,7 +424,7 @@ extension Instance {
     github.fail(18303)
     try sbd.poll(all: true)
     #expect(try sbd.get(s.id).pr?.number == 18303)
-    #expect(try sbd.get(s.id).reason == "merge #18303, approved by stamphog")
+    #expect(try sbd.get(s.id).reason == "#18303 is ready to merge, approved by stamphog")
   }
 
   /// The session keeps its PR through a rebase, and through a restart of
@@ -535,7 +535,7 @@ extension Instance {
     try sbd.startSbd()
     let after = try sbd.get(s.id)
     #expect(after.pr?.number == 18303)
-    #expect(after.reason == "merge #18303, approved by stamphog")
+    #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
     #expect(github.requests.count == count)
   }
 }

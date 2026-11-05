@@ -1,0 +1,22 @@
+#!/bin/bash
+# A stand-in for gh in sbd's merge tests. It records each call in
+# $SB_HOME/gh-calls.log. `gh auth token` prints a token. `gh pr merge` first
+# reads one line from $SB_HOME/gh-merge-gate when that file is a FIFO, so a
+# test can keep the merge running. It then prints $SB_HOME/gh-merge-error to
+# stderr and exits 1 when that file exists, and exits 0 otherwise.
+printf '%s\n' "$*" >>"$SB_HOME/gh-calls.log"
+case "$1 $2" in
+"auth token")
+  echo "token-1"
+  ;;
+"pr merge")
+  if [ -p "$SB_HOME/gh-merge-gate" ]; then read -r _ <"$SB_HOME/gh-merge-gate"; fi
+  if [ -f "$SB_HOME/gh-merge-error" ]; then
+    cat "$SB_HOME/gh-merge-error" >&2
+    exit 1
+  fi
+  ;;
+*)
+  exit 1
+  ;;
+esac

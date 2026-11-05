@@ -353,7 +353,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   @Test func theManagerAloneLeavesTheInboxEmpty() {
     let model = model([needsItem("m", manager: true, card: true)])
     #expect(model.triage.isEmpty)
-    #expect(model.needsYou.isEmpty)
+    #expect(model.needsUser.isEmpty)
     #expect(model.currentInboxItem == nil)
   }
 
@@ -396,6 +396,19 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   @Test func aSessionSeenForTheFirstTimeDoesNotNotify() {
     let model = model([needsItem("a")])
     #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
+  }
+
+  @Test func aSessionThatBecomesReadyToMergeNotifiesAndCounts() {
+    let model = model([needsItem("a", state: .working)])
+    let next = [needsItem("a", state: .readyToMerge)]
+    #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
+    model.apply(.success(next), followups: nil)
+    #expect(model.needsUser.map(\.id) == ["a"])
+  }
+
+  @Test func movingBetweenNeedsYouAndReadyToMergeDoesNotNotify() {
+    #expect(model([needsItem("a")]).sessionsToNotify([needsItem("a", state: .readyToMerge)]).isEmpty)
+    #expect(model([needsItem("a", state: .readyToMerge)]).sessionsToNotify([needsItem("a")]).isEmpty)
   }
 }
 
@@ -518,6 +531,35 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 
     #expect(sent.op == "group-suggest")
     #expect(sent.args == ["decline": "dependency:s1:g1"])
+  }
+
+  @Test func mergeSendsMergeWithTheSession() async {
+    let sent = await request { $0.merge("a") }
+
+    #expect(sent.op == "merge")
+    #expect(sent.args == ["session": "a"])
+  }
+
+  @Test func dismissSendsMergeWithDismiss() async {
+    let sent = await request { $0.merge("a", dismiss: true) }
+
+    #expect(sent.op == "merge")
+    #expect(sent.args == ["session": "a", "dismiss": true])
+  }
+
+  @Test func ignoresASecondMergeWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.merge("a")
+    model.merge("a", dismiss: true)
+    #expect(model.merging == ["a"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
   }
 
   @Test func ignoresASecondAnswerWhileTheFirstRuns() {

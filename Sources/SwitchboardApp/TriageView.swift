@@ -79,7 +79,11 @@ struct TriageDetail: View {
           .foregroundStyle(session.state.color)
       }
       if !item.summary.isEmpty { Text(item.summary).textSelection(.enabled) }
-      if item.source == .card {
+      if session.state == .readyToMerge {
+        let ready = session.mergeCards(all: model.sessions)
+        MergeBatch(sessions: ready)
+        ForEach(ready) { MergeCard(session: $0) }
+      } else if item.source == .card {
         // The card shows the whole tool call, which an approval needs to see.
         let cards = Card.inbox(session, all: model.sessions)
         GroupMessageBatch(cards: cards.filter { $0.kind == .send })
