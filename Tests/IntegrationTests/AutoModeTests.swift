@@ -114,23 +114,17 @@ import Testing
     let repos = try Repos()
     try repos.make("acme/widgets")
     let sbd = try Instance(config: ["repoRoots": [.string(repos.root)], "autoMode": true])
-    let s = try JSONCoding.decode(
-      SessionSummary.self,
-      from: try sbd.sb("spawn", "--json", "--repo", "acme/widgets", "--branch", "b", "--prompt", "hello", "--no-auto"))
-    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
-    #expect(sbd.stubArgs().allSatisfy { !$0.contains("--permission-mode") })
-  }
-
-  @Test func aFollowupSpawnWithNoAutoStartsWithoutAMode() throws {
-    let repos = try Repos()
-    try repos.make("acme/widgets")
-    let sbd = try Instance(config: ["repoRoots": [.string(repos.root)], "autoMode": true])
-    let f = try JSONCoding.decode(
-      SessionSummary.self,
-      from: try sbd.sb(
-        "spawn", "--json", "--repo", "acme/widgets", "--branch", "b", "--prompt", "hello", "--followup", "--no-auto"))
+    func spawn(_ branch: String, _ extra: String...) throws -> SessionSummary {
+      try JSONCoding.decode(
+        SessionSummary.self,
+        from: try sbd.sb(
+          ["spawn", "--json", "--repo", "acme/widgets", "--branch", branch, "--prompt", "hello", "--no-auto"] + extra))
+    }
+    let s = try spawn("b1")
+    let f = try spawn("b2", "--followup")
     try sbd.sb("followup", "start", f.id)
-    try sbd.waitFor(f.id, "the reply") { $0.lastReply == "Done: hello" }
+    for id in [s.id, f.id] { try sbd.waitFor(id, "the reply") { $0.lastReply == "Done: hello" } }
+    #expect(sbd.stubArgs().count == 2)
     #expect(sbd.stubArgs().allSatisfy { !$0.contains("--permission-mode") })
   }
 
@@ -157,5 +151,18 @@ extension AutoModeTests {
     try sbd.sb("choose", s.id, "3")
     let after = try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch x" }
     #expect(after.permissionMode == "auto")
+  }
+}
+
+extension GroupMessageTests {
+  @Test func autoModeIsRefusedForAGroupMessage() throws {
+    let s = try setup()
+    let card = try open(s)
+    #expect(throws: APIError.self) {
+      try s.sbd.client.call(
+        "answer", ["session": .string(s.sender.id), "card": .number(Double(card)), "behavior": "allow", "autoMode": true])
+    }
+    #expect(try sent(s.sbd, s.a.id).isEmpty)
+    #expect(try s.sbd.get(s.sender.id).cards.count == 1)
   }
 }

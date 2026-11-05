@@ -82,6 +82,13 @@ extension Service {
   func answer(_ args: JSON) throws -> JSON {
     let card = try chosenCard(args)
     let id = card.session
+    let autoMode = args["autoMode"]?.bool == true
+    if autoMode {
+      guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
+        throw APIError("card \(card.id): autoMode goes only with a behavior of allow")
+      }
+      if let refusal = card.autoModeRefusal { throw autoModeRefused(refusal) }
+    }
     if let message = card.send {
       switch args["behavior"]?.string {
       case "allow": return try decideGroupMessage(card, message, send: true)
@@ -97,10 +104,6 @@ extension Service {
     // What the hook prints, and what sbd types when Claude Code no longer
     // waits on the hook.
     let reply: (decision: Decision, typed: TypedAnswer)
-    let autoMode = args["autoMode"]?.bool == true
-    if autoMode, args["answers"] != nil || args["behavior"]?.string != "allow" {
-      throw APIError("card \(card.id): autoMode goes only with a behavior of allow")
-    }
     if let given = args["answers"]?.array {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
@@ -111,10 +114,7 @@ extension Service {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
-        if autoMode {
-          if let refusal = card.autoModeRefusal { throw autoModeRefused(refusal) }
-          data["permission_mode"] = .string(PermissionMode.auto)
-        }
+        if autoMode { data["permission_mode"] = .string(PermissionMode.auto) }
         reply = (.allow(updatedInput: nil, autoMode: autoMode), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
