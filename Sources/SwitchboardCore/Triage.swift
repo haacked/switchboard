@@ -32,12 +32,10 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   case reply
   /// Merges the session's PR, as `sb merge` does.
   case merge
-  /// Keeps the session out of Ready to merge until the PR's head changes.
+  /// Acknowledges the Ready to merge item, as `sb merge --dismiss` does.
   case dismiss
   /// Requests a review of the session's PR from the reviewers that the user picks.
   case requestReview
-  /// Hides the review card until the PR's head changes.
-  case dismissReview
   /// Sets the option's wait on the session.
   case wait
   /// Marks the session done.
@@ -51,7 +49,7 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   /// Answers the session's held question with the option's message.
   case answer
 
-  /// Whether the action runs `sb merge`, which also dismisses.
+  /// Whether the action runs `sb merge`, which also acknowledges.
   public var isMerge: Bool { self == .merge || self == .dismiss }
 
   /// Whether the action acts on the PR for the user, as `sb merge` and
@@ -59,7 +57,7 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   /// default, so a new action must state whether it needs a click.
   public var needsClick: Bool {
     switch self {
-    case .merge, .dismiss, .requestReview, .dismissReview: true
+    case .merge, .dismiss, .requestReview: true
     case .send, .reply, .wait, .done, .allow, .deny, .allowAutoMode, .answer: false
     }
   }
@@ -103,9 +101,8 @@ public struct TriageOption: Codable, Equatable, Sendable {
     case .send: return "Sends: \(oneLine(message ?? label, max: 200))"
     case .reply: return "Sends the text you type"
     case .merge: return "Merges the PR"
-    case .dismiss: return "Hides the merge card until the PR gets a new commit"
+    case .dismiss: return "Hides the merge card until the PR gets a new commit or a new turn starts"
     case .requestReview: return "Requests a review from the reviewers you pick"
-    case .dismissReview: return "Hides the review card until the PR gets a new commit"
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
     case .done: return "Marks the session done"
     case .allow: return "Allows the prompt"

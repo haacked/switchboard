@@ -157,7 +157,7 @@ import Testing
   @Test(
     arguments: zip(
       [TriageAction.send, .reply, .merge, .dismiss, .wait, .done, .allow, .deny, .answer],
-      ["Send", "Reply", "Merge", "Dismiss", "Wait", "Done", "Allow", "Deny", "Answer"]
+      ["Send", "Reply", "Merge", "Acknowledge", "Wait", "Done", "Allow", "Deny", "Answer"]
     ))
   func aLongLabelWithoutASplitShowsTheActionsVerb(_ action: TriageAction, _ verb: String) {
     let label = "Fix items 3 and 5, then merge"

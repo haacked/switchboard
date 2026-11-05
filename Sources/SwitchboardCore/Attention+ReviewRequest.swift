@@ -1,12 +1,10 @@
 import Foundation
 
-/// A review request that sbd ran or the user dismissed, as a `review-request`
-/// event recorded it.
+/// A review request that sbd ran, as a `review-request` event recorded it.
 public struct ReviewRequestAttempt: Codable, Equatable, Sendable {
   public enum Result: String, Codable, Sendable {
     case requested
     case failed
-    case dismissed
   }
 
   public static let event = "review-request"
@@ -78,21 +76,19 @@ extension Attention {
   }
 
   /// The review card for a reviewable PR that nobody has reviewed, that has
-  /// no requested reviewer, and that no dependency holds. A dismissal at the
-  /// current head commit hides it. A request at that commit names reviewers,
-  /// so `awaitingReview` puts the session in Ready for review instead.
+  /// no requested reviewer, and that no dependency holds. A request at the
+  /// current head commit names reviewers, so `awaitingReview` puts the
+  /// session in Ready for review instead. The Inbox's Acknowledge hides the
+  /// card, as it hides any item.
   /// `rules` calls it after the rules for running subagents and jobs.
   static func unreviewedPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = reviewablePR(facts), facts.requestedReviewers == [], !pr.hasReview,
-      !facts.dependencies.contains(where: \.holds), facts.currentReviewRequest?.result != .dismissed
+      !facts.dependencies.contains(where: \.holds)
     else { return nil }
     let checks = pr.checks.map { "Checks \($0.lowercased())" } ?? "No checks"
     return Verdict(
       state: .needsYou, reason: "#\(pr.number) is ready for review",
-      options: [
-        TriageOption(label: "Request review", action: .requestReview, recommended: true),
-        TriageOption(label: "Dismiss", action: .dismissReview),
-      ],
+      options: [TriageOption(label: "Request review", action: .requestReview, recommended: true)],
       callouts: facts.currentReviewRequest?.error.map {
         [Callout(kind: .warning, title: "The last review request failed", body: $0)]
       } ?? [],

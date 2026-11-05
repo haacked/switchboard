@@ -45,7 +45,6 @@ extension Instance {
 @Suite(.timeLimit(.minutes(2))) struct ReviewRequestTests {
   static let number = MergeTests.number
   static let card = "#18303 is ready for review"
-  static let readTheReply = "read its last reply and decide what's next"
 
   /// A session on #18303's branch, whose unreviewed PR the poller has read.
   func unreviewedSession(_ github: FakeGitHub, _ sbd: Instance) throws -> SessionSummary {
@@ -65,7 +64,7 @@ extension Instance {
     #expect(got.state == .needsYou)
     #expect(got.reason == Self.card)
     let item = try #require(got.triage)
-    #expect(item.options.map(\.action) == [.requestReview, .dismissReview])
+    #expect(item.options.map(\.action) == [.requestReview])
     #expect(item.summary.hasPrefix("#18303 Fix\nChecks success."))
     #expect(try sbd.triage().contains { $0.id == s.id })
   }
@@ -174,21 +173,27 @@ extension Instance {
     #expect(try sbd.get(s.id).state == .readyForReview)
   }
 
-  @Test func dismissHidesTheCardUntilANewCommit() throws {
+  @Test func dismissAcknowledgesTheCardUntilANewCommit() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try unreviewedSession(github, sbd)
 
-    try sbd.sb("review", "--dismiss", s.id)
+    let printed = try sbd.sb("review", "--dismiss", s.id)
 
-    #expect(try sbd.get(s.id).reason == Self.readTheReply)
+    #expect(printed.contains("acknowledged the review card of #18303"))
+    var got = try sbd.getJSON(s.id)
+    #expect(got["state"]?.string == "waiting")
+    #expect(got["reason"]?.string == Self.card)
+    #expect(got["acknowledged"]?.bool == true)
     #expect(sbd.ghEdits().isEmpty)
     github.change(Self.number) { $0["title"] = "a new title" }
     try sbd.poll(all: true)
-    #expect(try sbd.get(s.id).reason == Self.readTheReply)
+    #expect(try sbd.getJSON(s.id)["acknowledged"]?.bool == true)
     github.change(Self.number) { $0["headRefOid"] = "pushed" }
     try sbd.poll(all: true)
-    #expect(try sbd.get(s.id).reason == Self.card)
+    got = try sbd.getJSON(s.id)
+    #expect(got["acknowledged"] == nil)
+    #expect(got["reason"]?.string == Self.card)
   }
 
   @Test func reviewOfASessionWithoutTheCardIsRefused() throws {
@@ -265,23 +270,12 @@ extension Instance {
     #expect(sbd.ghEdits().isEmpty)
   }
 
-  @Test func choosingDismissHidesTheReviewCard() throws {
+  @Test func chooseRefusesRequestReviewInsideClaudeCode() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try unreviewedSession(github, sbd)
 
-    try sbd.sb("choose", s.id, "Dismiss")
-
-    #expect(try sbd.get(s.id).reason == Self.readTheReply)
-  }
-
-  @Test(arguments: ["1", "2"])
-  func chooseRefusesTheReviewOptionsInsideClaudeCode(_ option: String) throws {
-    let github = try FakeGitHub()
-    let sbd = try Instance.withMergeStub(github)
-    let s = try unreviewedSession(github, sbd)
-
-    let r = try sbd.run(["choose", s.id, option, "--text", "ann"], env: ["CLAUDECODE": "1"])
+    let r = try sbd.run(["choose", s.id, "Request review", "--text", "ann"], env: ["CLAUDECODE": "1"])
 
     #expect(r.status != 0)
     #expect(sbd.ghEdits().isEmpty)

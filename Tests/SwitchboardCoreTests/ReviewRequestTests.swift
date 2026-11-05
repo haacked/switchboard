@@ -53,7 +53,8 @@ extension ReviewRequestTests {
     }
 
     @Test func attemptOnAnOlderHeadIsNotCurrent() throws {
-      let f = try prFacts(unreviewedPR(headSha: "head2"), then: [reviewRequestEvent(5, head: "head1", "dismissed")])
+      let f = try prFacts(
+        unreviewedPR(headSha: "head2"), then: [reviewRequestEvent(5, head: "head1", "failed", error: "boom")])
 
       #expect(f.currentReviewRequest == nil)
     }
@@ -69,11 +70,7 @@ extension ReviewRequestTests {
 
       #expect(v == card)
       #expect(v.kind == .action)
-      #expect(
-        v.options == [
-          TriageOption(label: "Request review", action: .requestReview, recommended: true),
-          TriageOption(label: "Dismiss", action: .dismissReview),
-        ])
+      #expect(v.options == [TriageOption(label: "Request review", action: .requestReview, recommended: true)])
     }
 
     @Test func cardShowsThePRTitleAndChecks() throws {
@@ -174,19 +171,6 @@ extension ReviewRequestTests {
 
 extension ReviewRequestTests {
   @Suite struct Attempts {
-    @Test func dismissalAtTheHeadHidesTheCard() throws {
-      let f = try prFacts(unreviewedPR(), then: [reviewRequestEvent(5, "dismissed")])
-
-      #expect(verdict(f) == readTheReply)
-    }
-
-    @Test func newCommitAfterADismissalShowsTheCardAgain() throws {
-      let f = try prFacts(
-        unreviewedPR(), then: [reviewRequestEvent(5, "dismissed"), try prEvent(6, unreviewedPR(headSha: "head2"))])
-
-      #expect(verdict(f) == card)
-    }
-
     @Test func requestAtTheHeadMovesTheSessionToReadyForReview() throws {
       let f = try prFacts(unreviewedPR(), then: [reviewRequestEvent(5, "requested", reviewers: ["alice", "@copilot"])])
 
@@ -282,17 +266,13 @@ extension ReviewRequestTests {
       #expect(
         TriageOption(label: "Request review", action: .requestReview).effect
           == "Requests a review from the reviewers you pick")
-      #expect(
-        TriageOption(label: "Dismiss", action: .dismissReview).effect
-          == "Hides the review card until the PR gets a new commit")
     }
 
     @Test func sessionCardsCannotNameTheReviewActions() {
       #expect(!TriageAction.writable.contains(.requestReview))
-      #expect(!TriageAction.writable.contains(.dismissReview))
     }
 
-    @Test(arguments: [TriageAction.merge, .dismiss, .requestReview, .dismissReview])
+    @Test(arguments: [TriageAction.merge, .dismiss, .requestReview])
     func prActionsNeedTheUsersClick(_ action: TriageAction) {
       #expect(action.needsClick)
     }

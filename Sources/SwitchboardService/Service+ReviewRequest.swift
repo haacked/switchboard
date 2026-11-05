@@ -7,8 +7,8 @@ extension Service {
   /// The `review` request for a session that shows the review card. Without
   /// `reviewers`, it returns the suggested reviewers. With `reviewers`, it
   /// runs `gh pr edit --add-reviewer` and records the attempt. A failed
-  /// request records gh's error and fails. With `dismiss`, it hides the card
-  /// until the PR's head commit changes. `session` names the session, or `pr`
+  /// request records gh's error and fails. With `dismiss`, it acknowledges
+  /// the card, as `ack` does. `session` names the session, or `pr`
   /// and an optional `repository` name it by its open PR.
   func reviewRequest(_ args: JSON) throws -> JSON {
     let dismiss = args["dismiss"]?.bool == true
@@ -28,8 +28,7 @@ extension Service {
         throw APIError("\(e.session.name) isn't ready for a review request: \(verdict.reason)")
       }
       if dismiss {
-        let attempt = ReviewRequestAttempt(head: pr.headSha, result: .dismissed)
-        record(id, ReviewRequestAttempt.event, try JSON(encoding: attempt))
+        try acknowledge(id, verdict)
         return (id, pr, try JSON(encoding: summary(id)))
       }
       if reviewers != nil, !requestingReview.insert(id).inserted {

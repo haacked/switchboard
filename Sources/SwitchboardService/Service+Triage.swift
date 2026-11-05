@@ -65,8 +65,6 @@ extension Service {
         throw APIError("\(option.label) needs the reviewers. `sb review \(name)` lists the suggested ones")
       }
       return Request(op: "review", args: ["session": session, "reviewers": .array(reviewers.map(JSON.string))])
-    case .dismissReview:
-      return Request(op: "review", args: ["session": session, "dismiss": true])
     case .wait:
       var wait = try option.wait.map { try JSON(encoding: $0).object ?? [:] } ?? [:]
       wait["session"] = session

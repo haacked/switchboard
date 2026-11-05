@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// Runs `review`, which lists the suggested reviewers of a session that shows
 /// the review card, requests a review from the reviewers it names, or with
-/// `--dismiss` hides the card. A PR reference, such as `#N`, `owner/name#N`,
+/// `--dismiss` acknowledges the card. A PR reference, such as `#N`, `owner/name#N`,
 /// or a PR URL, names the session by its open PR.
 func review(_ a: Args) {
   // A session that read injected instructions could otherwise ask people
@@ -31,6 +31,6 @@ func review(_ a: Args) {
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
   print(
     dismiss
-      ? "dismissed the review card of \(pr) of \(s.name)"
+      ? "acknowledged the review card of \(pr) of \(s.name)"
       : "requested a review of \(pr) from \(reviewers.joined(separator: ", "))")
 }

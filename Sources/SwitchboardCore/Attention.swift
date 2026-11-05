@@ -97,10 +97,12 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var dependencies: [Dependency] = []
   /// What a docket row's `docket` events say.
   public var docket = DocketStatus()
-  /// The last merge that sbd ran or the user dismissed.
+  /// The last merge that sbd ran.
   public var merge: MergeAttempt?
-  /// The last review request that sbd ran or the user dismissed.
+  /// The last review request that sbd ran.
   public var reviewRequest: ReviewRequestAttempt?
+  /// The Inbox item that the user acknowledged during this turn.
+  public var acknowledgment: Acknowledgment?
   /// Claude Code's permission mode, as the last main-session hook or launch
   /// reported it. SessionStart carries none, so a launch without a mode
   /// leaves it unknown until the next hook.
@@ -125,7 +127,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   static let activityKinds = Set(hookKinds).union([
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
     "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
-    "account-moved", "idle",
+    "account-moved", "idle", "ack", "unack",
   ])
 
   public init() {}
@@ -134,6 +136,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let d = event.data
     if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
+    // Only an acknowledgment needs the snapshot. Startup replay applies every event, so most events skip it.
+    let promptsBefore = acknowledgment == nil ? nil : openPrompts
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.
     let fromSubagent = event.fromSubagent
@@ -260,12 +264,14 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
     applyAutoContinue(event, userPrompt: userPrompt)
+    applyAcknowledgment(event, promptsBefore: promptsBefore)
   }
 
   private mutating func startTurn(_ t: Int64) {
     if !turnRunning {
       turnRunning = true
       turnStarted = t
+      acknowledgment = nil
     }
   }
 
@@ -303,6 +309,8 @@ public struct Verdict: Equatable, Sendable {
   public var reason: String
   public var kind: TriageKind = .action
   public var source: VerdictSource = .rule
+  /// True when `Attention.shown` moved an acknowledged Inbox verdict to Waiting.
+  public var acknowledged = false
   /// What the session's card offers for a rule that knows the next step.
   public var options: [TriageOption] = []
   /// What the user should read before deciding.
