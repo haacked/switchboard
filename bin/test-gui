@@ -9,7 +9,7 @@
 # Last it types into a session's message field through the app's DraftSelfTest,
 # selects another session and comes back, presses Esc, quits, and checks the
 # draft after a relaunch and after two Escs.
-# Then it closes the shell pane of the Manager, a work session, and a chat
+# Then it closes the shell pane of the Manager, a work session, an Inbox item, and a chat
 # through the app's ShellSelfTest: the pane's close button, `exit`, Ctrl-D, and
 # the Session menu. It checks that the shell stays closed after a relaunch and
 # a switch to another session, that Open Shell starts it again, that the pane
@@ -386,8 +386,22 @@ check_shell() {
   closes "$work" "the menu's Close Shell"
   end_app
 
+  # The Inbox shows an item's terminals without selecting the session.
+  SB_INBOX="$work" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  app show-terminal >/dev/null
+  wait_for 120 has_clients "$work-claude" || fail "the Inbox did not attach to the work session's Claude pane"
+  remember_claude "$work"
+  [ "$(app click open)" != "no pane" ] || fail "the Inbox shows no terminal"
+  wait_for 10 is_open "$work" || fail "the Inbox's Open Shell did not open the shell"
+  wait_for 60 has_clients "$work-shell" || fail "the Inbox did not attach to the opened shell"
+  wait_for 10 panes_are 2 || fail "the Inbox shows no shell pane"
+  app click close >/dev/null
+  closes "$work" "the Inbox's close button"
+  end_app
+
   start_app "$chat"
-  app chat-terminal >/dev/null
+  app show-terminal >/dev/null
   wait_for 120 has_clients "$chat-claude" || fail "the app did not attach to the chat's Claude pane"
   wait_for 60 has_clients "$chat-shell" || fail "the app did not attach to the chat's shell"
   remember_claude "$chat"
@@ -398,7 +412,7 @@ check_shell() {
   [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
   end_app
   save_shots
-  echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch; Manager, work, chat)"
+  echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat)"
 }
 
 check_shell

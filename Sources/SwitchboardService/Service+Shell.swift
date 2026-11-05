@@ -10,7 +10,7 @@ extension Service {
     let id = try lookup(args)
     guard let open = args["open"]?.bool else { throw APIError("shell needs open true or false") }
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
-    // A follow-up keeps no closed flag before it starts, so its first shell opens.
+    // A closed flag saved on an unstarted follow-up would keep its shell closed after `followup start`.
     try requireFolder(session)
     if open {
       try openShell(id)

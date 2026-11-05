@@ -7,11 +7,11 @@ import SwiftTerm
 /// `click close` clicks the × on the Shell pane's label with mouse events at the button's place in the
 /// window. `click open` clicks Open Shell on the Claude pane's label the same way. SwiftUI builds no
 /// accessibility elements without an assistive app, so the test can't press a button by its label.
-/// `menu <menu> <item>` runs a menu item. `chat-terminal` shows a chat's terminals, as its Terminal toggle
-/// does. `select <session>` selects a session. `type <text>` types the text and Return into the shell pane.
-/// `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window shows. `cmd-w` sends ⌘W to
-/// the menu bar and reports the menu item that owns ⌘W. `snapshot <path>` draws the window as SB_SNAPSHOT
-/// does.
+/// `menu <menu> <item>` runs a menu item. `show-terminal` shows the terminals of a chat or an Inbox item,
+/// as their Terminal toggle does. `select <session>` selects a session. `type <text>` types the text and
+/// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
+/// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `snapshot <path>` draws
+/// the window as SB_SNAPSHOT does.
 @MainActor
 enum ShellSelfTest {
   static func start(_ model: BoardModel) {
@@ -32,11 +32,12 @@ enum ShellSelfTest {
     let rest = words.count > 1 ? words[1] : ""
     switch words.first {
     case "click":
-      let (target, inset): (TerminalView?, CGFloat) = rest == "close" ? (shellPane(), 14) : (panes().first, 30)
+      let (target, half): (TerminalView?, CGFloat) = rest == "close" ? (shellPane(), 6) : (panes().first, 25)
       guard let window, let pane = target else { return "no pane" }
-      // The pane's label is a bar about 18 pt tall above the terminal, with its button at the right end.
+      // The pane's label is a bar about 18 pt tall above the terminal. Its button follows the label's text.
       let frame = pane.convert(pane.bounds, to: nil)
-      let point = NSPoint(x: frame.maxX - inset, y: frame.maxY + 9)
+      let buttonX = frame.minX + 8 + SessionView.labelWidth + SessionView.labelSpacing
+      let point = NSPoint(x: buttonX + half, y: frame.maxY + 9)
       for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
         guard
           let event = NSEvent.mouseEvent(
@@ -46,7 +47,7 @@ enum ShellSelfTest {
         window.sendEvent(event)
       }
       return "clicked at \(Int(point.x)),\(Int(point.y))"
-    case "chat-terminal":
+    case "show-terminal":
       model.showingTerminal = true
       return "shown"
     case "menu":

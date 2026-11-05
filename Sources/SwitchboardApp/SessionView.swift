@@ -42,7 +42,7 @@ struct SessionView: View {
             }
             TerminalPane(command: terminals.attachCommand(.claude))
           }
-          .frame(minWidth: 480, idealWidth: 760)
+          .frame(minWidth: 320, idealWidth: 760)
           if session.shellClosed != true {
             VStack(spacing: 0) {
               paneLabel("Shell") {
@@ -57,7 +57,7 @@ struct SessionView: View {
               TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
             }
             .id(ui.shellAttach)
-            .frame(minWidth: 240, idealWidth: 360)
+            .frame(minWidth: 200, idealWidth: 360)
           }
         }
       } else if let error = ui.terminalsError {
@@ -101,13 +101,17 @@ struct SessionView: View {
     .sheet(isPresented: $ui.confirmingRemove) { removeSheet }
   }
 
+  static let labelWidth: CGFloat = 44
+  static let labelSpacing: CGFloat = 8
+
   /// The shell pane's tmux client exits when sbd ends the shell's tmux session. A shell that closed and
   /// opened again between two refreshes leaves `shellClosed` unchanged, so the pane attaches again
   /// while sbd still reports the shell open. The wait lets a closed shell reach the summary first.
   private func reattachShell() {
     let id = session.id
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model, ui] in
-      if let s = model.selected, s.id == id, s.shellClosed != true { ui.shellAttach += 1 }
+      // The Inbox shows a session without selecting it, so this finds the session by its id.
+      if let s = model.board.first(where: { $0.id == id }), s.shellClosed != true { ui.shellAttach += 1 }
     }
   }
 
@@ -230,11 +234,14 @@ struct SessionView: View {
     .padding(12)
   }
 
+  /// The text has a fixed width, so a pane's button is at the same place in every view. The button sits
+  /// next to the text, so it stays visible when a narrow column cuts off the end of the label.
   private func paneLabel(_ text: String, @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {
-    HStack {
+    HStack(spacing: SessionView.labelSpacing) {
       Text(text).font(.caption.bold()).foregroundStyle(.secondary)
-      Spacer()
+        .frame(width: SessionView.labelWidth, alignment: .leading)
       trailing().buttonStyle(.borderless).font(.caption).controlSize(.small)
+      Spacer()
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 3)
