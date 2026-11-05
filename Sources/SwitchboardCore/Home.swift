@@ -75,7 +75,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var tmux: String?
   /// The shell for both panes, or nil for the user's login shell.
   public var shell: String?
-  /// Extra arguments for every claude command, such as --permission-mode.
+  /// Extra arguments for every claude command, such as --strict-mcp-config.
+  /// A session in auto mode passes its --permission-mode after these, so it
+  /// wins over one here.
   public var claudeArgs: [String] = []
   /// Whether new sessions start claude in auto mode. `sb new --no-auto` opts one out.
   public var autoMode = true

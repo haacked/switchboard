@@ -56,4 +56,9 @@ import Testing
     #expect(PermissionMode.title("acceptEdits") == "accept edits")
     #expect(PermissionMode.title("auto") == "auto")
   }
+
+  @Test func aConfigWithoutAutoModeStartsSessionsInAutoMode() throws {
+    #expect(try JSONCoding.decode(Config.self, from: #"{"idleStopSeconds": 30}"#).autoMode)
+    #expect(try !JSONCoding.decode(Config.self, from: #"{"autoMode": false}"#).autoMode)
+  }
 }

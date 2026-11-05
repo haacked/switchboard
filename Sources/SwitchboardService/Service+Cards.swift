@@ -98,6 +98,9 @@ extension Service {
     // waits on the hook.
     let reply: (decision: Decision, typed: TypedAnswer)
     let autoMode = args["autoMode"]?.bool == true
+    if autoMode, args["answers"] != nil || args["behavior"]?.string != "allow" {
+      throw APIError("card \(card.id): autoMode goes only with a behavior of allow")
+    }
     if let given = args["answers"]?.array {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })

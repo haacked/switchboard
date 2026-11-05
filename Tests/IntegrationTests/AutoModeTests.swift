@@ -72,6 +72,19 @@ import Testing
     #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
   }
 
+  @Test func autoIsRefusedWithADeny() throws {
+    let (sbd, s, _) = try asked()
+    #expect(throws: APIError.self) {
+      try sbd.client.call("answer", ["session": .string(s.id), "behavior": "deny", "autoMode": true])
+    }
+    #expect(try sbd.get(s.id).cards.count == 1)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
+    try sbd.sb("deny", s.id)
+    try sbd.waitFor(s.id, "the card to close") { $0.cards.isEmpty }
+    try resume(sbd, s.id, "hello")
+    #expect(sbd.stubArgs().allSatisfy { !$0.contains("--permission-mode") })
+  }
+
   @Test func autoIsRefusedAfterTheHookCloses() throws {
     let (sbd, s) = try timedOut("perm touch x")
     #expect(try sbd.get(s.id).cards.first?.offersAutoMode == false)
@@ -95,6 +108,30 @@ import Testing
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
     #expect(sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- hello"])
     #expect(try sbd.get(s.id).permissionMode == "default")
+  }
+
+  @Test func spawnWithNoAutoStartsWithoutAMode() throws {
+    let repos = try Repos()
+    try repos.make("acme/widgets")
+    let sbd = try Instance(config: ["repoRoots": [.string(repos.root)], "autoMode": true])
+    let s = try JSONCoding.decode(
+      SessionSummary.self,
+      from: try sbd.sb("spawn", "--json", "--repo", "acme/widgets", "--branch", "b", "--prompt", "hello", "--no-auto"))
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
+    #expect(sbd.stubArgs().allSatisfy { !$0.contains("--permission-mode") })
+  }
+
+  @Test func aFollowupSpawnWithNoAutoStartsWithoutAMode() throws {
+    let repos = try Repos()
+    try repos.make("acme/widgets")
+    let sbd = try Instance(config: ["repoRoots": [.string(repos.root)], "autoMode": true])
+    let f = try JSONCoding.decode(
+      SessionSummary.self,
+      from: try sbd.sb(
+        "spawn", "--json", "--repo", "acme/widgets", "--branch", "b", "--prompt", "hello", "--followup", "--no-auto"))
+    try sbd.sb("followup", "start", f.id)
+    try sbd.waitFor(f.id, "the reply") { $0.lastReply == "Done: hello" }
+    #expect(sbd.stubArgs().allSatisfy { !$0.contains("--permission-mode") })
   }
 
   @Test func aStartedFollowupStartsInAutoMode() throws {

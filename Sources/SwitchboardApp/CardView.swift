@@ -53,6 +53,8 @@ struct CardView: View {
           .buttonStyle(.borderedProminent)
         if card.offersAutoMode {
           Button(PermissionMode.approveLabel) { model.answer(card, behavior: "allow", autoMode: true) }
+            .help(PermissionMode.autoModeNote)
+            .accessibilityHint(PermissionMode.autoModeNote)
         }
         Button("Deny", action: deny)
         TextField("Message for Claude (optional)", text: $draft.message)
