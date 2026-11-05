@@ -70,6 +70,10 @@ struct ContentView: View {
     model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
   }
 
+  private var isShowingDoneRemoval: Binding<Bool> {
+    Binding(get: { model.doneRemoval != nil }, set: { if !$0 { model.doneRemoval = nil } })
+  }
+
   private var isConfirmingCleanup: Binding<Bool> {
     Binding(get: { model.confirmingCleanup != nil }, set: { if !$0 { model.confirmingCleanup = nil } })
   }
@@ -174,6 +178,9 @@ struct ContentView: View {
     .sheet(isPresented: $model.showingImport) {
       ImportView().environmentObject(model)
     }
+    .sheet(isPresented: isShowingDoneRemoval) {
+      if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
+    }
   }
 }
 
@@ -197,7 +204,7 @@ struct Sidebar: View {
             HStack(spacing: 4) {
               SessionRow(session: row.session, repo: repos[row.id])
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
-              if BoardModel.canDelete(row.session) { DeleteButton(session: row.session) }
+              if row.session.isRemovableDone { DeleteButton(session: row.session) }
             }
             .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
             .contextMenu {
@@ -205,7 +212,7 @@ struct Sidebar: View {
                 Button("Clean Up: Delete the Worktree and Branch…") { model.confirmingCleanup = row.id }
                   .disabled(model.cleaningUp.contains(row.id))
               }
-              if BoardModel.canDelete(row.session) {
+              if row.session.isRemovableDone {
                 Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
                   model.confirmingDelete = row.id
                 }
@@ -216,6 +223,7 @@ struct Sidebar: View {
           HStack {
             Text(state.title)
             Spacer()
+            if state == .done { DeleteAllDoneButton() }
             Text("\(group.rows.count)").foregroundStyle(.secondary)
           }
         }
@@ -424,8 +432,12 @@ struct BoardView: View {
             HStack(alignment: .top, spacing: 12) {
               Spacer().frame(width: Self.labelWidth)
               ForEach(columns, id: \.self) { state in
-                Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
-                  .frame(width: Self.columnWidth, alignment: .leading)
+                HStack {
+                  Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
+                  Spacer()
+                  if state == .done { DeleteAllDoneButton() }
+                }
+                .frame(width: Self.columnWidth, alignment: .leading)
               }
             }
             .padding(.vertical, 4)
@@ -549,7 +561,7 @@ struct BoardCard: View {
       HStack(spacing: 4) {
         if s.state == .readyToMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
-        if BoardModel.canDelete(s) { DeleteButton(session: s) }
+        if s.isRemovableDone { DeleteButton(session: s) }
       }
       .padding(6)
     }

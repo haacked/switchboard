@@ -167,6 +167,8 @@ public final class Service {
         return .success(try remove(request.args))
       case "cleanup":
         return .success(try cleanup(request.args))
+      case "rm-done":
+        return .success(try removeDone(request.args))
       case "merge":
         return .success(try mergeRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
@@ -744,7 +746,7 @@ public final class Service {
   /// it is at the merged PR's head. A remote branch at another commit stays and
   /// the call throws. Without a merged PR for the branch, the remote branch is
   /// left alone and the call succeeds.
-  private func remove(_ args: JSON) throws -> JSON {
+  func remove(_ args: JSON) throws -> JSON {
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
     let removesRemoteBranch = args["remote_branch"]?.bool == true
@@ -762,24 +764,10 @@ public final class Service {
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
-    var repo: String?
-    var branch: (name: String, tip: String)?
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    if removesWorktree {
-      if folderGone {
-        repo = try checkGoneWorktree(session, mergedPR: pr?.state == .merged)
-      } else {
-        repo = try checkWorktreeIsLossless(
-          session, mergedPR: pr?.state == .merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
-      }
-    }
-    if removesBranch {
-      if folderGone, let repo {
-        branch = try checkGoneBranchIsMerged(repo, session, pr: pr)
-      } else {
-        branch = try checkBranchIsMerged(session, pr: pr)
-      }
-    }
+    let (repo, branch) = try checkRemoval(
+      session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+      branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
     // A local branch that is already gone still has its remote branch checked.
     let remoteTarget: (repo: String, remote: String, branch: String)? = {
@@ -850,6 +838,24 @@ public final class Service {
       "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branchRemoved),
       "remote_branch_removed": .bool(remoteRemoved),
     ]
+  }
+
+  /// The checks that `rm` makes before it stops anything. Returns the repo
+  /// when `worktree` is set, and with `branch` the branch and its tip, which
+  /// is nil when the folder and the branch are both gone.
+  func checkRemoval(
+    _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool
+  ) throws -> (repo: String?, branch: (name: String, tip: String)?) {
+    guard worktree else { return (nil, nil) }
+    let merged = pr?.state == .merged
+    let repo =
+      folderGone
+      ? try checkGoneWorktree(session, mergedPR: merged)
+      : try checkWorktreeIsLossless(session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
+    guard branch else { return (repo, nil) }
+    return (
+      repo, folderGone ? try checkGoneBranchIsMerged(repo, session, pr: pr) : try checkBranchIsMerged(session, pr: pr)
+    )
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
