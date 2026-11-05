@@ -102,12 +102,7 @@ final class BoardModel: ObservableObject {
   /// What the user typed in each message field and has not sent.
   private let messageDrafts: MessageDrafts
 
-  /// Without `draftsFolder`, the message drafts last only while the model does.
-  init(draftsFolder: String? = nil) {
-    messageDrafts = MessageDrafts(folder: draftsFolder)
-  }
-
-  let client = Client()
+  let client: Client
   /// Sends one request to sbd. Tests replace it.
   lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
     try client.call(op, args, timeout: 300)
@@ -131,6 +126,13 @@ final class BoardModel: ObservableObject {
   private var followupsRead = Date.distantPast
   /// sbd reads the usage every few minutes, so the app asks once a minute.
   private var usageRead = Date.distantPast
+
+  /// Takes the client so that tests can't reach the user's sbd by default.
+  /// Without `draftsFolder`, the message drafts last only while the model does.
+  init(client: Client, draftsFolder: String? = nil) {
+    self.client = client
+    messageDrafts = MessageDrafts(folder: draftsFolder)
+  }
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.

@@ -46,7 +46,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct UsageTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct UsageTests {
   @Test func reportsTheLimitsThatTheEndpointAnswers() throws {
     let fake = try FakeUsage()
     let sbd = try Instance.withUsage(fake)

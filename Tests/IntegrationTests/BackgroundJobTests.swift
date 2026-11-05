@@ -32,7 +32,7 @@ extension Instance {
   func lastStop(_ id: String) throws -> Int64? { try events(id).last { $0.kind == "Stop" }?.id }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct BackgroundJobTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct BackgroundJobTests {
   /// claude starts the turn that reports a background job up to 1.3 s after
   /// the job's process exits. The stub starts that turn only after the test
   /// creates $SB_HOME/report. sbd runs the stop rule only when the test moves

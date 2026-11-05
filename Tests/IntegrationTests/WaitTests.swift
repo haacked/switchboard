@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct WaitTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct WaitTests {
   static let hourMs: Int64 = 3600 * 1000
 
   /// A session whose first turn has ended.

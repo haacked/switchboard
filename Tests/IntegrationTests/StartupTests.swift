@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct StartupTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct StartupTests {
   @Test func aMessageSentWhileClaudeStartsArrivesAfterItsPrompt() throws {
     let sbd = try Instance(shell: Instance.slowShell)
     let s = try sbd.new()

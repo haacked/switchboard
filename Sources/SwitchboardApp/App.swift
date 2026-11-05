@@ -6,7 +6,7 @@ import UserNotifications
 @main
 struct SwitchboardApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-  @StateObject private var model = BoardModel(draftsFolder: Home().drafts)
+  @StateObject private var model = BoardModel(client: Client(), draftsFolder: Home().drafts)
 
   var body: some Scene {
     Window("Switchboard", id: "main") {

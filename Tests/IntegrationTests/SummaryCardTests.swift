@@ -71,7 +71,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct SummaryCardTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct SummaryCardTests {
   // MARK: The session's card
 
   /// The app shows a label of up to 20 characters on its button, and the detail beside it.

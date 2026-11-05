@@ -22,7 +22,7 @@ final class Outcome<T>: @unchecked Sendable {
   let done = DispatchSemaphore(value: 0)
 }
 
-@Suite(.timeLimit(.minutes(2))) struct FollowupTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct FollowupTests {
   @Test func addsListsAndRemovesAFollowupThatNeverRuns() throws {
     let sbd = try Instance()
     let parent = try sbd.new(name: "parent")

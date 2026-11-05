@@ -13,8 +13,10 @@ plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
 # a time limit, such as ProcessTests, then waits for a thread behind the
 # blocked ones, and its limit passes before it runs. This caps how many tests
 # run at once, and leaves a thread free. Without the cap, those two tests timed
-# out in 8 of 8 CI runs. The Command Line Tools' Swift Testing reads the
-# variable. The one in Xcode 26.0 does not. An existing value of the variable
+# out in 8 of 8 CI runs. Swift Testing reads the variable from Swift 6.3. The
+# one in Xcode 26.0, Swift 6.2, ignores it and starts every test at once, so
+# the integration suites also limit how many of their tests run at once
+# (Tests/IntegrationTests/Blocking.swift). An existing value of the variable
 # wins.
 export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-2}"
 args=()

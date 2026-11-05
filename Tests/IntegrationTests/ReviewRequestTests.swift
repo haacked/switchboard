@@ -42,7 +42,7 @@ extension Instance {
 
 /// A session whose open PR nobody reviewed and GitHub asks nobody to review
 /// gets a review card, and `sb review` requests the review with gh.
-@Suite(.timeLimit(.minutes(2))) struct ReviewRequestTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct ReviewRequestTests {
   static let number = MergeTests.number
   static let card = "#18303 is ready for review"
 

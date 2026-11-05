@@ -5,7 +5,7 @@ import Testing
 /// The Claude Code adapter against the installed claude with Haiku. Each test
 /// also records the hook payloads of the steps it ran, which the stub plays.
 /// The tests run one at a time, so they hold one live claude at once.
-@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .timeLimit(.minutes(3)))
+@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .blocking(timeLimit: .seconds(180)))
 struct ClaudeTests {
   @Test func startsWithAPromptAndTakesAPastedMessage() throws {
     let c = try ClaudeInstance()

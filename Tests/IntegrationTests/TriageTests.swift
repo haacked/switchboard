@@ -25,7 +25,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct TriageTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct TriageTests {
   @Test func summarizesATurnThatEndsInProse() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask", name: "review-code")
