@@ -84,6 +84,9 @@ public struct Session: Codable, Equatable, Sendable {
   /// True once the user chose the session's group, or chose Ungrouped. A
   /// session that took its parent's group has it false.
   public var placedByHand: Bool?
+  /// Set on a docket row, which tracks one docket review. Its `cwd` is empty
+  /// and claude never runs.
+  public var docket: DocketSession?
   /// The id of the group whose chat this session is. A chat belongs to no group.
   public var chat: String?
 
@@ -206,6 +209,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var dependencies: [Dependency]?
   /// The plans attached to the session and to its group, or nil when there are none.
   public var plans: [PlanSummary]?
+  /// The review that a docket row tracks, or nil for any other session.
+  public var docket: DocketSummary?
   /// gh's error from the last failed merge of the PR's head commit.
   public var mergeError: String?
 
