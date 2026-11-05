@@ -2,12 +2,21 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  /// Saves a `send` request's images in the session's attachments folder and
-  /// returns a plain `send` whose text ends with their paths, and the paths.
-  /// It runs off the state queue. Each image arrives as its bytes, because
-  /// sbd can't read the folders that macOS protects, such as ~/Desktop, where
-  /// screenshots land. It keeps nothing when it refuses one image.
-  func savingImages(_ request: Request) throws -> (send: Request, saved: [String]) {
+  /// Saves a `send` request's images in the session's attachments folder,
+  /// then handles a plain `send` whose text ends with their paths. It runs off
+  /// the state queue. Each image arrives as its bytes, because sbd can't read
+  /// the folders that macOS protects, such as ~/Desktop, where screenshots
+  /// land. A refused send queues nothing, so it deletes the copies.
+  func sendWithImages(_ request: Request, hookGone: @escaping () -> Bool) throws -> Response {
+    let (send, saved) = try savingImages(request)
+    let response = handle(send, hookGone: hookGone)
+    if !response.ok { for path in saved { try? FileManager.default.removeItem(atPath: path) } }
+    return response
+  }
+
+  /// The plain `send` and the paths of the copies. It keeps nothing when it
+  /// refuses one image.
+  private func savingImages(_ request: Request) throws -> (send: Request, saved: [String]) {
     let id = try queue.sync { try lookup(request.args) }
     guard let images = request.args["images"]?.array, !images.isEmpty else {
       throw APIError("send needs images when it names them")
