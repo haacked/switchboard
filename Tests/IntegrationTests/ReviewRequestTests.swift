@@ -162,6 +162,11 @@ extension Instance {
     let got = try sbd.get(s.id)
     #expect(got.reason == Self.card)
     #expect(got.triage?.callouts.contains { $0.kind == .warning && $0.body.contains(error) } == true)
+
+    try FileManager.default.removeItem(atPath: "\(sbd.home.path)/gh-edit-error")
+    try sbd.sb("review", s.id, "ann")
+
+    #expect(try sbd.get(s.id).state == .readyForReview)
   }
 
   @Test func dismissHidesTheCardUntilANewCommit() throws {
@@ -207,15 +212,16 @@ extension Instance {
     #expect(try sbd.get(s.id).reason == Self.card)
   }
 
-  @Test(arguments: [["review", "ann"], ["review"], ["review", "--dismiss"]])
-  func reviewInsideClaudeCodeIsRefused(_ args: [String]) throws {
+  @Test(arguments: [["ann"], [], ["--dismiss"]])
+  func reviewInsideClaudeCodeIsRefused(_ extra: [String]) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try unreviewedSession(github, sbd)
 
-    let r = try sbd.run(args + [s.id], env: ["CLAUDECODE": "1"])
+    let r = try sbd.run(["review", s.id] + extra, env: ["CLAUDECODE": "1"])
 
     #expect(r.status != 0)
+    #expect(r.stderr.contains("needs your click"))
     #expect(sbd.ghCalls().allSatisfy { !$0.hasPrefix("pr edit") && !$0.hasPrefix("api graphql") })
     #expect(try sbd.get(s.id).reason == Self.card)
   }

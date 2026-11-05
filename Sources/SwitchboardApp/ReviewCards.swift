@@ -73,9 +73,14 @@ struct ReviewerPicker: View {
     .frame(width: 320)
     .task {
       do {
-        suggestions = try await model.reviewSuggestions(session.id)
+        let loaded = try await model.reviewSuggestions(session.id)
+        suggestions = loaded
+        AccessibilityNotification.Announcement(
+          "\(loaded.count) suggested reviewer\(loaded.count == 1 ? "" : "s")"
+        ).post()
       } catch {
         self.error = "\(error)"
+        AccessibilityNotification.Announcement("Can't read the suggested reviewers: \(error)").post()
       }
     }
   }

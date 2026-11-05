@@ -69,8 +69,8 @@ extension Attention {
   /// The review card for a reviewable PR that nobody has reviewed, that has
   /// no requested reviewer, and that no dependency holds. A dismissal at the
   /// current head commit hides it. A request at that commit names reviewers,
-  /// so `awaitingReview` takes the session. `rules` calls it after the rules
-  /// for running subagents and jobs.
+  /// so `awaitingReview` puts the session in Ready for review instead.
+  /// `rules` calls it after the rules for running subagents and jobs.
   static func unreviewedPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = reviewablePR(facts), facts.requestedReviewers == [], !pr.hasReview,
       !facts.dependencies.contains(where: \.holds), facts.currentReviewRequest?.result != .dismissed

@@ -125,7 +125,8 @@ extension Service {
     guard config.triage.enabled, let e = entries[id], Triage.needsSummary(e.facts, verdict) else { return }
     let stop = e.facts.lastStop
     guard e.summaryAttempt != stop else { return }
-    // A skip records an event, which calls this again. The attempt ends that call.
+    // A skip records an event, which calls this again. Setting `summaryAttempt` first makes that call return at the
+    // guard above.
     entries[id]?.summaryAttempt = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
     if let skip = summarySkip(e.facts, account: account) {
