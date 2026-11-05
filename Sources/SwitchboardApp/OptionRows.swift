@@ -53,6 +53,9 @@ struct OptionList: View {
   let session: SessionSummary
   let item: TriageItem
   @State private var stacked = false
+  /// Typed replies by option index. Crossing the stacking width rebuilds
+  /// every row. A draft kept in a row's own state would be lost.
+  @State private var replies: [Int: String] = [:]
 
   var body: some View {
     let rows = item.options.map(OptionRow.init)
@@ -90,14 +93,16 @@ struct OptionList: View {
       // The text field reads the whole label.
       title.foregroundStyle(.secondary).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 4) {
-        ReplyOption(session: session, ref: item.ref, number: i + 1, option: option)
+        ReplyOption(
+          session: session, ref: item.ref, number: i + 1, option: option,
+          text: Binding(get: { replies[i, default: ""] }, set: { replies[i] = $0 }))
         if let description = rows[i].description {
           Text(description).foregroundStyle(.secondary).accessibilityHidden(true)
         }
       }
     } else {
       OptionButton(session: session, ref: item.ref, number: i + 1, option: option, title: title, primary: primary)
-      // The button's hint reads the same text.
+      // VoiceOver reads this text from the button's label and hint.
       VStack(alignment: .leading, spacing: 2) {
         if let description = rows[i].description { Text(description).foregroundStyle(.secondary) }
         if option.showsEffect { Text(option.effect).font(.caption).foregroundStyle(.secondary).lineLimit(3) }

@@ -74,8 +74,7 @@ extension TriageOption {
   /// What VoiceOver reads after the label: the option's detail and what a
   /// click does.
   var accessibilityHint: String {
-    guard let detail else { return effect }
-    return detail.hasSuffix(".") ? "\(detail) \(effect)" : "\(detail). \(effect)"
+    OptionRow.join(detail, effect) ?? effect
   }
 }
 
@@ -121,7 +120,7 @@ struct ReplyOption: View {
   let ref: String
   let number: Int
   let option: TriageOption
-  @State private var text = ""
+  @Binding var text: String
 
   private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -131,6 +130,7 @@ struct ReplyOption: View {
         .textFieldStyle(.roundedBorder)
         .onSubmit(send)
         .accessibilityLabel(option.label)
+        .accessibilityHint(option.detail ?? "")
       Button("Send", action: send)
         .disabled(trimmed.isEmpty || model.choosing.contains("\(session.id)/\(number)"))
         .accessibilityLabel("Send: \(option.label)")

@@ -135,7 +135,7 @@ import Testing
     let row = row(label)
 
     #expect(row.title == "Send")
-    #expect(row.lead != nil)
+    #expect(row.lead == label)
   }
 
   /// A colon or hyphen without the surrounding spaces is part of a word, not a separator.
