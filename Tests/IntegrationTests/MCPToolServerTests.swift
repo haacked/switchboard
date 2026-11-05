@@ -166,7 +166,7 @@ final class MCPClient {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct MCPToolServerTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct MCPToolServerTests {
   static let allTools: Set<String> = [
     "list_sessions", "get_session", "read_reply", "triage", "events", "send", "send_group", "spawn", "set_wait",
     "clear_wait", "add_note", "list_groups", "add_group", "remove_group", "move_to_group", "add_group_note",

@@ -83,7 +83,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct GitHubTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct GitHubTests {
   @Test func findsASessionsPRByItsBranch() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

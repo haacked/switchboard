@@ -48,8 +48,7 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
   }
 
   @Test func openChatStartsAGroupsFirstChatWithTheGroup() async {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
 
     let sent = await withCheckedContinuation { (sent: CheckedContinuation<(String, [String: JSON]), Never>) in
       model.send = { op, args in

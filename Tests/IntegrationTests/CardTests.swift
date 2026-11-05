@@ -28,7 +28,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct CardTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct CardTests {
   @Test func allowsAPermissionPrompt() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "perm touch x")

@@ -26,7 +26,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct AutoContinueTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct AutoContinueTests {
   static let quietSeconds = 60
   /// Past the quiet time, and well short of the 600 s idle stop.
   static let pastQuiet: Int64 = 61_000

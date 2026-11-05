@@ -43,7 +43,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
   github.change(122896) { $0["body"] = .string(text) }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct DependencyTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DependencyTests {
   @Test func bodyEdgesShowInGetAndLs() throws {
     let github = try FakeGitHub()
     body(github, "Moves the flags.\r\n\r\nDepends on #122953\r\nDepends on PostHog/charts#18303\r\n")

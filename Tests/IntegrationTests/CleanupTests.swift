@@ -28,7 +28,7 @@ func reaped(_ home: String) -> Bool {
   processes(of: home).isEmpty && !FileManager.default.fileExists(atPath: home)
 }
 
-@Suite(.timeLimit(.minutes(2))) struct CleanupTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct CleanupTests {
   @Test func theStubEndsWhenItsTerminalCloses() throws {
     let sbd = try Instance()
     let s = try sbd.newInADialog()

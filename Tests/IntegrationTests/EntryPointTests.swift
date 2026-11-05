@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct EntryPointTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct EntryPointTests {
   /// A launchctl stand-in that records its calls, prints `stderr`,
   /// and exits with `status` on bootstrap and 0 otherwise.
   private func fakeLaunchctl(in dir: String, status: Int = 0, stderr: String = "") throws -> String {

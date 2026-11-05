@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-@Suite(.timeLimit(.minutes(2))) struct SessionTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct SessionTests {
   @Test func startsClaudeWithTheFirstPromptAndTracksTheTurn() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "hello there")
@@ -76,6 +76,9 @@ import Testing
     let s = try sbd.new(prompt: "slow 60")
     try sbd.waitFor(s.id, "the tool call") { $0.state == .working }
     try sbd.waitForStubStatus(s, "busy")
+    // The stub reports busy before it sends PreToolUse. An event that arrives
+    // after the first check starts the wait for a check again.
+    try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
     func checks() -> Int { sbd.stubCalls().filter { $0.args == "agents --json" }.count }
     #expect(checks() == 0)
     // A periodic tick can start the check, so the log may lag the advance.
@@ -488,7 +491,7 @@ import Testing
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct AutoBranchSessionTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct AutoBranchSessionTests {
   @Test func namesTheBranchOfAWorktreeWithTheConfiguredPrefix() throws {
     let sbd = try Instance(config: ["branchPrefix": "haacked/"])
     let repo = try Repos.create("\(sbd.home.path)/repo")

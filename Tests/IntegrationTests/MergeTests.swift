@@ -32,7 +32,7 @@ extension Instance {
 }
 
 /// `sb merge` merges a ready PR with gh and resumes the session.
-@Suite(.timeLimit(.minutes(2))) struct MergeTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct MergeTests {
   static let charts = "PostHog/charts"
   /// The head branch of PostHog/charts#18303, which the fixture records as
   /// open, mergeable, approved by stamphog, and with checks that passed.

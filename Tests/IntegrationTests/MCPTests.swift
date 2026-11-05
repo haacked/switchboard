@@ -56,7 +56,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct MCPTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct MCPTests {
   @Test func sessionsReachTheSharedServersOverHTTPAndSSE() throws {
     let sbd = try Instance(config: [
       "mcpServers": [
