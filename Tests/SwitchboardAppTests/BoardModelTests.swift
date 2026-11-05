@@ -141,6 +141,15 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.visibleView == .inbox)
   }
 
+  @Test func movingUpFromTheFirstItemWrapsToTheLast() {
+    let model = model(["a", "b", "c"])
+    model.show(.inbox)
+    model.moveInbox(by: -1)
+    #expect(model.currentInboxItem == "c")
+    model.moveInbox(by: -1)
+    #expect(model.currentInboxItem == "b")
+  }
+
   @Test func boardCardForASessionOutsideTheInboxSelectsIt() {
     for state in [AttentionState.working, .done, .stale] {
       let model = model(["a"])
@@ -560,6 +569,29 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     model.merge("a")
     model.merge("a", dismiss: true)
     #expect(model.merging == ["a"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  @Test func chooseSendsTheTypedTextOfAReplyOption() async {
+    let sent = await request { $0.choose("a", ref: "summary:1", option: 2, action: .reply, text: "Use SQLite.") }
+
+    #expect(sent.op == "choose")
+    #expect(sent.args == ["session": "a", "option": "2", "ref": "summary:1", "text": "Use SQLite."])
+  }
+
+  @Test func ignoresACardsMergeWhileAMergeRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.merge("a")
+    model.choose("a", ref: "summary:1", option: 2, action: .dismiss)
+    #expect(model.merging == ["a"])
+    #expect(model.choosing.isEmpty)
     for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
     #expect(sent.value == 1)
   }

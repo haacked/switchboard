@@ -191,7 +191,7 @@ public final class Service {
         return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
       case "import":
         return .success(try JSON(encoding: importSessions(request.args)))
-      case "triage", "choose", "reply":
+      case "triage", "choose", "reply", "summary-set":
         return try triageRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
