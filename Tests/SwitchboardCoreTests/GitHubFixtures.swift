@@ -51,7 +51,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: true),
     PullRequest(
       id: "PR_kwDOJsIKrs8AAAABKhgNxg",
       number: 18303,
@@ -83,7 +84,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: false),
     PullRequest(
       id: "PR_kwDODg-Tdc8AAAABKWMoSw",
       number: 122896,
@@ -109,7 +111,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: true),
     PullRequest(
       id: "PR_kwDOFbb7KM70tBuL",
       number: 1209,
@@ -161,7 +164,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: false),
     PullRequest(
       id: "PR_kwDOD4evDM8AAAABHcbdjA",
       number: 20992,
@@ -198,7 +202,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: false),
     PullRequest(
       id: "PR_kwDOQXvSnc8AAAABKo4i1A",
       number: 189,
@@ -219,7 +224,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: nil),
+      closedAt: nil,
+      trunkConfig: false),
     PullRequest(
       id: "PR_kwDODg-Tdc8AAAABKD3FTQ",
       number: 122179,
@@ -248,7 +254,8 @@ enum GitHubFixtures {
       checks: "FAILURE",
       mergedBase: nil,
       mergedAt: "2026-10-23T21:57:32Z",
-      closedAt: "2026-10-23T21:57:32Z"),
+      closedAt: "2026-10-23T21:57:32Z",
+      trunkConfig: true),
     PullRequest(
       id: "PR_kwDODg-Tdc8AAAABJ8lAUA",
       number: 121847,
@@ -272,7 +279,8 @@ enum GitHubFixtures {
       checks: "SUCCESS",
       mergedBase: nil,
       mergedAt: nil,
-      closedAt: "2026-10-22T16:24:56Z"),
+      closedAt: "2026-10-22T16:24:56Z",
+      trunkConfig: true),
   ]
 
   /// The comments of each PR in `statusNodes`, oldest first.
