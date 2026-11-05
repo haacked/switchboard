@@ -227,6 +227,83 @@ extension Instance {
     #expect(try sbd.get(s.id).triage?.source == .fallback)
   }
 
+  /// The turn ends while its background job runs, so the session waits. The
+  /// job ends without a new turn, because the stub's report waits for
+  /// $SB_HOME/report.
+  @Test func summarizesATurnOnceItsBackgroundJobEnds() throws {
+    let sbd = try Instance(idleStopSeconds: 600, config: ["tickSeconds": 3600])
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
+    try sbd.sb("send", s.id, "background 100 held")
+    try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+    // No tick has run since the Stop, so the Stop itself counted the job.
+    #expect(try sbd.get(s.id).state == .waiting)
+    #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" })
+
+    let job = try #require(sbd.stubPid("job.pid"))
+    kill(job, SIGTERM)
+    try sbd.waitFor("the job to exit") { kill(job, 0) != 0 }
+    try sbd.advanceClock(1)
+
+    let event = try sbd.waitForTriageEvent(s.id)
+    #expect(event.data["stop"]?.int.map(Int64.init) == (try sbd.events(s.id).last { $0.kind == "Stop" })?.id)
+    #expect(event.data["skipped"] == nil)
+    #expect(sbd.summaryCalls().count == 1)
+  }
+
+  /// A draft PR that conflicts with its base puts the session in Needs you
+  /// by a rule. Once the conflict is gone, the reply decides the state, which
+  /// stays Needs you.
+  @Test func summarizesATurnOnceARuleNoLongerDecidesItsState() throws {
+    let github = try FakeGitHub()
+    github.change(MergeTests.number) {
+      $0["isDraft"] = true
+      $0["mergeable"] = "CONFLICTING"
+    }
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
+    try sbd.poll()
+    try sbd.sb("send", s.id, "again")
+    try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
+    let stop = try #require(try sbd.events(s.id).last { $0.kind == "Stop" }).id
+    #expect(try sbd.get(s.id).reason == "rebase; #18303 conflicts with main")
+    #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" || $0.id < stop })
+
+    github.change(MergeTests.number) { $0["mergeable"] = "MERGEABLE" }
+    try sbd.poll(all: true)
+
+    try sbd.waitFor("the second turn's summary") {
+      try sbd.events(s.id).contains { $0.kind == "triage" && $0.data["stop"]?.int.map(Int64.init) == stop }
+    }
+    #expect(try sbd.get(s.id).state == .needsYou)
+  }
+
+  @Test func aStateChangeWhileTheSummaryRunsStartsNoSecondCall() throws {
+    let sbd = try Instance(config: ["triage": ["timeoutSeconds": 10]])
+    let s = try sbd.new(prompt: "ask", name: "SLOW-SUMMARY")
+    try sbd.waitFor("the summary call") { sbd.summaryCalls().count == 1 }
+
+    try sbd.sb("wait", s.id, "Alex will reply")
+    try sbd.sb("wait", s.id, "--clear")
+
+    // A second call would log itself within a second.
+    Thread.sleep(forTimeInterval: 1)
+    #expect(try sbd.get(s.id).state == .needsYou)
+    #expect(sbd.summaryCalls().count == 1)
+  }
+
+  @Test func aFailedSummaryIsNotRetriedOnTheNextStateChange() throws {
+    let sbd = try Instance(config: ["triage": ["timeoutSeconds": 1]])
+    let s = try sbd.new(prompt: "ask", name: "SLOW-SUMMARY")
+    try sbd.waitForTriageEvent(s.id)
+
+    try sbd.sb("wait", s.id, "Alex will reply")
+    try sbd.sb("wait", s.id, "--clear")
+
+    #expect(sbd.summaryCalls().count == 1)
+    #expect(try sbd.events(s.id).filter { $0.kind == "triage" }.count == 1)
+  }
+
   @Test func turnsSummariesOff() throws {
     let sbd = try Instance(config: ["triage": ["enabled": false]])
     let s = try sbd.new(prompt: "ask")

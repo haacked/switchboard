@@ -118,13 +118,17 @@ extension Service {
 
   /// Starts the summary of the turn that just ended, when its last reply
   /// decides the session's state and no card or rule does. The result is a
-  /// `triage` event keyed by the Stop event.
+  /// `triage` event keyed by the Stop event. sbd calls it after each event
+  /// and tick that leaves the reply deciding the state. A turn gets one
+  /// attempt per run of sbd.
   func summarizeTurn(_ id: String) {
     guard config.triage.enabled, let e = entries[id] else { return }
     guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)) else {
       return
     }
     let stop = e.facts.lastStop
+    guard summaryAttempts[id] != stop else { return }
+    summaryAttempts[id] = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
     if let skip = summarySkip(e.facts, account: account) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])

@@ -55,6 +55,10 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The Stop event of each session's last turn whose summary this sbd
+  /// started or skipped. A turn gets one attempt per run of sbd, so a
+  /// restart retries a summary that failed.
+  var summaryAttempts: [String: Int64] = [:]
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -366,7 +370,6 @@ public final class Service {
       entries[id]?.inFlight = nil
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
-      if kind == "Stop" { summarizeTurn(id) }
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
       deliverPending(id, after: 0.5)
     default:
@@ -386,9 +389,12 @@ public final class Service {
     }
     if var e = entries[id] {
       e.facts.apply(event)
-      Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
+      let verdict = Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
       e.events += 1
       entries[id] = e
+      // A reply can decide the state after its turn ended, as when a
+      // background job outlasts the turn or a PR rule stops applying.
+      if Triage.needsSummary(e.facts, verdict) { summarizeTurn(id) }
     }
     releaseCards(id)
     return event
@@ -1305,8 +1311,9 @@ public final class Service {
           entries[id]?.unreportedSince = nil
         }
         if var e = entries[id] {
-          Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
+          let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
+          if Triage.needsSummary(e.facts, verdict) { summarizeTurn(id) }
         }
       }
       // A resolved `resume` wait can launch claude.
