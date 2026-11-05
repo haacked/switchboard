@@ -145,6 +145,11 @@ struct SessionView: View {
           Text(session.live ? "claude running" : "claude stopped")
             .font(.caption)
             .foregroundStyle(.secondary)
+          if let mode = session.permissionMode {
+            Text("\(PermissionMode.title(mode)) mode")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         if let pr = session.pr, let url = pr.link {

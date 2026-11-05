@@ -171,7 +171,7 @@ extension Instance {
     let s = try sbd.new(prompt: "perm touch x")
     let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     #expect(asked.triage?.source == .card)
-    #expect(asked.triage?.options.map(\.label) == ["Allow", "Deny"])
+    #expect(asked.triage?.options.map(\.label) == ["Allow", "Deny", "Approve and enable auto mode"])
     #expect(try sbd.triage().first?.triage?.title == "Approve `touch x`")
     let result = try JSON.parse(sbd.sb("choose", "--json", s.id, "allow"))
     #expect(result?["delivery"]?.string == "hook")

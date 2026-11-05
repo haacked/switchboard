@@ -36,6 +36,10 @@
 #   the hook, as Claude Code closes the request. timeout kills the hook and
 #   leaves the dialog open, as the hook's timeout does. perm sleep <n> sleeps
 #   n s before PostToolUse, as a long command does.
+#   A permission dialog outside auto mode also offers "Yes, and switch to
+#   auto mode", as Claude Code 2.1.318 does. Picking it, or a hook's allow
+#   with a setMode, switches the mode. Each payload carries the mode, from
+#   --permission-mode or `default`.
 #   perm and pick build their tool payloads by hand. The stub does not play
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
@@ -129,19 +133,23 @@ config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
 project="$config_dir/projects/$(jq -rn --arg c "$PWD" '$c | gsub("[^A-Za-z0-9]"; "-")')"
 
 recordings="$(dirname "$0")/claude"
-settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm=''
+settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm='' mode=default
 while [ $# -gt 0 ]; do
   case $1 in
   --settings) settings=$2 && shift 2 ;;
   --mcp-config) mcp_config=$2 && shift 2 ;;
   --session-id) session=$2 && shift 2 ;;
   --resume) session=$2 source=resume && shift 2 ;;
-  --model | --permission-mode | --append-system-prompt) shift 2 ;;
+  --permission-mode) mode=$2 && shift 2 ;;
+  --model | --append-system-prompt) shift 2 ;;
   --) prompt=${2:-} && break ;;
   --*) shift ;;
   *) prompt=$1 && shift ;;
   esac
 done
+# The mode lives in a file, because a dialog's answer arrives in a subshell.
+mode_file="$SB_HOME/stub-mode.$$"
+printf '%s' "$mode" >"$mode_file"
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
 sb_cmd=${hook_cmd% hook}
 request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
@@ -149,8 +157,8 @@ request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 # payload <event> [json fields]: a hook payload shaped like claude's. It names
 # the transcript, as claude's does, even before the file exists.
 payload() {
-  jq -nc --arg e "$1" --arg s "$session" --arg t "$project/$session.jsonl" --argjson f "${2:-{\}}" \
-    '{hook_event_name: $e, session_id: $s, transcript_path: $t} + $f'
+  jq -nc --arg e "$1" --arg s "$session" --arg t "$project/$session.jsonl" --arg m "$(<"$mode_file")" --argjson f "${2:-{\}}" \
+    '{hook_event_name: $e, session_id: $s, transcript_path: $t, permission_mode: $m} + $f'
 }
 
 # transcript <text>: appends a line to the conversation's transcript.
@@ -206,9 +214,9 @@ erase() { printf '\033[%dA\033[J' $((${#head[@]} + ${#items[@]} + 2)) >&2; }
 # keys <drawn>: draws the dialog, or draws it again when <drawn> is 1, then
 # reads keys from the terminal until an answer, and writes the answer to
 # $term. Up and Down move the cursor. Enter answers with the typed word, or
-# with the highlighted item: y for the first, esc for No. Escape alone
-# answers esc. bash 3.2 reads with whole-second timeouts, so a lone Escape
-# takes 1 s.
+# with the highlighted item: y for the first, auto for the auto mode item,
+# and esc for No. Escape alone answers esc. bash 3.2 reads with whole-second
+# timeouts, so a lone Escape takes 1 s.
 keys() {
   local c rest word='' cursor=0
   [ "$1" = 1 ] && erase
@@ -228,7 +236,11 @@ keys() {
       ;;
     '')
       if [ -z "$word" ]; then
-        [ "${items[$cursor]}" = "2. No" ] && word=esc || word=y
+        case ${items[$cursor]} in
+        *". No") word=esc ;;
+        *"switch to auto mode"*) word=auto ;;
+        *) word=y ;;
+        esac
       fi
       break
       ;;
@@ -258,7 +270,11 @@ dialog() {
     echo "⏺ $tool($(jq -r .tool_input.command <<<"$1"))" >&2
     head=(" Bash command" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " $(jq -r .tool_input.command <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌"
       " Do you want to proceed?")
-    items=("1. Yes" "2. No")
+    if [ "$(<"$mode_file")" = auto ]; then
+      items=("1. Yes" "2. No")
+    else
+      items=("1. Yes" "2. Yes, and switch to auto mode · auto mode handles these prompts for you" "3. No")
+    fi
   fi
   stty -icanon -echo <&3
   payload PermissionRequest "$1" | sh -c "exec $request_cmd" >"$out" &
@@ -311,12 +327,13 @@ vars() {
 # not in a pipeline's subshell, so a SIGKILL also stops the hooks that remain.
 emit() {
   local extra=${1:-'{}'} payload paused='' payloads
-  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --arg config "$config_dir" --argjson extra "$extra" '
+  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --arg config "$config_dir" --arg mode "$(<"$mode_file")" --argjson extra "$extra" '
     ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: $config,
       claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
     | walk(if type == "string" then
         reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))
-      else . end)')
+      else . end)
+    | if has("permission_mode") then .permission_mode = $mode else . end')
   while IFS= read -r payload; do
     [ -z "$payload" ] && continue
     if [ -n "${2:-}" ] && [ -z "$paused" ] && [[ $payload == *"$2"* ]]; then
@@ -347,6 +364,9 @@ answered() {
   "terminal y")
     input=${4:-$input}
     ;;
+  "terminal auto")
+    printf auto >"$mode_file"
+    ;;
   "terminal esc")
     stopped
     return
@@ -354,7 +374,11 @@ answered() {
   hook*)
     decision=$(printf '%s' "${answer#hook }" | jq -c .hookSpecificOutput.decision)
     case $(jq -r .behavior <<<"$decision") in
-    allow) input=$(jq -c --argjson i "$input" '.updatedInput // $i' <<<"$decision") ;;
+    allow)
+      input=$(jq -c --argjson i "$input" '.updatedInput // $i' <<<"$decision")
+      jq -r --arg m "$(<"$mode_file")" '[.updatedPermissions[]? | select(.type == "setMode") | .mode] | last // $m' \
+        <<<"$decision" >"$mode_file.new" && mv "$mode_file.new" "$mode_file"
+      ;;
     deny)
       if [ "$(jq -r .interrupt <<<"$decision")" = true ]; then
         stopped
