@@ -29,7 +29,9 @@ final class BoardModel: ObservableObject {
   @Published var confirmingCleanup: String?
   /// The ids of the sessions whose cleanup is running.
   @Published var cleaningUp: Set<String> = []
-  var presentingSheet: Bool { showingNew || showingImport }
+  /// The Delete All sheet's state, or nil while it is closed.
+  @Published var doneRemoval: DoneRemoval?
+  var presentingSheet: Bool { showingNew || showingImport || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox
   /// The Inbox item that the user last moved to.
@@ -521,22 +523,17 @@ final class BoardModel: ObservableObject {
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
-        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
     }
 
-    private static func list(_ parts: [String]) -> String {
+    static func list(_ parts: [String]) -> String {
       switch parts.count {
       case 0, 1: parts.joined()
       case 2: parts.joined(separator: " and ")
       default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
       }
     }
-  }
-
-  /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
-  nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
-    s.state == .done && s.kind == .work && !s.waitsToStart
   }
 
   nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {
