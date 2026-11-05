@@ -45,18 +45,7 @@ struct DecisionCard: View {
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
     } else if !item.options.isEmpty {
-      // An option written twice is one main button.
-      let primary = item.primary.flatMap { item.options.firstIndex(of: $0) }
-      VStack(alignment: .leading, spacing: 8) {
-        ForEach(Array(item.options.enumerated()), id: \.offset) { i, option in
-          if option.action == .reply {
-            ReplyOption(session: session, ref: item.ref, number: i + 1, option: option)
-          } else {
-            OptionButton(
-              session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary)
-          }
-        }
-      }
+      OptionList(session: session, item: item)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog.
       Text("Claude Code's dialog waits in the terminal. Open the Terminal to answer it.")
@@ -77,9 +66,9 @@ extension TriageOption {
     return "\(label), merge #\(pr)"
   }
 
-  /// Whether the button shows `effect` under the label. A session writes the
-  /// label, so the button shows what a click does unless the label is the
-  /// text that a click sends.
+  /// Whether the option's row shows `effect` beside its button. A session
+  /// writes the label, so the row shows what a click does unless the label is
+  /// the text that a click sends.
   var showsEffect: Bool { action != .send || (message ?? label) != label }
 
   /// What VoiceOver reads after the label: the option's detail and what a
@@ -90,39 +79,30 @@ extension TriageOption {
   }
 }
 
-/// An option's button. A click runs the option's action. The primary one is
-/// filled and answers ⌘⇧Return.
+/// An option's compact button. A click runs the option's action. The primary
+/// one is filled and answers ⌘⇧Return.
 struct OptionButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let ref: String
   let number: Int
   let option: TriageOption
+  let title: OptionTitle
   let primary: Bool
 
   static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
-    let effect = option.effect
     let button = Button {
       model.choose(session.id, ref: ref, option: number, action: option.action)
     } label: {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(option.label).fontWeight(.medium)
-        if let detail = option.detail { Text(detail).font(.caption).opacity(0.8) }
-        if option.showsEffect {
-          Text(effect).font(.caption).opacity(0.8).lineLimit(3)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.vertical, 4)
+      title
     }
-    .controlSize(.large)
     .disabled(
       model.choosing.contains("\(session.id)/\(number)")
         || (option.action.isMerge && model.merging.contains(session.id))
     )
-    .help(effect)
+    .help(option.effect)
     .accessibilityLabel(option.accessibilityLabel(pr: session.pr?.number))
     .accessibilityHint(option.accessibilityHint)
     if primary {
@@ -133,7 +113,8 @@ struct OptionButton: View {
   }
 }
 
-/// A choice that needs typing: a short field and a Send button.
+/// A choice that needs typing: a short field and a Send button. The option's
+/// row shows its title beside them.
 struct ReplyOption: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -145,17 +126,14 @@ struct ReplyOption: View {
   private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(option.label).fontWeight(.medium)
-      HStack {
-        TextField(option.placeholder ?? option.label, text: $text)
-          .textFieldStyle(.roundedBorder)
-          .onSubmit(send)
-          .accessibilityLabel(option.label)
-        Button("Send", action: send)
-          .disabled(trimmed.isEmpty || model.choosing.contains("\(session.id)/\(number)"))
-          .accessibilityLabel("Send: \(option.label)")
-      }
+    HStack {
+      TextField(option.placeholder ?? option.label, text: $text)
+        .textFieldStyle(.roundedBorder)
+        .onSubmit(send)
+        .accessibilityLabel(option.label)
+      Button("Send", action: send)
+        .disabled(trimmed.isEmpty || model.choosing.contains("\(session.id)/\(number)"))
+        .accessibilityLabel("Send: \(option.label)")
     }
   }
 
