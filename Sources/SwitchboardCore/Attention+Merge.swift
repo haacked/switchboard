@@ -35,22 +35,23 @@ extension SessionFacts {
     return merge.error
   }
 
-  /// Whether the PR's repo merges through Trunk's queue. A repo without Trunk
-  /// has no trunk-io comments.
-  var usesTrunk: Bool { prComments.contains { $0.author == TrunkComments.author } }
+  /// Whether the PR's repo merges through Trunk's queue, as its `.trunk`
+  /// folder or a trunk-io comment shows.
+  var usesTrunk: Bool { pr?.trunkConfig == true || prComments.contains { $0.author == TrunkComments.author } }
 }
 
 extension Attention {
   /// Ready to merge when the PR targets the default branch, is not a draft,
   /// GitHub reports no conflict, the checks passed, no review is required,
-  /// requested, or outstanding, the repo merges without Trunk, and no
+  /// requested, or outstanding, the poller read that the base repository has
+  /// no `.trunk` folder, no Trunk comment or queue state shows, and no
   /// dependency holds it. `openPR` calls it after its blocking rules and its
   /// merged and dismissed attempts, so the PR is open and the session is idle.
   static func readyToMerge(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, !pr.draft, pr.mergeable == .mergeable, pr.checks == "SUCCESS",
       pr.defaultBranch == nil || pr.base == pr.defaultBranch,
       pr.reviewDecision != .reviewRequired, pr.reviewDecision != .changesRequested, pr.changesRequestedBy.isEmpty,
-      pr.reviewRequests?.isEmpty ?? true, pr.queue == nil, !facts.usesTrunk,
+      pr.reviewRequests?.isEmpty ?? true, pr.trunkConfig == false, pr.queue == nil, !facts.usesTrunk,
       !facts.dependencies.contains(where: \.holds)
     else { return nil }
     return Verdict(

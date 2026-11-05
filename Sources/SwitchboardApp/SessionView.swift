@@ -24,18 +24,7 @@ struct SessionView: View {
     VStack(spacing: 0) {
       header
       Divider()
-      if !session.cards.isEmpty {
-        // A card with several questions would otherwise squeeze out the terminals.
-        ScrollView {
-          VStack(spacing: 8) {
-            ForEach(session.cards) { CardView(card: $0, draft: model.draft(for: $0)) }
-          }
-          .padding(8)
-        }
-        .frame(maxHeight: 360)
-        .fixedSize(horizontal: false, vertical: true)
-        Divider()
-      }
+      CardList(cards: session.cards)
       if session.cleanup?.state == .removed {
         Text("Cleanup removed this session's worktree, so it has no terminals.")
           .foregroundStyle(.secondary)

@@ -114,7 +114,7 @@ public enum AutoContinue {
     let f = input.facts
     let s = input.settings
     if input.verdict.state != .canContinue { return "not in Claude can continue" }
-    if input.session.manager == true { return "the Manager" }
+    if let label = input.session.kind.label { return label }
     if !f.cards.isEmpty || f.openPermission != nil || f.openQuestion != nil { return "an open card" }
     if !(input.session.waits ?? []).isEmpty { return "an open wait" }
     if f.turnRunning { return "a turn is running" }

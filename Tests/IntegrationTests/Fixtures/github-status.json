@@ -24,7 +24,8 @@
           "nameWithOwner": "PostHog/posthog",
           "defaultBranchRef": {
             "name": "master"
-          }
+          },
+          "trunkConfig": { "id": "MDQ6VHJlZTIzNTkwMTgxMzpiZmQzNDA0NjI0MGYzYTI3NzM3YzRjYjQwZWZhNjM4MTVkY2Y1ZTYw" }
         },
         "labels": {
           "nodes": [
@@ -229,7 +230,8 @@
           "nameWithOwner": "PostHog/charts",
           "defaultBranchRef": {
             "name": "main"
-          }
+          },
+          "trunkConfig": null
         },
         "labels": {
           "nodes": [
@@ -381,7 +383,8 @@
           "nameWithOwner": "PostHog/posthog",
           "defaultBranchRef": {
             "name": "master"
-          }
+          },
+          "trunkConfig": { "id": "MDQ6VHJlZTIzNTkwMTgxMzpiZmQzNDA0NjI0MGYzYTI3NzM3YzRjYjQwZWZhNjM4MTVkY2Y1ZTYw" }
         },
         "labels": {
           "nodes": []
@@ -548,7 +551,8 @@
           "nameWithOwner": "PostHog/requests-for-comments-internal",
           "defaultBranchRef": {
             "name": "main"
-          }
+          },
+          "trunkConfig": null
         },
         "labels": {
           "nodes": []
@@ -834,7 +838,8 @@
           "nameWithOwner": "PostHog/posthog.com",
           "defaultBranchRef": {
             "name": "master"
-          }
+          },
+          "trunkConfig": null
         },
         "labels": {
           "nodes": [
@@ -1048,7 +1053,8 @@
           "nameWithOwner": "haacked/review-code",
           "defaultBranchRef": {
             "name": "main"
-          }
+          },
+          "trunkConfig": null
         },
         "labels": {
           "nodes": []
@@ -1100,7 +1106,8 @@
           "nameWithOwner": "PostHog/posthog",
           "defaultBranchRef": {
             "name": "master"
-          }
+          },
+          "trunkConfig": { "id": "MDQ6VHJlZTIzNTkwMTgxMzpiZmQzNDA0NjI0MGYzYTI3NzM3YzRjYjQwZWZhNjM4MTVkY2Y1ZTYw" }
         },
         "labels": {
           "nodes": [
@@ -1295,7 +1302,8 @@
           "nameWithOwner": "PostHog/posthog",
           "defaultBranchRef": {
             "name": "master"
-          }
+          },
+          "trunkConfig": { "id": "MDQ6VHJlZTIzNTkwMTgxMzpiZmQzNDA0NjI0MGYzYTI3NzM3YzRjYjQwZWZhNjM4MTVkY2Y1ZTYw" }
         },
         "labels": {
           "nodes": [

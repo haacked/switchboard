@@ -41,12 +41,4 @@ public enum Manager {
 
     Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Its merge commits are on no remote, so remove that session with `sb rm` and then `git worktree remove --force <cwd>` when you finish.
     """
-
-  /// The Manager's --mcp-config: the Switchboard MCP server, which `sb` runs over stdio.
-  public static func mcpConfig(sb: String, home: String, session: String) -> JSON {
-    let env: JSON = ["SB_HOME": .string(home), "SB_SESSION_ID": .string(session)]
-    return [
-      "mcpServers": ["switchboard": ["type": "stdio", "command": .string(sb), "args": ["mcp-server"], "env": env]]
-    ]
-  }
 }

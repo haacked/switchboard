@@ -508,6 +508,8 @@ let sessionCard = TriageSummary(
   func ended(_ pr: PullRequest, comments: [PRComment] = []) -> SessionFacts {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), stop(2, 1, "Pushed.")])
     f.pr = pr
+    // The poller found no .trunk folder, so the repo merges without Trunk.
+    f.pr?.trunkConfig = false
     f.prComments = comments
     return f
   }

@@ -45,6 +45,8 @@ final class BoardModel: ObservableObject {
   /// The newest events of the sessions whose card details the Inbox showed,
   /// newest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
+  /// Each group chat's last messages, by group id, read while its pane shows.
+  @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -112,7 +114,7 @@ final class BoardModel: ObservableObject {
   /// star fills and turns the Needs you color while it needs you.
   var needsUser: [SessionSummary] { sessions.filter { $0.state.needsUser && Triage.mayHaveItem($0) } }
 
-  var manager: SessionSummary? { sessions.first { $0.manager == true } }
+  var manager: SessionSummary? { sessions.first { $0.kind == .manager } }
 
   /// A state's sessions in the sidebar, each one followed by its children.
   struct SidebarGroup: Identifiable {
@@ -121,15 +123,19 @@ final class BoardModel: ObservableObject {
     var id: AttentionState { state }
   }
 
-  /// The board without the Manager, which has its own sidebar row and belongs to no group.
-  var boardWithoutManager: [SessionSummary] { board.filter { $0.manager != true } }
+  /// The board without the Manager and the group chats, which belong to no
+  /// group. The Manager has its own sidebar row. A group's Board row opens its chat.
+  var workBoard: [SessionSummary] { board.filter { $0.kind == .work } }
+
+  /// The group's chat, or nil before its first start.
+  func chat(of group: String) -> SessionSummary? { sessions.first { $0.kind == .chat && $0.chat == group } }
 
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
   /// one with no parent. A session whose parent is another session nests under
   /// that parent while both are in the same group.
   var sidebarGroups: [SidebarGroup] {
-    let listed = boardWithoutManager
+    let listed = workBoard
     return AttentionState.allCases.compactMap { state in
       let group = listed.filter { $0.state == state }
       return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))
@@ -325,6 +331,18 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// Selects the group's chat. The first time, it starts the chat. A chat
+  /// that exists resumes only when the user sends it a message or shows its terminal.
+  func openChat(_ group: String) {
+    if let chat = chat(of: group) {
+      selection = chat.id
+      return
+    }
+    perform("chat", ["group": .string(group)]) { value in
+      if let id = value["id"]?.string { self.selectUnlisted(id) }
+    }
+  }
+
   /// Selects a session that sbd just made, which the next refresh lists.
   func selectUnlisted(_ id: String) {
     selection = id
@@ -446,6 +464,20 @@ final class BoardModel: ObservableObject {
 
   static let recentEventCount = 10
 
+  /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
+  func loadChatLog(_ group: String) {
+    let client = client
+    poller.async {
+      let messages = try? client.call("chat-log", ["group": .string(group)], as: [ChatMessage].self)
+      Task { @MainActor in
+        // A failed first read shows an empty log, so the pane stops showing that it is loading.
+        if let messages = messages ?? (self.chatLogs[group] == nil ? [] : nil), self.chatLogs[group] != messages {
+          self.chatLogs[group] = messages
+        }
+      }
+    }
+  }
+
   /// Reads the session's last reply from its transcript, which can be large,
   /// so off the main thread.
   func loadReply(_ session: String) {
@@ -511,7 +543,7 @@ final class BoardModel: ObservableObject {
 
   /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
   nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
-    s.state == .done && s.manager != true && !s.waitsToStart
+    s.state == .done && s.kind == .work && !s.waitsToStart
   }
 
   nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {

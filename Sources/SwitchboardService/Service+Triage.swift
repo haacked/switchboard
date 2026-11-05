@@ -82,20 +82,26 @@ extension Service {
   /// The session's last assistant reply from its transcript, which is read
   /// off the state queue, else the one its Stop hook reported.
   private func reply(_ args: JSON) throws -> JSON {
-    let (id, known, find, hooked) = try queue.sync { () -> (String, String?, (() -> String?)?, String?) in
+    let (id, findTranscript, hooked) = try queue.sync { () -> (String, () -> String?, String?) in
       let id = try lookup(args)
-      let e = entries[id]!
-      let account = paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
-      let session = e.session
-      let find =
-        session.started ? { Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) } : nil
-      return (id, e.facts.transcriptPath, find, e.facts.lastReply)
+      return (id, transcriptFinder(id), entries[id]!.facts.lastReply)
     }
-    // The file checks and the folder search run off the state queue.
-    let path = known.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } ?? find?()
-    let text = path.flatMap { Transcript.tail($0).lastReply }
+    let text = findTranscript().flatMap { Transcript.tail($0).lastReply }
     guard let reply = text ?? hooked else { throw APIError("\(id) has no reply yet") }
     return ["session": .string(id), "reply": .string(reply), "source": .string(text == nil ? "hook" : "transcript")]
+  }
+
+  /// Runs on the state queue. It returns a function that finds the session's
+  /// transcript, so that the file checks and the folder search run off the queue.
+  func transcriptFinder(_ id: String) -> () -> String? {
+    let e = entries[id]!
+    let account = paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
+    let session = e.session
+    let known = e.facts.transcriptPath
+    return {
+      if let known, FileManager.default.fileExists(atPath: known) { return known }
+      return session.started ? Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd) : nil
+    }
   }
 
   // MARK: Summaries

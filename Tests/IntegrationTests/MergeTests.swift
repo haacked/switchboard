@@ -60,6 +60,32 @@ extension Instance {
     #expect(got["reason"]?.string == "#18303 is ready to merge, approved by stamphog")
   }
 
+  /// A busy PR in a repository that merges through Trunk: Trunk's comment is
+  /// older than the comments the poller reads, so the poller sees only other
+  /// bots. The repository's `.trunk` folder still shows the queue.
+  @Test func busyPRInATrunkRepositoryIsNotReadyAndMergeIsRefused() throws {
+    let github = try FakeGitHub()
+    github.change(MergeTests.number) {
+      $0["repository"] = [
+        "nameWithOwner": .string(MergeTests.charts), "defaultBranchRef": ["name": "main"],
+        "trunkConfig": ["id": "TREE_trunk"],
+      ]
+    }
+    for i in 0..<25 {
+      github.comment(
+        on: MergeTests.number, by: "github-actions[bot]", body: "Deploy preview \(i)",
+        at: String(format: "2026-10-22T06:%02d:00Z", i))
+    }
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+
+    let r = try sbd.run(["merge", s.id])
+
+    #expect(try sbd.get(s.id).reason == "enqueue #18303, approved by stamphog")
+    #expect(r.status != 0)
+    #expect(sbd.ghMerges().isEmpty)
+  }
+
   @Test func readyPRShowsReadyToMergeInTheList() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)

@@ -392,11 +392,11 @@ public enum Triage {
   }
 
   /// Whether the session may put an item in the Inbox, the badge, the menu
-  /// bar, a notification, or Next Needing You. The Manager may not, because its
-  /// replies and cards repeat or name the sessions it manages, which have their
-  /// own entries. Nothing reports a problem with sb itself, such as an
-  /// out-of-date sbd. This refuses every Manager item.
-  public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.manager != true }
+  /// bar, a notification, or Next Needing You. The Manager and the group chats
+  /// may not, because their replies and cards repeat or name the sessions they
+  /// manage, which have their own entries. Nothing reports a problem with sb
+  /// itself, such as an out-of-date sbd. This refuses every item of theirs.
+  public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.kind == .work }
 
   /// The sessions that have an item, by group and then oldest first.
   public static func order(_ sessions: [SessionSummary]) -> [SessionSummary] {
