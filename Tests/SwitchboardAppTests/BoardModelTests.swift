@@ -20,6 +20,7 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
     since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
   s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
   s.manager = manager ? true : nil
+  if manager { s.kind = .manager }
   return s
 }
 
@@ -230,6 +231,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
       state: state, reason: "", since: 0, lastActivity: 0, live: false, claudePid: nil, attached: false,
       lastReply: nil, waits: [], notes: [])
     s.manager = manager
+    s.kind = SessionKind(manager: manager, chat: nil)
     if let pr {
       s.pr = try! JSONDecoder().decode(
         PRSummary.self,

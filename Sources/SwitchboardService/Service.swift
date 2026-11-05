@@ -133,6 +133,7 @@ public final class Service {
     snapshot = buildSnapshot() ?? Snapshot()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
+    try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
     for id in entries.keys { summarizeTurn(id) }
     try startMCPServers()
@@ -163,6 +164,10 @@ public final class Service {
         return try .success(JSON(encoding: spawn(request.args)))
       case "manager":
         return managerRequest()
+      case "chat":
+        return chatRequest(request.args)
+      case "chat-log":
+        return .success(try chatLog(request.args))
       case "rm":
         return .success(try remove(request.args))
       case "cleanup":
@@ -576,8 +581,10 @@ public final class Service {
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     args += ["--settings", home.claudeSettings]
     args += mcpArgs
-    if session.manager == true {
-      args += ["--mcp-config", Manager.mcpConfig(sb: sbPath, home: home.path, session: id).text]
+    if session.kind != .work {
+      args += [
+        "--mcp-config", MCPToolServer.launchConfig(sb: sbPath, home: home.path, session: id, group: session.chat).text,
+      ]
     }
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
@@ -1297,6 +1304,8 @@ public final class Service {
       markedDone: s.done)
     out.parent = s.parent
     out.manager = s.manager
+    out.kind = s.kind
+    out.chat = s.chat
     if Triage.mayHaveItem(out) { out.triage = Triage.item(e.facts, verdict) }
     out.followup = s.followup
     out.created = s.created

@@ -4,11 +4,11 @@ import Foundation
 public enum RepoLabels {
   static let maxLength = 30
 
-  /// Each session's label by session id. A session with no known repo, and
-  /// the Manager, get none. When the sessions span fewer than two repos, no
+  /// Each session's label by session id. A session with no known repo, the
+  /// Manager, and a group chat get none. When the sessions span fewer than two repos, no
   /// session gets one, because every row would say the same thing.
   public static func labels(_ sessions: [SessionSummary]) -> [String: String] {
-    let listed = sessions.filter { $0.manager != true }
+    let listed = sessions.filter { $0.kind == .work }
     // Every session in a folder takes the owner/name of the first PR in that
     // folder, or else of the first started follow-up in it. A session's own PR
     // does not override it. The sessions in one folder therefore count as one repo.
