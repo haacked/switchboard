@@ -6,6 +6,8 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
   /// An idle session whose PR can merge now.
   case readyToMerge = "ready_to_merge"
   case canContinue = "can_continue"
+  /// A session that the other rules put in Waiting and whose PR is open and not a draft.
+  case readyForReview = "ready_for_review"
   case waiting
   case working
   case done
@@ -18,6 +20,7 @@ public enum AttentionState: String, Codable, CaseIterable, Comparable, Sendable 
     case .needsYou: "Needs you"
     case .readyToMerge: "Ready to merge"
     case .canContinue: "Claude can continue"
+    case .readyForReview: "Ready for review"
     case .waiting: "Waiting"
     case .working: "Working"
     case .done: "Done"
@@ -202,6 +205,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var cleanup: CleanupStatus?
   /// The id of the session's group, or nil for Ungrouped.
   public var group: String?
+  /// The name and description of the session's group.
+  public var groupName: String?
+  public var groupDescription: String?
   /// The PRs that the session's open PR waits on, or nil when it waits on none.
   public var dependencies: [Dependency]?
   /// The plans attached to the session and to its group, or nil when there are none.
