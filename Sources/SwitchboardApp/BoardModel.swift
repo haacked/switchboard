@@ -363,6 +363,28 @@ final class BoardModel: ObservableObject {
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
+  /// Sets the group's description, or clears it when `text` is blank. The
+  /// Board shows the new text before sbd answers. It returns false when it
+  /// refuses the text, such as text over the length limit.
+  @discardableResult
+  func describeGroup(_ id: String, _ text: String) -> Bool {
+    guard let index = groups.firstIndex(where: { $0.id == id }) else { return true }
+    let clean: String?
+    do {
+      clean = try SessionGroup.cleanDescription(text)
+    } catch {
+      actionError = "\(error)"
+      return false
+    }
+    guard clean != groups[index].description else { return true }
+    groups[index].description = clean
+    if let clean {
+      perform("group-describe", ["group": .string(id), "text": .string(clean)])
+    } else {
+      perform("group-describe", ["group": .string(id), "clear": true])
+    }
+    return true
+  }
   func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
   func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
 

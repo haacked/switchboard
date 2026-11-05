@@ -205,6 +205,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var cleanup: CleanupStatus?
   /// The id of the session's group, or nil for Ungrouped.
   public var group: String?
+  /// The name and description of the session's group.
+  public var groupName: String?
+  public var groupDescription: String?
   /// The PRs that the session's open PR waits on, or nil when it waits on none.
   public var dependencies: [Dependency]?
   /// The plans attached to the session and to its group, or nil when there are none.
