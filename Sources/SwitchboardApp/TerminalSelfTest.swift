@@ -41,7 +41,7 @@ enum TerminalSelfTest {
   }
 
   private static func claudePane() -> TerminalView? {
-    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
+    guard let root = NSApp.switchboardWindow?.contentView
     else { return nil }
     return panes(in: root).min { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
   }

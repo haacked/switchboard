@@ -82,6 +82,7 @@ final class UsageReader: @unchecked Sendable {
       usage.checked = nowMs()
     } catch {
       usage.error = "\(error)"
+      if error is SignedOut { usage.signedOut = true }
     }
     return usage
   }
@@ -90,12 +91,10 @@ final class UsageReader: @unchecked Sendable {
   /// refreshed first, through claude.
   private func accessToken(_ folder: String) throws -> String {
     let login = ClaudeAccount.command(service.config.claude, in: folder)
-    guard var creds = credentials(folder) else {
-      throw APIError("not signed in; run `\(login)` and /login")
-    }
+    guard var creds = try credentials(folder) else { throw SignedOut(login: login) }
     if expiresSoon(creds.expiresAt) {
       refresh(folder)
-      guard let fresh = credentials(folder), !expiresSoon(fresh.expiresAt) else {
+      guard let fresh = try credentials(folder), !expiresSoon(fresh.expiresAt) else {
         throw APIError("the access token expired and claude could not refresh it; run `\(login)` and /login")
       }
       creds = fresh
@@ -111,17 +110,37 @@ final class UsageReader: @unchecked Sendable {
     return expiresAt < nowMs() + Self.refreshMarginMs
   }
 
-  /// The credentials from the login keychain, else from .credentials.json.
-  private func credentials(_ folder: String) -> (token: String, expiresAt: Int64?)? {
-    if settings.keychain,
-      let r = try? runCommand(
-        "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"], timeout: 10),
-      r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8))
+  /// The credentials from the login keychain, else from .credentials.json,
+  /// or nil when neither holds a login. It throws when the keychain read
+  /// fails for a reason other than a missing item and the file holds no
+  /// login, because a locked keychain does not mean the account signed out.
+  private func credentials(_ folder: String) throws -> (token: String, expiresAt: Int64?)? {
+    var keychainFailure: String?
+    if settings.keychain {
+      do {
+        let r = try runCommand(
+          "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"],
+          timeout: 10)
+        if r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8)) { return creds }
+        if r.status != 0 && r.status != Self.keychainItemNotFound {
+          keychainFailure =
+            "security exited with status \(r.status): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+      } catch {
+        keychainFailure = "\(error)"
+      }
+    }
+    if let creds = FileManager.default.contents(atPath: ClaudeAccount.credentialsFile(folder)).flatMap(
+      Usage.credentials)
     {
       return creds
     }
-    return FileManager.default.contents(atPath: ClaudeAccount.credentialsFile(folder)).flatMap(Usage.credentials)
+    if let keychainFailure { throw APIError("could not read the login from the keychain: \(keychainFailure)") }
+    return nil
   }
+
+  /// The exit status of `security find-generic-password` when no item matches.
+  private static let keychainItemNotFound: Int32 = 44
 
   /// claude refreshes an expired token when `claude mcp get` looks up the
   /// claude.ai connectors. The server name does not need to exist.
@@ -164,3 +183,9 @@ extension Service {
 }
 
 extension UsageReader: QuotaBudget {}
+
+/// The account has no credentials, so claude would ask for /login.
+struct SignedOut: Error, CustomStringConvertible {
+  var login: String
+  var description: String { "not signed in; run `\(login)` and /login" }
+}

@@ -3,6 +3,11 @@ import SwiftUI
 import SwitchboardCore
 import UserNotifications
 
+extension NSApplication {
+  /// The app's main window, found by the title that `SwitchboardApp` gives it.
+  var switchboardWindow: NSWindow? { windows.first { $0.isVisible && $0.title == "Switchboard" } }
+}
+
 @main
 struct SwitchboardApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
