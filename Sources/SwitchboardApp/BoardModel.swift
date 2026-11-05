@@ -358,6 +358,28 @@ final class BoardModel: ObservableObject {
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
+  /// Sets the group's description, or clears it when `text` is blank. The
+  /// Board shows the new text before sbd answers. It returns false when it
+  /// refuses the text, such as text over the length limit.
+  @discardableResult
+  func describeGroup(_ id: String, _ text: String) -> Bool {
+    guard let index = groups.firstIndex(where: { $0.id == id }) else { return true }
+    let clean: String?
+    do {
+      clean = try SessionGroup.cleanDescription(text)
+    } catch {
+      actionError = "\(error)"
+      return false
+    }
+    guard clean != groups[index].description else { return true }
+    groups[index].description = clean
+    if let clean {
+      perform("group-describe", ["group": .string(id), "text": .string(clean)])
+    } else {
+      perform("group-describe", ["group": .string(id), "clear": true])
+    }
+    return true
+  }
   func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
   func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
 
@@ -410,12 +432,13 @@ final class BoardModel: ObservableObject {
   private func followUpKey(plan: String, row: String) -> String { "\(plan) \(row)" }
 
   /// `sent` runs only when sbd accepted the message. A second send to the
-  /// same session does nothing until sbd answers the first.
-  func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {
+  /// same session does nothing until sbd answers the first. Each image is a
+  /// file name and the image's bytes.
+  func send(_ id: String, _ text: String, images: [(name: String, data: Data)] = [], sent: (() -> Void)? = nil) {
     guard sending.insert(id).inserted else { return }
-    perform(
-      "send", ["session": .string(id), "text": .string(text)], then: { _ in sent?() },
-      finally: { self.sending.remove(id) })
+    var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
+    perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
 
   /// Opens the window when the user has closed it. The always-present menu bar item sets this.

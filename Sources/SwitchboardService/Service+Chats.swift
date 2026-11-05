@@ -9,9 +9,12 @@ extension Service {
   /// summary, with `delivery` when it took text.
   func chatRequest(_ args: JSON) -> Response {
     do {
-      let group = try queue.sync { try lookupGroup(args) }
+      let group = try queue.sync {
+        let group = try lookupGroup(args)
+        try ensureChatFolder(group, description: groups[group]?.description)
+        return group
+      }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-      try ensureChatFolder(group)
       if let id = queue.sync(execute: { chatID(group) }) { return try openOrSend(id, text) }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
@@ -65,18 +68,34 @@ extension Service {
     entries.values.first { $0.session.chat == group }?.session.id
   }
 
-  private func ensureChatFolder(_ group: String) throws {
+  private func ensureChatFolder(_ group: String, description: String?) throws {
     let folder = home.chatFolder(group)
     try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-    try writeGuide(Chat.guide, in: folder)
+    try writeGuide(Chat.guide(description: description), in: folder)
   }
 
-  /// Rewrites CLAUDE.md in each chat folder that exists.
+  /// Rewrites CLAUDE.md in each chat folder that exists. A folder is named
+  /// for its group's id.
   func refreshChatGuides() throws {
     for name in (try? FileManager.default.contentsOfDirectory(atPath: home.chatsFolder)) ?? [] {
-      let folder = home.chatFolder(name)
-      if isDirectory(folder) { try writeGuide(Chat.guide, in: folder) }
+      try refreshChatGuide(name)
     }
+  }
+
+  /// Writes the group chat's CLAUDE.md with the group's description, when the chat's folder exists.
+  private func refreshChatGuide(_ group: String) throws {
+    let folder = home.chatFolder(group)
+    if isDirectory(folder) { try writeGuide(Chat.guide(description: groups[group]?.description), in: folder) }
+  }
+
+  /// Rewrites the group's chat guide, and tells the chat when its claude
+  /// runs. A chat whose claude is not live reads the new guide when it
+  /// starts. The pane reads `starting` while a stopped claude exits, so the
+  /// check reads `live` and not the pane.
+  func groupDescribed(_ group: String) throws {
+    try refreshChatGuide(group)
+    guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }
+    _ = try send(id, Chat.describedNotice(groups[group]?.description), byUser: false)
   }
 
   /// Marks the group's chat done, because its tools can no longer find the group.

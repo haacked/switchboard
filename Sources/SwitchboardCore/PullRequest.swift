@@ -202,6 +202,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// Whether the PR is open, not a draft, and approved.
   public var isApproved: Bool { status == .approved }
 
+  /// Open and not a draft.
+  public var ready: Bool { state == .open && !draft }
+
   public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
 
   /// The reviewers whose last verdict requests changes.
@@ -235,6 +238,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// sbd read it from trunk.
   public var queueLabel: String?
   public var trunkLoginNeeded: Bool?
+  /// The logins or team slugs whose review GitHub still asks for.
+  public var reviewRequests: [String]?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -249,6 +254,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     depot = pr.headDepot
     queueLabel = pr.queueLabel
     trunkLoginNeeded = pr.trunkLoginNeeded
+    reviewRequests = pr.reviewRequests
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can

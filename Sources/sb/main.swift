@@ -32,6 +32,10 @@ let usage = """
                                   or open it
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
+    send <session> --image <path> [--image <path>…] [<text>]
+                                  send images with the message. sbd keeps a copy of
+                                  each (png, jpg, gif, webp, heic, up to 20 MB) until
+                                  the session is removed
     send --group G [--yes] <text> send a message to every session in the group, after
                                   listing them and asking. Without a terminal, it
                                   needs --yes. Inside a Claude session, it sends
@@ -116,10 +120,13 @@ let usage = """
 
   Groups:
     group ls                      list the groups with their sessions, then Ungrouped
-    group add <name> [<session>...] [--note N]
+    group add <name> [<session>...] [--note N] [--description D]
     group rm <group>              remove the group; its sessions become ungrouped
     group move <session>... --to <group> | --ungrouped
     group note <group> <text>
+    group describe <group> <text> | --clear
+                                  set or clear the group's description, at
+                                  most \(SessionGroup.descriptionLimit) characters
     group suggest [--accept <id> | --decline <id>]
                                   list groups suggested from dependencies, branch
                                   names, and PR titles, or accept or decline one.
@@ -180,8 +187,8 @@ let usage = """
 
   A <session> is an id, a unique id prefix, or a unique name. For send, rename,
   and the text forms of wait, note, deny, and answer, every word after the
-  session is text, so put --json and --card before the session. SB_HOME picks
-  the state folder (default ~/.sb).
+  session is text, except send's leading --image pairs, so put --json and
+  --card before the session. SB_HOME picks the state folder (default ~/.sb).
 
   Wait kinds: ci, review (needs --who), bot-review, approval, queue, merge, and
   deploy (--env dev, prod-us, prod-eu, or prod) take a PR as --target, or wait
@@ -205,7 +212,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--text",
-      "--artifact", "--kind", "--version",
+      "--description", "--artifact", "--kind", "--version",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -305,6 +312,10 @@ func printSession(_ s: SessionSummary) {
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
   if let group = s.chat { print("  chat of: group \(group)") }
+  if let group = s.group {
+    let description = s.groupDescription.map { ": \($0)" } ?? ""
+    print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
+  }
   print("  folder:  \(s.cwd)")
   if let account = s.account { print("  account: \(ClaudeAccount.name(account))") }
   if let b = s.branch { print("  branch:  \(b)") }
@@ -502,11 +513,18 @@ guard let command = argv.popFirst() else {
 }
 // The text of these commands is everything after the session. All but
 // `send` and `rename` read flags instead when the word after the session is
-// one.
+// one. `send` reads its leading --image pairs itself, in Send.swift.
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
 var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
-// The text of `sb group note` is everything after the group.
-if ["group", "groups"].contains(command), argv.first == "note" { a = Args(argv, literalAfter: 2) }
+// The text of `sb group note` and `sb group describe` is everything after the
+// group. `describe` reads flags instead when the word after the group is
+// `--clear` or `--json`.
+if ["group", "groups"].contains(command), ["note", "describe"].contains(argv.first) {
+  a = Args(argv, literalAfter: 2)
+  if argv.first == "describe", a.positional.count > 2, ["--clear", "--json"].contains(a.positional[2]) {
+    a = Args(argv)
+  }
+}
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 
 switch command {
@@ -559,10 +577,7 @@ case "send" where a.values["--pending"] != nil:
 case "send" where a.values["--group"] != nil:
   sendGroup(a, group: a.values["--group"]!)
 case "send":
-  let text = a.positional.dropFirst().joined(separator: " ")
-  if text.isEmpty { die("send needs text") }
-  let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
-  if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
+  sendCommand(a)
 case "rm" where a.switches.contains("--done"):
   removeDone(a)
 case "rm":

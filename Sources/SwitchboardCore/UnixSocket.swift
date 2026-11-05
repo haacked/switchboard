@@ -69,6 +69,9 @@ public enum UnixSocket {
   public struct LineReader {
     let fd: Int32
     var buffer = Data()
+    /// How many bytes at the start of `buffer` hold no newline. A long line,
+    /// such as a request with an image, then takes one scan.
+    var scanned = 0
     var chunk = [UInt8](repeating: 0, count: 65536)
 
     public init(fd: Int32) { self.fd = fd }
@@ -76,16 +79,19 @@ public enum UnixSocket {
     /// The next line, without its newline, or nil at the end of the stream.
     public mutating func next() throws -> Data? {
       while true {
-        if let i = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+        if let i = buffer[(buffer.startIndex + scanned)...].firstIndex(of: UInt8(ascii: "\n")) {
           let line = Data(buffer[buffer.startIndex..<i])
           buffer = Data(buffer[(i + 1)...])
+          scanned = 0
           return line
         }
+        scanned = buffer.count
         let n = read(fd, &chunk, chunk.count)
         if n == 0 {
           guard !buffer.isEmpty else { return nil }
           let rest = buffer
           buffer = Data()
+          scanned = 0
           return rest
         }
         if n < 0 {
