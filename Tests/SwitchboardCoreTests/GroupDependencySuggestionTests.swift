@@ -588,7 +588,7 @@ private let posthog = "PostHog/posthog"
       notes: [Note(id: "n1", text: "clash", by: .you, t: 5), Note(id: "n2", text: "later", by: .you, t: 20)],
       created: 2)
 
-    let merged = kept.absorbing(other)
+    let merged = kept.absorbing(other, now: 30)
 
     #expect(merged.id == "g1")
     #expect(merged.name == "Flags")

@@ -20,7 +20,7 @@ private func readyPR(
   return pr
 }
 
-private func mergeEvent(_ t: Int64, head: String, _ result: String, error: String? = nil) -> Event {
+func mergeEvent(_ t: Int64, head: String, _ result: String, error: String? = nil) -> Event {
   var fields: [String: JSON] = ["head": .string(head), "result": .string(result)]
   if let error { fields["error"] = .string(error) }
   return event("merge", t, fields)
@@ -32,7 +32,7 @@ private func ackEvent(_ t: Int64, _ reason: String, head: String) throws -> Even
   return event("ack", t, data.object ?? [:])
 }
 
-private func dependenciesEvent(_ t: Int64, _ deps: [Dependency]) throws -> Event {
+func dependenciesEvent(_ t: Int64, _ deps: [Dependency]) throws -> Event {
   event("dependencies", t, ["dependencies": try JSON(encoding: deps)])
 }
 
@@ -258,10 +258,12 @@ extension MergeAttentionTests {
       #expect(verdict(f) == Verdict(state: .needsYou, reason: "answer: Which fruit?"))
     }
 
-    @Test func readyPRWithAnOpenWaitIsWaiting() throws {
+    @Test func readyPRWithAnOpenWaitIsReadyForReview() throws {
       let f = try prFacts(readyPR())
 
-      #expect(verdict(f, session(wait: "the deploy of #42")) == Verdict(state: .waiting, reason: "the deploy of #42"))
+      #expect(
+        verdict(f, session(wait: "the deploy of #42"))
+          == sampleReadyForReview("the deploy of #42", checks: "checks success"))
     }
 
     @Test func readyPRStaysReadyToMergeAfterTheStaleInterval() throws {

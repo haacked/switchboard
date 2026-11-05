@@ -504,6 +504,13 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(shown(model) == ["working: a", "notStarted: f"])
   }
 
+  @Test func readyForReviewGroupSitsBetweenClaudeCanContinueAndWaiting() {
+    let model = model([
+      summary("w", state: .waiting), summary("r", state: .readyForReview), summary("c", state: .canContinue),
+    ])
+    #expect(shown(model) == ["canContinue: c", "readyForReview: r", "waiting: w"])
+  }
+
   @Test func theManagerStaysSelectedAcrossARefresh() {
     let sessions = [summary("m", manager: true, state: .needsYou)]
     let model = model(sessions)
