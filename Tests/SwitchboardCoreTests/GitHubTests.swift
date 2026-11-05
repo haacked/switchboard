@@ -62,6 +62,32 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(GitHub.parsePR(node)?.pr.trunkConfig == expected)
   }
 
+  @Test(arguments: [JSON.null, "REVIEW_REQUIRED", "CHANGES_REQUESTED", "APPROVED"])
+  func readsTheReviewDecisionWhenTheKeyIsPresent(_ decision: JSON) throws {
+    let node = try editedNode(18303, ["reviewDecision": decision])
+
+    #expect(GitHub.parsePR(node)?.pr.reviewDecisionRead == true)
+  }
+
+  @Test func nullReviewDecisionMeansThePRNeedsNoReview() throws {
+    let node = try editedNode(18303, ["reviewDecision": .null])
+
+    #expect(GitHub.parsePR(node)?.pr.needsReview == false)
+  }
+
+  /// A response without the key, or with a decision that ReviewDecision
+  /// does not know, leaves the decision unread.
+  @Test(arguments: [nil, "SOMETHING_NEW"] as [JSON?])
+  func aMissingOrUnknownReviewDecisionLeavesItUnread(_ decision: JSON?) throws {
+    var node = try #require(GitHubFixtures.statusNode(18303)?.object)
+    node["reviewDecision"] = decision
+
+    let pr = try #require(GitHub.parsePR(.object(node))).pr
+
+    #expect(pr.reviewDecisionRead == nil)
+    #expect(pr.needsReview == nil)
+  }
+
   @Test func aResponseWithoutTheTrunkFolderLeavesItUnread() throws {
     let node = try editedNode(
       18303, ["repository": ["nameWithOwner": "PostHog/charts", "defaultBranchRef": ["name": "main"]]])
