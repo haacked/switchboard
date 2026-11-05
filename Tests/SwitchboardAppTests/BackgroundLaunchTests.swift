@@ -34,6 +34,20 @@ struct BackgroundLaunchTests {
     #expect(window.ignoresMouseEvents)
   }
 
+  @Test func hiddenSheetIsTransparentAndIgnoresTheMouse() {
+    _ = NSApplication.shared
+    let parent = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
+    let sheet = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+    parent.beginSheet(sheet)
+    defer { parent.endSheet(sheet) }
+    #expect(sheet.sheetParent === parent)
+    BackgroundLaunch.hide(sheet)
+    #expect(sheet.alphaValue == 0)
+    #expect(sheet.ignoresMouseEvents)
+  }
+
   @Test func statusItemWindowStaysVisible() {
     _ = NSApplication.shared
     let window = NSWindow(
