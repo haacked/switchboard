@@ -510,9 +510,10 @@ struct PlanArtifactList: View {
             .help("sb plan artifact read \(plan.id) asks the chat to read it again")
         }
         if let proposal = plan.proposal {
+          let diffText = proposal.diff.joined(separator: "\n")
           Text(proposal.rows.isEmpty ? "Status table update" : "Update to \(proposal.rows.count) rows")
             .font(.caption.bold())
-          Text(proposal.diff.joined(separator: "\n"))
+          Text(diffText)
             .font(.caption.monospaced()).lineLimit(12).textSelection(.enabled)
           Button("Show changes") { diffShown = plan.id }
             .buttonStyle(.link).font(.caption)
@@ -520,7 +521,7 @@ struct PlanArtifactList: View {
               isPresented: Binding(get: { diffShown == plan.id }, set: { if !$0 { diffShown = nil } })
             ) {
               ScrollView([.vertical, .horizontal]) {
-                Text(proposal.diff.joined(separator: "\n"))
+                Text(diffText)
                   .font(.caption.monospaced()).textSelection(.enabled).fixedSize().padding()
               }
               .frame(width: 640, height: 360)
