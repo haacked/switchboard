@@ -18,6 +18,8 @@ import Testing
     func leave() { lock.withLock { now -= 1 } }
   }
 
+  struct Thrown: Error {}
+
   func scope(_ trait: Blocking, _ body: @escaping @Sendable () async throws -> Void) async throws {
     try await trait.provideScope(for: Test.current!, testCase: Test.Case.current, performing: body)
   }
@@ -48,6 +50,30 @@ import Testing
     } matching: {
       $0.comments.contains { $0.rawValue.hasPrefix("Time limit was exceeded") }
     }
+  }
+
+  @Test func rethrowsTheErrorOfABodyThatOutlastsTheLimit() async {
+    let trait = Blocking(timeLimit: .milliseconds(10), slots: Slots(width: 1))
+    await withKnownIssue {
+      await #expect(throws: Thrown.self) {
+        try await scope(trait) {
+          usleep(300_000)
+          throw Thrown()
+        }
+      }
+    } matching: {
+      $0.comments.contains { $0.rawValue.hasPrefix("Time limit was exceeded") }
+    }
+  }
+
+  @Test func freesTheSlotOfABodyThatThrows() async throws {
+    let trait = Blocking(slots: Slots(width: 1))
+    await #expect(throws: Thrown.self) { try await scope(trait) { throw Thrown() } }
+    // A leaked slot would suspend this body forever, so the test polls for it.
+    let running = Running()
+    Task { try await scope(trait) { running.enter() } }
+    for _ in 0..<250 where running.peak == 0 { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(running.peak == 1)
   }
 
   @Test func startsTheLimitWhenTheBodyGetsASlot() async throws {

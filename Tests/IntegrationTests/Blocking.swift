@@ -47,14 +47,20 @@ struct Blocking: SuiteTrait, TestTrait, TestScoping {
   private func run(_ body: @Sendable () async throws -> Void) async throws {
     guard let timeLimit else { return try await body() }
     try await withoutActuallyEscaping(body) { body in
-      try await withThrowingTaskGroup(of: Void.self) { group in
+      try await withThrowingTaskGroup(of: Bool.self) { group in
         group.addTask {
           try await Task.sleep(for: timeLimit)
           Issue.record("Time limit was exceeded: \(timeLimit)")
+          return false
         }
-        group.addTask(operation: body)
+        group.addTask {
+          try await body()
+          return true
+        }
         defer { group.cancelAll() }
-        try await group.next()
+        // The group discards the error of a child that it awaits on exit.
+        // This second call rethrows the error of a body that outlasts the limit.
+        if try await group.next() == false { _ = try await group.next() }
       }
     }
   }
