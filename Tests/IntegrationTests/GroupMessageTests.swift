@@ -68,8 +68,6 @@ import Testing
     }
   }
 
-  func now(_ sbd: Instance) throws -> Int64 { Int64(try #require(try sbd.client.call("clock")["now"]?.int)) }
-
   static let expiryMs = GroupMessage.expirySeconds * 1000
 
   // MARK: Opening the card
@@ -133,9 +131,9 @@ import Testing
   @Test func theMessageExpiresAnHourAfterItOpens() throws {
     let s = try setup()
 
-    let before = try now(s.sbd)
+    let before = try s.sbd.now()
     let result = try ask(s)
-    let after = try now(s.sbd)
+    let after = try s.sbd.now()
 
     let expires = try #require(result.expires)
     #expect(expires >= before + GroupMessageTests.expiryMs)

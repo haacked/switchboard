@@ -7,6 +7,7 @@ extension AttentionState {
     case .needsYou: .orange
     case .readyToMerge: .mint
     case .canContinue: .blue
+    case .readyForReview: .indigo
     case .waiting: .purple
     case .working: .green
     case .done: .gray
