@@ -42,11 +42,12 @@ extension SessionFacts {
   /// item even when its reason repeats the acknowledged one. sbd records
   /// `ack` after the prompt that it covers, so this never clears the
   /// acknowledgment of the prompt that the user saw.
-  mutating func applyAcknowledgment(_ event: Event, promptsBefore before: OpenPrompts) {
+  /// `before` is nil when no acknowledgment was set before the event.
+  mutating func applyAcknowledgment(_ event: Event, promptsBefore before: OpenPrompts?) {
     switch event.kind {
     case "ack": acknowledgment = try? JSONCoding.convert(event.data, to: Acknowledgment.self)
     case "unack": acknowledgment = nil
-    default: if openPrompts.opened(since: before) { acknowledgment = nil }
+    default: if let before, openPrompts.opened(since: before) { acknowledgment = nil }
     }
   }
 }

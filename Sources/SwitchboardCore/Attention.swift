@@ -116,7 +116,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let d = event.data
     if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
-    let promptsBefore = openPrompts
+    // Only an acknowledgment needs the snapshot. Startup replay applies every event, so most events skip it.
+    let promptsBefore = acknowledgment == nil ? nil : openPrompts
     applyWait(event, userPrompt: userPrompt)
     // A subagent's tool calls don't change what the main session waits on.
     let fromSubagent = event.fromSubagent
