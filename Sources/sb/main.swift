@@ -87,9 +87,14 @@ let usage = """
                                   continue, in the order to go through them, each
                                   with a title, a summary, and options
     next                          the first of them
-    choose <session> <option>     click an option, by number or label: answer the
-                                  session's prompt, or send its message
+    choose <session> <option> [--text T]
+                                  click an option, by number or label: run its action,
+                                  such as send its message or merge. A reply option
+                                  sends T. Card and merge options refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
+    summary set [<session>]       record the session's Inbox card for this turn, as JSON
+                                  on stdin. The session defaults to $SB_SESSION_ID
+    summary help                  the card's format, for a session to follow
 
   Permission prompts and questions:
     cards [<session>]             list the open ones
@@ -182,7 +187,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--pending",
+      "--group", "--to", "--note", "--accept", "--decline", "--pending", "--text",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -592,6 +597,8 @@ case "choose":
   choose(a)
 case "reply":
   replyCommand(a)
+case "summary":
+  summaryCommand(a)
 case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":

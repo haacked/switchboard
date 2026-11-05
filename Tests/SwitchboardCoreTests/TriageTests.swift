@@ -49,7 +49,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(item?.kind == .approval)
     #expect(item?.title == "Approve `touch x`")
     #expect(item?.options.map(\.label) == ["Allow", "Deny"])
-    #expect(item?.options.map(\.message) == ["allow", "deny"])
+    #expect(item?.options.map(\.action) == [.allow, .deny])
   }
 
   @Test func aSingleQuestionCardGivesItsOptions() {
@@ -67,7 +67,8 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(item?.title == "Answer: Which fruit?")
     #expect(
       item?.options == [
-        TriageOption(label: "apple", detail: "Red", message: "apple"), TriageOption(label: "cherry", message: "cherry"),
+        TriageOption(label: "apple", detail: "Red", action: .answer, message: "apple"),
+        TriageOption(label: "cherry", action: .answer, message: "cherry"),
       ])
   }
 
@@ -86,7 +87,7 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     #expect(item?.kind == .action)
     #expect(item?.title == "Rebase: #1204 conflicts with main")
     #expect(item?.summary == "Rebase; #1204 conflicts with main.")
-    #expect(item?.options.isEmpty == true)
+    #expect(item?.options.map(\.label) == ["Rebase"])
   }
 
   @Test func aMergedPRWithUncommittedChangesIsFinishedWorkToReview() {

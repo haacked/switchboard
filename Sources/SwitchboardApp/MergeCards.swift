@@ -11,51 +11,14 @@ extension SessionSummary {
   }
 }
 
-/// A Ready to merge session's PR, with Merge and Dismiss. Merge runs
-/// `gh pr merge --merge` in sbd. Dismiss keeps the session out of Ready to
-/// merge until the PR's head commit changes.
-struct MergeCard: View {
-  @EnvironmentObject var model: BoardModel
-  let session: SessionSummary
-
-  private var merging: Bool { model.merging.contains(session.id) }
-
-  var body: some View {
-    if let pr = session.pr {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(alignment: .firstTextBaseline) {
-          Text(verbatim: "#\(pr.number)").font(.headline)
-          Text(pr.title).fontWeight(.medium).lineLimit(2).textSelection(.enabled)
-        }
-        Text([session.name, pr.repo, "checks passed"].joined(separator: " · "))
-          .font(.caption).foregroundStyle(.secondary)
-        MergeNote(session: session, lines: 4)
-        HStack {
-          Button(merging ? "Merging…" : "Merge") { model.merge(session.id) }
-          Button("Dismiss") { model.merge(session.id, dismiss: true) }
-            .help("Hide the merge card until the PR gets a new commit")
-        }
-        .disabled(merging)
-      }
-      .padding(10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(RoundedRectangle(cornerRadius: 8).fill(AttentionState.readyToMerge.color.opacity(0.07)))
-      .overlay(RoundedRectangle(cornerRadius: 8).stroke(AttentionState.readyToMerge.color.opacity(0.35)))
-      .accessibilityElement(children: .contain)
-      .accessibilityLabel("Merge #\(pr.number)")
-    }
-  }
-}
-
 /// gh's error from a failed merge, or nothing.
 struct MergeNote: View {
   let session: SessionSummary
-  let lines: Int
 
   var body: some View {
     if let error = session.mergeError {
       Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
-        .lineLimit(lines).help(error)
+        .lineLimit(2).help(error)
     }
   }
 }
