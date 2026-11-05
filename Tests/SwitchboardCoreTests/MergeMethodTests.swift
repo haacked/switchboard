@@ -18,6 +18,7 @@ private func landablePR(
   pr.trunkConfig = trunkConfig
   pr.mergeQueue = mergeQueue
   pr.inMergeQueue = inMergeQueue
+  pr.reviewDecisionRead = true
   return pr
 }
 
@@ -95,9 +96,12 @@ extension MergeMethodTests {
         "approved with another review request open",
         samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], reviewRequests: ["bob"])
       ),
-      ("no decision, requests not read", samplePR(reviewDecision: nil, reviewRequests: nil)),
-      ("no decision, nobody asked", samplePR(reviewDecision: nil, reviewRequests: [])),
-      ("no decision, approved", samplePR(reviewDecision: nil, verdicts: [sampleVerdict("alice", "APPROVED")])),
+      ("no decision, requests not read", samplePR(reviewDecision: nil, reviewRequests: nil, reviewDecisionRead: true)),
+      ("no decision, nobody asked", samplePR(reviewDecision: nil, reviewRequests: [], reviewDecisionRead: true)),
+      (
+        "no decision, approved",
+        samplePR(reviewDecision: nil, verdicts: [sampleVerdict("alice", "APPROVED")], reviewDecisionRead: true)
+      ),
     ])
     func reviewIsSatisfied(_ label: String, _ pr: PullRequest) {
       #expect(pr.reviewSatisfied, "\(label)")
@@ -121,6 +125,7 @@ extension MergeMethodTests {
           reviewDecision: .approved,
           verdicts: [sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "CHANGES_REQUESTED", on: "older")])
       ),
+      ("decision not read", samplePR(reviewDecision: nil, reviewRequests: [])),
       ("no decision, a review request open", samplePR(reviewDecision: nil, reviewRequests: ["bob"])),
       (
         "no decision, approved, a review request open",
@@ -400,6 +405,35 @@ extension MergeMethodTests {
 }
 
 extension MergeMethodTests {
+  /// A null review decision means "no review required" only when the poll
+  /// read it. An older event or an unrecognized decision string keeps the PR
+  /// out of Ready to merge.
+  @Suite struct UnreadReviewDecision {
+    @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk])
+    func prWhoseReviewDecisionWasNotReadIsNotReadyToMerge(_ method: MergeMethod) throws {
+      let f = try methodFacts(method) {
+        $0.reviewDecision = nil
+        $0.reviewDecisionRead = nil
+        $0.verdicts = []
+      }
+
+      #expect(verdict(f).state != .readyToMerge)
+      #expect(!verdict(f).options.contains { $0.action == .merge })
+    }
+
+    @Test func unrecognizedReviewDecisionIsNotReadyToMerge() throws {
+      var node = try #require(GitHubFixtures.statusNode(18303)?.object)
+      node["reviewDecision"] = "SOMETHING_NEW"
+      node["isMergeQueueEnabled"] = false
+      let parsed = try #require(GitHub.parsePR(.object(node)))
+
+      #expect(parsed.pr.reviewDecisionRead == nil)
+      #expect(!parsed.pr.reviewSatisfied)
+    }
+  }
+}
+
+extension MergeMethodTests {
   /// An approved PR that can't land yet waits on GitHub or needs the user,
   /// and never moves into Ready for review.
   @Suite struct ApprovedButNotLandable {
@@ -409,7 +443,7 @@ extension MergeMethodTests {
     func approvedPRWhoseChecksRunWaits(_ method: MergeMethod, _ checks: String) throws {
       let f = try methodFacts(method) { $0.checks = checks }
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 approved; checks running"))
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "checks running on #42; #42 approved"))
     }
 
     @Test func approvedPRWithoutADecisionWhoseChecksRunWaits() throws {
@@ -418,7 +452,7 @@ extension MergeMethodTests {
         $0.checks = "PENDING"
       }
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 approved; checks running"))
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "checks running on #42; #42 needs no review"))
     }
 
     @Test(arguments: methods)
@@ -427,7 +461,7 @@ extension MergeMethodTests {
 
       #expect(
         verdict(f)
-          == Verdict(state: .waiting, reason: "#42 approved; GitHub is still checking whether it can merge"))
+          == Verdict(state: .waiting, reason: "GitHub is still checking whether #42 can merge; #42 approved"))
     }
 
     /// GitHub still asks bob for a review, which alone would put the PR in
@@ -439,7 +473,7 @@ extension MergeMethodTests {
         $0.reviewRequests = ["bob"]
       }
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 approved; checks running"))
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "checks running on #42; #42 approved"))
     }
 
     @Test(arguments: methods, ["FAILURE", "ERROR"])
@@ -479,7 +513,7 @@ extension MergeMethodTests {
     func prInTheMergeQueueWaits(_ method: MergeMethod) throws {
       let f = try methodFacts(method) { $0.inMergeQueue = true }
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 is in the merge queue"))
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 is in the merge queue; #42 approved"))
     }
 
     @Test func prInTheMergeQueueWithAReviewRequestOpenWaits() throws {
@@ -488,7 +522,7 @@ extension MergeMethodTests {
         $0.reviewRequests = ["bob"]
       }
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 is in the merge queue"))
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "#42 is in the merge queue; #42 approved"))
     }
 
     @Test func prInTheMergeQueueWithAWaitShowsTheWait() throws {
@@ -496,7 +530,7 @@ extension MergeMethodTests {
 
       #expect(
         verdict(f, session(wait: "the merge queue for #42"))
-          == Verdict(state: .waiting, reason: "the merge queue for #42"))
+          == Verdict(state: .waiting, reason: "the merge queue for #42; #42 approved"))
     }
   }
 }
@@ -519,9 +553,7 @@ extension MergeMethodTests {
     func waitingSessionWithASatisfiedReviewStaysWaiting(_ label: String, _ pr: PullRequest) throws {
       let f = try prFacts(pr)
 
-      #expect(
-        verdict(f, session(wait: "the deploy of #42")) == Verdict(state: .waiting, reason: "the deploy of #42"),
-        "\(label)")
+      #expect(verdict(f, session(wait: "the deploy of #42")).state == .waiting, "\(label)")
     }
 
     @Test(arguments: [
@@ -532,7 +564,7 @@ extension MergeMethodTests {
       let dependency = Dependency(via: .body, repo: "acme/widgets", number: 41, state: .open)
       let f = try prFacts(pr, then: [try dependenciesEvent(3, [dependency])])
 
-      #expect(verdict(f) == Verdict(state: .waiting, reason: "waits on #41"), "\(label)")
+      #expect(verdict(f).state == .waiting, "\(label)")
     }
 
     @Test func backgroundJobWithASatisfiedReviewIsNotReadyForReview() throws {

@@ -19,6 +19,7 @@ private func readyPR(
     reviewRequests: reviewRequests)
   pr.trunkConfig = trunkConfig
   pr.mergeQueue = mergeQueue
+  pr.reviewDecisionRead = true
   return pr
 }
 
@@ -255,12 +256,12 @@ extension MergeAttentionTests {
       #expect(verdict(f) == Verdict(state: .needsYou, reason: "answer: Which fruit?"))
     }
 
-    /// The base branch requires no review, so the PR needs none and does not
-    /// move to Ready for review.
-    @Test func readyPRWithAnOpenWaitIsWaiting() throws {
-      let f = try prFacts(readyPR())
+    @Test func readyPRWithAnOpenWaitIsReadyForReview() throws {
+      let f = try prFacts(readyPR(reviewDecision: .reviewRequired))
 
-      #expect(verdict(f, session(wait: "the deploy of #42")) == Verdict(state: .waiting, reason: "the deploy of #42"))
+      #expect(
+        verdict(f, session(wait: "the deploy of #42"))
+          == sampleReadyForReview("the deploy of #42", checks: "checks success"))
     }
 
     @Test func readyPRStaysReadyToMergeAfterTheStaleInterval() throws {

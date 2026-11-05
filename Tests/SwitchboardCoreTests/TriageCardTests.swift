@@ -489,6 +489,7 @@ let sessionCard = TriageSummary(
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
     f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -507,6 +508,7 @@ let sessionCard = TriageSummary(
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
     f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -522,6 +524,7 @@ let sessionCard = TriageSummary(
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
     f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -606,6 +609,7 @@ let sessionCard = TriageSummary(
     // merges with a merge commit.
     f.pr?.trunkConfig = false
     f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
     f.prComments = comments
     return f
   }

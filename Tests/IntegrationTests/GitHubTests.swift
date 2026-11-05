@@ -125,7 +125,8 @@ extension Instance {
     // the base moved. A push changes the head commit, which can fix the conflict.
     #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with main")
     #expect(
-      try reason { $0["headRefOid"] = "pushed" } == "#18303 approved; GitHub is still checking whether it can merge")
+      try reason { $0["headRefOid"] = "pushed" }
+        == "GitHub is still checking whether #18303 can merge; #18303 approved")
     #expect(
       try reason {
         $0["headRefOid"] = head
@@ -225,7 +226,7 @@ extension Instance {
     #expect(requested.state == .readyForReview)
     #expect(
       requested.reason
-        == "#18303 chore(cdp): document lookup records in the dead-letter runbook; review requested from copilot-pull-request-reviewer, checks success"
+        == "#18303 chore(cdp): document lookup records in the dead-letter runbook; review required; review requested from copilot-pull-request-reviewer, checks success"
     )
     #expect(try sbd.triage().isEmpty)
 

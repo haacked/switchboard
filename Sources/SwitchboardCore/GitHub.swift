@@ -128,6 +128,9 @@ public enum GitHub {
       nodes($0).compactMap { $0["requestedReviewer"].flatMap { $0["login"]?.string ?? $0["slug"]?.string } }
     }
     let repo = node["repository"]?["nameWithOwner"]?.string ?? ""
+    // A decision that ReviewDecision doesn't know stays unread, so it never
+    // reads as "no review required".
+    let reviewDecision = node["reviewDecision"]?.string.flatMap(ReviewDecision.init(rawValue:))
     let pr = PullRequest(
       id: id, number: number, url: node["url"]?.string ?? "", repo: repo,
       title: node["title"]?.string ?? "", state: PRState(rawValue: node["state"]?.string ?? "") ?? .open,
@@ -135,7 +138,7 @@ public enum GitHub {
       headSha: node["headRefOid"]?.string ?? "", base: node["baseRefName"]?.string ?? "",
       defaultBranch: node["repository"]?["defaultBranchRef"]?["name"]?.string,
       mergeable: node["mergeable"]?.string.flatMap(Mergeable.init(rawValue:)),
-      reviewDecision: node["reviewDecision"]?.string.flatMap(ReviewDecision.init(rawValue:)),
+      reviewDecision: reviewDecision,
       verdicts: nodes(node["latestOpinionatedReviews"]).map(review), reviews: nodes(node["reviews"]).map(review),
       labels: nodes(node["labels"]).compactMap { $0["name"]?.string },
       checks: nodes(node["commits"]).first?["commit"]?["statusCheckRollup"]?["state"]?.string,
@@ -143,6 +146,7 @@ public enum GitHub {
       reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string,
       dependsOn: node["body"]?.string.map { Dependencies.refs(inBody: $0, repo: repo) },
       trunkConfig: node["repository"]?["trunkConfig"].map { $0 != .null },
+      reviewDecisionRead: node["reviewDecision"] == .null || reviewDecision != nil ? true : nil,
       mergeQueue: node["isMergeQueueEnabled"]?.bool, inMergeQueue: node["isInMergeQueue"]?.bool)
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)

@@ -114,10 +114,10 @@ extension Attention {
         options: [ask("Fix the checks", "Fix the failing checks on \(n).")])
     }
     if pr.checksRunning {
-      return Verdict(state: .waiting, reason: "\(n) approved; checks running")
+      return Verdict(state: .waiting, reason: "checks running on \(n)")
     }
     if pr.mergeable == .unknown {
-      return Verdict(state: .waiting, reason: "\(n) approved; GitHub is still checking whether it can merge")
+      return Verdict(state: .waiting, reason: "GitHub is still checking whether \(n) can merge")
     }
     return nil
   }
@@ -127,7 +127,7 @@ extension Attention {
   /// must act on. It does not rely on `openPR` running first.
   static func awaitingReview(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.ready, let reviewers = pr.reviewRequests, !reviewers.isEmpty,
-      !pr.isApproved, pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
+      pr.mergeable != .conflicting, pr.mergedBase == nil, pr.queue == nil,
       !pr.ciFailed, classify(facts.lastReply ?? "") == .other, let line = readyPRLine(facts)
     else { return nil }
     return Verdict(state: .readyForReview, reason: oneLine(line, max: 200))

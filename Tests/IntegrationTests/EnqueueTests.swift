@@ -83,7 +83,7 @@ extension FakeGitHub {
     let got = try sbd.get(s.id)
 
     #expect(got.state == .waiting)
-    #expect(got.reason == "#18303 approved; checks running")
+    #expect(got.reason == "checks running on #18303; #18303 approved")
   }
 
   @Test func prInTheMergeQueueWaits() throws {
@@ -95,7 +95,7 @@ extension FakeGitHub {
     let got = try sbd.get(s.id)
 
     #expect(got.state == .waiting)
-    #expect(got.reason == "#18303 is in the merge queue")
+    #expect(got.reason == "#18303 is in the merge queue; #18303 approved")
   }
 
   // What the summary shows

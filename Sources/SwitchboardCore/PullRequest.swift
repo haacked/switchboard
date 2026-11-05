@@ -95,6 +95,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var mergeable: Mergeable?
   /// GitHub leaves it nil when the base branch requires no review.
   public var reviewDecision: ReviewDecision?
+  /// Whether the poll read `reviewDecision`, so that a nil there means the
+  /// base branch requires no review. nil in events that an older sbd
+  /// recorded.
+  public var reviewDecisionRead: Bool?
   /// Each reviewer's last approval or change request.
   public var verdicts: [Review]
   /// The last 20 reviews, oldest first.
@@ -153,7 +157,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
     reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
-    trunkConfig: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil
+    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil
   ) {
     self.id = id
     self.number = number
@@ -181,6 +185,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.depot = depot
     self.dependsOn = dependsOn
     self.trunkConfig = trunkConfig
+    self.reviewDecisionRead = reviewDecisionRead
     self.mergeQueue = mergeQueue
     self.inMergeQueue = inMergeQueue
   }
@@ -204,6 +209,18 @@ public struct PullRequest: Codable, Equatable, Sendable {
     }
   }
 
+  /// Whether the base branch's rules ask for a review that GitHub does not
+  /// count as given: true for REVIEW_REQUIRED and CHANGES_REQUESTED, false
+  /// for APPROVED and for a branch that requires no review. nil when the
+  /// poll did not read the decision.
+  public var needsReview: Bool? {
+    switch reviewDecision {
+    case .reviewRequired, .changesRequested: true
+    case .approved: false
+    case nil: reviewDecisionRead == true ? false : nil
+    }
+  }
+
   /// Whether the head commit's checks ended in failure or error.
   public var checksFailed: Bool { checks == "FAILURE" || checks == "ERROR" }
 
@@ -214,16 +231,13 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var ready: Bool { state == .open && !draft }
 
   /// Whether review lets the PR merge: nobody's last verdict requests
-  /// changes, and GitHub approved the PR or the base branch requires no
-  /// review and no review request is open. GitHub's approval already counts
-  /// the required reviews, so other open requests don't hold an approved PR.
+  /// changes, GitHub needs no review, and GitHub approved the PR or no review
+  /// request is open. GitHub's approval already counts the required reviews,
+  /// so other open requests don't hold an approved PR. A decision that the
+  /// poll did not read never satisfies it.
   public var reviewSatisfied: Bool {
-    guard changesRequestedBy.isEmpty else { return false }
-    switch reviewDecision {
-    case .approved: return true
-    case .changesRequested, .reviewRequired: return false
-    case nil: return reviewRequests?.isEmpty ?? true
-    }
+    guard changesRequestedBy.isEmpty, needsReview == false else { return false }
+    return reviewDecision == .approved || (reviewRequests?.isEmpty ?? true)
   }
 
   /// When the newest approval was submitted.
