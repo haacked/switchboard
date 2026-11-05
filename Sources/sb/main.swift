@@ -32,6 +32,10 @@ let usage = """
                                   or open it
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
+    send <session> --image <path> [--image <path>…] [<text>]
+                                  send images with the message. sbd keeps a copy of
+                                  each (png, jpg, gif, webp, heic, up to 20 MB) until
+                                  the session is removed
     send --group G [--yes] <text> send a message to every session in the group, after
                                   listing them and asking. Without a terminal, it
                                   needs --yes. Inside a Claude session, it sends
@@ -547,10 +551,7 @@ case "send" where a.values["--pending"] != nil:
 case "send" where a.values["--group"] != nil:
   sendGroup(a, group: a.values["--group"]!)
 case "send":
-  let text = a.positional.dropFirst().joined(separator: " ")
-  if text.isEmpty { die("send needs text") }
-  let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
-  if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
+  sendCommand(a)
 case "rm":
   let result = call(
     "rm",

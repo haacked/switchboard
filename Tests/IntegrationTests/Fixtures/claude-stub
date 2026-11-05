@@ -497,12 +497,13 @@ echo "claude-stub $session ($source)"
 # tmux turns each LF of a paste into CR. The tty in cooked mode turns CR back
 # into LF. A pasted message therefore reaches read as several lines. A line
 # that ends inside a paste adds a new line to the prompt instead of
-# submitting it.
+# submitting it. Two pastes before an Enter, as a message with images
+# sends, put the first paste's end and the second paste on one line.
 start=$'\e[200~' end=$'\e[201~' typed='' pasting=''
 while IFS= read -r line; do
-  [[ $line == *"$start"* ]] && pasting=1
-  [[ $line == *"$end"* ]] && pasting=''
-  line=${line/"$start"/} line=${line/"$end"/}
+  last=${line##*"$start"}
+  if [[ $line == *"$start"* && $last != *"$end"* ]]; then pasting=1; elif [[ $line == *"$end"* ]]; then pasting=''; fi
+  line=${line//"$start"/} line=${line//"$end"/}
   if [ -n "$pasting" ]; then
     typed+=$line$'\n'
     continue
