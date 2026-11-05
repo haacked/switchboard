@@ -77,6 +77,15 @@ public final class Service {
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
+  /// The plans whose update turn is running.
+  var planUpdatesRunning: Set<String> = []
+  /// Runs the update turns that the poller starts, one at a time.
+  let planJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.plans"
+    jobs.maxConcurrentOperationCount = 1
+    return jobs
+  }()
   var docketPoll = DocketPoll()
   let keeper: SnapshotKeeper
 
@@ -193,6 +202,8 @@ public final class Service {
         return try triageRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
+      case "plan-propose", "plan-apply":
+        return .success(try planProposalDocumentRequest(request.op, request.args))
       case "plan-followup":
         // `planFollowup` takes the state queue itself.
         return .success(try JSON(encoding: planFollowup(request.args)))
@@ -309,6 +320,8 @@ public final class Service {
       return try groupRequest(op, args)
     case "plan-ls", "plan-get", "plan-detach", "plan-auto":
       return try planRequest(op, args)
+    case "plan-proposals", "plan-reject":
+      return try planProposalRequest(op, args)
     default:
       throw APIError("unknown request \(op)")
     }

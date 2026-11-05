@@ -108,6 +108,7 @@ public struct Config: Codable, Equatable, Sendable {
   public var autoContinue = AutoContinueSettings()
   public var usage = UsageSettings()
   public var docket = DocketSettings()
+  public var planUpdates = PlanUpdateSettings()
 
   public init() {}
 
@@ -148,6 +149,7 @@ public struct Config: Codable, Equatable, Sendable {
     autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
     usage = try c.decodeIfPresent(UsageSettings.self, forKey: .usage) ?? d.usage
     docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
+    planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
   }
 }
 

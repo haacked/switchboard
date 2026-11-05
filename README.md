@@ -133,6 +133,10 @@ sb plan get <plan>
 sb plan update <plan>                    # write the status table now
 sb plan auto <plan> on                   # write it on its own when it changes
 sb plan followup <plan> <row>            # make a follow-up from a Not started row
+sb plan propose <plan>                   # ask the model to rewrite the out-of-date Status cells now
+sb plan proposals [--group G] [--plan P] # the updates and new rows that wait for you
+sb plan apply <proposal>
+sb plan reject <proposal>
 sb plan detach <plan>
 ```
 
@@ -141,6 +145,10 @@ sb plan detach <plan>
 A row of a table with `Item` and `Status` columns that links no PR and whose status reads Not started can become a follow-up. `sb plan ls`, `sb plan get`, `sb group ls`, and `sb get` list those rows, and the Board shows a Follow up button for each under its group's name. `sb plan followup <plan> <row>` names the row by its `#` cell or its item text and adds a follow-up in the plan's group, or under the plan's session, with the item as its title and prompt and the plan as its link. Its repository is the one that the group's sessions share, else the issue's or PR's repository. A row that links a PR, or that already has a follow-up, is refused. Removing the follow-up lets the row make another.
 
 `sb plan update` writes a table of the group's sessions, with each one's state, wait, and PR, between `<!-- sb:status -->` and `<!-- /sb:status -->`, and leaves the rest of the document alone. A plan without those two lines refuses the update. A file is written in place. An issue's body is checked again just before the edit, and the edit retries when someone changed the issue meanwhile. A PR's file is committed to the PR's head branch with its blob SHA, and the commit retries when the file changed. Writing to GitHub publishes, so `sbd` writes only on `sb plan update`, or after `sb plan auto <plan> on`, at most once per idle interval and only when the table changed.
+
+Status cells are prose, so the model writes them. When rows of a plan are out of date, `sbd` runs one headless `claude -p` turn with no tools and no MCP servers, under the account of the group's chat (or the active account when the group has no chat). The turn sees only the out-of-date rows that have a Status column, with each linked PR's stage, as data. It answers with a new Status cell for each row by number. `sbd` builds each new row by replacing only its Status cell, sets today's date on each "status as of" line, and refuses the answer when it names a row it was not given or when the result changes any other line. The result is a proposal: `sb plan proposals` lists it with its diff, the Inbox and the group's chat pane show it with Apply and Reject, `sb plan apply` writes it with the same retries as `sb plan update`, and `sb plan reject` drops it. With `sb plan auto <plan> on`, `sbd` applies it without asking. A batch runs at most once per plan every 30 minutes and only when the out-of-date rows or their PRs' stages changed since the last batch, so a rejected batch is not proposed again. A turn spends quota, so `sbd` skips it when the account has no quota left and says so on the plan (`sb plan get`). `sb plan propose <plan>` runs a batch now, ignoring the 30 minutes. The model and the time limit come from `planUpdates.model` (default `haiku`) and `planUpdates.timeoutSeconds` (120) in `config.json`.
+
+A session in a plan's group whose PR no row of the plan links gets a suggested row for the plan's work table, the table with `Item` and `Status` columns that holds the most rows: the next `#`, the PR's title, and its stage with a link. `sb plan proposals` lists it, Apply adds the row, and Reject declines it for good.
 
 ### Triage
 

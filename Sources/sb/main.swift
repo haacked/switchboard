@@ -130,7 +130,14 @@ let usage = """
     plan detach <plan>
     plan update <plan>            write the status table between
                                   <!-- sb:status --> and <!-- /sb:status -->
-    plan auto <plan> on|off       write the table on its own when it changes
+    plan auto <plan> on|off       write the table on its own when it changes,
+                                  and apply model updates without asking
+    plan propose <plan>           ask the model to rewrite the out-of-date
+                                  rows' Status cells now
+    plan proposals [--group G] [--plan P]
+                                  the updates and new rows that wait for you
+    plan apply <proposal>         write a proposal into the document
+    plan reject <proposal>        drop it. A declined row stays declined
 
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
@@ -193,7 +200,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending",
+      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

@@ -5,10 +5,21 @@ struct InboxView: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
+    VStack(spacing: 0) {
+      if !model.planProposals.isEmpty {
+        PlanProposalList(proposals: model.planProposals)
+        Divider()
+      }
+      sessions
+    }
+  }
+
+  @ViewBuilder
+  private var sessions: some View {
     if model.triage.isEmpty && model.currentInboxItem == nil {
       VStack(spacing: 12) {
         Image(systemName: "checkmark.circle").font(.system(size: 40)).foregroundStyle(.secondary)
-        Text("Nothing needs you").foregroundStyle(.secondary)
+        Text(model.planProposals.isEmpty ? "Nothing needs you" : "No session needs you").foregroundStyle(.secondary)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {

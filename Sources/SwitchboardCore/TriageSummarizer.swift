@@ -46,11 +46,7 @@ public enum TriageSummarizer {
 
   /// The arguments of the `claude` command, after the program.
   public static func arguments(model: String) -> [String] {
-    [
-      "-p", "--model", model, "--output-format", "json", "--json-schema", schema.text, "--tools", "",
-      "--strict-mcp-config", "--no-session-persistence", "--setting-sources", "", "--disable-slash-commands",
-      "--system-prompt", system,
-    ]
+    Headless.arguments(model: model, schema: schema, system: system)
   }
 
   public static func input(session: SessionSummary, reply: String) -> String {
@@ -68,16 +64,7 @@ public enum TriageSummarizer {
 
   /// Reads the output of `claude -p --output-format json`.
   public static func parse(_ output: String) throws -> TriageSummary {
-    guard let envelope = JSON.parse(output) else {
-      throw APIError("claude printed no JSON: \(oneLine(output, max: 200))")
-    }
-    if envelope["is_error"]?.bool == true {
-      throw APIError("claude failed: \(oneLine(envelope["result"]?.string ?? output, max: 200))")
-    }
-    let payload =
-      envelope["structured_output"]
-      ?? envelope["result"]?.string.flatMap { JSON.parse(unfenced($0)) }
-    guard let payload, let raw = payload.object else { throw APIError("claude's answer has no summary") }
+    let raw = try Headless.answer(output)
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let summary = (raw["summary"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     guard !title.isEmpty, !summary.isEmpty else { throw APIError("claude's summary has no title or text") }
@@ -93,15 +80,5 @@ public enum TriageSummarizer {
     return TriageSummary(
       title: title, kind: TriageKind(rawValue: raw["kind"]?.string ?? "") ?? .info, summary: summary,
       options: Array(options.prefix(6)))
-  }
-
-  /// The text without a Markdown code fence around it.
-  static func unfenced(_ text: String) -> String {
-    var lines = text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")
-    if lines.first?.hasPrefix("```") == true, lines.last?.hasPrefix("```") == true, lines.count >= 2 {
-      lines.removeFirst()
-      lines.removeLast()
-    }
-    return lines.joined(separator: "\n")
   }
 }
