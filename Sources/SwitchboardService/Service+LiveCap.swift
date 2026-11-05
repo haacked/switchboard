@@ -52,10 +52,8 @@ extension Service {
         logLine("can't start queued \(id): \(error)")
       }
     }
-    let freeSlots = liveCap - live.count
     // A session that sbd stopped keeps its slot until its claude exits.
-    let exiting = live.filter(\.facts.exiting).count
-    let needed = queued.count - freeSlots - exiting
+    let needed = queued.count - (liveCap - live.count) - live.filter(\.facts.exiting).count
     guard needed > 0 else { return }
     for id in stoppable(now: now).prefix(needed) {
       try? stop(id, reason: "the live cap of \(liveCap) needs the slot")
