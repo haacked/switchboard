@@ -23,9 +23,12 @@ final class MessageDrafts {
   private var pendingSave: DispatchWorkItem?
   /// Writes run here in order, because an image file can be 20 MB.
   private let io = DispatchQueue(label: "switchboard.drafts")
+  private let saveDelay: TimeInterval
 
-  init(folder: String?) {
+  /// `saveDelay` is how long after the last change a save waits.
+  init(folder: String?, saveDelay: TimeInterval = 0.5) {
     self.folder = folder
+    self.saveDelay = saveDelay
     load()
     NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -79,7 +82,7 @@ final class MessageDrafts {
 
   private nonisolated static func write(_ saved: [String: Saved], images: [String: Data], to folder: String) {
     let files = FileManager.default
-    func url(_ name: String) -> URL { URL(fileURLWithPath: "\(folder)/\(name)") }
+    func url(_ name: String) -> URL { Self.url(name, in: folder) }
     do {
       // The drafts hold text that the user has not sent, so only the user can read them.
       try files.createDirectory(
@@ -97,7 +100,10 @@ final class MessageDrafts {
   }
 
   private nonisolated static let index = "drafts.json"
-  private static let saveDelay: TimeInterval = 0.5
+
+  private nonisolated static func url(_ name: String, in folder: String) -> URL {
+    URL(fileURLWithPath: "\(folder)/\(name)")
+  }
 
   /// Only a change to the text or the images schedules a save. The Esc hint and the error are not saved.
   private func add(_ draft: MessageField.Draft, for key: String) {
@@ -111,18 +117,19 @@ final class MessageDrafts {
     pendingSave?.cancel()
     let save = DispatchWorkItem { [weak self] in self?.save() }
     pendingSave = save
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDelay, execute: save)
+    DispatchQueue.main.asyncAfter(deadline: .now() + saveDelay, execute: save)
   }
 
   private func load() {
-    guard let folder, let data = FileManager.default.contents(atPath: "\(folder)/\(Self.index)"),
+    guard let folder, let data = FileManager.default.contents(atPath: Self.url(Self.index, in: folder).path),
       let saved = try? JSONCoding.decoder.decode([String: Saved].self, from: data)
     else { return }
     for (key, entry) in saved {
       let draft = MessageField.Draft()
       draft.text = entry.text
       for image in entry.images {
-        guard let bytes = FileManager.default.contents(atPath: "\(folder)/\(image.id.uuidString)") else { continue }
+        guard let bytes = FileManager.default.contents(atPath: Self.url(image.id.uuidString, in: folder).path)
+        else { continue }
         draft.append(id: image.id, name: image.name, data: bytes)
       }
       add(draft, for: key)

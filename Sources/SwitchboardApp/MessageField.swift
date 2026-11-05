@@ -22,8 +22,6 @@ struct MessageField: View {
     /// The time of the first Esc. A second Esc within `escapeWindow` of it clears the draft.
     @Published private var armedAt: Date?
     var escapeHint: Bool { armedAt != nil }
-    /// Whether the text field has focus, which decides whether Command+V reaches `paste`.
-    var focused = false
 
     var isEmpty: Bool { trimmed.isEmpty && images.isEmpty }
 
@@ -146,6 +144,8 @@ struct MessageField: View {
   @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
   @FocusState private var focused: Bool
+  /// The paste monitor reads this view's focus here. The draft can't hold it, because several views share one draft.
+  @State private var focus = Focus()
   @State private var dropTargeted = false
   @State private var pasteMonitor: Any?
 
@@ -179,13 +179,10 @@ struct MessageField: View {
     .onChange(of: draft.escapeHint) {
       if draft.escapeHint { AccessibilityNotification.Announcement("Press Escape again to clear").post() }
     }
-    .onAppear { pasteMonitor = Self.monitorPaste(into: draft) }
-    // The draft outlives the view. Without the reset, a field that is removed while it has focus makes the next
-    // field's paste monitor take Command+V from the terminals.
+    .onAppear { pasteMonitor = Self.monitorPaste(into: draft, when: focus) }
     .onDisappear {
       pasteMonitor.map(NSEvent.removeMonitor)
       pasteMonitor = nil
-      draft.focused = false
     }
   }
 
@@ -194,7 +191,7 @@ struct MessageField: View {
       .lineLimit(1...4)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
-      .onChange(of: focused, initial: true) { draft.focused = focused }
+      .onChange(of: focused) { focus.held = focused }
       // An input method that composes takes Esc to cancel the composition.
       .onKeyPress(phases: .down) { press in
         guard press.key == .escape else {
@@ -276,9 +273,9 @@ struct MessageField: View {
 
   /// Watches for Command+V while the field has focus. The menu's Paste item takes the key before the
   /// field sees it, and the field editor ignores image data. A local monitor sees the key first.
-  private static func monitorPaste(into draft: Draft) -> Any? {
+  private static func monitorPaste(into draft: Draft, when focus: Focus) -> Any? {
     NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak draft] event in
-      guard let draft, draft.focused,
+      guard let draft, focus.held,
         event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
         event.charactersIgnoringModifiers == "v",
         draft.paste(from: .general)
@@ -286,6 +283,8 @@ struct MessageField: View {
       return nil
     }
   }
+
+  final class Focus { var held = false }
 
   private static var editor: NSTextView? { NSApp.keyWindow?.firstResponder as? NSTextView }
 

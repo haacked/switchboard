@@ -585,7 +585,7 @@ import Testing
   }
 
   @Test func anEditSavesWithoutSaveNow() async {
-    let drafts = MessageDrafts(folder: folder)
+    let drafts = MessageDrafts(folder: folder, saveDelay: 0.01)
 
     drafts.draft(for: "a").text = "typed"
     await settle { self.draftsJSON().contains("typed") }
@@ -597,7 +597,7 @@ import Testing
     let first = MessageDrafts(folder: folder)
     first.draft(for: "a").text = "saved"
     first.saveNow()
-    let drafts = MessageDrafts(folder: folder)
+    let drafts = MessageDrafts(folder: folder, saveDelay: 0.01)
 
     drafts.draft(for: "a").text = "edited"
     await settle { self.draftsJSON().contains("edited") }
@@ -606,7 +606,7 @@ import Testing
   }
 
   @Test func aPruneSavesWithoutSaveNow() async {
-    let drafts = MessageDrafts(folder: folder)
+    let drafts = MessageDrafts(folder: folder, saveDelay: 0.01)
     drafts.draft(for: "a").text = "for a"
     drafts.draft(for: "b").text = "for b"
     drafts.saveNow()

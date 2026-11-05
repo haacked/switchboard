@@ -34,7 +34,6 @@ enum DraftSelfTest {
     model.selection = other
     await pause()
     log("other session: \(self.field()?.stringValue ?? "<no field>")")
-    log("focused after switch: \(draft(model, session)?.focused == true)")
     model.selection = session
     // The other session's field stays in the window until SwiftUI redraws.
     await pause()
