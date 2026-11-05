@@ -49,6 +49,20 @@ struct BackgroundLaunchTests {
     #expect(sheet.ignoresMouseEvents)
   }
 
+  @Test func sheetOpenedAfterLaunchIsHiddenOnItsFirstUpdate() {
+    let center = NotificationCenter()
+    let observer = BackgroundLaunch.hideWindowsAsTheyUpdate(center)
+    defer { center.removeObserver(observer) }
+    let parent = window()
+    let sheet = window()
+    parent.beginSheet(sheet)
+    defer { parent.endSheet(sheet) }
+    #expect(sheet.alphaValue == 1)
+    center.post(name: NSWindow.didUpdateNotification, object: sheet)
+    #expect(sheet.alphaValue == 0)
+    #expect(sheet.ignoresMouseEvents)
+  }
+
   @Test func statusItemWindowStaysVisible() {
     let window = window([.borderless])
     window.level = .statusBar

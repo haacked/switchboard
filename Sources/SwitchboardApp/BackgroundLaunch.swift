@@ -17,8 +17,12 @@ enum BackgroundLaunch {
   static func start() {
     NSApp.setActivationPolicy(.accessory)
     NSApp.windows.forEach(hide)
-    _ = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) {
-      note in
+    hideWindowsAsTheyUpdate()
+  }
+
+  @discardableResult
+  static func hideWindowsAsTheyUpdate(_ center: NotificationCenter = .default) -> NSObjectProtocol {
+    center.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { note in
       MainActor.assumeIsolated {
         if let window = note.object as? NSWindow { hide(window) }
       }
