@@ -58,10 +58,13 @@ public struct NewSession: Codable, Sendable {
   /// The group to join, by id, unique id prefix, or unique name. Without it,
   /// the session joins its parent's group.
   public var group: String?
+  /// Whether claude starts in auto mode. Without it, `Config.autoMode` decides.
+  public var autoMode: Bool?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
-    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil, group: String? = nil
+    prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil, group: String? = nil,
+    autoMode: Bool? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -73,6 +76,7 @@ public struct NewSession: Codable, Sendable {
     self.parent = parent
     self.account = account
     self.group = group
+    self.autoMode = autoMode
   }
 }
 

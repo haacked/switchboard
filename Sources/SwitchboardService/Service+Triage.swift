@@ -65,15 +65,17 @@ extension Service {
       return Request(op: "wait", args: .object(wait))
     case .done:
       return Request(op: "done", args: ["session": session])
-    case .allow, .deny, .answer:
+    case .allow, .deny, .allowAutoMode, .answer:
       guard item.source == .card, let card = entries[id]!.facts.cards.first else {
         throw APIError("\(name) has no prompt to answer")
       }
       var answer: [String: JSON] = ["session": session, "card": .number(Double(card.id))]
-      if option.action == .answer {
-        answer["answers"] = [.string(option.message ?? option.label)]
-      } else {
-        answer["behavior"] = .string(option.action.rawValue)
+      switch option.action {
+      case .answer: answer["answers"] = [.string(option.message ?? option.label)]
+      case .allowAutoMode:
+        answer["behavior"] = "allow"
+        answer["autoMode"] = true
+      default: answer["behavior"] = .string(option.action.rawValue)
       }
       return Request(op: "answer", args: .object(answer))
     }

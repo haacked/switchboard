@@ -271,6 +271,18 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(start.args == "--session-id \(id) --settings \(sbd.home.claudeSettings) -- begin")
   }
 
+  @Test func anImportedSessionStartsInAutoModeWhenTheSettingIsOn() throws {
+    let sbd = try Instance(accounts: ["A"], config: ["autoMode": true])
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: sbd.work, name: "unprompted", job: "0badf00d")])
+    let s = try #require(try sbd.client.importSessions([id]).imported.first)
+
+    #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
+    try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
+    let start = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
+    #expect(start.args.hasSuffix("--permission-mode auto -- begin"))
+  }
+
   @Test func namesAnImportedSessionByItsBranchElseClaudesNameElseItsFolder() throws {
     let sbd = try Instance(accounts: ["A"])
     let repo = try sbd.makeRepo()

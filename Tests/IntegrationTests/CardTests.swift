@@ -28,6 +28,17 @@ extension Instance {
   }
 }
 
+/// A session whose card's PermissionRequest hook timed out while the
+/// stub's dialog still shows.
+func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance, SessionSummary) {
+  let sbd = try Instance(idleStopSeconds: idleStopSeconds)
+  let s = try sbd.new(prompt: prompt)
+  try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+  try sbd.type(s.id, "timeout")
+  try sbd.waitFor(s.id, "the closed hook") { $0.cards.first?.hookClosed == true }
+  return (sbd, s)
+}
+
 @Suite(.blocking(timeLimit: .seconds(120))) struct CardTests {
   @Test func allowsAPermissionPrompt() throws {
     let sbd = try Instance()
@@ -161,17 +172,6 @@ extension Instance {
     #expect(events.contains { $0.kind == "dialog_closed" && $0.data["allowed"] == nil })
   }
 
-  /// A session whose card's PermissionRequest hook timed out while the
-  /// stub's dialog still shows.
-  func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance, SessionSummary) {
-    let sbd = try Instance(idleStopSeconds: idleStopSeconds)
-    let s = try sbd.new(prompt: prompt)
-    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
-    try sbd.type(s.id, "timeout")
-    try sbd.waitFor(s.id, "the closed hook") { $0.cards.first?.hookClosed == true }
-    return (sbd, s)
-  }
-
   @Test func keepsTheCardWhenTheHookTimesOut() throws {
     let (sbd, s) = try timedOut("perm touch v", idleStopSeconds: 1)
     #expect(try sbd.events(s.id).contains { $0.kind == "card_closed" })
@@ -199,6 +199,8 @@ extension Instance {
 
   @Test func allowMovesTheCursorBackToYesAfterTheHookTimesOut() throws {
     let (sbd, s) = try timedOut("perm touch u")
+    // Past "Yes, and switch to auto mode".
+    try sbd.press(s.id, "Down")
     try sbd.press(s.id, "Down")
     try sbd.waitFor("the cursor on No") { try sbd.highlighted(s.id)?.contains("No") == true }
     try sbd.sb("allow", s.id)
