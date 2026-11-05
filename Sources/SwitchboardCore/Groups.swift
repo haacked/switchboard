@@ -5,24 +5,57 @@ import Foundation
 public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   public var id: String
   public var name: String
+  /// One short statement of what the group is for, written by the user.
+  public var description: String?
   public var notes: [Note]
   /// Milliseconds since the epoch.
   public var created: Int64
 
-  public init(id: String, name: String, notes: [Note] = [], created: Int64) {
+  /// The longest description, in characters.
+  public static let descriptionLimit = 280
+
+  public init(id: String, name: String, description: String? = nil, notes: [Note] = [], created: Int64) {
     self.id = id
     self.name = name
+    self.description = description
     self.notes = notes
     self.created = created
   }
 
+  /// The text on one line, with each whitespace run, line breaks included, as one space.
+  static func collapsingWhitespace(_ text: String) -> String {
+    text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+  }
+
+  /// The description with its whitespace runs joined into single spaces, or
+  /// nil when nothing remains. It refuses text over `descriptionLimit`.
+  public static func cleanDescription(_ text: String?) throws -> String? {
+    guard let text else { return nil }
+    let clean = collapsingWhitespace(text)
+    guard clean.count <= descriptionLimit else {
+      throw APIError("a group description has at most \(descriptionLimit) characters, and this one has \(clean.count)")
+    }
+    return clean.isEmpty ? nil : clean
+  }
+
   /// This group with `other`'s notes added, oldest first. A note of `other`
-  /// whose id this group already uses gets a new id.
-  public func absorbing(_ other: SessionGroup) -> SessionGroup {
+  /// whose id this group already uses gets a new id. This group keeps its
+  /// description. Without one, it takes `other`'s, or a line that names both
+  /// groups when neither has one. When both have one, `other`'s becomes a
+  /// note at `now`, so no text is lost.
+  public func absorbing(_ other: SessionGroup, now: Int64) -> SessionGroup {
     var kept = self
     for var note in other.notes {
       if kept.notes.contains(where: { $0.id == note.id }) { note.id = shortId("n", taken: kept.notes.map(\.id)) }
       kept.notes.append(note)
+    }
+    if kept.description == nil {
+      kept.description = other.description ?? (try? Self.cleanDescription("Merged from \(name) and \(other.name)"))
+    } else if let theirs = other.description, theirs != kept.description {
+      kept.notes.append(
+        Note(
+          id: shortId("n", taken: kept.notes.map(\.id)), text: "Description of \(other.name): \(theirs)", by: .you,
+          t: now))
     }
     kept.notes.sort { $0.t < $1.t }
     return kept
@@ -33,6 +66,7 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
 public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var id: String
   public var name: String
+  public var description: String?
   public var notes: [Note]
   public var created: Int64
   public var sessions: [String]
@@ -42,6 +76,7 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public init(_ group: SessionGroup, sessions: [String]) {
     id = group.id
     name = group.name
+    description = group.description
     notes = group.notes
     created = group.created
     self.sessions = sessions
@@ -88,10 +123,12 @@ public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
   /// The sessions of the merged group that the user placed by hand. Accepting
   /// leaves them where they are.
   public var stays: [String]?
+  /// The description that a new group gets on accept, or nil for a join or a merge.
+  public var description: String?
 
   public init(
     id: String, name: String, group: String?, sessions: [String], reason: String, merge: Merge? = nil,
-    stays: [String]? = nil
+    stays: [String]? = nil, description: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -100,6 +137,7 @@ public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
     self.reason = reason
     self.merge = merge
     self.stays = stays
+    self.description = description
   }
 
   /// What accepting does, such as `join Flags`.
@@ -268,6 +306,12 @@ public enum GroupSuggestions {
     }
   }
 
+  /// The description of a new group made from the key, or nil when it is over the length limit.
+  static func description(_ key: Key) -> String? {
+    try? SessionGroup.cleanDescription(
+      key.kind == .prefix ? "Sessions on the \(key.text) branch prefix" : "Sessions whose \(reason(key))")
+  }
+
   /// The suggestions, strongest first: merges of groups that a dependency
   /// links, then joins from a dependency, then joins and new groups from
   /// keys. A session in no group that the user didn't place there by hand
@@ -340,7 +384,8 @@ public enum GroupSuggestions {
       out.append(
         GroupSuggestion(
           id: id, name: option.group.flatMap { names[$0] } ?? option.key.text, group: option.group,
-          sessions: sessions, reason: reason(option.key)))
+          sessions: sessions, reason: reason(option.key),
+          description: option.group == nil ? description(option.key) : nil))
     }
     return out
   }

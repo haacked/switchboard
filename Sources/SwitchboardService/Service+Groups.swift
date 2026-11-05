@@ -12,8 +12,9 @@ extension Service {
       }
       let ids = try sessionRefs(args)
       let notes = try args["note"].map { try [makeNote($0.string, by: args["by"]?.string, after: [])] } ?? []
+      let description = try SessionGroup.cleanDescription(args["description"]?.string)
       try refuseUngroupable(ids)
-      let id = try createGroup(name, notes: notes).id
+      let id = try createGroup(name, description: description, notes: notes).id
       try place(ids, in: id)
       return try JSON(encoding: groupSummary(id))
     case "group-rm":
@@ -33,6 +34,14 @@ extension Service {
       let id = try lookupGroup(args)
       var group = groups[id]!
       group.notes.append(try makeNote(args["text"]?.string, by: args["by"]?.string, after: group.notes))
+      try saveGroup(group)
+      return try JSON(encoding: groupSummary(id))
+    case "group-describe":
+      let id = try lookupGroup(args)
+      let clear = args["clear"]?.bool == true
+      guard clear || args["text"]?.string != nil else { throw APIError("group describe needs text, or clear") }
+      var group = groups[id]!
+      group.description = clear ? nil : try SessionGroup.cleanDescription(args["text"]?.string)
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
     case "group-suggest":
@@ -79,18 +88,29 @@ extension Service {
   }
 
   /// Refuses a name that another group has. A name then finds one group.
-  private func createGroup(_ name: String, notes: [Note] = []) throws -> SessionGroup {
+  private func createGroup(_ name: String, description: String? = nil, notes: [Note] = []) throws -> SessionGroup {
     if groups.values.contains(where: { $0.name == name }) { throw APIError("a group named \(name) exists") }
     // A removed group's chat keeps the group's id, so a new group never takes that id.
     let taken = Set(groups.keys).union(entries.values.compactMap(\.session.chat))
-    let group = SessionGroup(id: shortId("g", taken: taken), name: name, notes: notes, created: nowMs())
+    let group = SessionGroup(
+      id: shortId("g", taken: taken), name: name, description: description, notes: notes, created: nowMs())
     try saveGroup(group)
     return group
   }
 
+  /// A changed description also rewrites the group chat's guide and tells the
+  /// chat. A failure there is logged, because the group is already saved and a
+  /// merge still has to move its plans and delete the absorbed group.
   private func saveGroup(_ group: SessionGroup) throws {
+    let described = groups[group.id].map { $0.description != group.description } ?? false
     try store.save(group: group)
     groups[group.id] = group
+    guard described else { return }
+    do {
+      try groupDescribed(group.id)
+    } catch {
+      logLine("groups: can't update the chat of \(group.id) with its description: \(error)")
+    }
   }
 
   /// Deletes the group, detaches its plans, and marks its chat done.
@@ -157,11 +177,11 @@ extension Service {
     if let group = suggestion.group {
       id = group
     } else {
-      id = try createGroup(suggestion.name).id
+      id = try createGroup(suggestion.name, description: suggestion.description).id
     }
     try place(suggestion.sessions, in: id)
     if let merged = suggestion.merge?.group, members(merged).isEmpty {
-      try saveGroup(groups[id]!.absorbing(groups[merged]!))
+      try saveGroup(groups[id]!.absorbing(groups[merged]!, now: nowMs()))
       try movePlans(from: merged, to: id)
       try deleteGroup(merged)
     }
