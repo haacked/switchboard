@@ -178,7 +178,7 @@ extension Service {
     let id = try lookupGroup(args)
     guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
     let from = args["from"]?.string
-    let targets = members(id).filter { !$0.waitsToStart && $0.id != from }
+    let targets = members(id).filter { $0.runsClaude && $0.id != from }
     let list = targets.map { GroupSend.Target(id: $0.id, name: $0.name) }
     guard args["confirmed"]?.bool == true else { return GroupSend(group: id, targets: list, sent: false) }
     if let from { return try openGroupMessage(from: from, group: id, text: text, targets: list) }

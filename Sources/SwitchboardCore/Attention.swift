@@ -86,6 +86,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
+  /// What a docket row's `docket` events say.
+  public var docket = DocketStatus()
   /// The last merge that sbd ran.
   public var merge: MergeAttempt?
   /// The Inbox item that the user acknowledged during this turn.
@@ -131,6 +133,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       live = true
     case "account-moved":
       transcriptPath = nil
+    case "docket":
+      docket.apply(d)
     case "started", "resumed":
       lastLaunch = event.t
     case "imported":
@@ -306,6 +310,7 @@ public enum Attention {
   ) -> Verdict {
     if session.done { return Verdict(state: .done, reason: "marked done") }
     if let verdict = followupVerdict(session) { return verdict }
+    if let verdict = docketVerdict(session, facts) { return verdict }
     if let card = facts.cards.first {
       return Verdict(state: .needsYou, reason: oneLine(card.reason))
     }

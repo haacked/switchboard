@@ -149,6 +149,12 @@ let usage = """
     followup import [--file F]    add the open items of Followups.md that no
                                   earlier import read
 
+  docket reviews, rows with no terminal:
+    docket <pr> [--existing append|overwrite] [--name N] [--group G] [--parent S]
+                                  start a docket review of the PR, or track the
+                                  one docket has open, and add its row. sb rm
+                                  removes the row and leaves docket's review
+
   Service:
     poll [--all]                  ask GitHub and Depot about the sessions' PRs
                                   now; --all reads every PR, not only those due
@@ -191,7 +197,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--send", "--pending",
+      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -281,6 +287,10 @@ func printSession(_ s: SessionSummary) {
   print("  state:   \(s.state.title): \(s.reasonLine) (\(ago(s.since)))".printable)
   if s.waitsToStart {
     printFollowup(s)
+    return printWaitsAndNotes(s)
+  }
+  if let docket = s.docket {
+    printDocket(docket)
     return printWaitsAndNotes(s)
   }
   print(
@@ -618,6 +628,8 @@ case "chat":
   chat(a)
 case "plan", "plans":
   plan(a)
+case "docket":
+  docket(a)
 case "followup", "followups":
   followup(a)
 case "poll":

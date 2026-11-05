@@ -10,9 +10,9 @@ struct TriageDetail: View {
 
   enum Pane { case terminal, summary }
 
-  /// An unstarted follow-up has no terminals, so it shows its summary and Start button whatever the toggle says.
+  /// An unstarted follow-up and a docket row have no terminals, so they show their summary whatever the toggle says.
   static func pane(for session: SessionSummary, showingTerminal: Bool) -> Pane {
-    showingTerminal && !session.waitsToStart ? .terminal : .summary
+    showingTerminal && !session.waitsToStart && session.runsClaude ? .terminal : .summary
   }
 
   var body: some View {
@@ -38,7 +38,7 @@ struct TriageDetail: View {
         if session.waitsToStart {
           // A follow-up has no claude to message yet.
           StartButton(session: session).padding(8)
-        } else {
+        } else if session.runsClaude {
           MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
             .padding(8)
         }
@@ -60,11 +60,13 @@ struct TriageDetail: View {
         .help("Show the session in the sidebar, with its terminals")
       Toggle("Terminal", isOn: $model.showingTerminal)
         .toggleStyle(.button)
-        .disabled(session.waitsToStart)
+        .disabled(!session.runsClaude)
         .help(
           session.waitsToStart
             ? "A follow-up has no terminals until it starts"
-            : "Show the session's Claude terminal and shell in place of its summary")
+            : !session.runsClaude
+              ? "A docket review has no terminals"
+              : "Show the session's Claude terminal and shell in place of its summary")
     }
     .padding(10)
   }

@@ -618,6 +618,24 @@ import Testing
     #expect(try sent(sbd, f.id).isEmpty)
   }
 
+  @Test func aDocketReviewStartedInsideASessionJoinsItsGroupAndAGroupSendLeavesItOut() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config)
+    let sender = try sbd.new(name: "sender")
+    let a = try sbd.new(name: "alpha")
+    let flags = try add(sbd, "Flags", sender.id, a.id)
+    let d = try decode(SessionSummary.self, sbd.sb(["docket", "--json", "o/r#1"], env: inside(sender.id)))
+    #expect(d.parent == sender.id)
+    #expect(d.group == flags.id)
+
+    let result = try decode(
+      GroupSend.self,
+      sbd.sb(["send", "--json", "--group", "Flags", "--yes", "Rebase on main."], env: inside(sender.id)))
+
+    #expect(result.targets.map(\.id) == [a.id])
+    #expect(try sent(sbd, d.id).isEmpty)
+  }
+
   @Test func sendGroupSendsToAFollowupThatHasStarted() throws {
     let sbd = try Instance()
     let repo = try sbd.makeRepo()

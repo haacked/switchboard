@@ -77,6 +77,7 @@ public final class Service {
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
+  var docketPoll = DocketPoll()
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -198,6 +199,8 @@ public final class Service {
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
+      case "docket-start":
+        return .success(try JSON(encoding: startDocket(request.args)))
       case "usage":
         // `usage` runs off the state queue. The reader takes that queue itself
         // to list the accounts, and a refresh waits on the network.
@@ -1259,6 +1262,7 @@ public final class Service {
       deferDueQuestions(now: now)
       expireGroupMessages(now: now)
       readyDueFollowups(now: now)
+      pollDocketsIfDue(now: now)
       notifyParents(now: now)
       autoContinueSessions(now: now)
       compactSnapshots()
@@ -1316,6 +1320,7 @@ public final class Service {
     out.group = s.group
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
+    out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
     if verdict.acknowledged { out.acknowledged = true }
     // A follow-up has been Not started since it was added, which for an
