@@ -2,7 +2,7 @@
 
 A macOS app that runs 20 to 100 Claude Code sessions at once and shows which ones need you.
 
-**Status:** v0.1, a first version to try. It runs sessions, shows which need you, stops idle ones, keeps follow-ups that haven't started, and tracks each session's GitHub PR and its Depot CI run. Waits on a time, another session, a PR's checks, reviews, approval, or merge, or a PostHog deploy resolve themselves. It groups sessions, sends one message to a group, and reads and updates plan documents attached to a group. Chats come later. The design plan is in `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/plans/switchboard.md`, and v0.1's scope is in `plans/v0.1-app.md` next to it.
+**Status:** v0.1, a first version to try. It runs sessions, shows which need you, stops idle ones, keeps follow-ups that haven't started, and tracks each session's GitHub PR and its Depot CI run. Waits on a time, another session, a PR's checks, reviews, approval, or merge, or a PostHog deploy resolve themselves. It groups sessions, sends one message to a group, and reads and updates plan documents attached to a group. Each group can have a chat, a Claude session that manages only that group's sessions. The design plan is in `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/plans/switchboard.md`, and v0.1's scope is in `plans/v0.1-app.md` next to it.
 Each session is a folder, or a new git worktree, with the real Claude Code terminal and a shell. A background service, `sbd`, stops the `claude` process of a session that sits idle, and resumes it when you open the session or send it a message. A stopped session costs a few MB instead of 300 to 500.
 
 ## Install
@@ -118,6 +118,18 @@ When a session's PR depends on another session's PR and the two sessions are in 
 `suggest` looks only at ungrouped sessions for the rest. Sessions whose branches start with the same words (after the owner, as in `haacked/`), whose PR titles share a scope such as `feat(flags):`, or whose branches and titles share a word, form a suggestion. It names a new group, or an existing group whose sessions or name share the key. A session that you moved to Ungrouped by hand is never suggested. Moving a session, adding it to a group, and accepting a suggestion all count as placing it by hand. A declined suggestion stays declined, also after sbd restarts. The Board lists the suggestions above the rows, each with Accept and Decline.
 
 `sb send --group` lists the sessions it sends to, every session in the group except follow-ups that haven't started, and asks for confirmation. Without a terminal it needs `--yes`. Inside a Claude session it sends nothing, with or without `--yes`, because session text quotes PR comments and logs that may carry instructions and Claude supplies its own flags. It opens a card on the asking session instead, which puts that session in Needs you. The card shows the group, every target session, and the exact text, with Send and Cancel. `sb cards` lists it, `sb allow <session> --card <id>` sends it, and `sb deny <session> --card <id>` cancels it. The card sends to the sessions it lists, not to sessions that joined the group since. A card that nobody decides expires after an hour. When several sessions wait on group messages, the Inbox shows them together with Send All and Cancel All. Claude reads your decision with `sb send --pending <id>`, which waits up to `--timeout` seconds (60 by default) and prints pending, sent, cancelled, or expired. Inside Claude, `sb send --group` needs a session that Switchboard runs. A message sent inside a session never goes to that session. A group message never answers a session's deferred question.
+
+### Group chats
+
+A group chat is an interactive Claude session that manages one group's sessions. It runs in `~/.sb/chats/<group-id>`, a scratch folder that sbd sets up with `git init` and a `CLAUDE.md` guide, with no worktree or branch. Its claude gets the `switchboard` MCP server with `--group <group-id>`, so its tools reach only that group's sessions and the chat itself.
+
+```
+sb chat flag-evals                       # start the chat the first time, open it after that
+sb chat flag-evals "What needs me?"      # send it a message; --send <text> does the same
+sb chat flag-evals --log                 # its last messages
+```
+
+The Board's group row has a Chat button. The chat pane shows the chat's messages, its open cards, a message field, and a Terminal toggle. `sb ls` shows a chat with kind `chat`. A chat belongs to no group, never needs a PR, and stays out of the Inbox and auto-continue. A session that the chat starts joins the chat's group, and the chat is its parent. A group message from the chat opens a card in the chat pane, and nothing goes out until you send it there. Removing the group, or merging it into another, marks its chat done, and its folder and transcript stay.
 
 ### Plan documents
 
