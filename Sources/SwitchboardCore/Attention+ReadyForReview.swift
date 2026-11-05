@@ -11,7 +11,7 @@ extension Attention {
     guard verdict.state == .waiting, let pr = readyPR(facts) else { return nil }
     guard let line = readyPRLine(facts) else {
       var out = verdict
-      out.reason = oneLine("\(verdict.reason); \(reviewNotNeeded(pr))", max: 200)
+      out.reason = oneLine("\(verdict.reason); \(whyNotReadyForReview(pr))", max: 200)
       return out
     }
     return Verdict(state: .readyForReview, reason: oneLine("\(line); \(verdict.reason)", max: 200), kind: verdict.kind)
@@ -52,7 +52,7 @@ extension Attention {
   }
 
   /// Why a ready PR is not in Ready for review.
-  static func reviewNotNeeded(_ pr: PullRequest) -> String {
+  static func whyNotReadyForReview(_ pr: PullRequest) -> String {
     if pr.needsReview == nil { return "#\(pr.number): GitHub's review rule not read yet" }
     return pr.reviewDecision == .approved ? "#\(pr.number) approved" : "#\(pr.number) needs no review"
   }

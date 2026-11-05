@@ -349,6 +349,6 @@ extension Instance {
 
     try sbd.poll(all: true)
 
-    #expect(try sbd.getJSON(s.id)["state"]?.string != "ready_for_review")
+    #expect(try sbd.get(s.id).state == .readyToMerge)
   }
 }

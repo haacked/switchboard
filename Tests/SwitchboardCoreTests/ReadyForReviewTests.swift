@@ -201,6 +201,16 @@ extension ReadyForReviewTests {
       #expect(v.reason.hasPrefix("#42 Fix; changes requested by bob; review requested from bob"))
     }
 
+    /// A dismissed change request leaves the decision with no verdict behind
+    /// it.
+    @Test func waitingSessionWithAChangeRequestDecisionAndNoVerdictSaysChangesRequested() throws {
+      let f = try prFacts(reviewPR(reviewDecision: .changesRequested, reviewRequests: []))
+
+      #expect(
+        verdict(f, session(wait: "CI on #42"))
+          == Verdict(state: .readyForReview, reason: "#42 Fix; changes requested, checks success; CI on #42"))
+    }
+
     @Test func prThatWaitsOnAReviewStaysReadyForReviewAfterTheStaleInterval() throws {
       let f = try prFacts(reviewPR())
 
@@ -361,15 +371,7 @@ extension ReadyForReviewTests {
     @Test func approvedPRWithAReviewRequestIsNotReadyForReview() throws {
       let f = try prFacts(reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("bob", "APPROVED")]))
 
-      #expect(verdict(f).state != .readyForReview)
-    }
-
-    @Test func greenPRThatNeedsNoReviewIsReadyToMerge() throws {
-      var pr = reviewPR(reviewDecision: nil, reviewRequests: [])
-      pr.trunkConfig = false
-      let f = try prFacts(pr)
-
-      #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))
+      #expect(verdict(f) == Verdict(state: .needsYou, reason: "merge #42, approved by bob"))
     }
   }
 }
