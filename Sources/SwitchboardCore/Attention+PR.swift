@@ -85,19 +85,41 @@ extension Attention {
     }
     // The user dismissed the merge card of this head commit.
     if facts.currentMerge?.result == .dismissed { return nil }
+    if pr.inMergeQueue == true { return Verdict(state: .waiting, reason: "\(n) is in the merge queue") }
     if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.
     guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }
     switch pr.queue {
     case nil:
-      return Verdict(
-        state: .needsYou, reason: oneLine("\(facts.usesTrunk ? "enqueue" : "merge") \(n)\(approvedBy(pr))"),
-        options: facts.usesTrunk ? [ask("Enqueue", "Add \(n) to the Trunk merge queue.")] : [])
+      return approvedNotReady(pr)
+        ?? Verdict(
+          state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
     case .unknown:
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
     default:
       return nil
     }
+  }
+
+  /// An approved PR that can't merge yet because of its checks or its
+  /// mergeability. Running checks and an uncomputed mergeability end on their
+  /// own, so the session waits outside Ready to merge and the Inbox. Failed
+  /// checks need someone to fix them.
+  static func approvedNotReady(_ pr: PullRequest) -> Verdict? {
+    let n = "#\(pr.number)"
+    if pr.checksFailed {
+      return Verdict(
+        state: .needsYou,
+        reason: oneLine("fix the checks on \(n)\(approvedBy(pr, after: ";"))"),
+        options: [ask("Fix the checks", "Fix the failing checks on \(n).")])
+    }
+    if pr.checksRunning {
+      return Verdict(state: .waiting, reason: "\(n) approved; checks running")
+    }
+    if pr.mergeable == .unknown {
+      return Verdict(state: .waiting, reason: "\(n) approved; GitHub is still checking whether it can merge")
+    }
+    return nil
   }
 
   /// Ready for review while an open PR needs only the review that GitHub
@@ -124,8 +146,8 @@ extension Attention {
   static func names(_ logins: [String]) -> String { logins.joined(separator: " and ") }
 
   /// ", approved by X and Y", or nothing when nobody approved the PR.
-  static func approvedBy(_ pr: PullRequest) -> String {
-    pr.approvers.isEmpty ? "" : ", approved by \(names(pr.approvers))"
+  static func approvedBy(_ pr: PullRequest, after separator: String = ",") -> String {
+    pr.approvers.isEmpty ? "" : "\(separator) approved by \(names(pr.approvers))"
   }
 }
 

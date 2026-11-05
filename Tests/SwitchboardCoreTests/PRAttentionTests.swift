@@ -15,7 +15,7 @@ private func goneEvent(_ t: Int64) -> Event {
   event("worktree", t, ["dirty": .null, "gone": true])
 }
 
-private func trunkComment(_ id: String = "IC_trunk") -> PRComment {
+func trunkComment(_ id: String = "IC_trunk") -> PRComment {
   PRComment(id: id, author: "trunk-io[bot]", createdAt: "2026-10-25T00:00:00Z", body: "<!-- Trunk Merge -->")
 }
 
@@ -397,7 +397,8 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let f = try prFacts(samplePR(mergeable: .conflicting))
 
     #expect(
-      Attention.evaluate(session(wait: "CI on #42"), f, now: Self.now) == sampleReadyForReview("CI on #42"))
+      Attention.evaluate(session(wait: "CI on #42"), f, now: Self.now)
+        == Verdict(state: .waiting, reason: "CI on #42"))
   }
 
   @Test func runningTurnWinsOverAConflictingPR() throws {
@@ -424,7 +425,10 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   func recordedOpenPR(_ number: Int, _ state: AttentionState, _ reason: String) throws {
     let node = try #require(GitHubFixtures.statusNode(number))
     let parsed = try #require(GitHub.parsePR(node))
-    let f = try prFacts(parsed.pr, comments: parsed.comments.filter { GitHub.bodyAuthors.contains($0.author) })
+    // The recording predates the status query's merge queue fields.
+    var pr = parsed.pr
+    pr.mergeQueue = pr.mergeQueue ?? false
+    let f = try prFacts(pr, comments: parsed.comments.filter { GitHub.bodyAuthors.contains($0.author) })
 
     #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: state, reason: reason))
   }

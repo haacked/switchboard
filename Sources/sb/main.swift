@@ -78,9 +78,11 @@ let usage = """
                                   after the merge, a running turn, and a folder sbd didn't make.
     merge <session|PR> [--dismiss]
                                   merge a Ready to merge session's PR with a merge commit, then resume
-                                  the session. A PR (#N, owner/name#N, or a URL) names the session by
-                                  its open PR. --dismiss keeps the session out of Ready to merge until
-                                  the PR's head commit changes.
+                                  the session. In a repo with GitHub's merge queue or Trunk, add it to
+                                  the queue instead, and resume the session once it merges. A PR (#N,
+                                  owner/name#N, or a URL) names the session by its open PR. --dismiss
+                                  keeps the session out of Ready to merge until the PR's head commit
+                                  changes.
                                   Refuses inside Claude Code
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and

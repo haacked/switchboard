@@ -36,7 +36,7 @@ struct DecisionCard: View {
 
   @ViewBuilder
   private var actions: some View {
-    if session.state == .readyToMerge {
+    if session.canMerge {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {

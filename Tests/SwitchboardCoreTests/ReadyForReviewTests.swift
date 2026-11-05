@@ -216,8 +216,6 @@ extension ReadyForReviewTests {
     @Test(arguments: [
       (reviewPR(), "review requested from ann"),
       (reviewPR(reviewRequests: []), "review required"),
-      (reviewPR(reviewDecision: nil, reviewRequests: []), "no review requested"),
-      (reviewPR(reviewDecision: nil, reviewRequests: nil), "no review requested"),
     ])
     func waitsReasonFollowsThePRsReason(_ pr: PullRequest, _ reviews: String) throws {
       let f = try prFacts(pr)
@@ -227,13 +225,25 @@ extension ReadyForReviewTests {
           == Verdict(state: .readyForReview, reason: "#42 Fix; \(reviews), checks success; CI on #42"))
     }
 
+    /// A PR whose review is done, or whose base branch requires none, needs
+    /// no review, so its session stays in Waiting.
+    @Test(arguments: [
+      reviewPR(reviewDecision: nil, reviewRequests: []), reviewPR(reviewDecision: nil, reviewRequests: nil),
+      reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("ann", "APPROVED")], reviewRequests: []),
+      reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("ann", "APPROVED")], reviewRequests: ["bob"]),
+    ])
+    func prThatNeedsNoReviewStaysWaiting(_ pr: PullRequest) throws {
+      let f = try prFacts(pr)
+
+      #expect(verdict(f, session(wait: "CI on #42")) == Verdict(state: .waiting, reason: "CI on #42"))
+    }
+
     @Test func dependencysReasonFollowsThePRsReason() throws {
-      let f = try prFacts(
-        reviewPR(reviewDecision: nil, reviewRequests: []), then: [try dependenciesEvent(3, [openDependency])])
+      let f = try prFacts(reviewPR(reviewRequests: []), then: [try dependenciesEvent(3, [openDependency])])
 
       #expect(
         verdict(f)
-          == Verdict(state: .readyForReview, reason: "#42 Fix; no review requested, checks success; waits on #41"))
+          == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waits on #41"))
     }
 
     @Test func backgroundJobWithAReadyPRIsReadyForReview() throws {
@@ -299,6 +309,7 @@ extension ReadyForReviewTests {
     @Test func prThatCanMergeIsReadyToMerge() throws {
       var pr = reviewPR(reviewDecision: nil, reviewRequests: [])
       pr.trunkConfig = false
+      pr.mergeQueue = false
       let f = try prFacts(pr)
 
       #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))

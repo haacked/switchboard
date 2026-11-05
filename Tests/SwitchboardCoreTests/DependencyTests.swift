@@ -241,8 +241,10 @@ private let trunk = PRComment(
   id: "IC_trunk", author: "trunk-io[bot]", createdAt: "2026-10-25T00:00:00Z", body: "<!-- Trunk Merge -->")
 private let readsTheReply = Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
 private let conflict = Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main")
-private let held41 = sampleReadyForReview("waits on #41")
-private let approvedHeld41 = sampleReadyForReview("waits on #41", review: "approved by alice")
+// `samplePR` needs no review and the approved PRs have their approval, so a
+// held session stays in Waiting rather than Ready for review.
+private let held41 = Verdict(state: .waiting, reason: "waits on #41")
+private let approvedHeld41 = held41
 private let replaces41 = Verdict(state: .needsYou, reason: "decide what replaces #41, which closed unmerged")
 private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")])
 
@@ -302,7 +304,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
 @Suite struct BusyBaseAttention {
   static let now: Int64 = 10
-  static let busy = sampleReadyForReview("rebase onto #41 once its turn ends")
+  static let busy = Verdict(state: .waiting, reason: "rebase onto #41 once its turn ends")
 
   private func verdict(_ deps: [Dependency], working: String) throws -> Verdict {
     let f = try edgeFacts(samplePR(mergeable: .conflicting), deps)
@@ -378,7 +380,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
     #expect(
       Attention.evaluate(session(), f, now: Self.now)
-        == sampleReadyForReview("waits on the deploy of #41", review: "approved by alice"))
+        == Verdict(state: .waiting, reason: "waits on the deploy of #41"))
   }
 
   @Test(arguments: [(false, Bool?.none), (true, Bool?.some(true))])
@@ -418,20 +420,20 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
   @Test func dependencyInAnotherRepoNamesItsRepo() throws {
     #expect(
-      try verdict([bodyEdge(7, repo: "acme/gears")]) == sampleReadyForReview("waits on acme/gears#7"))
+      try verdict([bodyEdge(7, repo: "acme/gears")]) == Verdict(state: .waiting, reason: "waits on acme/gears#7"))
   }
 
   @Test(arguments: [Bool?.some(false), .none])
   func mergedButUndeployedDependencyWaitsOnTheDeploy(_ deployed: Bool?) throws {
     let v = try verdict([bodyEdge(41, deploy: true, state: .merged, deployed: deployed)])
 
-    #expect(v == sampleReadyForReview("waits on the deploy of #41"))
+    #expect(v == Verdict(state: .waiting, reason: "waits on the deploy of #41"))
   }
 
   @Test func mergedButUndeployedDependencyInAnotherRepoNamesItsRepo() throws {
     let v = try verdict([bodyEdge(7, repo: "PostHog/posthog", deploy: true, state: .merged, deployed: false)])
 
-    #expect(v == sampleReadyForReview("waits on the deploy of PostHog/posthog#7"))
+    #expect(v == Verdict(state: .waiting, reason: "waits on the deploy of PostHog/posthog#7"))
   }
 
   @Test(arguments: [PRState?.some(.open), .none])
@@ -490,7 +492,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
     #expect(
       Attention.evaluate(session(wait: "run the app and look"), f, now: Self.now)
-        == sampleReadyForReview("run the app and look"))
+        == Verdict(state: .waiting, reason: "run the app and look"))
   }
 
   @Test(arguments: [

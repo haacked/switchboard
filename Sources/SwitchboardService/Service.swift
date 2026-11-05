@@ -1375,6 +1375,8 @@ public final class Service {
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
     out.permissionMode = e.facts.permissionMode
+    out.pr?.mergeMethod = e.facts.mergeMethod
+    if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

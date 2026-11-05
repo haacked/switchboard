@@ -2,12 +2,15 @@ import Foundation
 
 extension Attention {
   /// Ready for review when the other rules leave the session Waiting and its
-  /// PR is open, not a draft, not in Trunk's queue, and not merged by sbd.
-  /// A session therefore stays in Needs you, Ready to merge, Claude can
-  /// continue, or Working. The reason keeps a wait's or a dependency's line
-  /// after the PR's.
+  /// PR is open, not a draft, not in Trunk's queue, not merged by sbd, and
+  /// still needs a review. A session therefore stays in Needs you, Ready to
+  /// merge, Claude can continue, or Working, and a PR whose review is
+  /// satisfied stays in Waiting. The reason keeps a wait's or a dependency's
+  /// line after the PR's.
   static func readyForReview(_ verdict: Verdict, _ facts: SessionFacts) -> Verdict? {
-    guard verdict.state == .waiting, let line = readyPRLine(facts) else { return nil }
+    guard verdict.state == .waiting, facts.pr?.reviewSatisfied != true, let line = readyPRLine(facts) else {
+      return nil
+    }
     return Verdict(state: .readyForReview, reason: oneLine("\(line); \(verdict.reason)", max: 200), kind: verdict.kind)
   }
 

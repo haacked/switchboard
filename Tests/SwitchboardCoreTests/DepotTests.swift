@@ -526,7 +526,7 @@ private let heldByTrunk: [TrunkQueueState] = [.pending, .testing, .passed, .fail
   @Test func openWaitWinsOverADepotFailure() throws {
     let v = try verdict(withDepot(samplePR(checks: "PENDING"), Self.failing), session: session(wait: "CI on #42"))
 
-    #expect(v == sampleReadyForReview("CI on #42", checks: "checks pending"))
+    #expect(v == Verdict(state: .waiting, reason: "CI on #42"))
   }
 
   @Test func idleSessionWithADepotFailureIsNotStale() throws {

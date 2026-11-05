@@ -4,7 +4,7 @@ import Testing
 @testable import SwitchboardCore
 
 /// A recorded PR node with some top-level fields replaced.
-private func editedNode(_ number: Int, _ fields: [String: JSON]) throws -> JSON {
+func editedNode(_ number: Int, _ fields: [String: JSON?]) throws -> JSON {
   var node = try #require(GitHubFixtures.statusNode(number)?.object)
   for (key, value) in fields { node[key] = value }
   return .object(node)
