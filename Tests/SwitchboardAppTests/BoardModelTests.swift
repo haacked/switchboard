@@ -166,6 +166,15 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.visibleView == .inbox)
   }
 
+  @Test func movingUpFromTheFirstItemWrapsToTheLast() {
+    let model = model(["a", "b", "c"])
+    model.show(.inbox)
+    model.moveInbox(by: -1)
+    #expect(model.currentInboxItem == "c")
+    model.moveInbox(by: -1)
+    #expect(model.currentInboxItem == "b")
+  }
+
   @Test func boardCardForASessionOutsideTheInboxSelectsIt() {
     for state in [AttentionState.working, .done, .stale] {
       let model = model(["a"])
@@ -269,22 +278,22 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   }
 
   @Test func offersTheIconOnADoneSession() {
-    #expect(BoardModel.canDelete(done()))
+    #expect(done().isRemovableDone)
   }
 
   @Test func neverOffersTheIconOnTheManager() {
-    #expect(!BoardModel.canDelete(done(manager: true)))
+    #expect(!done(manager: true).isRemovableDone)
   }
 
   @Test func neverOffersTheIconOnAFollowupThatHasNotStarted() {
     var s = done()
     s.followup = Followup(prompt: "p")
-    #expect(!BoardModel.canDelete(s))
+    #expect(!s.isRemovableDone)
   }
 
   @Test func neverOffersTheIconOutsideTheDoneColumn() {
     for state in AttentionState.allCases where state != .done {
-      #expect(!BoardModel.canDelete(done(state: state)))
+      #expect(!done(state: state).isRemovableDone)
     }
   }
 
@@ -560,6 +569,23 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
       model.merge("a")
       model.merge("a", dismiss: true)
       #expect(model.merging == ["a"])
+    }
+    #expect(sent.count == 1)
+  }
+
+  @Test func chooseSendsTheTypedTextOfAReplyOption() async {
+    let sent = await firstRequest { $0.choose("a", ref: "summary:1", option: 2, action: .reply, text: "Use SQLite.") }
+
+    #expect(sent.op == "choose")
+    #expect(sent.args == ["session": "a", "option": "2", "ref": "summary:1", "text": "Use SQLite."])
+  }
+
+  @Test func ignoresACardsMergeWhileAMergeRuns() async {
+    let sent = await firstRequest { model in
+      model.merge("a")
+      model.choose("a", ref: "summary:1", option: 2, action: .dismiss)
+      #expect(model.merging == ["a"])
+      #expect(model.choosing.isEmpty)
     }
     #expect(sent.count == 1)
   }

@@ -113,11 +113,7 @@ func sendGroup(_ a: Args, group: String) {
   if preview.targets.isEmpty { die("\(group) has no session to send to") }
   let list = preview.targets.map { "  \($0.id)  \($0.name)".printable }.joined(separator: "\n")
   let count = preview.targets.count == 1 ? "this session" : "these \(preview.targets.count) sessions"
-  if !a.switches.contains("--yes") {
-    guard isatty(STDIN_FILENO) != 0 else { die("pass --yes to send to \(count) without asking:\n\(list)") }
-    print("Send to \(count)?\n\(list)\n[y/N] ", terminator: "")
-    guard let answer = readLine()?.lowercased(), answer == "y" || answer == "yes" else { die("not sent") }
-  }
+  if !a.switches.contains("--yes") { confirm(verb: "send to", count, list, refused: "not sent") }
   args["confirmed"] = true
   args["targets"] = .array(preview.targets.map { .string($0.id) })
   let result = call("send-group", args)
@@ -158,4 +154,13 @@ func printDeliveries(_ sent: GroupSend) {
   for d in sent.deliveries ?? [] {
     print("\(d.session)  \(d.delivery?.rawValue ?? "failed: \(d.error ?? "")")".printable)
   }
+}
+
+/// Lists the sessions and asks on the terminal, for example "Send to these 3
+/// sessions? [y/N]". It exits unless the answer is yes. Without a terminal,
+/// it exits and asks for --yes.
+func confirm(verb: String, _ count: String, _ list: String, refused: String) {
+  guard isatty(STDIN_FILENO) != 0 else { die("pass --yes to \(verb) \(count) without asking:\n\(list)") }
+  print("\(list)\n\(verb.prefix(1).uppercased() + verb.dropFirst()) \(count)? [y/N] ", terminator: "")
+  guard let answer = readLine()?.lowercased(), answer == "y" || answer == "yes" else { die(refused) }
 }
