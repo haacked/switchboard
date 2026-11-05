@@ -135,5 +135,17 @@ extension MCPToolServer {
       "suggest_groups",
       "Lists groups suggested from branch names and PR titles. With `accept`, it accepts that suggestion instead.",
       ["accept": string("The id of a suggestion to accept.")]),
+    Tool(
+      "plan_artifact",
+      "Reports the result of one `Switchboard plan artifact task.` step to Switchboard. Use kind `read` after a read task, `proposal` after a rewrite task, and `check` then `published` in a publish task. If it answers with an error, stop and do not publish.",
+      [
+        "plan": string("The plan id from the message's `plan:` line."),
+        "kind": string("One of read, proposal, check, or published."),
+        "file": string(
+          "The path of a file that holds the full text: the artifact's text for read and check, the rewritten file for proposal."
+        ),
+        "text": string("The same text, when you did not save it to a file. Send file or text, not both."),
+        "version": string("The version or update time that the Artifact tool showed, if any."),
+      ], required: ["plan", "kind"]),
   ]
 }
