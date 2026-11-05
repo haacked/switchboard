@@ -42,7 +42,9 @@ extension MCPToolServer {
     Tool(
       "list_sessions",
       "Lists the sessions with their state, reason, PR, waits, and notes. The sessions that need the user come first."),
-    Tool("get_session", "Shows one session.", ["session": session], required: ["session"]),
+    Tool(
+      "get_session", "Shows one session, with its group's name and description.", ["session": session],
+      required: ["session"]),
     Tool(
       "read_reply", "Reads the session's last reply from its transcript, as Markdown.", ["session": session],
       required: ["session"]),
@@ -111,7 +113,8 @@ extension MCPToolServer {
     Tool(
       "add_note", "Adds a note to a session.", ["session": session, "text": string("The note.")],
       required: ["session", "text"]),
-    Tool("list_groups", "Lists the groups with their sessions and notes, then the sessions in no group."),
+    Tool(
+      "list_groups", "Lists the groups with their descriptions, sessions, and notes, then the sessions in no group."),
     Tool(
       "add_group", "Adds a group.",
       [

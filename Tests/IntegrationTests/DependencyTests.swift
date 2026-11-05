@@ -68,7 +68,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
     #expect(try sbd.get(s.id).lastActivity == activity)
   }
 
-  @Test func bodyEdgeHoldsTheSessionInWaiting() throws {
+  @Test func bodyEdgeHoldsTheSessionInReadyForReview() throws {
     let github = try FakeGitHub()
     body(github, "Depends on #122953")
     let sbd = try Instance.withGitHub(github)
@@ -77,8 +77,8 @@ private func body(_ github: FakeGitHub, _ text: String) {
     try sbd.pollTwice()
 
     let after = try sbd.get(s.id)
-    #expect(after.state == .waiting)
-    #expect(after.reason == "waits on #122953")
+    #expect(after.state == .readyForReview)
+    #expect(after.reason.hasSuffix("; waits on #122953"))
     #expect(try sbd.triage().isEmpty)
   }
 
@@ -90,7 +90,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
 
     try sbd.pollTwice()
 
-    #expect(try sbd.get(s.id).reason == "waits on PostHog/charts#18303")
+    #expect(try sbd.get(s.id).reason.hasSuffix("; waits on PostHog/charts#18303"))
   }
 
   @Test func unreadEdgePrintsUnknown() throws {
@@ -104,7 +104,7 @@ private func body(_ github: FakeGitHub, _ text: String) {
 
     #expect(try sbd.edges(s.id) == [Dependency(via: .body, repo: posthog, number: 1, state: nil)])
     #expect(try sbd.sb("get", s.id).contains("  depends: #1 unknown\n"))
-    #expect(try sbd.get(s.id).reason == "waits on #1")
+    #expect(try sbd.get(s.id).reason.hasSuffix("; waits on #1"))
   }
 
   @Test func repeatedRefsCollapseToOneEdge() throws {
@@ -146,8 +146,8 @@ private func body(_ github: FakeGitHub, _ text: String) {
         Dependency(via: .stack, repo: posthog, number: 122953, base: baseBranch, state: .open, session: base.id)
       ])
     #expect(try sbd.edges(base.id) == nil)
-    #expect(try sbd.get(top.id).state == .waiting)
-    #expect(try sbd.get(top.id).reason == "waits on #122953")
+    #expect(try sbd.get(top.id).state == .readyForReview)
+    #expect(try sbd.get(top.id).reason.hasSuffix("; waits on #122953"))
     #expect(try sbd.sb("get", top.id).contains("  depends: #122953 open (session \(base.id))\n"))
   }
 
@@ -343,8 +343,8 @@ private func body(_ github: FakeGitHub, _ text: String) {
       try sbd.edges(s.id) == [
         Dependency(via: .body, repo: posthog, number: 122179, deploy: true, state: .merged, deployed: false)
       ])
-    #expect(try sbd.get(s.id).state == .waiting)
-    #expect(try sbd.get(s.id).reason == "waits on the deploy of #122179")
+    #expect(try sbd.get(s.id).state == .readyForReview)
+    #expect(try sbd.get(s.id).reason.hasSuffix("; waits on the deploy of #122179"))
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
     #expect(try sbd.sb("get", s.id).contains("  depends: #122179 merged, deploy\n"))
 

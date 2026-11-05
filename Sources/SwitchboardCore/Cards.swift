@@ -31,6 +31,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   public var hookClosed: Bool
   /// The message of a `send` card. Other kinds have none.
   public var send: GroupMessage?
+  /// The session's permission mode when the PermissionRequest arrived, such
+  /// as `default` or `auto`.
+  public var permissionMode: String?
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -53,6 +56,25 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     deferred = false
     hookClosed = false
     send = nil
+    permissionMode = event.data["permission_mode"]?.string
+  }
+
+  /// Whether an allow can also switch the session to auto mode: a permission
+  /// card from manual or acceptEdits mode whose hook still waits. The hook's
+  /// answer switches the mode. A typed answer can't, because the dialog's
+  /// item differs per tool and only Bash's was captured.
+  public var offersAutoMode: Bool { autoModeRefusal == nil }
+
+  /// The refusal of an auto mode allow once the card's hook is gone.
+  public var hookClosedRefusal: String { "card \(id)'s hook closed, so sbd can't switch the mode" }
+
+  /// Why an allow can't switch the session to auto mode, or nil when it can.
+  public var autoModeRefusal: String? {
+    guard kind == .permission else { return "card \(id) isn't a permission prompt" }
+    if hookClosed { return hookClosedRefusal }
+    guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
+    if PermissionMode.offeringAutoMode.contains(mode) { return nil }
+    return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a
@@ -188,7 +210,8 @@ public struct Question: Codable, Equatable, Sendable {
 
 /// A held PermissionRequest's answer.
 public enum Decision: Equatable, Sendable {
-  case allow(updatedInput: JSON?)
+  /// With `autoMode`, the allow also switches the session to auto mode.
+  case allow(updatedInput: JSON?, autoMode: Bool = false)
   /// Claude reads the message and goes on. Without a message, the turn stops,
   /// as No does in the terminal.
   case deny(message: String?)
@@ -197,9 +220,12 @@ public enum Decision: Equatable, Sendable {
   public var hookOutput: JSON {
     var decision: [String: JSON]
     switch self {
-    case .allow(let input):
+    case .allow(let input, let autoMode):
       decision = ["behavior": "allow"]
       if let input { decision["updatedInput"] = input }
+      if autoMode {
+        decision["updatedPermissions"] = [["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]]
+      }
     case .deny(let message?):
       decision = ["behavior": "deny", "message": .string(message)]
     case .deny(nil):

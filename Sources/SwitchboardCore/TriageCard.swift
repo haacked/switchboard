@@ -10,6 +10,8 @@ public enum TriageCard {
   public static let maxOptions = 6
   public static let maxCallouts = 5
   public static let labelLength = 80
+  /// The longest label that the app shows on its button. A longer label moves beside the button.
+  public static let buttonLabelLength = 20
   public static let messageLength = 2_000
   public static let bodyLength = 1_000
 
@@ -138,14 +140,16 @@ public enum TriageCard {
               then what you need from the user.
     title     Optional. Under \(Triage.titleLength) characters, what the user does ("Pick how to land #98").
               It defaults to the summary's first line.
-    options   Up to \(maxOptions) buttons, each with a label (under \(labelLength) characters) and an action:
+    options   Up to \(maxOptions) buttons, each with a short label (a verb phrase of up to \(buttonLabelLength) characters,
+              such as "Fix + merge") and an action:
                 send    sends "message" to you as the user's reply, so write it as the user would say it
                         ("Yes, push."). Without "message" it sends the label.
                 reply   shows a text field; the user's text comes to you ("placeholder" is its hint)
                 merge   merges your PR, as `sb merge` does, once it is ready to merge
                 wait    sets the wait in "wait", such as {"kind": "ci", "target": "98"} (see `sb help`)
                 done    marks you done
-              "recommended": true makes an option the main button. "detail" adds a line under the label.
+              "recommended": true makes an option the main button. "detail" says what the option does, in a
+              line beside its button. A label over \(buttonLabelLength) characters moves beside the button too.
               Give exactly one option when the next step is obvious. Otherwise give one option per real
               choice, recommend at most one, and leave out filler such as Cancel or Skip.
     callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that

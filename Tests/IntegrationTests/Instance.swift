@@ -112,6 +112,8 @@ final class Instance {
       "trunk": ["path": .string("\(path)/trunk")],
       // Tests that read the stub's arguments don't expect the nudge in them.
       "triage": ["systemPrompt": ""],
+      // Nor do they expect --permission-mode auto. AutoModeTests turn it on.
+      "autoMode": false,
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
@@ -274,6 +276,11 @@ final class Instance {
   /// due waits only when no shared MCP server is starting.
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
+  }
+
+  /// sbd's clock, in ms since the epoch.
+  func now() throws -> Int64 {
+    Int64(try #require(try client.call("clock")["now"]?.int))
   }
 
   /// Waits until the stub reports the session to `claude agents` with the status.

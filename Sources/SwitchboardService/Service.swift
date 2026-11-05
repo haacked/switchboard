@@ -311,7 +311,9 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
-    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group", "send-pending":
+    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-suggest",
+      "send-group",
+      "send-pending":
       return try groupRequest(op, args)
     case "plan-ls", "plan-get", "plan-detach", "plan-auto":
       return try planRequest(op, args)
@@ -532,6 +534,7 @@ public final class Service {
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
+    session.autoMode = args.autoMode ?? config.autoMode
     configure(&session)
     entries[id] = Entry(session: session)
     try store.save(session)
@@ -602,6 +605,8 @@ public final class Service {
     }
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
+    // After claudeArgs, so that the session's mode wins over a global one.
+    if session.autoMode == true { args += ["--permission-mode", PermissionMode.auto] }
     if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
@@ -627,7 +632,12 @@ public final class Service {
     snapshot.claudePids[id] = nil
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
-    record(id, resume ? "resumed" : "started", ["prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening])
+    record(
+      id, resume ? "resumed" : "started",
+      [
+        "prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening,
+        "permission_mode": session.autoMode == true ? .string(PermissionMode.auto) : .null,
+      ])
   }
 
   /// Whether the session's conversation has a transcript. `--resume` fails
@@ -1356,13 +1366,19 @@ public final class Service {
     out.account = s.claudeConfigDir
     out.cleanup = e.facts.cleanup
     out.group = s.group
+    if let group = s.group.flatMap({ groups[$0] }) {
+      out.groupName = group.name
+      out.groupDescription = group.description
+    }
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
+    out.permissionMode = e.facts.permissionMode
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
+    if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
     return out
   }
 
