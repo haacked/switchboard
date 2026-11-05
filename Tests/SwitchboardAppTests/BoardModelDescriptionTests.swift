@@ -7,8 +7,7 @@ import Testing
 @MainActor
 @Suite struct BoardModelDescription {
   func model(description: String? = nil) -> BoardModel {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     model.groups = [
       GroupSummary(SessionGroup(id: "g1", name: "Flags", description: description, created: 0), sessions: [])
     ]
