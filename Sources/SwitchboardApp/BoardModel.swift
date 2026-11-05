@@ -44,6 +44,9 @@ final class BoardModel: ObservableObject {
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
+  /// The newest events of the sessions whose card details the Inbox showed,
+  /// oldest first, by session id.
+  @Published var recentEvents: [String: [Event]] = [:]
   /// Each group chat's last messages, by group id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
@@ -451,13 +454,38 @@ final class BoardModel: ObservableObject {
     perform("merge", args, on: merges, finally: { self.merging.remove(id) })
   }
 
-  func choose(_ session: String, ref: String, option number: Int) {
+  /// Clicks the item's option. `text` is what the user typed for a reply option.
+  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
+    // The Board's merge buttons read `merging`, so a merge from the card shows there too.
+    let merge = action.isMerge
+    if merge, merging.contains(session) { return }
     guard choosing.insert(key).inserted else { return }
+    var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
+    if let text { args["text"] = .string(text) }
+    if merge { merging.insert(session) }
+    // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
-      "choose", ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)],
-      finally: { self.choosing.remove(key) })
+      "choose", args, on: merge ? merges : nil,
+      finally: {
+        self.choosing.remove(key)
+        if merge { self.merging.remove(session) }
+      })
   }
+
+  /// Reads the session's newest events for its card's details.
+  func loadEvents(_ session: String) {
+    let client = client
+    poller.async {
+      let events = try? client.call(
+        "events", ["session": .string(session), "limit": .number(Double(Self.recentEventCount))], as: [Event].self)
+      Task { @MainActor in
+        if let events, self.recentEvents[session] != events { self.recentEvents[session] = events }
+      }
+    }
+  }
+
+  static let recentEventCount = 10
 
   /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ group: String) {
@@ -634,6 +662,16 @@ final class BoardModel: ObservableObject {
     inboxJumps += 1
   }
 
+  /// Focuses the Inbox item `step` places after the current one, around the
+  /// end of the list.
+  func moveInbox(by step: Int) {
+    let list = triage
+    guard !list.isEmpty else { return }
+    let i = list.firstIndex { $0.id == currentInboxItem } ?? (step > 0 ? -1 : 0)
+    inboxFocus = list[((i + step) % list.count + list.count) % list.count].id
+    inboxJumps += 1
+  }
+
   /// Moves to the next Inbox item while the Inbox shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
@@ -641,9 +679,7 @@ final class BoardModel: ObservableObject {
     let list = showingInbox ? triage : needsUser
     guard !list.isEmpty else { return }
     if showingInbox {
-      let i = list.firstIndex { $0.id == currentInboxItem } ?? -1
-      inboxFocus = list[(i + 1) % list.count].id
-      inboxJumps += 1
+      moveInbox(by: 1)
       // A field in the item that scrolls away would keep the keystrokes.
       NSApp.keyWindow?.makeFirstResponder(nil)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {

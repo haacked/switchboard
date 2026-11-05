@@ -59,7 +59,10 @@ sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
 sb triage                    # what needs you, in the order to go through it
 sb next                      # the first item
 sb choose <session> 1        # click an option, by number or label
+sb choose <session> 3 --text "Use v2"   # a reply option sends the text
 sb reply <session>           # the session's last reply, as Markdown
+sb summary set < card.json   # inside a session: write its Inbox card for this turn
+sb summary help              # the card's format
 ```
 
 A session is an id, a unique id prefix, or a unique name. `sb send` pastes into a live idle session, queues the message while a turn runs, and resumes a stopped session with the message as its first prompt. The paste also submits anything you typed but didn't send in that session's Claude terminal.
@@ -159,18 +162,44 @@ A row of a table with `Item` and `Status` columns that links no PR and whose sta
 
 ### Triage
 
-Each session that needs you, or that Claude can continue, gets one item: a title that says what you do, a kind (`decision`, `question`, `approval`, `review`, `action`, or `info`), a two-sentence summary, and options. `sb triage` lists them in the order to go through them, and `sb next` prints the first. The same item is `triage` in `sb ls --json` and `sb get --json`, with a `source`:
+Each session that needs you, or that Claude can continue, gets one item: a decision card with a title that says what you do, a kind (`decision`, `question`, `approval`, `review`, `action`, or `info`), a summary of two to four lines, options, and callouts. `sb triage` lists them in the order to go through them, and `sb next` prints the first. The same item is `triage` in `sb ls --json` and `sb get --json`, with a `source`, in this order of precedence:
 
 - `card`: a held permission prompt or `AskUserQuestion` question. Allow and Deny, or the question's options.
-- `rule`: the reason that a PR rule, a wait, or a follow-up gives, such as "Rebase: #1204 conflicts with its base".
-- `summary`: when a turn ends in prose, sbd runs `claude -p` with Haiku, no tools, no MCP servers, and no saved session, under the session's own account, and records a `triage` event. It runs once per turn, two at a time, with a 60 s timeout.
-- `fallback`: the last paragraph of the reply, with no options, until the summary arrives or when it fails.
+- `session`: the card that the session wrote for its current turn with `sb summary set` (see Session summaries). When a PR rule decides the state after the turn, such as a new conflict, the rule's reason leads the callouts, and the rule's options follow the session's.
+- `rule`: the reason that a PR rule, a wait, or a follow-up gives, such as "Rebase: #1204 conflicts with main". A PR rule that knows the next step adds its options and callouts with no model call: Merge and Dismiss for a PR that is ready to merge, Rebase for a conflict, and one option each for a retarget, requested changes, a Trunk removal, a failed Depot run, and an approved PR in a Trunk repo.
+- `summary`: when a turn ends in prose and the session wrote no card, sbd runs `claude -p` with Haiku, no tools, no MCP servers, and no saved session, under the session's own account, and records a `triage` event. It runs once per turn, two at a time, with a 60 s timeout. Its options can only send a message or take typed text. sbd skips the call, and records `triage` with `skipped`, when the account's quota is spent (see `sb usage`) or the session had `triage.perHour` calls in the last hour.
+- `fallback`: the last paragraph of the reply, with no options, until the summary arrives or when it fails or is skipped.
 
-The order is: a held prompt or question; a decision, question, or approval from a summary; PR actions; finished work to review; Claude can continue. The oldest comes first in each group.
+The order is: a held prompt or question; a decision, question, or approval; PR actions; finished work to review; Claude can continue. The oldest comes first in each group.
 
-`sb choose <session> <option>` does what a click does: it answers the session's card, or sends the option's message. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, and `systemPrompt` (empty turns the nudge off).
+Each option has an action, and a click runs a request that sb already has: `send` sends the option's message, `reply` sends text you type, `merge` and `dismiss` do what `sb merge` and `sb merge --dismiss` do, `wait` sets the option's wait, `done` marks the session done, and `allow`, `deny`, and `answer` answer a held prompt. `sb choose <session> <option>` does what a click does, and `--text` gives a reply option its text. Inside Claude Code, `sb choose` refuses to answer a prompt or to merge. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, `perHour` (default 6), and `systemPrompt` (empty turns the nudge off).
 
-In the app, the Inbox shows the list on the left. The right side shows the selected session's summary, its option buttons (or its card), its last reply as formatted Markdown, and a field that messages the session itself. The Terminal button shows the session's terminals in place of the summary.
+In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the option buttons with the recommended one filled (⌘⇧Return clicks it), a text field for a reply option, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. A held prompt shows its card in place of the buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
+
+#### Session summaries
+
+A session writes its Inbox card at the end of a turn that needs you, and sbd shows it until the session's next turn starts. `sb summary set` reads the card as JSON on stdin, for the session in `$SB_SESSION_ID` or the one it names:
+
+```json
+{
+  "title": "Pick how to land #98",
+  "summary": "Opened #98; CI is green.\nTwo review items need a call.",
+  "options": [
+    {"label": "Fix items 3 and 5, then merge", "action": "send", "message": "Fix items 3 and 5, then merge.", "recommended": true},
+    {"label": "Merge as is", "action": "merge"},
+    {"label": "Wait for CI", "action": "wait", "wait": {"kind": "ci", "target": "98"}},
+    {"label": "Skip", "action": "done"},
+    {"label": "Something else", "action": "reply", "placeholder": "What should it do?"}
+  ],
+  "callouts": [{"kind": "warning", "title": "Drops events_old", "body": "The migration deletes the table."}]
+}
+```
+
+- `summary` is required. sbd keeps its first four lines, each up to 200 characters. `title` defaults to the first line.
+- `options` holds up to 6 buttons. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main button, and `detail` adds a line under its label.
+- `callouts` holds up to 5 things to read before deciding, each with a `kind` (`warning`, `decision`, or `info`), a `title`, and a `body`.
+
+sbd drops an option with another action or a wait that `sb wait` would refuse, and a callout with no title or another kind, and `sb summary set` prints what it dropped and why. The card is data: sbd shows it and never runs anything from it, and a button only runs its action, which makes its own checks. A merge button, for one, merges only a PR that is ready to merge. `sb summary help` prints the format for a session to follow.
 
 ### Auto-continue
 

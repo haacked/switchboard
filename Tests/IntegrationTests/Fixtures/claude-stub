@@ -40,6 +40,9 @@
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
+#   card <name>      pipes $SB_HOME/<name>.json into `sb summary set` before its
+#                    Stop, as a session writes its Inbox card at the end of its
+#                    turn. sb's output goes to $SB_HOME/summary-set.log
 #   a prompt that holds "Switchboard plan artifact task." plays the chat's
 #                    side of the task with a fake Artifact tool. See artifact
 #   anything else    replies "Done: <prompt>"
@@ -126,6 +129,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 hook_cmd=$(jq -r '.hooks.Stop[0].hooks[0].command' "$settings")
+sb_cmd=${hook_cmd% hook}
 request_cmd=$(jq -r '.hooks.PermissionRequest[0].hooks[0].command' "$settings")
 
 # payload <event> [json fields]: a hook payload shaped like claude's. It names
@@ -553,6 +557,11 @@ turn() {
     asks "$p" AskUserQuestion "$questions" \
       "$(jq -c '. + {answers: {"Which fruit?": "apple", "Which colors?": "red"}}' <<<"$questions")"
     return
+    ;;
+  card\ *)
+    reply="I wrote the card ${p#card }."
+    marker='"hook_event_name":"Stop"'
+    before="$sb_cmd summary set <'$SB_HOME/${p#card }.json' >>'$SB_HOME/summary-set.log' 2>&1"
     ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;

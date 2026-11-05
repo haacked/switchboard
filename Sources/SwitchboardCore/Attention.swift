@@ -80,6 +80,12 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
   /// recorded it.
   public var triage: TriageSummary?
+  /// The card that the session wrote with `sb summary set` during its
+  /// current turn, and the id of its event.
+  public var sessionSummary: TriageSummary?
+  public var sessionSummaryId: Int64 = 0
+  /// When sbd called the model for a summary, within the last hour.
+  public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
   public var lastTouched: Int64 = 0
   /// When sbd continued the session on its own, within the last hour.
@@ -266,6 +272,10 @@ public struct Verdict: Equatable, Sendable {
   public var reason: String
   public var kind: TriageKind = .action
   public var source: VerdictSource = .rule
+  /// What the session's card offers for a rule that knows the next step.
+  public var options: [TriageOption] = []
+  /// What the user should read before deciding.
+  public var callouts: [Callout] = []
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }

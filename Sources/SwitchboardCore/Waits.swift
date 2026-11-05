@@ -343,7 +343,7 @@ public struct Wait: Codable, Equatable, Sendable {
 
 /// The arguments of the `wait` request, as sb sends them. Every field is text,
 /// so that a bad value gets an error that names it.
-public struct WaitRequest: Codable, Sendable {
+public struct WaitRequest: Codable, Equatable, Sendable {
   public var kind: String?
   /// A PR for the PR kinds, or a session for `session`.
   public var target: String?
