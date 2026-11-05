@@ -236,6 +236,17 @@ import Testing
     #expect(try listed(sbd, g.id).description == "Ship the cache.")
   }
 
+  @Test func aNoteOrTheSameDescriptionSendsTheChatNothing() throws {
+    let sbd = try Instance()
+    _ = try add(sbd, "Flags", description: "Ship the cache.")
+    let c = try liveChat(sbd, "Flags")
+
+    try sbd.sb("group", "note", "Flags", "Ask Ana first.")
+    _ = try describe(sbd, "Flags", "Ship the cache.")
+
+    #expect(try !shared.sent(sbd, c.id).contains { $0.contains("this group's description") })
+  }
+
   // MARK: Length
 
   @Test func describeTakesExactlyTheLimit() throws {
@@ -487,8 +498,10 @@ import Testing
 
   @Test func aMergeOfTwoGroupsWithoutDescriptionsNamesBoth() throws {
     let l = try GroupTests().linkedGroups()
+    let c = try liveChat(l.sbd, "Flags")
 
     _ = try shared.accept(l.sbd, shared.mergeId(l.flags, l.docs))
+    try waitForMessage(l.sbd, c, holding: "Merged from")
 
     let description = try #require(try listed(l.sbd, l.flags.id).description)
     #expect(description.hasPrefix("Merged from"))
@@ -645,7 +658,7 @@ import Testing
     try sbd.waitFor(c.id, "the stop") { !$0.live }
 
     _ = try describe(sbd, "Flags", "Ship the cache first.")
-    #expect(try !sbd.get(c.id).live)
+    #expect(try !shared.sent(sbd, c.id).contains { $0.contains("Ship the cache first.") })
     let again = try liveChat(sbd, "Flags")
 
     #expect(again.id == c.id)

@@ -9,12 +9,12 @@ extension Service {
   /// summary, with `delivery` when it took text.
   func chatRequest(_ args: JSON) -> Response {
     do {
-      let (group, description) = try queue.sync {
+      let group = try queue.sync {
         let group = try lookupGroup(args)
-        return (group, groups[group]?.description)
+        try ensureChatFolder(group, description: groups[group]?.description)
+        return group
       }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-      try ensureChatFolder(group, description: description)
       if let id = queue.sync(execute: { chatID(group) }) { return try openOrSend(id, text) }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
@@ -89,10 +89,12 @@ extension Service {
   }
 
   /// Rewrites the group's chat guide, and tells the chat when its claude
-  /// runs. A stopped chat reads the new guide when it starts.
+  /// runs. A chat whose claude is not live reads the new guide when it
+  /// starts. The pane outlives a stopped claude, so the check reads `live`
+  /// and not the pane.
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
-    guard let id = chatID(group), entries[id]?.session.done == false, claudeState(id) != .stopped else { return }
+    guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }
     _ = try send(id, Chat.describedNotice(groups[group]?.description), byUser: false)
   }
 

@@ -74,5 +74,6 @@ import Testing
 
     #expect(model.describeGroup("g1", "Flag evaluation"))
     #expect(!model.describeGroup("g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1)))
+    #expect(model.describeGroup("g1", "New text"))
   }
 }

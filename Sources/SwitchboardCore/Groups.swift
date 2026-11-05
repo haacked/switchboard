@@ -379,7 +379,7 @@ public enum GroupSuggestions {
         GroupSuggestion(
           id: id, name: option.group.flatMap { names[$0] } ?? option.key.text, group: option.group,
           sessions: sessions, reason: reason(option.key),
-          description: option.group == nil ? description(option.key) : nil))
+          description: option.group == nil ? try? SessionGroup.cleanDescription(description(option.key)) : nil))
     }
     return out
   }
