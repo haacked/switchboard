@@ -241,19 +241,23 @@ final class TerminalHost {
     _ = try? run(["kill-session", "-t", "=\(name)"])
   }
 
-  /// Pastes the text with bracketed paste, then presses Enter. It leaves copy
-  /// mode first, where Enter would not reach the program.
-  func paste(_ name: String, _ text: String) throws {
+  /// Pastes `text` with bracketed paste, then `attachments` as a paste of its
+  /// own, then presses Enter. Claude Code attaches the images of a paste that
+  /// holds only image paths, and leaves paths inside other text as text. It
+  /// leaves copy mode first, where Enter would not reach the program.
+  func paste(_ name: String, _ text: String, attachments: String? = nil) throws {
     let target = "=\(name):"
     try leaveCopyMode(target)
     // The text goes in on stdin, because tmux strips a trailing semicolon
     // from a command argument.
     let buffer = "sb-\(name)"
-    try run(["load-buffer", "-b", buffer, "-"], input: Data(text.utf8))
-    try run(["paste-buffer", "-p", "-d", "-b", buffer, "-t", target])
-    // Claude Code treats an Enter that arrives in the same read as the paste
-    // as part of the pasted text.
-    usleep(300_000)
+    for part in [text, attachments ?? ""] where !part.isEmpty {
+      try run(["load-buffer", "-b", buffer, "-"], input: Data(part.utf8))
+      try run(["paste-buffer", "-p", "-d", "-b", buffer, "-t", target])
+      // Claude Code treats an Enter or a paste that arrives in the same read
+      // as the paste as part of the pasted text.
+      usleep(300_000)
+    }
     try run(["send-keys", "-t", target, "Enter"])
   }
 

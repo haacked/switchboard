@@ -70,6 +70,8 @@
 # Each run appends one record to $SB_HOME/stub-calls.log in one write:
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK and the arguments, split by tabs. A NUL
 # ends the record, because a prompt can hold a newline.
+# Each line it reads from the terminal goes to $SB_HOME/stub-input.log as it
+# arrived, with the paste markers.
 
 args=("$@")
 if [ "${1-}" = -p ]; then
@@ -588,12 +590,14 @@ echo "claude-stub $session ($source)"
 # tmux turns each LF of a paste into CR. The tty in cooked mode turns CR back
 # into LF. A pasted message therefore reaches read as several lines. A line
 # that ends inside a paste adds a new line to the prompt instead of
-# submitting it.
+# submitting it. Two pastes before an Enter, as a message with images
+# sends, put the first paste's end and the second paste on one line.
 start=$'\e[200~' end=$'\e[201~' typed='' pasting=''
 while IFS= read -r line; do
-  [[ $line == *"$start"* ]] && pasting=1
-  [[ $line == *"$end"* ]] && pasting=''
-  line=${line/"$start"/} line=${line/"$end"/}
+  printf '%s\n' "$line" >>"$SB_HOME/stub-input.log"
+  last=${line##*"$start"}
+  if [[ $line == *"$start"* && $last != *"$end"* ]]; then pasting=1; elif [[ $line == *"$end"* ]]; then pasting=''; fi
+  line=${line//"$start"/} line=${line//"$end"/}
   if [ -n "$pasting" ]; then
     typed+=$line$'\n'
     continue

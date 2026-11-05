@@ -209,6 +209,8 @@ public final class Service {
         // `usage` runs off the state queue. The reader takes that queue itself
         // to list the accounts, and a refresh waits on the network.
         return .success(try JSON(encoding: usageRequest(request.args)))
+      case "send" where request.args["images"] != nil:
+        return try sendWithImages(request, hookGone: hookGone)
       default:
         break
       }
@@ -667,7 +669,10 @@ public final class Service {
     guard entries[id] != nil else { throw APIError("no session \(id)") }
     let delivery: Delivery
     let now = nowMs()
-    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty {
+    // Claude Code does not attach the images of a prompt that starts it, so
+    // a message with images waits for a paste.
+    let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
+    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches {
       try launch(id, prompt: text)
       delivery = .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
@@ -716,10 +721,11 @@ public final class Service {
   /// `delivered`, so only a direct paste records `requeued` for the log.
   private func paste(_ id: String, _ text: String, queued: Bool) {
     let name = paneName(id, .claude)
+    let parts = Attachments.split(text, folder: home.attachmentsFolder(id))
     entries[id]?.inFlight = nowMs()
     pasteQueue.async { [self] in
       do {
-        try host.paste(name, text)
+        try host.paste(name, parts?.text ?? text, attachments: parts?.paths)
         if queued { queue.async { self.record(id, "delivered", ["text": .string(text)]) } }
       } catch {
         logLine("can't paste into \(id): \(error)")

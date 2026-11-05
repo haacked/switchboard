@@ -32,6 +32,10 @@ let usage = """
                                   or open it
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
+    send <session> --image <path> [--image <path>…] [<text>]
+                                  send images with the message. sbd keeps a copy of
+                                  each (png, jpg, gif, webp, heic, up to 20 MB) until
+                                  the session is removed
     send --group G [--yes] <text> send a message to every session in the group, after
                                   listing them and asking. Without a terminal, it
                                   needs --yes. Inside a Claude session, it sends
@@ -180,8 +184,8 @@ let usage = """
 
   A <session> is an id, a unique id prefix, or a unique name. For send, rename,
   and the text forms of wait, note, deny, and answer, every word after the
-  session is text, so put --json and --card before the session. SB_HOME picks
-  the state folder (default ~/.sb).
+  session is text, except send's leading --image pairs, so put --json and
+  --card before the session. SB_HOME picks the state folder (default ~/.sb).
 
   Wait kinds: ci, review (needs --who), bot-review, approval, queue, merge, and
   deploy (--env dev, prod-us, prod-eu, or prod) take a PR as --target, or wait
@@ -502,7 +506,7 @@ guard let command = argv.popFirst() else {
 }
 // The text of these commands is everything after the session. All but
 // `send` and `rename` read flags instead when the word after the session is
-// one.
+// one. `send` reads its leading --image pairs itself, in Send.swift.
 let flagsAfterSession = ["wait", "note", "deny", "answer"]
 var a = Args(argv, literalAfter: (["send", "rename", "choose"] + flagsAfterSession).contains(command) ? 1 : .max)
 // The text of `sb group note` is everything after the group.
@@ -559,10 +563,7 @@ case "send" where a.values["--pending"] != nil:
 case "send" where a.values["--group"] != nil:
   sendGroup(a, group: a.values["--group"]!)
 case "send":
-  let text = a.positional.dropFirst().joined(separator: " ")
-  if text.isEmpty { die("send needs text") }
-  let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
-  if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
+  sendCommand(a)
 case "rm" where a.switches.contains("--done"):
   removeDone(a)
 case "rm":

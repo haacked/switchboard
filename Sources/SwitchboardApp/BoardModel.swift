@@ -410,12 +410,13 @@ final class BoardModel: ObservableObject {
   private func followUpKey(plan: String, row: String) -> String { "\(plan) \(row)" }
 
   /// `sent` runs only when sbd accepted the message. A second send to the
-  /// same session does nothing until sbd answers the first.
-  func send(_ id: String, _ text: String, sent: (() -> Void)? = nil) {
+  /// same session does nothing until sbd answers the first. Each image is a
+  /// file name and the image's bytes.
+  func send(_ id: String, _ text: String, images: [(name: String, data: Data)] = [], sent: (() -> Void)? = nil) {
     guard sending.insert(id).inserted else { return }
-    perform(
-      "send", ["session": .string(id), "text": .string(text)], then: { _ in sent?() },
-      finally: { self.sending.remove(id) })
+    var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
+    perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
 
   /// Opens the window when the user has closed it. The always-present menu bar item sets this.
