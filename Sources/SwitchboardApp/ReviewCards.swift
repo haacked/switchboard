@@ -74,11 +74,15 @@ struct ReviewerPicker: View {
     .task {
       do {
         let loaded = try await model.reviewSuggestions(session.id)
+        // reviewSuggestions returns after gh finishes even when closing the
+        // popover cancelled this task.
+        guard !Task.isCancelled else { return }
         suggestions = loaded
         AccessibilityNotification.Announcement(
           "\(loaded.count) suggested reviewer\(loaded.count == 1 ? "" : "s")"
         ).post()
       } catch {
+        guard !Task.isCancelled else { return }
         self.error = "\(error)"
         AccessibilityNotification.Announcement("Can't read the suggested reviewers: \(error)").post()
       }

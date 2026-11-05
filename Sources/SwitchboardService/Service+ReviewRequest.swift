@@ -69,13 +69,8 @@ extension Service {
   /// Runs `gh pr edit --add-reviewer` and returns its error, or nil when it
   /// requested the review.
   private func runReviewRequest(_ pr: PullRequest, _ reviewers: [String]) -> String? {
-    do {
-      _ = try runGh(
-        ["pr", "edit", String(pr.number), "--repo", pr.repo, "--add-reviewer", reviewers.joined(separator: ",")],
-        timeout: Service.reviewTimeoutSeconds)
-      return nil
-    } catch {
-      return "\(error)"
-    }
+    ghError(
+      ["pr", "edit", String(pr.number), "--repo", pr.repo, "--add-reviewer", reviewers.joined(separator: ",")],
+      timeout: Service.reviewTimeoutSeconds)
   }
 }

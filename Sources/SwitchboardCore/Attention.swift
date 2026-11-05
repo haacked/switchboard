@@ -233,6 +233,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "pr":
       pr = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
+      if reviewRequest?.result == .requested, reviewRequest?.head == pr?.headSha,
+        pr?.reviewRequests?.isEmpty == false
+      {
+        reviewRequest?.listed = true
+      }
       // A pr event carries the comments only when they changed. An event
       // without a PR clears them.
       if let comments = d["comments"] {

@@ -107,8 +107,8 @@ final class BoardModel: ObservableObject {
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
   private let worker = DispatchQueue(label: "switchboard.actions")
-  /// Merges wait on `gh pr merge` for up to 120 s each, so they run apart
-  /// from other actions and from each other.
+  /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
+  /// They run apart from other actions and from each other.
   private let merges = DispatchQueue(label: "switchboard.merges", attributes: .concurrent)
   /// A plan apply waits for sbd's GitHub poll and then writes to GitHub, so
   /// it runs apart from other actions too.

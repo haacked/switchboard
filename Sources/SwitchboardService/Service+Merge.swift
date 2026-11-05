@@ -69,10 +69,15 @@ extension Service {
   /// `--match-head-commit` makes GitHub refuse the merge when a push landed
   /// after the session became Ready to merge.
   private func runMerge(_ pr: PullRequest) -> String? {
+    ghError(
+      ["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha],
+      timeout: Service.mergeTimeoutSeconds)
+  }
+
+  /// Runs gh and returns its error, or nil when it exited 0.
+  func ghError(_ args: [String], timeout: TimeInterval) -> String? {
     do {
-      _ = try runGh(
-        ["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha],
-        timeout: Service.mergeTimeoutSeconds)
+      _ = try runGh(args, timeout: timeout)
       return nil
     } catch {
       return "\(error)"

@@ -143,7 +143,9 @@ extension ReviewRequestTests {
       let dependency = Dependency(via: .body, repo: "acme/widgets", number: 41, state: .open)
       let f = try prFacts(unreviewedPR(), then: [try dependenciesEvent(3, [dependency])])
 
-      #expect(verdict(f) != card)
+      #expect(
+        verdict(f)
+          == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waits on #41"))
     }
 
     @Test(arguments: ["Which base should it target?", "Want me to request a review?"])
@@ -237,6 +239,18 @@ extension ReviewRequestTests {
         verdict(f)
           == Verdict(
             state: .readyForReview, reason: "#42 Fix; review required; review requested from alice, checks success"))
+    }
+
+    @Test func requestRemovedOnGitHubAfterItWasListedShowsTheCardAgain() throws {
+      let f = try prFacts(
+        unreviewedPR(),
+        then: [
+          reviewRequestEvent(5, "requested", reviewers: ["alice"]),
+          try prEvent(6, unreviewedPR(reviewRequests: ["alice"])),
+          try prEvent(7, unreviewedPR()),
+        ])
+
+      #expect(verdict(f) == card)
     }
 
     @Test func newCommitAfterARequestShowsTheCardAgainWhenNobodyIsAsked() throws {
