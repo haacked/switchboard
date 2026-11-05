@@ -29,7 +29,9 @@ final class BoardModel: ObservableObject {
   @Published var confirmingCleanup: String?
   /// The ids of the sessions whose cleanup is running.
   @Published var cleaningUp: Set<String> = []
-  var presentingSheet: Bool { showingNew || showingImport }
+  /// The Delete All sheet's state, or nil while it is closed.
+  @Published var doneRemoval: DoneRemoval?
+  var presentingSheet: Bool { showingNew || showingImport || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox
   /// The Inbox item that the user last moved to.
@@ -42,6 +44,9 @@ final class BoardModel: ObservableObject {
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
+  /// The newest events of the sessions whose card details the Inbox showed,
+  /// oldest first, by session id.
+  @Published var recentEvents: [String: [Event]] = [:]
   /// Each group chat's last messages, by group id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
@@ -63,6 +68,9 @@ final class BoardModel: ObservableObject {
   @Published var answeringSuggestions: Set<String> = []
   /// The plan rows, as `<plan> <row>`, whose follow-up sbd is making.
   @Published var followingUp: Set<String> = []
+  /// Artifact plans whose Apply or Reject is on its way to sbd. Their buttons
+  /// stay disabled until sbd replies, so a second click can't answer again.
+  @Published var answeringArtifacts: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -371,16 +379,33 @@ final class BoardModel: ObservableObject {
     guard followingUp.insert(key).inserted else { return }
     perform(
       "plan-followup", ["plan": .string(plan), "row": .string(row)],
-      then: { _ in
-        for g in self.groups.indices {
-          guard let p = self.groups[g].plans?.firstIndex(where: { $0.id == plan }) else { continue }
-          self.groups[g].plans?[p].canFollowUp.removeAll { ($0.ref ?? $0.text) == row }
-        }
-      },
+      then: { _ in self.changePlan(plan) { $0.canFollowUp.removeAll { ($0.ref ?? $0.text) == row } } },
       finally: { self.followingUp.remove(key) })
   }
 
+  /// Changes the plan's summary in each group that lists it, before the
+  /// next refresh lists the plan again.
+  private func changePlan(_ id: String, _ change: (inout PlanSummary) -> Void) {
+    for g in groups.indices {
+      guard let p = groups[g].plans?.firstIndex(where: { $0.id == id }) else { continue }
+      change(&groups[g].plans![p])
+    }
+  }
+
   func isFollowingUp(plan: String, row: String) -> Bool { followingUp.contains(followUpKey(plan: plan, row: row)) }
+
+  /// Applies or rejects an artifact plan's pending update. Apply asks the
+  /// group's chat to publish it.
+  func answerArtifact(plan: String, apply: Bool) {
+    guard answeringArtifacts.insert(plan).inserted else { return }
+    perform(
+      apply ? "plan-artifact-apply" : "plan-artifact-reject", ["plan": .string(plan)],
+      then: { result in
+        guard let doc = try? JSONCoding.convert(result, to: PlanDocument.self) else { return }
+        self.changePlan(plan) { $0 = PlanSummary(doc) }
+      },
+      finally: { self.answeringArtifacts.remove(plan) })
+  }
 
   private func followUpKey(plan: String, row: String) -> String { "\(plan) \(row)" }
 
@@ -433,13 +458,38 @@ final class BoardModel: ObservableObject {
     perform("merge", args, on: merges, finally: { self.merging.remove(id) })
   }
 
-  func choose(_ session: String, ref: String, option number: Int) {
+  /// Clicks the item's option. `text` is what the user typed for a reply option.
+  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
+    // The Board's merge buttons read `merging`, so a merge from the card shows there too.
+    let merge = action.isMerge
+    if merge, merging.contains(session) { return }
     guard choosing.insert(key).inserted else { return }
+    var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
+    if let text { args["text"] = .string(text) }
+    if merge { merging.insert(session) }
+    // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
-      "choose", ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)],
-      finally: { self.choosing.remove(key) })
+      "choose", args, on: merge ? merges : nil,
+      finally: {
+        self.choosing.remove(key)
+        if merge { self.merging.remove(session) }
+      })
   }
+
+  /// Reads the session's newest events for its card's details.
+  func loadEvents(_ session: String) {
+    let client = client
+    poller.async {
+      let events = try? client.call(
+        "events", ["session": .string(session), "limit": .number(Double(Self.recentEventCount))], as: [Event].self)
+      Task { @MainActor in
+        if let events, self.recentEvents[session] != events { self.recentEvents[session] = events }
+      }
+    }
+  }
+
+  static let recentEventCount = 10
 
   /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ group: String) {
@@ -505,22 +555,17 @@ final class BoardModel: ObservableObject {
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
-        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
     }
 
-    private static func list(_ parts: [String]) -> String {
+    static func list(_ parts: [String]) -> String {
       switch parts.count {
       case 0, 1: parts.joined()
       case 2: parts.joined(separator: " and ")
       default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
       }
     }
-  }
-
-  /// The delete icon is for Done sessions that are not the Manager and not an unstarted follow-up.
-  nonisolated static func canDelete(_ s: SessionSummary) -> Bool {
-    s.state == .done && s.kind == .work && !s.waitsToStart
   }
 
   nonisolated static func deletePlan(_ s: SessionSummary) -> DeletePlan {
@@ -621,6 +666,16 @@ final class BoardModel: ObservableObject {
     inboxJumps += 1
   }
 
+  /// Focuses the Inbox item `step` places after the current one, around the
+  /// end of the list.
+  func moveInbox(by step: Int) {
+    let list = triage
+    guard !list.isEmpty else { return }
+    let i = list.firstIndex { $0.id == currentInboxItem } ?? (step > 0 ? -1 : 0)
+    inboxFocus = list[((i + step) % list.count + list.count) % list.count].id
+    inboxJumps += 1
+  }
+
   /// Moves to the next Inbox item while the Inbox shows. Otherwise selects
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
@@ -628,9 +683,7 @@ final class BoardModel: ObservableObject {
     let list = showingInbox ? triage : needsUser
     guard !list.isEmpty else { return }
     if showingInbox {
-      let i = list.firstIndex { $0.id == currentInboxItem } ?? -1
-      inboxFocus = list[(i + 1) % list.count].id
-      inboxJumps += 1
+      moveInbox(by: 1)
       // A field in the item that scrolls away would keep the keystrokes.
       NSApp.keyWindow?.makeFirstResponder(nil)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {

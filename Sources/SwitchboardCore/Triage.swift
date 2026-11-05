@@ -13,6 +13,8 @@ public enum TriageKind: String, Codable, Sendable {
 public enum TriageSource: String, Codable, Sendable {
   /// A held permission prompt or `AskUserQuestion` call.
   case card
+  /// The card that the session wrote with `sb summary set` during its turn.
+  case session
   /// An attention reason that a PR rule, a wait, or a follow-up gave.
   case rule
   /// A Haiku summary of the turn's last reply.
@@ -21,39 +23,142 @@ public enum TriageSource: String, Codable, Sendable {
   case fallback
 }
 
-/// A choice that the user clicks. For a `card` item, `message` is the answer
-/// that `choose` gives the card: `allow`, `deny`, or `TriageOption.allowAutoMode` for a
-/// permission prompt, and the option's label for a question. For other items
-/// it is the text that the session receives.
-public struct TriageOption: Codable, Equatable, Sendable {
-  /// The message of a permission card's option that allows the call and switches the session to auto mode.
-  public static let allowAutoMode = "allow-auto-mode"
+/// What a click on an option does. Each one runs a request that sbd already
+/// has, so a card adds no power that sb lacks.
+public enum TriageAction: String, Codable, Sendable, CaseIterable {
+  /// Sends the option's message to the session.
+  case send
+  /// Sends the text that the user types to the session.
+  case reply
+  /// Merges the session's PR, as `sb merge` does.
+  case merge
+  /// Keeps the session out of Ready to merge until the PR's head changes.
+  case dismiss
+  /// Sets the option's wait on the session.
+  case wait
+  /// Marks the session done.
+  case done
+  /// Allows the session's held permission prompt.
+  case allow
+  /// Denies the session's held permission prompt.
+  case deny
+  /// Allows the session's held permission prompt and switches the session to auto mode.
+  case allowAutoMode
+  /// Answers the session's held question with the option's message.
+  case answer
 
+  /// Whether the action runs `sb merge`, which also dismisses.
+  public var isMerge: Bool { self == .merge || self == .dismiss }
+
+  /// The actions that a card from a session or the model may name. sbd adds
+  /// the others to the cards that it builds from a held prompt or a PR.
+  public static let writable: [TriageAction] = [.send, .reply, .merge, .wait, .done]
+}
+
+/// A choice that the user clicks.
+public struct TriageOption: Codable, Equatable, Sendable {
   public var label: String
   public var detail: String?
-  public var message: String
+  public var action: TriageAction
+  /// The text that a `send` option sends, or the label that an `answer`
+  /// option gives the card.
+  public var message: String?
   public var recommended: Bool
+  /// The wait that a `wait` option sets.
+  public var wait: WaitRequest?
+  /// The hint in a `reply` option's empty text field.
+  public var placeholder: String?
 
-  public init(label: String, detail: String? = nil, message: String, recommended: Bool = false) {
+  public init(
+    label: String, detail: String? = nil, action: TriageAction = .send, message: String? = nil,
+    recommended: Bool = false, wait: WaitRequest? = nil, placeholder: String? = nil
+  ) {
     self.label = label
     self.detail = detail
+    self.action = action
     self.message = message
     self.recommended = recommended
+    self.wait = wait
+    self.placeholder = placeholder
+  }
+
+  /// What a click on the option does, in one line, which a button shows
+  /// because a click sends text as the user.
+  public var effect: String {
+    switch action {
+    case .send: return "Sends: \(oneLine(message ?? label, max: 200))"
+    case .reply: return "Sends the text you type"
+    case .merge: return "Merges the PR"
+    case .dismiss: return "Hides the merge card until the PR gets a new commit"
+    case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
+    case .done: return "Marks the session done"
+    case .allow: return "Allows the prompt"
+    case .allowAutoMode: return "Allows the prompt and switches the session to auto mode"
+    case .deny: return "Denies the prompt"
+    case .answer: return "Answers: \(oneLine(message ?? label, max: 200))"
+    }
+  }
+
+  /// A `triage` event recorded before options had actions holds `send`
+  /// options.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    label = try c.decode(String.self, forKey: .label)
+    detail = try c.decodeIfPresent(String.self, forKey: .detail)
+    action = try c.decodeIfPresent(TriageAction.self, forKey: .action) ?? .send
+    message = try c.decodeIfPresent(String.self, forKey: .message)
+    recommended = try c.decodeIfPresent(Bool.self, forKey: .recommended) ?? false
+    wait = try c.decodeIfPresent(WaitRequest.self, forKey: .wait)
+    placeholder = try c.decodeIfPresent(String.self, forKey: .placeholder)
   }
 }
 
-/// What Haiku says about a turn that ended in prose.
+/// Something the user should read before deciding, such as a conflict, a
+/// failed check, or a call that the session made without asking.
+public struct Callout: Codable, Equatable, Sendable {
+  public enum Kind: String, Codable, Sendable, CaseIterable {
+    case warning
+    case decision
+    case info
+  }
+
+  public var kind: Kind
+  public var title: String
+  public var body: String
+
+  public init(kind: Kind, title: String, body: String = "") {
+    self.kind = kind
+    self.title = title
+    self.body = body
+  }
+}
+
+/// What a session's card or Haiku's summary says about a turn.
 public struct TriageSummary: Codable, Equatable, Sendable {
   public var title: String
   public var kind: TriageKind
   public var summary: String
   public var options: [TriageOption]
+  public var callouts: [Callout]
 
-  public init(title: String, kind: TriageKind, summary: String, options: [TriageOption] = []) {
+  public init(
+    title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = []
+  ) {
     self.title = title
     self.kind = kind
     self.summary = summary
     self.options = options
+    self.callouts = callouts
+  }
+
+  /// A `triage` event recorded before cards had callouts holds none.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    title = try c.decode(String.self, forKey: .title)
+    kind = try c.decode(TriageKind.self, forKey: .kind)
+    summary = try c.decode(String.self, forKey: .summary)
+    options = try c.decodeIfPresent([TriageOption].self, forKey: .options) ?? []
+    callouts = try c.decodeIfPresent([Callout].self, forKey: .callouts) ?? []
   }
 }
 
@@ -64,6 +169,8 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var kind: TriageKind
   public var summary: String
   public var options: [TriageOption]
+  /// What the user should read before deciding.
+  public var callouts: [Callout]
   public var source: TriageSource
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
@@ -71,15 +178,28 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var ref: String
 
   public init(
-    title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], source: TriageSource,
-    ref: String = ""
+    title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
+    source: TriageSource, ref: String = ""
   ) {
     self.ref = ref
     self.title = title
     self.kind = kind
     self.summary = summary
     self.options = options
+    self.callouts = callouts
     self.source = source
+  }
+
+  init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
+    self.init(
+      title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
+      callouts: summary.callouts, source: source, ref: ref)
+  }
+
+  /// The option that the card's main button runs: the recommended one, or
+  /// the only one.
+  public var primary: TriageOption? {
+    options.first(where: \.recommended) ?? (options.count == 1 ? options.first : nil)
   }
 
   /// The option that `sb choose` and a click name: a 1-based number, or a
@@ -116,8 +236,10 @@ extension Attention {
 }
 
 extension SessionFacts {
-  /// Keeps the summary of the turn that ended at the last Stop. A summary
-  /// for any other turn, a failed one, and a new prompt leave none.
+  /// Keeps the summary of the turn that ended at the last Stop, and the card
+  /// that the session wrote during its current turn. A failed or skipped
+  /// summary, and a summary for any other turn, leave none. A new prompt
+  /// starts a newer turn, which drops both.
   mutating func applyTriage(_ event: Event) {
     switch event.kind {
     case "Stop":
@@ -127,10 +249,19 @@ extension SessionFacts {
       // A summary of the earlier turn that arrives later keys to no turn.
       lastStop = 0
       triage = nil
+      sessionSummary = nil
+      sessionSummaryId = 0
+    case Triage.sessionEvent:
+      guard let card = try? JSONCoding.convert(event.data, to: TriageSummary.self) else { return }
+      sessionSummary = card
+      sessionSummaryId = event.id
     case "triage":
-      guard lastStop != 0, event.data["stop"]?.int.map(Int64.init) == lastStop, event.data["error"] == nil else {
-        return
+      if event.data["skipped"] == nil {
+        summaryCalls = summaryCalls.filter { event.t - $0 < AutoContinue.hourMs } + [event.t]
       }
+      guard lastStop != 0, event.data["stop"]?.int.map(Int64.init) == lastStop, event.data["error"] == nil,
+        event.data["skipped"] == nil
+      else { return }
       triage = try? JSONCoding.convert(event.data, to: TriageSummary.self)
     default:
       break
@@ -142,6 +273,8 @@ extension SessionFacts {
 /// Claude can continue, and the order the list shows them in.
 public enum Triage {
   public static let titleLength = 60
+  /// The kind of the event that `sb summary set` records.
+  public static let sessionEvent = "summary"
 
   /// The session's item, or nil when it needs nothing from the user.
   /// `verdict` is the session's attention verdict.
@@ -151,20 +284,36 @@ public enum Triage {
     if let card = facts.cards.first {
       item = cardItem(card)
       item.ref = "card:\(card.id)"
+    } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
+      item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
+      if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)
       item.ref = "rule:\(item.title)"
     } else {
-      if let summary = facts.triage {
-        item = TriageItem(
-          title: oneLine(summary.title, max: titleLength), kind: summary.kind, summary: summary.summary,
-          options: summary.options, source: .summary)
-      } else {
-        item = fallbackItem(facts.lastReply ?? "", verdict)
-      }
+      item = facts.triage.map { TriageItem($0, source: .summary) } ?? fallbackItem(facts.lastReply ?? "", verdict)
       item.ref = "stop:\(facts.lastStop)"
     }
     return item
+  }
+
+  /// Adds what a rule found after the session wrote its card. The rule's
+  /// reason and callouts come before the card's callouts. The rule's options
+  /// come after the card's options, except an action the card already offers.
+  /// The card's main option stays the main option.
+  static func addRule(_ verdict: Verdict, to item: inout TriageItem) {
+    let kind: Callout.Kind = verdict.state == .needsYou ? .warning : .info
+    item.callouts.insert(contentsOf: [Callout(kind: kind, title: title(verdict.reason))] + verdict.callouts, at: 0)
+    let lead = item.primary
+    let added = verdict.options.filter { rule in
+      !item.options.contains { $0.action == rule.action && ($0.action != .send || $0.message == rule.message) }
+    }
+    item.options += added.map { option in
+      var option = option
+      if lead != nil { option.recommended = false }
+      return option
+    }
+    if let lead, let i = item.options.firstIndex(of: lead) { item.options[i].recommended = true }
   }
 
   /// Whether the verdict is the one that the session's last reply gives, and
@@ -186,26 +335,26 @@ public enum Triage {
         title: title(card.reason), kind: .approval,
         summary: "Claude asks to send \(message.summary). Nothing is sent until you send it.",
         options: [
-          TriageOption(label: "Send", message: "allow"),
-          TriageOption(label: "Cancel", message: "deny"),
+          TriageOption(label: "Send", action: .allow),
+          TriageOption(label: "Cancel", action: .deny),
         ], source: .card)
     }
     if card.kind == .permission {
       return TriageItem(
         title: title(card.reason), kind: .approval, summary: "Claude asks to run \(card.summary).",
         options: [
-          TriageOption(label: "Allow", message: "allow", recommended: true),
-          TriageOption(label: "Deny", message: "deny"),
-        ]
-          + (card.offersAutoMode
-            ? [TriageOption(label: PermissionMode.approveLabel, message: TriageOption.allowAutoMode)] : []),
+          TriageOption(label: "Allow", action: .allow, recommended: true),
+          TriageOption(label: "Deny", action: .deny),
+        ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
         source: .card)
     }
     let first = card.questions.first
     // Several questions, or a multi-select one, take more than a click.
     let options =
       card.questions.count == 1 && first?.multiSelect == false
-      ? (first?.options ?? []).map { TriageOption(label: $0.label, detail: $0.description, message: $0.label) } : []
+      ? (first?.options ?? []).map {
+        TriageOption(label: $0.label, detail: $0.description, action: .answer, message: $0.label)
+      } : []
     return TriageItem(
       title: title(card.reason), kind: .question,
       summary: card.questions.map(\.question).joined(separator: " "), options: options, source: .card)
@@ -215,7 +364,7 @@ public enum Triage {
     let text = capitalized(verdict.reason)
     return TriageItem(
       title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",
-      source: .rule)
+      options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
   /// The last paragraph of the reply as the summary, with no options.
@@ -292,6 +441,8 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var account: String?
   /// How long a summary call may run before sbd ends it.
   public var timeoutSeconds = 60.0
+  /// The most summary calls for one session in any hour.
+  public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
     "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first."
@@ -305,6 +456,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
     model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
     account = try c.decodeIfPresent(String.self, forKey: .account)
     timeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .timeoutSeconds) ?? d.timeoutSeconds
+    perHour = try c.decodeIfPresent(Int.self, forKey: .perHour) ?? d.perHour
     systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt) ?? d.systemPrompt
   }
 }

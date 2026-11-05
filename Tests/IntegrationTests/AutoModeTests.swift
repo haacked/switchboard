@@ -114,6 +114,7 @@ extension AutoModeTests {
     let (sbd, s, _) = try asked()
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.options.map(\.label) == ["Allow", "Deny", "Approve and enable auto mode"])
+    #expect(item.options.map(\.action) == [.allow, .deny, .allowAutoMode])
     #expect(throws: TestError.self) { try sbd.sb("choose", s.id, "3", env: ["CLAUDECODE": "1"]) }
     #expect(try sbd.get(s.id).cards.count == 1)
     try sbd.sb("choose", s.id, "3")

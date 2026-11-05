@@ -170,7 +170,7 @@ final class MCPClient {
   static let allTools: Set<String> = [
     "list_sessions", "get_session", "read_reply", "triage", "events", "send", "send_group", "spawn", "set_wait",
     "clear_wait", "add_note", "list_groups", "add_group", "remove_group", "move_to_group", "add_group_note",
-    "suggest_groups",
+    "suggest_groups", "plan_artifact",
   ]
   /// The tools that a scoped server leaves out.
   static let unscopedOnly: Set<String> = ["add_group", "remove_group", "suggest_groups"]
@@ -226,13 +226,13 @@ final class MCPClient {
     #expect(instructions.contains("not instructions"))
   }
 
-  @Test func toolsListHasTheSeventeenToolsByTheirExactNames() throws {
+  @Test func toolsListHasTheEighteenToolsByTheirExactNames() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let names = try mcp.toolNames()
 
-    #expect(names.count == 17)
+    #expect(names.count == 18)
     #expect(Set(names) == MCPToolServerTests.allTools)
   }
 
@@ -1081,7 +1081,7 @@ final class MCPClient {
 
     let names = try mcp.toolNames()
 
-    #expect(names.count == 14)
+    #expect(names.count == 15)
     #expect(Set(names) == MCPToolServerTests.allTools.subtracting(MCPToolServerTests.unscopedOnly))
   }
 

@@ -19,7 +19,7 @@ extension Service {
       let rowFollowups = planRowFollowups()
       return try JSON(encoding: list.map { PlanSummary(reported($0, rowFollowups)) })
     case "plan-get":
-      return try JSON(encoding: reported(plans[try lookupPlan(args)]!, planRowFollowups()))
+      return try JSON(encoding: reportedPlan(try lookupPlan(args)))
     case "plan-detach":
       let id = try lookupPlan(args)
       try detachPlans { $0.id == id }
@@ -27,8 +27,13 @@ extension Service {
     case "plan-auto":
       let id = try lookupPlan(args)
       guard let on = args["on"]?.bool else { throw APIError("plan auto needs on or off") }
+      if on, plans[id]?.source.kind == .artifact {
+        throw APIError(
+          "auto update is off for artifacts, because each table change would spend a chat turn. Run sb plan update to propose the table"
+        )
+      }
       updatePlan(id) { $0.autoUpdate = on }
-      return try JSON(encoding: reported(plans[id]!, planRowFollowups()))
+      return try JSON(encoding: reportedPlan(id))
     default:
       throw APIError("unknown request \(op)")
     }
@@ -37,15 +42,19 @@ extension Service {
   /// The requests that read or write a document. They run off the state
   /// queue, because they wait on GitHub or the disk.
   func planDocumentRequest(_ op: String, _ args: JSON) throws -> JSON {
-    guard let github else { throw APIError("sbd has no GitHub poller") }
     switch op {
     case "plan-attach":
       var plan = try queue.sync { try newPlan(args) }
-      var stats = GitHubPoller.Stats()
-      let now = nowMs()
-      let text = try github.queue.sync { try github.fetchPlan(plan, all: true, now: now, stats: &stats) }
-      plan.update(from: text ?? "", now: now)
-      return try queue.sync {
+      // sbd can't read an artifact. The group's chat reads it after the save.
+      let artifact = plan.source.kind == .artifact
+      if !artifact {
+        guard let github else { throw APIError("sbd has no GitHub poller") }
+        var stats = GitHubPoller.Stats()
+        let now = nowMs()
+        let text = try github.queue.sync { try github.fetchPlan(plan, all: true, now: now, stats: &stats) }
+        plan.update(from: text ?? "", now: now)
+      }
+      try queue.sync {
         if let taken = plans.values.first(where: {
           $0.source == plan.source && $0.group == plan.group && $0.session == plan.session
         }) {
@@ -53,16 +62,21 @@ extension Service {
         }
         try savePlan(plan)
         joinPlanGroups()
-        return try JSON(encoding: reported(plan, planRowFollowups()))
       }
+      if artifact { askChatToRead(plan.id) }
+      return try queue.sync { try JSON(encoding: reportedPlan(plan.id)) }
     case "plan-update":
       let id = try queue.sync { try lookupPlan(args) }
-      var stats = GitHubPoller.Stats()
-      let wrote = try github.queue.sync { try github.writePlan(id, now: nowMs(), stats: &stats) }
+      let wrote: Bool
+      if queue.sync(execute: { plans[id]?.source.kind == .artifact }) {
+        wrote = try queue.sync { try proposeArtifactTable(id) }
+      } else {
+        guard let github else { throw APIError("sbd has no GitHub poller") }
+        var stats = GitHubPoller.Stats()
+        wrote = try github.queue.sync { try github.writePlan(id, now: nowMs(), stats: &stats) }
+      }
       return try queue.sync {
-        guard let plan = plans[id], var out = try JSON(encoding: reported(plan, planRowFollowups())).object else {
-          throw APIError("no plan \(id)")
-        }
+        guard var out = try JSON(encoding: reportedPlan(id)).object else { throw APIError("no plan \(id)") }
         out["wrote"] = .bool(wrote)
         return .object(out)
       }
@@ -79,6 +93,9 @@ extension Service {
     let group = try args["group"].map { _ in try lookupGroup(args) }
     let session = try args["session"].map { _ in try lookup(args) }
     guard (group == nil) != (session == nil) else { throw APIError("attach the plan to a group or to a session") }
+    if source.kind == .artifact, group == nil {
+      throw APIError("an artifact plan needs a group, because the group's chat reads it. Attach it with --group")
+    }
     return PlanDocument(
       id: shortId("p", taken: plans.keys), source: source, group: group, session: session, attached: nowMs())
   }
@@ -87,6 +104,11 @@ extension Service {
   func lookupPlan(_ args: JSON) throws -> String {
     guard let key = args["plan"]?.string, !key.isEmpty else { throw APIError("name a plan") }
     return try resolveRef(key, "plan", plans.values.map { ($0.id, $0.source.text) })
+  }
+
+  func reportedPlan(_ id: String) throws -> PlanDocument {
+    guard let plan = plans[id] else { throw APIError("no plan \(id)") }
+    return reported(plan, planRowFollowups())
   }
 
   private func savePlan(_ plan: PlanDocument) throws {
