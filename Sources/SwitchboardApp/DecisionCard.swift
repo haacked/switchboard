@@ -36,7 +36,7 @@ struct DecisionCard: View {
 
   @ViewBuilder
   private var actions: some View {
-    if session.state == .readyToMerge {
+    if session.canMerge {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
@@ -75,8 +75,9 @@ extension TriageOption {
 
   /// What VoiceOver reads after the label: the option's detail and what a
   /// click does.
-  var accessibilityHint: String {
-    OptionRow.join(detail, effect) ?? effect
+  func accessibilityHint(mergeMethod: MergeMethod?) -> String {
+    let effect = effect(mergeMethod: mergeMethod)
+    return OptionRow.join(detail, effect) ?? effect
   }
 }
 
@@ -94,6 +95,7 @@ struct OptionButton: View {
   static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
+    let effect = option.effect(mergeMethod: session.pr?.mergeMethod)
     let button = Button {
       model.choose(session.id, ref: ref, option: number, action: option.action)
     } label: {
@@ -103,9 +105,9 @@ struct OptionButton: View {
       model.choosing.contains("\(session.id)/\(number)")
         || (option.action.isMerge && model.merging.contains(session.id))
     )
-    .help(option.effect)
+    .help(effect)
     .accessibilityLabel(option.accessibilityLabel(pr: session.pr?.number))
-    .accessibilityHint(option.accessibilityHint)
+    .accessibilityHint(option.accessibilityHint(mergeMethod: session.pr?.mergeMethod))
     if primary {
       button.buttonStyle(.borderedProminent).keyboardShortcut(Self.primaryShortcut)
     } else {

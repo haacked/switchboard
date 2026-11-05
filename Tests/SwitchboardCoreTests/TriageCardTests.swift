@@ -488,6 +488,8 @@ let sessionCard = TriageSummary(
     var f = try carded()
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
+    f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -505,6 +507,8 @@ let sessionCard = TriageSummary(
     var f = try carded(only)
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
+    f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -519,6 +523,8 @@ let sessionCard = TriageSummary(
     var f = try carded(merging)
     f.pr = samplePR(checks: "SUCCESS")
     f.pr?.trunkConfig = false
+    f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
 
     let item = try #require(itemOf(f))
 
@@ -599,8 +605,11 @@ let sessionCard = TriageSummary(
   func ended(_ pr: PullRequest, comments: [PRComment] = []) -> SessionFacts {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), stop(2, 1, "Pushed.")])
     f.pr = pr
-    // The poller found no .trunk folder, so the repo merges without Trunk.
+    // The poller found no .trunk folder and no merge queue, so the repo
+    // merges with a merge commit.
     f.pr?.trunkConfig = false
+    f.pr?.mergeQueue = false
+    f.pr?.reviewDecisionRead = true
     f.prComments = comments
     return f
   }
@@ -656,7 +665,7 @@ let sessionCard = TriageSummary(
   }
 
   enum OneStep: String, CaseIterable, CustomTestStringConvertible {
-    case retarget, requestedChanges, trunkRemoval, depotFailure, approvedForTrunk
+    case retarget, requestedChanges, trunkRemoval, depotFailure
 
     var testDescription: String { rawValue }
 
@@ -670,22 +679,15 @@ let sessionCard = TriageSummary(
         pr = samplePR()
         pr.depot = DepotRun(
           id: "run1", headSha: samplePRHead, status: "failed", jobs: 3, failed: [DepotRun.Job(name: "Django tests")])
-      case .approvedForTrunk:
-        pr = samplePR(reviewDecision: .approved, verdicts: [Review(author: "alice", state: "APPROVED")])
       }
       return pr
     }
 
-    var comments: [PRComment] {
-      self == .approvedForTrunk
-        ? [PRComment(id: "IC_trunk", author: TrunkComments.author, createdAt: "2026-10-25T00:00:00Z", body: "Trunk")]
-        : []
-    }
   }
 
   @Test(arguments: OneStep.allCases)
   func aPRRuleWithOneNextStepOffersOneSend(_ rule: OneStep) throws {
-    let f = ended(rule.pr, comments: rule.comments)
+    let f = ended(rule.pr)
 
     let item = try #require(itemOf(f))
 

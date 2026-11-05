@@ -124,7 +124,9 @@ extension Instance {
     // GitHub answers UNKNOWN while it computes mergeability again, as after
     // the base moved. A push changes the head commit, which can fix the conflict.
     #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with main")
-    #expect(try reason { $0["headRefOid"] = "pushed" } == "merge #18303, approved by stamphog")
+    #expect(
+      try reason { $0["headRefOid"] = "pushed" }
+        == "GitHub is still checking whether #18303 can merge; #18303 approved")
     #expect(
       try reason {
         $0["headRefOid"] = head

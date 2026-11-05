@@ -15,7 +15,7 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
   for (i, o) in item.options.enumerated() {
     out("   \(i + 1)) \(o.label)\(o.recommended ? " (recommended)" : "")\(o.detail.map { ": \($0)" } ?? "")")
     // Clicking sends this text as you, so you read it first.
-    out("      \(o.action == .reply ? "Sends what you give with --text" : o.effect)")
+    out("      \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
   }
 }
 

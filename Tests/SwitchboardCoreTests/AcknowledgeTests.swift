@@ -24,6 +24,8 @@ private func turn(_ reply: String, start: Int64 = 0) -> [Event] {
 private func mergeablePR(headSha: String = samplePRHead, mergeable: Mergeable = .mergeable) -> PullRequest {
   var pr = samplePR(headSha: headSha, mergeable: mergeable, checks: "SUCCESS")
   pr.trunkConfig = false
+  pr.mergeQueue = false
+  pr.reviewDecisionRead = true
   return pr
 }
 

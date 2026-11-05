@@ -312,6 +312,7 @@ extension ReadyForReviewTests {
     @Test func prThatCanMergeIsReadyToMerge() throws {
       var pr = reviewPR(reviewDecision: nil, reviewRequests: [])
       pr.trunkConfig = false
+      pr.mergeQueue = false
       let f = try prFacts(pr)
 
       #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))
@@ -368,10 +369,17 @@ extension ReadyForReviewTests {
       #expect(verdict(f) == Verdict(state: .waiting, reason: "waits on #41; #42 needs no review"))
     }
 
+    /// GitHub's approval counts the required reviews, so ann's open request
+    /// doesn't hold the PR out of Ready to merge.
     @Test func approvedPRWithAReviewRequestIsNotReadyForReview() throws {
       let f = try prFacts(reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("bob", "APPROVED")]))
 
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "merge #42, approved by bob"))
+      #expect(
+        verdict(f)
+          == Verdict(
+            state: .readyToMerge,
+            reason: "#42 is ready to merge, approved by bob; can't tell how acme/widgets merges, so merge it on GitHub"
+          ))
     }
   }
 }

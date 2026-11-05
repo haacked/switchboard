@@ -110,6 +110,12 @@ final class FakeGitHub {
     for node in try FakeGitHub.recorded("github-status.json") {
       if let id = node["id"]?.string, let object = node.object { prs[id] = object }
     }
+    // GitHub answers both merge queue fields for every PR. The recording
+    // predates the status query's ask for them.
+    for id in prs.keys {
+      if prs[id]!["isMergeQueueEnabled"] == nil { prs[id]!["isMergeQueueEnabled"] = false }
+      if prs[id]!["isInMergeQueue"] == nil { prs[id]!["isInMergeQueue"] = false }
+    }
     for node in try FakeGitHub.recorded("github-bodies.json") {
       if let id = node["id"]?.string { bodies[id] = node }
     }

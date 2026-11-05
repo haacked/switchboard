@@ -638,7 +638,7 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
-        if s.state == .readyToMerge { MergeButton(session: s) }
+        if s.canMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if s.isRemovableDone { DeleteButton(session: s) }
       }

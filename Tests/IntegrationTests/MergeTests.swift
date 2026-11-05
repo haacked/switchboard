@@ -14,11 +14,15 @@ extension Instance {
     ])
   }
 
-  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
-  func ghMerges() -> [String] {
+  /// The arguments of each gh call that the stub ran and that starts with
+  /// `prefix`, oldest first.
+  func ghCalls(_ prefix: String) -> [String] {
     let text = (try? String(contentsOfFile: "\(home.path)/gh-calls.log", encoding: .utf8)) ?? ""
-    return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix("pr merge ") }
+    return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix(prefix) }
   }
+
+  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
+  func ghMerges() -> [String] { ghCalls("pr merge ") }
 
   /// Makes the stub's `gh pr merge` print `text` to stderr and exit 1.
   func ghMergeFails(with text: String) throws {
@@ -63,7 +67,7 @@ extension Instance {
   /// A busy PR in a repository that merges through Trunk: Trunk's comment is
   /// older than the comments the poller reads, so the poller sees only other
   /// bots. The repository's `.trunk` folder still shows the queue.
-  @Test func busyPRInATrunkRepositoryIsNotReadyAndMergeIsRefused() throws {
+  @Test func busyPRInATrunkRepositoryIsEnqueuedWithoutAMerge() throws {
     let github = try FakeGitHub()
     github.change(MergeTests.number) {
       $0["repository"] = [
@@ -79,10 +83,12 @@ extension Instance {
     let sbd = try Instance.withMergeStub(github)
     let s = try readySession(sbd)
 
+    #expect(try sbd.get(s.id).reason == "#18303 is ready to merge, approved by stamphog")
+
     let r = try sbd.run(["merge", s.id])
 
-    #expect(try sbd.get(s.id).reason == "enqueue #18303, approved by stamphog")
-    #expect(r.status != 0)
+    #expect(r.status == 0)
+    #expect(sbd.ghComments() == ["pr comment 18303 --repo PostHog/charts --body /trunk merge"])
     #expect(sbd.ghMerges().isEmpty)
   }
 
