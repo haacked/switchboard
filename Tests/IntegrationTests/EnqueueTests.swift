@@ -367,8 +367,9 @@ extension FakeGitHub {
   }
 
   /// GitHub reports no removal state, so an open PR that its merge queue no
-  /// longer holds is the removal. One read is not enough, since a read just
-  /// after the enqueue can come before GitHub queues the PR.
+  /// longer holds is the removal. One read is not enough, since a read while
+  /// GitHub merges the PR can show it outside the queue before it shows it
+  /// merged.
   @Test func prThatGitHubsMergeQueueDropsResumesTheSessionAfterTwoReads() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)

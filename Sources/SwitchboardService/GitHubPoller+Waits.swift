@@ -73,7 +73,9 @@ extension GitHubPoller {
   /// - a `ci` outcome that only one read showed, since a read just after a push
   ///   can show the old head commit, or a status that reports before CI queues.
   ///   Two reads that both show a failure agree.
-  /// - a GitHub merge queue removal that only one read showed.
+  /// - a GitHub merge queue removal that only one read showed, since a read
+  ///   while GitHub merges the PR can show it outside the queue before it
+  ///   shows it merged.
   func resolveWaits(_ interest: Interest, stats: inout Stats) {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     queuedWaits = queuedWaits.filter { id in interest.waits.contains { $0.wait.id == id } }
@@ -101,19 +103,20 @@ extension GitHubPoller {
     }
   }
 
-  /// "GitHub removed it from the merge queue" for a `queue` wait whose open
-  /// PR an earlier read showed in GitHub's merge queue and this read shows
-  /// outside it. A PR that the queue has not taken yet keeps the wait open.
+  static let leftGitHubQueue = "GitHub removed it from the merge queue"
+
+  /// `leftGitHubQueue` for a `queue` wait whose open PR an earlier read showed
+  /// in GitHub's merge queue and this read shows outside it. A PR that the
+  /// queue has not taken yet keeps the wait open.
   private func githubQueueOutcome(_ wait: Wait, _ pr: PullRequest) -> String? {
     guard wait.kind == .queue, pr.state == .open, pr.queue == nil else { return nil }
     if pr.inMergeQueue == true { queuedWaits.insert(wait.id) }
     guard pr.inMergeQueue == false, queuedWaits.contains(wait.id) else { return nil }
-    return "GitHub removed it from the merge queue"
+    return Self.leftGitHubQueue
   }
 
   private func confirmed(_ wait: Wait, _ pr: PullRequest, _ outcome: String, polled: Int64) -> Bool {
-    let leftGitHubQueue = wait.kind == .queue && pr.state == .open && pr.queue == nil
-    guard wait.kind == .ci || leftGitHubQueue else { return true }
+    guard wait.kind == .ci || outcome == Self.leftGitHubQueue else { return true }
     // More Depot jobs can fail between the two reads. That changes the
     // outcome's words but not the fact that the checks failed.
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome

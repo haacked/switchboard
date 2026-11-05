@@ -131,8 +131,9 @@ import Testing
     #expect(option.accessibilityHint(mergeMethod: .merge) == "Leave items 3 and 5? Merges the PR")
   }
 
-  @Test func aHintWithoutADetailIsTheEffect() {
-    #expect(TriageOption(label: "Skip", action: .done).accessibilityHint(mergeMethod: nil) == "Marks the session done")
+  @Test(arguments: [nil, MergeMethod.trunk])
+  func aHintWithoutADetailIsTheEffect(_ method: MergeMethod?) {
+    #expect(TriageOption(label: "Skip", action: .done).accessibilityHint(mergeMethod: method) == "Marks the session done")
   }
 
   @Test(arguments: [MergeMethod.mergeQueue, .trunk])
