@@ -5,16 +5,10 @@ import SwitchboardCore
 /// remove` refuses a locked worktree. sbd asks Supacode to delete such a
 /// worktree instead, and never unlocks one or forces git.
 extension Service {
-  /// True when the reason that `git worktree list --porcelain` prints after
-  /// `locked` is Supacode's JSON, whose `owner` is `supacode`. git quotes a
-  /// reason that holds a quote and escapes the quotes inside it.
+  /// True when the reason that `git worktree list --porcelain -z` prints
+  /// after `locked` is Supacode's JSON, whose `owner` is `supacode`.
   static func isSupacodeLock(_ reason: Substring) -> Bool {
-    var text = reason.trimmingCharacters(in: .whitespaces)
-    if text.hasPrefix("\"") && text.hasSuffix("\"") && text.count >= 2 {
-      text = String(text.dropFirst().dropLast()).replacingOccurrences(of: "\\\"", with: "\"")
-        .replacingOccurrences(of: "\\\\", with: "\\")
-    }
-    return JSON.parse(text)?["owner"]?.string == "supacode"
+    JSON.parse(reason.trimmingCharacters(in: .whitespaces))?["owner"]?.string == "supacode"
   }
 
   /// The supacode program, or throws when sbd can't find it.
@@ -28,12 +22,19 @@ extension Service {
   /// Removes the linked worktree that git lists at `path`. A worktree that
   /// Supacode locked goes through `supacode worktree delete`, and any other
   /// through `git worktree remove`, which refuses every other lock. Returns
-  /// true when Supacode removed it.
+  /// true when Supacode removed it. Supacode runs `git branch -D` on the
+  /// worktree's branch when its `deleteBranchOnDeleteWorktree` setting is on.
+  /// sbd's checks decide whether the branch goes, so a branch that Supacode
+  /// deleted comes back at the tip and with the config that it had.
   func removeWorktree(_ repo: String, _ path: String) throws -> Bool {
     guard let entry = try worktreeEntry(repo, at: path), entry.lockedBySupacode else {
       _ = try gitOutput(repo, ["worktree", "remove", path])
       return false
     }
+    let kept: (name: String, tip: String, config: [(String, String)])? = try {
+      guard let name = entry.branch, let tip = entry.head else { return nil }
+      return (name, tip, try branchConfig(repo, name))
+    }()
     let result = try runCommand(
       try supacodeExecutable(), ["worktree", "delete", "--worktree", Self.supacodeID(entry.path), "--background"],
       timeout: 200)
@@ -45,7 +46,22 @@ extension Service {
     guard try worktreeEntry(repo, at: path) == nil else {
       throw APIError("supacode reported that it deleted \(entry.path), but git still lists the worktree.")
     }
+    if let kept, !branchExists(repo, kept.name) {
+      // The empty old value makes git refuse when the ref exists.
+      _ = try gitOutput(repo, ["update-ref", "refs/heads/\(kept.name)", kept.tip, ""])
+      for (key, value) in kept.config { _ = try? gitOutput(repo, ["config", "--local", "--add", key, value]) }
+    }
     return true
+  }
+
+  /// The repo's own config entries for the branch, in the order git lists them.
+  private func branchConfig(_ repo: String, _ branch: String) throws -> [(String, String)] {
+    let prefix = "branch.\(branch)."
+    return try gitOutput(repo, ["config", "--local", "-z", "--list"]).split(separator: "\0").compactMap { entry in
+      let parts = entry.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+      guard let key = parts.first, key.hasPrefix(prefix) else { return nil }
+      return (String(key), parts.count > 1 ? String(parts[1]) : "")
+    }
   }
 
   /// Supacode's id for a worktree: its absolute path with a trailing slash, percent-encoded.
@@ -67,10 +83,21 @@ extension Service {
     return isInMain(session.cwd, tip) ? (name, tip) : nil
   }
 
+  /// Deletes the checked branch once the worktree is gone. After Supacode
+  /// removed the worktree it follows `deleteBranchInMain`, and otherwise
+  /// `deleteMergedBranch`. Returns false when the branch stays.
+  func deleteBranch(
+    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, supacodeRemoved: Bool
+  ) throws -> Bool {
+    if supacodeRemoved { return try deleteBranchInMain(repo, branch) }
+    try deleteMergedBranch(repo, branch, pr: pr)
+    return true
+  }
+
   /// Deletes the branch that `supacodeBranch` returned, after the worktree is
   /// gone, when origin/main still contains its tip and no worktree has it
-  /// checked out. Returns false when the branch stays. A branch that Supacode
-  /// already deleted counts as deleted. Passing the checked tip makes git
+  /// checked out. Returns false when the branch stays. A branch that is
+  /// already gone counts as deleted. Passing the checked tip makes git
   /// refuse when a commit landed after the check.
   func deleteBranchInMain(_ repo: String, _ branch: (name: String, tip: String)) throws -> Bool {
     guard branchExists(repo, branch.name) else { return true }

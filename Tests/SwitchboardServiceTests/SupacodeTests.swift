@@ -3,17 +3,13 @@ import Testing
 @testable import SwitchboardService
 
 @Suite struct SupacodeTests {
-  @Test func readsSupacodesQuotedLockReason() {
-    let reason =
-      #" "{\"build\":\"1792934673\",\"createdAt\":1793889333,\"owner\":\"supacode\",\"version\":\"0.11.6\"}""#
-    #expect(Service.isSupacodeLock(Substring(reason)))
+  @Test func readsSupacodesLockReason() {
+    #expect(
+      Service.isSupacodeLock(
+        #" {"build":"1792934673","createdAt":1793889333,"owner":"supacode","version":"0.11.6"}"#))
   }
 
-  @Test func readsAnUnquotedLockReason() {
-    #expect(Service.isSupacodeLock(#" {"owner":"supacode"}"#))
-  }
-
-  @Test(arguments: ["", " Supacode", #" "{\"owner\":\"someone-else\"}""#, " not json"])
+  @Test(arguments: ["", " Supacode", #" {"owner":"someone-else"}"#, " not json"])
   func refusesEveryOtherLock(_ reason: String) {
     #expect(!Service.isSupacodeLock(Substring(reason)))
   }

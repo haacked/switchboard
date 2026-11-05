@@ -595,7 +595,8 @@ private let supacodeLock = #"{"build":"1792934673","createdAt":1793889333,"owner
 
 extension Instance {
   /// Points sbd's `supacode` at a stub, and returns the file where the stub records each call. The stub that
-  /// works removes the worktree with git, as Supacode does. The stub that fails prints a message and exits 1.
+  /// works removes the worktree and force-deletes its branch with git, as Supacode does with its default
+  /// settings. The stub that fails prints a message and exits 1.
   fileprivate func useSupacodeStub(failing: Bool = false, removes: Bool = true) throws -> String {
     let calls = "\(home.path)/supacode-calls.log"
     let stub = "\(home.path)/supacode-stub"
@@ -608,7 +609,9 @@ extension Instance {
         path=$(printf '%b' "${4//%/\\x}")
         path=${path%/}
         main=$(/usr/bin/git -C "$path" worktree list --porcelain | head -1 | cut -d' ' -f2-)
-        /usr/bin/git -C "$main" worktree unlock "$path" && /usr/bin/git -C "$main" worktree remove "$path"
+        branch=$(/usr/bin/git -C "$path" branch --show-current)
+        /usr/bin/git -C "$main" worktree unlock "$path" && /usr/bin/git -C "$main" worktree remove "$path" || exit 1
+        [ -z "$branch" ] || /usr/bin/git -C "$main" branch -q -D "$branch"
         """#
     try "#!/bin/bash\necho \"$@\" >> \(calls)\n\(body)\n".write(toFile: stub, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub)
@@ -739,5 +742,48 @@ private func calls(_ log: String) -> [String] {
     #expect(calls(log).count == 1)
     // origin/main doesn't contain the branch's tip, so the branch stays.
     #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
+    let kept = try s.sbd.waitFor(session.id, "the kept branch in the reason") {
+      $0.reason.contains("kept \(RecordedPR.breaker.branch)")
+    }
+    #expect(kept.state == .done)
+  }
+
+  /// Supacode deletes the branch with the worktree, and the commit after the merge is only on that branch.
+  @Test func keepsABranchWithACommitAfterTheMergeThatSupacodeDeleted() throws {
+    let s = try Setup()
+    let merged = try s.finished(.breaker, state: "MERGED")
+    try s.pollUntilDone(merged)
+    try s.sbd.commit(merged.cwd, "later.txt")
+    try s.sbd.markDone(merged.id)
+    let tip = try s.sbd.git(merged.cwd, "rev-parse", "HEAD")
+    try s.sbd.git(s.repo, "config", "branch.\(RecordedPR.breaker.branch).remote", "origin")
+    _ = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, merged.cwd)
+
+    let r = try s.sbd.rmDone("--worktree", "--yes", "--json")
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(removed(try parse(r)) == [merged.id], Comment(rawValue: r.stdout))
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(RecordedPR.breaker.branch)") == tip)
+    #expect(try s.sbd.git(s.repo, "config", "branch.\(RecordedPR.breaker.branch).remote") == "origin")
+  }
+
+  /// The plan keeps the squash-merged branch, so the remote branch stays too.
+  @Test func keepsTheRemoteBranchOfABranchThatTheSupacodePathKeeps() throws {
+    let s = try Setup()
+    let merged = try s.finished(.breaker, state: "MERGED", push: true)
+    try s.pollUntilDone(merged)
+    _ = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, merged.cwd)
+
+    let plan = try s.sbd.planDoneRemoval(remoteBranch: true)
+    #expect(item(plan, merged.id)?["remoteBranch"] == .bool(false), Comment(rawValue: plan.text))
+
+    let r = try s.sbd.rmDone("--worktree", "--delete-remote-branch", "--yes", "--json")
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(removed(try parse(r)) == [merged.id], Comment(rawValue: r.stdout))
+    #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
+    #expect(try s.sbd.branchExists(s.origin, RecordedPR.breaker.branch))
   }
 }

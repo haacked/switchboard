@@ -46,12 +46,7 @@ extension Service {
     var branchError: Error?
     if let branch {
       do {
-        if supacodeRemoved {
-          branchRemoved = try deleteBranchInMain(repo, branch)
-        } else {
-          try deleteMergedBranch(repo, branch, pr: pr)
-          branchRemoved = true
-        }
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, supacodeRemoved: supacodeRemoved)
       } catch {
         branchError = error
       }

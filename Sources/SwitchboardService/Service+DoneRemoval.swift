@@ -55,10 +55,10 @@ extension Service {
   /// refuses, by running `rm`'s checks. The checks only read git, so they run
   /// concurrently.
   private func planDoneRemoval(_ ids: [String], worktree: Bool, remoteBranch: Bool) -> DoneRemovalPlan {
-    let outcomes: [Result<DoneRemovalPlan.Item, NotDone>] = concurrentMap(ids) { id in
+    let outcomes: [Result<DoneRemovalPlan.Item, Skipped>] = concurrentMap(ids) { id in
       switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch) {
-      case .failure(let notDone):
-        return .failure(notDone)
+      case .failure(let skipped):
+        return .failure(skipped)
       case .success(let t):
         do {
           let checked = try checkRemoval(
@@ -71,7 +71,7 @@ extension Service {
               branch: checked.branch?.name, remoteBranch: t.remoteBranch && (checked.branch != nil || !checked.supacode)
             ))
         } catch {
-          return .failure(NotDone(skip: .init(id: id, name: t.session.name, reason: "\(error)")))
+          return .failure(Skipped(skip: .init(id: id, name: t.session.name, reason: "\(error)")))
         }
       }
     }
@@ -79,7 +79,7 @@ extension Service {
     for outcome in outcomes {
       switch outcome {
       case .success(let item): plan.remove.append(item)
-      case .failure(let notDone): plan.skip.append(notDone.skip)
+      case .failure(let skipped): plan.skip.append(skipped.skip)
       }
     }
     return plan
@@ -94,21 +94,21 @@ extension Service {
     var remoteBranch: Bool
   }
 
-  private struct NotDone: Error {
+  private struct Skipped: Error {
     var skip: DoneRemovalPlan.Skip
   }
 
   /// The arguments of the Done delete icon's `rm` for the session, without
   /// running git. A session that is gone or no longer a removable Done
   /// session fails with the reason.
-  private func doneTarget(_ id: String, worktree: Bool, remoteBranch: Bool) -> Result<DoneTarget, NotDone> {
+  private func doneTarget(_ id: String, worktree: Bool, remoteBranch: Bool) -> Result<DoneTarget, Skipped> {
     queue.sync {
       guard let e = entries[id] else {
-        return .failure(NotDone(skip: .init(id: id, name: id, reason: "\(id) no longer exists")))
+        return .failure(Skipped(skip: .init(id: id, name: id, reason: "\(id) no longer exists")))
       }
       let s = e.session
       guard summary(id).isRemovableDone else {
-        return .failure(NotDone(skip: .init(id: id, name: s.name, reason: "\(s.name) is no longer in Done")))
+        return .failure(Skipped(skip: .init(id: id, name: s.name, reason: "\(s.name) is no longer in Done")))
       }
       let removesWorktree = worktree && s.repo != nil
       let removesBranch = removesWorktree && s.branch != nil && e.facts.pr?.state == .merged

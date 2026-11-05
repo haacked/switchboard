@@ -144,7 +144,6 @@ struct DoneRemovalSheet: View {
           Spacer()
           Button("Cancel", role: .cancel) { model.doneRemoval = nil }.keyboardShortcut(.cancelAction)
           Button("Delete \(plan.remove.count)", role: .destructive) { model.removeDone(plan) }
-            .keyboardShortcut(.defaultAction)
             .disabled(plan.remove.isEmpty)
         }
       case .removing(let plan, let done):
@@ -156,7 +155,7 @@ struct DoneRemovalSheet: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 8) {
             SkipList(title: "Removed, with something kept", skips: result.partial)
-            SkipList(title: "Skipped, still in Done", skips: result.skipped)
+            SkipList(title: "Skipped", skips: result.skipped)
           }
           .frame(maxWidth: .infinity, alignment: .leading)
         }

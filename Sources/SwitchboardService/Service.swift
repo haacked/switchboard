@@ -441,8 +441,8 @@ public final class Service {
 
   func worktreeEntries(_ repo: String) throws -> [WorktreeEntry] {
     var entries: [WorktreeEntry] = []
-    for line in try gitOutput(repo, ["worktree", "list", "--porcelain"]).split(
-      separator: "\n", omittingEmptySubsequences: true)
+    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"]).split(
+      separator: "\0", omittingEmptySubsequences: true)
     {
       if line.hasPrefix("worktree ") {
         entries.append(
@@ -807,19 +807,16 @@ public final class Service {
     var branchError: Error?
     if let repo, let branch {
       do {
-        if supacodeRemoved {
-          branchRemoved = try deleteBranchInMain(repo, branch)
-        } else {
-          try deleteMergedBranch(repo, branch, pr: pr)
-          branchRemoved = true
-        }
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, supacodeRemoved: supacodeRemoved)
       } catch {
         branchError = error
       }
     }
     var remoteRemoved = false
     var remoteError: Error?
-    if let target = remoteTarget, !branchExists(target.repo, target.branch), let pr = mergedPR(pr, of: target.branch) {
+    if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch),
+      let pr = mergedPR(pr, of: target.branch)
+    {
       do {
         remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
       } catch {
@@ -841,7 +838,7 @@ public final class Service {
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
     if let branchError, let branch {
-      let remote = removesRemoteBranch ? " It also kept the remote branch, because the local branch stayed." : ""
+      let remote = removesRemoteBranch ? " It also kept the remote branch." : ""
       throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
     }
     if let remoteError {

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import SwitchboardCore
 import Testing
 
@@ -105,5 +105,51 @@ import Testing
     let json = try JSON(encoding: plan)
 
     #expect(json["remove"]?.array?.first?["remoteBranch"] == .bool(true))
+  }
+}
+
+final class SentArgs: @unchecked Sendable {
+  private let lock = NSLock()
+  private var sent: [[String: JSON]] = []
+  var value: [[String: JSON]] { lock.withLock { sent } }
+  func append(_ args: [String: JSON]) { lock.withLock { sent.append(args) } }
+}
+
+@MainActor
+@Suite struct BoardModelDoneRemoval {
+  @Test func removesOneSessionPerRequestAndSkipsARequestThatFails() async {
+    _ = NSApplication.shared
+    let sent = SentArgs()
+    let model = BoardModel()
+    model.send = { op, args in
+      #expect(op == "rm-done")
+      sent.append(args)
+      let id = args["targets"]?.array?.first?.string ?? ""
+      if id == "b" { throw Refusal(description: "the socket closed") }
+      return try JSON(encoding: DoneRemovalResult(removed: [id], skipped: [], partial: []))
+    }
+    let plan = DoneRemovalPlan(
+      remove: ["a", "b", "c"].map { .init(id: $0, name: $0, pr: nil, worktree: nil, branch: nil, remoteBranch: false) },
+      skip: [.init(id: "d", name: "d", reason: "has uncommitted files")])
+    model.doneRemoval = .confirming(plan)
+    model.selection = "a"
+
+    model.removeDone(plan)
+    await settle { if case .finished = model.doneRemoval { true } else { false } }
+
+    guard case .finished(let result) = model.doneRemoval else {
+      Issue.record("Delete All did not finish")
+      return
+    }
+    #expect(result.removed == ["a", "c"])
+    #expect(result.skipped.map(\.id) == ["d", "b"])
+    #expect(result.skipped.last?.reason == "the socket closed")
+    #expect(model.selection == nil)
+    #expect(sent.value.map { $0["targets"]?.array?.compactMap(\.string) ?? [] } == [["a"], ["b"], ["c"]])
+    for args in sent.value {
+      #expect(args["confirmed"] == .bool(true))
+      #expect(args["worktree"] == .bool(true))
+      #expect(args["remote_branch"] == .bool(true))
+    }
   }
 }
