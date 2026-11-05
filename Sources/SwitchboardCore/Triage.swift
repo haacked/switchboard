@@ -32,7 +32,7 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   case reply
   /// Merges the session's PR, as `sb merge` does.
   case merge
-  /// Keeps the session out of Ready to merge until the PR's head changes.
+  /// Acknowledges the Ready to merge item, as `sb merge --dismiss` does.
   case dismiss
   /// Sets the option's wait on the session.
   case wait
@@ -47,7 +47,7 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   /// Answers the session's held question with the option's message.
   case answer
 
-  /// Whether the action runs `sb merge`, which also dismisses.
+  /// Whether the action runs `sb merge`, which also acknowledges.
   public var isMerge: Bool { self == .merge || self == .dismiss }
 
   /// The actions that a card from a session or the model may name. sbd adds
@@ -90,7 +90,7 @@ public struct TriageOption: Codable, Equatable, Sendable {
     case .send: return "Sends: \(oneLine(message ?? label, max: 200))"
     case .reply: return "Sends the text you type"
     case .merge: return mergeMethod?.enqueues == true ? "Adds the PR to its merge queue" : "Merges the PR"
-    case .dismiss: return "Hides the merge card until the PR gets a new commit"
+    case .dismiss: return "Hides the merge card until the PR gets a new commit or a new turn starts"
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
     case .done: return "Marks the session done"
     case .allow: return "Allows the prompt"

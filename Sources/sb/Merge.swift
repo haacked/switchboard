@@ -2,8 +2,8 @@ import Foundation
 import SwitchboardCore
 
 /// Runs `merge`, which merges a Ready to merge session's PR or adds it to its
-/// repository's merge queue. With `--dismiss` it takes the session out of
-/// Ready to merge. A PR reference, such as `#N`, `owner/name#N`, or a PR URL,
+/// repository's merge queue. With `--dismiss` it acknowledges the session's
+/// Ready to merge item. A PR reference, such as `#N`, `owner/name#N`, or a PR URL,
 /// names the session by its open PR.
 func merge(_ a: Args) {
   // A session that read injected instructions could otherwise merge its own
@@ -26,6 +26,6 @@ func merge(_ a: Args) {
   if a.json { return printJSON(result) }
   let s = summary(result)
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
-  let verb = dismiss ? "dismissed" : (s.pr?.mergeMethod ?? .merge).pastTense
+  let verb = dismiss ? "acknowledged" : (s.pr?.mergeMethod ?? .merge).pastTense
   print("\(verb) \(pr) of \(s.name)")
 }

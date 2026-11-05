@@ -83,8 +83,6 @@ extension Attention {
         options: [ask("Fix the checks", "Fix the failing Depot CI on \(n): \(failure)")],
         callouts: [Callout(kind: .warning, title: "Depot CI failed on \(n)", body: failure)])
     }
-    // The user dismissed the merge card of this head commit.
-    if facts.currentMerge?.result == .dismissed { return nil }
     if pr.inMergeQueue == true { return Verdict(state: .waiting, reason: "\(n) is in the merge queue") }
     if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.

@@ -6,10 +6,10 @@ import UniformTypeIdentifiers
 
 /// A field that sends the session's Claude a message, with images dropped on it or pasted into it.
 struct MessageField: View {
-  /// See SessionViewState for why this isn't `@State`.
+  /// What the field holds. MessageDrafts keeps one per target, so it outlives the view.
   final class Draft: ObservableObject {
     struct Image: Identifiable {
-      let id = UUID()
+      var id = UUID()
       let name: String
       let data: Data
       let thumbnail: NSImage?
@@ -19,8 +19,9 @@ struct MessageField: View {
     @Published var images: [Image] = []
     /// Why the last dropped or pasted file was not added.
     @Published var error: String?
-    /// Whether the text field has focus, which decides whether Command+V reaches `paste`.
-    var focused = false
+    /// The time of the first Esc. A second Esc within `escapeWindow` of it clears the draft.
+    @Published private var armedAt: Date?
+    var escapeHint: Bool { armedAt != nil }
 
     var isEmpty: Bool { trimmed.isEmpty && images.isEmpty }
 
@@ -89,10 +90,38 @@ struct MessageField: View {
       images.removeAll { $0.id == id }
     }
 
+    static let escapeWindow: TimeInterval = 1
+
+    /// Handles an Esc and returns true when it cleared the draft. A first Esc on a draft with something in it
+    /// only sets `escapeHint`. The field then handles the key as it would without a draft.
+    func escape(at now: Date) -> Bool {
+      guard !isEmpty else {
+        disarmEscape()
+        return false
+      }
+      if let armedAt, now.timeIntervalSince(armedAt) <= Self.escapeWindow {
+        text = ""
+        images = []
+        error = nil
+        disarmEscape()
+        return true
+      }
+      armedAt = now
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.escapeWindow) { [weak self] in
+        if self?.armedAt == now { self?.disarmEscape() }
+      }
+      return false
+    }
+
+    /// Ends the window in which a second Esc clears the draft.
+    func disarmEscape() {
+      if armedAt != nil { armedAt = nil }
+    }
+
     static let pastedName = "Pasted image.png"
 
-    private func append(name: String, data: Data) {
-      images.append(Image(name: name, data: data, thumbnail: Self.thumbnail(data)))
+    func append(id: UUID = UUID(), name: String, data: Data) {
+      images.append(Image(id: id, name: name, data: data, thumbnail: Self.thumbnail(data)))
     }
 
     /// A small decoded copy, so that a chip does not keep the full image's bitmap.
@@ -111,9 +140,12 @@ struct MessageField: View {
 
   @EnvironmentObject var model: BoardModel
   let session: String
+  /// From `BoardModel.messageDraft(for:)`, so that the text survives a switch to another view.
+  @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
-  @StateObject private var draft = Draft()
   @FocusState private var focused: Bool
+  /// The paste monitor reads this view's focus here. The draft can't hold it, because several views share one draft.
+  @State private var focus = Focus()
   @State private var dropTargeted = false
   @State private var pasteMonitor: Any?
 
@@ -144,7 +176,10 @@ struct MessageField: View {
     .onChange(of: draft.error) {
       if let error = draft.error { AccessibilityNotification.Announcement(error).post() }
     }
-    .onAppear { pasteMonitor = Self.monitorPaste(into: draft) }
+    .onChange(of: draft.escapeHint) {
+      if draft.escapeHint { AccessibilityNotification.Announcement("Press Escape again to clear").post() }
+    }
+    .onAppear { pasteMonitor = Self.monitorPaste(into: draft, when: focus) }
     .onDisappear {
       pasteMonitor.map(NSEvent.removeMonitor)
       pasteMonitor = nil
@@ -156,10 +191,25 @@ struct MessageField: View {
       .lineLimit(1...4)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
-      .onChange(of: focused) { draft.focused = focused }
+      .onChange(of: focused) { focus.held = focused }
+      // An input method that composes takes Esc to cancel the composition.
+      .onKeyPress(phases: .down) { press in
+        guard press.key == .escape else {
+          draft.disarmEscape()
+          return .ignored
+        }
+        return !Self.editorIsComposing && draft.escape(at: Date()) ? .handled : .ignored
+      }
       .overlay {
         if dropTargeted {
           RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2)
+        }
+      }
+      // The hint sits inside the field, because a row below it would resize the terminals above.
+      .overlay(alignment: .trailing) {
+        if draft.escapeHint {
+          Text("Press Esc again to clear").font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).background(.background).padding(.trailing, 4).allowsHitTesting(false)
         }
       }
       // The key handler does not see keypad Enter, which sends here. An input method that passes Return on after composing also sends here.
@@ -167,12 +217,11 @@ struct MessageField: View {
       // The handler also takes key repeats. A held Shift+Return would otherwise reach onSubmit and send.
       .onKeyPress(.return, phases: [.down, .repeat]) { press in
         // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
-        let editor = NSApp.keyWindow?.firstResponder as? NSTextView
-        switch Self.keyAction(modifiers: press.modifiers, composing: editor?.hasMarkedText() == true) {
+        switch Self.keyAction(modifiers: press.modifiers, composing: Self.editorIsComposing) {
         case .send:
           send()
         case .newline:
-          editor?.insertNewlineIgnoringFieldEditor(nil)
+          Self.editor?.insertNewlineIgnoringFieldEditor(nil)
         case nil:
           return .ignored
         }
@@ -224,9 +273,9 @@ struct MessageField: View {
 
   /// Watches for Command+V while the field has focus. The menu's Paste item takes the key before the
   /// field sees it, and the field editor ignores image data. A local monitor sees the key first.
-  private static func monitorPaste(into draft: Draft) -> Any? {
+  private static func monitorPaste(into draft: Draft, when focus: Focus) -> Any? {
     NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak draft] event in
-      guard let draft, draft.focused,
+      guard let draft, focus.held,
         event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
         event.charactersIgnoringModifiers == "v",
         draft.paste(from: .general)
@@ -234,6 +283,13 @@ struct MessageField: View {
       return nil
     }
   }
+
+  final class Focus { var held = false }
+
+  private static var editor: NSTextView? { NSApp.keyWindow?.firstResponder as? NSTextView }
+
+  /// Whether an input method holds marked text in the focused field.
+  private static var editorIsComposing: Bool { editor?.hasMarkedText() == true }
 
   enum KeyAction { case send, newline }
 

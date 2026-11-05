@@ -20,7 +20,7 @@ public enum MergeMethod: String, Codable, Sendable {
   public var pastTense: String { enqueues ? "enqueued" : "merged" }
 }
 
-/// A merge that sbd ran or the user dismissed, as a `merge` event recorded it.
+/// A merge that sbd ran, as a `merge` event recorded it.
 public struct MergeAttempt: Codable, Equatable, Sendable {
   public enum Result: String, Codable, Sendable {
     case merged
@@ -28,7 +28,6 @@ public struct MergeAttempt: Codable, Equatable, Sendable {
     /// commented `/trunk merge`.
     case enqueued
     case failed
-    case dismissed
   }
 
   /// The PR's head commit when the attempt ran.
@@ -83,7 +82,7 @@ extension Attention {
   /// Ready to merge when the PR targets the default branch, is not a draft,
   /// GitHub reports no conflict, the checks passed, review is satisfied,
   /// Trunk reports no queue state for it, and no dependency holds it. `openPR` calls it
-  /// after its blocking rules, its merged and dismissed attempts, and its
+  /// after its blocking rules, its merged attempt, and its
   /// GitHub merge queue rule, so the PR is open, outside GitHub's queue, and
   /// the session is idle. A repository whose merge method sbd can't tell
   /// gets no Merge or Enqueue option.
@@ -94,7 +93,7 @@ extension Attention {
     else { return nil }
     let method = facts.mergeMethod
     var reason = "#\(pr.number) is ready to merge\(approvedBy(pr))"
-    var options = [TriageOption(label: "Dismiss", action: .dismiss)]
+    var options = [TriageOption(label: "Acknowledge", action: .dismiss)]
     if method == .unknown {
       reason += "; can't tell how \(pr.repo) merges, so merge it on GitHub"
     } else {

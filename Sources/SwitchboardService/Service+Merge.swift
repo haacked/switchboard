@@ -6,8 +6,8 @@ extension Service {
 
   /// The `merge` request, which lands a Ready to merge session's PR the way
   /// its repository merges: a merge commit, GitHub's merge queue, or Trunk's
-  /// queue. With `dismiss` it takes the session out of Ready to merge until
-  /// its PR's head commit changes. `session` names the session, or `pr` and
+  /// queue. With `dismiss` it acknowledges the session's Ready to merge
+  /// item. `session` names the session, or `pr` and
   /// an optional `repository` name it by its open PR. After a merge, sbd
   /// resumes the session with a message. After an enqueue, sbd sets a queue
   /// wait that resumes the session when the PR merges. A failed command
@@ -23,7 +23,7 @@ extension Service {
       guard !merging.contains(id) else { throw APIError("#\(pr.number) is already merging") }
       let method = e.facts.mergeMethod
       if args["dismiss"]?.bool == true {
-        record(id, "merge", try JSON(encoding: MergeAttempt(head: pr.headSha, result: .dismissed)))
+        try acknowledge(id, verdict)
         return (id, nil, method)
       }
       guard method != .unknown else {

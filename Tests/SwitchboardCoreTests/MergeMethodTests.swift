@@ -250,7 +250,7 @@ extension MergeMethodTests {
       let v = verdict(f)
 
       #expect(v.state == .readyToMerge)
-      #expect(v.options.map(\.label) == [label, "Dismiss"])
+      #expect(v.options.map(\.label) == [label, "Acknowledge"])
     }
 
     @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk])
@@ -264,10 +264,10 @@ extension MergeMethodTests {
     }
 
     @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk, .unknown])
-    func readyPRAlwaysOffersDismiss(_ method: MergeMethod) throws {
+    func readyPRAlwaysOffersAcknowledge(_ method: MergeMethod) throws {
       let f = try methodFacts(method)
 
-      #expect(verdict(f).options.contains { $0.label == "Dismiss" && $0.action == .dismiss })
+      #expect(verdict(f).options.contains { $0.label == "Acknowledge" && $0.action == .dismiss })
     }
 
     @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk])
@@ -296,10 +296,10 @@ extension MergeMethodTests {
       #expect(!v.options.contains { $0.action == .merge })
     }
 
-    @Test func undeterminedMethodOffersOnlyDismiss() throws {
+    @Test func undeterminedMethodOffersOnlyAcknowledge() throws {
       let f = try methodFacts(.unknown)
 
-      #expect(verdict(f).options.map(\.label) == ["Dismiss"])
+      #expect(verdict(f).options.map(\.label) == ["Acknowledge"])
     }
 
     @Test func undeterminedMethodsReasonSendsTheUserToGitHub() throws {
@@ -363,13 +363,6 @@ extension MergeMethodTests {
     func prThatADependencyHoldsIsNotReadyToMerge(_ method: MergeMethod) throws {
       let dependency = Dependency(via: .body, repo: "acme/widgets", number: 7, state: .open)
       let f = try methodFacts(method, then: [try dependenciesEvent(3, [dependency])])
-
-      #expect(verdict(f).state != .readyToMerge)
-    }
-
-    @Test(arguments: methods)
-    func prDismissedAtItsHeadIsNotReadyToMerge(_ method: MergeMethod) throws {
-      let f = try methodFacts(method, then: [mergeEvent(3, head: samplePRHead, "dismissed")])
 
       #expect(verdict(f).state != .readyToMerge)
     }
