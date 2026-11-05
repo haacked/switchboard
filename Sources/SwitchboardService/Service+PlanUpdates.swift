@@ -124,9 +124,17 @@ extension Service {
       for plan in plans.values.sorted(by: { $0.id < $1.id }) where !planUpdatesRunning.contains(plan.id) {
         switch PlanUpdates.due(plan, now: now) {
         case .skip:
-          if PlanUpdates.editable(plan).isEmpty { updatePlan(plan.id) { $0.updateNote = nil } }
+          if PlanUpdates.editable(plan).isEmpty {
+            updatePlan(plan.id) {
+              $0.updateNote = nil
+              $0.proposal = nil
+            }
+          }
         case .wait(let until):
-          updatePlan(plan.id) { $0.updateNote = "the next update waits until \(Wait.formatTime(until))" }
+          // A failed batch's reason stays on the plan until the next batch runs.
+          updatePlan(plan.id) {
+            if $0.updateNote == nil { $0.updateNote = "the next update waits until \(Wait.formatTime(until))" }
+          }
         case .run:
           // A plan with no quota left gets a note. The next poll checks the quota again.
           if let job = try? startPlanUpdate(plan.id) { jobs.append(job) }

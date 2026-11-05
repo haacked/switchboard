@@ -353,7 +353,7 @@ private func answerJSON(_ pairs: [(String, String)]) -> JSON {
   @Test func unchangedStatusGivesNoEditForTheRow() throws {
     let out = try edits([answer("1", "In review (\(breakerLink))")])
 
-    #expect(!out.contains { $0.old == breakerRow })
+    #expect(out.isEmpty)
   }
 
   /// "2" and "3" are the `#` cells of a Not started row and a current row.
@@ -370,6 +370,43 @@ private func answerJSON(_ pairs: [(String, String)]) -> JSON {
     let error = failure { _ = try edits([answer("1", doneStatus), answer("2", "Done")]) }
 
     #expect(error.contains("not out of date"))
+  }
+
+  @Test(arguments: ["", "   ", "\n"])
+  func answerThatLeavesTheStatusEmptyIsRefused(_ status: String) {
+    let error = failure { _ = try edits([answer("1", status)]) }
+
+    #expect(error.contains("status empty"))
+  }
+
+  @Test func statusLongerThanTheCellLimitIsCut() throws {
+    let out = try edits([answer("1", String(repeating: "a", count: PlanUpdates.cellLength + 100))])
+
+    let edit = try #require(out.first { $0.old == breakerRow })
+    #expect(Plans.cells(edit.new)[2].count <= PlanUpdates.cellLength)
+  }
+
+  /// "01" names the same row as "1".
+  @Test(arguments: [["1", "1"], ["1", "01"]])
+  func answerThatEditsARowTwiceIsRefused(_ numbers: [String]) {
+    let error = failure { _ = try edits(numbers.map { answer($0, doneStatus) }) }
+
+    #expect(error.contains("twice"))
+  }
+
+  /// The row leaves out its trailing Status cell.
+  @Test func linkedRowWithNoStatusCellIsNotGiven() {
+    let markdown = table("| # | Item | Status |", "| 1 | Breaker counts \(breakerLink) |")
+
+    #expect(PlanUpdates.editable(rows(markdown)).isEmpty)
+  }
+
+  @Test func linkedRowWithAnEmptyStatusCellIsGiven() throws {
+    let markdown = table("| # | Item | Status |", "| 1 | Breaker counts \(breakerLink) | |")
+
+    let out = try edits([answer("1", doneStatus)], markdown)
+
+    #expect(out.map(\.new).contains("| 1 | Breaker counts \(breakerLink) | \(doneStatus) |"))
   }
 
   @Test func rowThatIsNotOutOfDateIsNotGivenEvenWhenItLinksAPR() {
@@ -407,9 +444,11 @@ private func answerJSON(_ pairs: [(String, String)]) -> JSON {
     #expect(out.filter { $0.old == statusLine }.map(\.new) == [todayLine])
   }
 
-  @Test func statusDateLineInsideTheGeneratedBlockGetsNoEdit() throws {
+  @Test(arguments: [PlanUpdateLineForm.plain, .crlf])
+  func statusDateLineInsideTheGeneratedBlockGetsNoEdit(_ form: PlanUpdateLineForm) throws {
     let inside = "Status as of 2026-11-01."
-    let markdown = "# Plan\n\n\(start)\n\(inside)\n\(end)\n\n" + table("| # | Item | Status |", breakerRow)
+    let markdown = form.apply(
+      "# Plan\n\n\(start)\n\(inside)\n\(end)\n\n" + table("| # | Item | Status |", breakerRow))
 
     let out = try edits([answer("1", doneStatus)], markdown)
 
@@ -459,6 +498,21 @@ private let newRow = "| 4 | Docs for the API | In progress ([posthog#122896](\(u
     #expect(out == expected)
   }
 
+  /// Two date lines read the same once an earlier update dated both.
+  @Test func applySetsTheDateOnEveryIdenticalDateLine() throws {
+    let line = "_Status as of Nov 1, 2026_"
+    let markdown = "# Plan\n\n\(line)\n\n## Phase 1\n\n\(line)\n\n" + table("| # | Item | Status |", breakerRow)
+    let changes = try edits([answer("1", doneStatus)], markdown)
+
+    let out = try PlanUpdates.apply(markdown, changes)
+
+    #expect(
+      out
+        == markdown.replacingOccurrences(of: line, with: "_Status as of Nov 5, 2026_")
+        .replacingOccurrences(of: breakerRow, with: doneRow))
+    try PlanUpdates.verify(old: markdown, new: out, rows: rows(markdown))
+  }
+
   @Test func applyOfNoEditsLeavesTheTextAlone() throws {
     #expect(try PlanUpdates.apply(document, []) == document)
   }
@@ -479,6 +533,13 @@ private let newRow = "| 4 | Docs for the API | In progress ([posthog#122896](\(u
       "the row is only in the generated block",
       document.replacingOccurrences(of: "\(breakerRow)\n", with: "")
         .replacingOccurrences(of: "\(start)\n\(end)", with: "\(start)\n\(breakerRow)\n\(end)"),
+      breakerRow, nil
+    ),
+    (
+      "the row is only in the generated block of a CRLF document",
+      document.replacingOccurrences(of: "\(breakerRow)\n", with: "")
+        .replacingOccurrences(of: "\(start)\n\(end)", with: "\(start)\n\(breakerRow)\n\(end)")
+        .replacingOccurrences(of: "\n", with: "\r\n"),
       breakerRow, nil
     ),
     ("the anchor was removed", document.replacingOccurrences(of: "\(experimentRow)\n", with: ""), nil, experimentRow),
@@ -607,5 +668,41 @@ private let updated = document.replacingOccurrences(of: breakerRow, with: doneRo
     p.proposed = 1_000
     #expect(PlanUpdates.due(p, now: 1_000 + PlanUpdates.batchMs - 1) == .wait(until: 1_000 + PlanUpdates.batchMs))
     #expect(PlanUpdates.due(p, now: 1_000 + PlanUpdates.batchMs) == .run)
+  }
+}
+
+@Suite struct PlanUpdateWorkTable {
+  private let header = "| # | Item | Status |"
+
+  @Test func workTableIsTheTableWithTheMostRows() throws {
+    let markdown =
+      table(header, "| 1 | A | Not started |") + "\n"
+      + table(header, "| 7 | B | Not started |\n| 8 | C | Not started |") + "\n"
+      + table(header, "| 9 | D | Not started |")
+
+    let work = try #require(Plans.parse(markdown).workTable)
+
+    #expect(work.last == "| 8 | C | Not started |")
+    #expect(work.lastNumber == 8)
+  }
+
+  @Test func laterTableWinsATie() throws {
+    let markdown = table(header, "| 1 | A | Not started |") + "\n" + table(header, "| 4 | B | Not started |")
+
+    let work = try #require(Plans.parse(markdown).workTable)
+
+    #expect(work.last == "| 4 | B | Not started |")
+    #expect(work.lastNumber == 4)
+  }
+
+  /// Rows that neither link a PR nor read Not started don't count.
+  @Test func rowsWithOtherStatusesDoNotCount() throws {
+    let markdown =
+      table(header, "| 1 | A | Not started |") + "\n"
+      + table(header, "| 5 | B | Done |\n| 6 | C | Done |")
+
+    let work = try #require(Plans.parse(markdown).workTable)
+
+    #expect(work.last == "| 1 | A | Not started |")
   }
 }

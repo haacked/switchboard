@@ -23,6 +23,10 @@ struct PlanProposalCard: View {
   @EnvironmentObject var model: BoardModel
   let proposal: PlanProposal
 
+  private var verbs: (apply: String, reject: String) {
+    proposal.kind == .update ? ("Apply", "Reject") : ("Accept", "Decline")
+  }
+
   private var groupName: String? {
     proposal.group.map { id in model.groups.first { $0.id == id }?.name ?? id }
   }
@@ -38,10 +42,10 @@ struct PlanProposalCard: View {
             .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
         Spacer()
-        Button(proposal.kind == .update ? "Apply" : "Accept") { model.applyProposal(proposal.id) }
-          .accessibilityLabel("Apply: \(proposal.title)")
-        Button(proposal.kind == .update ? "Reject" : "Decline") { model.rejectProposal(proposal.id) }
-          .accessibilityLabel("Reject: \(proposal.title)")
+        Button(verbs.apply) { model.applyProposal(proposal.id) }
+          .accessibilityLabel("\(verbs.apply): \(proposal.title) in \(proposal.source.text)")
+        Button(verbs.reject) { model.rejectProposal(proposal.id) }
+          .accessibilityLabel("\(verbs.reject): \(proposal.title) in \(proposal.source.text)")
       }
       VStack(alignment: .leading, spacing: 2) {
         ForEach(Array(proposal.edits.enumerated()), id: \.offset) { _, edit in

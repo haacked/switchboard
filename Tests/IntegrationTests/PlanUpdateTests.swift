@@ -307,6 +307,39 @@ extension Instance {
     #expect(try sbd.updateProposals().isEmpty)
     #expect(try sbd.plan(id).proposal == nil)
     #expect(sbd.planText == document)
+
+    // The failed batch waits like any other, and the next poll keeps its reason.
+    try sbd.poll(all: true)
+    sleep(1)
+
+    #expect(try sbd.plan(id).updateNote?.contains(Spec.notOutOfDate) == true)
+    #expect(sbd.planUpdateCalls().count == 1)
+  }
+
+  @Test func answerThatChangesNoRowSettlesTheBatch() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    try sbd.addGroup("Flags")
+    try sbd.writePlan(sbd.planFile, document)
+    let id = try sbd.attachPlan(sbd.planFile, group: "Flags")
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+    try sbd.writePlanAnswer([])
+    github.change(122953) { $0["state"] = "MERGED" }
+
+    try sbd.poll(all: true)
+
+    _ = try sbd.waitFor("the note on the plan", fetch: { try sbd.plan(id).updateNote }) {
+      $0.contains("left every row as it was")
+    }
+    #expect(try sbd.plan(id).settled != nil)
+    #expect(try sbd.plan(id).proposal == nil)
+
+    try sbd.advanceClock(30 * 60_000)
+    try sbd.poll(all: true)
+    sleep(1)
+
+    #expect(sbd.planUpdateCalls().count == 1)
   }
 
   @Test func proposeOfAnAnswerThatEditsAnotherRowFailsWithTheReason() throws {

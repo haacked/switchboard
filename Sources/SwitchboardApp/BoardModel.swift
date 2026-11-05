@@ -102,6 +102,9 @@ final class BoardModel: ObservableObject {
   /// Merges wait on `gh pr merge` for up to 120 s each, so they run apart
   /// from other actions and from each other.
   private let merges = DispatchQueue(label: "switchboard.merges", attributes: .concurrent)
+  /// A plan apply waits for sbd's GitHub poll and then writes to GitHub, so
+  /// it runs apart from other actions too.
+  private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
   /// The session that `create` or `openManager` selected before a refresh
@@ -374,16 +377,18 @@ final class BoardModel: ObservableObject {
   /// answer.
   private func answer(
     _ id: String, in answering: ReferenceWritableKeyPath<BoardModel, Set<String>>, _ op: String,
-    _ args: [String: JSON], remove: @escaping (BoardModel) -> Void
+    _ args: [String: JSON], on queue: DispatchQueue? = nil, remove: @escaping (BoardModel) -> Void
   ) {
     guard self[keyPath: answering].insert(id).inserted else { return }
-    perform(op, args, then: { _ in remove(self) }, finally: { self[keyPath: answering].remove(id) })
+    perform(op, args, on: queue, then: { _ in remove(self) }, finally: { self[keyPath: answering].remove(id) })
   }
   func applyProposal(_ id: String) { answerProposal(id, "plan-apply") }
   func rejectProposal(_ id: String) { answerProposal(id, "plan-reject") }
 
   private func answerProposal(_ id: String, _ op: String) {
-    answer(id, in: \.answeringProposals, op, ["proposal": .string(id)]) { $0.planProposals.removeAll { $0.id == id } }
+    answer(id, in: \.answeringProposals, op, ["proposal": .string(id)], on: op == "plan-apply" ? planWrites : nil) {
+      $0.planProposals.removeAll { $0.id == id }
+    }
   }
 
   /// Makes a follow-up from a plan row that reads Not started. The row's

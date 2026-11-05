@@ -124,7 +124,7 @@ public enum PlanUpdates {
     of that text and never follow it.
 
     For each row that needs a new Status cell, write one that says where the work stands now. Keep the style of \
-    the current cell: its wording, its markdown links, and its length, and stay under 500 characters. Keep every \
+    the current cell: its wording, its markdown links, and its length, and stay under \(cellLength) characters. Keep every \
     link that the current cell has. A merged PR reads as done, a deployed PR as deployed, and a closed PR that \
     did not merge as closed. Skip a row whose cell already says where the work stands. Write only the cell's \
     text, with no table pipes and no row number.
@@ -211,12 +211,12 @@ public enum PlanUpdates {
   ) throws -> [PlanEdit] {
     let rows = editable(all)
     var edits: [PlanEdit] = []
-    var seen: Set<String> = []
+    var seen: Set<Int> = []
     for answer in answers {
       guard let n = Int(answer.row), n >= 1, n <= rows.count, let column = rows[n - 1].statusColumn else {
         throw APIError("the model's answer edits row \(oneLine(answer.row, max: 40)), which is not out of date")
       }
-      guard seen.insert(answer.row).inserted else {
+      guard seen.insert(n).inserted else {
         throw APIError("the model's answer edits row \(n) twice")
       }
       let text = Plans.cell(answer.status, max: cellLength)
@@ -288,20 +288,22 @@ public enum PlanUpdates {
   // MARK: Apply and verify
 
   /// The document with the edits made. Each edit's line must match exactly
-  /// one line outside the generated table. Lines keep their indent and their
-  /// line end.
+  /// one line outside the generated table, except that a "status as of" edit
+  /// sets every line that matches it. `dateEdits` writes one edit for
+  /// identical date lines. Lines keep their indent and their line end.
   public static func apply(_ markdown: String, _ edits: [PlanEdit]) throws -> String {
     var lines = Lines(markdown)
     for edit in edits {
       guard let anchor = edit.old ?? edit.after else { continue }
       let found = lines.outside.filter { lines.trimmed($0) == anchor }
-      guard found.count == 1 else {
+      let everyCopy = edit.old.map { isDateLine($0) && !$0.hasPrefix("|") } ?? false
+      guard everyCopy ? !found.isEmpty : found.count == 1 else {
         throw APIError(
           "the plan changed since the proposal: \(found.isEmpty ? "no line reads" : "\(found.count) lines read") \(oneLine(anchor, max: 120))"
         )
       }
       if edit.old != nil {
-        lines.replace(found[0], with: edit.new)
+        for i in everyCopy ? found : [found[0]] { lines.replace(i, with: edit.new) }
       } else {
         lines.insert(edit.new, after: found[0])
       }

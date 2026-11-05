@@ -430,7 +430,7 @@ public enum Plans {
       rows.append(
         Content.Row(
           text: line, links: links, number: cell(columns?.number), item: item, status: status,
-          statusColumn: columns?.status))
+          statusColumn: columns?.status.flatMap { $0 < row.count ? $0 : nil }))
     }
     endTable()
     return Content(links: links(in: outside), rows: rows, statusBlock: block, workTable: work?.table)
@@ -478,9 +478,6 @@ public enum Plans {
     return cells.map { $0.trimmingCharacters(in: .whitespaces) }
   }
 
-  /// Whether a row names an item and its status cell reads Not started,
-  /// ignoring case and the marks around it, such as `**Not started**` or
-  /// `Not started.`.
   /// The line with the text of cell `index` replaced by `text` and every
   /// other character kept, or nil when the line has no such cell. Cells
   /// count as `cells(_:)` counts them.
@@ -509,6 +506,9 @@ public enum Plans {
     return String(line[..<start]) + " \(text) " + String(line[end...])
   }
 
+  /// Whether a row names an item and its status cell reads Not started,
+  /// ignoring case and the marks around it, such as `**Not started**` or
+  /// `Not started.`.
   static func notStarted(item: String?, status: String?) -> Bool {
     guard item?.isEmpty == false, let status else { return false }
     return status.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased() == "not started"
