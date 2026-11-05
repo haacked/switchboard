@@ -182,6 +182,8 @@ public struct MCPToolServer: Sendable {
         ["group": try groupID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
     case "suggest_groups":
       return try client.call("group-suggest", pick(args, ["accept"]))
+    case "plan_artifact":
+      return try planArtifact(args, scoped)
     default:
       throw APIError("no tool \(name)")
     }
@@ -239,6 +241,15 @@ public struct MCPToolServer: Sendable {
       throw APIError("\(ref) is not group \(scoped.group.name)")
     }
     return .string(scoped.group.id)
+  }
+
+  /// Sends sbd the chat's report on an artifact plan. The answer leaves out
+  /// the plan, so the document's text does not fill the chat's context.
+  private func planArtifact(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
+    var request = pick(args, ["plan", "kind", "file", "text", "version"])
+    if let scoped { request["group"] = .string(scoped.group.id) }
+    _ = try client.call("plan-artifact-report", request)
+    return ["plan": args["plan"] ?? .null, "kind": args["kind"] ?? .null, "ok": true]
   }
 
   /// The items of `list` whose `id` is a session in the group.

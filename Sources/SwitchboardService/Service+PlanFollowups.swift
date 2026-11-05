@@ -52,8 +52,9 @@ extension Service {
 
   /// The plan with each row's follow-up filled in.
   func reported(_ plan: PlanDocument, _ rowFollowups: PlanRowFollowups) -> PlanDocument {
-    guard let items = rowFollowups[plan.source] else { return plan }
     var out = plan
+    out.artifact?.stale = Plans.copyStale(read: plan.read, now: nowMs())
+    guard let items = rowFollowups[plan.source] else { return out }
     for i in out.rows.indices { out.rows[i].followup = out.rows[i].item.flatMap { items[$0] } }
     return out
   }

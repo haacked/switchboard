@@ -9,6 +9,8 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
     case issue
     /// A markdown file on the head branch of a PR.
     case pr
+    /// A claude.ai artifact, which only the group's chat can read or write.
+    case artifact
   }
 
   public var kind: Kind
@@ -17,12 +19,15 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
   public var number: Int?
   /// The absolute path of a file, or the path of a PR's file in its repo.
   public var path: String?
+  /// The link of an artifact.
+  public var url: String?
 
-  public init(kind: Kind, repo: String? = nil, number: Int? = nil, path: String? = nil) {
+  public init(kind: Kind, repo: String? = nil, number: Int? = nil, path: String? = nil, url: String? = nil) {
     self.kind = kind
     self.repo = repo
     self.number = number
     self.path = path
+    self.url = url
   }
 
   /// Reads an issue as `owner/name#N` or an issue URL, a PR as `owner/name#N`
@@ -34,6 +39,11 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
     let file = path?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: ["/"])
     if file?.isEmpty == true { throw APIError("--path needs a file in the PR") }
     if let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" {
+      if let artifact = PlanSource.artifact(url) {
+        if file != nil { throw APIError("--path names a file in a PR, and \(text) is an artifact") }
+        self = artifact
+        return
+      }
       let parts = url.path.split(separator: "/").map(String.init)
       guard url.host?.lowercased() == "github.com", parts.count >= 4, ["issues", "pull"].contains(parts[2]),
         let number = Int(parts[3]), number > 0
@@ -52,6 +62,16 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
     }
     if file != nil { throw APIError("--path names a file in a PR, and \(text) is a local file") }
     self.init(kind: .file, path: standard)
+  }
+
+  /// An artifact from a `https://claude.ai/artifact/<id>` or
+  /// `https://claude.ai/code/artifact/<id>` link, without its query or fragment.
+  static func artifact(_ url: URL) -> PlanSource? {
+    let parts = url.path.split(separator: "/").map(String.init)
+    guard url.host?.lowercased() == "claude.ai", url.scheme?.lowercased() == "https", parts.count >= 2,
+      [["artifact"], ["code", "artifact"]].contains(Array(parts.dropLast()))
+    else { return nil }
+    return PlanSource(kind: .artifact, url: "https://claude.ai/" + parts.joined(separator: "/"))
   }
 
   /// `pull` is nil for `owner/name#N`, which names an issue or a PR.
@@ -73,6 +93,7 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
     case .file: path ?? ""
     case .issue: "https://github.com/\(repo ?? "")/issues/\(number ?? 0)"
     case .pr: "https://github.com/\(repo ?? "")/pull/\(number ?? 0)"
+    case .artifact: url ?? ""
     }
   }
 
@@ -82,6 +103,7 @@ public struct PlanSource: Codable, Equatable, Hashable, Sendable {
     case .file: path ?? ""
     case .issue: ref
     case .pr: "\(ref):\(path ?? "")"
+    case .artifact: url ?? ""
     }
   }
 }
@@ -196,6 +218,8 @@ public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
   /// The text between the status markers at the last read, or nil when the
   /// document has none.
   public var statusBlock: String?
+  /// The copy of an artifact plan and its pending update, or nil for other types.
+  public var artifact: ArtifactPlan?
 
   public init(id: String, source: PlanSource, group: String? = nil, session: String? = nil, attached: Int64) {
     self.id = id
@@ -206,6 +230,7 @@ public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
     self.attached = attached
     self.links = []
     self.rows = []
+    if source.kind == .artifact { artifact = ArtifactPlan() }
   }
 
   /// Takes in the document's text. A row whose text is unchanged keeps when
@@ -263,6 +288,10 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
   public var outOfDate: [PlanRow]
   /// The Not started rows that have no follow-up yet.
   public var canFollowUp: [PlanRow]
+  /// For an artifact plan: true when its copy is missing or old.
+  public var copyStale: Bool?
+  /// For an artifact plan: its pending update.
+  public var proposal: ArtifactProposal.Summary?
 
   public init(_ plan: PlanDocument) {
     id = plan.id
@@ -280,6 +309,8 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
       row.ref = Plans.ref(of: row, in: plan.rows)
       return row
     }
+    copyStale = plan.artifact?.stale
+    proposal = plan.artifact?.proposal.map(ArtifactProposal.Summary.init)
   }
 }
 

@@ -40,6 +40,8 @@
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
+#   a prompt that holds "Switchboard plan artifact task." plays the chat's
+#                    side of the task with a fake Artifact tool. See artifact
 #   anything else    replies "Done: <prompt>"
 # `claude -p ...` is the summary call. It reads the prompt on stdin and prints
 # the JSON that claude prints with --output-format json: a decision with two
@@ -390,6 +392,85 @@ asks() {
   event turn Stop | emit "$(vars "$1" "$reply")"
 }
 
+# artifact <prompt>: plays a Switchboard plan artifact task with a fake
+# Artifact tool, and prints the reply. The artifact whose URL ends in <id> is
+# the text in $SB_HOME/artifacts/<id>, and its version is the text in
+# <id>.version, which may be missing. It reports each result with
+# `sb plan artifact report`, where sb is the command of the switchboard server
+# in --mcp-config. read saves the text to a file and reports read. rewrite
+# copies copy: to write:, inserts " updated" before the last | of each row:
+# line, and reports proposal. publish reports check with the artifact's text
+# and version, and stops when that report fails. Otherwise it writes
+# publish: over the artifact, increments an integer version or appends +1 to
+# any other one, and reports published with the new version.
+artifact() {
+  local line plan='' url='' task='' copy='' write='' publish='' rows=() cfg sb store version=() new out
+  while IFS= read -r line; do
+    line=${line%$'\r'}
+    case $line in
+    plan:\ *) plan=${line#plan: } ;;
+    artifact:\ *) url=${line#artifact: } ;;
+    task:\ *) task=${line#task: } ;;
+    copy:\ *) copy=${line#copy: } ;;
+    write:\ *) write=${line#write: } ;;
+    publish:\ *) publish=${line#publish: } ;;
+    row:\ *) rows+=("${line#row: }") ;;
+    # A blank line ends the machine lines.
+    '') [ -n "$task" ] && break ;;
+    esac
+  done <<<"${1#*Switchboard plan artifact task.}"
+  # A chat's --mcp-config is inline JSON. The Manager's is a file.
+  [[ $mcp_config == \{* ]] && cfg=$mcp_config || cfg=$(cat "$mcp_config" 2>/dev/null)
+  sb=$(jq -r '.mcpServers.switchboard.command // empty' <<<"$cfg")
+  [ -z "$sb" ] && echo "Artifact $task: no switchboard server" && return
+  store="$SB_HOME/artifacts/${url##*/}"
+  [ -f "$store.version" ] && version=(--version "$(cat "$store.version")")
+  case $task in
+  read)
+    [ -f "$store" ] || { echo "Artifact read: no artifact at $url" && return; }
+    cp "$store" "$PWD/artifact-read.md"
+    out=$("$sb" plan artifact report "$plan" --kind read --file "$PWD/artifact-read.md" "${version[@]}" 2>&1) ||
+      { echo "Artifact read: the report failed: $(oneline "$out")" && return; }
+    echo "Artifact read: reported $url"
+    ;;
+  rewrite)
+    perl -e '
+      my ($from, $to, @rows) = @ARGV;
+      my %named = map { $_ => 1 } @rows;
+      open(my $in, "<", $from) or die "$from: $!";
+      open(my $out, ">", $to) or die "$to: $!";
+      while (my $l = <$in>) {
+        my ($body, $end) = $l =~ /^(.*?)(\r?\n?)\z/s;
+        (my $t = $body) =~ s/^\s+|\s+$//g;
+        $body =~ s/\s*\|\s*$/ updated |/ if $named{$t};
+        print $out $body . $end;
+      }' "$copy" "$write" "${rows[@]}"
+    out=$("$sb" plan artifact report "$plan" --kind proposal --file "$(absolute "$write")" 2>&1) ||
+      { echo "Artifact rewrite: the report failed: $(oneline "$out")" && return; }
+    echo "Artifact rewrite: proposed $write"
+    ;;
+  publish)
+    [ -f "$store" ] && cp "$store" "$PWD/artifact-check.md" || : >"$PWD/artifact-check.md"
+    out=$("$sb" plan artifact report "$plan" --kind check --file "$PWD/artifact-check.md" "${version[@]}" 2>&1) ||
+      { echo "Artifact publish: stopped: $(oneline "$out")" && return; }
+    new=${version[1]-}
+    if [[ $new =~ ^[0-9]+$ ]]; then new=$((new + 1)); elif [ -n "$new" ]; then new="$new+1"; else new=1; fi
+    cp "$publish" "$store"
+    printf '%s' "$new" >"$store.version"
+    out=$("$sb" plan artifact report "$plan" --kind published --version "$new" 2>&1) ||
+      { echo "Artifact publish: published, and the report failed: $(oneline "$out")" && return; }
+    echo "Artifact publish: published $url version $new"
+    ;;
+  *) echo "Artifact: no task $task" ;;
+  esac
+}
+
+# absolute <path>: the path, relative to the cwd unless it starts with /.
+absolute() { [[ $1 == /* ]] && printf '%s' "$1" || printf '%s/%s' "$PWD" "$1"; }
+
+# oneline <text>: the text with its line breaks as spaces.
+oneline() { printf '%s' "$1" | tr '\r\n' '  '; }
+
 questions='{"questions":[
   {"question":"Which fruit?","header":"Fruit","multiSelect":false,
    "options":[{"label":"apple","description":"A red fruit"},{"label":"cherry","description":"A small fruit"}]},
@@ -405,6 +486,7 @@ turn() {
   transcript "$p"
   status
   case $p in
+  *"Switchboard plan artifact task."*) reply=$(artifact "$p") ;;
   slow*)
     n=${p#slow }
     status busy

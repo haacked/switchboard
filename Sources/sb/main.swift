@@ -194,6 +194,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending",
+      "--artifact", "--kind", "--version",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

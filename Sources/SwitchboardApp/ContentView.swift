@@ -420,7 +420,9 @@ struct BoardView: View {
                         model.chat(of: group) == nil
                           ? "Start a chat that manages this group's sessions" : "Open this group's chat")
                   }
-                  PlanFollowupList(plans: model.groups.first { $0.id == row.group }?.plans ?? [])
+                  let plans = model.groups.first { $0.id == row.group }?.plans ?? []
+                  PlanFollowupList(plans: plans)
+                  PlanArtifactList(plans: plans)
                 }
                 .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(columns, id: \.self) { state in
@@ -484,6 +486,44 @@ struct PlanFollowupList: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("plan-row-\(plan.id)-\(ref)")
       }
+    }
+  }
+}
+
+/// A group's artifact plans: whether sbd's copy may be old, and a pending
+/// update's diff with Apply and Reject.
+struct PlanArtifactList: View {
+  @EnvironmentObject var model: BoardModel
+  let plans: [PlanSummary]
+
+  var body: some View {
+    ForEach(plans.filter { $0.source.kind == .artifact }) { plan in
+      VStack(alignment: .leading, spacing: 4) {
+        if plan.copyStale == true {
+          Text(plan.read == nil ? "No copy of the artifact yet" : "Copy of the artifact may be old")
+            .font(.caption).foregroundStyle(.orange)
+            .help("sb plan artifact read \(plan.id) asks the chat to read it again")
+        }
+        if let proposal = plan.proposal {
+          Text(proposal.rows.isEmpty ? "Status table update" : "Update to \(proposal.rows.count) rows")
+            .font(.caption.bold())
+          Text(proposal.diff.joined(separator: "\n"))
+            .font(.caption.monospaced()).lineLimit(12).textSelection(.enabled)
+          if proposal.state == .pending {
+            HStack {
+              Button("Apply") { model.answerArtifact(plan: plan.id, apply: true) }
+              Button("Reject") { model.answerArtifact(plan: plan.id, apply: false) }
+            }
+            .controlSize(.small)
+            .disabled(model.answeringArtifacts.contains(plan.id))
+          } else {
+            Text("Publishing").font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      }
+      .padding(.top, 4)
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("plan-artifact-\(plan.id)")
     }
   }
 }
