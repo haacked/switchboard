@@ -4,15 +4,16 @@ import Testing
 @testable import SwitchboardCore
 
 /// A PR that waits on ann's review: open, not a draft, mergeable, its checks
-/// passed, no verdict, and GitHub requires a review.
+/// passed, no verdict, and GitHub requires a review. The poll read the
+/// review decision unless `reviewDecisionRead` says otherwise.
 private func reviewPR(
   state: PRState = .open, draft: Bool = false, reviewDecision: ReviewDecision? = .reviewRequired,
-  verdicts: [Review] = [], checks: String? = "SUCCESS", queue: TrunkQueueState? = nil,
-  reviewRequests: [String]? = ["ann"]
+  reviewDecisionRead: Bool? = true, verdicts: [Review] = [], checks: String? = "SUCCESS",
+  queue: TrunkQueueState? = nil, reviewRequests: [String]? = ["ann"]
 ) -> PullRequest {
   var pr = samplePR(
     state: state, draft: draft, reviewDecision: reviewDecision, verdicts: verdicts, checks: checks, queue: queue,
-    reviewRequests: reviewRequests)
+    reviewRequests: reviewRequests, reviewDecisionRead: reviewDecisionRead)
   pr.title = "Fix"
   return pr
 }
@@ -163,17 +164,22 @@ extension ReadyForReviewTests {
       let f = try prFacts(reviewPR())
 
       #expect(
-        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review requested from ann, checks success"))
+        verdict(f)
+          == Verdict(
+            state: .readyForReview, reason: "#42 Fix; review required; review requested from ann, checks success"))
     }
 
     @Test(arguments: [
-      (reviewPR(reviewRequests: ["ann", "bob"]), "#42 Fix; review requested from ann and bob, checks success"),
+      (
+        reviewPR(reviewRequests: ["ann", "bob"]),
+        "#42 Fix; review required; review requested from ann and bob, checks success"
+      ),
       (
         reviewPR(verdicts: [sampleVerdict("ann", "APPROVED")], reviewRequests: ["bob"]),
-        "#42 Fix; approved by ann; review requested from bob, checks success"
+        "#42 Fix; review required; approved by ann; review requested from bob, checks success"
       ),
-      (reviewPR(checks: "PENDING"), "#42 Fix; review requested from ann, checks pending"),
-      (reviewPR(checks: nil), "#42 Fix; review requested from ann, no checks"),
+      (reviewPR(checks: "PENDING"), "#42 Fix; review required; review requested from ann, checks pending"),
+      (reviewPR(checks: nil), "#42 Fix; review required; review requested from ann, no checks"),
     ])
     func reasonNamesTheReviewsAndTheChecks(_ pr: PullRequest, _ reason: String) throws {
       let f = try prFacts(pr)
@@ -214,10 +220,9 @@ extension ReadyForReviewTests {
   /// after the PR's.
   @Suite struct ReadyForReviewWaitReason {
     @Test(arguments: [
-      (reviewPR(), "review requested from ann"),
+      (reviewPR(), "review required; review requested from ann"),
       (reviewPR(reviewRequests: []), "review required"),
-      (reviewPR(reviewDecision: nil, reviewRequests: []), "no review requested"),
-      (reviewPR(reviewDecision: nil, reviewRequests: nil), "no review requested"),
+      (reviewPR(reviewRequests: nil), "review required"),
     ])
     func waitsReasonFollowsThePRsReason(_ pr: PullRequest, _ reviews: String) throws {
       let f = try prFacts(pr)
@@ -228,12 +233,10 @@ extension ReadyForReviewTests {
     }
 
     @Test func dependencysReasonFollowsThePRsReason() throws {
-      let f = try prFacts(
-        reviewPR(reviewDecision: nil, reviewRequests: []), then: [try dependenciesEvent(3, [openDependency])])
+      let f = try prFacts(reviewPR(reviewRequests: []), then: [try dependenciesEvent(3, [openDependency])])
 
       #expect(
-        verdict(f)
-          == Verdict(state: .readyForReview, reason: "#42 Fix; no review requested, checks success; waits on #41"))
+        verdict(f) == Verdict(state: .readyForReview, reason: "#42 Fix; review required, checks success; waits on #41"))
     }
 
     @Test func backgroundJobWithAReadyPRIsReadyForReview() throws {
@@ -315,6 +318,58 @@ extension ReadyForReviewTests {
       let f = try prFacts(reviewPR())
 
       #expect(verdict(f, session(done: true, wait: wait)).state == .done)
+    }
+  }
+}
+
+extension ReadyForReviewTests {
+  /// Only a PR whose base branch's rules ask for a review that GitHub does
+  /// not count as given is in Ready for review. Both paths into the column
+  /// check it: a Waiting verdict, and a review that GitHub still asks for.
+  @Suite struct ReadyForReviewNeedsReview {
+    static let wait = "CI on #42"
+
+    @Test(arguments: [
+      ("no review required", reviewPR(reviewDecision: nil, reviewRequests: []), "#42 needs no review"),
+      (
+        "decision not read", reviewPR(reviewDecision: nil, reviewDecisionRead: nil, reviewRequests: []),
+        "#42: GitHub's review rule not read yet"
+      ),
+      (
+        "approved",
+        reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("ann", "APPROVED")], reviewRequests: []),
+        "#42 approved"
+      ),
+    ])
+    func waitingSessionWhosePRNeedsNoReviewStaysWaitingAndSaysWhy(
+      _ label: String, _ pr: PullRequest, _ why: String
+    ) throws {
+      let f = try prFacts(pr)
+
+      #expect(
+        verdict(f, session(wait: Self.wait)) == Verdict(state: .waiting, reason: "\(Self.wait); \(why)"), "\(label)")
+    }
+
+    /// A dependency's Waiting verdict takes the same guard as a wait's.
+    @Test func heldSessionWhosePRNeedsNoReviewStaysWaiting() throws {
+      let f = try prFacts(
+        reviewPR(reviewDecision: nil, reviewRequests: []), then: [try dependenciesEvent(3, [openDependency])])
+
+      #expect(verdict(f) == Verdict(state: .waiting, reason: "waits on #41; #42 needs no review"))
+    }
+
+    @Test func approvedPRWithAReviewRequestIsNotReadyForReview() throws {
+      let f = try prFacts(reviewPR(reviewDecision: .approved, verdicts: [sampleVerdict("bob", "APPROVED")]))
+
+      #expect(verdict(f).state != .readyForReview)
+    }
+
+    @Test func greenPRThatNeedsNoReviewIsReadyToMerge() throws {
+      var pr = reviewPR(reviewDecision: nil, reviewRequests: [])
+      pr.trunkConfig = false
+      let f = try prFacts(pr)
+
+      #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))
     }
   }
 }
