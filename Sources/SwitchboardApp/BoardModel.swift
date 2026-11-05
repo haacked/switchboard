@@ -503,7 +503,7 @@ final class BoardModel: ObservableObject {
       var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
-        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a locked worktree, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
+        " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
     }
 

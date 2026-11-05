@@ -435,6 +435,8 @@ public final class Service {
     var branch: String?
     /// Set by `git worktree lock`, which tools such as Supacode use. `worktree remove` refuses it.
     var locked: Bool
+    /// The lock is Supacode's, which `removeWorktree` asks Supacode to delete.
+    var lockedBySupacode = false
   }
 
   func worktreeEntries(_ repo: String) throws -> [WorktreeEntry] {
@@ -451,6 +453,7 @@ public final class Service {
         entries[entries.count - 1].branch = String(line.dropFirst("branch refs/heads/".count))
       } else if line == "locked" || line.hasPrefix("locked ") {
         entries[entries.count - 1].locked = true
+        entries[entries.count - 1].lockedBySupacode = Self.isSupacodeLock(line.dropFirst("locked".count))
       }
     }
     return entries
@@ -772,7 +775,7 @@ public final class Service {
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    let (repo, branch) = try checkRemoval(
+    let (repo, branch, _) = try checkRemoval(
       session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
       branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
@@ -793,26 +796,30 @@ public final class Service {
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
+    var supacodeRemoved = false
     // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
     // folder's path through a symlink, so it gets the path that it lists for the worktree.
     if let repo {
       let listed = folderGone ? try worktreeEntry(repo, at: session.cwd)?.path : session.cwd
-      if let listed { _ = try gitOutput(repo, ["worktree", "remove", listed]) }
+      if let listed { supacodeRemoved = try removeWorktree(repo, listed) }
     }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
       do {
-        try deleteMergedBranch(repo, branch, pr: pr)
-        branchRemoved = true
+        if supacodeRemoved {
+          branchRemoved = try deleteBranchInMain(repo, branch)
+        } else {
+          try deleteMergedBranch(repo, branch, pr: pr)
+          branchRemoved = true
+        }
       } catch {
         branchError = error
       }
     }
     var remoteRemoved = false
     var remoteError: Error?
-    let localBranchIsGone = branchRemoved || branch == nil
-    if let target = remoteTarget, localBranchIsGone, let pr = mergedPR(pr, of: target.branch) {
+    if let target = remoteTarget, !branchExists(target.repo, target.branch), let pr = mergedPR(pr, of: target.branch) {
       do {
         remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
       } catch {
@@ -848,21 +855,23 @@ public final class Service {
   }
 
   /// The checks that `rm` makes before it stops anything. Returns the repo
-  /// when `worktree` is set, and with `branch` the branch and its tip, which
-  /// is nil when the folder and the branch are both gone.
+  /// when `worktree` is set, and with `branch` the branch to delete and its
+  /// tip. The branch is nil when the folder and the branch are both gone, and
+  /// when Supacode locked the worktree and origin/main doesn't contain the tip.
+  /// `supacode` is true when Supacode locked the worktree.
   func checkRemoval(
     _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool
-  ) throws -> (repo: String?, branch: (name: String, tip: String)?) {
-    guard worktree else { return (nil, nil) }
+  ) throws -> (repo: String?, branch: (name: String, tip: String)?, supacode: Bool) {
+    guard worktree else { return (nil, nil, false) }
     let merged = pr?.state == .merged
-    let repo =
-      folderGone
-      ? try checkGoneWorktree(session, mergedPR: merged)
-      : try checkWorktreeIsLossless(session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
-    guard branch else { return (repo, nil) }
-    return (
-      repo, folderGone ? try checkGoneBranchIsMerged(repo, session, pr: pr) : try checkBranchIsMerged(session, pr: pr)
-    )
+    if folderGone {
+      let repo = try checkGoneWorktree(session, mergedPR: merged)
+      return (repo, branch ? try checkGoneBranchIsMerged(repo, session, pr: pr) : nil, false)
+    }
+    let (repo, supacode) = try checkWorktreeIsLossless(
+      session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
+    guard branch else { return (repo, nil, supacode) }
+    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
@@ -1016,9 +1025,11 @@ public final class Service {
     entries.values.first { $0.session.id != session.id && $0.session.cwd == session.cwd }?.session.id
   }
 
-  /// Returns the session's repo, or throws unless the session's folder is a
-  /// linked worktree of the repo that `new` made it from, no other session runs
-  /// in it, it has no uncommitted file and no file whose change git status
+  /// Returns the session's repo and whether Supacode locked the worktree, or
+  /// throws unless the session's folder is a linked worktree of the repo that
+  /// `new` made it from, no other session runs in it, git doesn't lock it
+  /// unless the lock is Supacode's and sbd can find supacode, it has no
+  /// uncommitted file and no file whose change git status
   /// skips, and HEAD is on a remote branch. With a merged PR, HEAD may instead
   /// be on a local branch, because a squash merge leaves the commits on no
   /// remote branch and `worktree remove` keeps the branch. `worktree remove`
@@ -1027,7 +1038,7 @@ public final class Service {
   /// refuses the removal.
   func checkWorktreeIsLossless(
     _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool
-  ) throws -> String {
+  ) throws -> (repo: String, supacode: Bool) {
     let repo = try worktreeRepo(session)
     if let sharedWith {
       throw APIError(
@@ -1037,7 +1048,7 @@ public final class Service {
     guard let entry = try worktreeEntries(repo).dropFirst().first(where: { samePath($0.path, session.cwd) }) else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
-    if entry.locked { throw lockedError(session.cwd) }
+    if entry.locked && !entry.lockedBySupacode { throw lockedError(session.cwd) }
     let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored)
     guard status.changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
@@ -1045,7 +1056,8 @@ public final class Service {
     try requireNoHiddenChanges(session.cwd)
     if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
-    return repo
+    if entry.lockedBySupacode { _ = try supacodeExecutable() }
+    return (repo, entry.lockedBySupacode)
   }
 
   /// Throws when a tracked file has git's assume-unchanged or skip-worktree

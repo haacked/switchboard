@@ -95,6 +95,8 @@ public struct Config: Codable, Equatable, Sendable {
   /// Names of ignored files and folders that `sb cleanup` may delete besides
   /// build output, such as `.env` or `.notes`.
   public var cleanupDeletes: [String] = []
+  /// The supacode command, which deletes a worktree that Supacode locked. A test points it at a stub.
+  public var supacode = "supacode"
   /// The Claude config folders whose sessions `sb import` lists, or nil for
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
@@ -138,6 +140,7 @@ public struct Config: Codable, Equatable, Sendable {
     branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? d.branchPrefix
     followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
     cleanupDeletes = try c.decodeIfPresent([String].self, forKey: .cleanupDeletes) ?? d.cleanupDeletes
+    supacode = try c.decodeIfPresent(String.self, forKey: .supacode) ?? d.supacode
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     depot = try c.decodeIfPresent(DepotSettings.self, forKey: .depot) ?? d.depot

@@ -68,7 +68,8 @@ extension Service {
           return .success(
             .init(
               id: id, name: t.session.name, pr: t.pr?.number, worktree: t.worktree ? t.session.cwd : nil,
-              branch: checked.branch?.name, remoteBranch: t.remoteBranch))
+              branch: checked.branch?.name, remoteBranch: t.remoteBranch && (checked.branch != nil || !checked.supacode)
+            ))
         } catch {
           return .failure(NotDone(skip: .init(id: id, name: t.session.name, reason: "\(error)")))
         }

@@ -587,3 +587,157 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(removed(result).isDisjoint(with: skipped))
   }
 }
+
+// MARK: - Worktrees that Supacode locked
+
+/// The lock reason that Supacode writes.
+private let supacodeLock = #"{"build":"1792934673","createdAt":1793889333,"owner":"supacode","version":"0.11.6"}"#
+
+extension Instance {
+  /// Points sbd's `supacode` at a stub, and returns the file where the stub records each call. The stub that
+  /// works removes the worktree with git, as Supacode does. The stub that fails prints a message and exits 1.
+  fileprivate func useSupacodeStub(failing: Bool = false, removes: Bool = true) throws -> String {
+    let calls = "\(home.path)/supacode-calls.log"
+    let stub = "\(home.path)/supacode-stub"
+    let body =
+      failing
+      ? #"echo "Supacode is not running" >&2; exit 1"#
+      : !removes
+        ? "exit 0"
+        : #"""
+        path=$(printf '%b' "${4//%/\\x}")
+        path=${path%/}
+        main=$(/usr/bin/git -C "$path" worktree list --porcelain | head -1 | cut -d' ' -f2-)
+        /usr/bin/git -C "$main" worktree unlock "$path" && /usr/bin/git -C "$main" worktree remove "$path"
+        """#
+    try "#!/bin/bash\necho \"$@\" >> \(calls)\n\(body)\n".write(toFile: stub, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub)
+    try restart(setting: "supacode", to: .string(stub))
+    return calls
+  }
+
+  fileprivate func lockForSupacode(_ repo: String, _ cwd: String) throws {
+    try git(repo, "worktree", "lock", "--reason", supacodeLock, cwd)
+  }
+}
+
+private func calls(_ log: String) -> [String] {
+  ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+}
+
+@Suite(.timeLimit(.minutes(2))) struct SupacodeLockTests {
+  @Test func deleteAllRemovesAWorktreeThatSupacodeLockedThroughSupacode() throws {
+    let s = try Setup()
+    let kept = try s.finished(.breaker, state: "MERGED")
+    let inMain = try s.finished(.groups, state: "MERGED")
+    // origin/main contains the second branch's tip, as after a merge commit. The first is like a squash merge.
+    try s.sbd.git(inMain.cwd, "push", "-q", "origin", "HEAD:main")
+    try s.sbd.git(s.repo, "fetch", "-q", "origin")
+    try s.pollUntilDone(kept, inMain)
+    let log = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, kept.cwd)
+    try s.sbd.lockForSupacode(s.repo, inMain.cwd)
+
+    let plan = try s.sbd.planDoneRemoval()
+    #expect(planned(plan) == [kept.id, inMain.id], Comment(rawValue: plan.text))
+    #expect(isNull(item(plan, kept.id)?["branch"]))
+    #expect(item(plan, inMain.id)?["branch"]?.string == RecordedPR.groups.branch)
+
+    let r = try s.sbd.rmDone("--worktree", "--yes", "--json")
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(removed(try parse(r)) == [kept.id, inMain.id], Comment(rawValue: r.stdout))
+    #expect(try s.sbd.client.sessions().isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: kept.cwd))
+    #expect(!FileManager.default.fileExists(atPath: inMain.cwd))
+    #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
+    #expect(try !s.sbd.branchExists(s.repo, RecordedPR.groups.branch))
+    let made = calls(log)
+    #expect(made.count == 2, Comment(rawValue: made.joined(separator: "\n")))
+    for call in made {
+      #expect(call.hasPrefix("worktree delete --worktree %2F"), Comment(rawValue: call))
+      #expect(call.hasSuffix("%2F --background"), Comment(rawValue: call))
+      #expect(!call.contains("/"), Comment(rawValue: call))
+    }
+  }
+
+  @Test func skipsAWorktreeThatSupacodeLockedWhenSupacodeFails() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/locked")
+    try sbd.markDone(s.id)
+    _ = try sbd.useSupacodeStub(failing: true)
+    try sbd.lockForSupacode(repo, s.cwd)
+
+    let result = try parse(try sbd.rmDone("--worktree", "--yes", "--json"))
+
+    let reason = try #require(skip(result["skipped"], s.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains("Supacode is not running"), Comment(rawValue: reason))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.git(repo, "worktree", "list", "--porcelain").contains("supacode"))
+  }
+
+  @Test func skipsAWorktreeThatSupacodeSaysItDeletedWhenGitStillListsIt() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/locked")
+    try sbd.markDone(s.id)
+    _ = try sbd.useSupacodeStub(removes: false)
+    try sbd.lockForSupacode(repo, s.cwd)
+
+    let result = try parse(try sbd.rmDone("--worktree", "--yes", "--json"))
+
+    let reason = try #require(skip(result["skipped"], s.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains("still lists"), Comment(rawValue: reason))
+    #expect(try sbd.intact(s))
+  }
+
+  @Test func skipsAWorktreeThatSupacodeLockedWhenSupacodeIsMissing() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/locked")
+    try sbd.markDone(s.id)
+    try sbd.restart(setting: "supacode", to: .string("\(sbd.home.path)/no-such-supacode"))
+    try sbd.lockForSupacode(repo, s.cwd)
+
+    let plan = try sbd.planDoneRemoval()
+
+    let reason = try #require(skip(plan["skip"], s.id)?["reason"]?.string, Comment(rawValue: plan.text))
+    #expect(reason.contains("can't find"), Comment(rawValue: reason))
+    #expect(try sbd.intact(s))
+  }
+
+  @Test func skipsAWorktreeThatSupacodeLockedWithUncommittedFilesWithoutCallingSupacode() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/dirty")
+    try sbd.markDone(s.id)
+    let log = try sbd.useSupacodeStub()
+    try sbd.lockForSupacode(repo, s.cwd)
+    try "draft".write(toFile: "\(s.cwd)/draft.txt", atomically: true, encoding: .utf8)
+
+    let result = try parse(try sbd.rmDone("--worktree", "--yes", "--json"))
+
+    let reason = try #require(skip(result["skipped"], s.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains("uncommitted"), Comment(rawValue: reason))
+    #expect(try sbd.intact(s))
+    #expect(calls(log).isEmpty)
+  }
+
+  @Test func cleanupRemovesAWorktreeThatSupacodeLockedAndKeepsTheSession() throws {
+    let s = try Setup()
+    let session = try s.finished(.breaker, state: "MERGED")
+    try s.pollUntilDone(session)
+    let log = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, session.cwd)
+
+    let r = try s.sbd.run(["cleanup", session.id, "--json"])
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(!FileManager.default.fileExists(atPath: session.cwd))
+    #expect(try s.sbd.client.sessions().map(\.id) == [session.id])
+    #expect(calls(log).count == 1)
+    // origin/main doesn't contain the branch's tip, so the branch stays.
+    #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
+  }
+}
