@@ -135,6 +135,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The PRs that the body's `Depends on` lines name. The poller keeps these
   /// and not the body. nil in events that an older sbd recorded.
   public var dependsOn: [PRRef]?
+  /// Whether the base repository's default branch has a `.trunk` folder,
+  /// which a repository that merges through Trunk's queue keeps. nil when the
+  /// poll did not read it, as in events that an older sbd recorded.
+  public var trunkConfig: Bool?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
@@ -142,7 +146,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
-    reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil
+    reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
+    trunkConfig: Bool? = nil
   ) {
     self.id = id
     self.number = number
@@ -169,6 +174,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.mergeCommit = mergeCommit
     self.depot = depot
     self.dependsOn = dependsOn
+    self.trunkConfig = trunkConfig
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the

@@ -51,6 +51,43 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(parsed.comments == GitHubFixtures.statusComments[number])
   }
 
+  @Test(arguments: [
+    (JSON.object(["id": "TREE_1"]), Bool?.some(true)), (JSON.null, Bool?.some(false)),
+  ])
+  func readsWhetherTheRepositoryHasATrunkFolder(_ object: JSON, _ expected: Bool?) throws {
+    let node = try editedNode(
+      18303,
+      ["repository": ["nameWithOwner": "PostHog/charts", "defaultBranchRef": ["name": "main"], "trunkConfig": object]])
+
+    #expect(GitHub.parsePR(node)?.pr.trunkConfig == expected)
+  }
+
+  @Test func aResponseWithoutTheTrunkFolderLeavesItUnread() throws {
+    let node = try editedNode(
+      18303, ["repository": ["nameWithOwner": "PostHog/charts", "defaultBranchRef": ["name": "main"]]])
+
+    #expect(GitHub.parsePR(node)?.pr.trunkConfig == nil)
+  }
+
+  /// GitHub answers a field it couldn't resolve, such as for a token without
+  /// Contents read, with null and an error. That null is not an answer.
+  @Test(arguments: [
+    (JSON.array([["path": ["nodes", 0, "repository", "trunkConfig"], "type": "FORBIDDEN"]]), Bool?.none),
+    (JSON.array([["message": "Something went wrong"]]), Bool?.none),
+    (JSON.array([["path": ["nodes", 1, "repository", "trunkConfig"], "type": "FORBIDDEN"]]), Bool?.some(false)),
+  ])
+  func aTrunkFolderThatGitHubFailedToReadIsUnread(_ errors: JSON, _ expected: Bool?) throws {
+    let node = try editedNode(
+      18303,
+      ["repository": ["nameWithOwner": "PostHog/charts", "defaultBranchRef": ["name": "main"], "trunkConfig": .null]])
+    let response: JSON = ["data": ["nodes": [node]], "errors": errors]
+
+    let prs = GitHub.parseStatus(response, ["PR_kwDOJsIKrs8AAAABKhgNxg"]).prs
+
+    #expect(prs.count == 1)
+    #expect(prs.first?.pr.trunkConfig == expected)
+  }
+
   @Test func commentsFromBothPagesAreMergedAndSortedByCreation() throws {
     let a = commentNode("IC_a", "alice", "2026-10-01T00:00:00Z")
     let b = commentNode("IC_b", "bob", "2026-10-02T00:00:00Z")

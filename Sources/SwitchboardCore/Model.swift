@@ -84,6 +84,10 @@ public struct Session: Codable, Equatable, Sendable {
   /// Set on a docket row, which tracks one docket review. Its `cwd` is empty
   /// and claude never runs.
   public var docket: DocketSession?
+  /// The id of the group whose chat this session is. A chat belongs to no group.
+  public var chat: String?
+
+  public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
   public init(
     id: String, name: String, cwd: String, repo: String? = nil, branch: String? = nil,
@@ -100,6 +104,27 @@ public struct Session: Codable, Equatable, Sendable {
     self.started = false
     self.done = false
     self.waitNote = nil
+  }
+}
+
+/// What a session is for. Only a work session belongs to a group, gets a
+/// triage item, or has a worktree and a PR.
+public enum SessionKind: String, Codable, Sendable {
+  case work
+  case manager
+  case chat
+
+  public init(manager: Bool?, chat: String?) {
+    self = manager == true ? .manager : chat != nil ? .chat : .work
+  }
+
+  /// How a message names a session of this kind, or nil for a work session.
+  public var label: String? {
+    switch self {
+    case .work: nil
+    case .manager: "the Manager"
+    case .chat: "a group chat"
+    }
   }
 }
 
@@ -156,6 +181,11 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var parent: String?
   /// True for the Manager.
   public var manager: Bool?
+  /// The field to read for what the session is. `manager` and `chat` stay
+  /// in the JSON for the tools that read them.
+  public var kind: SessionKind = .work
+  /// The id of the group whose chat this session is.
+  public var chat: String?
   public var followup: Followup?
   /// When the session was added, in ms since the epoch. An imported
   /// follow-up was added on the date of its line.

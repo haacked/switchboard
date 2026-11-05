@@ -197,3 +197,24 @@ struct CardView: View {
     }
   }
 }
+
+/// The session's open cards above its other content, followed by a divider, or nothing without cards.
+struct CardList: View {
+  @EnvironmentObject var model: BoardModel
+  let cards: [Card]
+
+  var body: some View {
+    if !cards.isEmpty {
+      // A card with several questions would otherwise squeeze out the content below it.
+      ScrollView {
+        VStack(spacing: 8) {
+          ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+        }
+        .padding(8)
+      }
+      .frame(maxHeight: 360)
+      .fixedSize(horizontal: false, vertical: true)
+      Divider()
+    }
+  }
+}

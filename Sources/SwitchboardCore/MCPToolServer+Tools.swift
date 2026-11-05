@@ -105,8 +105,9 @@ extension MCPToolServer {
           "What happens when the wait ends: resume the session (the default), or notify, which moves it to Needs you."),
       ]),
     Tool(
-      "clear_wait", "Clears all of the session's waits, or only the wait that `wait` names.",
-      ["session": session, "wait": string("The id of one wait.")], required: ["session"]),
+      "clear_wait",
+      "Clears all of a session's waits, by default the calling session's, or only the wait that `wait` names.",
+      ["session": session, "wait": string("The id of one wait.")]),
     Tool(
       "add_note", "Adds a note to a session.", ["session": session, "text": string("The note.")],
       required: ["session", "text"]),

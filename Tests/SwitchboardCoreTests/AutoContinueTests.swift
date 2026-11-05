@@ -44,6 +44,10 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(blocker { $0.session.manager = true } == "the Manager")
   }
 
+  @Test func aGroupChatIsHeldBack() {
+    #expect(blocker { $0.session.chat = "g1" } == "a group chat")
+  }
+
   @Test func aSessionMarkedNotTheManagerPasses() {
     #expect(blocker { $0.session.manager = false } == nil)
   }
@@ -232,6 +236,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     var input = AutoContinueInput(
       session: session(wait: "CI"), facts: SessionFacts(), verdict: Verdict(state: .needsYou, reason: "x"), now: now)
     input.session.manager = true
+    input.session.chat = "g1"
     input.facts.cards = [Card(event("PermissionRequest", now - hourMs, tool("Bash", ["command": "ls"])))]
     input.facts.turnRunning = true
     input.busy = true
@@ -246,6 +251,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     let fixes: [(String, (inout AutoContinueInput) -> Void)] = [
       ("not in Claude can continue", { $0.verdict = offer }),
       ("the Manager", { $0.session.manager = nil }),
+      ("a group chat", { $0.session.chat = nil }),
       ("an open card", { $0.facts.cards = [] }),
       ("an open wait", { $0.session.waits = nil }),
       ("a turn is running", { $0.facts.turnRunning = false }),

@@ -275,6 +275,7 @@ swift build
 bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/test-gui        # opens the app's window, checks the bytes its terminal sends, and checks that sessions survive an app relaunch; needs a logged-in Mac session
+bin/measure         # starts 25 and then 50 stub sessions on a private sbd and prints memory and `sb ls` times
 bin/fmt             # formats Sources, Tests and Package.swift with swift format; --check lists files that differ and exits 1
 bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
@@ -283,6 +284,8 @@ bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after
 The app draws its terminals with SwiftTerm.
 
 `bin/test-gui` runs the app's `TerminalSelfTest` (`SB_TERMINAL_TEST`) against a private `sbd` whose `claude` is `Tests/GUI/received-bytes-stub`, a stand-in that shows every byte it receives. The test sends keys, a paste, a scroll, and a resize to the Claude pane, and then compares the bytes that `sb screen` shows with the expected ones. It opens a real window, so it needs a logged-in macOS session with a display, and it refuses to run from an SSH or background session (`SB_GUI_ANY_SESSION=1` tries anyway). It uses a short `SB_HOME` under `/tmp`, because a Unix socket path cannot exceed 103 bytes, and ends the app, `sbd`, tmux, and the stand-in and deletes the folder when it exits, even when it fails. It leaves the app's log, the final screen, and the pane PNGs in `.build/gui-test/terminal`, and after any failure also the `sbd` log in `.build/gui-test/sbd.log`. Before it sends keys, the self test waits up to 180 s until the session reports a tmux client on its Claude pane, the window holds a terminal view, and `bin/test-gui` has seen the stand-in take the app's size. It then checks that a session keeps running when the app quits or is killed. It types into the stand-in and the session's shell, quits the app (`SB_QUIT_FILE`, which makes the app quit as ⌘Q does), and compares the session record, both panes' pids, and the stand-in's screen before and after, with the app gone and again once a new app has attached. It then does the same after `kill -KILL` of the app, and checks that the shell is the same process. CI does not run it, because tmux-driven tests currently fail on the GitHub Actions runner.
+
+`bin/measure 10 25 100` measures each count in turn. It builds `sb` and `sbd` in release mode, runs the panes in your login shell, and reports the resident memory of `sbd`, of the terminals, and of the stub claudes, with the median of 5 runs of `sb ls` and `sb ls --json`. The stub stands in for claude, so the numbers leave out claude's own memory. `MeasureTests` in `bin/test` checks that `sb ls` answers in under 1 s with 25 sessions, and skips the timing when the load average is above the core count.
 
 The stub plays the hook payloads that `bin/test --claude` records in `Tests/IntegrationTests/Fixtures/claude/`. After a Claude Code update, run `bin/test --claude` and read `git diff` on that folder to see what the new version sends.
 
