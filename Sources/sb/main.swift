@@ -33,8 +33,12 @@ let usage = """
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
     send --group G [--yes] <text> send a message to every session in the group, after
-                                  listing them and asking. Without a terminal, or
-                                  inside a Claude session, it needs --yes
+                                  listing them and asking. Without a terminal, it
+                                  needs --yes. Inside a Claude session, it sends
+                                  nothing and shows the message in Switchboard,
+                                  where the user sends or cancels it
+    send --pending N [--timeout S] wait up to S seconds (default 60) for the user's
+                                  decision on group message N
     open <session>                resume the session if its claude is stopped
     stop <session>                stop the session's claude
     resume <session> [--prompt P] resume the session's claude
@@ -178,7 +182,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing",
+      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--pending",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -527,6 +531,8 @@ case "note":
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])
+case "send" where a.values["--pending"] != nil:
+  awaitGroupMessage(a, id: a.values["--pending"]!)
 case "send" where a.values["--group"] != nil:
   sendGroup(a, group: a.values["--group"]!)
 case "send":

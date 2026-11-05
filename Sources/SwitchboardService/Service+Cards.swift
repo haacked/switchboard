@@ -68,13 +68,26 @@ extension Service {
     }
   }
 
+  /// The card that `args` names: its `card` id, or the session's only card.
+  func chosenCard(_ args: JSON) throws -> Card {
+    let id = try lookup(args)
+    return try Card.choose(args["card"]?.int, from: entries[id]?.facts.cards ?? [], session: id)
+  }
+
   /// Answers a card: allow, deny with an optional message, or `answers`, one
   /// per question. A held card answers through its hook. A deferred question
   /// answers with a message to the session. A card whose hook closed answers
   /// by typing into the terminal.
   func answer(_ args: JSON) throws -> JSON {
-    let id = try lookup(args)
-    let card = try Card.choose(args["card"]?.int, from: entries[id]?.facts.cards ?? [], session: id)
+    let card = try chosenCard(args)
+    let id = card.session
+    if let message = card.send {
+      switch args["behavior"]?.string {
+      case "allow": return try decideGroupMessage(card, message, send: true)
+      case "deny": return try decideGroupMessage(card, message, send: false)
+      default: throw APIError("card \(card.id) is a group message. Send it with allow, or cancel it with deny")
+      }
+    }
     var data: [String: JSON] = ["card": .number(Double(card.id)), "behavior": "allow"]
     func answered(_ delivery: String) -> JSON {
       record(id, "answered", .object(data))

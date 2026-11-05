@@ -130,3 +130,13 @@ import Testing
     #expect(ports == ["fixed": 4100])
   }
 }
+
+@Suite struct PendingWaitTests {
+  @Test(arguments: [
+    (JSON?.none, 30.0), (JSON.number(0), 0), (JSON.number(45), 45), (JSON.number(120), 120),
+    (JSON.number(121), 120), (JSON.number(100_000), 120), (JSON.number(-5), 0),
+  ])
+  func clampsTheTimeoutTo120Seconds(_ timeout: JSON?, _ seconds: TimeInterval) {
+    #expect(MCPToolServer.pendingWait(timeout) == seconds)
+  }
+}

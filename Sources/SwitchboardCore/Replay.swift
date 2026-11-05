@@ -39,10 +39,10 @@ public struct SessionReplay: Codable, Equatable, Sendable {
     if event.id > 0 { lastEvent = event.id }
   }
 
-  /// A restart ended every held request, so only a deferred question stays.
-  /// A snapshot holds the state before this step.
+  /// A restart ended every held request, so only the cards that outlive a
+  /// turn stay. A snapshot holds the state before this step.
   public mutating func restarted() {
-    facts.cards.removeAll { !$0.deferred }
+    facts.cards.removeAll { !$0.outlivesTurn }
   }
 }
 

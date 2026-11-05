@@ -178,9 +178,18 @@ public enum Triage {
   }
 
   static func cardItem(_ card: Card) -> TriageItem {
+    if let message = card.send {
+      return TriageItem(
+        title: title(card.reason), kind: .approval,
+        summary: "Claude asks to send \(message.summary). Nothing is sent until you send it.",
+        options: [
+          TriageOption(label: "Send", message: "allow"),
+          TriageOption(label: "Cancel", message: "deny"),
+        ], source: .card)
+    }
     if card.kind == .permission {
       return TriageItem(
-        title: title("approve \(card.summary)"), kind: .approval, summary: "Claude asks to run \(card.summary).",
+        title: title(card.reason), kind: .approval, summary: "Claude asks to run \(card.summary).",
         options: [
           TriageOption(label: "Allow", message: "allow", recommended: true),
           TriageOption(label: "Deny", message: "deny"),
@@ -192,7 +201,7 @@ public enum Triage {
       card.questions.count == 1 && first?.multiSelect == false
       ? (first?.options ?? []).map { TriageOption(label: $0.label, detail: $0.description, message: $0.label) } : []
     return TriageItem(
-      title: title("answer: \(card.summary)"), kind: .question,
+      title: title(card.reason), kind: .question,
       summary: card.questions.map(\.question).joined(separator: " "), options: options, source: .card)
   }
 

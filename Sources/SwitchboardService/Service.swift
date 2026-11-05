@@ -201,7 +201,15 @@ public final class Service {
       }
       if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
       // A group send has no session argument. It waits for every server that is starting.
-      if request.op == "send-group", request.args["confirmed"]?.bool == true { awaitMCPServers() }
+      // A request from inside Claude only opens a card, so it sends nothing and waits for nothing.
+      if request.op == "send-group", request.args["confirmed"]?.bool == true, request.args["from"] == nil {
+        awaitMCPServers()
+      }
+      if request.op == "answer", request.args["behavior"]?.string == "allow",
+        queue.sync(execute: { answersGroupMessage(request.args) })
+      {
+        awaitMCPServers()
+      }
       // A request that acts on claude decides from the current processes,
       // so it takes a new snapshot. Other requests use the tick's.
       let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
@@ -285,7 +293,7 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
-    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group":
+    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-suggest", "send-group", "send-pending":
       return try groupRequest(op, args)
     case "plan-ls", "plan-get", "plan-detach", "plan-auto":
       return try planRequest(op, args)
@@ -1231,6 +1239,7 @@ public final class Service {
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
       deferDueQuestions(now: now)
+      expireGroupMessages(now: now)
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
       notifyParents(now: now)

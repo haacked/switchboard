@@ -84,23 +84,36 @@ private func printGroups(_ list: GroupList) {
 }
 
 /// Lists the group's targets, asks the user to confirm, then sends. Session
-/// text can quote PR comments and logs that carry instructions, so Claude
-/// can't fan out unless the user confirmed the list and Claude passed --yes.
+/// text can quote PR comments and logs that carry instructions, so inside
+/// Claude it only opens a card in the app. The user sends it from there.
+/// Claude supplies its own flags, so --yes changes nothing inside Claude.
 func sendGroup(_ a: Args, group: String) {
   let text = a.positional.joined(separator: " ")
   if text.isEmpty { die("send needs text") }
   var args: [String: JSON] = ["group": .string(group), "text": .string(text)]
-  if author == .claude, let from = ProcessInfo.processInfo.environment["SB_SESSION_ID"] { args["from"] = .string(from) }
+  if author == .claude {
+    guard let from = ProcessInfo.processInfo.environment["SB_SESSION_ID"] else {
+      die(
+        "SB_SESSION_ID is not set. Inside Claude, a message to a group waits for the user's decision in Switchboard. That works only in a session that Switchboard started. Ask the user to run sb send --group \(group) with the message in their own terminal."
+      )
+    }
+    args["from"] = .string(from)
+    args["confirmed"] = true
+    let result = call("send-group", args)
+    if a.json { return printJSON(result) }
+    let card = decode(result, as: GroupSend.self)
+    let list = card.targets.map { "  \($0.id)  \($0.name)".printable }.joined(separator: "\n")
+    print(
+      "Nothing was sent. Switchboard shows the user this message for \(card.targets.count == 1 ? "1 session" : "\(card.targets.count) sessions"). The user sends or cancels it there:\n\(list)"
+    )
+    print("Wait for the user's decision with: sb send --pending \(card.pending ?? 0)")
+    return
+  }
   let preview = decode(call("send-group", args), as: GroupSend.self)
   if preview.targets.isEmpty { die("\(group) has no session to send to") }
   let list = preview.targets.map { "  \($0.id)  \($0.name)".printable }.joined(separator: "\n")
   let count = preview.targets.count == 1 ? "this session" : "these \(preview.targets.count) sessions"
   if !a.switches.contains("--yes") {
-    if author == .claude {
-      die(
-        "a message to a group needs the user's confirmation. Show the user this list, and pass --yes only after they confirm it:\n\(list)"
-      )
-    }
     guard isatty(STDIN_FILENO) != 0 else { die("pass --yes to send to \(count) without asking:\n\(list)") }
     print("Send to \(count)?\n\(list)\n[y/N] ", terminator: "")
     guard let answer = readLine()?.lowercased(), answer == "y" || answer == "yes" else { die("not sent") }
@@ -109,7 +122,40 @@ func sendGroup(_ a: Args, group: String) {
   args["targets"] = .array(preview.targets.map { .string($0.id) })
   let result = call("send-group", args)
   if a.json { return printJSON(result) }
-  for d in decode(result, as: GroupSend.self).deliveries ?? [] {
+  printDeliveries(decode(result, as: GroupSend.self))
+}
+
+/// Waits for the user's decision on a group message that Claude asked for.
+func awaitGroupMessage(_ a: Args, id text: String) {
+  guard let id = Int64(text) else { die("--pending needs the id that sb send --group printed") }
+  let timeout = a.values["--timeout"].map { Double($0) ?? -1 } ?? 60
+  guard timeout >= 0 else { die("--timeout needs a number of seconds") }
+  let status: GroupSend
+  do {
+    status = try client.awaitGroupMessage(id, timeout: timeout)
+  } catch {
+    die("\(error)")
+  }
+  if a.json { return printJSON((try? JSON(encoding: status)) ?? .null) }
+  switch status.decision {
+  case .pending?:
+    print("The message still waits for the user's decision. Nothing was sent.")
+  case .cancelled?:
+    print("The user cancelled the message. Nothing was sent. Do not send it again unless the user asks you to.")
+  case .expired?:
+    print(
+      "Nobody decided in time, so the message expired. Nothing was sent. Do not send it again unless the user asks you to."
+    )
+  case .sent?:
+    print("The user sent the message.")
+    printDeliveries(status)
+  case nil:
+    die("sbd returned no decision for message \(id)")
+  }
+}
+
+func printDeliveries(_ sent: GroupSend) {
+  for d in sent.deliveries ?? [] {
     print("\(d.session)  \(d.delivery?.rawValue ?? "failed: \(d.error ?? "")")".printable)
   }
 }

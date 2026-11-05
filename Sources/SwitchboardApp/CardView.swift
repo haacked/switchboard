@@ -1,7 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
-/// A permission prompt or a question, answered without opening the session.
+/// A permission prompt, a question, or a group message, answered without opening the session.
 struct CardView: View {
   /// See SessionViewState for why this isn't `@State`.
   final class Draft: ObservableObject {
@@ -28,7 +28,11 @@ struct CardView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       }
-      if card.kind == .permission { permission } else { questions }
+      switch card.kind {
+      case .permission: permission
+      case .question: questions
+      case .send: groupMessage
+      }
     }
     .disabled(model.answering.contains(card.id))
     .padding(12)
@@ -43,16 +47,7 @@ struct CardView: View {
       if let description = card.input["description"]?.string {
         Text(description).foregroundStyle(.secondary)
       }
-      ScrollView {
-        Text(card.details)
-          .font(.body.monospaced())
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(maxHeight: 160)
-      .fixedSize(horizontal: false, vertical: true)
-      .padding(8)
-      .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+      textBox(card.details, maxHeight: 160)
       HStack {
         Button("Allow") { model.answer(card, behavior: "allow") }
           .buttonStyle(.borderedProminent)
@@ -67,7 +62,61 @@ struct CardView: View {
     }
   }
 
+  /// The text verbatim, in a box that scrolls past `maxHeight`.
+  private func textBox(_ text: String, maxHeight: CGFloat) -> some View {
+    ScrollView {
+      Text(verbatim: text)
+        .font(.body.monospaced())
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .frame(maxHeight: maxHeight)
+    .fixedSize(horizontal: false, vertical: true)
+    .padding(8)
+    .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+  }
+
   private func deny() { model.answer(card, behavior: "deny", message: draft.message) }
+
+  /// Claude wrote the text. It can quote PR comments or logs, so it shows
+  /// verbatim and is never read as Markdown.
+  @ViewBuilder
+  private var groupMessage: some View {
+    if let message = card.send {
+      VStack(alignment: .leading, spacing: 8) {
+        // The Inbox lists other sessions' send cards in this session's pane.
+        let asker = model.sessions.first { $0.id == card.session }?.name ?? card.session
+        Text(verbatim: "\(asker) wants to send \(message.summary)").font(.headline)
+        VStack(alignment: .leading, spacing: 2) {
+          ForEach(message.targets, id: \.id) { target in
+            HStack(spacing: 6) {
+              Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary).accessibilityHidden(true)
+              Text(verbatim: target.name)
+              Text(verbatim: target.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+          }
+        }
+        textBox(message.text, maxHeight: 200)
+        HStack {
+          Button("Send") { model.answer(card, behavior: "allow") }
+            .buttonStyle(.borderedProminent)
+          Button("Cancel") { model.answer(card, behavior: "deny") }
+          Spacer()
+          HStack(spacing: 4) {
+            Text("Expires in")
+            Text(Date(timeIntervalSince1970: Double(message.expires) / 1000), style: .relative)
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+        Text(
+          "Nothing is sent until you send it. The text can quote PR comments or logs, so read it before you send it."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+    }
+  }
 
   private var questions: some View {
     VStack(alignment: .leading, spacing: 14) {
