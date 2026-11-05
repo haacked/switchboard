@@ -623,3 +623,53 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.groups.first?.plans?.first?.canFollowUp.isEmpty == true)
   }
 }
+
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelArtifactAnswers {
+  @Test(arguments: [(true, "plan-artifact-apply"), (false, "plan-artifact-reject")])
+  func answerSendsTheOpForApplyOrReject(_ apply: Bool, _ op: String) async {
+    let sent = await BoardModelSuggestions().request { $0.answerArtifact(plan: "p1", apply: apply) }
+
+    #expect(sent.op == op)
+    #expect(sent.args == ["plan": "p1"])
+  }
+
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.answerArtifact(plan: "p1", apply: true)
+    model.answerArtifact(plan: "p1", apply: false)
+    #expect(model.answeringArtifacts == ["p1"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  /// sbd's reply replaces the plan's summary in the same turn that turns the
+  /// buttons back on, before the refresh lists the plan again.
+  @Test func answerTakesThePlanFromSbdsReply() async throws {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    var plan = PlanDocument(
+      id: "p1", source: PlanSource(kind: .artifact, url: "https://claude.ai/artifact/a"), group: "g", attached: 0)
+    plan.artifact?.copy = "a\n"
+    plan.artifact?.proposal = ArtifactProposal(rows: [], base: "a\n", version: nil, text: "b\n", created: 1)
+    var group = GroupSummary(SessionGroup(id: "g", name: "G", created: 0), sessions: [])
+    group.plans = [PlanSummary(plan)]
+    model.groups = [group]
+    var answered = plan
+    answered.artifact?.proposal = nil
+    let reply = try JSONCoding.convert(answered, to: JSON.self)
+    model.send = { _, _ in reply }
+
+    model.answerArtifact(plan: "p1", apply: false)
+    for _ in 0..<100 where !model.answeringArtifacts.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.answeringArtifacts.isEmpty)
+    #expect(model.groups.first?.plans?.first?.proposal == nil)
+  }
+}

@@ -50,7 +50,8 @@ extension Service {
   /// The user approved the pending update: asks the chat to publish it.
   func applyArtifactProposal(_ id: String) throws {
     try queue.sync {
-      guard plans[id]?.artifact?.proposal != nil else { throw APIError("\(id) has no update to apply") }
+      guard let proposal = plans[id]?.artifact?.proposal else { throw APIError("\(id) has no update to apply") }
+      guard proposal.state == .pending else { throw APIError("\(id) is already publishing. Reject it to start over") }
       updatePlan(id) {
         $0.artifact?.proposal?.state = .publishing
         $0.artifact?.proposal?.checked = false
@@ -182,11 +183,6 @@ extension Service {
     return id
   }
 
-  func reportedPlan(_ id: String) throws -> PlanDocument {
-    guard let plan = plans[id] else { throw APIError("no plan \(id)") }
-    return reported(plan, planRowFollowups())
-  }
-
   /// Writes the files that the task names into the chat's folder, then sends
   /// the chat the task.
   private func sendArtifactTask(_ task: Plans.ArtifactTask, _ id: String) throws {
@@ -196,20 +192,20 @@ extension Service {
     }
     let folder = "\(home.chatFolder(group))/plans"
     try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-    let copy = "\(folder)/\(id).md"
-    let proposed = "\(folder)/\(id).proposed.md"
+    let copyFile = "\(folder)/\(id).md"
+    let proposedFile = "\(folder)/\(id).proposed.md"
     let url = plan.source.url ?? ""
     let text: String
     switch task {
     case .read:
       text = Plans.artifactTask(.read, plan: id, url: url)
     case .rewrite:
-      try (plan.artifact?.copy ?? "").write(toFile: copy, atomically: true, encoding: .utf8)
+      try (plan.artifact?.copy ?? "").write(toFile: copyFile, atomically: true, encoding: .utf8)
       text = Plans.artifactTask(
-        .rewrite, plan: id, url: url, copy: copy, write: proposed, rows: plan.artifact?.rewrite ?? [])
+        .rewrite, plan: id, url: url, copy: copyFile, write: proposedFile, rows: plan.artifact?.rewrite ?? [])
     case .publish:
-      try (plan.artifact?.proposal?.text ?? "").write(toFile: proposed, atomically: true, encoding: .utf8)
-      text = Plans.artifactTask(.publish, plan: id, url: url, publish: proposed)
+      try (plan.artifact?.proposal?.text ?? "").write(toFile: proposedFile, atomically: true, encoding: .utf8)
+      text = Plans.artifactTask(.publish, plan: id, url: url, publish: proposedFile)
     }
     let response = chatRequest(["group": .string(group), "text": .string(text)])
     if let error = response.error { throw APIError(error) }

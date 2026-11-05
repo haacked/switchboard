@@ -106,7 +106,12 @@ extension Service {
     return try resolveRef(key, "plan", plans.values.map { ($0.id, $0.source.text) })
   }
 
-  func savePlan(_ plan: PlanDocument) throws {
+  func reportedPlan(_ id: String) throws -> PlanDocument {
+    guard let plan = plans[id] else { throw APIError("no plan \(id)") }
+    return reported(plan, planRowFollowups())
+  }
+
+  private func savePlan(_ plan: PlanDocument) throws {
     try store.save(plan: plan)
     plans[plan.id] = plan
   }

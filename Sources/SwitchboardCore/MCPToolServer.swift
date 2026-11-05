@@ -247,6 +247,10 @@ public struct MCPToolServer: Sendable {
   /// the plan, so the document's text does not fill the chat's context.
   private func planArtifact(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(args, ["plan", "kind", "file", "text", "version"])
+    // sbd opens the file from its own working directory. This process runs in the chat's folder and resolves a relative path.
+    if let file = args["file"]?.string {
+      request["file"] = .string(URL(fileURLWithPath: file.expandingTilde).standardizedFileURL.path)
+    }
     if let scoped { request["group"] = .string(scoped.group.id) }
     _ = try client.call("plan-artifact-report", request)
     return ["plan": args["plan"] ?? .null, "kind": args["kind"] ?? .null, "ok": true]

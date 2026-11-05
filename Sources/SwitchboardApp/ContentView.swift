@@ -494,11 +494,16 @@ struct PlanFollowupList: View {
 /// update's diff with Apply and Reject.
 struct PlanArtifactList: View {
   @EnvironmentObject var model: BoardModel
+  /// The plan whose full diff the popover shows.
+  @State private var diffShown: String?
   let plans: [PlanSummary]
 
   var body: some View {
     ForEach(plans.filter { $0.source.kind == .artifact }) { plan in
       VStack(alignment: .leading, spacing: 4) {
+        if let error = plan.error {
+          Text(error).font(.caption).foregroundStyle(.red).lineLimit(3).help(error)
+        }
         if plan.copyStale == true {
           Text(plan.read == nil ? "No copy of the artifact yet" : "Copy of the artifact may be old")
             .font(.caption).foregroundStyle(.orange)
@@ -509,16 +514,30 @@ struct PlanArtifactList: View {
             .font(.caption.bold())
           Text(proposal.diff.joined(separator: "\n"))
             .font(.caption.monospaced()).lineLimit(12).textSelection(.enabled)
-          if proposal.state == .pending {
-            HStack {
-              Button("Apply") { model.answerArtifact(plan: plan.id, apply: true) }
-              Button("Reject") { model.answerArtifact(plan: plan.id, apply: false) }
+          Button("Show changes") { diffShown = plan.id }
+            .buttonStyle(.link).font(.caption)
+            .popover(
+              isPresented: Binding(get: { diffShown == plan.id }, set: { if !$0 { diffShown = nil } })
+            ) {
+              ScrollView([.vertical, .horizontal]) {
+                Text(proposal.diff.joined(separator: "\n"))
+                  .font(.caption.monospaced()).textSelection(.enabled).fixedSize().padding()
+              }
+              .frame(width: 640, height: 360)
             }
-            .controlSize(.small)
-            .disabled(model.answeringArtifacts.contains(plan.id))
-          } else {
-            Text("Publishing").font(.caption).foregroundStyle(.secondary)
+          // Reject stays available while publishing. A chat whose read or
+          // publish fails never reports, and sbd refuses a new update until
+          // the proposal goes.
+          HStack {
+            if proposal.state == .pending {
+              Button("Apply") { model.answerArtifact(plan: plan.id, apply: true) }
+            } else {
+              Text("Publishing").font(.caption).foregroundStyle(.secondary)
+            }
+            Button("Reject") { model.answerArtifact(plan: plan.id, apply: false) }
           }
+          .controlSize(.small)
+          .disabled(model.answeringArtifacts.contains(plan.id))
         }
       }
       .padding(.top, 4)

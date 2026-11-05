@@ -117,8 +117,8 @@ extension Plans {
     return lines.joined(separator: "\n")
   }
 
-  /// Refuses a rewrite that changed anything but the named rows and a
-  /// "status as of" line, or that added or removed a line.
+  /// Refuses a rewrite that changed anything but the named rows and the
+  /// numeric date after "status as of", or that added or removed a line.
   public static func checkRewrite(base: String, text: String, rows: [String]) throws {
     let old = lines(base)
     let new = lines(text)
@@ -126,13 +126,20 @@ extension Plans {
       throw APIError("the rewrite has \(new.count) lines and the copy has \(old.count). Only the named rows may change")
     }
     let named = Set(rows)
-    func dateLine(_ line: String) -> Bool { line.lowercased().contains("status as of") }
     for (a, b) in zip(old, new) where a != b {
       let line = a.trimmingCharacters(in: .whitespaces)
-      guard named.contains(line) || (dateLine(a) && dateLine(b)) else {
+      guard named.contains(line) || withoutStatusDate(a) == withoutStatusDate(b) else {
         throw APIError("the rewrite changed a line that is not a named row: \(oneLine(line, max: 160))")
       }
     }
+  }
+
+  /// The line with the date after "status as of" removed. A date here is
+  /// digit runs joined by single separators, such as `2026-11-05`, so a
+  /// date written with a month name does not match and its rewrite is refused.
+  static func withoutStatusDate(_ line: String) -> String {
+    line.replacingOccurrences(
+      of: #"(?i)(status as of\s+)\d+(?:[-/.: ]\d+)*"#, with: "$1", options: .regularExpression)
   }
 
   /// The text's lines without their `\r`, which a CRLF document has and `parse` drops.
@@ -140,11 +147,16 @@ extension Plans {
     text.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
   }
 
-  /// The lines that differ between `base` and `text`, as `- ` and `+ ` lines,
-  /// after their common first and last lines.
+  /// The lines that differ between `base` and `text`, as `- ` and `+ ` lines.
+  /// When both have the same number of lines, as every rewrite does, each
+  /// changed line is followed by its replacement. Otherwise the diff is
+  /// everything between their common first and last lines.
   public static func diff(_ base: String, _ text: String) -> [String] {
     let old = lines(base)
     let new = lines(text)
+    if old.count == new.count {
+      return zip(old, new).flatMap { a, b in a == b ? [] : ["- \(a)", "+ \(b)"] }
+    }
     var start = 0
     while start < old.count, start < new.count, old[start] == new[start] { start += 1 }
     var end = 0

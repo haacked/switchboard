@@ -391,6 +391,22 @@ extension Instance {
     #expect(sbd.storedArtifact == document)
   }
 
+  @Test func updateOfACopyThatHoldsTheTableProposesNothing() throws {
+    let sbd = try Instance()
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachArtifact(group: "Flags")
+    try sbd.sb("plan", "update", id)
+    let table = try #require(
+      try sbd.waitForPlan(id, "the table's proposal") { $0.artifact?.proposal != nil }.artifact?.proposal?.text)
+    try sbd.sb("plan", "artifact", "apply", id)
+    try sbd.waitForPlan(id, "the publish") { $0.artifact?.copy == table && $0.artifact?.proposal == nil }
+
+    let result = try #require(JSON.parse(try sbd.sb("plan", "update", "--json", id)))
+
+    #expect(result["wrote"]?.bool == false)
+    #expect(try sbd.plan(id).artifact?.proposal == nil)
+  }
+
   @Test func autoUpdateIsRefusedForAnArtifactPlan() throws {
     let sbd = try Instance()
     try sbd.addGroup("Flags")
@@ -461,6 +477,86 @@ extension Instance {
     #expect(plan.artifact?.copy == document)
     #expect(sbd.storedArtifact == document)
     #expect(sbd.storedVersion == "1")
+  }
+
+  /// A slow turn keeps the chat busy, so the first publish turn waits in its
+  /// queue and a second Apply finds the proposal publishing.
+  @Test func secondApplyWhilePublishingIsRefused() throws {
+    let sbd = try Instance()
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachArtifact(group: "Flags")
+    try sbd.proposeRewrite(id, rows: ["1"])
+    try sbd.sb("chat", "Flags", "--send", "slow 30")
+    try sbd.sb("plan", "artifact", "apply", id)
+
+    let r = try sbd.run("plan", "artifact", "apply", id)
+
+    #expect(r.status != 0)
+    #expect(try sbd.plan(id).artifact?.proposal?.state == .publishing)
+  }
+
+  /// A slow turn keeps the chat busy, so the rewrite stays pending.
+  @Test func rejectDropsAPendingRewrite() throws {
+    let sbd = try Instance()
+    try sbd.addGroup("Flags")
+    let id = try sbd.attachArtifact(group: "Flags")
+    try sbd.sb("chat", "Flags", "--send", "slow 30")
+    try sbd.sb("plan", "artifact", "rewrite", id, "1")
+    #expect(try sbd.plan(id).artifact?.rewrite != nil)
+
+    try sbd.sb("plan", "artifact", "reject", id)
+
+    #expect(try sbd.plan(id).artifact?.rewrite == nil)
+    #expect(try sbd.run("plan", "artifact", "rewrite", id, "1").status == 0)
+  }
+
+  // MARK: a turn that can't reach the chat
+
+  /// A file where the chat's `plans` folder goes makes every artifact turn fail before it is sent.
+  private func blockPlansFolder(_ sbd: Instance, _ group: GroupSummary) throws {
+    let folder = "\(sbd.home.chatFolder(group.id))/plans"
+    try? FileManager.default.removeItem(atPath: folder)
+    try FileManager.default.createDirectory(
+      atPath: sbd.home.chatFolder(group.id), withIntermediateDirectories: true)
+    try "".write(toFile: folder, atomically: true, encoding: .utf8)
+  }
+
+  @Test func attachThatCantReachTheChatKeepsThePlanWithAnError() throws {
+    let sbd = try Instance()
+    let flags = try sbd.addGroup("Flags")
+    try blockPlansFolder(sbd, flags)
+    try sbd.storeArtifact(document, version: "1")
+
+    let id = try sbd.attachPlan(artifactURL, group: "Flags")
+
+    let plan = try sbd.plan(id)
+    #expect(plan.error != nil)
+    #expect(plan.artifact?.copy == nil)
+  }
+
+  @Test func rewriteThatCantReachTheChatLeavesNoPendingRewrite() throws {
+    let sbd = try Instance()
+    let flags = try sbd.addGroup("Flags")
+    let id = try sbd.attachArtifact(group: "Flags")
+    try blockPlansFolder(sbd, flags)
+
+    let r = try sbd.run("plan", "artifact", "rewrite", id, "1")
+
+    #expect(r.status != 0)
+    #expect(try sbd.plan(id).artifact?.rewrite == nil)
+  }
+
+  @Test func applyThatCantReachTheChatLeavesTheProposalPending() throws {
+    let sbd = try Instance()
+    let flags = try sbd.addGroup("Flags")
+    let id = try sbd.attachArtifact(group: "Flags")
+    try sbd.proposeRewrite(id, rows: ["1"])
+    try blockPlansFolder(sbd, flags)
+
+    let r = try sbd.run("plan", "artifact", "apply", id)
+
+    #expect(r.status != 0)
+    #expect(try sbd.plan(id).artifact?.proposal?.state == .pending)
   }
 
   @Test func applyWithoutAProposalIsRefused() throws {

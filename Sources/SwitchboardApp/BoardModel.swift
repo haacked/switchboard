@@ -63,6 +63,8 @@ final class BoardModel: ObservableObject {
   @Published var answeringSuggestions: Set<String> = []
   /// The plan rows, as `<plan> <row>`, whose follow-up sbd is making.
   @Published var followingUp: Set<String> = []
+  /// Artifact plans whose Apply or Reject is on its way to sbd. Their buttons
+  /// stay disabled until sbd replies, so a second click can't answer again.
   @Published var answeringArtifacts: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
