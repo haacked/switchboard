@@ -97,6 +97,8 @@ extension GitHubPoller {
       let (text, _) = try contents(file, source)
       read.etag = file.etag
       return text
+    case .artifact:
+      return nil
     }
   }
 
@@ -163,6 +165,7 @@ extension GitHubPoller {
       case .file: written = try writeFile(plan.source, table)
       case .issue: written = try writeIssue(plan.source, table, stats: &stats)
       case .pr: written = try writePRFile(plan.source, table, stats: &stats)
+      case .artifact: throw APIError("only the group's chat can write \(plan.source.text)")
       }
     } catch {
       service.queue.sync { service.recordPlanError(id, error) }

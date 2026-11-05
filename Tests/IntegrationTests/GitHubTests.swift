@@ -221,8 +221,11 @@ extension Instance {
     #expect(draft.state == .needsYou)
 
     let requested = try state { $0["isDraft"] = false }
-    #expect(requested.state == .waiting)
-    #expect(requested.reason == "review of #18303 by copilot-pull-request-reviewer")
+    #expect(requested.state == .readyForReview)
+    #expect(
+      requested.reason
+        == "#18303 chore(cdp): document lookup records in the dead-letter runbook; review requested from copilot-pull-request-reviewer, checks success"
+    )
     #expect(try sbd.triage().isEmpty)
 
     // GitHub clears the request when the reviewer submits.
@@ -236,7 +239,7 @@ extension Instance {
     #expect(reviewed.reason == "read its last reply and decide what's next")
     #expect(try sbd.triage().map(\.id) == [s.id])
 
-    #expect(try state { $0["reviewRequests"] = ["nodes": [copilot]] }.state == .waiting)
+    #expect(try state { $0["reviewRequests"] = ["nodes": [copilot]] }.state == .readyForReview)
     let failing = try state { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": "FAILURE"]]]]] }
     #expect(failing.state == .needsYou)
   }

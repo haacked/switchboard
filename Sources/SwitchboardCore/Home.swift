@@ -39,6 +39,9 @@ public struct Home: Sendable {
 
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
+  /// Where sbd keeps copies of the images sent to a session. Removing the
+  /// session removes its session folder, and these with it.
+  public func attachmentsFolder(_ id: String) -> String { "\(sessionFolder(id))/attachments" }
 
   public func create() throws {
     try FileManager.default.createDirectory(
