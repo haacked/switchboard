@@ -39,8 +39,10 @@ struct InboxView: View {
 
 /// One row for each session that needs you, then one for each that Claude
 /// can continue. No Claude output appears here, only what the user does.
+/// While the list has focus, j and k move to the next and previous item.
 struct TriageList: View {
   @EnvironmentObject var model: BoardModel
+  @FocusState private var focused: Bool
 
   var body: some View {
     let items = model.triage
@@ -60,12 +62,21 @@ struct TriageList: View {
                 .padding(.bottom, 4)
               ForEach(group) { s in
                 TriageRow(session: s, repo: repos[s.id], current: s.id == current).id(s.id)
+                  .simultaneousGesture(TapGesture().onEnded { focused = true })
               }
             }
           }
         }
         .padding(.vertical, 6)
       }
+      .focusable()
+      .focused($focused)
+      .focusEffectDisabled()
+      .onKeyPress(characters: CharacterSet(charactersIn: "jk"), phases: .down) { press in
+        model.moveInbox(by: press.characters == "j" ? 1 : -1)
+        return .handled
+      }
+      .onAppear { focused = true }
       .onChange(of: model.inboxJumps, initial: true) {
         // The rows have no layout yet when the Inbox replaces the Board. A scroll
         // right away often does nothing, so this waits 0.3 s.

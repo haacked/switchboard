@@ -60,6 +60,12 @@ let usage = """
                                   session's PR is merged and the branch has no commit after it.
                                   --delete-remote-branch also deletes the branch on its remote, and keeps
                                   it, with an error, unless it is at the merged PR's head
+    rm --done [--worktree [--delete-remote-branch]] [--yes]
+                                  remove every Done session the same way, after listing
+                                  them and the ones whose checks fail, which it skips.
+                                  --worktree also deletes each branch whose PR merged.
+                                  Without a terminal or inside Claude, it needs --yes.
+                                  With --json and without --yes, it removes nothing
     cleanup <session>             remove the worktree and the local branch of a session whose PR merged,
                                   and keep the session in Done. Refuses uncommitted files, commits
                                   after the merge, a running turn, and a folder sbd didn't make.
@@ -87,9 +93,14 @@ let usage = """
                                   continue, in the order to go through them, each
                                   with a title, a summary, and options
     next                          the first of them
-    choose <session> <option>     click an option, by number or label: answer the
-                                  session's prompt, or send its message
+    choose <session> <option> [--text T]
+                                  click an option, by number or label: run its action,
+                                  such as send its message or merge. A reply option
+                                  sends T. Card and merge options refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
+    summary set [<session>]       record the session's Inbox card for this turn, as JSON
+                                  on stdin. The session defaults to $SB_SESSION_ID
+    summary help                  the card's format, for a session to follow
 
   Permission prompts and questions:
     cards [<session>]             list the open ones
@@ -200,7 +211,7 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan",
+      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -558,6 +569,8 @@ case "send":
   if text.isEmpty { die("send needs text") }
   let result = call("send", ["session": .string(a.session("send")), "text": .string(text)])
   if a.json { printJSON(result) } else { print(result["delivery"]?.string ?? "sent") }
+case "rm" where a.switches.contains("--done"):
+  removeDone(a)
 case "rm":
   let result = call(
     "rm",
@@ -615,6 +628,8 @@ case "choose":
   choose(a)
 case "reply":
   replyCommand(a)
+case "summary":
+  summaryCommand(a)
 case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":
