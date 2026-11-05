@@ -269,6 +269,8 @@ public final class Service {
       try update(id) { $0.done = done }
       record(id, done ? "done" : "undone")
       return try JSON(encoding: summary(id))
+    case "ack":
+      return try acknowledgeRequest(args)
     case "wait", "clear-wait", "resolve-wait":
       return try waitRequest(op, args)
     case "note", "remove-note":
@@ -1292,7 +1294,7 @@ public final class Service {
 
   func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
-    let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
+    let verdict = Attention.shown(Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
@@ -1315,6 +1317,7 @@ public final class Service {
     if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.mergeError = e.facts.mergeError
+    if verdict.acknowledged { out.acknowledged = true }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

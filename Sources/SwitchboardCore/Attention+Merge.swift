@@ -1,11 +1,10 @@
 import Foundation
 
-/// A merge that sbd ran or the user dismissed, as a `merge` event recorded it.
+/// A merge that sbd ran, as a `merge` event recorded it.
 public struct MergeAttempt: Codable, Equatable, Sendable {
   public enum Result: String, Codable, Sendable {
     case merged
     case failed
-    case dismissed
   }
 
   /// The PR's head commit when the attempt ran.
@@ -46,7 +45,7 @@ extension Attention {
   /// requested, or outstanding, the poller read that the base repository has
   /// no `.trunk` folder, no Trunk comment or queue state shows, and no
   /// dependency holds it. `openPR` calls it after its blocking rules and its
-  /// merged and dismissed attempts, so the PR is open and the session is idle.
+  /// merged attempt, so the PR is open and the session is idle.
   static func readyToMerge(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, !pr.draft, pr.mergeable == .mergeable, pr.checks == "SUCCESS",
       pr.defaultBranch == nil || pr.base == pr.defaultBranch,

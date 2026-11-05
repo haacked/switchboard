@@ -542,13 +542,6 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(sent.args == ["session": "a"])
   }
 
-  @Test func dismissSendsMergeWithDismiss() async {
-    let sent = await request { $0.merge("a", dismiss: true) }
-
-    #expect(sent.op == "merge")
-    #expect(sent.args == ["session": "a", "dismiss": true])
-  }
-
   @Test func ignoresASecondMergeWhileTheFirstRuns() {
     _ = NSApplication.shared
     let model = BoardModel()
@@ -558,7 +551,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
       return .null
     }
     model.merge("a")
-    model.merge("a", dismiss: true)
+    model.merge("a")
     #expect(model.merging == ["a"])
     for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
     #expect(sent.value == 1)
@@ -621,5 +614,132 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 
     #expect(model.followingUp.isEmpty)
     #expect(model.groups.first?.plans?.first?.canFollowUp.isEmpty == true)
+  }
+}
+
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelAcknowledge {
+  @Test func acknowledgeSendsAckWithTheSession() async {
+    let sent = await BoardModelSuggestions().request { $0.acknowledge("a") }
+
+    #expect(sent.op == "ack")
+    #expect(sent.args == ["session": "a"])
+  }
+
+  @Test func undoSendsAckWithUndo() async {
+    let sent = await BoardModelSuggestions().request { $0.acknowledge("a", undo: true) }
+
+    #expect(sent.op == "ack")
+    #expect(sent.args == ["session": "a", "undo": true])
+  }
+
+  @Test func ignoresASecondAcknowledgeWhileTheFirstRuns() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.acknowledge("a")
+    model.acknowledge("a", undo: true)
+    #expect(model.acknowledging == ["a"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  @Test func acknowledgingOneSessionLeavesAnotherFree() {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.acknowledge("a")
+    model.acknowledge("b")
+    #expect(model.acknowledging == ["a", "b"])
+    for _ in 0..<100 where sent.value < 2 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 2)
+  }
+
+  @Test func theAcknowledgingSetEmptiesWhenTheRequestFinishes() async throws {
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.send = { _, _ in .null }
+
+    model.acknowledge("a")
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.acknowledging.isEmpty)
+  }
+
+  @Test func theAcknowledgingSetEmptiesWhenTheRequestFails() async throws {
+    struct Refused: Error {}
+    _ = NSApplication.shared
+    let model = BoardModel()
+    model.send = { _, _ in throw Refused() }
+
+    model.acknowledge("a")
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.acknowledging.isEmpty)
+  }
+}
+
+/// Whether the Inbox makes Acknowledge the item's primary button.
+@Suite struct InformationalItems {
+  func item(
+    state: AttentionState = .needsYou, kind: TriageKind = .info, options: [TriageOption] = [], card: Bool = false,
+    openPrompt: Bool = false, triage: Bool = true
+  ) throws -> SessionSummary {
+    var s = needsItem("a", state: state)
+    s.triage = triage ? TriageItem(title: "Done", kind: kind, summary: "", options: options, source: .summary) : nil
+    s.openPrompt = openPrompt
+    if card {
+      let json: JSON = [
+        "id": 3, "session": "a", "kind": "permission", "tool": "Bash", "summary": "`ls`", "input": [:],
+        "questions": [], "since": 0, "deferred": false, "hookClosed": false,
+      ]
+      s.cards = [try JSONCoding.convert(json, to: Card.self)]
+    }
+    return s
+  }
+
+  static let option = TriageOption(label: "Go", message: "go")
+
+  @Test func needsYouInfoItemIsInformational() throws {
+    #expect(try item().isInformational)
+  }
+
+  @Test(arguments: [TriageKind.decision, .question, .approval, .review, .action])
+  func needsYouItemWithNoOptionsIsInformational(_ kind: TriageKind) throws {
+    #expect(try item(kind: kind).isInformational)
+  }
+
+  @Test func infoItemWithOptionsIsInformational() throws {
+    #expect(try item(kind: .info, options: [InformationalItems.option]).isInformational)
+  }
+
+  @Test(arguments: [TriageKind.decision, .question, .approval, .review, .action])
+  func itemWithOptionsIsNotInformational(_ kind: TriageKind) throws {
+    #expect(try !item(kind: kind, options: [InformationalItems.option]).isInformational)
+  }
+
+  @Test(arguments: AttentionState.allCases.filter { $0 != .needsYou })
+  func itemOutsideNeedsYouIsNotInformational(_ state: AttentionState) throws {
+    #expect(try !item(state: state).isInformational)
+  }
+
+  @Test func sessionWithACardIsNotInformational() throws {
+    #expect(try !item(card: true).isInformational)
+  }
+
+  @Test func sessionWithAnOpenDialogIsNotInformational() throws {
+    #expect(try !item(openPrompt: true).isInformational)
+  }
+
+  @Test func sessionWithoutATriageItemIsNotInformational() throws {
+    #expect(try !item(triage: false).isInformational)
   }
 }

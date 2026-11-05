@@ -100,6 +100,8 @@ struct TriageDetail: View {
       } else if item.source == .fallback {
         Text("No summary yet. The reply below is what the session said.").font(.caption).foregroundStyle(.secondary)
       }
+      // Each merge card has its own Acknowledge button.
+      if session.state != .readyToMerge { AcknowledgeButton(session: session, primary: session.isInformational) }
     }
   }
 
@@ -107,6 +109,7 @@ struct TriageDetail: View {
     HStack(spacing: 8) {
       if session.state == .working { ProgressView().controlSize(.small) }
       Text(session.state == .working ? "Working: \(session.reason)" : session.reason).foregroundStyle(.secondary)
+      if session.acknowledged == true { AcknowledgeButton(session: session) }
     }
   }
 

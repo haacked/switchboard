@@ -49,9 +49,11 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
-  /// Sessions whose merge or dismissal is on its way to sbd. Their buttons
-  /// stay disabled until sbd replies, so a second click can't merge again.
+  /// Sessions whose merge is on its way to sbd. Their buttons stay disabled
+  /// until sbd replies, so a second click can't merge again.
   @Published var merging: Set<String> = []
+  /// Sessions whose acknowledgment or its undo is on its way to sbd.
+  @Published var acknowledging: Set<String> = []
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -421,12 +423,28 @@ final class BoardModel: ObservableObject {
       finally: { self.answering.remove(card.id) })
   }
 
-  /// Merges the session's PR, or with `dismiss` takes it out of Ready to merge.
-  func merge(_ id: String, dismiss: Bool = false) {
+  func merge(_ id: String) {
     guard merging.insert(id).inserted else { return }
+    perform("merge", ["session": .string(id)], on: merges, finally: { self.merging.remove(id) })
+  }
+
+  /// Takes the session's item out of the Inbox, or with `undo` puts it back.
+  /// The Inbox moves its focus from an acknowledged item to the next one.
+  func acknowledge(_ id: String, undo: Bool = false) {
+    guard acknowledging.insert(id).inserted else { return }
     var args: [String: JSON] = ["session": .string(id)]
-    if dismiss { args["dismiss"] = true }
-    perform("merge", args, on: merges, finally: { self.merging.remove(id) })
+    if undo {
+      args["undo"] = true
+    } else if currentInboxItem == id {
+      moveInboxFocus(after: id)
+    }
+    perform("ack", args, finally: { self.acknowledging.remove(id) })
+  }
+
+  /// The session that the Session menu's Acknowledge acts on: the current
+  /// Inbox item while the Inbox shows, else the selected session.
+  var acknowledgeTarget: SessionSummary? {
+    visibleView == .inbox ? sessions.first { $0.id == currentInboxItem } : selected
   }
 
   func choose(_ session: String, ref: String, option number: Int) {
@@ -624,16 +642,23 @@ final class BoardModel: ObservableObject {
     let list = showingInbox ? triage : needsUser
     guard !list.isEmpty else { return }
     if showingInbox {
-      let i = list.firstIndex { $0.id == currentInboxItem } ?? -1
-      inboxFocus = list[(i + 1) % list.count].id
-      inboxJumps += 1
-      // A field in the item that scrolls away would keep the keystrokes.
-      NSApp.keyWindow?.makeFirstResponder(nil)
+      moveInboxFocus(after: currentInboxItem)
     } else if let current = selection, let i = list.firstIndex(where: { $0.id == current }) {
       selection = list[(i + 1) % list.count].id
     } else {
       selection = list[0].id
     }
+  }
+
+  /// Focuses the Inbox item after `id`, or the first one after the last.
+  private func moveInboxFocus(after id: String?) {
+    let list = triage
+    guard !list.isEmpty else { return }
+    let i = list.firstIndex { $0.id == id } ?? -1
+    inboxFocus = list[(i + 1) % list.count].id
+    inboxJumps += 1
+    // A field in the item that scrolls away would keep the keystrokes.
+    NSApp.keyWindow?.makeFirstResponder(nil)
   }
 
   /// Starts sbd as a launchd agent with the `sb` that ships next to the app.

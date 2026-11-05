@@ -545,8 +545,10 @@ struct BoardCard: View {
           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
           CleanupNote(session: s)
           MergeNote(session: s, lines: 2)
-          Text("\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))")
-            .font(.caption2).foregroundStyle(.tertiary)
+          Text(
+            "\(s.waitsToStart ? "not started" : s.live ? "running" : "stopped") · \(ago(s.since))\(s.acknowledged == true ? " · acknowledged" : "")"
+          )
+          .font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)

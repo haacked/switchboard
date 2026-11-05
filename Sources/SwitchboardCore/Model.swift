@@ -205,6 +205,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var plans: [PlanSummary]?
   /// gh's error from the last failed merge of the PR's head commit.
   public var mergeError: String?
+  /// True when the user acknowledged the session's Inbox item, which moves
+  /// it to Waiting until its reason changes or a new turn starts.
+  public var acknowledged: Bool?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

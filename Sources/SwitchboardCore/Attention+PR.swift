@@ -65,8 +65,6 @@ extension Attention {
       let reason = "fix Depot CI on \(n): "
       return Verdict(state: .needsYou, reason: reason + run.failureSummary(max: 70 - reason.count))
     }
-    // The user dismissed the merge card of this head commit.
-    if facts.currentMerge?.result == .dismissed { return nil }
     if let v = readyToMerge(facts) { return v }
     // A PR that waits on another can't merge yet.
     guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }

@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 
 /// Runs `merge`, which merges a Ready to merge session's PR, or with
-/// `--dismiss` takes the session out of Ready to merge. A PR reference, such
+/// `--dismiss` acknowledges the session's Ready to merge item. A PR reference, such
 /// as `#N`, `owner/name#N`, or a PR URL, names the session by its open PR.
 func merge(_ a: Args) {
   // A session that read injected instructions could otherwise merge its own
@@ -25,5 +25,5 @@ func merge(_ a: Args) {
   if a.json { return printJSON(result) }
   let s = summary(result)
   let pr = s.pr.map { "#\($0.number)" } ?? "the PR"
-  print(dismiss ? "dismissed \(pr) of \(s.name)" : "merged \(pr) of \(s.name)")
+  print(dismiss ? "acknowledged \(pr) of \(s.name)" : "merged \(pr) of \(s.name)")
 }

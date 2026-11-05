@@ -86,8 +86,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
-  /// The last merge that sbd ran or the user dismissed.
+  /// The last merge that sbd ran.
   public var merge: MergeAttempt?
+  /// The Inbox item that the user acknowledged during this turn.
+  public var acknowledgment: Acknowledgment?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -105,7 +107,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   static let activityKinds = Set(hookKinds).union([
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
     "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
-    "account-moved", "idle",
+    "account-moved", "idle", "ack", "unack",
   ])
 
   public init() {}
@@ -228,12 +230,14 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
     applyAutoContinue(event, userPrompt: userPrompt)
+    applyAcknowledgment(event)
   }
 
   private mutating func startTurn(_ t: Int64) {
     if !turnRunning {
       turnRunning = true
       turnStarted = t
+      acknowledgment = nil
     }
   }
 
@@ -262,6 +266,8 @@ public struct Verdict: Equatable, Sendable {
   public var reason: String
   public var kind: TriageKind = .action
   public var source: VerdictSource = .rule
+  /// True when `Attention.shown` moved an acknowledged Inbox verdict to Waiting.
+  public var acknowledged = false
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }

@@ -11,9 +11,8 @@ extension SessionSummary {
   }
 }
 
-/// A Ready to merge session's PR, with Merge and Dismiss. Merge runs
-/// `gh pr merge --merge` in sbd. Dismiss keeps the session out of Ready to
-/// merge until the PR's head commit changes.
+/// A Ready to merge session's PR, with Merge and Acknowledge. Merge runs
+/// `gh pr merge --merge` in sbd.
 struct MergeCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -32,8 +31,7 @@ struct MergeCard: View {
         MergeNote(session: session, lines: 4)
         HStack {
           Button(merging ? "Merging…" : "Merge") { model.merge(session.id) }
-          Button("Dismiss") { model.merge(session.id, dismiss: true) }
-            .help("Hide the merge card until the PR gets a new commit")
+          AcknowledgeButton(session: session)
         }
         .disabled(merging)
       }

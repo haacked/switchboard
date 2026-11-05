@@ -66,9 +66,13 @@ let usage = """
     merge <session|PR> [--dismiss]
                                   merge a Ready to merge session's PR with a merge commit, then resume
                                   the session. A PR (#N, owner/name#N, or a URL) names the session by
-                                  its open PR. --dismiss keeps the session out of Ready to merge until
-                                  the PR's head commit changes.
+                                  its open PR. --dismiss acknowledges the session's Ready to merge item,
+                                  as sb ack does.
                                   Refuses inside Claude Code
+    ack <session> [--undo]        acknowledge the session's Inbox item: it moves to Waiting until its
+                                  reason or its PR's head commit changes or a new turn starts. Nothing
+                                  else about the session changes. --undo puts it back in the Inbox.
+                                  Refuses the session that runs it
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -266,7 +270,7 @@ func printTable(_ sessions: [SessionSummary]) {
     let live = s.live ? "●" : "○"
     let name = oneLine(s.name, max: nameWidth)
     print(
-      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reason)"
+      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reasonLine)"
         .printable
     )
   }
@@ -274,7 +278,7 @@ func printTable(_ sessions: [SessionSummary]) {
 
 func printSession(_ s: SessionSummary) {
   print("\(s.id)  \(s.name)".printable)
-  print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))".printable)
+  print("  state:   \(s.state.title): \(s.reasonLine) (\(ago(s.since)))".printable)
   if s.waitsToStart {
     printFollowup(s)
     return printWaitsAndNotes(s)
@@ -552,6 +556,8 @@ case "rm":
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":
   merge(a)
+case "ack":
+  acknowledge(a)
 case "cleanup":
   let result = call("cleanup", ["session": .string(a.session("cleanup"))], timeout: 300)
   if a.json { printJSON(result) } else { print("cleaned up \(result["cleaned"]?.string ?? "")") }
