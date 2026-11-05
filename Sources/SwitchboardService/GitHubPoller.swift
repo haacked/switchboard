@@ -44,6 +44,10 @@ final class GitHubPoller {
   /// when a later read shows the same head commit and outcome. `outcome` is
   /// "failed" for any failure.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
+  /// The `queue` waits whose PR a read showed in GitHub's merge queue.
+  /// GitHub reports no removal state, so a later read that shows the open PR
+  /// outside the queue means the queue dropped it.
+  var queuedWaits: Set<String> = []
   var deploys = Deploys()
   /// The PRs of edges that left a session's list before the poller read
   /// their PR again. The next poll reads them whether or not they are due.

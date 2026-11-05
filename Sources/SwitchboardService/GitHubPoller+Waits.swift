@@ -73,12 +73,17 @@ extension GitHubPoller {
   /// - a `ci` outcome that only one read showed, since a read just after a push
   ///   can show the old head commit, or a status that reports before CI queues.
   ///   Two reads that both show a failure agree.
+  /// - a GitHub merge queue removal that only one read showed, since a read
+  ///   while GitHub merges the PR can show it outside the queue before it
+  ///   shows it merged.
   func resolveWaits(_ interest: Interest, stats: inout Stats) {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
+    queuedWaits = queuedWaits.filter { id in interest.waits.contains { $0.wait.id == id } }
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
         case let comments = keptComments(read.comments), let pr = shown(id, last: nil),
-        let outcome = wait.kind == .deploy ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr),
+        let outcome = wait.kind == .deploy
+          ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr) ?? githubQueueOutcome(wait, pr),
         !(wait.pr == nil && wait.finishedBeforeSet(pr)),
         confirmed(wait, pr, outcome, polled: read.polled),
         !service.queue.sync(execute: { service.entries[session.id]?.session.done ?? true })
@@ -98,11 +103,23 @@ extension GitHubPoller {
     }
   }
 
+  static let leftGitHubQueue = "GitHub removed it from the merge queue"
+
+  /// `leftGitHubQueue` for a `queue` wait whose open PR an earlier read showed
+  /// in GitHub's merge queue and this read shows outside it. A PR that the
+  /// queue has not taken yet keeps the wait open.
+  private func githubQueueOutcome(_ wait: Wait, _ pr: PullRequest) -> String? {
+    guard wait.kind == .queue, pr.state == .open, pr.queue == nil else { return nil }
+    if pr.inMergeQueue == true { queuedWaits.insert(wait.id) }
+    guard pr.inMergeQueue == false, queuedWaits.contains(wait.id) else { return nil }
+    return Self.leftGitHubQueue
+  }
+
   private func confirmed(_ wait: Wait, _ pr: PullRequest, _ outcome: String, polled: Int64) -> Bool {
-    guard wait.kind == .ci else { return true }
+    guard wait.kind == .ci || outcome == Self.leftGitHubQueue else { return true }
     // More Depot jobs can fail between the two reads. That changes the
     // outcome's words but not the fact that the checks failed.
-    let verdict = pr.ciFailed ? "failed" : outcome
+    let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, polled)
       return false

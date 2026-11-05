@@ -69,7 +69,7 @@ public enum GitHub {
       nodes(ids: $ids) {
         ... on PullRequest {
           id number url title state isDraft mergedAt closedAt mergeCommit { oid } body
-          headRefName headRefOid baseRefName mergeable reviewDecision
+          headRefName headRefOid baseRefName mergeable reviewDecision isMergeQueueEnabled isInMergeQueue
           repository { nameWithOwner defaultBranchRef { name } trunkConfig: object(expression: "HEAD:.trunk") { id } }
           labels(first: 20) { nodes { name } }
           reviewRequests(first: 20) {
@@ -146,7 +146,8 @@ public enum GitHub {
       reviewRequests: reviewRequests, mergeCommit: node["mergeCommit"]?["oid"]?.string,
       dependsOn: node["body"]?.string.map { Dependencies.refs(inBody: $0, repo: repo) },
       trunkConfig: node["repository"]?["trunkConfig"].map { $0 != .null },
-      reviewDecisionRead: node["reviewDecision"] == .null || reviewDecision != nil ? true : nil)
+      reviewDecisionRead: node["reviewDecision"] == .null || reviewDecision != nil ? true : nil,
+      mergeQueue: node["isMergeQueueEnabled"]?.bool, inMergeQueue: node["isInMergeQueue"]?.bool)
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }

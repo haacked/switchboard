@@ -285,7 +285,7 @@ extension ReviewRequestTests {
   @Suite struct Actions {
     @Test func reviewActionsSayWhatAClickDoes() {
       #expect(
-        TriageOption(label: "Request review", action: .requestReview).effect
+        TriageOption(label: "Request review", action: .requestReview).effect(mergeMethod: nil)
           == "Requests a review from the reviewers you pick")
     }
 

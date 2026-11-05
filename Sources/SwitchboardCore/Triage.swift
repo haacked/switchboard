@@ -105,12 +105,13 @@ public struct TriageOption: Codable, Equatable, Sendable {
   }
 
   /// What a click on the option does, in one line, which a button shows
-  /// because a click sends text as the user.
-  public var effect: String {
+  /// because a click sends text as the user. A merge in a repository with a
+  /// queue adds the PR to that queue.
+  public func effect(mergeMethod: MergeMethod?) -> String {
     switch action {
     case .send: return "Sends: \(oneLine(message ?? label, max: 200))"
     case .reply: return "Sends the text you type"
-    case .merge: return "Merges the PR"
+    case .merge: return mergeMethod?.enqueues == true ? "Adds the PR to its merge queue" : "Merges the PR"
     case .dismiss: return "Hides the merge card until the PR gets a new commit or a new turn starts"
     case .requestReview: return "Requests a review from the reviewers you pick"
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"

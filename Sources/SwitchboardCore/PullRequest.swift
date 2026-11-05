@@ -143,6 +143,12 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// which a repository that merges through Trunk's queue keeps. nil when the
   /// poll did not read it, as in events that an older sbd recorded.
   public var trunkConfig: Bool?
+  /// Whether the base branch merges through GitHub's merge queue. nil when
+  /// the poll did not read it.
+  public var mergeQueue: Bool?
+  /// Whether the PR is in GitHub's merge queue. nil when the poll did not
+  /// read it.
+  public var inMergeQueue: Bool?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
@@ -151,7 +157,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
     reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
-    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil
+    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil
   ) {
     self.id = id
     self.number = number
@@ -180,6 +186,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.dependsOn = dependsOn
     self.trunkConfig = trunkConfig
     self.reviewDecisionRead = reviewDecisionRead
+    self.mergeQueue = mergeQueue
+    self.inMergeQueue = inMergeQueue
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
@@ -222,6 +230,21 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// Open and not a draft.
   public var ready: Bool { state == .open && !draft }
 
+  /// Whether review lets the PR merge: nobody's last verdict requests
+  /// changes, GitHub needs no review, and GitHub approved the PR or no review
+  /// request is open. GitHub's approval already counts the required reviews,
+  /// so other open requests don't hold an approved PR. A decision that the
+  /// poll did not read never satisfies it.
+  public var reviewSatisfied: Bool {
+    guard changesRequestedBy.isEmpty, needsReview == false else { return false }
+    return reviewDecision == .approved || (reviewRequests?.isEmpty ?? true)
+  }
+
+  /// When the newest approval was submitted.
+  public var approvedAt: String? {
+    verdicts.filter { $0.state == "APPROVED" }.compactMap(\.submittedAt).max()
+  }
+
   public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
 
   /// The reviewers whose last verdict requests changes.
@@ -233,8 +256,11 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// GitHub hasn't computed its mergeability yet. A merged or closed PR is
   /// never pending.
   public var isPending: Bool {
-    state == .open && (checks == "PENDING" || checks == "EXPECTED" || mergeable == .unknown)
+    state == .open && (checksRunning || mergeable == .unknown)
   }
+
+  /// Whether the head commit's checks have not finished.
+  public var checksRunning: Bool { checks == "PENDING" || checks == "EXPECTED" }
 }
 
 /// What `sb ls` and the GUI show of a session's PR. The app asks for every
@@ -257,6 +283,16 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var trunkLoginNeeded: Bool?
   /// The logins or team slugs whose review GitHub still asks for.
   public var reviewRequests: [String]?
+  /// nil when GitHub has no review decision, as when the base branch
+  /// requires no review.
+  public var reviewDecision: ReviewDecision?
+  public var approvers: [String]?
+  /// When the newest approval was submitted.
+  public var approvedAt: String?
+  public var inMergeQueue: Bool?
+  /// How sbd merges the PR. sbd sets it from the session's facts, so a
+  /// summary made from the PR alone leaves it nil.
+  public var mergeMethod: MergeMethod?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -272,6 +308,10 @@ public struct PRSummary: Codable, Equatable, Sendable {
     queueLabel = pr.queueLabel
     trunkLoginNeeded = pr.trunkLoginNeeded
     reviewRequests = pr.reviewRequests
+    reviewDecision = pr.reviewDecision
+    approvers = pr.approvers
+    approvedAt = pr.approvedAt
+    inMergeQueue = pr.inMergeQueue
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can
