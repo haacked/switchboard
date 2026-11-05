@@ -45,6 +45,9 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   /// Answers the session's held question with the option's message.
   case answer
 
+  /// Whether the action runs `sb merge`, which also dismisses.
+  public var isMerge: Bool { self == .merge || self == .dismiss }
+
   /// The actions that a card from a session or the model may name. sbd adds
   /// the others to the cards that it builds from a held prompt or a PR.
   public static let writable: [TriageAction] = [.send, .reply, .merge, .wait, .done]

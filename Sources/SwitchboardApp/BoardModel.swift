@@ -436,7 +436,7 @@ final class BoardModel: ObservableObject {
   func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
     let key = "\(session)/\(number)"
     // The Board's merge buttons read `merging`, so a merge from the card shows there too.
-    let merge = action == .merge || action == .dismiss
+    let merge = action.isMerge
     if merge, merging.contains(session) { return }
     guard choosing.insert(key).inserted else { return }
     var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]

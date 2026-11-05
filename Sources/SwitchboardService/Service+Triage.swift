@@ -44,7 +44,7 @@ extension Service {
     guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
     let option = try item.option(key)
     // Claude Code may not approve its own prompt or merge its own PR.
-    if args["insideClaude"]?.bool == true, item.source == .card || [.merge, .dismiss].contains(option.action) {
+    if args["insideClaude"]?.bool == true, item.source == .card || option.action.isMerge {
       throw APIError("choose answers a prompt or merges a PR for you, so it doesn't run inside Claude Code")
     }
     let session = JSON.string(id)

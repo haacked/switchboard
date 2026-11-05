@@ -120,7 +120,7 @@ struct OptionButton: View {
     .controlSize(.large)
     .disabled(
       model.choosing.contains("\(session.id)/\(number)")
-        || ([.merge, .dismiss].contains(option.action) && model.merging.contains(session.id))
+        || (option.action.isMerge && model.merging.contains(session.id))
     )
     .help(effect)
     .accessibilityLabel(option.accessibilityLabel(pr: session.pr?.number))
