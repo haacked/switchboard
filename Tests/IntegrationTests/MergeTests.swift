@@ -120,8 +120,36 @@ extension Instance {
     try writer.close()
     first.waitUntilExit()
     #expect(second.status != 0)
+    #expect(second.stderr.contains("#18303 is already merging"))
     #expect(first.terminationStatus == 0)
     #expect(sbd.ghMerges().count == 1)
+  }
+
+  @Test func removeWhileAMergeRunsIsRefused() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+    let gate = "\(sbd.home.path)/gh-merge-gate"
+    guard mkfifo(gate, 0o600) == 0 else { throw TestError(description: "mkfifo failed") }
+    let merge = Process()
+    merge.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sb")
+    merge.arguments = ["merge", s.id]
+    merge.environment = sbd.environment()
+    merge.standardOutput = FileHandle.nullDevice
+    merge.standardError = FileHandle.nullDevice
+    try merge.run()
+    try sbd.waitFor("gh to start the merge") { sbd.ghMerges().count == 1 }
+
+    let removed = try sbd.run(["rm", s.id])
+
+    let writer = try #require(FileHandle(forWritingAtPath: gate))
+    writer.write(Data("go\n".utf8))
+    try writer.close()
+    merge.waitUntilExit()
+    #expect(removed.status != 0)
+    #expect(removed.stderr.contains("is merging its PR"))
+    #expect(merge.terminationStatus == 0)
+    #expect(try sbd.get(s.id).id == s.id)
   }
 
   @Test func conflictingPRIsNotReadyAndMergeIsRefusedWithItsReason() throws {

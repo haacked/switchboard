@@ -26,10 +26,18 @@ extension Service {
       merging.insert(id)
       return (id, pr)
     }
-    guard let pr else { return try queue.sync { try JSON(encoding: summary(id)) } }
+    guard let pr else {
+      return try queue.sync {
+        guard entries[id] != nil else { throw APIError("\(id) was removed") }
+        return try JSON(encoding: summary(id))
+      }
+    }
     defer { queue.sync { _ = merging.remove(id) } }
     let error = runMerge(pr)
     return try queue.sync {
+      guard entries[id] != nil else {
+        throw APIError("#\(pr.number) \(error.map { "didn't merge: \($0)" } ?? "merged"), but \(id) was removed")
+      }
       let attempt = MergeAttempt(head: pr.headSha, result: error == nil ? .merged : .failed, error: error)
       record(id, "merge", try JSON(encoding: attempt))
       if let error { throw APIError("#\(pr.number) didn't merge: \(error)") }

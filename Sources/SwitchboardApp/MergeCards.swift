@@ -18,6 +18,8 @@ struct MergeCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
 
+  private var merging: Bool { model.merging.contains(session.id) }
+
   var body: some View {
     if let pr = session.pr {
       VStack(alignment: .leading, spacing: 6) {
@@ -25,15 +27,15 @@ struct MergeCard: View {
           Text(verbatim: "#\(pr.number)").font(.headline)
           Text(pr.title).fontWeight(.medium).lineLimit(2).textSelection(.enabled)
         }
-        Text([session.name, pr.repo, "checks \(pr.checks?.lowercased() ?? "unknown")"].joined(separator: " · "))
+        Text([session.name, pr.repo, "checks passed"].joined(separator: " · "))
           .font(.caption).foregroundStyle(.secondary)
         MergeNote(session: session, lines: 4)
         HStack {
-          Button("Merge") { model.merge(session.id) }
+          Button(merging ? "Merging…" : "Merge") { model.merge(session.id) }
           Button("Dismiss") { model.merge(session.id, dismiss: true) }
             .help("Hide the merge card until the PR gets a new commit")
         }
-        .disabled(model.merging.contains(session.id))
+        .disabled(merging)
       }
       .padding(10)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,21 +82,30 @@ struct MergeBatch: View {
   }
 }
 
-/// The Merge button on a Ready to merge Board card.
+/// The Merge button on a Ready to merge Board card. It asks first, like the
+/// card's cleanup and delete buttons, because a merge can't be undone.
 struct MergeButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  @State private var confirming = false
+
+  private var ref: String { session.pr.map { "#\($0.number)" } ?? "the PR" }
 
   var body: some View {
     Button {
-      model.merge(session.id)
+      confirming = true
     } label: {
       Image(systemName: "arrow.triangle.merge")
     }
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
     .disabled(model.merging.contains(session.id))
-    .accessibilityLabel("Merge \(session.pr.map { "#\($0.number)" } ?? "the PR") of \(session.name)")
-    .help("Merge the PR with a merge commit")
+    .accessibilityLabel("Merge \(ref) of \(session.name)")
+    .help("Merge the PR with a merge commit…")
+    .confirmationDialog("Merge \(ref)?", isPresented: $confirming) {
+      Button("Merge") { model.merge(session.id) }
+    } message: {
+      Text(session.pr.map { "\($0.title) (\($0.repo))" } ?? session.name)
+    }
   }
 }

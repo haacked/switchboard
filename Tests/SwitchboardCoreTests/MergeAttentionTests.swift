@@ -6,13 +6,14 @@ import Testing
 /// A PR that every ready-to-merge condition passes: open, not a draft,
 /// mergeable, its checks passed, and no review required.
 private func readyPR(
-  draft: Bool = false, headSha: String = samplePRHead, base: String = "main", mergeable: Mergeable? = .mergeable,
-  reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [], checks: String? = "SUCCESS", mergedBase: Int? = nil,
-  queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil
+  draft: Bool = false, headSha: String = samplePRHead, base: String = "main", defaultBranch: String? = "main",
+  mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [],
+  checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil
 ) -> PullRequest {
   samplePR(
-    draft: draft, headSha: headSha, base: base, mergeable: mergeable, reviewDecision: reviewDecision,
-    verdicts: verdicts, checks: checks, mergedBase: mergedBase, queue: queue, reviewRequests: reviewRequests)
+    draft: draft, headSha: headSha, base: base, defaultBranch: defaultBranch, mergeable: mergeable,
+    reviewDecision: reviewDecision, verdicts: verdicts, checks: checks, mergedBase: mergedBase, queue: queue,
+    reviewRequests: reviewRequests)
 }
 
 private func mergeEvent(_ t: Int64, head: String, _ result: String, error: String? = nil) -> Event {
@@ -79,6 +80,12 @@ extension MergeAttentionTests {
       #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))
     }
 
+    @Test func prWhoseDefaultBranchDidNotLoadIsReadyToMerge() throws {
+      let f = try prFacts(readyPR(defaultBranch: nil))
+
+      #expect(verdict(f).state == .readyToMerge)
+    }
+
     @Test(arguments: [
       ([sampleVerdict("alice", "APPROVED")], "#42 is ready to merge, approved by alice"),
       (
@@ -114,6 +121,10 @@ extension MergeAttentionTests {
         "changes requested on the head without a decision",
         readyPR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)])
       ),
+      (
+        "changes requested on an older commit without a decision",
+        readyPR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: "older")])
+      ),
       ("merged base", readyPR(base: "haacked/parent", mergedBase: 41)),
       ("stacked on another branch", readyPR(base: "haacked/parent")),
       ("review requested", readyPR(reviewRequests: ["alice"])),
@@ -138,9 +149,10 @@ extension MergeAttentionTests {
       let comments = [
         PRComment(id: "IC_gh", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:00Z"), trunkBotComment,
       ]
-      let f = try prFacts(readyPR(), comments: comments)
+      let f = try prFacts(
+        readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
 
-      #expect(verdict(f).state != .readyToMerge)
+      #expect(verdict(f) == Verdict(state: .needsYou, reason: "enqueue #42, approved by alice"))
     }
 
     @Test func prWithOnlyOtherBotCommentsIsReadyToMerge() throws {

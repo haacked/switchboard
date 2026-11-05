@@ -105,7 +105,7 @@ final class BoardModel: ObservableObject {
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
-  var needsYou: [SessionSummary] { sessions.filter { $0.state.needsUser && Triage.mayHaveItem($0) } }
+  var needsUser: [SessionSummary] { sessions.filter { $0.state.needsUser && Triage.mayHaveItem($0) } }
 
   var manager: SessionSummary? { sessions.first { $0.manager == true } }
 
@@ -233,7 +233,7 @@ final class BoardModel: ObservableObject {
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
       loaded = true
-      NSApp.dockTile.badgeLabel = needsYou.isEmpty ? nil : "\(needsYou.count)"
+      NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)"
     case .failure(let error):
       let problem = "\(error)"
       if unreachable != problem { unreachable = problem }
@@ -561,7 +561,7 @@ final class BoardModel: ObservableObject {
   /// the next session that needs you, after the selected one.
   func selectNextNeedingYou() {
     let showingInbox = visibleView == .inbox
-    let list = showingInbox ? triage : needsYou
+    let list = showingInbox ? triage : needsUser
     guard !list.isEmpty else { return }
     if showingInbox {
       let i = list.firstIndex { $0.id == currentInboxItem } ?? -1

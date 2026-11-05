@@ -755,6 +755,7 @@ public final class Service {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      guard !merging.contains(id) else { throw APIError("\(id) is merging its PR") }
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
@@ -787,6 +788,7 @@ public final class Service {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id) else {
         throw APIError("\(session.id) changed while it was being removed")
       }
+      guard !merging.contains(session.id) else { throw APIError("\(session.id) is merging its PR") }
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
       try store.checkDeletable(session: session.id)
       install(fresh)
@@ -823,6 +825,7 @@ public final class Service {
       guard !starting.contains(session.id), entries[session.id]?.session.cwd == session.cwd else {
         throw APIError("\(session.id) started while it was being removed")
       }
+      guard !merging.contains(session.id) else { throw APIError("\(session.id) is merging its PR") }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
       entries[session.id] = nil

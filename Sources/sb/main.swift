@@ -66,8 +66,8 @@ let usage = """
     merge <session|PR> [--dismiss]
                                   merge a Ready to merge session's PR with a merge commit, then resume
                                   the session. A PR (#N, owner/name#N, or a URL) names the session by
-                                  its open PR. --dismiss keeps the
-                                  session out of Ready to merge until the PR's head commit changes.
+                                  its open PR. --dismiss keeps the session out of Ready to merge until
+                                  the PR's head commit changes.
                                   Refuses inside Claude Code
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
