@@ -180,6 +180,7 @@ struct Sidebar: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
+    let repos = model.repoLabels
     List(selection: $model.selection) {
       if let manager = model.manager {
         Section {
@@ -193,7 +194,7 @@ struct Sidebar: View {
         Section(isExpanded: expanded(state)) {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
-              SessionRow(session: row.session)
+              SessionRow(session: row.session, repo: repos[row.id])
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if BoardModel.canDelete(row.session) { DeleteButton(session: row.session) }
             }
@@ -314,6 +315,7 @@ extension PRSummary {
 
 struct SessionRow: View {
   let session: SessionSummary
+  var repo: String? = nil
   @Environment(\.backgroundProminence) private var prominence
 
   var body: some View {
@@ -337,11 +339,19 @@ struct SessionRow: View {
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
-        Text(session.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        subtitle
         CleanupNote(session: session)
       }
     }
     .padding(.vertical, 2)
+  }
+
+  /// Text truncates at its end. The reason therefore truncates before the repo does.
+  private var subtitle: some View {
+    let parts = [repo, session.reason].compactMap { $0 }
+    return Text(verbatim: parts.joined(separator: " · "))
+      .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      .accessibilityLabel(Text(verbatim: parts.joined(separator: ", ")))
   }
 }
 
