@@ -38,8 +38,11 @@ struct TriageDetail: View {
           // A follow-up has no claude to message yet.
           StartButton(session: session).padding(8)
         } else if session.runsClaude {
-          MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
-            .padding(8)
+          MessageField(
+            session: session.id, draft: model.messageDraft(for: session),
+            shortcut: KeyboardShortcut(.return, modifiers: [.command])
+          )
+          .padding(8)
         }
       }
     }
