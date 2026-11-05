@@ -32,6 +32,11 @@ public struct Home: Sendable {
   /// The folder that the Manager session runs in.
   public var managerFolder: String { "\(path)/manager" }
 
+  /// Holds a folder per group chat.
+  public var chatsFolder: String { "\(path)/chats" }
+  /// The folder that a group's chat runs in.
+  public func chatFolder(_ group: String) -> String { "\(chatsFolder)/\(group)" }
+
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
 

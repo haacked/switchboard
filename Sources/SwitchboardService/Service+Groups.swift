@@ -55,8 +55,11 @@ extension Service {
   }
 
   /// The group of the session that starts a new one, or nil without a parent.
+  /// A chat's group is the one it manages, while that group exists.
   func groupOfParent(_ parent: String?) -> String? {
-    parent.flatMap { entries[$0]?.session.group }
+    guard let session = parent.flatMap({ entries[$0]?.session }) else { return nil }
+    if let chat = session.chat { return groups[chat] == nil ? nil : chat }
+    return session.group
   }
 
   /// The group that a new session joins: the one that `ref` names, else its parent's.
@@ -78,7 +81,9 @@ extension Service {
   /// Refuses a name that another group has. A name then finds one group.
   private func createGroup(_ name: String, notes: [Note] = []) throws -> SessionGroup {
     if groups.values.contains(where: { $0.name == name }) { throw APIError("a group named \(name) exists") }
-    let group = SessionGroup(id: shortId("g", taken: groups.keys), name: name, notes: notes, created: nowMs())
+    // A removed group's chat keeps the group's id, so a new group never takes that id.
+    let taken = Set(groups.keys).union(entries.values.compactMap(\.session.chat))
+    let group = SessionGroup(id: shortId("g", taken: taken), name: name, notes: notes, created: nowMs())
     try saveGroup(group)
     return group
   }
@@ -88,8 +93,9 @@ extension Service {
     groups[group.id] = group
   }
 
-  /// Deletes the group and detaches its plans.
+  /// Deletes the group, detaches its plans, and marks its chat done.
   private func deleteGroup(_ id: String) throws {
+    try retireChat(of: id)
     try store.delete(group: id)
     try detachPlans { $0.group == id }
     groups[id] = nil
@@ -107,12 +113,12 @@ extension Service {
     }
   }
 
-  /// The Manager has its own row in the app and belongs to no group.
-  func groupable(_ session: Session) -> Bool { session.manager != true }
+  /// The Manager and the group chats belong to no group.
+  func groupable(_ session: Session) -> Bool { session.kind == .work }
 
   private func refuseUngroupable(_ ids: [String]) throws {
-    if let id = ids.first(where: { entries[$0].map { !groupable($0.session) } ?? false }) {
-      throw APIError("\(id) is the Manager, which belongs to no group")
+    if let session = ids.compactMap({ entries[$0]?.session }).first(where: { !groupable($0) }) {
+      throw APIError("\(session.id) is \(session.kind.label ?? "a work session"), which belongs to no group")
     }
   }
 

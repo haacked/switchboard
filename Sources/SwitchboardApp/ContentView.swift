@@ -99,6 +99,8 @@ struct ContentView: View {
         }
         if let s = model.selected, let f = s.followup, f.started == nil {
           FollowupView(session: s, followup: f).id(s.id)
+        } else if let s = model.selected, let group = s.chat {
+          ChatView(session: s, group: group).id(s.id)
         } else if let s = model.selected {
           SessionView(session: s).id(s.id)
         } else {
@@ -394,7 +396,7 @@ struct BoardView: View {
   static let columnWidth: CGFloat = 240
 
   var body: some View {
-    let board = model.boardWithoutManager
+    let board = model.workBoard
     let columns = AttentionState.allCases.filter { state in board.contains { $0.state == state } }
     if columns.isEmpty {
       VStack(spacing: 12) {
@@ -414,6 +416,13 @@ struct BoardView: View {
                   Text(row.title).fontWeight(.semibold).lineLimit(2)
                   Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
                     .font(.caption).foregroundStyle(.secondary)
+                  if let group = row.group {
+                    Button("Chat") { model.openChat(group) }
+                      .buttonStyle(.link).font(.caption)
+                      .help(
+                        model.chat(of: group) == nil
+                          ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+                  }
                   PlanFollowupList(plans: model.groups.first { $0.id == row.group }?.plans ?? [])
                 }
                 .frame(width: Self.labelWidth, alignment: .leading)

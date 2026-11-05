@@ -65,7 +65,7 @@ public struct DoneRemovalResult: Codable, Equatable, Sendable {
 }
 
 extension SessionSummary {
-  /// A Done session that the Done delete icon and Delete All may remove: not
-  /// the Manager and not a follow-up that hasn't started.
-  public var isRemovableDone: Bool { state == .done && manager != true && !waitsToStart }
+  /// A Done session that the Done delete icon and Delete All may remove: a
+  /// work session, not the Manager or a chat, and not a follow-up that hasn't started.
+  public var isRemovableDone: Bool { state == .done && kind == .work && !waitsToStart }
 }

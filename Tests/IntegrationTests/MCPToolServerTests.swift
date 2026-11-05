@@ -71,6 +71,19 @@ final class MCPClient {
     try self.init(command: "\(Instance.bin)/sb", args: ["mcp-server"] + scope, env: sbd.environment(extra), cwd: cwd)
   }
 
+  /// Runs the server that an --mcp-config entry names, with its command,
+  /// arguments, and environment, and none of the test process's sb variables.
+  convenience init(server: JSON) throws {
+    var env = ProcessInfo.processInfo.environment
+    env["CLAUDECODE"] = nil
+    env["SB_SESSION_ID"] = nil
+    env["SB_HOME"] = nil
+    for (key, value) in server["env"]?.object ?? [:] { env[key] = value.string }
+    try self.init(
+      command: try #require(server["command"]?.string), args: (server["args"]?.array ?? []).compactMap(\.string),
+      env: env)
+  }
+
   init(command: String, args: [String], env: [String: String], cwd: String? = nil) throws {
     _ = MCPClient.ignoreSIGPIPE
     process.executableURL = URL(fileURLWithPath: command)
@@ -1308,15 +1321,7 @@ final class MCPClient {
   @Test func theServerThatManagerConfigNamesListsThisHomesSessions() throws {
     let sbd = try Instance()
     let s = try sbd.new(name: "alpha")
-    let server = try #require(try managerConfig(sbd)["mcpServers"]?["switchboard"])
-    var env = ProcessInfo.processInfo.environment
-    env["CLAUDECODE"] = nil
-    env["SB_SESSION_ID"] = nil
-    env["SB_HOME"] = nil
-    for (key, value) in server["env"]?.object ?? [:] { env[key] = value.string }
-    let mcp = try MCPClient(
-      command: try #require(server["command"]?.string), args: (server["args"]?.array ?? []).compactMap(\.string),
-      env: env)
+    let mcp = try MCPClient(server: try #require(try managerConfig(sbd)["mcpServers"]?["switchboard"]))
 
     let listed = try mcp.call("list_sessions").decode([SessionSummary].self)
 
