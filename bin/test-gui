@@ -278,6 +278,7 @@ check_drafts() {
   run_step type
   logged "typed: $typed"
   logged "other session: "
+  logged "focused after switch: false"
   logged "after switch: $typed"
   logged "after one esc: $typed hint true"
   logged "hint after the window: false"

@@ -142,7 +142,7 @@ struct MessageField: View {
 
   @EnvironmentObject var model: BoardModel
   let session: String
-  /// From `BoardModel.messageDrafts`, so that the text survives a switch to another view.
+  /// From `BoardModel.messageDraft(for:)`, so that the text survives a switch to another view.
   @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
   @FocusState private var focused: Bool

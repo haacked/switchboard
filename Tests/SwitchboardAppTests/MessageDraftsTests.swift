@@ -646,6 +646,19 @@ import Testing
     #expect(drafts.draft(for: "a").isEmpty)
   }
 
+  @Test func saveCreatesTheFolderAndItsParentForTheUserOnly() throws {
+    let home = "\(root)/home"
+    let drafts = MessageDrafts(folder: "\(home)/drafts")
+    drafts.draft(for: "a").text = "secret"
+
+    drafts.saveNow()
+
+    for path in [home, "\(home)/drafts"] {
+      let mode = try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int
+      #expect(mode == 0o700)
+    }
+  }
+
   @Test func storeOnAnEmptyFolderLoadsNoDrafts() {
     let drafts = MessageDrafts(folder: folder)
 
