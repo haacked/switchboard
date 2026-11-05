@@ -192,7 +192,7 @@ The order is: a held prompt or question; a decision, question, or approval; PR a
 
 Each option has an action, and a click runs a request that sb already has: `send` sends the option's message, `reply` sends text you type, `merge` and `dismiss` do what `sb merge` and `sb merge --dismiss` do, `wait` sets the option's wait, `done` marks the session done, and `allow`, `deny`, and `answer` answer a held prompt. `sb choose <session> <option>` does what a click does, and `--text` gives a reply option its text. Inside Claude Code, `sb choose` refuses to answer a prompt or to merge. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, `perHour` (default 6), and `systemPrompt` (empty turns the nudge off).
 
-In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the option buttons with the recommended one filled (⌘⇧Return clicks it), a text field for a reply option, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. A held prompt shows its card in place of the buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
+In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the options as rows, each a compact button with a short title and what the option does beside it (under it when the pane is narrower than 420 points), with the recommended button filled (⌘⇧Return clicks it), a text field for a reply option, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. A held prompt shows its card in place of the buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
 
 #### Session summaries
 
@@ -203,8 +203,8 @@ A session writes its Inbox card at the end of a turn that needs you, and sbd sho
   "title": "Pick how to land #98",
   "summary": "Opened #98; CI is green.\nTwo review items need a call.",
   "options": [
-    {"label": "Fix items 3 and 5, then merge", "action": "send", "message": "Fix items 3 and 5, then merge.", "recommended": true},
-    {"label": "Merge as is", "action": "merge"},
+    {"label": "Fix + merge", "detail": "Fixes items 3 and 5, then merges", "action": "send", "message": "Fix items 3 and 5, then merge.", "recommended": true},
+    {"label": "Merge", "detail": "Merges as is", "action": "merge"},
     {"label": "Wait for CI", "action": "wait", "wait": {"kind": "ci", "target": "98"}},
     {"label": "Skip", "action": "done"},
     {"label": "Something else", "action": "reply", "placeholder": "What should it do?"}
@@ -214,7 +214,7 @@ A session writes its Inbox card at the end of a turn that needs you, and sbd sho
 ```
 
 - `summary` is required. sbd keeps its first four lines, each up to 200 characters. `title` defaults to the first line.
-- `options` holds up to 6 buttons. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main button, and `detail` adds a line under its label.
+- `options` holds up to 6 buttons. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main button. A `label` of up to 20 characters is the button's title, and `detail` says beside the button what the option does. A longer label (up to 80 characters) moves beside the button: the part before a `: `, ` — `, ` – `, or ` - ` titles the button when it fits, and otherwise the button shows the action's verb, such as Send or Merge.
 - `callouts` holds up to 5 things to read before deciding, each with a `kind` (`warning`, `decision`, or `info`), a `title`, and a `body`.
 
 sbd drops an option with another action or a wait that `sb wait` would refuse, and a callout with no title or another kind, and `sb summary set` prints what it dropped and why. The card is data: sbd shows it and never runs anything from it, and a button only runs its action, which makes its own checks. A merge button, for one, merges only a PR that is ready to merge. `sb summary help` prints the format for a session to follow.

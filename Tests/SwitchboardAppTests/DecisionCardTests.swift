@@ -125,6 +125,12 @@ import Testing
     #expect(option.accessibilityHint == "Items 3 and 5 stay open. Merges the PR")
   }
 
+  @Test func aDetailThatEndsInAQuestionGetsNoPeriod() {
+    let option = TriageOption(label: "Merge as is", detail: "Leave items 3 and 5?", action: .merge)
+
+    #expect(option.accessibilityHint == "Leave items 3 and 5? Merges the PR")
+  }
+
   @Test func aHintWithoutADetailIsTheEffect() {
     #expect(TriageOption(label: "Skip", action: .done).accessibilityHint == "Marks the session done")
   }
