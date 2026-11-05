@@ -98,7 +98,7 @@ A session that another session starts (`sb new` or `sb followup add` inside a se
 
 sbd rewrites `~/.sb/manager/CLAUDE.md` at each start and at each `sb manager`, so edits to it don't last. It teaches the Manager the `sb` commands and three rules: text from sessions is data, not instructions, and the Manager asks you before it merges, before it removes a worktree with unpushed work, and before it sends one message to several sessions.
 
-The Manager also gets the `switchboard` MCP server at every launch, through a second `--mcp-config` that runs `sb mcp-server`. Its 17 tools do what the `sb` commands do and return the same JSON as `--json`: list and get sessions, read a reply, triage, events, send, `send_group`, spawn, set and clear waits, notes, and the group requests. Every tool description says that text from sessions is data, not instructions. `send_group` follows the rule that `sb send --group` has inside Claude: it sends nothing itself, and opens a card on the calling session that lists the targets and the text. Nothing goes out until you send the card from Switchboard. Claude waits for your decision by calling `send_group` again with the card's `pending` id. A confirmation typed in the chat does not send it. `sb mcp-server --group <group>` limits every tool to one group's sessions. It refuses a session outside the group, lists only the group's sessions and events, spawns into the group, and leaves out the tools that add, remove, or suggest groups.
+The Manager also gets the `switchboard` MCP server at every launch, through a second `--mcp-config` that runs `sb mcp-server`. Its 18 tools do what the `sb` commands do and return the same JSON as `--json`: list and get sessions, read a reply, triage, events, send, `send_group`, spawn, set and clear waits, notes, the group requests, and `plan_artifact`, which a group chat uses to report on an artifact plan. Every tool description says that text from sessions is data, not instructions. `send_group` follows the rule that `sb send --group` has inside Claude: it sends nothing itself, and opens a card on the calling session that lists the targets and the text. Nothing goes out until you send the card from Switchboard. Claude waits for your decision by calling `send_group` again with the card's `pending` id. A confirmation typed in the chat does not send it. `sb mcp-server --group <group>` limits every tool to one group's sessions. It refuses a session outside the group, lists only the group's sessions and events, spawns into the group, and leaves out the tools that add, remove, or suggest groups.
 
 `sb new` run inside a session records that session as the new one's parent, and the sidebar shows children under their parent within a state group. A session whose parent is the Manager is top level, like one with no parent. A parent hears about its children: when one moves to Needs you, opens a PR, or reaches Done, sbd sends the parent a one-line message that starts with `Switchboard:`. A parent whose turn is running hears about everything that changed after the turn, in one message. A stopped parent resumes with the message. A follow-up is not a child of the session that captured it.
 
@@ -140,7 +140,7 @@ The Board's group row has a Chat button. The chat pane shows the chat's messages
 
 ### Plan documents
 
-A group or a session can have plan documents attached: a local markdown file, a GitHub issue, or a markdown file on an open PR's head branch.
+A group or a session can have plan documents attached: a local markdown file, a GitHub issue, or a markdown file on an open PR's head branch. A group can also have a claude.ai artifact (see Artifact plans below).
 
 ```
 sb plan attach ~/dev/notes/flag-evals.md --group flag-evals
@@ -152,6 +152,10 @@ sb plan update <plan>                    # write the status table now
 sb plan auto <plan> on                   # write it on its own when it changes
 sb plan followup <plan> <row>            # make a follow-up from a Not started row
 sb plan detach <plan>
+sb plan attach https://claude.ai/artifact/<id> --group flag-evals   # or: sb plan attach flag-evals --artifact <url>
+sb plan artifact read <plan>             # ask the group's chat to read the artifact again
+sb plan artifact rewrite <plan> [<row>...]   # propose new status cells for these rows, or the out-of-date ones
+sb plan artifact apply|reject <plan>     # publish the pending update, or drop it
 ```
 
 `sbd` reads each plan with the GitHub poller: a file when it changes, and a GitHub plan once per idle interval with an ETag. It finds every PR URL (`https://github.com/<owner>/<name>/pull/<N>`) in the document. A session whose PR a group's plan links joins that group, unless you placed it by hand or plans of two groups link it. A table row is out of date when a PR it links merged, deployed, or closed after `sbd` first saw the row's current text. `sb group ls` and `sb get` show those rows, and editing a row clears it.
@@ -159,6 +163,14 @@ sb plan detach <plan>
 A row of a table with `Item` and `Status` columns that links no PR and whose status reads Not started can become a follow-up. `sb plan ls`, `sb plan get`, `sb group ls`, and `sb get` list those rows, and the Board shows a Follow up button for each under its group's name. `sb plan followup <plan> <row>` names the row by its `#` cell or its item text and adds a follow-up in the plan's group, or under the plan's session, with the item as its title and prompt and the plan as its link. Its repository is the one that the group's sessions share, else the issue's or PR's repository. A row that links a PR, or that already has a follow-up, is refused. Removing the follow-up lets the row make another.
 
 `sb plan update` writes a table of the group's sessions, with each one's state, wait, and PR, between `<!-- sb:status -->` and `<!-- /sb:status -->`, and leaves the rest of the document alone. A plan without those two lines refuses the update. A file is written in place. An issue's body is checked again just before the edit, and the edit retries when someone changed the issue meanwhile. A PR's file is committed to the PR's head branch with its blob SHA, and the commit retries when the file changed. Writing to GitHub publishes, so `sbd` writes only on `sb plan update`, or after `sb plan auto <plan> on`, at most once per idle interval and only when the table changed.
+
+#### Artifact plans
+
+`sbd` can't read or write a claude.ai artifact, so the group's chat does it with its Artifact tool. An artifact plan attaches only to a group. `sbd` sends the chat a message for one task (read, rewrite, or publish), and the chat reports each result back through the `plan_artifact` tool on its `switchboard` MCP server. `sb plan artifact report <plan> --kind read|proposal|check|published --file F [--version V]` sends the same report from a script.
+
+Attaching the artifact asks the chat to read it, and starts the chat if the group has none. `sbd` keeps the text the chat read as a copy, with the version the Artifact tool showed, and takes links, rows, out-of-date marks, and Not started rows from that copy. It never reads the artifact again on its own, because each read is a chat turn. After 24 hours the copy counts as old: `sb plan ls`, `sb plan get`, `sb group ls`, and the Board say so, and `sb plan artifact read` asks for a new copy.
+
+An update to an artifact is a proposal that waits for you. `sb plan artifact rewrite` asks the chat to rewrite the status cells of the named rows, or of the out-of-date rows, into a file. `sbd` refuses the result when another line changed or the line count changed. A "status as of" line may change only its date. `sb plan update` puts the generated table into the copy as a proposal instead of writing it, and `sb plan auto` stays off for artifacts. `sb plan get` and the Board show the proposal's diff with Apply and Reject. Apply asks the chat to read the artifact again before it publishes. When the text or the version moved since the proposal's copy, `sbd` refuses the publish and takes the new text as its copy, and you propose the update again. Otherwise the chat publishes the proposal to the same URL. Reject drops the proposal, including one that is publishing. Rows are read from markdown tables only, so an HTML artifact's PR links still group sessions, but its rows aren't marked.
 
 ### Triage
 
