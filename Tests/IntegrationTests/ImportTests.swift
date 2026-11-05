@@ -54,7 +54,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
   Dictionary(result.refused.map { ($0.ref, $0.reason) }, uniquingKeysWith: { first, _ in first })
 }
 
-@Suite(.timeLimit(.minutes(2))) struct ImportTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct ImportTests {
   @Test func listsWorktreeSessionsByDefaultAndEverySessionWithAll() throws {
     let start = nowMs()
     let sbd = try Instance(accounts: ["A", "B"])

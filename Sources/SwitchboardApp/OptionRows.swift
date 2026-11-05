@@ -20,8 +20,9 @@ struct OptionRow {
     } else if let (head, tail) = Self.split(label) {
       (title, lead) = (head, tail)
     } else {
-      // The action's name, such as Send or Merge.
-      (title, lead) = (Triage.capitalized(option.action.rawValue), label)
+      // The action's name, such as Send or Merge. The UI calls `dismiss` Acknowledge.
+      let name = option.action == .dismiss ? "acknowledge" : option.action.rawValue
+      (title, lead) = (Triage.capitalized(name), label)
     }
     description = Self.join(lead, option.detail)
   }
@@ -105,7 +106,10 @@ struct OptionList: View {
       // VoiceOver reads this text from the button's label and hint.
       VStack(alignment: .leading, spacing: 2) {
         if let description = rows[i].description { Text(description).foregroundStyle(.secondary) }
-        if option.showsEffect { Text(option.effect).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
+        if option.showsEffect {
+          Text(option.effect(mergeMethod: session.pr?.mergeMethod)).font(.caption).foregroundStyle(.secondary)
+            .lineLimit(3)
+        }
         if primary { Text("⇧⌘↩").font(.caption).foregroundStyle(.tertiary) }
       }
       .fixedSize(horizontal: false, vertical: true)

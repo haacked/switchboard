@@ -21,7 +21,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct LiveCapTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct LiveCapTests {
   func instance(cap: Int, extra: [String: JSON] = [:]) throws -> Instance {
     try Instance(config: extra.merging(["liveCap": .number(Double(cap))]) { $1 })
   }

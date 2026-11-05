@@ -296,6 +296,8 @@ public final class Service {
       try update(id) { $0.done = done }
       record(id, done ? "done" : "undone")
       return try JSON(encoding: summary(id))
+    case "ack":
+      return try acknowledgeRequest(args)
     case "wait", "clear-wait", "resolve-wait":
       return try waitRequest(op, args)
     case "note", "remove-note":
@@ -1385,7 +1387,7 @@ public final class Service {
 
   func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
-    let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
+    let verdict = Attention.shown(Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
@@ -1413,7 +1415,10 @@ public final class Service {
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
+    if verdict.acknowledged { out.acknowledged = true }
     out.permissionMode = e.facts.permissionMode
+    out.pr?.mergeMethod = e.facts.mergeMethod
+    if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.

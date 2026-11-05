@@ -4,7 +4,7 @@ import Testing
 
 /// The stub plays the payloads that the real claude tier recorded, so sbd
 /// sees the same events from the stub as from claude.
-@Suite(.timeLimit(.minutes(2))) struct StubTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct StubTests {
   /// Normalizes the stub's payloads after the event id `after`, through the
   /// event id `through`, as the real tier normalizes its own, and compares
   /// them with the step's recording.

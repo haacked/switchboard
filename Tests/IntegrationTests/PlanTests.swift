@@ -137,7 +137,7 @@ extension Instance {
   var planFile: String { "\(home.path)/notes/flag-evaluations.md" }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct PlanTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct PlanTests {
   // MARK: reads
 
   @Test func fileReadShowsLinksAndRows() throws {

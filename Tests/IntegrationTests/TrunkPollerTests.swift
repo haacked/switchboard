@@ -97,7 +97,7 @@ private let failedText =
 private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run trunk login\u{1B}[0m\n"
 
 /// PRs, comments, and trunk runs through `sb poll` against the fake GitHub and a fake trunk.
-@Suite(.timeLimit(.minutes(2))) struct TrunkPollerTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct TrunkPollerTests {
   static let posthog = "PostHog/posthog"
   /// A poll interval long enough that sbd's timer never fires during a test, so
   /// only the test's own polls run trunk. The interval tests need a nonzero

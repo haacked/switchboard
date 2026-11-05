@@ -46,7 +46,7 @@ extension Instance {
 
 /// A session whose PR is open and not a draft, and that waits on other
 /// people, is in Ready for review.
-@Suite(.timeLimit(.minutes(2))) struct ReadyForReviewTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct ReadyForReviewTests {
   static let charts = "PostHog/charts"
   /// The head branch of PostHog/charts#18303. The fixture records it as open,
   /// mergeable, and approved, so each test first makes it wait on a review.

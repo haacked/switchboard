@@ -25,7 +25,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct TriageTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct TriageTests {
   @Test func summarizesATurnThatEndsInProse() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask", name: "review-code")
@@ -255,7 +255,7 @@ extension Instance {
     #expect(item.source == .rule)
     #expect(item.kind == .approval)
     #expect(item.title == "#18303 is ready to merge, approved by stamphog")
-    #expect(item.options.map(\.label) == ["Merge #18303", "Dismiss"])
+    #expect(item.options.map(\.label) == ["Merge #18303", "Acknowledge"])
     #expect(item.options.map(\.action) == [.merge, .dismiss])
   }
 

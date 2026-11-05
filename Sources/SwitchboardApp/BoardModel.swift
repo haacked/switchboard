@@ -54,9 +54,11 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
-  /// Sessions whose merge or dismissal is on its way to sbd. Their buttons
-  /// stay disabled until sbd replies, so a second click can't merge again.
+  /// Sessions whose merge is on its way to sbd. Their buttons stay disabled
+  /// until sbd replies, so a second click can't merge again.
   @Published var merging: Set<String> = []
+  /// Sessions whose acknowledgment or its undo is on its way to sbd.
+  @Published var acknowledging: Set<String> = []
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -97,8 +99,10 @@ final class BoardModel: ObservableObject {
   /// What the user picked or typed on each open card, by card id. The Inbox
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
+  /// What the user typed in each message field and has not sent.
+  private let messageDrafts: MessageDrafts
 
-  let client = Client()
+  let client: Client
   /// Sends one request to sbd. Tests replace it.
   lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
     try client.call(op, args, timeout: 300)
@@ -122,6 +126,13 @@ final class BoardModel: ObservableObject {
   private var followupsRead = Date.distantPast
   /// sbd reads the usage every few minutes, so the app asks once a minute.
   private var usageRead = Date.distantPast
+
+  /// Takes the client so that tests can't reach the user's sbd by default.
+  /// Without `draftsFolder`, the message drafts last only while the model does.
+  init(client: Client, draftsFolder: String? = nil) {
+    self.client = client
+    messageDrafts = MessageDrafts(folder: draftsFolder)
+  }
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
@@ -255,6 +266,7 @@ final class BoardModel: ObservableObject {
       if loaded { sessionsToNotify(list).forEach(notify) }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
+      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)))
       if !sameShown(sessions, list) { sessions = list }
       let listed = Set(board.map(\.id))
       if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
@@ -502,12 +514,37 @@ final class BoardModel: ObservableObject {
       finally: { self.answering.remove(card.id) })
   }
 
-  /// Merges the session's PR, or with `dismiss` takes it out of Ready to merge.
-  func merge(_ id: String, dismiss: Bool = false) {
+  func merge(_ id: String) {
     guard merging.insert(id).inserted else { return }
+    perform("merge", ["session": .string(id)], on: merges, finally: { self.merging.remove(id) })
+  }
+
+  /// Takes the session's item out of the Inbox, or with `undo` puts it back.
+  /// The Inbox moves its focus from an acknowledged item to the next one.
+  func acknowledge(_ id: String, undo: Bool = false) {
+    guard acknowledging.insert(id).inserted else { return }
     var args: [String: JSON] = ["session": .string(id)]
-    if dismiss { args["dismiss"] = true }
-    perform("merge", args, on: merges, finally: { self.merging.remove(id) })
+    if undo {
+      args["undo"] = true
+    } else if currentInboxItem == id {
+      moveInbox(by: 1)
+      // A field in the item that scrolls away would keep the keystrokes. A
+      // session's terminal outside the Inbox keeps them.
+      if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
+    }
+    perform(
+      "ack", args,
+      then: { value in
+        // The user put the item back, so the refresh must not notify about it.
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+      },
+      finally: { self.acknowledging.remove(id) })
+  }
+
+  /// The session that the Session menu's Acknowledge acts on: the current
+  /// Inbox item while the Inbox shows, else the selected session.
+  var acknowledgeTarget: SessionSummary? {
+    visibleView == .inbox ? sessions.first { $0.id == currentInboxItem } : selected
   }
 
   /// Clicks the item's option. `text` is what the user typed for a reply option.
@@ -567,6 +604,10 @@ final class BoardModel: ObservableObject {
         if let text, self.replies[session] != text { self.replies[session] = text }
       }
     }
+  }
+
+  func messageDraft(for session: SessionSummary) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.key(for: session))
   }
 
   func draft(for card: Card) -> CardView.Draft {

@@ -5,7 +5,7 @@ import Testing
 /// A group's description: `sb group add --description`, `sb group describe`,
 /// the defaults that accepted suggestions build, and the context that the
 /// group's chat and the MCP tools see.
-@Suite(.timeLimit(.minutes(2))) struct GroupDescriptionTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct GroupDescriptionTests {
   static let limit = SessionGroup.descriptionLimit
   let shared = GroupTests()
 

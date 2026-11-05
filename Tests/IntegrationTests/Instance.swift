@@ -84,6 +84,7 @@ final class Instance {
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
     inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
   ) throws {
+    Blocking.requireSlot()
     _ = Instance.watcher
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }

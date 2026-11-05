@@ -5,18 +5,21 @@ import Testing
 
 /// A PR that every ready-to-merge condition passes: open, not a draft,
 /// mergeable, its checks passed, no review required, and a repository that
-/// the poller read has no `.trunk` folder.
+/// the poller read has no `.trunk` folder and a base branch without a merge
+/// queue.
 private func readyPR(
   draft: Bool = false, headSha: String = samplePRHead, base: String = "main", defaultBranch: String? = "main",
   mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [],
   checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil,
-  trunkConfig: Bool? = false
+  trunkConfig: Bool? = false, mergeQueue: Bool? = false
 ) -> PullRequest {
   var pr = samplePR(
     draft: draft, headSha: headSha, base: base, defaultBranch: defaultBranch, mergeable: mergeable,
     reviewDecision: reviewDecision, verdicts: verdicts, checks: checks, mergedBase: mergedBase, queue: queue,
     reviewRequests: reviewRequests)
   pr.trunkConfig = trunkConfig
+  pr.mergeQueue = mergeQueue
+  pr.reviewDecisionRead = true
   return pr
 }
 
@@ -24,6 +27,12 @@ func mergeEvent(_ t: Int64, head: String, _ result: String, error: String? = nil
   var fields: [String: JSON] = ["head": .string(head), "result": .string(result)]
   if let error { fields["error"] = .string(error) }
   return event("merge", t, fields)
+}
+
+/// An acknowledgment of the Ready to merge verdict with `reason`.
+private func ackEvent(_ t: Int64, _ reason: String, head: String) throws -> Event {
+  let data = try JSON(encoding: Acknowledgment(state: .readyToMerge, reason: reason, head: head))
+  return event("ack", t, data.object ?? [:])
 }
 
 func dependenciesEvent(_ t: Int64, _ deps: [Dependency]) throws -> Event {
@@ -36,7 +45,7 @@ private let trunkBotComment = PRComment(
 private let now: Int64 = 10
 
 private func verdict(_ facts: SessionFacts, _ s: Session = session()) -> Verdict {
-  Attention.evaluate(s, facts, now: now)
+  Attention.shown(Attention.evaluate(s, facts, now: now), facts)
 }
 
 /// The suites nest under one name, so `--filter MergeAttentionTests` runs them all.
@@ -69,9 +78,16 @@ extension MergeAttentionTests {
     }
 
     @Test func laterMergeEventReplacesTheEarlierOne() {
-      let f = facts([mergeEvent(1, head: "abc", "failed", error: "boom"), mergeEvent(2, head: "abc", "dismissed")])
+      let f = facts([mergeEvent(1, head: "abc", "failed", error: "boom"), mergeEvent(2, head: "abc", "merged")])
 
-      #expect(f.merge == MergeAttempt(head: "abc", result: .dismissed))
+      #expect(f.merge == MergeAttempt(head: "abc", result: .merged))
+    }
+
+    /// An event that sbd recorded before Acknowledge can hold `dismissed`, which MergeAttempt does not decode.
+    @Test func dismissedMergeEventNoLongerDecodes() {
+      let f = facts([mergeEvent(1, head: "abc", "dismissed")])
+
+      #expect(f.merge == nil)
     }
   }
 }
@@ -149,20 +165,21 @@ extension MergeAttentionTests {
       #expect(verdict(f).state != .readyToMerge)
     }
 
-    @Test func prWithATrunkCommentAmongOtherCommentsIsNotReadyToMerge() throws {
+    @Test func prWithATrunkCommentAmongOtherCommentsOffersEnqueue() throws {
       let comments = [
         PRComment(id: "IC_gh", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:00Z"), trunkBotComment,
       ]
       let f = try prFacts(
         readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
 
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "enqueue #42, approved by alice"))
+      #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge, approved by alice"))
+      #expect(verdict(f).options.map(\.label) == ["Enqueue #42", "Acknowledge"])
     }
 
     /// A busy PR in a Trunk repository: Trunk's comment is outside the
     /// comments the poller reads, so only the repository's `.trunk` folder
     /// shows the queue.
-    @Test func prInARepositoryWithATrunkFolderIsNotReadyToMerge() throws {
+    @Test func prInARepositoryWithATrunkFolderOffersEnqueue() throws {
       let comments = (0..<25).map {
         PRComment(id: "IC_\($0)", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:\(10 + $0)Z")
       }
@@ -170,13 +187,20 @@ extension MergeAttentionTests {
         readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], trunkConfig: true),
         comments: comments)
 
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "enqueue #42, approved by alice"))
+      #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge, approved by alice"))
+      #expect(verdict(f).options.map(\.label) == ["Enqueue #42", "Acknowledge"])
     }
 
-    @Test func prWhoseTrunkFolderWasNotReadIsNotReadyToMerge() throws {
-      let f = try prFacts(readyPR(trunkConfig: nil))
+    @Test(arguments: [(Bool?.none, Bool?.some(false)), (false, nil), (nil, nil)])
+    func prWhoseMergeMethodWasNotReadHasNoMergeOption(_ trunkConfig: Bool?, _ mergeQueue: Bool?) throws {
+      let f = try prFacts(readyPR(trunkConfig: trunkConfig, mergeQueue: mergeQueue))
 
-      #expect(verdict(f).state != .readyToMerge)
+      #expect(
+        verdict(f)
+          == Verdict(
+            state: .readyToMerge,
+            reason: "#42 is ready to merge; can't tell how acme/widgets merges, so merge it on GitHub"))
+      #expect(verdict(f).options.map(\.action) == [.dismiss])
     }
 
     @Test func prWithOnlyOtherBotCommentsIsReadyToMerge() throws {
@@ -270,35 +294,66 @@ extension MergeAttentionTests {
 
     // Merge attempts
 
-    @Test func dismissedAttemptAtTheHeadFallsThroughToTheOtherRules() throws {
+    @Test func oldDismissedEventAtTheHeadLeavesThePRReadyToMerge() throws {
       let f = try prFacts(readyPR(), then: [mergeEvent(3, head: samplePRHead, "dismissed")])
-
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "read its last reply and decide what's next"))
-    }
-
-    @Test func dismissedApprovedPRDoesNotAskForTheMergeAgain() throws {
-      let f = try prFacts(
-        readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]),
-        then: [mergeEvent(3, head: samplePRHead, "dismissed")])
-
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "read its last reply and decide what's next"))
-    }
-
-    @Test func dismissedAttemptAtAnOlderHeadIsReadyToMerge() throws {
-      let f = try prFacts(readyPR(), then: [mergeEvent(3, head: "older", "dismissed")])
 
       #expect(verdict(f) == Verdict(state: .readyToMerge, reason: "#42 is ready to merge"))
     }
 
-    @Test func pushAfterADismissalMakesThePRReadyAgain() throws {
+    // Acknowledgments
+
+    @Test func acknowledgedApprovedPRIsWaitingWithItsReason() throws {
+      let reason = "#42 is ready to merge, approved by alice"
+      let f = try prFacts(
+        readyPR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]),
+        then: [try ackEvent(3, reason, head: samplePRHead)])
+
+      let v = verdict(f)
+
+      #expect(v == Verdict(state: .waiting, reason: reason))
+      #expect(v.acknowledged)
+    }
+
+    @Test func pushAfterAnAcknowledgmentMakesThePRReadyAgain() throws {
       let f = try prFacts(
         readyPR(),
         then: [
-          mergeEvent(3, head: samplePRHead, "dismissed"),
+          try ackEvent(3, "#42 is ready to merge", head: samplePRHead),
           event("pr", 4, ["pr": try JSON(encoding: readyPR(headSha: "pushed"))]),
         ])
 
-      #expect(verdict(f).state == .readyToMerge)
+      let v = verdict(f)
+
+      #expect(v.state == .readyToMerge)
+      #expect(!v.acknowledged)
+    }
+
+    @Test func acknowledgmentStaysAcrossPollsOfTheSameHead() throws {
+      var retitled = readyPR()
+      retitled.title = "a new title"
+      let f = try prFacts(
+        readyPR(),
+        then: [
+          try ackEvent(3, "#42 is ready to merge", head: samplePRHead),
+          event("pr", 4, ["pr": try JSON(encoding: retitled)]),
+        ])
+
+      #expect(verdict(f).acknowledged)
+    }
+
+    @Test func newTurnAfterAnAcknowledgmentMakesThePRReadyAgain() throws {
+      let f = try prFacts(
+        readyPR(),
+        then: [
+          try ackEvent(3, "#42 is ready to merge", head: samplePRHead),
+          event("UserPromptSubmit", 4, ["prompt": "one more thing"]),
+          event("Stop", 5, ["last_assistant_message": "Pushed."]),
+        ])
+
+      let v = verdict(f)
+
+      #expect(v.state == .readyToMerge)
+      #expect(!v.acknowledged)
     }
 
     @Test func failedAttemptAtTheHeadStaysReadyToMerge() throws {
@@ -316,14 +371,6 @@ extension MergeAttentionTests {
 
     @Test func mergedAttemptAtAnOlderHeadIsReadyToMerge() throws {
       let f = try prFacts(readyPR(), then: [mergeEvent(3, head: "older", "merged")])
-
-      #expect(verdict(f).state == .readyToMerge)
-    }
-
-    @Test func failedAttemptAfterADismissalAtTheHeadIsReadyToMerge() throws {
-      let f = try prFacts(
-        readyPR(),
-        then: [mergeEvent(3, head: samplePRHead, "dismissed"), mergeEvent(4, head: samplePRHead, "failed", error: "x")])
 
       #expect(verdict(f).state == .readyToMerge)
     }

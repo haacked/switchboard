@@ -48,8 +48,11 @@ struct ChatView: View {
         CardList(cards: session.cards)
         let proposals = model.planProposals.filter { $0.group == group }
         if !proposals.isEmpty { PlanProposalList(proposals: proposals) }
-        MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
-          .padding(8)
+        MessageField(
+          session: session.id, draft: model.messageDraft(for: session),
+          shortcut: KeyboardShortcut(.return, modifiers: [.command])
+        )
+        .padding(8)
       }
     }
     // A tool call changes lastActivity, so the log reloads only when the reply or the state changes.

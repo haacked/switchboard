@@ -14,11 +14,15 @@ extension Instance {
     ])
   }
 
-  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
-  func ghMerges() -> [String] {
+  /// The arguments of each gh call that the stub ran and that starts with
+  /// `prefix`, oldest first.
+  func ghCalls(_ prefix: String) -> [String] {
     let text = (try? String(contentsOfFile: "\(home.path)/gh-calls.log", encoding: .utf8)) ?? ""
-    return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix("pr merge ") }
+    return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix(prefix) }
   }
+
+  /// The arguments of each `gh pr merge` that the stub ran, oldest first.
+  func ghMerges() -> [String] { ghCalls("pr merge ") }
 
   /// Makes the stub's `gh pr merge` print `text` to stderr and exit 1.
   func ghMergeFails(with text: String) throws {
@@ -32,7 +36,7 @@ extension Instance {
 }
 
 /// `sb merge` merges a ready PR with gh and resumes the session.
-@Suite(.timeLimit(.minutes(2))) struct MergeTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct MergeTests {
   static let charts = "PostHog/charts"
   /// The head branch of PostHog/charts#18303, which the fixture records as
   /// open, mergeable, approved by stamphog, and with checks that passed.
@@ -63,7 +67,7 @@ extension Instance {
   /// A busy PR in a repository that merges through Trunk: Trunk's comment is
   /// older than the comments the poller reads, so the poller sees only other
   /// bots. The repository's `.trunk` folder still shows the queue.
-  @Test func busyPRInATrunkRepositoryIsNotReadyAndMergeIsRefused() throws {
+  @Test func busyPRInATrunkRepositoryIsEnqueuedWithoutAMerge() throws {
     let github = try FakeGitHub()
     github.change(MergeTests.number) {
       $0["repository"] = [
@@ -79,10 +83,12 @@ extension Instance {
     let sbd = try Instance.withMergeStub(github)
     let s = try readySession(sbd)
 
+    #expect(try sbd.get(s.id).reason == "#18303 is ready to merge, approved by stamphog")
+
     let r = try sbd.run(["merge", s.id])
 
-    #expect(try sbd.get(s.id).reason == "enqueue #18303, approved by stamphog")
-    #expect(r.status != 0)
+    #expect(r.status == 0)
+    #expect(sbd.ghComments() == ["pr comment 18303 --repo PostHog/charts --body /trunk merge"])
     #expect(sbd.ghMerges().isEmpty)
   }
 
@@ -227,21 +233,80 @@ extension Instance {
     #expect(try sbd.messagesFromSbd(s.id).isEmpty)
   }
 
-  @Test func dismissedPRLeavesReadyToMergeUntilANewPush() throws {
+  @Test func dismissAcknowledgesTheReadyToMergeItem() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try readySession(sbd)
 
     try sbd.sb("merge", "--dismiss", s.id)
 
-    #expect(try sbd.getJSON(s.id)["state"]?.string != "ready_to_merge")
+    let got = try sbd.getJSON(s.id)
+    #expect(got["state"]?.string == "waiting")
+    #expect(got["reason"]?.string == "#18303 is ready to merge, approved by stamphog")
+    #expect(got["acknowledged"]?.bool == true)
     #expect(sbd.ghMerges().isEmpty)
-    github.change(MergeTests.number) { $0["headRefOid"] = "pushed" }
-    try sbd.poll(all: true)
-    #expect(try sbd.getJSON(s.id)["state"]?.string == "ready_to_merge")
   }
 
-  @Test func dismissedPRStaysDismissedAcrossPollsOfTheSameHead() throws {
+  @Test func dismissPrintsThatItAcknowledgedThePR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+
+    let printed = try sbd.sb("merge", "--dismiss", s.id)
+
+    #expect(printed.trimmingCharacters(in: .whitespacesAndNewlines) == "acknowledged #18303 of \(s.name)")
+  }
+
+  @Test func acknowledgedReadyToMergeSessionStillMerges() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+    try sbd.sb("ack", s.id)
+
+    try sbd.sb("merge", s.id)
+
+    #expect(
+      sbd.ghMerges() == ["pr merge 18303 --repo PostHog/charts --merge --match-head-commit \(head(github))"])
+  }
+
+  @Test func secondDismissRecordsNoSecondAck() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+
+    try sbd.sb("merge", "--dismiss", s.id)
+    try sbd.sb("merge", "--dismiss", s.id)
+
+    #expect(try sbd.events(s.id).filter { $0.kind == "ack" }.count == 1)
+  }
+
+  @Test func dismissRecordsAnAckEventAndNoMergeEvent() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+
+    try sbd.sb("merge", "--dismiss", s.id)
+
+    let kinds = try sbd.events(s.id).map(\.kind)
+    #expect(kinds.filter { $0 == "ack" }.count == 1)
+    #expect(!kinds.contains("merge"))
+  }
+
+  @Test func dismissedPRReturnsToReadyToMergeAfterANewPush() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+    try sbd.sb("merge", "--dismiss", s.id)
+
+    github.change(MergeTests.number) { $0["headRefOid"] = "pushed" }
+    try sbd.poll(all: true)
+
+    let got = try sbd.getJSON(s.id)
+    #expect(got["state"]?.string == "ready_to_merge")
+    #expect(got["acknowledged"] == nil)
+  }
+
+  @Test func dismissedPRStaysAcknowledgedAcrossPollsOfTheSameHead() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try readySession(sbd)
@@ -250,7 +315,23 @@ extension Instance {
 
     try sbd.poll(all: true)
 
-    #expect(try sbd.getJSON(s.id)["state"]?.string != "ready_to_merge")
+    let got = try sbd.getJSON(s.id)
+    #expect(got["state"]?.string == "waiting")
+    #expect(got["acknowledged"]?.bool == true)
+  }
+
+  @Test func dismissedPRReturnsToReadyToMergeAfterANewTurn() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+    try sbd.sb("merge", "--dismiss", s.id)
+
+    try sbd.sb("send", s.id, "again")
+
+    let back = try sbd.waitFor(s.id, "the reply to the new turn") {
+      $0.lastReply == "Done: again" && $0.state == .readyToMerge
+    }
+    #expect(back.acknowledged == nil)
   }
 
   @Test func mergeInsideClaudeCodeIsRefused() throws {
@@ -289,14 +370,16 @@ extension Instance {
     try sbd.waitFor("the post-merge message") { try !sbd.messagesFromSbd(s.id).isEmpty }
   }
 
-  @Test func dismissByPRNumberDismissesThatSessionsPR() throws {
+  @Test func dismissByPRNumberAcknowledgesThatSessionsPR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try readySession(sbd)
 
     try sbd.sb("merge", "--dismiss", "#18303")
 
-    #expect(try sbd.getJSON(s.id)["state"]?.string != "ready_to_merge")
+    let got = try sbd.getJSON(s.id)
+    #expect(got["state"]?.string == "waiting")
+    #expect(got["acknowledged"]?.bool == true)
   }
 
   @Test func mergeByAPRNumberThatTwoSessionsShareIsRefused() throws {

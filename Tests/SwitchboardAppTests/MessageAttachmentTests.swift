@@ -280,8 +280,7 @@ import Testing
   // MARK: submit(_:to:)
 
   @Test func submitSendsAnImageWithoutText() async throws {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     let requests = Sent()
     model.send = { op, args in
       requests.add(op, args)

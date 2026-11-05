@@ -4,7 +4,7 @@ import Testing
 
 /// `sb spawn` and the `spawn` request: a session in a new worktree of a repo
 /// that `--repo` names, or a follow-up that waits to start there.
-@Suite(.timeLimit(.minutes(2))) struct SpawnTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct SpawnTests {
   /// The environment of a command that Claude runs inside the session.
   func inside(_ id: String) -> [String: String] { ["SB_SESSION_ID": id, "CLAUDECODE": "1"] }
 
