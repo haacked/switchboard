@@ -135,6 +135,32 @@ public struct PlanLink: Codable, Equatable, Hashable, Sendable {
 /// How far a PR has gone, as a plan row tracks it.
 public enum PlanStage: String, Codable, Sendable {
   case open, merged, deployed, closed
+
+  /// The stage of a PR in that state. A deployed PR reads as merged, because
+  /// GitHub's PR state has no deployed value.
+  public init(_ state: PRState) {
+    switch state {
+    case .open: self = .open
+    case .merged: self = .merged
+    case .closed: self = .closed
+    }
+  }
+}
+
+/// The table of a plan that a new row goes into: the one with `Item` and
+/// `Status` columns that holds the most rows.
+public struct PlanTable: Codable, Equatable, Sendable {
+  public var header: [String]
+  /// The table's last line, trimmed. A new row goes after it.
+  public var last: String
+  /// The largest number in the `#` column, or nil when it has none.
+  public var lastNumber: Int?
+
+  public init(header: [String], last: String, lastNumber: Int? = nil) {
+    self.header = header
+    self.last = last
+    self.lastNumber = lastNumber
+  }
 }
 
 /// A table row of a plan that links at least one PR, or that links none and
@@ -175,6 +201,8 @@ public struct PlanRow: Codable, Equatable, Sendable {
   public var number: String?
   public var item: String?
   public var status: String?
+  /// The index of the status cell among the row's cells.
+  public var statusColumn: Int?
   /// The follow-up made from the row. sbd fills it in when it reports the
   /// plan, and the stored record leaves it nil. The follow-up's
   /// `planRow` is what records the link.
@@ -225,6 +253,16 @@ public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
   /// The text between the status markers at the last read, or nil when the
   /// document has none.
   public var statusBlock: String?
+  public var workTable: PlanTable?
+  /// The update that waits for the user's Apply or Reject.
+  public var proposal: PlanProposal?
+  /// When sbd last asked the model for an update, in ms since the epoch.
+  public var proposed: Int64?
+  /// The key of the last batch that the user rejected or that changed no
+  /// cell. Later polls don't propose that batch again.
+  public var settled: String?
+  /// Why sbd ran no update, or nil after one ran.
+  public var updateNote: String?
   /// The copy of an artifact plan and its pending update, or nil for other types.
   public var artifact: ArtifactPlan?
 
@@ -257,9 +295,11 @@ public struct PlanDocument: Codable, Equatable, Sendable, Identifiable {
       kept.number = row.number
       kept.item = row.item
       kept.status = row.status
+      kept.statusColumn = row.statusColumn
       return kept
     }
     statusBlock = content.statusBlock
+    workTable = content.workTable
     read = now
     error = nil
   }
@@ -295,6 +335,9 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
   public var outOfDate: [PlanRow]
   /// The Not started rows that have no follow-up yet.
   public var canFollowUp: [PlanRow]
+  /// The id of the update that waits for the user.
+  public var update: String?
+  public var updateNote: String?
   /// For an artifact plan: true when its copy is missing or old.
   public var copyStale: Bool?
   /// For an artifact plan: its pending update.
@@ -311,6 +354,8 @@ public struct PlanSummary: Codable, Equatable, Sendable, Identifiable {
     links = plan.links.count
     rows = plan.rows.count
     outOfDate = plan.rows.filter(\.outOfDate)
+    update = plan.proposal?.id
+    updateNote = plan.updateNote
     canFollowUp = plan.rows.filter { $0.notStarted && $0.followup == nil }.map { row in
       var row = row
       row.ref = Plans.ref(of: row, in: plan.rows)
@@ -333,12 +378,16 @@ public enum Plans {
       public var number: String?
       public var item: String?
       public var status: String?
+      /// The index of the status cell among the row's cells, or nil when its
+      /// table has no `Item` and `Status` columns.
+      public var statusColumn: Int?
     }
 
     public var links: [PlanLink]
     public var rows: [Row]
     /// The text between the status markers, or nil without them.
     public var statusBlock: String?
+    public var workTable: PlanTable?
   }
 
   static let prURL = try! NSRegularExpression(
@@ -379,26 +428,50 @@ public enum Plans {
     let lines = outside.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     var rows: [Content.Row] = []
     var columns: Columns?
+    // The work table is the table with Item and Status columns that holds
+    // the most rows. A later table wins a tie.
+    var table: (table: PlanTable, rows: Int)?
+    var work: (table: PlanTable, rows: Int)?
+    func endTable() {
+      if let t = table, t.rows >= (work?.rows ?? 0) { work = t }
+      table = nil
+    }
     for (i, line) in lines.enumerated() {
       guard line.hasPrefix("|") else {
         columns = nil
+        endTable()
         continue
       }
-      if isSeparator(line) { continue }
+      if isSeparator(line) {
+        table?.table.last = line
+        continue
+      }
+      let row = cells(line)
       // The line above a separator is the table's header.
       if i + 1 < lines.count, isSeparator(lines[i + 1]) {
-        columns = Columns(header: cells(line))
+        endTable()
+        columns = Columns(header: row)
+        if columns?.status != nil { table = (PlanTable(header: row, last: line), 0) }
         continue
       }
+      table?.table.last = line
+      if let n = columns?.number, n < row.count, let value = Int(row[n]) {
+        let last = table?.table.lastNumber ?? 0
+        table?.table.lastNumber = max(last, value)
+      }
       let links = links(in: line)
-      let row = cells(line)
       func cell(_ index: Int?) -> String? { index.flatMap { $0 < row.count && !row[$0].isEmpty ? row[$0] : nil } }
       let item = cell(columns?.item)
       let status = cell(columns?.status)
       guard !links.isEmpty || notStarted(item: item, status: status) else { continue }
-      rows.append(Content.Row(text: line, links: links, number: cell(columns?.number), item: item, status: status))
+      table?.rows += 1
+      rows.append(
+        Content.Row(
+          text: line, links: links, number: cell(columns?.number), item: item, status: status,
+          statusColumn: columns?.status.flatMap { $0 < row.count ? $0 : nil }))
     }
-    return Content(links: links(in: outside), rows: rows, statusBlock: block)
+    endTable()
+    return Content(links: links(in: outside), rows: rows, statusBlock: block, workTable: work?.table)
   }
 
   /// Where a table's `#`, `Item`, and `Status` columns are. A table without
@@ -441,6 +514,34 @@ public enum Plans {
     // The text after the last `|` is a cell only when the line has no trailing `|`.
     if !current.trimmingCharacters(in: .whitespaces).isEmpty { cells.append(current) }
     return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+  }
+
+  /// The line with the text of cell `index` replaced by `text` and every
+  /// other character kept, or nil when the line has no such cell. Cells
+  /// count as `cells(_:)` counts them.
+  static func replacingCell(_ line: String, _ index: Int, with text: String) -> String? {
+    var bars: [String.Index] = []
+    var escaped = false
+    for i in line.indices {
+      if escaped {
+        escaped = false
+      } else if line[i] == "\\" {
+        escaped = true
+      } else if line[i] == "|" {
+        bars.append(i)
+      }
+    }
+    guard bars.first == line.startIndex, index >= 0, index < bars.count else { return nil }
+    let start = line.index(after: bars[index])
+    let end: String.Index
+    if index + 1 < bars.count {
+      end = bars[index + 1]
+    } else if !line[start...].trimmingCharacters(in: .whitespaces).isEmpty {
+      end = line.endIndex
+    } else {
+      return nil
+    }
+    return String(line[..<start]) + " \(text) " + String(line[end...])
   }
 
   /// Whether a row names an item and its status cell reads Not started,
@@ -509,7 +610,7 @@ public enum Plans {
     var lines = ["| Session | State | Wait | PR |", "| --- | --- | --- | --- |"]
     for s in sessions.sorted(by: { ($0.name, $0.id) < ($1.name, $1.id) }) {
       let pr = s.pr.map { "[\($0.repo)#\($0.number)](\($0.url)) \($0.state.rawValue.lowercased())" } ?? ""
-      let cells = [s.name, s.state.title, s.waits.first?.line ?? "", pr].map(cell)
+      let cells = [s.name, s.state.title, s.waits.first?.line ?? "", pr].map { cell($0) }
       lines.append("| " + cells.joined(separator: " | ") + " |")
     }
     return lines.joined(separator: "\n")
@@ -517,7 +618,7 @@ public enum Plans {
 
   /// A table cell on one line. It escapes `<` as `&lt;`, so that no cell can
   /// hold a status marker.
-  static func cell(_ text: String) -> String {
-    oneLine(text, max: 200).replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: "|", with: "\\|")
+  static func cell(_ text: String, max: Int = 200) -> String {
+    oneLine(text, max: max).replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: "|", with: "\\|")
   }
 }

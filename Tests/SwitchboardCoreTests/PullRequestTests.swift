@@ -9,20 +9,20 @@ func samplePR(
   state: PRState = .open, draft: Bool = false, headSha: String = samplePRHead, base: String = "main",
   defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
   verdicts: [Review] = [], reviews: [Review] = [], checks: String? = nil, mergedBase: Int? = nil,
-  queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil
+  queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil, reviewDecisionRead: Bool? = nil
 ) -> PullRequest {
   PullRequest(
     id: "PR_42", number: 42, url: "https://github.com/acme/widgets/pull/42", repo: "acme/widgets", state: state,
     draft: draft, head: "feature", headSha: headSha, base: base, defaultBranch: defaultBranch, mergeable: mergeable,
     reviewDecision: reviewDecision, verdicts: verdicts, reviews: reviews, checks: checks, mergedBase: mergedBase,
-    queue: queue, reviewRequests: reviewRequests)
+    queue: queue, reviewRequests: reviewRequests, reviewDecisionRead: reviewDecisionRead)
 }
 
 /// What `Attention.evaluate` gives for samplePR's session, whose PR #42 has
 /// no title, when its other rules give Waiting. `waiting` is that verdict's
 /// reason, and nil when the review request gave it.
 func sampleReadyForReview(
-  _ waiting: String? = nil, review: String = "no review requested", checks: String = "no checks"
+  _ waiting: String? = nil, review: String = "review required", checks: String = "no checks"
 ) -> Verdict {
   Verdict(state: .readyForReview, reason: "#42; \(review), \(checks)" + (waiting.map { "; \($0)" } ?? ""))
 }
@@ -106,5 +106,41 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
   ])
   func isPendingOnlyWhileAnOpenPRWillChange(_ pr: PullRequest, _ pending: Bool) {
     #expect(pr.isPending == pending)
+  }
+}
+
+@Suite struct PullRequestNeedsReview {
+  @Test(arguments: [
+    (ReviewDecision?.some(.reviewRequired), Bool?.some(true), Bool?.some(true)),
+    (.reviewRequired, nil, true),
+    (.changesRequested, true, true),
+    (.changesRequested, nil, true),
+    (.approved, true, false),
+    (.approved, nil, false),
+    (nil, true, false),
+    (nil, nil, nil),
+  ])
+  func needsReviewFollowsTheDecisionAndWhetherThePollReadIt(
+    _ decision: ReviewDecision?, _ read: Bool?, _ expected: Bool?
+  ) {
+    #expect(samplePR(reviewDecision: decision, reviewDecisionRead: read).needsReview == expected)
+  }
+
+  /// A `pr` event that an older sbd recorded has no `reviewDecisionRead`.
+  @Test func prFromAnOlderSbdHasAnUnreadDecision() throws {
+    var object = try #require(try JSON(encoding: samplePR(reviewDecision: nil)).object)
+    object["reviewDecisionRead"] = nil
+
+    let decoded = try JSONCoding.convert(JSON.object(object), to: PullRequest.self)
+
+    #expect(decoded.needsReview == nil)
+  }
+
+  @Test func reviewDecisionReadSurvivesAnEventRoundTrip() throws {
+    let original = samplePR(reviewDecision: nil, reviewDecisionRead: true)
+
+    let decoded = try JSONCoding.convert(try JSON(encoding: original), to: PullRequest.self)
+
+    #expect(decoded.reviewDecisionRead == true)
   }
 }

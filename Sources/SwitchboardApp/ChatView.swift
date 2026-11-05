@@ -46,6 +46,8 @@ struct ChatView: View {
         Divider()
         // The Inbox leaves out a chat's cards, such as a group message that waits for the user, so they show here.
         CardList(cards: session.cards)
+        let proposals = model.planProposals.filter { $0.group == group }
+        if !proposals.isEmpty { PlanProposalList(proposals: proposals) }
         MessageField(
           session: session.id, draft: model.messageDraft(for: session),
           shortcut: KeyboardShortcut(.return, modifiers: [.command])
