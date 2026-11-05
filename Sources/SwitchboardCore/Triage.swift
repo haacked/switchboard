@@ -42,6 +42,8 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   case allow
   /// Denies the session's held permission prompt.
   case deny
+  /// Allows the session's held permission prompt and switches the session to auto mode.
+  case allowAutoMode
   /// Answers the session's held question with the option's message.
   case answer
 
@@ -91,6 +93,7 @@ public struct TriageOption: Codable, Equatable, Sendable {
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
     case .done: return "Marks the session done"
     case .allow: return "Allows the prompt"
+    case .allowAutoMode: return "Allows the prompt and switches the session to auto mode"
     case .deny: return "Denies the prompt"
     case .answer: return "Answers: \(oneLine(message ?? label, max: 200))"
     }
@@ -342,7 +345,8 @@ public enum Triage {
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
-        ], source: .card)
+        ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
+        source: .card)
     }
     let first = card.questions.first
     // Several questions, or a multi-select one, take more than a click.

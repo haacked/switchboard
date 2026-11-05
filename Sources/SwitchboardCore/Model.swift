@@ -89,6 +89,10 @@ public struct Session: Codable, Equatable, Sendable {
   public var docket: DocketSession?
   /// The id of the group whose chat this session is. A chat belongs to no group.
   public var chat: String?
+  /// True when every launch starts claude in auto mode, so a resumed session
+  /// keeps it. Otherwise sbd passes no permission mode, and Claude's settings
+  /// choose one. Nil in a session that an older sbd stored.
+  public var autoMode: Bool?
 
   public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
@@ -219,6 +223,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the user acknowledged the session's Inbox item, which moves
   /// it to Waiting until its reason changes or a new turn starts.
   public var acknowledged: Bool?
+  /// Claude Code's permission mode, such as `default` or `auto`, or nil when
+  /// no hook has reported it since claude started.
+  public var permissionMode: String?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

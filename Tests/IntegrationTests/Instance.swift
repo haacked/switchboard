@@ -112,6 +112,8 @@ final class Instance {
       "trunk": ["path": .string("\(path)/trunk")],
       // Tests that read the stub's arguments don't expect the nudge in them.
       "triage": ["systemPrompt": ""],
+      // Nor do they expect --permission-mode auto. AutoModeTests turn it on.
+      "autoMode": false,
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
