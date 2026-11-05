@@ -21,7 +21,7 @@ extension Service {
       try requireNoTurn(e)
       return (e.session, e.facts.pr, sharedSession(e.session))
     }
-    let (repo, branch) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
+    let (repo, branch, supacode) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     let branchName = branch?.name ?? session.branch ?? ""
     let fresh = buildSnapshot()
     let claudePid: Int? = try queue.sync {
@@ -41,12 +41,12 @@ extension Service {
     }
     host.kill(paneName(session.id, .claude))
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
-    let supacodeRemoved = try removeWorktree(repo, session.cwd)
+    try removeWorktree(repo, session.cwd)
     var branchRemoved = false
     var branchError: Error?
     if let branch {
       do {
-        branchRemoved = try deleteBranch(repo, branch, pr: pr, supacodeRemoved: supacodeRemoved)
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
       } catch {
         branchError = error
       }
@@ -90,7 +90,7 @@ extension Service {
   /// head commit. A worktree that Supacode locked passes the lock check, and
   /// its branch follows `supacodeBranch`, which may keep it.
   private func checkCleanup(_ session: Session, pr: PullRequest?, sharedWith: String?) throws -> (
-    repo: String, branch: (name: String, tip: String)?
+    repo: String, branch: (name: String, tip: String)?, supacode: Bool
   ) {
     guard let pr, pr.state != .open else { throw APIError("\(session.id) has no merged PR.") }
     guard pr.state == .merged else {
@@ -104,7 +104,7 @@ extension Service {
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true)
-    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr))
+    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// Throws for a follow-up that hasn't started, and for a session whose

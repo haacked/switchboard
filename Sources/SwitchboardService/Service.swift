@@ -775,7 +775,7 @@ public final class Service {
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    let (repo, branch, _) = try checkRemoval(
+    let (repo, branch, supacode) = try checkRemoval(
       session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
       branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
@@ -796,18 +796,17 @@ public final class Service {
       install(fresh)
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
     }
-    var supacodeRemoved = false
     // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
     // folder's path through a symlink, so it gets the path that it lists for the worktree.
     if let repo {
       let listed = folderGone ? try worktreeEntry(repo, at: session.cwd)?.path : session.cwd
-      if let listed { supacodeRemoved = try removeWorktree(repo, listed) }
+      if let listed { try removeWorktree(repo, listed) }
     }
     var branchRemoved = false
     var branchError: Error?
     if let repo, let branch {
       do {
-        branchRemoved = try deleteBranch(repo, branch, pr: pr, supacodeRemoved: supacodeRemoved)
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
       } catch {
         branchError = error
       }
@@ -965,15 +964,20 @@ public final class Service {
   /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
   func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
-    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
-      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
-    }
+    let (branch, tip) = try checkedOutBranch(session)
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
     try requireTip(tip, of: branch, inMerged: pr)
     return (branch, tip)
+  }
+
+  /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
+  func checkedOutBranch(_ session: Session) throws -> (name: String, tip: String) {
+    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
+      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
+    }
+    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"]))
   }
 
   /// The PR when it merged `branch`, or nil.
@@ -1000,6 +1004,12 @@ public final class Service {
     }
     guard branchExists(repo, branch) else { throw APIError("\(branch) no longer exists.") }
     try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"]), of: branch, inMerged: pr)
+    try requireNotCheckedOut(repo, branch, ignoring: path)
+  }
+
+  /// Throws when a worktree other than the one at `path` has the branch checked out.
+  /// Deleting the ref of a checked-out branch breaks that worktree.
+  func requireNotCheckedOut(_ repo: String, _ branch: String, ignoring path: String? = nil) throws {
     let checkedOut = try worktreeEntries(repo).contains { entry in
       entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)
     }
@@ -1012,6 +1022,11 @@ public final class Service {
   /// check.
   func deleteMergedBranch(_ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?) throws {
     try recheckBranch(repo, branch.name, pr: pr)
+    try deleteBranchRef(repo, branch)
+  }
+
+  /// Deletes the branch's ref at the checked tip, so git refuses when a commit landed after the check.
+  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String)) throws {
     _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
     // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
     _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])

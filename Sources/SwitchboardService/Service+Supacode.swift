@@ -21,15 +21,15 @@ extension Service {
 
   /// Removes the linked worktree that git lists at `path`. A worktree that
   /// Supacode locked goes through `supacode worktree delete`, and any other
-  /// through `git worktree remove`, which refuses every other lock. Returns
-  /// true when Supacode removed it. Supacode runs `git branch -D` on the
+  /// through `git worktree remove`, which refuses every other lock. It reads
+  /// the lock again, so it acts on the lock that git lists now. Supacode runs `git branch -D` on the
   /// worktree's branch when its `deleteBranchOnDeleteWorktree` setting is on.
   /// sbd's checks decide whether the branch goes, so a branch that Supacode
   /// deleted comes back at the tip and with the config that it had.
-  func removeWorktree(_ repo: String, _ path: String) throws -> Bool {
+  func removeWorktree(_ repo: String, _ path: String) throws {
     guard let entry = try worktreeEntry(repo, at: path), entry.lockedBySupacode else {
       _ = try gitOutput(repo, ["worktree", "remove", path])
-      return false
+      return
     }
     let kept: (name: String, tip: String, config: [(String, String)])? = try {
       guard let name = entry.branch, let tip = entry.head else { return nil }
@@ -51,7 +51,6 @@ extension Service {
       _ = try gitOutput(repo, ["update-ref", "refs/heads/\(kept.name)", kept.tip, ""])
       for (key, value) in kept.config { _ = try? gitOutput(repo, ["config", "--local", "--add", key, value]) }
     }
-    return true
   }
 
   /// The repo's own config entries for the branch, in the order git lists them.
@@ -76,37 +75,29 @@ extension Service {
   /// squash merge leaves the tip outside origin/main. Throws when the
   /// worktree doesn't have the session's branch checked out.
   func supacodeBranch(_ session: Session) throws -> (name: String, tip: String)? {
-    guard let name = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == name else {
-      throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
-    }
-    let tip = try gitOutput(session.cwd, ["rev-parse", "HEAD"])
-    return isInMain(session.cwd, tip) ? (name, tip) : nil
+    let branch = try checkedOutBranch(session)
+    return isInMain(session.cwd, branch.tip) ? branch : nil
   }
 
-  /// Deletes the checked branch once the worktree is gone. After Supacode
-  /// removed the worktree it follows `deleteBranchInMain`, and otherwise
-  /// `deleteMergedBranch`. Returns false when the branch stays.
+  /// Deletes the checked branch once the worktree is gone, by the rule that
+  /// checked it: `deleteBranchInMain` when `supacodeBranch` checked it, and
+  /// otherwise `deleteMergedBranch`. Returns false when the branch stays.
   func deleteBranch(
-    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, supacodeRemoved: Bool
+    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, inMain: Bool
   ) throws -> Bool {
-    if supacodeRemoved { return try deleteBranchInMain(repo, branch) }
+    if inMain { return try deleteBranchInMain(repo, branch) }
     try deleteMergedBranch(repo, branch, pr: pr)
     return true
   }
 
   /// Deletes the branch that `supacodeBranch` returned, after the worktree is
   /// gone, when origin/main still contains its tip and no worktree has it
-  /// checked out. Returns false when the branch stays. A branch that is
-  /// already gone counts as deleted. Passing the checked tip makes git
-  /// refuse when a commit landed after the check.
+  /// checked out. Returns false when the branch stays.
   func deleteBranchInMain(_ repo: String, _ branch: (name: String, tip: String)) throws -> Bool {
-    guard branchExists(repo, branch.name) else { return true }
+    guard branchExists(repo, branch.name) else { throw APIError("\(branch.name) no longer exists.") }
     guard isInMain(repo, branch.tip) else { return false }
-    guard !(try worktreeEntries(repo).contains { $0.branch == branch.name }) else {
-      throw APIError("\(branch.name) is checked out in a worktree.")
-    }
-    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
-    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+    try requireNotCheckedOut(repo, branch.name)
+    try deleteBranchRef(repo, branch)
     return true
   }
 
