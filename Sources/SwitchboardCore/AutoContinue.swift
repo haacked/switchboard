@@ -115,7 +115,10 @@ public enum AutoContinue {
     let s = input.settings
     if input.verdict.state != .canContinue { return "not in Claude can continue" }
     if let label = input.session.kind.label { return label }
-    if !f.cards.isEmpty || f.openPermission != nil || f.openQuestion != nil { return "an open card" }
+    // A continue starts a new turn, which drops the card from `sb summary set`.
+    if !f.cards.isEmpty || f.sessionSummary != nil || f.openPermission != nil || f.openQuestion != nil {
+      return "an open card"
+    }
     if !(input.session.waits ?? []).isEmpty { return "an open wait" }
     if f.turnRunning { return "a turn is running" }
     if input.busy { return "a message is on its way" }
