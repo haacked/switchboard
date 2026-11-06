@@ -810,11 +810,13 @@ public final class Service {
   /// also deletes the local branch, and needs `worktree`. `remote_branch`
   /// also deletes the branch on its remote, and needs `branch`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
-  /// can take a while. A failed removal leaves the session and its panes in
-  /// place. A store that can't delete the session's record also refuses the
-  /// removal before anything stops. After the worktree is gone, the session is
-  /// forgotten whatever happens to the branch, because its folder is missing.
-  /// The branch is checked again at that point. A failed check or delete keeps
+  /// can take a while. A removal of the worktree closes the panes first, and
+  /// runs the checks again once `finishPaneStop` returns. A refusal there, or
+  /// a failed removal, leaves the session. A store that can't delete the
+  /// session's record also refuses the removal before anything stops. After
+  /// the worktree is gone, the session is forgotten whatever happens to the
+  /// branch, because its folder is missing. The branch is checked again at
+  /// that point. A failed check or delete keeps
   /// the branch and throws after the session is forgotten. The conversation's
   /// transcript stays in the account's projects folder, because Claude Code has
   /// no command that archives a local session. When the session's folder is
@@ -845,7 +847,7 @@ public final class Service {
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    let (repo, branch, supacode) = try checkRemoval(
+    var (repo, branch, supacode) = try checkRemoval(
       session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
       branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
@@ -855,7 +857,7 @@ public final class Service {
       return (repo, trackedRemote(repo, name), name)
     }()
     let fresh = buildSnapshot()
-    try queue.sync {
+    let stop: PaneStop? = try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
         !merging.contains(session.id)
       else {
@@ -864,7 +866,15 @@ public final class Service {
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
       try store.checkDeletable(session: session.id)
       install(fresh)
+      if removesWorktree { return beginPaneStop(session.id) }
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
+      return nil
+    }
+    if let stop {
+      try finishPaneStop(session, stop, command: "sb rm --worktree")
+      (repo, branch, supacode) = try checkRemoval(
+        session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+        branch: removesBranch)
     }
     // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
     // folder's path through a symlink, so it gets the path that it lists for the worktree.

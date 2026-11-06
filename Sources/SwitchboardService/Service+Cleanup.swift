@@ -5,10 +5,10 @@ extension Service {
   /// Removes the worktree and the local branch of a session whose PR merged,
   /// and keeps the session in Done. Every check of `checkCleanup` runs first,
   /// and a turn that is running also refuses, so a refusal changes nothing.
-  /// The checks run again after claude exits and the panes close. A claude
-  /// that has not exited 5 s after SIGTERM refuses. Its pane stays open, so
-  /// that a later cleanup finds it. A refusal at that point leaves the
-  /// session, the folder, and the branch.
+  /// The checks run again after `finishPaneStop` returns, which waits for
+  /// claude, the panes' processes, and every process with the folder open to
+  /// exit. A refusal at that point leaves the session, the folder, and the
+  /// branch.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
   /// keeps the branch and throws.
@@ -24,22 +24,15 @@ extension Service {
     let (repo, branch, supacode) = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     let branchName = branch?.name ?? session.branch ?? ""
     let fresh = buildSnapshot()
-    let claudePid: Int? = try queue.sync {
+    let stop: PaneStop = try queue.sync {
       guard let e = entries[session.id], e.session.cwd == session.cwd, !starting.contains(session.id) else {
         throw APIError("\(session.id) changed while it was being cleaned up")
       }
       try requireNoTurn(e)
       install(fresh)
-      host.kill(paneName(session.id, .shell))
-      guard case .running(let pid) = claudeState(session.id) else { return nil }
-      kill(pid_t(pid), SIGTERM)
-      return pid
+      return beginPaneStop(session.id)
     }
-    // claude can write to the folder until it exits. `worktree remove` deletes ignored files.
-    if let claudePid, !Processes.waitForExit([claudePid], seconds: 5).isEmpty {
-      throw APIError("\(session.id)'s claude has not exited. Run `sb cleanup` again once it has.")
-    }
-    host.kill(paneName(session.id, .claude))
+    try finishPaneStop(session, stop, command: "sb cleanup")
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     try removeWorktree(repo, session.cwd)
     var branchRemoved = false
