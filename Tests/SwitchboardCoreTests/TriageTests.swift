@@ -362,7 +362,7 @@ func replyFixture(_ name: String) throws -> String {
   }
 
   @Test(arguments: [Triage.closingItems, Triage.closingItems + 1, 12])
-  func aListLongerThanTheCardShowsItsFirstItemsAndAnEllipsis(_ count: Int) {
+  func aListShowsAnEllipsisOnlyWhenItHasMoreItemsThanTheCard(_ count: Int) {
     let items = (1...count).map { "\($0). Item \($0)." }.joined(separator: "\n")
     let lines = summaryLines("Changes I made:\n\n\(items)")
 
@@ -539,7 +539,7 @@ func replyFixture(_ name: String) throws -> String {
 
     let summary = try TriageSummarizer.parse(envelope(payload))
 
-    #expect(summary.summary == lines.prefix(TriageSummarizer.summaryLines).joined(separator: "\n"))
+    #expect(summary.summary == lines.dropLast().joined(separator: "\n"))
     #expect(!summary.summary.contains("extra"))
   }
 

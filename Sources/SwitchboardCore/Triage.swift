@@ -498,7 +498,8 @@ public enum Triage {
   static func itemLine(_ text: String) -> String {
     let line = oneLine(text, max: .max)
     // A list item can start with a flag such as --squash. This trim keeps its dashes.
-    let sentences = Attention.sentences(line, trimming: CharacterSet(charactersIn: "*_`").union(.whitespaces))
+    let sentences = Attention.sentences(
+      line, trimming: Attention.sentenceTrim.subtracting(CharacterSet(charactersIn: "-")))
     guard let pick = sentences.dropFirst().first(where: { $0.localizedCaseInsensitiveContains("recommend") }) else {
       return line
     }
