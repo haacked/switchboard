@@ -65,6 +65,17 @@ struct BackgroundLaunchTests {
     #expect(sheet.ignoresMouseEvents)
   }
 
+  @Test func hiddenPopoverAboveTheNormalLevelIsTransparentAndIgnoresTheMouse() {
+    let parent = window()
+    let popover = window([.borderless])
+    popover.level = .popUpMenu
+    parent.addChildWindow(popover, ordered: .above)
+    defer { parent.removeChildWindow(popover) }
+    BackgroundLaunch.hide(popover)
+    #expect(popover.alphaValue == 0)
+    #expect(popover.ignoresMouseEvents)
+  }
+
   @Test func statusItemWindowStaysVisible() {
     let window = window([.borderless])
     window.level = .statusBar

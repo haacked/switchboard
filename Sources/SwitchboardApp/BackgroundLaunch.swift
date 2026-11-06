@@ -34,9 +34,10 @@ enum BackgroundLaunch {
     }
   }
 
-  /// Leaves the menu bar item alone, because its window sits above the normal level.
+  /// Leaves the menu bar item alone, because its window sits above the normal level. A popover's window also sits
+  /// above it, but it is a child window of the window that presents it.
   static func hide(_ window: NSWindow) {
-    guard window.level == .normal, window.alphaValue != 0 else { return }
+    guard window.level == .normal || window.parent != nil, window.alphaValue != 0 else { return }
     window.alphaValue = 0
     window.ignoresMouseEvents = true
   }

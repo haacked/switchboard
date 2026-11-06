@@ -151,6 +151,7 @@ extension Instance {
     let a = try sbd.usage(of: "A")
 
     #expect(a.error?.contains("not signed in") == true)
+    #expect(a.signedOut == true)
     #expect(a.limits.isEmpty)
     #expect(fake.requests.isEmpty)
   }
@@ -166,6 +167,7 @@ extension Instance {
     let a = try sbd.usage(of: "A")
 
     #expect(a.error != nil)
+    #expect(a.signedOut == true)
     #expect(fake.requests.isEmpty)
   }
 
@@ -178,6 +180,7 @@ extension Instance {
     let a = try sbd.usage(of: "A")
 
     #expect(a.error?.contains("429") == true)
+    #expect(a.signedOut == nil)
   }
 
   @Test func aFailedReadKeepsTheLimitsOfTheReadBeforeIt() throws {
@@ -244,6 +247,7 @@ extension Instance {
     #expect(sbd.refreshCalls().count == 1)
     #expect(fake.requests.isEmpty)
     #expect(a.error?.contains("could not refresh") == true)
+    #expect(a.signedOut == nil)
     #expect(a.limits.isEmpty)
   }
 

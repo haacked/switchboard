@@ -78,7 +78,7 @@ enum DraftSelfTest {
   }
 
   private static func field() -> NSTextField? {
-    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
+    guard let root = NSApp.switchboardWindow?.contentView
     else { return nil }
     func find(_ view: NSView) -> NSTextField? {
       if let field = view as? NSTextField, field.placeholderString == "Message Claude…" { return field }
