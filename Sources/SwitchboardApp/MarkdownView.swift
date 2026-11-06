@@ -178,10 +178,11 @@ private struct DetailsView: View {
   }
 }
 
-/// An image from a web or file URL, at its own size up to a limit. A local
-/// image loads when it shows. A web image shows its alt text until the user
-/// clicks it, so text that a model wrote can't make the app request a URL. Any
-/// other source, and an image that fails to load, shows its alt text.
+/// An image from a web or file URL, at its own size up to a limit. An image
+/// shows its alt text until the user clicks it, so text that a model wrote can't
+/// make the app request a URL or touch a path, such as one under `/net` or a
+/// protected folder. Any other source, and an image that fails to load, shows
+/// its alt text.
 private struct MarkdownImageView: View {
   let image: MarkdownBlock.Image
   @State private var loaded: NSImage?
@@ -220,10 +221,10 @@ private struct MarkdownImageView: View {
         }
       }
       .task(id: "\(image.source)/\(asked)") {
-        guard let url, asked || MarkdownImageLoader.loadsUnasked(url) else { return }
+        guard let url else { return }
         if let cached = Self.cache.object(forKey: url as NSURL) {
           loaded = cached
-        } else if let image = await MarkdownImageLoader.load(url) {
+        } else if asked || MarkdownImageLoader.loadsUnasked(url), let image = await MarkdownImageLoader.load(url) {
           Self.cache.setObject(image, forKey: url as NSURL)
           loaded = image
         }
@@ -237,7 +238,10 @@ private struct MarkdownImageView: View {
 enum MarkdownImageLoader {
   static let limit = 20 << 20
 
-  static func loadsUnasked(_ url: URL) -> Bool { url.isFileURL }
+  /// No image loads without a click. The answer comes from nothing but the URL,
+  /// because a path under `/net` or a protected folder acts on the first
+  /// filesystem call, a symlink resolution or a stat.
+  static func loadsUnasked(_ url: URL) -> Bool { false }
 
   static func load(_ url: URL, limit: Int = limit) async -> NSImage? {
     guard let data = url.isFileURL ? read(url, limit: limit) : await fetch(url, limit: limit) else { return nil }
