@@ -5,8 +5,9 @@ import Testing
 
 @testable import SwitchboardApp
 
-private func item(_ options: [TriageOption], multiSelect: Bool = false) -> TriageItem {
-  TriageItem(title: "t", kind: .decision, summary: "s", options: options, multiSelect: multiSelect, source: .session)
+private func item(_ options: [TriageOption], multiSelect: Bool = false, ref: String = "") -> TriageItem {
+  TriageItem(
+    title: "t", kind: .decision, summary: "s", options: options, multiSelect: multiSelect, source: .session, ref: ref)
 }
 
 private let fixes = [
@@ -26,16 +27,16 @@ private let fixes = [
   @Test func aClickTicksAndASecondClickUnticks() {
     var picks = OptionPicks()
 
-    picks.toggle(2)
+    picks.toggle(2, fixes[1])
     #expect(picks.contains(2))
-    picks.toggle(2)
+    picks.toggle(2, fixes[1])
     #expect(!picks.contains(2))
   }
 
   @Test func theKeysFollowTheOptionsOrderNotTheClicks() {
     var picks = OptionPicks()
-    picks.toggle(3)
-    picks.toggle(1)
+    picks.toggle(3, fixes[2])
+    picks.toggle(1, fixes[0])
 
     #expect(picks.keys == ["1", "3"])
   }
@@ -44,24 +45,24 @@ private let fixes = [
     var picks = OptionPicks()
     #expect(!picks.canSubmit)
 
-    picks.toggle(1)
+    picks.toggle(1, fixes[0])
     #expect(picks.canSubmit)
 
-    picks.toggle(1)
+    picks.toggle(1, fixes[0])
     #expect(!picks.canSubmit)
   }
 
   @Test func submitShowsTheMessageThatItSends() {
     var picks = OptionPicks()
-    picks.toggle(3)
-    picks.toggle(1)
+    picks.toggle(3, fixes[2])
+    picks.toggle(1, fixes[0])
 
     #expect(picks.effect(in: item(fixes, multiSelect: true)) == "Sends:\n- Fix item 3.\n- Rename the flag")
   }
 
   @Test func submitWithOnePickShowsThatPicksMessage() {
     var picks = OptionPicks()
-    picks.toggle(2)
+    picks.toggle(2, fixes[1])
 
     #expect(picks.effect(in: item(fixes, multiSelect: true)) == "Sends: Fix item 5.")
   }
@@ -73,10 +74,44 @@ private let fixes = [
   /// A new item, such as the session's next card, starts with nothing ticked.
   @Test func picksBelongToTheItemTheUserSaw() {
     var picks = OptionPicks(ref: "summary:1")
-    picks.toggle(1)
+    picks.toggle(1, fixes[0])
 
-    #expect(picks.on("summary:1").canSubmit)
-    #expect(!picks.on("summary:2").canSubmit)
+    #expect(picks.on(item(fixes, multiSelect: true, ref: "summary:1")).canSubmit)
+    #expect(!picks.on(item(fixes, multiSelect: true, ref: "summary:2")).canSubmit)
+  }
+
+  /// A rule can drop an option from the card without a change to its ref.
+  @Test func aPickWhoseOptionLeftTheCardIsDropped() {
+    let checks = TriageOption(label: "Fix the checks", action: .send)
+    var picks = OptionPicks(ref: "summary:1")
+    picks.toggle(4, checks)
+    #expect(picks.on(item(fixes + [checks], multiSelect: true, ref: "summary:1")).canSubmit)
+
+    let after = picks.on(item(fixes, multiSelect: true, ref: "summary:1"))
+    #expect(!after.canSubmit)
+    #expect(after.keys.isEmpty)
+  }
+
+  /// A rule can put an option that runs on its own at a ticked number.
+  @Test func aPickWhoseOptionCanNoLongerBeTickedIsDropped() {
+    let checks = TriageOption(label: "Fix the checks", action: .send)
+    var picks = OptionPicks(ref: "summary:1")
+    picks.toggle(1, fixes[0])
+    picks.toggle(4, checks)
+    let card = item(fixes + [TriageOption(label: "Merge #98", action: .merge)], multiSelect: true, ref: "summary:1")
+
+    #expect(picks.on(card).keys == ["1"])
+  }
+
+  /// A rule can put another tickable option at a ticked number. The user did not tick that one.
+  @Test func aPickWhoseNumberNowHoldsAnotherOptionIsDropped() {
+    var picks = OptionPicks(ref: "summary:1")
+    picks.toggle(4, TriageOption(label: "Fix the checks", action: .send))
+    let card = item(fixes + [TriageOption(label: "Rebase", action: .send)], multiSelect: true, ref: "summary:1")
+
+    let after = picks.on(card)
+    #expect(!after.canSubmit)
+    #expect(after.keys.isEmpty)
   }
 }
 

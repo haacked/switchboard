@@ -123,23 +123,34 @@ extension View {
 /// belong to the item that the user saw, so a new item starts with none.
 struct OptionPicks: Equatable {
   private(set) var ref: String
-  private var numbers: Set<Int> = []
+  /// The option that the user ticked at each number.
+  private var ticked: [Int: TriageOption] = [:]
 
   init(ref: String = "") { self.ref = ref }
 
-  mutating func toggle(_ number: Int) {
-    if numbers.remove(number) == nil { numbers.insert(number) }
+  mutating func toggle(_ number: Int, _ option: TriageOption) {
+    if ticked.removeValue(forKey: number) == nil { ticked[number] = option }
   }
 
-  /// These picks when they belong to `ref`, else none.
-  func on(_ ref: String) -> OptionPicks { ref == self.ref ? self : OptionPicks(ref: ref) }
+  /// These picks when they belong to the item, else none. A rule can remove
+  /// or replace an option without a change to the item's ref. This keeps a
+  /// pick only while its number still holds the option that the user ticked.
+  /// That option must also still be tickable.
+  func on(_ item: TriageItem) -> OptionPicks {
+    guard item.ref == ref else { return OptionPicks(ref: item.ref) }
+    var kept = self
+    kept.ticked = ticked.filter { number, option in
+      item.options.indices.contains(number - 1) && item.options[number - 1] == option && item.isTickable(option)
+    }
+    return kept
+  }
 
-  func contains(_ number: Int) -> Bool { numbers.contains(number) }
+  func contains(_ number: Int) -> Bool { ticked[number] != nil }
 
-  var canSubmit: Bool { !numbers.isEmpty }
+  var canSubmit: Bool { !ticked.isEmpty }
 
   /// The picks as `choose` names them, in the options' order.
-  var keys: [String] { numbers.sorted().map(String.init) }
+  var keys: [String] { ticked.keys.sorted().map(String.init) }
 
   static let prompt = "Tick the options that apply."
 
@@ -166,7 +177,7 @@ struct OptionList: View {
 
   /// The picks for the item on screen. A pick made on another item, such as
   /// the session's last card, is not one.
-  private var current: OptionPicks { picks.on(item.ref) }
+  private var current: OptionPicks { picks.on(item) }
 
   enum ShortcutOwner: Equatable {
     case option(Int)
@@ -208,14 +219,14 @@ struct OptionList: View {
     let ticked = current.contains(i + 1)
     return Button {
       picks = current
-      picks.toggle(i + 1)
+      picks.toggle(i + 1, option)
     } label: {
       OptionCardLabel(
         mark: .checkbox(ticked), title: option.label, description: option.detail,
         tag: option.recommended ? "Recommended" : nil)
     }
     .buttonStyle(OptionCardStyle(ticked: ticked))
-    .accessibilityLabel(option.label)
+    .accessibilityLabel(option.recommended ? "\(option.label), recommended" : option.label)
     .accessibilityHint(option.detail ?? "")
     .accessibilityAddTraits(ticked ? .isSelected : [])
   }

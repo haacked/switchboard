@@ -58,6 +58,16 @@ private let sendOptions = [
     #expect(try JSONCoding.convert(old, to: TriageSummary.self).multiSelect == false)
   }
 
+  /// An item that an older sbd sends has no multiSelect.
+  @Test func anItemFromAnOlderSbdDecodesAsSingleChoice() throws {
+    let old: JSON = [
+      "title": "t", "kind": "decision", "summary": "s", "options": [], "callouts": [], "source": "session",
+      "ref": "summary:1",
+    ]
+
+    #expect(try JSONCoding.convert(old, to: TriageItem.self).multiSelect == false)
+  }
+
   @Test func theItemKeepsTheCardsMultiSelect() throws {
     let summary = try cleaned(multiCard()).card
     let f = facts([
