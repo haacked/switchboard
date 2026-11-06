@@ -71,5 +71,6 @@ jobs:
       - run: brew install tmux
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
-      # A 3-CPU runner is close to fully busy with 4 integration shards.
-      - run: bin/test --shards 4
+      # With 4 integration shards a 3-CPU runner has almost no idle CPU, and
+      # the tests' fixed waits start to time out. With 2 it is half idle.
+      - run: bin/test --shards 3
