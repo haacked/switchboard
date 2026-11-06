@@ -5,7 +5,7 @@ import Testing
 /// A Manager or a group chat gets no message when a child changes. It gets a
 /// digest of its children with the next prompt, through the UserPromptSubmit
 /// hook, and it follows a child through a wait.
-@Suite(.timeLimit(.minutes(2))) struct DigestTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DigestTests {
   enum Parent: CaseIterable { case manager, chat }
 
   func decode<T: Decodable>(_ type: T.Type, _ text: String) throws -> T { try JSONCoding.decode(type, from: text) }
