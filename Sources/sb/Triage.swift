@@ -67,7 +67,8 @@ func choose(_ a: Args) {
     args["option"] = .string(key)
   }
   if let text { args["text"] = .string(text) }
-  // A choice can allow, answer, or merge, which `allow`, `answer`, and `merge` refuse inside Claude Code.
+  // A choice can allow, answer, merge, or request a review. `allow`, `answer`, `merge`, and `review` refuse those
+  // inside Claude Code.
   if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil { args["insideClaude"] = true }
   // A merge option waits up to two minutes for `gh pr merge`, as `sb merge` does.
   let result = call("choose", args, timeout: 180)
