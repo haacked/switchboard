@@ -19,17 +19,18 @@ extension Service {
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
-      let (id, created) = try queue.sync { () -> (String, SessionSummary?) in
-        if let id = chatID(group) { return (id, nil) }
+      let (id, created, queued) = try queue.sync { () -> (String, SessionSummary?, Bool) in
+        if let id = chatID(group) { return (id, nil, false) }
         guard let name = groups[group]?.name else { throw APIError("group \(group) was removed") }
         let folder = home.chatFolder(group)
         let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
         let chat = try create(new, (folder, nil, nil)) { $0.chat = group }
-        return (chat.id, chat)
+        return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
       guard let created else { return try openOrSend(id, text) }
       guard text != nil else { return .success(try JSON(encoding: created)) }
-      return .success(try withDelivery(created, .string(Delivery.resumed.rawValue)))
+      let delivery: Delivery = queued ? .queued : .resumed
+      return .success(try withDelivery(created, .string(delivery.rawValue)))
     } catch {
       return .failure("\(error)")
     }

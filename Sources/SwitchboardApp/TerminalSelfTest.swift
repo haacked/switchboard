@@ -174,9 +174,14 @@ enum TerminalSelfTest {
 
   static func run(folder: String) async {
     guard let pane = claudePane() else { return log("no terminal pane") }
+    // SwiftTerm stops drawing while other windows or a locked screen cover the window. A background launch's
+    // transparent window counts as covered. The PNGs would then show the pane's earlier text.
+    pane.suspendsRenderingWhenNotVisible = false
     pane.window?.makeFirstResponder(pane)
     log("pane \(Int(pane.bounds.width))x\(Int(pane.bounds.height))")
     await pause(1)
+    let policy = NSApp.activationPolicy() == .accessory ? "accessory" : "regular"
+    log("launch \(policy) active=\(NSApp.isActive) alpha=\(pane.window?.alphaValue ?? -1)")
     png(pane, to: "\(folder)/pane-start.png")
 
     key(pane, "a", code: code(for: "a"))

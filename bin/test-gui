@@ -13,6 +13,9 @@
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, or SB_DRAFT_TEST, so the app
+# runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
+# normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
@@ -152,6 +155,10 @@ check_terminal() {
 
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
   grep -q '^selftest: attached after' "$shots/app.log" || fail "the app never saw the session attach: $(grep '^selftest: gave up' "$shots/app.log")"
+  if [ "${SB_TEST_VISIBLE:-}" != 1 ]; then
+    grep -qx 'selftest: launch accessory active=false alpha=0.0' "$shots/app.log" ||
+      fail "the app did not stay hidden and inactive: $(grep '^selftest: launch' "$shots/app.log")"
+  fi
 
   local got
   got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
