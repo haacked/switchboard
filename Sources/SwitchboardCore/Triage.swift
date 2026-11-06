@@ -208,6 +208,9 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// The user ticks any of the checkable options and submits them as one reply.
   public var multiSelect: Bool
   public var source: TriageSource
+  /// What the user can open after the Summary and the Action. The service
+  /// fills it from the session, because the builder sees only its facts.
+  public var details: TriageDetails
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
   /// click never lands on an item the user did not see.
@@ -215,9 +218,10 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, source: TriageSource, ref: String = ""
+    multiSelect: Bool = false, source: TriageSource, ref: String = "", details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
+    self.details = details
     self.title = title
     self.kind = kind
     self.summary = summary
@@ -233,9 +237,16 @@ public struct TriageItem: Codable, Equatable, Sendable {
       callouts: summary.callouts, multiSelect: summary.multiSelect, source: source, ref: ref)
   }
 
-  /// An item that an older sbd wrote has no multiSelect.
+  private enum CodingKeys: String, CodingKey {
+    case title, kind, summary, options, callouts, multiSelect, source, ref, message
+  }
+
+  private struct Sections: Decodable { var details: TriageDetails? }
+
+  /// An item that an older sbd wrote has no multiSelect and no message.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    details = try c.decodeIfPresent(Sections.self, forKey: .message)?.details ?? TriageDetails()
     title = try c.decode(String.self, forKey: .title)
     kind = try c.decode(TriageKind.self, forKey: .kind)
     summary = try c.decode(String.self, forKey: .summary)
@@ -244,6 +255,19 @@ public struct TriageItem: Codable, Equatable, Sendable {
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
     source = try c.decode(TriageSource.self, forKey: .source)
     ref = try c.decode(String.self, forKey: .ref)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(title, forKey: .title)
+    try c.encode(kind, forKey: .kind)
+    try c.encode(summary, forKey: .summary)
+    try c.encode(options, forKey: .options)
+    try c.encode(callouts, forKey: .callouts)
+    try c.encode(multiSelect, forKey: .multiSelect)
+    try c.encode(source, forKey: .source)
+    try c.encode(ref, forKey: .ref)
+    try c.encode(message, forKey: .message)
   }
 
   /// Whether the user ticks the option rather than clicks it.
@@ -418,7 +442,7 @@ public enum Triage {
     }
     if card.kind == .permission {
       return TriageItem(
-        title: title(card.reason), kind: .approval, summary: "Claude asks to run \(card.summary).",
+        title: title(card.reason), kind: .approval, summary: "Claude asks to run \(callSummary(card)).",
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),

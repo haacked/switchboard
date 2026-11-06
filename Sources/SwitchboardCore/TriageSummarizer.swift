@@ -19,9 +19,10 @@ public enum TriageSummarizer {
     (the session offers a next step and waits for a yes), review (finished work to read), action (the user \
     does something outside the session), or info (nothing is asked). Use decision only when the reply names \
     two or more choices.
-    - summary: two to four plain lines separated by newlines, each under \(TriageCard.lineLength) characters. The first says what \
+    - summary: two to three plain lines separated by newlines, each under \(TriageCard.lineLength) characters. The first says what \
     the session did. The last says what it needs from the user, or what is finished when it asks nothing. Use \
-    only facts that the reply states.
+    only facts that the reply states. Include a fact only if the user would misjudge or not understand an option \
+    without it. The full reply is in Details, so leave the rest out.
     - options: at most \(TriageCard.maxOptions) buttons, and only choices that the reply offers or clearly asks for. Never add a \
     Cancel, Skip, or Other button, and never invent a step. Each has a short label, an optional detail, an \
     action, and recommended set to true only for the one option that the reply recommends. The action send \

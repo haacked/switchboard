@@ -1,25 +1,31 @@
 import Foundation
 import SwitchboardCore
 
-/// Prints an item: its title, what the session says, and its options.
+/// Prints an item: its title, then its Summary, its Action, and a line that names what its Details hold.
 func printTriage(_ s: SessionSummary, position: Int? = nil) {
   guard let item = s.triage else { return }
   func out(_ line: String) { print(line.printable) }
+  let message = item.message
   let number = position.map { "\($0). " } ?? ""
   out("\(number)\(item.title)  [\(item.kind.rawValue)]")
   out("   \(s.name) (\(s.id)), \(s.repo.map { ($0 as NSString).lastPathComponent + ", " } ?? "")\(ago(s.since))")
-  if !item.summary.isEmpty { out("   \(oneLine(item.summary, max: 300))") }
-  for c in item.callouts {
-    out("   [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
+  out("   Summary:")
+  if !message.summary.text.isEmpty { out("      \(oneLine(message.summary.text, max: 300))") }
+  for c in message.summary.callouts {
+    out("      [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
+  out("   Action:")
   if item.hasTickable {
-    out("   pick any, as in: sb choose \(s.id) 1,3")
+    out("      pick any, as in: sb choose \(s.id) 1,3")
   }
-  for (i, o) in item.options.enumerated() {
-    out("   \(i + 1)) \(o.label)\(o.recommended ? " (recommended)" : "")\(o.detail.map { ": \($0)" } ?? "")")
+  if message.action.options.isEmpty { out("      none, except Acknowledge: sb ack \(s.id)") }
+  for (i, o) in message.action.options.enumerated() {
+    out("      \(i + 1)) \(o.label)\(o.recommended ? " (recommended)" : "")\(o.detail.map { ": \($0)" } ?? "")")
     // Clicking sends this text as you, so you read it first.
-    out("      \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
+    out("         \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
   }
+  let held = message.details.parts
+  out("   Details: \(held.isEmpty ? "none" : held.joined(separator: ", ")) (sb get --json \(s.id))")
 }
 
 /// `sb triage` lists the sessions that need you or that Claude can continue,

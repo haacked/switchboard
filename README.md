@@ -197,7 +197,7 @@ An update to an artifact is a proposal that waits for you. `sb plan artifact rew
 
 ### Triage
 
-Each session that needs you, or that Claude can continue, gets one item: a decision card with a title that says what you do, a kind (`decision`, `question`, `approval`, `review`, `action`, or `info`), a summary of two to four lines, options, and callouts. `sb triage` lists them in the order to go through them, and `sb next` prints the first. The same item is `triage` in `sb ls --json` and `sb get --json`, with a `source`, in this order of precedence:
+Each session that needs you, or that Claude can continue, gets one item: a decision card with a title that says what you do, a kind (`decision`, `question`, `approval`, `review`, `action`, or `info`), a summary of two to three lines, options, and callouts. `sb triage` lists them in the order to go through them, and `sb next` prints the first. The same item is `triage` in `sb ls --json` and `sb get --json`, with a `source`, in this order of precedence:
 
 - `card`: a held permission prompt or `AskUserQuestion` question. Allow and Deny, or the question's options.
 - `session`: the card that the session wrote for its current turn with `sb summary set` (see Session summaries). When a PR rule decides the state after the turn, such as a new conflict, the rule's reason leads the callouts, and the rule's options follow the session's.
@@ -207,9 +207,33 @@ Each session that needs you, or that Claude can continue, gets one item: a decis
 
 The order is: a held prompt or question; a decision, question, or approval; PR actions; finished work to review; Claude can continue. The oldest comes first in each group.
 
+Every item has the same three sections in the same order, whatever its kind:
+
+- **Summary:** only the context you need to understand the options and pick one: the summary lines, and the callouts. A fact is in it only if you would misjudge or not understand an option without it. The three-line limit, the Haiku prompt, and `sb summary help` all state this, and the full reply is in Details.
+- **Action:** the buttons: the options, Allow and Deny, Merge or Enqueue, Request review, Send and Cancel for a group message, a held question's answers, and Acknowledge.
+- **Details:** everything else, collapsed until you open it: the tool call that a prompt asks about, a group message's text and targets, the PR and its checks, waits, notes, the full last reply, and the newest events.
+
+A permission prompt is the one case where Details starts open. Its Summary shows a Bash command up to 200 characters on one line. A longer command, a command with a line break, or a tool such as Write whose Summary names only a file, opens Details with the whole call, so you never allow a call that the Inbox shows in part.
+
+`sb ls --json`, `sb get --json`, `sb triage --json`, `sb next --json`, and the MCP `triage` tool carry the sections as `triage.message`, beside the item's own fields:
+
+```json
+{
+  "title": "Approve `touch x`", "kind": "approval", "source": "card", "ref": "card:3",
+  "summary": "Claude asks to run `touch x`.", "options": [], "callouts": [], "multiSelect": false,
+  "message": {
+    "summary": {"text": "Claude asks to run `touch x`.", "callouts": []},
+    "action": {"options": [{"label": "Allow", "action": "allow", "recommended": true}, {"label": "Deny", "action": "deny"}], "multiSelect": false, "primary": 0},
+    "details": {"openByDefault": false, "toolInput": {"tool": "Bash", "text": "touch x"}, "lastReply": "…"}
+  }
+}
+```
+
+`message.summary` is `{text, callouts}`. `message.action` is `{options, multiSelect, primary}`, where `primary` is the index of the main option, or null when no option is the main one. `message.details` always has `openByDefault` and has only the parts that exist: `lastReply`, `toolInput` (`{tool, text}`), `pullRequest` (`{line, title, url}`), `waits`, `notes`, and `targets` (`name (id)` for each session of a group message). The newest events are not in it: `sb events <session>` prints them. The item's own `summary`, `callouts`, `options`, and `multiSelect` hold the same values as `message`, for scripts that read them. `sb triage` prints the Summary, the Action, and a line that names the Details.
+
 Each option has an action, and a click runs a request that sb already has: `send` sends the option's message, `reply` sends text you type, `merge` and `dismiss` do what `sb merge` and `sb merge --dismiss` do, `requestReview` does what `sb review <session> <reviewer>...` does, `wait` sets the option's wait, `done` marks the session done, and `allow`, `deny`, and `answer` answer a held prompt. `sb choose <session> <option>` does what a click does, and `--text` gives a reply option its text and a Request review option its reviewers, separated by commas or spaces. On a multi-select card, `sb choose <session> 1,3` names several options, separated by commas, and they go as one reply. Inside Claude Code, `sb choose` refuses to answer a prompt, to merge, or to request a review. `sb reply <session>` prints the session's last reply from its transcript. sbd also starts every claude with `--append-system-prompt` text that asks it to put choices through `AskUserQuestion`. In `config.json`, `triage` sets `enabled` (false turns the summaries off), `model` (default `haiku`), `account`, `timeoutSeconds`, `perHour` (default 6), and `systemPrompt` (empty turns the nudge off).
 
-In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's card: the summary, the callouts, the options, and a collapsed Details group with the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. Each option is a full-width box stacked under the callouts, with its label as the title and its detail under it. Long text wraps. A box has a neutral background and border, so it never reads as a callout. A click on a box with a chevron runs its option at once. When the option sends text that differs from its label, or does something else such as a merge, the box says so in a last line. The recommended option is filled with the accent color, and ⌘⇧Return clicks it. A reply option's box holds a text field and a Send button. On a multi-select card, each box that sends a message has a checkbox: tick the ones that apply, then click Submit, which shows the message it sends and stays off until something is ticked. There Submit takes ⌘⇧Return, and the recommended option is marked Recommended. Acknowledge is a box too, which says that it sends nothing. A held prompt shows its card in place of the options. A held question shows each option as a box: a click answers a question with one choice at once, a multi-select question has checkboxes, a card with several questions has radio buttons for each one-choice question, and Submit sends those answers. Allow and Deny, a group message's Send and Cancel, and Merge All (or Enqueue All) stay plain buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
+In the app, the Inbox shows the list on the left, and `j` and `k` move through it while it has focus. The right side shows the selected session's message as three titled sections, Summary, Action, and Details. Summary holds the summary and the callouts. Action holds the options. Details is collapsed and holds the tool call or group message, the last reply as formatted Markdown, the PR and its checks, waits, notes, and the newest events. Each option is a full-width box stacked under the callouts, with its label as the title and its detail under it. Long text wraps. A box has a neutral background and border, so it never reads as a callout. A click on a box with a chevron runs its option at once. When the option sends text that differs from its label, or does something else such as a merge, the box says so in a last line. The recommended option is filled with the accent color, and ⌘⇧Return clicks it. A reply option's box holds a text field and a Send button. On a multi-select card, each box that sends a message has a checkbox: tick the ones that apply, then click Submit, which shows the message it sends and stays off until something is ticked. There Submit takes ⌘⇧Return, and the recommended option is marked Recommended. Acknowledge is a box too, which says that it sends nothing. A held prompt shows its card in place of the options. A held question shows each option as a box: a click answers a question with one choice at once, a multi-select question has checkboxes, a card with several questions has radio buttons for each one-choice question, and Submit sends those answers. Allow and Deny, a group message's Send and Cancel, and Merge All (or Enqueue All) stay plain buttons. A field at the bottom messages the session itself. The Terminal button shows the session's terminals in place of the card.
 
 #### Session summaries
 
@@ -230,7 +254,7 @@ A session writes its Inbox card at the end of a turn that needs you, and sbd sho
 }
 ```
 
-- `summary` is required. sbd keeps its first four lines, each up to 200 characters. `title` defaults to the first line.
+- `summary` is required. sbd keeps its first three lines, each up to 200 characters. `title` defaults to the first line.
 - `options` holds up to 6 options. A session may name the actions `send` (with `message`), `reply` (with an optional `placeholder`), `merge`, `wait` (with a `wait` object that takes the fields of `sb wait`), and `done`. `recommended: true` makes an option the main one. The `label`, up to 80 characters, is the option's title, and `detail` says under it what the option does.
 - `multiSelect: true` lets you tick any of the options and submit them together, as for which review items to fix. Every option of such a card must be a `send` option. A single pick sends its message. Several picks send one message that lists each picked option's message on its own line, after `- `, in the options' order.
 - `callouts` holds up to 5 things to read before deciding, each with a `kind` (`warning`, `decision`, or `info`), a `title`, and a `body`.
