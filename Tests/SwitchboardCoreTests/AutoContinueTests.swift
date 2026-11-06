@@ -53,7 +53,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
   }
 
   enum OpenPrompt: CaseIterable, Sendable {
-    case card, deferredCard, permission, question
+    case card, deferredCard, sessionCard, permission, question
   }
 
   @Test(arguments: OpenPrompt.allCases)
@@ -67,6 +67,8 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
         var card = Card(request)
         card.deferred = true
         input.facts.cards = [card]
+      case .sessionCard:
+        input.facts.sessionSummary = sessionCard
       case .permission:
         input.facts.openPermission = ToolCall(tool: "Bash", summary: "`rm -rf build`", since: now - hourMs)
       case .question:
@@ -238,6 +240,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     input.session.manager = true
     input.session.chat = "g1"
     input.facts.cards = [Card(event("PermissionRequest", now - hourMs, tool("Bash", ["command": "ls"])))]
+    input.facts.sessionSummary = sessionCard
     input.facts.turnRunning = true
     input.busy = true
     input.facts.live = false
@@ -253,6 +256,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
       ("the Manager", { $0.session.manager = nil }),
       ("a group chat", { $0.session.chat = nil }),
       ("an open card", { $0.facts.cards = [] }),
+      ("an open card", { $0.facts.sessionSummary = nil }),
       ("an open wait", { $0.session.waits = nil }),
       ("a turn is running", { $0.facts.turnRunning = false }),
       ("a message is on its way", { $0.busy = false }),

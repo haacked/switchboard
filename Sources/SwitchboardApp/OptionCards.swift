@@ -171,8 +171,9 @@ struct OptionList: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let item: TriageItem
-  /// Typed replies by option index.
-  @State private var replies: [Int: String] = [:]
+  /// Typed replies by item ref and option index. The view outlives its item,
+  /// so a reply that sbd refused as stale would otherwise fill the next item's field.
+  @State private var replies: [String: String] = [:]
   @State private var picks = OptionPicks()
 
   /// The picks for the item on screen. A pick made on another item, such as
@@ -199,11 +200,16 @@ struct OptionList: View {
       ForEach(item.options.indices, id: \.self) { i in
         let option = item.options[i]
         if option.action == .reply {
+          let key = "\(item.ref)/\(i)"
           ReplyOption(
             session: session, ref: item.ref, number: i + 1, option: option,
-            text: Binding(get: { replies[i, default: ""] }, set: { replies[i] = $0 }))
+            text: Binding(get: { replies[key, default: ""] }, set: { replies[key] = $0 }))
         } else if item.isTickable(option) {
           tickBox(i, option)
+        } else if option.action == .requestReview {
+          RequestReviewOption(
+            session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
+            shortcut: owner == .option(i))
         } else {
           OptionButton(
             session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
@@ -244,8 +250,9 @@ struct OptionList: View {
   }
 }
 
-/// An option's box. A click runs the option's action. The main option is
-/// filled. The option that owns the shortcut answers ⌘⇧Return.
+/// An option's box. A click runs the option's action, or `onClick` when it
+/// is set. The main option is filled. The option that owns the shortcut
+/// answers ⌘⇧Return.
 struct OptionButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -254,13 +261,14 @@ struct OptionButton: View {
   let option: TriageOption
   let primary: Bool
   var shortcut = false
+  var onClick: (() -> Void)?
 
   static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
     let effect = option.effect(mergeMethod: session.pr?.mergeMethod)
     Button {
-      model.choose(session.id, ref: ref, option: number, action: option.action)
+      if let onClick { onClick() } else { model.choose(session.id, ref: ref, option: number, action: option.action) }
     } label: {
       OptionCardLabel(
         mark: .go, title: option.label, description: option.detail,
@@ -288,7 +296,7 @@ struct ReplyOption: View {
   let option: TriageOption
   @Binding var text: String
 
-  private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var trimmed: String { Self.trimmed(text) }
 
   var body: some View {
     OptionCardChrome(interactive: false) {
@@ -310,8 +318,6 @@ struct ReplyOption: View {
   }
 
   private func send() {
-    guard !trimmed.isEmpty else { return }
-    model.choose(session.id, ref: ref, option: number, action: .reply, text: trimmed)
-    text = ""
+    Self.submit($text, session: session.id, ref: ref, option: number, to: model)
   }
 }

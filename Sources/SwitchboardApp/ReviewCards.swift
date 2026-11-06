@@ -1,0 +1,104 @@
+import SwiftUI
+import SwitchboardCore
+
+/// The review card's Request review button. A click opens the suggested
+/// reviewers, and nothing is requested until the user picks some and
+/// clicks Request Review.
+struct RequestReviewOption: View {
+  let session: SessionSummary
+  let ref: String
+  let number: Int
+  let option: TriageOption
+  let primary: Bool
+  var shortcut = false
+  @State private var picking = false
+
+  var body: some View {
+    OptionButton(
+      session: session, ref: ref, number: number, option: option, primary: primary, shortcut: shortcut
+    ) { picking = true }
+    .popover(isPresented: $picking, arrowEdge: .bottom) {
+      ReviewerPicker(session: session, ref: ref, number: number)
+    }
+  }
+}
+
+/// The suggested reviewers, each with a checkbox, and a button that requests
+/// a review from the checked ones.
+struct ReviewerPicker: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+  let ref: String
+  let number: Int
+  @Environment(\.dismiss) private var dismiss
+  @State private var suggestions: [ReviewerSuggestion]?
+  @State private var error: String?
+  @State private var picked: Set<String> = []
+
+  private var prRef: String { session.pr.map { "#\($0.number)" } ?? "the PR" }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("Request a review of \(prRef)").font(.headline)
+      if let error {
+        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).lineLimit(4)
+      } else if let suggestions {
+        ForEach(suggestions, id: \.login) { s in
+          Toggle(isOn: checked(s.login)) {
+            VStack(alignment: .leading, spacing: 1) {
+              Text(s.login).fontWeight(.medium)
+              Text(s.reason).font(.caption).foregroundStyle(.secondary)
+            }
+          }
+          .toggleStyle(.checkbox)
+          .accessibilityLabel("\(s.login), \(s.reason)")
+        }
+      } else {
+        ProgressView("Reading suggestions…").controlSize(.small)
+      }
+      HStack {
+        Spacer()
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Request Review") {
+          let reviewers = ReviewerPicker.chosen(suggestions ?? [], picked)
+          model.choose(
+            session.id, ref: ref, option: number, action: .requestReview, text: reviewers.joined(separator: ","))
+          dismiss()
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(picked.isEmpty || model.choosing.contains("\(session.id)/\(number)"))
+      }
+    }
+    .padding()
+    .frame(width: 320)
+    .task {
+      do {
+        let loaded = try await model.reviewSuggestions(session.id)
+        // reviewSuggestions returns after gh finishes even when closing the
+        // popover cancelled this task.
+        guard !Task.isCancelled else { return }
+        suggestions = loaded
+        AccessibilityNotification.Announcement(
+          "\(loaded.count) suggested reviewer\(loaded.count == 1 ? "" : "s")"
+        ).post()
+      } catch {
+        guard !Task.isCancelled else { return }
+        self.error = "\(error)"
+        AccessibilityNotification.Announcement("Can't read the suggested reviewers: \(error)").post()
+      }
+    }
+  }
+
+  private func checked(_ login: String) -> Binding<Bool> {
+    Binding(
+      get: { picked.contains(login) },
+      set: { on in
+        if on { picked.insert(login) } else { picked.remove(login) }
+      })
+  }
+
+  /// The picked reviewers, in the order that the suggestions list them.
+  static func chosen(_ suggestions: [ReviewerSuggestion], _ picked: Set<String>) -> [String] {
+    suggestions.map(\.login).filter(picked.contains)
+  }
+}

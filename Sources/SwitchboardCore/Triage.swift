@@ -34,6 +34,8 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
   case merge
   /// Acknowledges the Ready to merge item, as `sb merge --dismiss` does.
   case dismiss
+  /// Requests a review of the session's PR from the reviewers that the user picks.
+  case requestReview
   /// Sets the option's wait on the session.
   case wait
   /// Marks the session done.
@@ -49,6 +51,26 @@ public enum TriageAction: String, Codable, Sendable, CaseIterable {
 
   /// Whether the action runs `sb merge`, which also acknowledges.
   public var isMerge: Bool { self == .merge || self == .dismiss }
+
+  /// Whether a click waits on gh for up to two minutes, so the app runs it
+  /// apart from its other actions. The switch has no default, so a new
+  /// action must state whether it waits on gh.
+  public var waitsOnGh: Bool {
+    switch self {
+    case .merge, .requestReview: true
+    case .send, .reply, .dismiss, .wait, .done, .allow, .deny, .allowAutoMode, .answer: false
+    }
+  }
+
+  /// Whether the action acts on the PR for the user, as `sb merge` and
+  /// `sb review` do, so a session may not run it. The switch has no
+  /// default, so a new action must state whether it needs a click.
+  public var needsClick: Bool {
+    switch self {
+    case .merge, .dismiss, .requestReview: true
+    case .send, .reply, .wait, .done, .allow, .deny, .allowAutoMode, .answer: false
+    }
+  }
 
   /// The actions that a card from a session or the model may name. sbd adds
   /// the others to the cards that it builds from a held prompt or a PR.
@@ -91,6 +113,7 @@ public struct TriageOption: Codable, Equatable, Sendable {
     case .reply: return "Sends the text you type"
     case .merge: return mergeMethod?.enqueues == true ? "Adds the PR to its merge queue" : "Merges the PR"
     case .dismiss: return "Hides the merge card until the PR gets a new commit or a new turn starts"
+    case .requestReview: return "Requests a review from the reviewers you pick"
     case .wait: return "Waits on \(wait?.kind ?? "manual")\(wait?.target.map { " \($0)" } ?? "")"
     case .done: return "Marks the session done"
     case .allow: return "Allows the prompt"
@@ -416,7 +439,8 @@ public enum Triage {
   static func ruleItem(_ verdict: Verdict) -> TriageItem {
     let text = capitalized(verdict.reason)
     return TriageItem(
-      title: title(verdict.reason), kind: verdict.kind, summary: text.hasSuffix(".") ? text : text + ".",
+      title: title(verdict.reason), kind: verdict.kind,
+      summary: verdict.summary ?? (text.hasSuffix(".") ? text : text + "."),
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 

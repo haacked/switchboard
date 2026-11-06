@@ -172,6 +172,26 @@ final class OpLog: @unchecked Sendable {
     #expect(log.value == ["account-use"])
   }
 
+  @Test func choosingAnAccountClosesTheMenu() {
+    let model = model(OpLog())
+    model.showingAccounts = true
+
+    model.useAccount("/b")
+
+    #expect(!model.showingAccounts)
+  }
+
+  @Test func offeringAMoveClosesTheMenuAndAsksWithoutSwitching() {
+    let model = model(OpLog())
+    model.showingAccounts = true
+
+    model.offerMove(plan)
+
+    #expect(!model.showingAccounts)
+    #expect(model.switchingAccount?.folder == "/a")
+    #expect(model.switchingAccount?.switches == false)
+  }
+
   @Test func theMenuOffersAMoveOnlyToASignedInActiveAccountWithSessionsElsewhere() {
     let model = offlineModel()
     model.accounts = [

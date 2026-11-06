@@ -38,6 +38,10 @@ public final class Service {
     var turnProbe = TurnProbe()
     /// When the tick last saw a terminal on the Claude pane.
     var lastOnScreen: Int64 = 0
+    /// The Stop event of the last turn whose summary this sbd started or
+    /// skipped. A turn gets one attempt per run of sbd, so a restart retries
+    /// a summary that failed.
+    var summaryAttempt: Int64 = 0
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
 
@@ -57,6 +61,8 @@ public final class Service {
   var starting: Set<String> = []
   /// The sessions whose PR `merge` is merging.
   var merging: Set<String> = []
+  /// The sessions whose PR `review` is asking gh to request a review of.
+  var requestingReview: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -152,7 +158,9 @@ public final class Service {
     try? refreshManagerGuide()
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
-    for id in entries.keys { summarizeTurn(id) }
+    for (id, e) in entries {
+      summarizeTurn(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+    }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
     let reader = UsageReader(service: self, settings: config.usage)
@@ -193,6 +201,8 @@ public final class Service {
         return .success(try removeDone(request.args))
       case "merge":
         return .success(try mergeRequest(request.args))
+      case "review":
+        return .success(try reviewRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -386,7 +396,6 @@ public final class Service {
       entries[id]?.inFlight = nil
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
-      if kind == "Stop" { summarizeTurn(id) }
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
       deliverPending(id, after: 0.5)
     default:
@@ -406,9 +415,12 @@ public final class Service {
     }
     if var e = entries[id] {
       e.facts.apply(event)
-      Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
+      let verdict = Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
       e.events += 1
       entries[id] = e
+      // A reply can decide the state after its turn ended, as when a
+      // background job outlasts the turn or a PR rule stops applying.
+      summarizeTurn(id, verdict)
     }
     releaseCards(id)
     return event
@@ -798,11 +810,13 @@ public final class Service {
   /// also deletes the local branch, and needs `worktree`. `remote_branch`
   /// also deletes the branch on its remote, and needs `branch`. git runs off
   /// the state queue, because removing a worktree with large ignored folders
-  /// can take a while. A failed removal leaves the session and its panes in
-  /// place. A store that can't delete the session's record also refuses the
-  /// removal before anything stops. After the worktree is gone, the session is
-  /// forgotten whatever happens to the branch, because its folder is missing.
-  /// The branch is checked again at that point. A failed check or delete keeps
+  /// can take a while. A removal of the worktree closes the panes first, and
+  /// runs the checks again once `finishPaneStop` returns. A refusal there, or
+  /// a failed removal, leaves the session. A store that can't delete the
+  /// session's record also refuses the removal before anything stops. After
+  /// the worktree is gone, the session is forgotten whatever happens to the
+  /// branch, because its folder is missing. The branch is checked again at
+  /// that point. A failed check or delete keeps
   /// the branch and throws after the session is forgotten. The conversation's
   /// transcript stays in the account's projects folder, because Claude Code has
   /// no command that archives a local session. When the session's folder is
@@ -833,7 +847,7 @@ public final class Service {
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
     let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
-    let (repo, branch, supacode) = try checkRemoval(
+    var (repo, branch, supacode) = try checkRemoval(
       session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
       branch: removesBranch)
     // The branch's git config is deleted with the branch, so the remote is read first.
@@ -843,7 +857,7 @@ public final class Service {
       return (repo, trackedRemote(repo, name), name)
     }()
     let fresh = buildSnapshot()
-    try queue.sync {
+    let stop: PaneStop? = try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
         !merging.contains(session.id)
       else {
@@ -852,7 +866,15 @@ public final class Service {
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
       try store.checkDeletable(session: session.id)
       install(fresh)
+      if removesWorktree { return beginPaneStop(session.id) }
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
+      return nil
+    }
+    if let stop {
+      try finishPaneStop(session, stop, command: "sb rm --worktree")
+      (repo, branch, supacode) = try checkRemoval(
+        session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+        branch: removesBranch)
     }
     // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
     // folder's path through a symlink, so it gets the path that it lists for the worktree.
@@ -1336,8 +1358,9 @@ public final class Service {
           entries[id]?.unreportedSince = nil
         }
         if var e = entries[id] {
-          Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
+          let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
+          summarizeTurn(id, verdict)
         }
       }
       runQueuedStarts(now: now)
