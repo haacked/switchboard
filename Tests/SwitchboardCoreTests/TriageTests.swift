@@ -361,11 +361,41 @@ func replyFixture(_ name: String) throws -> String {
     #expect(line.hasSuffix("…"))
   }
 
-  @Test func aLongListShowsItsFirstItemsAndAnEllipsis() {
-    let items = (1...12).map { "\($0). Item \($0)." }.joined(separator: "\n")
+  @Test(arguments: [Triage.closingItems, Triage.closingItems + 1, 12])
+  func aListLongerThanTheCardShowsItsFirstItemsAndAnEllipsis(_ count: Int) {
+    let items = (1...count).map { "\($0). Item \($0)." }.joined(separator: "\n")
     let lines = summaryLines("Changes I made:\n\n\(items)")
 
-    #expect(lines == ["Changes I made:"] + (1...Triage.closingItems).map { "\($0). Item \($0)." } + ["…"])
+    let shown = min(count, Triage.closingItems)
+    #expect(
+      lines == ["Changes I made:"] + (1...shown).map { "\($0). Item \($0)." } + (count > shown ? ["…"] : []))
+  }
+
+  @Test(arguments: [
+    (
+      "## Decisions\n\n1. **Retry?** I recommend yes.\n\nTell me.",
+      ["Decisions", "1. Retry? I recommend yes.", "Tell me."]
+    ),
+    (
+      "I read the plan.\nDecisions I need from you:\n\n1. a\n\nTell me.",
+      ["Decisions I need from you:", "1. a", "Tell me."]
+    ),
+    ("1. a\n2. b\n\nTell me.", ["1. a", "2. b", "Tell me."]),
+  ])
+  func theLeadIsTheLineBeforeTheList(_ reply: String, _ expected: [String]) {
+    #expect(summaryLines(reply) == expected)
+  }
+
+  @Test func anItemThatStartsWithAFlagKeepsItsDashes() {
+    let reply = "Decisions I need from you:\n\n1. **`--squash` or `--merge`?** I recommend squash.\n\nTell me."
+
+    #expect(summaryLines(reply).dropFirst().first == "1. --squash or --merge? I recommend squash.")
+  }
+
+  @Test func aTaskListKeepsWhichItemsAreDone() {
+    let reply = "What's left:\n\n- [x] Done thing.\n- [ ] Open thing.\n\nTell me."
+
+    #expect(summaryLines(reply) == ["What's left:", "- [x] Done thing.", "- [ ] Open thing.", "Tell me."])
   }
 
   @Test func aNumberedListKeepsTheRepliesOwnNumbers() throws {
@@ -498,6 +528,19 @@ func replyFixture(_ name: String) throws -> String {
     let summary = try TriageSummarizer.parse(envelope(payload))
 
     #expect(summary.summary == Self.eightLines)
+  }
+
+  @Test func keepsOneLinePerDecisionUpToTheMostItAsksFor() throws {
+    let lines =
+      ["It planned."] + (1...TriageSummarizer.maxDecisions).map { "\($0). Decision \($0)." } + [
+        "It needs them.", "extra",
+      ]
+    let payload: JSON = ["title": "Decide", "kind": "decision", "summary": .string(lines.joined(separator: "\n"))]
+
+    let summary = try TriageSummarizer.parse(envelope(payload))
+
+    #expect(summary.summary == lines.prefix(TriageSummarizer.summaryLines).joined(separator: "\n"))
+    #expect(!summary.summary.contains("extra"))
   }
 
   @Test func aSessionsOwnCardStillKeepsFourLines() throws {

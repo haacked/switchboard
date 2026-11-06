@@ -456,7 +456,7 @@ public enum Triage {
   }
 
   /// A fallback summary lists at most this many items of a list.
-  static let closingItems = 10
+  static let closingItems = TriageSummarizer.maxDecisions
 
   /// The reply's last list when at most one paragraph follows it: the line
   /// before the list, a line for each item, and that paragraph. Otherwise the
@@ -476,7 +476,8 @@ public enum Triage {
     }
     let itemLines = items.prefix(closingItems).enumerated().compactMap { i, item -> String? in
       guard case .paragraph(let text) = item.blocks.first else { return nil }
-      let marker = number.map { "\($0 + i). " } ?? "- "
+      let box = item.checked.map { $0 ? "[x] " : "[ ] " } ?? ""
+      let marker = (number.map { "\($0 + i). " } ?? "- ") + box
       return oneLine(marker + itemLine(plain(text)), max: TriageCard.lineLength)
     }
     guard !itemLines.isEmpty else { return lastParagraph }
@@ -496,7 +497,8 @@ public enum Triage {
   /// first sentence and the first sentence that recommends.
   static func itemLine(_ text: String) -> String {
     let line = oneLine(text, max: .max)
-    let sentences = Attention.sentences(line)
+    // A list item can start with a flag such as --squash. This trim keeps its dashes.
+    let sentences = Attention.sentences(line, trimming: CharacterSet(charactersIn: "*_`").union(.whitespaces))
     guard let pick = sentences.dropFirst().first(where: { $0.localizedCaseInsensitiveContains("recommend") }) else {
       return line
     }

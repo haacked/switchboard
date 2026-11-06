@@ -456,7 +456,9 @@ public enum Attention {
 
   static let sentenceClosers: Set<Character> = ["*", "_", "`", "\"", "'", "\u{201D}", "\u{2019}", ")", "]"]
 
-  static func sentences(_ text: String) -> [String] {
+  static let sentenceTrim = CharacterSet(charactersIn: "*_` -").union(.whitespaces)
+
+  static func sentences(_ text: String, trimming: CharacterSet = sentenceTrim) -> [String] {
     var out: [String] = []
     var current = ""
     let chars = Array(text)
@@ -473,7 +475,7 @@ public enum Attention {
       }
     }
     out.append(current)
-    return out.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*_` -").union(.whitespaces)) }.filter {
+    return out.map { $0.trimmingCharacters(in: trimming) }.filter {
       !$0.isEmpty
     }
   }
