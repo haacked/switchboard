@@ -10,6 +10,7 @@ extension Service {
       guard let name = args["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
         throw APIError("group add needs a name")
       }
+      try refuseGroupTodo(args)
       let ids = try sessionRefs(args)
       let notes = try args["note"].map { try [makeNote($0.string, by: args["by"]?.string, after: [])] } ?? []
       let description = try SessionGroup.cleanDescription(args["description"]?.string)
@@ -31,6 +32,7 @@ extension Service {
       try place(ids, in: group)
       return try JSON(encoding: ids.map { summary($0) })
     case "group-note":
+      try refuseGroupTodo(args)
       let id = try lookupGroup(args)
       var group = groups[id]!
       group.notes.append(try makeNote(args["text"]?.string, by: args["by"]?.string, after: group.notes))

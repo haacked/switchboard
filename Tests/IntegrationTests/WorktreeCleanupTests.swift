@@ -186,6 +186,22 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(after.cleanup?.state == .removed)
   }
 
+  /// Cleanup keeps the record, so an open to-do does not stop it.
+  @Test func cleanupSucceedsWithAnOpenToDoAndKeepsTheSessionAndTheToDo() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.client.sessions().map(\.id) == [s.id])
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.storedNote(s.id, todo.id) == todo)
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
   @Test func cleanupRecordsACleanupEvent() throws {
     let github = try FakeGitHub()
     let (sbd, _, s) = try finishedSession(github)

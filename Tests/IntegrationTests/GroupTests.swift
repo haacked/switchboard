@@ -158,6 +158,29 @@ import Testing
     #expect(noted.notes.map(\.by) == [.claude])
   }
 
+  /// `group rm` drops the group's notes, so a group never holds a to-do.
+  @Test func groupNoteRefusesAToDo() throws {
+    let sbd = try Instance()
+    _ = try add(sbd, "Flags")
+
+    let message = failure(sbd, "group-note", ["group": "Flags", "text": "tell Alex", "kind": "todo"])
+
+    #expect(message.contains("To-dos belong on sessions, not groups."), Comment(rawValue: message))
+    #expect(try list(sbd).groups.first?.notes.isEmpty == true)
+  }
+
+  @Test func groupAddRefusesAToDoNoteAndCreatesNoGroup() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+
+    let message = failure(
+      sbd, "group-add", ["name": "Flags", "sessions": [.string(a.id)], "note": "tell Alex", "kind": "todo"])
+
+    #expect(message.contains("To-dos belong on sessions, not groups."), Comment(rawValue: message))
+    #expect(try list(sbd).groups.isEmpty)
+    #expect(try sbd.get(a.id).group == nil)
+  }
+
   // MARK: move
 
   @Test func moveMovesSessionsIntoAGroupFoundByNameOrIdPrefix() throws {

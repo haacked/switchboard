@@ -127,12 +127,16 @@ extension Service {
     return ["now": .number(Double(nowMs()))]
   }
 
-  /// A note with an id that `notes` doesn't use. It throws for empty text.
-  func makeNote(_ text: String?, by: String?, after notes: [Note]) throws -> Note {
+  /// A note with an id that `notes` doesn't use. It throws for empty text and
+  /// for an unknown kind. A plain note keeps `kind` nil.
+  func makeNote(_ text: String?, by: String?, kind: String? = nil, after notes: [Note]) throws -> Note {
     guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
       throw APIError("note needs text")
     }
-    return Note(id: shortId("n", taken: notes.map(\.id)), text: text, by: try Author(parsing: by), t: nowMs())
+    let kind = try Note.Kind(parsing: kind)
+    return Note(
+      id: shortId("n", taken: notes.map(\.id)), text: text, by: try Author(parsing: by), t: nowMs(),
+      kind: kind == .todo ? .todo : nil)
   }
 
   func noteRequest(_ op: String, _ args: JSON) throws -> JSON {
@@ -140,14 +144,19 @@ extension Service {
     let notes = entries[id]?.session.notes ?? []
     switch op {
     case "note":
-      let note = try makeNote(args["text"]?.string, by: args["by"]?.string, after: notes)
+      let note = try makeNote(args["text"]?.string, by: args["by"]?.string, kind: args["kind"]?.string, after: notes)
       try update(id) { $0.notes = notes + [note] }
       record(id, "note", ["note": try JSON(encoding: note)])
     case "remove-note":
       let noteId = args["note"]?.string ?? ""
-      guard notes.contains(where: { $0.id == noteId }) else { throw APIError("\(id) has no note \(noteId)") }
+      guard let note = notes.first(where: { $0.id == noteId }) else { throw APIError("\(id) has no note \(noteId)") }
+      guard !note.isOpenTodo else {
+        throw APIError("\(noteId) is an open to-do. Resolve it with sb note \(id) --resolve \(noteId).")
+      }
       try update(id) { $0.notes = notes.filter { $0.id != noteId } }
       record(id, "note-removed", ["note": .string(noteId)])
+    case "resolve-note":
+      try resolveNote(id, args)
     default:
       throw APIError("unknown request \(op)")
     }

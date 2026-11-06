@@ -23,6 +23,9 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
+    try exec(
+      "CREATE TABLE IF NOT EXISTS resolved_todos (id INTEGER PRIMARY KEY, session TEXT, name TEXT, repo TEXT, branch TEXT, pr INTEGER, note TEXT, text TEXT, by TEXT, added INTEGER, resolved INTEGER, how TEXT)"
+    )
   }
 
   deinit { sqlite3_close(db) }
@@ -31,20 +34,57 @@ public final class Store {
     try run("INSERT OR REPLACE INTO sessions (id, json) VALUES (?, ?)", [session.id, try JSONCoding.encode(session)])
   }
 
-  public func delete(session id: String) throws {
+  /// Deletes the session's record, events, and snapshot, and records the
+  /// resolved to-dos, in one transaction. A failure leaves all of it as it was.
+  public func delete(session id: String, resolving todos: [ResolvedTodo] = []) throws {
+    try transaction { try deleteRows(session: id, resolving: todos) }
+  }
+
+  /// Throws when `delete(session:resolving:)` hits an abort or a constraint, a
+  /// read-only connection, or a write lock held past the busy timeout. It runs
+  /// the same statements in a transaction that it rolls back, so it doesn't see
+  /// a failure that only the commit causes.
+  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo] = []) throws {
+    try exec("BEGIN IMMEDIATE")
+    defer { try? exec("ROLLBACK") }
+    try deleteRows(session: id, resolving: todos)
+  }
+
+  private func deleteRows(session id: String, resolving todos: [ResolvedTodo]) throws {
+    for todo in todos { try insert(todo) }
     try run("DELETE FROM sessions WHERE id = ?", [id])
     try run("DELETE FROM events WHERE session = ?", [id])
     try run("DELETE FROM snapshots WHERE session = ?", [id])
   }
 
-  /// Throws when `delete(session:)` hits an abort or a constraint, a read-only
-  /// connection, or a write lock held past the busy timeout. It runs the deletes
-  /// in a transaction that it rolls back, so it doesn't see a failure that only
-  /// the commit causes.
-  public func checkDeletable(session id: String) throws {
-    try exec("BEGIN IMMEDIATE")
-    defer { try? exec("ROLLBACK") }
-    try delete(session: id)
+  /// Saves the session and records the resolved to-do, in one transaction.
+  public func save(_ session: Session, resolving todo: ResolvedTodo) throws {
+    try transaction {
+      try insert(todo)
+      try save(session)
+    }
+  }
+
+  private func insert(_ todo: ResolvedTodo) throws {
+    try run(
+      "INSERT INTO resolved_todos (session, name, repo, branch, pr, note, text, by, added, resolved, how) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        todo.session, todo.name, todo.repo as Any, todo.branch as Any, todo.pr as Any, todo.note, todo.text,
+        todo.by.rawValue, todo.added, todo.resolved, todo.how,
+      ])
+  }
+
+  /// The resolved to-dos, newest first.
+  public func resolvedTodos(limit: Int) throws -> [ResolvedTodo] {
+    try query(
+      "SELECT id, session, name, repo, branch, pr, note, text, by, added, resolved, how FROM resolved_todos ORDER BY id DESC LIMIT ?",
+      [limit]
+    ) { row in
+      ResolvedTodo(
+        id: row.int(0), session: row.text(1), name: row.text(2), repo: row.optionalText(3),
+        branch: row.optionalText(4), pr: row.optionalInt(5), note: row.text(6), text: row.text(7),
+        by: Author(rawValue: row.text(8)) ?? .you, added: row.int(9), resolved: row.int(10), how: row.text(11))
+    }
   }
 
   /// The snapshot that `Snapshots` saved for the session, as JSON text.
@@ -201,6 +241,19 @@ public final class Store {
     let statement: OpaquePointer?
     func text(_ i: Int32) -> String { String(cString: sqlite3_column_text(statement, i)) }
     func int(_ i: Int32) -> Int64 { sqlite3_column_int64(statement, i) }
+    func optionalText(_ i: Int32) -> String? { sqlite3_column_type(statement, i) == SQLITE_NULL ? nil : text(i) }
+    func optionalInt(_ i: Int32) -> Int? { sqlite3_column_type(statement, i) == SQLITE_NULL ? nil : Int(int(i)) }
+  }
+
+  private func transaction(_ body: () throws -> Void) throws {
+    try exec("BEGIN IMMEDIATE")
+    do {
+      try body()
+      try exec("COMMIT")
+    } catch {
+      try? exec("ROLLBACK")
+      throw error
+    }
   }
 
   private func exec(_ sql: String) throws {

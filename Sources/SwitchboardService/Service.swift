@@ -312,8 +312,10 @@ public final class Service {
       return try acknowledgeRequest(args)
     case "wait", "clear-wait", "resolve-wait":
       return try waitRequest(op, args)
-    case "note", "remove-note":
+    case "note", "remove-note", "resolve-note":
       return try noteRequest(op, args)
+    case "resolved-todos":
+      return try resolvedTodos(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -829,8 +831,11 @@ public final class Service {
   /// The remote branch is deleted only after the local branch is, and only when
   /// it is at the merged PR's head. A remote branch at another commit stays and
   /// the call throws. Without a merged PR for the branch, the remote branch is
-  /// left alone and the call succeeds.
+  /// left alone and the call succeeds. A session with an open to-do is refused
+  /// before anything stops, unless `resolve` names each open to-do. A to-do
+  /// that arrives later keeps the session, even after its worktree is gone.
   func remove(_ args: JSON) throws -> JSON {
+    let resolving = try resolveArgument(args)
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
     let removesRemoteBranch = args["remote_branch"]?.bool == true
@@ -845,6 +850,7 @@ public final class Service {
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       guard !merging.contains(id) else { throw APIError("\(id) is merging its PR") }
+      try checkTodos(id, resolving: resolving)
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
@@ -865,8 +871,9 @@ public final class Service {
       else {
         throw APIError("\(session.id) changed while it was being removed")
       }
+      try checkTodos(session.id, resolving: resolving)
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
-      try store.checkDeletable(session: session.id)
+      try store.checkDeletable(session: session.id, resolving: deletionRecords(session.id, resolving: resolving))
       install(fresh)
       if removesWorktree { return beginPaneStop(session.id) }
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
@@ -911,10 +918,17 @@ public final class Service {
       else {
         throw APIError("\(session.id) changed while it was being removed")
       }
+      // A to-do can arrive while the panes stop. The record then stays, with the worktree gone.
+      do {
+        try forgetSession(session.id, resolving: resolving)
+      } catch let error as OpenTodoError {
+        let kept = repo != nil ? "Removed the worktree of \(session.id) and kept the session" : "Kept \(session.id)"
+        throw APIError("\(kept), because it has an open to-do: \(error.list). \(error.hint)")
+      } catch let error where repo != nil {
+        throw APIError("Removed the worktree of \(session.id) and kept the session: \(error)")
+      }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))
-      entries[session.id] = nil
-      try store.delete(session: session.id)
       try detachPlans { $0.session == session.id }
     }
     try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))

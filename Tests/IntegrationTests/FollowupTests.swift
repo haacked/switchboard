@@ -334,4 +334,66 @@ final class Outcome<T>: @unchecked Sendable {
     #expect(after == before)
     #expect(after.count == 3)
   }
+
+  // MARK: To-dos
+
+  private func followupIds(_ sbd: Instance) throws -> [String] {
+    try sbd.client.call("followup-ls", as: [SessionSummary].self).map(\.id)
+  }
+
+  @Test func followupRmRefusesAnUnstartedFollowupThatHoldsAnOpenToDo() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
+    let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
+    // shortId never uses 0, so n00000 names no note.
+    let lists: [(String, JSON?)] = [
+      ("no resolve", nil),
+      ("an unknown id", ["n00000"]),
+      ("the open id and an unknown id", [.string(todo.id), "n00000"]),
+      ("a boolean", true),
+    ]
+
+    for (what, resolve) in lists {
+      var args: [String: JSON] = ["session": .string(f.id)]
+      args["resolve"] = resolve
+
+      let message = failure(sbd, "followup-rm", args)
+
+      #expect(message != "no error", "\(what)")
+      #expect(try followupIds(sbd) == [f.id], "\(what)")
+      #expect(try sbd.isOpenTodo(f.id, todo.id), "\(what)")
+      #expect(try sbd.resolvedTodos().isEmpty, "\(what)")
+    }
+    let message = failure(sbd, "followup-rm", ["session": .string(f.id)])
+    #expect(message.contains("has an open to-do"), Comment(rawValue: message))
+    #expect(message.contains(todo.id), Comment(rawValue: message))
+  }
+
+  @Test func followupRmWithResolveRemovesTheFollowupAndKeepsTheRecord() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
+    let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
+
+    try sbd.sb("followup", "rm", f.id, "--resolve", todo.id)
+
+    #expect(try followupIds(sbd).isEmpty)
+    let rows = try sbd.resolvedTodos()
+    #expect(rows.map { $0["note"]?.string } == [todo.id])
+    #expect(rows.first?["session"]?.string == f.id)
+    #expect(rows.first?["text"]?.string == todo.text)
+    #expect(rows.first?["how"]?.string == "resolved and deleted the session")
+  }
+
+  @Test func followupRmResolveInsideClaudeCodeExitsWithAnError() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
+    let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
+
+    let r = try sbd.run(["followup", "rm", f.id, "--resolve", todo.id], env: ["CLAUDECODE": "1"])
+
+    #expect(r.status != 0)
+    #expect(try followupIds(sbd) == [f.id])
+    #expect(try sbd.isOpenTodo(f.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
 }
