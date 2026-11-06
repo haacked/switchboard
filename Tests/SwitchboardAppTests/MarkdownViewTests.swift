@@ -19,9 +19,15 @@ import Testing
     #expect(rows.map(\.gap) == [8, 8, 3, 3, 8])
   }
 
-  @Test func onlyALocalImageLoadsWithoutAClick() {
-    #expect(MarkdownImageLoader.loadsUnasked(URL(fileURLWithPath: "/tmp/a.png")))
-    #expect(!MarkdownImageLoader.loadsUnasked(URL(string: "https://x.example/a.png")!))
+  @Test func noImageLoadsWithoutAClick() {
+    let sources = [
+      "https://x.example/a.png", "file:///tmp/a.png", "file:///net/attacker.example/export/x.png",
+      "file:///Users/me/Desktop/a.png", "file:///Users/me/Documents/a.png",
+      "file:///Users/me/Downloads/a.png", "file:///Volumes/Share/a.png",
+    ]
+    for source in sources {
+      #expect(!MarkdownImageLoader.loadsUnasked(URL(string: source)!), "\(source)")
+    }
   }
 
   @Test func aLocalImageLoadsOnlyFromARegularFileUnderTheLimit() async throws {
