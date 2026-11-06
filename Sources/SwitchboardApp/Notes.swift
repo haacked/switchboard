@@ -137,6 +137,7 @@ struct NotesPopover: View {
             Spacer(minLength: 0)
             Button("Resolve") { model.resolveNote(session.id, note: note.id) }
               .help("Mark the to-do done. It stays in the notes as resolved.")
+              .accessibilityLabel("Resolve: \(note.text)")
           }
         }
         ForEach(badge.plain, id: \.id) { row($0) }

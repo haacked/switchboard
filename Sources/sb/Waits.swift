@@ -100,7 +100,7 @@ func refuse(_ words: String, _ command: String) -> Never {
 func noteLine(_ n: Note) -> String {
   var kind = ""
   if n.kind == .todo { kind = n.resolved.map { "to-do, resolved \(ago($0.t)); " } ?? "to-do, " }
-  return "\(n.id)  \(n.text) (\(kind)\(n.by.rawValue), \(ago(n.t)))"
+  return "\(n.id)  \(n.text) (\(kind)\(n.by.rawValue), \(ago(n.t)))".printable
 }
 
 /// The open to-dos first, then the plain notes, then the resolved to-dos.

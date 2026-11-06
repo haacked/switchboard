@@ -21,26 +21,40 @@ import Testing
     return names.filter { $0.hasSuffix(".swift") }.sorted().map { sources.appendingPathComponent($0) }
   }
 
-  /// Each call of `delete(session:)` on any receiver, outside comments, with the function that contains it.
+  /// Each call of `delete(session:)` on any receiver in the service's sources, outside comments, with the function
+  /// that contains it.
   static func deleteCalls() throws -> [DeleteCall] {
+    try swiftFiles().flatMap {
+      try deleteCalls(in: String(contentsOf: $0, encoding: .utf8), file: $0.lastPathComponent)
+    }
+  }
+
+  /// The calls in one file's text. The patterns match against the whole text. A call that wraps after
+  /// `delete(` still counts.
+  static func deleteCalls(in text: String, file: String) throws -> [DeleteCall] {
     let call = try Regex(#"\.delete\(\s*session\s*:"#)
     let function = try Regex(#"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)"#)
-    var calls: [DeleteCall] = []
-    for file in try swiftFiles() {
-      var current: String?
-      let lines = try String(contentsOf: file, encoding: .utf8).components(separatedBy: "\n")
-      for (index, line) in lines.enumerated() {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("//") { continue }
-        if let match = line.firstMatch(of: function), let name = match.output[1].substring {
-          current = String(name)
-        }
-        if line.contains(call) {
-          calls.append(DeleteCall(file: file.lastPathComponent, line: index + 1, function: current))
-        }
-      }
+    let lines = text.components(separatedBy: "\n")
+    func lineNumber(_ index: String.Index) -> Int { text[..<index].filter { $0 == "\n" }.count + 1 }
+    func isComment(_ line: Int) -> Bool { lines[line - 1].trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+    let functions = text.matches(of: function).compactMap { match in
+      isComment(lineNumber(match.range.lowerBound))
+        ? nil : match.output[1].substring.map { (start: match.range.lowerBound, name: String($0)) }
     }
-    return calls
+    return text.matches(of: call).compactMap { match in
+      let line = lineNumber(match.range.lowerBound)
+      if isComment(line) { return nil }
+      let enclosing = functions.last { $0.start < match.range.lowerBound }?.name
+      return DeleteCall(file: file, line: line, function: enclosing)
+    }
+  }
+
+  @Test func deleteCallsFindsACallThatWrapsAfterTheParenthesis() throws {
+    let text = "func purge() {\n  try store.delete(\n    session: id, resolving: [])\n}\n"
+
+    let calls = try Self.deleteCalls(in: text, file: "Purge.swift")
+
+    #expect(calls.map(\.description) == ["Purge.swift:2 in purge"])
   }
 
   @Test func theServiceHasSourceFiles() throws {

@@ -384,6 +384,22 @@ final class Outcome<T>: @unchecked Sendable {
     #expect(rows.first?["how"]?.string == "resolved and deleted the session")
   }
 
+  /// `followup-rm` has no store check before `forgetSession`. The failed delete happens there. The follow-up
+  /// stays in sbd, and its to-do stays open.
+  @Test func followupRmThatTheStoreCannotDeleteKeepsTheFollowupAndItsToDo() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
+    let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
+    try sbd.blockDeletes(from: "sessions")
+
+    let message = failure(sbd, "followup-rm", ["session": .string(f.id), "resolve": [.string(todo.id)]])
+
+    #expect(message.contains("store is read-only"), Comment(rawValue: message))
+    #expect(try followupIds(sbd) == [f.id])
+    #expect(try sbd.isOpenTodo(f.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
   @Test func followupRmResolveInsideClaudeCodeExitsWithAnError() throws {
     let sbd = try Instance()
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])

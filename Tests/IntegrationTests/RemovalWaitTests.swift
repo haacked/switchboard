@@ -349,6 +349,31 @@ private final class Strays {
     #expect(try sbd.resolvedTodoIds() == [todo.id])
   }
 
+  /// `rm --delete-branch` deletes the branch before its last to-do check. A late refusal names the branch too.
+  @Test func aLateToDoRefusalNamesTheBranchThatRmDeleted() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    let terminals = try sbd.client.terminals(s.id)
+    let strays = try holdFolder(sbd, s)
+    defer { strays.killAll() }
+
+    let removal = Outcome<CommandResult>.detached { try sbd.deleteSessionAndBranch(s.id) }
+    try sbd.waitFor("the stop to close the Claude pane") { try !paneExists(terminals, terminals.claude) }
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    strays.killAll()
+    try #require(removal.done.wait(timeout: .now() + 60) == .success, "rm did not return")
+    let r = try #require(try removal.result?.get())
+
+    #expect(r.status != 0)
+    #expect(
+      r.stderr.contains(
+        "Removed the worktree and the local branch of \(s.id) and kept the session, because it has an open to-do"),
+      Comment(rawValue: r.stderr))
+    #expect(try !sbd.localBranchExists(repo, mergedBranch))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+  }
+
   /// The folder scan refuses after the pane stop began, which is after the first check accepted the to-do's id.
   @Test func aRefusalAfterThePaneStopBeganLeavesTheToDoOpen() throws {
     let sbd = try Instance()

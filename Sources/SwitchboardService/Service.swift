@@ -845,12 +845,15 @@ public final class Service {
     guard removesBranch || !removesRemoteBranch else {
       throw APIError("The remote branch can't be deleted without the local branch. Delete the local branch too.")
     }
+    let flags =
+      (removesWorktree ? ["--worktree"] : []) + (removesBranch ? ["--delete-branch"] : [])
+      + (removesRemoteBranch ? ["--delete-remote-branch"] : [])
     let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
       let id = try lookup(args)
       // The start would otherwise leave its new worktree behind.
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
       guard !merging.contains(id) else { throw APIError("\(id) is merging its PR") }
-      try checkTodos(id, resolving: resolving)
+      try checkTodos(id, resolving: resolving, flags: flags)
       let entry = entries[id]!
       return (entry.session, entry.facts.pr, sharedSession(entry.session))
     }
@@ -872,7 +875,8 @@ public final class Service {
         throw APIError("\(session.id) changed while it was being removed")
       }
       // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
-      try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
+      try store.checkDeletable(
+        session: session.id, resolving: checkTodos(session.id, resolving: resolving, flags: flags))
       install(fresh)
       if removesWorktree { return beginPaneStop(session.id) }
       if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
@@ -917,14 +921,29 @@ public final class Service {
       else {
         throw APIError("\(session.id) changed while it was being removed")
       }
-      // A to-do can arrive while the panes stop. The record then stays, with the worktree gone.
+      // A to-do can arrive while the panes stop. The record stays. The refusal names what rm already removed.
+      let removed = [
+        repo != nil ? "the worktree" : nil, branchRemoved ? "the local branch" : nil,
+        remoteRemoved ? "the remote branch" : nil,
+      ].compactMap { $0 }
+      let parts =
+        removed.count < 3
+        ? removed.joined(separator: " and ") : "\(removed.dropLast().joined(separator: ", ")), and \(removed.last!)"
+      let kept = removed.isEmpty ? "Kept \(session.id)" : "Removed \(parts) of \(session.id) and kept the session"
+      var stayed = ""
+      if let branchError, let branch {
+        stayed = " It kept \(branch.name): \(branchError)"
+      } else if let remoteError {
+        stayed = " It kept the remote branch: \(remoteError)"
+      }
       do {
         try forgetSession(session.id, resolving: resolving)
       } catch var error as OpenTodoError {
-        error.kept = repo != nil ? "Removed the worktree of \(session.id) and kept the session" : "Kept \(session.id)"
+        error.kept = kept
+        guard stayed.isEmpty else { throw APIError("\(error)\(stayed)") }
         throw error
-      } catch let error where repo != nil {
-        throw APIError("Removed the worktree of \(session.id) and kept the session: \(error)")
+      } catch let error where !removed.isEmpty {
+        throw APIError("\(kept): \(error)\(stayed)")
       }
       host.kill(paneName(session.id, .claude))
       host.kill(paneName(session.id, .shell))

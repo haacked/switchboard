@@ -298,6 +298,30 @@ import Testing
     #expect(try sbd.get(s.id).openTodos.isEmpty)
   }
 
+  @Test func lsCountsTheOpenToDos() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    #expect(try !sbd.sb("ls").contains("to-do"))
+
+    _ = try sbd.addTodo(s.id, "tell Alex")
+    #expect(try sbd.sb("ls").contains("[1 to-do]"))
+
+    _ = try sbd.addTodo(s.id, "close the incident")
+    #expect(try sbd.sb("ls").contains("[2 to-dos]"))
+  }
+
+  /// Claude can write a note whose text holds terminal escapes. `sb note` prints them escaped.
+  @Test func noteListEscapesTheText() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    _ = try sbd.addTodo(s.id, "done\u{1b}[2Kremoved", by: .claude)
+
+    let text = try sbd.sb("note", s.id)
+
+    #expect(text.contains("done\\u{1b}[2Kremoved"), Comment(rawValue: text))
+    #expect(!text.contains("\u{1b}"), Comment(rawValue: text))
+  }
+
   @Test func noteRefusesAnUnknownKind() throws {
     let sbd = try Instance()
     let s = try sbd.new()

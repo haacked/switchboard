@@ -68,6 +68,17 @@ extension Instance {
   func intact(_ s: SessionSummary) throws -> Bool {
     try FileManager.default.fileExists(atPath: s.cwd) && client.sessions().map(\.id).contains(s.id)
   }
+
+  /// Makes every delete from `table` abort, as a constraint on the store would.
+  func blockDeletes(from table: String) throws {
+    let r = try runCommand(
+      "/usr/bin/sqlite3",
+      [
+        home.database,
+        "CREATE TRIGGER block_\(table) BEFORE DELETE ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
+      ])
+    #expect(r.status == 0)
+  }
 }
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct DeleteSessionTests {
@@ -323,22 +334,11 @@ extension Instance {
       "git -C \"$REPO\" branch -D \(Self.mergedBranch) >/dev/null", error: "no longer exists")
   }
 
-  /// Makes every delete from `table` abort, as a constraint on the store would.
-  private func blockDeletes(from table: String, _ sbd: Instance) throws {
-    let r = try runCommand(
-      "/usr/bin/sqlite3",
-      [
-        sbd.home.database,
-        "CREATE TRIGGER block_\(table) BEFORE DELETE ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
-      ])
-    #expect(r.status == 0)
-  }
-
   /// The store refuses the delete, so sbd refuses before it stops claude or removes the worktree.
   private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool) throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
-    try blockDeletes(from: table, sbd)
+    try sbd.blockDeletes(from: table)
     let r = try (branch ? sbd.deleteSessionAndBranch(s.id) : sbd.deleteSession(s.id))
     #expect(r.status != 0)
     #expect(r.stderr.contains("store is read-only"))
@@ -784,7 +784,8 @@ extension Instance {
       #expect(r.stderr.contains("\"\(todo.text)\""), Comment(rawValue: r.stderr))
     }
     #expect(r.stderr.contains("sb note \(s.id) --resolve"), Comment(rawValue: r.stderr))
-    #expect(r.stderr.contains("sb rm \(s.id)"), Comment(rawValue: r.stderr))
+    #expect(
+      r.stderr.contains("sb rm \(s.id)\(worktree ? " --worktree" : "") --resolve"), Comment(rawValue: r.stderr))
     sleep(1)
     #expect(Processes.exists(pid))
     #expect(try paneRuns(terminals, terminals.claude))
@@ -794,6 +795,19 @@ extension Instance {
     #expect(try sbd.isOpenTodo(s.id, first.id))
     #expect(try sbd.isOpenTodo(s.id, second.id))
     #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  /// Claude can write a to-do whose text holds terminal escapes. The refusal prints them escaped.
+  @Test func rmRefusalEscapesTheToDoText() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    _ = try sbd.addTodo(s.id, "done\u{1b}[2Kremoved", by: .claude)
+
+    let r = try sbd.run(["rm", s.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("done\\u{1b}[2Kremoved"), Comment(rawValue: r.stderr))
+    #expect(!r.stderr.contains("\u{1b}"), Comment(rawValue: r.stderr))
   }
 
   /// Two to-dos need two --resolve flags, and each one counts.
@@ -907,7 +921,7 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
     let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
-    try blockDeletes(from: "sessions", sbd)
+    try sbd.blockDeletes(from: "sessions")
 
     let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
 
