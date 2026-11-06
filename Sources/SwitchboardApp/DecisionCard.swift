@@ -1,8 +1,9 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The Inbox card of a session: what it did and needs, the buttons that act
-/// on it, what to read before deciding, and the details behind a disclosure.
+/// The Inbox message of a session, in three sections that never change their
+/// order: the Summary (what it did and needs, and what to read before
+/// deciding), the Action (the buttons), and the Details (behind a disclosure).
 struct DecisionCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -11,18 +12,24 @@ struct DecisionCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       header
-      if !item.summary.isEmpty {
-        Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-      }
-      if !item.callouts.isEmpty {
-        VStack(alignment: .leading, spacing: 8) {
-          ForEach(Array(item.callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
+      VStack(alignment: .leading, spacing: 8) {
+        SectionTitle(text: Self.sectionTitles[0])
+        if !item.summary.isEmpty {
+          Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
+        ForEach(Array(item.callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
       }
-      VStack(alignment: .leading, spacing: 8) { actions }
-      CardDetails(session: session)
+      VStack(alignment: .leading, spacing: 8) {
+        SectionTitle(text: Self.sectionTitles[1])
+        actions
+      }
+      // A new item starts with its own open or closed Details.
+      CardDetails(session: session, details: item.details).id(item.ref)
     }
   }
+
+  /// The names of the three sections, in the order the card draws them.
+  static let sectionTitles = ["Summary", "Action", "Details"]
 
   private var header: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -43,7 +50,8 @@ struct DecisionCard: View {
       // The card shows the whole tool call, which an approval needs to see.
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
-      ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+      // Details holds this session's own call and message text.
+      ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0), compact: $0.session == session.id) }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item)
     } else if session.openPrompt {
@@ -117,16 +125,41 @@ struct CalloutView: View {
   }
 }
 
-/// The full last reply, the PR and its checks, notes, waits, and the newest
-/// events, collapsed until the user opens them.
+/// The heading of one of a message's sections.
+struct SectionTitle: View {
+  let text: String
+
+  var body: some View {
+    Text(text).font(.headline).accessibilityAddTraits(.isHeader)
+  }
+}
+
+/// The tool call or group message, the PR and its checks, notes, waits, the
+/// full last reply, and the newest events. They stay collapsed until the user
+/// opens them, except for a permission call that the Summary shows in part.
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  @State private var open = false
+  let details: TriageDetails
+  @State private var open: Bool
+
+  init(session: SessionSummary, details: TriageDetails) {
+    self.session = session
+    self.details = details
+    _open = State(initialValue: details.openByDefault)
+  }
 
   var body: some View {
     DisclosureGroup(isExpanded: $open) {
       VStack(alignment: .leading, spacing: 12) {
+        if let input = details.toolInput {
+          section(session.cards.first?.send == nil ? "Tool call: \(input.tool)" : "Message") {
+            Text(verbatim: input.text).font(.body.monospaced()).textSelection(.enabled)
+          }
+        }
+        if !details.targets.isEmpty {
+          section("Sends to") { ForEach(details.targets, id: \.self) { Text(verbatim: $0) } }
+        }
         if let pr = session.pr {
           section("Pull request") {
             if let url = pr.link { Link("\(pr.line): \(pr.title)", destination: url) } else { Text(pr.line) }
@@ -151,8 +184,9 @@ struct CardDetails: View {
       }
       .padding(.top, 6)
     } label: {
-      Text("Details").font(.headline)
+      SectionTitle(text: DecisionCard.sectionTitles[2])
     }
+    .onAppear { if open { model.loadEvents(session.id) } }
     .onChange(of: open) { if open { model.loadEvents(session.id) } }
   }
 

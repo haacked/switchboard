@@ -1424,7 +1424,11 @@ public final class Service {
     out.manager = s.manager
     out.kind = s.kind
     out.chat = s.chat
-    if Triage.mayHaveItem(out) { out.triage = Triage.item(e.facts, verdict) }
+    if Triage.mayHaveItem(out) {
+      out.triage = Triage.item(e.facts, verdict)
+      let details = Triage.details(for: out)
+      out.triage?.details = details
+    }
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir
