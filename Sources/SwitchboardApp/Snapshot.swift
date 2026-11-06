@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_DETAILS opens each card's Details, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its main window, or the window's open sheet,
 /// into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
 /// window itself, so this needs no screen recording permission. The drawing
@@ -12,6 +12,8 @@ import Foundation
 /// layers that the drawing misses, so `sb screen` checks terminals.
 @MainActor
 enum Snapshot {
+  static let opensDetails = ProcessInfo.processInfo.environment["SB_DETAILS"] != nil
+
   static func start(_ model: BoardModel) {
     let env = ProcessInfo.processInfo.environment
     if let id = env["SB_SELECT"] { model.selection = id }

@@ -12,7 +12,7 @@ struct DecisionCard: View {
     VStack(alignment: .leading, spacing: 14) {
       header
       if !item.summary.isEmpty {
-        Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        MarkdownView(text: item.summary)
       }
       if !item.callouts.isEmpty {
         VStack(alignment: .leading, spacing: 8) {
@@ -103,7 +103,7 @@ struct CalloutView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(callout.title).fontWeight(.semibold)
         if !callout.body.isEmpty {
-          Text(callout.body).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          MarkdownView(text: callout.body).font(.callout).foregroundStyle(.secondary)
         }
       }
       .textSelection(.enabled)
@@ -122,7 +122,7 @@ struct CalloutView: View {
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  @State private var open = false
+  @State private var open = Snapshot.opensDetails
 
   var body: some View {
     DisclosureGroup(isExpanded: $open) {
