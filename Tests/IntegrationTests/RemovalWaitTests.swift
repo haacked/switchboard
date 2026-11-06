@@ -279,10 +279,13 @@ private final class Strays {
     defer { strays.killAll() }
     try sbd.sb("send", s.id, "background 2 held")
     try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 2 s." }
+    let job = try #require(strays.pids()?.first)
+    try #require(Processes.exists(Int(job)), "the job ended before the removal began")
 
     let r = try sbd.removeWorktree(how, s.id)
 
     #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(!Processes.exists(Int(job)))
     try expectRemoved(how, sbd, s)
   }
 }

@@ -24,17 +24,16 @@ import Testing
     return p
   }
 
-  /// Waits for the process to reach the `sleep` that `exec` starts, which keeps the shell's fds.
+  /// Waits for the process to reach the `sleep` that `exec` starts, which keeps the shell's fds. It checks the
+  /// executable name, because the shell's arguments name sleep before the shell runs.
   private func waitForSleep(_ p: Process) throws {
     let deadline = Date().addingTimeInterval(10)
     while Date() < deadline {
-      if Processes.byParent().values.joined().contains(where: {
-        $0.pid == Int(p.processIdentifier) && $0.command.contains("sleep")
-      }) {
-        return
-      }
+      let r = try runCommand("/bin/ps", ["-o", "comm=", "-p", String(p.processIdentifier)])
+      if r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("sleep") { return }
       Thread.sleep(forTimeInterval: 0.05)
     }
+    Issue.record("\(p.processIdentifier) never exec'd sleep")
   }
 
   @Test func findsAProcessWhoseWorkingFolderIsInside() throws {
@@ -66,6 +65,21 @@ import Testing
     let found = try #require(users.first { $0.pid == Int(open.processIdentifier) })
     #expect(found.path.hasSuffix("/w/file"))
     #expect(!users.map(\.pid).contains(Int(beside.processIdentifier)))
+  }
+
+  /// The copy runs in /, so only its program path finds it.
+  @Test func findsAProcessWhoseProgramIsInside() throws {
+    let (folder, _) = try folders()
+    try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: "\(folder)/sleep")
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "\(folder)/sleep")
+    p.arguments = ["30"]
+    p.currentDirectoryURL = URL(fileURLWithPath: "/")
+    try p.run()
+    defer { p.terminate() }
+
+    let found = try #require(Processes.using(folder).first { $0.pid == Int(p.processIdentifier) })
+    #expect(found.path.hasSuffix("/w/sleep"))
   }
 
   @Test func aFolderThatIsGoneHasNoUsers() {

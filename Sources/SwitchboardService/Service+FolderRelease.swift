@@ -14,7 +14,7 @@ extension Service {
   /// and sends SIGTERM to claude. It runs on the state queue, after `install`
   /// of a fresh snapshot, because it reads the panes' processes from it.
   func beginPaneStop(_ id: String) -> PaneStop {
-    let panes = [Pane.claude, .shell].compactMap { snapshot.panes[paneName(id, $0)]?.pid }
+    let panes = [Pane.claude, .shell].compactMap { snapshot.panes[paneName(id, $0)] }.filter { !$0.dead }.map(\.pid)
     let processes = Processes.descendants(of: panes.filter(Processes.isValidPid), in: snapshot.children)
     host.kill(paneName(id, .shell))
     var claudePid: Int?
@@ -40,27 +40,20 @@ extension Service {
     }
     host.kill(paneName(session.id, .claude))
     let deadline = Date().addingTimeInterval(5)
-    while true {
-      let running = stop.processes.filter(Processes.exists)
-      let late = Date() >= deadline
-      // The folder scan reads every process, so it waits until the panes' processes are gone.
-      guard running.isEmpty || late else {
-        Thread.sleep(forTimeInterval: 0.25)
-        continue
-      }
-      let users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
-      if running.isEmpty && users.isEmpty { return }
-      if late {
-        let commands = Dictionary(
-          uniqueKeysWithValues: Processes.byParent().values.joined().map { ($0.pid, $0.command) })
-        let named =
-          running.sorted().map { "\($0) (\(commands[$0] ?? "?"))" }
-          + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.path))" }
-        throw APIError(
-          "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
-        )
-      }
+    let running = Processes.waitForExit(stop.processes, seconds: 5)
+    var users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
+    while running.isEmpty, !users.isEmpty, Date() < deadline {
       Thread.sleep(forTimeInterval: 0.25)
+      users = Processes.using(session.cwd)
     }
+    guard !running.isEmpty || !users.isEmpty else { return }
+    let commands = Dictionary(
+      uniqueKeysWithValues: Processes.byParent().values.joined().map { ($0.pid, $0.command) })
+    let named =
+      running.sorted().map { "\($0) (\(commands[$0] ?? "?"))" }
+      + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.path))" }
+    throw APIError(
+      "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
+    )
   }
 }
