@@ -116,13 +116,15 @@ The Manager also gets the `switchboard` MCP server at every launch, through a se
 
 ### Groups
 
-A group has a name, notes, and sessions. A session started inside another session, by `sb new` or `sb followup add`, joins its parent's group. The app's Board shows a row per group, sorted by name, and an Ungrouped row last.
+A group has a name, a description, notes, and sessions. A session started inside another session, by `sb new` or `sb followup add`, joins its parent's group. The app's Board shows a row per group, sorted by name, and an Ungrouped row last.
 
 ```
-sb group add flag-evals s3k9a s7mpq --note "RFC #1209"
+sb group add flag-evals s3k9a s7mpq --note "RFC #1209" --description "Flag evaluation cache rollout"
 sb group ls
 sb group move s2abc --to flag-evals      # or --ungrouped
 sb group note flag-evals "rollout doc: …"
+sb group describe flag-evals Ship the cache behind a flag first
+sb group describe flag-evals --clear
 sb group rm flag-evals                   # its sessions become ungrouped
 sb group suggest                         # groups suggested from dependencies, branch names, and PR titles
 sb group suggest --accept prefix:flag-evaluations
@@ -130,7 +132,9 @@ sb group suggest --decline merge:g2kq7:g8xmp   # never suggest it again
 sb send --group flag-evals "Rebase onto main."
 ```
 
-When a session's PR depends on another session's PR and the two sessions are in different groups, `suggest` offers to merge the groups. A PR depends on another when it is stacked on it or names it in a `Depends on` line. The group with more sessions placed by hand keeps its name, then the group with more sessions, then the older one. The merge moves the other group's sessions into it, except sessions that you placed by hand, which stay where they are and which the suggestion lists. When no session is left behind, the other group is deleted and its notes move to the group that kept its name. A merge that would move no session is not suggested. When one end of the dependency has no group, `suggest` offers to add it to the other end's group. These suggestions come before the ones from branch names and PR titles.
+A description says what the group is for in one line of at most 280 characters. Line breaks become spaces. `sb group ls` shows it under the group's name, `sb get` shows it with a session's group, and `--json` has it as `description` on a group and `groupDescription` on a session. The Board shows it under the group's name. Click it to edit it, then press Return to save or Escape to cancel. A group without one shows "Add a description". A group that a suggestion creates gets a description from the suggestion, such as "Sessions on the inbox branch prefix", which you can change.
+
+When a session's PR depends on another session's PR and the two sessions are in different groups, `suggest` offers to merge the groups. A PR depends on another when it is stacked on it or names it in a `Depends on` line. The group with more sessions placed by hand keeps its name, then the group with more sessions, then the older one. The merge moves the other group's sessions into it, except sessions that you placed by hand, which stay where they are and which the suggestion lists. When no session is left behind, the other group is deleted and its notes move to the group that kept its name. That group keeps its own description and gets the other group's description as a note. When it has none, it takes the other group's description, or "Merged from" and both names when neither has one. A merge that would move no session is not suggested. When one end of the dependency has no group, `suggest` offers to add it to the other end's group. These suggestions come before the ones from branch names and PR titles.
 
 `suggest` looks only at ungrouped sessions for the rest. Sessions whose branches start with the same words (after the owner, as in `haacked/`), whose PR titles share a scope such as `feat(flags):`, or whose branches and titles share a word, form a suggestion. It names a new group, or an existing group whose sessions or name share the key. A session that you moved to Ungrouped by hand is never suggested. Moving a session, adding it to a group, and accepting a suggestion all count as placing it by hand. A declined suggestion stays declined, also after sbd restarts. The Board lists the suggestions above the rows, each with Accept and Decline.
 
@@ -138,7 +142,7 @@ When a session's PR depends on another session's PR and the two sessions are in 
 
 ### Group chats
 
-A group chat is an interactive Claude session that manages one group's sessions. It runs in `~/.sb/chats/<group-id>`, a scratch folder that sbd sets up with `git init` and a `CLAUDE.md` guide, with no worktree or branch. Its claude gets the `switchboard` MCP server with `--group <group-id>`, so its tools reach only that group's sessions and the chat itself.
+A group chat is an interactive Claude session that manages one group's sessions. It runs in `~/.sb/chats/<group-id>`, a scratch folder that sbd sets up with `git init` and a `CLAUDE.md` guide, with no worktree or branch. Its claude gets the `switchboard` MCP server with `--group <group-id>`, so its tools reach only that group's sessions and the chat itself. The guide ends with the group's description, quoted and marked as data rather than instructions. When the description changes, sbd rewrites the guide, and a chat whose claude is running also gets a `Switchboard:` message with the new text.
 
 ```
 sb chat flag-evals                       # start the chat the first time, open it after that
