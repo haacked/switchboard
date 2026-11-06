@@ -87,6 +87,14 @@ import Testing
     #expect(Set(draft.images.map(\.id)).count == 2)
   }
 
+  @Test func addReturnsThePathsItLeftOut() throws {
+    let draft = MessageField.Draft()
+    let notes = try file("notes.png", Data("just some text".utf8))
+    let shot = try file("shot.png")
+
+    #expect(draft.add(paths: [notes, shot]) == [notes])
+  }
+
   @Test func addKeepsTheOrderOfTheDrop() throws {
     let draft = MessageField.Draft()
     let names = ["e.png", "a.png", "d.jpg", "b.gif", "c.webp"]
@@ -159,7 +167,7 @@ import Testing
     #expect(Set(FileDropTarget.DropView().registeredDraggedTypes) == Set([.fileURL, .string] + promises))
   }
 
-  /// Writes a promised file when a receiver asks for it. The screenshot thumbnail offers its file this way.
+  /// A provider's delegate, which names the promised file. AppKit asks it to write the file only during a real drag.
   final class Promise: NSObject, NSFilePromiseProviderDelegate {
     let name: String
     init(_ name: String) { self.name = name }
@@ -169,62 +177,150 @@ import Testing
     ) { completionHandler(nil) }
   }
 
-  /// A drag of promised files. AppKit fulfills a promise only during a real drag, so `fulfill` stands in for the
-  /// source: it writes each promise's file into the folder that the view chose, in the order of the promises.
-  func promiseDrag(_ files: [(name: String, data: Data)], into view: FileDropTarget.DropView)
-    -> (DropSelfTest.DraggingInfo, folders: () -> [URL])
-  {
-    let promises = files.map { Promise($0.name) }
-    let info = drag(promises.map { NSFilePromiseProvider(fileType: "public.png", delegate: $0) })
-    var folders: [URL] = []
-    view.receivePromises = { receivers, folder, done in
-      folders.append(folder)
-      #expect(receivers.count == files.count)
-      let urls = files.map { folder.appendingPathComponent($0.name) }
-      for (url, file) in zip(urls, files) { try? file.data.write(to: url) }
-      done(urls)
+  /// Stands in for AppKit's receive call. It records each promise's folder and reader, in the order that the view
+  /// asked, so that a test can write the files and run the readers later and in any order.
+  final class Source: @unchecked Sendable {
+    var calls: [(folder: URL, reader: @Sendable (URL, (any Error)?) -> Void)] = []
+
+    init(_ view: FileDropTarget.DropView) {
+      view.receiveFiles = { [unowned self] _, folder, _, reader in calls.append((folder, reader)) }
     }
-    return (info, { withExtendedLifetime(promises) { folders } })
+
+    /// Writes the promise's file, if `data` is set, and runs its reader from another thread.
+    func fulfill(_ index: Int, _ name: String, _ data: Data?, error: (any Error)? = nil) {
+      let call = calls[index]
+      let url = call.folder.appendingPathComponent(name)
+      if let data { try? data.write(to: url) }
+      DispatchQueue.global().sync { call.reader(url, error) }
+    }
   }
 
-  @Test func dropViewAttachesPromisedImagesInTheOrderOfTheDrag() throws {
+  /// A drag of promised files of the type, as the screenshot thumbnail offers its file.
+  func promiseDrag(_ names: [String], type: String = "public.png") -> (DropSelfTest.DraggingInfo, [Promise]) {
+    let promises = names.map { Promise($0) }
+    return (drag(promises.map { NSFilePromiseProvider(fileType: type, delegate: $0) }), promises)
+  }
+
+  /// A drop view that attaches to the draft, and records what it keeps and when the drop ends.
+  final class Target {
     let draft = MessageField.Draft()
     let view = FileDropTarget.DropView()
-    view.drop = { draft.add(paths: $0.map(\.path)) }
+    var kept: [String] = []
+    var dropped = false
+
+    init() {
+      view.drop = { [unowned self] urls in
+        dropped = true
+        return draft.add(paths: urls.map(\.path)).map { URL(fileURLWithPath: $0) }
+      }
+      view.keep = { [unowned self] url in
+        if FileManager.default.fileExists(atPath: url.path) { kept.append(url.lastPathComponent) }
+      }
+    }
+
+    func waitForDrop() async {
+      for _ in 0..<250 where !dropped { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+  }
+
+  struct PromiseFailed: Error {}
+
+  @Test func dropViewAttachesPromisedImagesInTheOrderOfTheDragWhateverOrderTheyArrive() async throws {
+    let target = Target()
     var targeted: [Bool] = []
-    view.targeted = { targeted.append($0) }
-    let (info, folders) = promiseDrag(
-      [("Screenshot 2.png", Self.png), ("Screenshot 1.png", Self.png)], into: view)
+    target.view.targeted = { targeted.append($0) }
+    let source = Source(target.view)
+    let (info, promises) = promiseDrag(["Screenshot 2.png", "Screenshot 1.png"])
 
-    #expect(view.draggingEntered(info) == .copy)
-    #expect(view.performDragOperation(info))
+    #expect(target.view.draggingEntered(info) == .copy)
+    #expect(target.view.performDragOperation(info))
+    try #require(source.calls.count == 2)
+    source.fulfill(1, "Screenshot 1.png", Self.png)
+    source.fulfill(0, "Screenshot 2.png", Self.png)
+    await target.waitForDrop()
 
-    #expect(draft.images.map(\.name) == ["Screenshot 2.png", "Screenshot 1.png"])
-    #expect(draft.error == nil)
+    #expect(target.draft.images.map(\.name) == ["Screenshot 2.png", "Screenshot 1.png"])
+    #expect(target.draft.error == nil)
     #expect(targeted.first == true)
-    let folder = try #require(folders().first)
-    #expect(!FileManager.default.fileExists(atPath: folder.path))
+    #expect(target.kept.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: source.calls[0].folder.path))
+    withExtendedLifetime(promises) {}
   }
 
-  @Test func dropViewRefusesAPromisedFileThatIsNotAnImageAndKeepsTheRest() {
-    let draft = MessageField.Draft()
-    let view = FileDropTarget.DropView()
-    view.drop = { draft.add(paths: $0.map(\.path)) }
-    let (info, _) = promiseDrag([("notes.png", Data("just some text".utf8)), ("shot.png", Self.png)], into: view)
+  /// A promise can move its file, so a file that the draft left out goes to the Trash rather than away.
+  @Test func dropViewKeepsAPromisedFileThatTheDraftLeftOut() async throws {
+    let target = Target()
+    let source = Source(target.view)
+    let (info, promises) = promiseDrag(["notes.png", "shot.png"])
 
-    #expect(view.performDragOperation(info))
+    #expect(target.view.performDragOperation(info))
+    try #require(source.calls.count == 2)
+    source.fulfill(0, "notes.png", Data("just some text".utf8))
+    source.fulfill(1, "shot.png", Self.png)
+    await target.waitForDrop()
 
-    #expect(draft.images.map(\.name) == ["shot.png"])
-    #expect(draft.error == "notes.png isn't an image.")
+    #expect(target.draft.images.map(\.name) == ["shot.png"])
+    #expect(target.draft.error == "notes.png isn't an image.")
+    #expect(target.kept == ["notes.png"])
+    #expect(!FileManager.default.fileExists(atPath: source.calls[0].folder.path))
+    withExtendedLifetime(promises) {}
+  }
+
+  /// A source can write part of a file before it fails. The part never attaches.
+  @Test func dropViewReportsAFailedPromiseAndAttachesTheRest() async throws {
+    let target = Target()
+    let source = Source(target.view)
+    let (info, promises) = promiseDrag(["broken.png", "shot.png"])
+
+    #expect(target.view.performDragOperation(info))
+    try #require(source.calls.count == 2)
+    source.fulfill(0, "broken.png", Self.png.prefix(16), error: PromiseFailed())
+    source.fulfill(1, "shot.png", Self.png)
+    await target.waitForDrop()
+
+    #expect(target.draft.images.map(\.name) == ["shot.png"])
+    #expect(target.draft.error?.hasPrefix("can't read broken.png") == true)
+    #expect(target.kept.isEmpty)
+    withExtendedLifetime(promises) {}
+  }
+
+  @Test func dropViewIgnoresAReaderThatRunsMoreTimesThanItsPromiseNamed() async throws {
+    let target = Target()
+    let source = Source(target.view)
+    let (info, promises) = promiseDrag(["a.png", "b.png"])
+
+    #expect(target.view.performDragOperation(info))
+    try #require(source.calls.count == 2)
+    source.fulfill(0, "a.png", Self.png)
+    source.fulfill(0, "extra.png", Self.png)
+    source.fulfill(1, "b.png", Self.png)
+    await target.waitForDrop()
+
+    #expect(target.draft.images.map(\.name) == ["a.png", "b.png"])
+    withExtendedLifetime(promises) {}
+  }
+
+  /// A screen recording's thumbnail promises a movie, which the draft would refuse after the source wrote it.
+  @Test func dropViewRefusesAPromiseOfAFileThatIsNotAnImage() {
+    let target = Target()
+    let source = Source(target.view)
+    let (info, promises) = promiseDrag(["Screen Recording.mov"], type: "com.apple.quicktime-movie")
+
+    #expect(target.view.draggingEntered(info).isEmpty)
+    #expect(!target.view.performDragOperation(info))
+    #expect(source.calls.isEmpty)
+    withExtendedLifetime(promises) {}
   }
 
   /// A drag that names a file needs no promise, so the view never waits for one.
   @Test func dropViewTakesFileURLsOverPromises() throws {
     let view = FileDropTarget.DropView()
     var dropped: [URL] = []
-    view.drop = { dropped = $0 }
-    var asked = false
-    view.receivePromises = { _, _, _ in asked = true }
+    view.drop = {
+      dropped = $0
+      return []
+    }
+    let source = Source(view)
     let promise = Promise("thumbnail.png")
     let info = drag([
       URL(fileURLWithPath: try file("a.png")) as NSURL,
@@ -233,7 +329,7 @@ import Testing
 
     #expect(view.performDragOperation(info))
     #expect(dropped.map(\.lastPathComponent) == ["a.png"])
-    #expect(!asked)
+    #expect(source.calls.isEmpty)
   }
 
   @Test func dropViewPassesClicksThrough() {
@@ -245,7 +341,10 @@ import Testing
   @Test func dropViewHandsOverEveryFileInTheOrderOfTheDrag() throws {
     let view = FileDropTarget.DropView()
     var dropped: [URL] = []
-    view.drop = { dropped = $0 }
+    view.drop = {
+      dropped = $0
+      return []
+    }
     let urls = try ["c.png", "a.png", "b.jpg"].map { URL(fileURLWithPath: try file($0)) }
     let info = drag(urls as [NSURL])
 
@@ -258,7 +357,10 @@ import Testing
   @Test func dropViewLeavesOutAWebURL() throws {
     let view = FileDropTarget.DropView()
     var dropped: [URL] = []
-    view.drop = { dropped = $0 }
+    view.drop = {
+      dropped = $0
+      return []
+    }
     let info = drag([
       URL(fileURLWithPath: try file("a.png")) as NSURL, URL(string: "https://example.com/b.png")! as NSURL,
     ])
@@ -271,7 +373,10 @@ import Testing
   @Test func dropViewTakesTheFileOfAnItemThatAlsoHasText() throws {
     let view = FileDropTarget.DropView()
     var dropped: [URL] = []
-    view.drop = { dropped = $0 }
+    view.drop = {
+      dropped = $0
+      return []
+    }
     let path = try file("a.png")
     let item = NSPasteboardItem()
     item.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
@@ -285,7 +390,10 @@ import Testing
   @Test func dropViewRefusesADragWithoutFiles() {
     let view = FileDropTarget.DropView()
     var dropped = false
-    view.drop = { _ in dropped = true }
+    view.drop = { _ in
+      dropped = true
+      return []
+    }
     let info = drag(["some text" as NSString])
 
     #expect(view.draggingEntered(info).isEmpty)
@@ -405,6 +513,34 @@ import Testing
 
     #expect(view.performDragOperation(info))
     #expect((field.currentEditor() as? NSTextView)?.string == "hello world")
+  }
+
+  /// The point lies inside "hello", so a point outside the field, which always maps to an end, can't pass.
+  @Test func dropViewInsertsTextInsideAWordAtTheDropPoint() throws {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 280, height: 24))
+    field.stringValue = "hello world"
+    let view = FileDropTarget.DropView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+    window.contentView?.addSubview(field)
+    window.contentView?.addSubview(view)
+    try #require(window.makeFirstResponder(field))
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    let point = NSPoint(x: 40, y: 22)
+    let layout = try #require(editor.layoutManager)
+    let container = try #require(editor.textContainer)
+    let index = layout.characterIndex(
+      for: editor.convert(point, from: nil), in: container, fractionOfDistanceBetweenInsertionPoints: nil)
+    try #require((1..<5).contains(index))
+    let board = pasteboard()
+    board.writeObjects(["-" as NSString])
+
+    #expect(view.performDragOperation(DropSelfTest.DraggingInfo(window: window, location: point, pasteboard: board)))
+    #expect(
+      editor.string
+        == ("hello world" as NSString).replacingCharacters(in: NSRange(location: index, length: 0), with: "-"))
   }
 
   /// A field that holds `text`, with `selected` selected, under a drop view. The drag starts in the field's editor.

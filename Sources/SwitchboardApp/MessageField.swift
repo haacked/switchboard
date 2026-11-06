@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import SwiftUI
 import SwitchboardCore
+import UniformTypeIdentifiers
 
 /// A field that sends the session's Claude a message, with images dropped on it or pasted into it.
 struct MessageField: View {
@@ -45,19 +46,25 @@ struct MessageField: View {
     }
 
     /// Adds each image file in order, and sets `error` for each file that is not one.
-    func add(paths: [String]) {
+    /// Returns the paths it left out.
+    @discardableResult
+    func add(paths: [String]) -> [String] {
       attach(
         paths.map { path in
           ((path as NSString).lastPathComponent, { try Attachments.read(path: path, remaining: $0) })
-        })
+        }
+      ).map { paths[$0] }
     }
 
     /// Adds each file in order while the message stays within `Attachments.checkMessage`. It leaves out a file
     /// that fails to read or would pass a limit, and `error` names that file. The files after it still attach.
     /// A file past the count limit is not read. A file larger than the room left under the total limit is not read.
-    private func attach(_ files: [(name: String, read: (_ remaining: Int) throws -> Data)]) {
+    /// Returns the indexes of the files it left out.
+    @discardableResult
+    private func attach(_ files: [(name: String, read: (_ remaining: Int) throws -> Data)]) -> [Int] {
       var refused: [String] = []
       var overLimit: [(reason: String, names: [String])] = []
+      var leftOut: [Int] = []
       func leaveOut(_ name: String, _ error: any Error) {
         let reason = "\(error)"
         if let i = overLimit.firstIndex(where: { $0.reason == reason }) {
@@ -67,7 +74,8 @@ struct MessageField: View {
         }
       }
       var total = images.reduce(0) { $0 + $1.data.count }
-      for file in files {
+      for (index, file) in files.enumerated() {
+        leftOut.append(index)
         do {
           try Attachments.checkMessage(count: images.count + 1, total: total)
         } catch {
@@ -90,6 +98,7 @@ struct MessageField: View {
           leaveOut(file.name, error)
           continue
         }
+        leftOut.removeLast()
         append(name: file.name, data: data)
         total += data.count
       }
@@ -97,6 +106,7 @@ struct MessageField: View {
         refused.append("\(names.joined(separator: ", ")) \(names.count == 1 ? "isn't" : "aren't") attached: \(reason)")
       }
       error = refused.isEmpty ? nil : refused.joined(separator: " ")
+      return leftOut
     }
 
     /// Adds the pasteboard's images and returns true, or returns false and leaves the paste to the
@@ -212,7 +222,11 @@ struct MessageField: View {
         Text(error).font(.caption).foregroundStyle(.red)
       }
     }
-    .overlay { FileDropTarget(isTargeted: $dropTargeted) { draft.add(paths: $0.map(\.path)) } }
+    .overlay {
+      FileDropTarget(isTargeted: $dropTargeted) { urls in
+        draft.add(paths: urls.map(\.path)).map { URL(fileURLWithPath: $0) }
+      }
+    }
     // A refused paste or drop changes neither the text nor the chips, so VoiceOver would say nothing.
     .onChange(of: draft.error) {
       if let error = draft.error { AccessibilityNotification.Announcement(error).post() }
@@ -342,7 +356,8 @@ struct MessageField: View {
 /// on each edit, so the view removes them again after each SwiftUI update. Clicks pass through this view.
 struct FileDropTarget: NSViewRepresentable {
   @Binding var isTargeted: Bool
-  let drop: ([URL]) -> Void
+  /// Attaches the files and returns the ones it left out.
+  let drop: ([URL]) -> [URL]
 
   func makeNSView(context: Context) -> DropView { DropView() }
 
@@ -355,13 +370,18 @@ struct FileDropTarget: NSViewRepresentable {
   static func dismantleNSView(_ view: DropView, coordinator: ()) { view.releaseFieldEditor() }
 
   final class DropView: NSView {
-    var drop: ([URL]) -> Void = { _ in }
+    var drop: ([URL]) -> [URL] = { _ in [] }
     var targeted: (Bool) -> Void = { _ in }
-    /// Receives promised files into a folder and calls `done` on the main queue with their URLs, in the order of
-    /// the promises. A URL whose promise failed names a file that does not exist, so `drop` reports it.
-    var receivePromises:
-      (_ promises: [NSFilePromiseReceiver], _ folder: URL, _ done: @escaping @MainActor ([URL]) -> Void) -> Void =
-        DropView.receive
+    /// AppKit's call that writes a promise's files into the folder and runs the reader once for each file, on the
+    /// queue. AppKit allows it only during `performDragOperation` and the calls around it.
+    var receiveFiles:
+      (NSFilePromiseReceiver, URL, OperationQueue, @escaping @Sendable (URL, (any Error)?) -> Void) -> Void = {
+        promise, folder, queue, reader in
+        promise.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: queue, reader: reader)
+      }
+    /// Keeps a promised file that the draft left out. A promise can move its file, as the screenshot thumbnail
+    /// does when it is dropped, so deleting it would lose the only copy.
+    var keep: (URL) -> Void = { try? FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
 
     /// Which drop view limited each field editor. Every text field in a window shares one field editor, so
     /// focus that moves between two message fields can reach the new field's view before the old one's.
@@ -416,7 +436,7 @@ struct FileDropTarget: NSViewRepresentable {
     /// would insert it.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
       let pasteboard = sender.draggingPasteboard
-      let files = !pasteboard.fileURLs.isEmpty || pasteboard.canReadObject(forClasses: [NSFilePromiseReceiver.self])
+      let files = !pasteboard.fileURLs.isEmpty || !Self.imagePromises(pasteboard).isEmpty
       operation = files || (fieldEditor != nil && pasteboard.string(forType: .string) != nil) ? .copy : []
       targeted(files)
       return operation
@@ -433,16 +453,16 @@ struct FileDropTarget: NSViewRepresentable {
       let pasteboard = sender.draggingPasteboard
       let urls = pasteboard.fileURLs
       if !urls.isEmpty {
-        drop(urls)
+        _ = drop(urls)
         return true
       }
-      let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver] ?? []
+      let promises = Self.imagePromises(pasteboard)
       if !promises.isEmpty {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("switchboard-drop-\(UUID())")
         guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
         else { return false }
-        receivePromises(promises, folder) { [drop] urls in
-          drop(urls)
+        receive(promises, into: folder) { [drop, keep] urls in
+          for url in drop(urls) where FileManager.default.fileExists(atPath: url.path) { keep(url) }
           try? FileManager.default.removeItem(at: folder)
         }
         return true
@@ -466,9 +486,20 @@ struct FileDropTarget: NSViewRepresentable {
       return true
     }
 
-    /// AppKit lets a receiver take its files only during `performDragOperation` and the calls around it. Each
-    /// promise writes one file per promised type, and the reader runs once for each file.
-    static func receive(
+    /// The drag's promises, when every file that they promise is an image. A drag that also promises another kind
+    /// of file, such as a screen recording, is left to the text path or refused.
+    static func imagePromises(_ pasteboard: NSPasteboard) -> [NSFilePromiseReceiver] {
+      let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver] ?? []
+      let images = promises.allSatisfy { promise in
+        !promise.fileTypes.isEmpty && promise.fileTypes.allSatisfy { UTType($0)?.conforms(to: .image) == true }
+      }
+      return images ? promises : []
+    }
+
+    /// Receives the promised files into the folder and calls `done` on the main queue with their URLs, in the order
+    /// of the promises. Each promise writes one file per promised type. The reader of a failed promise deletes any
+    /// part of the file that it wrote, so `drop` reports the file as missing.
+    private func receive(
       _ promises: [NSFilePromiseReceiver], into folder: URL, then done: @escaping @MainActor ([URL]) -> Void
     ) {
       let received = Received(expected: promises.map(\.fileTypes.count))
@@ -476,7 +507,8 @@ struct FileDropTarget: NSViewRepresentable {
       let queue = OperationQueue()
       for (index, promise) in promises.enumerated() {
         for _ in promise.fileTypes { group.enter() }
-        promise.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: queue) { url, _ in
+        receiveFiles(promise, folder, queue) { url, error in
+          if error != nil { try? FileManager.default.removeItem(at: url) }
           if received.add(url, at: index) { group.leave() }
         }
       }
