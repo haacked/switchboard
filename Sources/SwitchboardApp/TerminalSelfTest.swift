@@ -40,10 +40,14 @@ enum TerminalSelfTest {
     await pause(1)
   }
 
-  private static func claudePane() -> TerminalView? {
-    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
-    else { return nil }
-    return panes(in: root).min { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+  private static func claudePane() -> TerminalView? { panes().first }
+
+  static var window: NSWindow? { NSApp.windows.first { $0.isVisible && $0.title == "Switchboard" } }
+
+  /// The window's terminals from left to right.
+  static func panes() -> [TerminalView] {
+    guard let root = window?.contentView else { return [] }
+    return panes(in: root).sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
   }
 
   private static func panes(in view: NSView) -> [TerminalView] {
@@ -61,7 +65,7 @@ enum TerminalSelfTest {
 
   /// The key code that types `char` on the current keyboard layout, so the script
   /// works on a Dvorak keyboard too. Keys that aren't characters keep their fixed code.
-  private static func code(for char: String) -> UInt16 {
+  static func code(for char: String) -> UInt16 {
     for code in UInt16(0)..<UInt16(50) {
       let probe = NSEvent.keyEvent(
         with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
@@ -71,7 +75,7 @@ enum TerminalSelfTest {
     return 0
   }
 
-  private static func key(
+  static func key(
     _ view: NSView, _ chars: String, _ plain: String? = nil, code: UInt16, mods: NSEvent.ModifierFlags = []
   ) {
     guard let window = view.window else { return }

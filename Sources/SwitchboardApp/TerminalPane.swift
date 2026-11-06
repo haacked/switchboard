@@ -6,8 +6,10 @@ import SwiftUI
 /// only the tmux client, so the pane keeps running in sbd.
 struct TerminalPane: NSViewRepresentable {
   let command: [String]
+  /// Runs on the main thread after the tmux client exits.
+  var onExit: (() -> Void)? = nil
 
-  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeCoordinator() -> Coordinator { Coordinator(onExit: onExit) }
 
   func makeNSView(context: Context) -> LocalProcessTerminalView {
     let view = ThemedTerminalView(frame: .zero)
@@ -30,12 +32,17 @@ struct TerminalPane: NSViewRepresentable {
   }
 
   final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
+    let onExit: (() -> Void)?
+
+    init(onExit: (() -> Void)?) { self.onExit = onExit }
+
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func processTerminated(source: TerminalView, exitCode: Int32?) {
       DispatchQueue.main.async {
         source.feed(text: "\r\n[detached from Switchboard's terminal]\r\n")
+        self.onExit?()
       }
     }
   }

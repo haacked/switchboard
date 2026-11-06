@@ -93,6 +93,9 @@ public struct Session: Codable, Equatable, Sendable {
   /// keeps it. Otherwise sbd passes no permission mode, and Claude's settings
   /// choose one. Nil in a session that an older sbd stored.
   public var autoMode: Bool?
+  /// True after the shell pane's shell exited or the user closed the pane.
+  /// sbd then starts no shell for the session until the user opens one.
+  public var shellClosed: Bool?
 
   public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
@@ -226,6 +229,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?
+  /// True when the session has no shell pane, because its shell exited or
+  /// the user closed it.
+  public var shellClosed: Bool?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

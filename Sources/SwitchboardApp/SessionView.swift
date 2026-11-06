@@ -11,6 +11,8 @@ final class SessionViewState: ObservableObject {
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
   @Published var removeOptions: RemoveOptions?
+  /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
+  @Published var shellAttach = 0
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -25,22 +27,38 @@ struct SessionView: View {
       header
       Divider()
       CardList(cards: session.cards)
-      if session.cleanup?.state == .removed {
+      if !session.hasTerminals {
         Text("Cleanup removed this session's worktree, so it has no terminals.")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
-            paneLabel("Claude")
+            paneLabel("Claude") {
+              if session.shellClosed == true {
+                Button("Open Shell") { model.setShellOpen(session.id, true) }
+                  .help("Start a shell in the session's folder beside the Claude terminal")
+              }
+            }
             TerminalPane(command: terminals.attachCommand(.claude))
           }
-          .frame(minWidth: 480, idealWidth: 760)
-          VStack(spacing: 0) {
-            paneLabel("Shell")
-            TerminalPane(command: terminals.attachCommand(.shell))
+          .frame(minWidth: 320, idealWidth: 760)
+          if session.shellClosed != true {
+            VStack(spacing: 0) {
+              paneLabel("Shell") {
+                Button {
+                  model.setShellOpen(session.id, false)
+                } label: {
+                  Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Close Shell")
+                .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
+              }
+              TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
+            }
+            .id(ui.shellAttach)
+            .frame(minWidth: 200, idealWidth: 360)
           }
-          .frame(minWidth: 240, idealWidth: 360)
         }
       } else if let error = ui.terminalsError {
         Text("Can't open the terminals: \(error)")
@@ -59,7 +77,7 @@ struct SessionView: View {
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if session.cleanup?.state == .removed { return }
+      if !session.hasTerminals { return }
       let id = session.id
       let model = model
       // Opening a session resumes a stopped claude. The selection has to rest
@@ -81,6 +99,20 @@ struct SessionView: View {
       }
     }
     .sheet(isPresented: $ui.confirmingRemove) { removeSheet }
+  }
+
+  static let labelWidth: CGFloat = 44
+  static let labelSpacing: CGFloat = 8
+
+  /// The shell pane's tmux client exits when sbd ends the shell's tmux session. A shell that closed and
+  /// opened again between two refreshes leaves `shellClosed` unchanged, so the pane attaches again
+  /// while sbd still reports the shell open. The wait lets a closed shell reach the summary first.
+  private func reattachShell() {
+    let id = session.id
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model, ui] in
+      // The Inbox shows a session without selecting it, so this finds the session by its id.
+      if let s = model.board.first(where: { $0.id == id }), s.shellClosed != true { ui.shellAttach += 1 }
+    }
   }
 
   /// A confirmation dialog can't hold toggles, so the options are in a sheet.
@@ -202,13 +234,22 @@ struct SessionView: View {
     .padding(12)
   }
 
-  private func paneLabel(_ text: String) -> some View {
-    Text(text)
-      .font(.caption.bold())
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(.bar)
+  /// The text has a fixed width, so a pane's button is at the same place in every view. The button sits
+  /// next to the text, so it stays visible when a narrow column cuts off the end of the label.
+  private func paneLabel(_ text: String, @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {
+    HStack(spacing: SessionView.labelSpacing) {
+      Text(text).font(.caption.bold()).foregroundStyle(.secondary)
+        .frame(width: SessionView.labelWidth, alignment: .leading)
+      trailing().buttonStyle(.borderless).font(.caption).controlSize(.small)
+      Spacer()
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(.bar)
   }
+}
+
+extension SessionSummary {
+  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
+  var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
 }
