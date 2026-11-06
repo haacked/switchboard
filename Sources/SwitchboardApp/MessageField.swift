@@ -429,8 +429,8 @@ struct FileDropTarget: NSViewRepresentable {
         drop(urls)
         return true
       }
-      guard let editor = fieldEditor, let text = pasteboard.string(forType: .string), let window else { return false }
-      let index = editor.characterIndexForInsertion(at: window.convertPoint(toScreen: sender.draggingLocation))
+      guard let editor = fieldEditor, let text = pasteboard.string(forType: .string) else { return false }
+      let index = editor.characterIndexForInsertion(at: editor.convert(sender.draggingLocation, from: nil))
       var location = min(index, (editor.string as NSString).length)
       if sender.draggingSource as AnyObject? === editor {
         // The editor takes no drags, so it never deletes the text it dragged.

@@ -309,6 +309,25 @@ import Testing
     #expect((field.currentEditor() as? NSTextView)?.string == "look at this")
   }
 
+  @Test func dropViewInsertsTextBeforeTheTextAfterTheDropPoint() throws {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 280, height: 24))
+    field.stringValue = "world"
+    let view = FileDropTarget.DropView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+    window.contentView?.addSubview(field)
+    window.contentView?.addSubview(view)
+    try #require(window.makeFirstResponder(field))
+    let board = pasteboard()
+    board.writeObjects(["hello " as NSString])
+    let info = DropSelfTest.DraggingInfo(window: window, location: NSPoint(x: 2, y: 22), pasteboard: board)
+
+    #expect(view.performDragOperation(info))
+    #expect((field.currentEditor() as? NSTextView)?.string == "hello world")
+  }
+
   /// A field that holds `text`, with `selected` selected, under a drop view. The drag starts in the field's editor.
   func movingText(_ text: String, selected: NSRange, dropAt x: CGFloat) throws -> (NSTextField, Bool) {
     let window = NSWindow(
@@ -336,8 +355,7 @@ import Testing
     let (field, handled) = try movingText("hello world", selected: NSRange(location: 6, length: 5), dropAt: 2)
 
     #expect(handled)
-    #expect((field.currentEditor() as? NSTextView)?.string.count == 11)
-    #expect((field.currentEditor() as? NSTextView)?.string.contains("worldworld") == false)
+    #expect((field.currentEditor() as? NSTextView)?.string == "worldhello ")
   }
 
   @Test func dropViewLeavesTextDroppedInsideItsOwnSelection() throws {
