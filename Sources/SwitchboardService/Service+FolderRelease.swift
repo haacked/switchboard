@@ -40,7 +40,7 @@ extension Service {
     }
     host.kill(paneName(session.id, .claude))
     let deadline = Date().addingTimeInterval(5)
-    let running = Processes.waitForExit(stop.processes, seconds: 5)
+    let running = Processes.waitForExit(stop.processes, seconds: deadline.timeIntervalSinceNow)
     var users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
     while running.isEmpty, !users.isEmpty, Date() < deadline {
       Thread.sleep(forTimeInterval: 0.25)

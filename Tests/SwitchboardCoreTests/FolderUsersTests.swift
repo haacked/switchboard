@@ -25,7 +25,7 @@ import Testing
   }
 
   /// Waits for the process to reach the `sleep` that `exec` starts, which keeps the shell's fds. It checks the
-  /// executable name, because the shell's arguments name sleep before the shell runs.
+  /// executable name, because the shell's arguments name sleep before the shell execs it.
   private func waitForSleep(_ p: Process) throws {
     let deadline = Date().addingTimeInterval(10)
     while Date() < deadline {

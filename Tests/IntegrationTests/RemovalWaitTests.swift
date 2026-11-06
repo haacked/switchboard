@@ -288,4 +288,19 @@ private final class Strays {
     #expect(!Processes.exists(Int(job)))
     try expectRemoved(how, sbd, s)
   }
+
+  /// The process descends from no pane, so only the folder scan's retry can see it exit.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func removesWhenAProcessInTheFolderExitsDuringTheWait(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    try strays.spawn("/bin/sleep", ["3"], cwd: s.cwd)
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(how, sbd, s)
+  }
 }
