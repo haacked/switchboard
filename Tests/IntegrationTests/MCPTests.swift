@@ -51,8 +51,8 @@ extension Instance {
 
   /// Replaces these keys in config.json, which sbd reads when it starts.
   func setConfig(_ values: [String: JSON]) throws {
-    let config = JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object ?? [:]
-    try JSON.object(config.merging(values) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
+    try JSON.object(try config().merging(values) { $1 }).text.write(
+      toFile: home.config, atomically: true, encoding: .utf8)
   }
 }
 

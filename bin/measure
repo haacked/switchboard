@@ -3,9 +3,10 @@
 # Phases. It builds sb and sbd in release mode and starts a private sbd under
 # a temporary SB_HOME, with the stub claude from the integration tests, which
 # stays idle at its prompt. For each count, it adds sessions until that many
-# run. It then reports the resident memory of sbd, of the terminals (the tmux
+# exist. It then reports the resident memory of sbd, of the terminals (the tmux
 # server and the panes' shells), of the stub claudes, and of all of them
-# together, and the median wall time of `sb ls` and `sb ls --json`.
+# together, and the median wall time of `sb ls` and `sb ls --json`. sbd's
+# live cap (config.json's liveCap, 10 by default) limits how many stubs run.
 # The stub stands in for claude, so its memory says nothing about claude's.
 # The panes run your login shell, as the installed sbd's do.
 #   bin/measure              measures 25 and then 50 sessions
@@ -87,9 +88,13 @@ for count in "${counts[@]}"; do
     sb new "$home/work" --name "m$started" >/dev/null
     started=$((started + 1))
   done
+  # The live cap stops idle sessions to start the rest, so at most the cap's
+  # count of stubs run once every start has left the queue.
   for _ in $(seq 300); do
-    live=$(sb ls --json | jq '[.[] | select(.claudePid)] | length')
-    if [ "$live" -ge "$count" ]; then break; fi
+    status=$(sb live --json)
+    live=$(jq '[.live[] | select(.pid)] | length' <<<"$status")
+    want=$(jq --argjson count "$count" '[$count, .cap] | min' <<<"$status")
+    if [ "$(jq '.queued | length' <<<"$status")" -eq 0 ] && [ "$live" -ge "$want" ]; then break; fi
     sleep 0.1
   done
   # Shells read their startup files after the pane starts, so memory settles later.

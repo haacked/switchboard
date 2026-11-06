@@ -202,6 +202,9 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
+    live [--set N]                list the sessions whose claude runs and the
+                                  starts that queue behind the cap. --set changes
+                                  the cap and saves it in config.json
     service install|uninstall|status
     version
 
@@ -232,7 +235,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--description", "--artifact", "--kind", "--version",
+      "--set", "--description", "--artifact", "--kind", "--version",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -670,6 +673,8 @@ case "mcp-server":
   mcpServer(a)
 case "autocontinue":
   autoContinue(a)
+case "live":
+  live(a)
 case "group", "groups":
   group(a)
 case "chat":

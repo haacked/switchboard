@@ -111,9 +111,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// JSON. The summary cuts both short.
   public var details: String {
     if let command = input["command"]?.string { return command }
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    return (try? encoder.encode(input)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    return input.prettyText
   }
 
   /// The card with the given id, or the session's only card. A session with
