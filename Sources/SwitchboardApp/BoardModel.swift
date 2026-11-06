@@ -701,19 +701,11 @@ final class BoardModel: ObservableObject {
         parts.append("its local branch \(branch)")
         parts.append("the remote branch \(branch), only if it is still at the merged PR's head")
       }
-      var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
+      var text = "This stops claude, closes both terminals, and deletes " + englishList(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
         " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
-    }
-
-    static func list(_ parts: [String]) -> String {
-      switch parts.count {
-      case 0, 1: parts.joined()
-      case 2: parts.joined(separator: " and ")
-      default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
-      }
     }
   }
 

@@ -69,15 +69,16 @@ extension Instance {
     try FileManager.default.fileExists(atPath: s.cwd) && client.sessions().map(\.id).contains(s.id)
   }
 
-  /// Makes every delete from `table` abort, as a constraint on the store would.
-  func blockDeletes(from table: String) throws {
+  /// Makes every `statement`, such as `DELETE` or `INSERT`, on `table` abort, as a constraint on the store would.
+  func block(_ statement: String, on table: String) throws {
+    let trigger = "block_\(statement.lowercased())_\(table)"
     let r = try runCommand(
       "/usr/bin/sqlite3",
       [
         home.database,
-        "CREATE TRIGGER block_\(table) BEFORE DELETE ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
+        "CREATE TRIGGER \(trigger) BEFORE \(statement) ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
       ])
-    #expect(r.status == 0)
+    try #require(r.status == 0)
   }
 }
 
@@ -338,7 +339,7 @@ extension Instance {
   private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool) throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
-    try sbd.blockDeletes(from: table)
+    try sbd.block("DELETE", on: table)
     let r = try (branch ? sbd.deleteSessionAndBranch(s.id) : sbd.deleteSession(s.id))
     #expect(r.status != 0)
     #expect(r.stderr.contains("store is read-only"))
@@ -921,7 +922,7 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
     let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
-    try sbd.blockDeletes(from: "sessions")
+    try sbd.block("DELETE", on: "sessions")
 
     let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
 
@@ -960,13 +961,7 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
     let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
-    let blocked = try runCommand(
-      "/usr/bin/sqlite3",
-      [
-        sbd.home.database,
-        "CREATE TRIGGER block_records BEFORE INSERT ON resolved_todos BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
-      ])
-    try #require(blocked.status == 0)
+    try sbd.block("INSERT", on: "resolved_todos")
 
     let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
 

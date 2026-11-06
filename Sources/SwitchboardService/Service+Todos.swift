@@ -11,18 +11,17 @@ struct OpenTodoError: Error, CustomStringConvertible {
   let open: [Note]
   /// `sb rm`, or `sb followup rm` for a follow-up that hasn't started.
   let command: String
-  /// The flags of the refused request, such as `--worktree`. The suggested
+  /// The flags of the refused `rm`, such as `--worktree`. The suggested
   /// command repeats them.
-  let flags: [String]
+  var flags: [String] = []
   /// What `rm` already did when the check failed late, such as "Kept s1". It
   /// replaces the session as the subject of the refusal.
   var kept: String?
+  /// The sentence that names a branch the late `rm` failed to delete, such
+  /// as " It kept main: …". It ends the refusal.
+  var stayed = ""
 
-  /// The to-dos with their text escaped. Claude can write a to-do whose text
-  /// would move the cursor of the terminal that prints the refusal.
-  var list: String {
-    unresolved.map { "\($0.id) \"\(oneLine($0.text, max: .max).printable)\"" }.joined(separator: "; ")
-  }
+  var list: String { unresolved.map { "\($0.id) \"\(oneLine($0.text, max: .max))\"" }.joined(separator: "; ") }
 
   static func resolveHint(_ session: String, _ note: String) -> String {
     "Resolve it with sb note \(session) --resolve \(note)"
@@ -39,7 +38,7 @@ struct OpenTodoError: Error, CustomStringConvertible {
 
   var description: String {
     let subject = kept.map { "\($0), because it" } ?? session
-    return "\(subject) has an open to-do: \(list). \(hint)"
+    return "\(subject) has an open to-do: \(list). \(hint)\(stayed)"
   }
 }
 
@@ -63,10 +62,9 @@ extension Service {
 
   /// Throws unless `resolving` names exactly the session's open to-dos.
   /// Returns the `resolved_todos` rows that a delete that resolves them
-  /// writes. It changes nothing. It runs on the state queue. The refusal's
-  /// suggested command repeats `flags`.
+  /// writes. It changes nothing. It runs on the state queue.
   @discardableResult
-  func checkTodos(_ id: String, resolving: Set<String>, flags: [String] = []) throws -> [ResolvedTodo] {
+  func checkTodos(_ id: String, resolving: Set<String>) throws -> [ResolvedTodo] {
     guard let entry = entries[id] else { throw APIError("no session \(id)") }
     let open = entry.session.openTodos
     if let stray = resolving.sorted().first(where: { ref in !open.contains { $0.id == ref } }) {
@@ -75,7 +73,7 @@ extension Service {
     let unresolved = open.filter { !resolving.contains($0.id) }
     guard unresolved.isEmpty else {
       let command = entry.session.waitsToStart ? "sb followup rm" : "sb rm"
-      throw OpenTodoError(session: id, unresolved: unresolved, open: open, command: command, flags: flags)
+      throw OpenTodoError(session: id, unresolved: unresolved, open: open, command: command)
     }
     let resolution = Note.Resolution(t: nowMs(), by: .you, how: "resolved and deleted the session")
     return open.map {

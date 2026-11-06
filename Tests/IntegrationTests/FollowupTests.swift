@@ -390,7 +390,7 @@ final class Outcome<T>: @unchecked Sendable {
     let sbd = try Instance()
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
     let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
-    try sbd.blockDeletes(from: "sessions")
+    try sbd.block("DELETE", on: "sessions")
 
     let message = failure(sbd, "followup-rm", ["session": .string(f.id), "resolve": [.string(todo.id)]])
 

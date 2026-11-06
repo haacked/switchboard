@@ -287,8 +287,10 @@ struct Args {
   }
 }
 
+/// Escapes each control character but newline and tab. A refusal
+/// from sbd can quote text that Claude wrote.
 func warn(_ message: String) {
-  FileHandle.standardError.write(Data("sb: \(message)\n".utf8))
+  FileHandle.standardError.write(Data("sb: \(controlsEscaped(message))\n".utf8))
 }
 
 func die(_ message: String) -> Never {

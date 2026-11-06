@@ -298,6 +298,15 @@ public func oneLine(_ text: String, max: Int = 70) -> String {
   return line.count <= max ? line : String(line.prefix(max - 1)) + "…"
 }
 
+/// The parts joined as an English list: "a", "a and b", or "a, b, and c".
+public func englishList(_ parts: [String]) -> String {
+  switch parts.count {
+  case 0, 1: parts.joined()
+  case 2: parts.joined(separator: " and ")
+  default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
+  }
+}
+
 private let timestamp = ISO8601DateFormatter()
 
 /// Writes a timestamped line to stderr, which launchd sends to sbd.log.
