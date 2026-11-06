@@ -163,8 +163,11 @@ public struct MCPToolServer: Sendable {
       request["session"] = try sessionOrCaller(args, scoped)
       return try client.call("clear-wait", request)
     case "add_note":
-      return try client.call(
-        "note", ["session": try sessionID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
+      var request: [String: JSON] = [
+        "session": try sessionID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude,
+      ]
+      if args["todo"]?.bool == true { request["kind"] = .string(Note.Kind.todo.rawValue) }
+      return try client.call("note", request)
     case "list_groups":
       guard let scoped else { return try client.call("group-ls") }
       return try JSON(encoding: GroupList(groups: [scoped.group], ungrouped: []))

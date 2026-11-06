@@ -126,7 +126,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// `dialog_closed` and `card_closed` can be the only record of the answer.
   static let activityKinds = Set(hookKinds).union([
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
-    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
+    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "note-resolved", "done", "undone",
     "account-moved", "idle", "ack", "unack",
   ])
 
