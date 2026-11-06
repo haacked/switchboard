@@ -340,11 +340,14 @@ struct SessionRow: View {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {
-            Link(destination: url) { Text(verbatim: "#\(pr.number)") }
-              .font(.caption)
-              .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
-              .help(pr.tooltip)
-              .accessibilityValue(pr.status.rawValue)
+            HStack(spacing: 3) {
+              Link(destination: url) { Text(verbatim: "#\(pr.number)") }
+                .font(.caption)
+                .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
+                .help(pr.tooltip)
+                .accessibilityValue(pr.status.rawValue)
+              if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+            }
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
@@ -608,10 +611,13 @@ struct BoardCard: View {
             Text(s.name).fontWeight(.medium).lineLimit(1)
             Spacer()
             if let pr = s.pr {
-              Text(verbatim: "#\(pr.number)")
-                .font(.caption.bold())
-                .foregroundStyle(pr.status.color)
-                .help(pr.tooltip)
+              HStack(spacing: 3) {
+                Text(verbatim: "#\(pr.number)")
+                  .font(.caption.bold())
+                  .foregroundStyle(pr.status.color)
+                  .help(pr.tooltip)
+                if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+              }
             }
           }
           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
