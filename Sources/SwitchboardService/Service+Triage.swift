@@ -48,9 +48,9 @@ extension Service {
       guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
       option = try item.option(key)
     }
-    // Claude Code may not approve its own prompt or merge its own PR.
-    if args["insideClaude"]?.bool == true, item.source == .card || option.action.isMerge {
-      throw APIError("choose answers a prompt or merges a PR for you, so it doesn't run inside Claude Code")
+    // Claude Code may not approve its own prompt or act on its own PR.
+    if args["insideClaude"]?.bool == true, item.source == .card || option.action.needsClick {
+      throw APIError("choose answers a prompt or acts on a PR for you, so it doesn't run inside Claude Code")
     }
     let session = JSON.string(id)
     switch option.action {
@@ -64,6 +64,12 @@ extension Service {
       return Request(op: "merge", args: ["session": session])
     case .dismiss:
       return Request(op: "merge", args: ["session": session, "dismiss": true])
+    case .requestReview:
+      let reviewers = ReviewRequests.reviewers(in: args["text"]?.string ?? "")
+      guard !reviewers.isEmpty else {
+        throw APIError("\(option.label) needs the reviewers. `sb review \(name)` lists the suggested ones")
+      }
+      return Request(op: "review", args: ["session": session, "reviewers": .array(reviewers.map(JSON.string))])
     case .wait:
       var wait = try option.wait.map { try JSON(encoding: $0).object ?? [:] } ?? [:]
       wait["session"] = session
@@ -113,15 +119,18 @@ extension Service {
 
   // MARK: Summaries
 
-  /// Starts the summary of the turn that just ended, when its last reply
-  /// decides the session's state and no card or rule does. The result is a
-  /// `triage` event keyed by the Stop event.
-  func summarizeTurn(_ id: String) {
-    guard config.triage.enabled, let e = entries[id] else { return }
-    guard Triage.needsSummary(e.facts, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)) else {
-      return
-    }
+  /// Starts the summary of the turn that just ended, when `verdict`, the
+  /// session's current verdict, comes from the last reply and no card or
+  /// rule decides it. The result is a `triage` event keyed by the Stop event.
+  /// sbd calls it after each event and tick, and once at startup. A turn gets
+  /// one attempt per run of sbd.
+  func summarizeTurn(_ id: String, _ verdict: Verdict) {
+    guard config.triage.enabled, let e = entries[id], Triage.needsSummary(e.facts, verdict) else { return }
     let stop = e.facts.lastStop
+    guard e.summaryAttempt != stop else { return }
+    // A skip records an event, which calls this again. Setting `summaryAttempt` first makes that call return at the
+    // guard above.
+    entries[id]?.summaryAttempt = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
     if let skip = summarySkip(e.facts, account: account) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])

@@ -206,6 +206,10 @@ struct OptionList: View {
             text: Binding(get: { replies[key, default: ""] }, set: { replies[key] = $0 }))
         } else if item.isTickable(option) {
           tickBox(i, option)
+        } else if option.action == .requestReview {
+          RequestReviewOption(
+            session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
+            shortcut: owner == .option(i))
         } else {
           OptionButton(
             session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
@@ -246,8 +250,9 @@ struct OptionList: View {
   }
 }
 
-/// An option's box. A click runs the option's action. The main option is
-/// filled. The option that owns the shortcut answers ⌘⇧Return.
+/// An option's box. A click runs the option's action, or `onClick` when it
+/// is set. The main option is filled. The option that owns the shortcut
+/// answers ⌘⇧Return.
 struct OptionButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -256,13 +261,14 @@ struct OptionButton: View {
   let option: TriageOption
   let primary: Bool
   var shortcut = false
+  var onClick: (() -> Void)?
 
   static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
     let effect = option.effect(mergeMethod: session.pr?.mergeMethod)
     Button {
-      model.choose(session.id, ref: ref, option: number, action: option.action)
+      if let onClick { onClick() } else { model.choose(session.id, ref: ref, option: number, action: option.action) }
     } label: {
       OptionCardLabel(
         mark: .go, title: option.label, description: option.detail,

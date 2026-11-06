@@ -38,6 +38,10 @@ public final class Service {
     var turnProbe = TurnProbe()
     /// When the tick last saw a terminal on the Claude pane.
     var lastOnScreen: Int64 = 0
+    /// The Stop event of the last turn whose summary this sbd started or
+    /// skipped. A turn gets one attempt per run of sbd, so a restart retries
+    /// a summary that failed.
+    var summaryAttempt: Int64 = 0
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
 
@@ -57,6 +61,8 @@ public final class Service {
   var starting: Set<String> = []
   /// The sessions whose PR `merge` is merging.
   var merging: Set<String> = []
+  /// The sessions whose PR `review` is asking gh to request a review of.
+  var requestingReview: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -152,7 +158,9 @@ public final class Service {
     try? refreshManagerGuide()
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
-    for id in entries.keys { summarizeTurn(id) }
+    for (id, e) in entries {
+      summarizeTurn(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+    }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
     let reader = UsageReader(service: self, settings: config.usage)
@@ -193,6 +201,8 @@ public final class Service {
         return .success(try removeDone(request.args))
       case "merge":
         return .success(try mergeRequest(request.args))
+      case "review":
+        return .success(try reviewRequest(request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -386,7 +396,6 @@ public final class Service {
       entries[id]?.inFlight = nil
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
-      if kind == "Stop" { summarizeTurn(id) }
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
       deliverPending(id, after: 0.5)
     default:
@@ -406,9 +415,12 @@ public final class Service {
     }
     if var e = entries[id] {
       e.facts.apply(event)
-      Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
+      let verdict = Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
       e.events += 1
       entries[id] = e
+      // A reply can decide the state after its turn ended, as when a
+      // background job outlasts the turn or a PR rule stops applying.
+      summarizeTurn(id, verdict)
     }
     releaseCards(id)
     return event
@@ -1336,8 +1348,9 @@ public final class Service {
           entries[id]?.unreportedSince = nil
         }
         if var e = entries[id] {
-          Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
+          let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
+          summarizeTurn(id, verdict)
         }
       }
       runQueuedStarts(now: now)

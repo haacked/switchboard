@@ -150,7 +150,7 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     let two = facts(ended + [event("job", 3, ["count": 2])])
     #expect(Attention.evaluate(session(), two, now: 4).reason == "waiting on 2 background jobs")
     let gone = facts(ended + [event("job", 3, ["count": 1]), event("job", 4, ["count": 0])])
-    #expect(Attention.evaluate(session(), gone, now: 5).state == .needsYou)
+    #expect(Attention.evaluate(session(), gone, now: 4 + Attention.jobReportMs).state == .needsYou)
   }
 
   @Test func reportOfABackgroundJobReturnsTheSessionToTheUser() {
@@ -365,5 +365,35 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
   @Test func jsonRoundTrips() {
     let text = #"{"a":[1,true,null,"x"],"b":{"c":2.5}}"#
     #expect(JSON.parse(text)?.text == text)
+  }
+}
+
+/// A turn that started a background job, and the job's exit at t = 10.
+private let jobEndsAfterTheTurn = [
+  event("UserPromptSubmit", 0, ["prompt": "go"]), event("job", 1, ["count": 1]), stop(3, 2, "Started a job."),
+  event("job", 10, ["count": 0]),
+]
+
+@Suite struct JobReportWait {
+  @Test func sessionWaitsForTheReportOfAJobThatEndedAfterItsTurn() {
+    let f = facts(jobEndsAfterTheTurn)
+
+    #expect(
+      Attention.evaluate(session(), f, now: 10 + Attention.jobReportMs - 1)
+        == Verdict(state: .waiting, reason: "waiting for claude to report its background job"))
+    #expect(Attention.evaluate(session(), f, now: 10 + Attention.jobReportMs).state == .needsYou)
+  }
+
+  @Test(arguments: ["UserPromptSubmit", "Stop"])
+  func aNewTurnEndsTheWait(_ kind: String) {
+    let f = facts(jobEndsAfterTheTurn + [event(kind, 11, ["prompt": "<task-notification>"])])
+
+    #expect(!f.mayReportJob(now: 12))
+  }
+
+  @Test func aTurnWithoutJobsWaitsForNoReport() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), stop(3, 2, "Done.")])
+
+    #expect(!f.mayReportJob(now: 3))
   }
 }
