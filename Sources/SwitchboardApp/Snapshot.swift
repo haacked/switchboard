@@ -10,7 +10,7 @@ import Foundation
 /// window background color first. A snapshot run uses the light appearance,
 /// or the dark one with SB_SNAPSHOT_APPEARANCE=dark. SB_SNAPSHOT_SIZE=<width>x<height>
 /// sets the window's content size in points just before the drawing, so a narrow
-/// layout can be drawn. SwiftTerm draws text in
+/// layout can be drawn, and puts the window's frame back after it. SwiftTerm draws text in
 /// layers that the drawing misses, so `sb screen` checks terminals.
 @MainActor
 enum Snapshot {
@@ -39,11 +39,15 @@ enum Snapshot {
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
     let size = env["SB_SNAPSHOT_SIZE"].flatMap(contentSize)
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-      if let size, let window = mainWindow {
+      let window = size == nil ? nil : mainWindow
+      let frame = window?.frame
+      if let size, let window {
         window.setContentSize(size)
         window.contentView?.layoutSubtreeIfNeeded()
       }
       write(to: path)
+      // AppKit saves the main window's frame on every change. Restoring it keeps the next launch at the user's last size.
+      if let window, let frame { window.setFrame(frame, display: false) }
       if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
     }
   }
