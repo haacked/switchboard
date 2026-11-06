@@ -355,6 +355,9 @@ public enum Attention {
   public static func evaluate(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
   ) -> Verdict {
+    var facts = facts
+    // Only a work session has a PR. A pr event recorded for a Manager or a chat must not fire a PR rule.
+    if session.kind != .work { facts.pr = nil }
     let verdict = rules(session, facts, now: now, stateOf: stateOf)
     return readyForReview(verdict, facts) ?? verdict
   }
