@@ -117,6 +117,28 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
   }
 
+  @Test func aCIWaitSetOnTheHeadCommitResolvesOnOneRead() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(18303) { $0["headRefOid"] = .string(head) }
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    #expect(try sbd.get(s.id).waits.first?.head == head)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
+  }
+
+  @Test func aCIWaitKeepsTwoReadsWhenTheHeadCommitDiffers() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    github.change(18303) { $0["headRefOid"] = "pushed-commit" }
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
   @Test func aWaitStaysOpenWhenTheReadAfterItFails() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

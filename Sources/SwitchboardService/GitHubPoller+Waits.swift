@@ -70,9 +70,10 @@ extension GitHubPoller {
   /// - a session marked done since the poll began;
   /// - the session's own PR when it finished before the wait was set, which is
   ///   an earlier PR of a reused branch;
-  /// - a `ci` outcome that only one read showed, since a read just after a push
-  ///   can show the old head commit, or a status that reports before CI queues.
-  ///   Two reads that both show a failure agree.
+  /// - a `ci` outcome that only one read showed, unless the read shows the
+  ///   head commit that the wait recorded. A read just after a push can show
+  ///   the old head commit, or a status that reports before CI queues. Two reads
+  ///   that both show a failure agree.
   /// - a GitHub merge queue removal that only one read showed, since a read
   ///   while GitHub merges the PR can show it outside the queue before it
   ///   shows it merged.
@@ -117,6 +118,7 @@ extension GitHubPoller {
 
   private func confirmed(_ wait: Wait, _ pr: PullRequest, _ outcome: String, polled: Int64) -> Bool {
     guard wait.kind == .ci || outcome == Self.leftGitHubQueue else { return true }
+    if wait.kind == .ci && wait.head == pr.headSha { return true }
     // More Depot jobs can fail between the two reads. That changes the
     // outcome's words but not the fact that the checks failed.
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
