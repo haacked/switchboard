@@ -20,16 +20,18 @@ public enum TriageCard {
   }
 
   /// Options may name only the `actions`. An option without an action sends
-  /// its message. A nil `kind` takes the kind from the options.
+  /// its message. A nil `kind` takes the kind from the options. The summary
+  /// keeps its first `lines` lines.
   public static func clean(
-    _ raw: JSON, actions: [TriageAction] = TriageAction.writable, kind: TriageKind? = nil, now: Int64 = 0
+    _ raw: JSON, actions: [TriageAction] = TriageAction.writable, kind: TriageKind? = nil,
+    lines maxLines: Int = summaryLines, now: Int64 = 0
   ) throws -> Cleaned {
     guard raw.object != nil else { throw APIError("the summary is a JSON object") }
     let lines = (raw["summary"]?.string ?? "").split(whereSeparator: \.isNewline)
       .map { oneLine(String($0), max: lineLength) }.filter { !$0.isEmpty }
     guard let first = lines.first else { throw APIError("the summary needs a summary") }
     var dropped: [String] = []
-    if lines.count > summaryLines { dropped.append("lines after the first \(summaryLines) of the summary") }
+    if lines.count > maxLines { dropped.append("lines after the first \(maxLines) of the summary") }
     let multiSelect = raw["multiSelect"]?.bool ?? false
     let options = keep(raw["options"], "option", max: maxOptions, &dropped) {
       let option = try option($0, actions: actions, now: now)
@@ -43,7 +45,7 @@ public enum TriageCard {
     let card = TriageSummary(
       title: title.isEmpty ? oneLine(first, max: Triage.titleLength) : title,
       kind: kind ?? self.kind(for: options),
-      summary: lines.prefix(summaryLines).joined(separator: "\n"), options: options, callouts: callouts,
+      summary: lines.prefix(maxLines).joined(separator: "\n"), options: options, callouts: callouts,
       multiSelect: multiSelect)
     return Cleaned(card: card, dropped: dropped)
   }
