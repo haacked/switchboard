@@ -102,7 +102,8 @@ final class Outcome<T>: @unchecked Sendable {
   }
 
   @Test func refusesRequestsWithoutWaitingForASharedServerThatIsStarting() throws {
-    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", delay: 60)]])
+    let gate = try MCPGate()
+    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", gate: gate)]])
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
     // A request waits up to 10 s for a starting server only when it can start claude.
     for op in ["open", "send", "resume", "terminals"] {
@@ -114,28 +115,34 @@ final class Outcome<T>: @unchecked Sendable {
 
   @Test func aStartWaitsForASharedServerThatIsStarting() throws {
     let repos = try Repos()
-    try repos.make("acme/widgets")
+    let repo = try repos.make("acme/widgets")
+    // sbd waits for the server for 10 s from the server's start. git can
+    // take that long under load. The hook holds git until the test restarts
+    // the server.
+    let hold = try repos.holdCheckouts(in: repo)
+    let gate = try MCPGate(open: true)
     let sbd = try Instance(config: [
-      "repoRoots": [.string(repos.root)], "mcpServers": ["slow": Instance.stubServer("slow", delay: 3)],
+      "repoRoots": [.string(repos.root)], "mcpServers": ["slow": Instance.stubServer("slow", gate: gate)],
     ])
+    let slow = try sbd.waitForRunning("slow")
     let f = try add(sbd, ["prompt": "mcp slow", "repository": "acme/widgets"])
-    _ = try sbd.client.call("followup-start", ["session": .string(f.id)])
-    try sbd.waitFor(f.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
+    let folder = "\(sbd.home.path)/worktrees/widgets/mcp-slow"
+    let started = Outcome.detached { try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)]) }
+    try sbd.waitFor("git to make \(folder)", timeout: 60) {
+      if let result = started.result { _ = try result.get() }
+      return FileManager.default.fileExists(atPath: folder)
+    }
+    let restarted = try sbd.restartServer(slow, behind: gate)
+    try FileManager.default.removeItem(atPath: hold)
+    _ = try gate.open(sbd, after: started, sentAt: Date())
+    try sbd.waitFor(f.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
     #expect(try sbd.events(f.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
   }
 
   @Test func leavesAFollowupAloneWhileItsWorktreeIsMade() throws {
     let repos = try Repos()
     let repo = try repos.make("acme/widgets")
-    // git runs post-checkout in the new worktree, and the hook holds the
-    // start until the test removes the gate file, or for at most 30 s.
-    let gate = "\(repos.root)/gate"
-    FileManager.default.createFile(atPath: gate, contents: nil)
-    defer { try? FileManager.default.removeItem(atPath: gate) }
-    let hook = "\(repo)/.git/hooks/post-checkout"
-    try "#!/bin/sh\ni=0\nwhile [ -e '\(gate)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
-      .write(toFile: hook, atomically: true, encoding: .utf8)
-    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+    let gate = try repos.holdCheckouts(in: repo)
     let sbd = try Instance(config: ["repoRoots": [.string(repos.root)]])
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets", "on": "1h"])
     let folder = "\(sbd.home.path)/worktrees/widgets/fix-the-cache"
