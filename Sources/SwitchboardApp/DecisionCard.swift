@@ -8,19 +8,38 @@ struct DecisionCard: View {
   let session: SessionSummary
   let item: TriageItem
 
+  static let rowSpacing: CGFloat = 14
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
+    VStack(alignment: .leading, spacing: Self.rowSpacing) {
       header
-      if !item.summary.isEmpty {
-        Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-      }
-      if !item.callouts.isEmpty {
-        VStack(alignment: .leading, spacing: 8) {
-          ForEach(Array(item.callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
+      if Self.splitsSummary(item) {
+        SummaryCalloutColumns {
+          summary
+          callouts
         }
+      } else {
+        if !item.summary.isEmpty { summary }
+        if !item.callouts.isEmpty { callouts }
       }
       VStack(alignment: .leading, spacing: 8) { actions }
       CardDetails(session: session)
+    }
+  }
+
+  /// Whether the card shows its summary and its callouts as two columns
+  /// when it is wide enough. A card without either one keeps a single stack.
+  static func splitsSummary(_ item: TriageItem) -> Bool {
+    !item.summary.isEmpty && !item.callouts.isEmpty
+  }
+
+  private var summary: some View {
+    Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+  }
+
+  private var callouts: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(Array(item.callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
     }
   }
 
@@ -81,6 +100,55 @@ extension TriageOption {
     let effect = effect(mergeMethod: mergeMethod)
     guard let detail, !detail.isEmpty else { return effect }
     return detail.last.map(".?!".contains) == true ? "\(detail) \(effect)" : "\(detail). \(effect)"
+  }
+}
+
+/// Places its two children, the summary and the callouts, side by side when
+/// the callout column gets at least `minimumColumn`, and stacks them
+/// otherwise. Both columns start at the top, and the taller one sets the
+/// height. ViewThatFits measures wrapped text at its one-line width, so it
+/// would stack every summary longer than the pane.
+struct SummaryCalloutColumns: Layout {
+  static let spacing: CGFloat = 16
+  static let minimumColumn: CGFloat = 260
+  static let summaryShare: CGFloat = 0.55
+
+  /// The column widths for the width the card gets, or nil when the two stack.
+  static func widths(for width: CGFloat) -> (summary: CGFloat, callouts: CGFloat)? {
+    let shared = width - spacing
+    let callouts = shared * (1 - summaryShare)
+    guard callouts >= minimumColumn else { return nil }
+    return (shared * summaryShare, callouts)
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard subviews.count == 2 else { return .zero }
+    let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+    if let width, let columns = Self.widths(for: width) {
+      let summary = subviews[0].sizeThatFits(ProposedViewSize(width: columns.summary, height: nil))
+      let callouts = subviews[1].sizeThatFits(ProposedViewSize(width: columns.callouts, height: nil))
+      return CGSize(width: width, height: max(summary.height, callouts.height))
+    }
+    let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
+    return CGSize(
+      width: width ?? sizes.map(\.width).max() ?? 0,
+      height: sizes[0].height + DecisionCard.rowSpacing + sizes[1].height)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    guard subviews.count == 2 else { return }
+    if let columns = Self.widths(for: bounds.width) {
+      subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: columns.summary, height: nil))
+      subviews[1].place(
+        at: CGPoint(x: bounds.minX + columns.summary + Self.spacing, y: bounds.minY),
+        proposal: ProposedViewSize(width: columns.callouts, height: nil))
+      return
+    }
+    let proposal = ProposedViewSize(width: bounds.width, height: nil)
+    let summary = subviews[0].sizeThatFits(proposal)
+    subviews[0].place(at: bounds.origin, proposal: proposal)
+    subviews[1].place(
+      at: CGPoint(x: bounds.minX, y: bounds.minY + summary.height + DecisionCard.rowSpacing), proposal: proposal)
   }
 }
 

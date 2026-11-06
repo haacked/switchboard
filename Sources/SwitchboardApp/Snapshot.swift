@@ -8,7 +8,9 @@ import Foundation
 /// window itself, so this needs no screen recording permission. The drawing
 /// leaves out the window's background, so the snapshot fills it in with the
 /// window background color first. A snapshot run uses the light appearance,
-/// or the dark one with SB_SNAPSHOT_APPEARANCE=dark. SwiftTerm draws text in
+/// or the dark one with SB_SNAPSHOT_APPEARANCE=dark. SB_SNAPSHOT_SIZE=<width>x<height>
+/// sets the window's content size in points just before the drawing, so a narrow
+/// layout can be drawn. SwiftTerm draws text in
 /// layers that the drawing misses, so `sb screen` checks terminals.
 @MainActor
 enum Snapshot {
@@ -35,14 +37,28 @@ enum Snapshot {
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: env["SB_SNAPSHOT_APPEARANCE"] == "dark" ? .darkAqua : .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
+    let size = env["SB_SNAPSHOT_SIZE"].flatMap(contentSize)
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+      if let size, let window = mainWindow {
+        window.setContentSize(size)
+        window.contentView?.layoutSubtreeIfNeeded()
+      }
       write(to: path)
       if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
     }
   }
 
+  /// The size that `<width>x<height>` names, or nil when the text is not one.
+  nonisolated static func contentSize(_ text: String) -> NSSize? {
+    let parts = text.split(separator: "x", omittingEmptySubsequences: false).map { Double($0) ?? 0 }
+    guard parts.count == 2, parts.allSatisfy({ $0 > 0 }) else { return nil }
+    return NSSize(width: parts[0], height: parts[1])
+  }
+
+  static var mainWindow: NSWindow? { NSApp.windows.first { $0.isVisible && $0.title == "Switchboard" } }
+
   static func write(to path: String) {
-    let window = NSApp.windows.first { $0.isVisible && $0.title == "Switchboard" }
+    let window = mainWindow
     guard let view = (window?.attachedSheet ?? window)?.contentView,
       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
     else {
