@@ -3,8 +3,9 @@ import SwiftTerm
 
 /// A scripted check of the terminal panes on a Mac with no one at the keyboard. SB_TERMINAL_TEST=<folder>
 /// sends synthetic key, paste, scroll, and resize events to the leftmost pane (the Claude pane) of the
-/// selected session (the first one when none is selected), then writes pane.png (the pane as drawn) to the
-/// folder. The pane's program reports what it received, so `sb screen` shows the result.
+/// selected session (the first one when none is selected), then writes PNGs of the pane as drawn, and of
+/// the pane with its side padding, to the folder. The pane's program reports what it received, so
+/// `sb screen` shows the result.
 @MainActor
 enum TerminalSelfTest {
   static func start(_ model: BoardModel) {
@@ -238,6 +239,17 @@ enum TerminalSelfTest {
       await pause(1)
     }
     png(pane, to: "\(folder)/pane-end.png")
+    if let padded = pane.superview?.superview as? PaddedTerminalView {
+      png(padded, to: "\(folder)/pane-padded.png")
+      // SwiftTerm's computeFontDimensions measures a cell the same way: the advance of the "W" glyph, rounded
+      // to the backing pixel grid.
+      var character: UniChar = 0x57
+      var glyph: CGGlyph = 0
+      CTFontGetGlyphsForCharacters(pane.font, &character, &glyph, 1)
+      let scale = pane.window?.backingScaleFactor ?? 1
+      let cell = (pane.font.advancement(forGlyph: NSGlyph(glyph)).width * scale).rounded() / scale
+      log("padded pane \(padded.bounds.width) cell \(cell)")
+    }
     log("done")
   }
 }
