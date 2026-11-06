@@ -414,14 +414,14 @@ public enum GitHub {
     (connection?["nodes"]?.array ?? []).filter { $0 != .null }
   }
 
-  /// One query with an alias per key. Each key's values go in variables, so
-  /// no branch name appears in the query text.
   /// Splits `owner/name`. A repo without a slash has an empty name.
   public static func ownerAndName(_ repo: String) -> (owner: String, name: String) {
     let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
     return (parts.first ?? "", parts.count > 1 ? parts[1] : "")
   }
 
+  /// One query with an alias per key. Each key's values go in variables, so
+  /// no branch name appears in the query text.
   public static func lookupQuery(_ keys: [PRKey]) -> (query: String, variables: JSON) {
     var declarations: [String] = []
     var fields: [String] = []

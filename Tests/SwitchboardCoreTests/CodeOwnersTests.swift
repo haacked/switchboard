@@ -252,6 +252,39 @@ private let mobile = ".github/workflows/*mobile*.yml @o"
     #expect(owned > 0)
     #expect(elapsed < .seconds(2))
   }
+
+  /// A backtracking regex runs for seconds to hours on each of these lines.
+  @Test(arguments: [
+    String(repeating: "*?", count: 12) + "*Z",
+    String(repeating: "*a", count: 20) + "*Z",
+    String(repeating: "**/", count: 30) + "Z",
+    String(repeating: "a/**/", count: 15) + "Z",
+  ])
+  func aLineWithManyWildcardsMatchesQuickly(pattern: String) throws {
+    let file = try #require(CodeOwnersFile.parse("\(pattern) @x"))
+    let paths = [
+      "frontend/src/scenes/feature-flags/components/release/v2/FeatureFlagReleaseConditions.tsx",
+      String(repeating: "a", count: 200), String(repeating: "a/", count: 40) + "b",
+    ]
+
+    let elapsed = ContinuousClock().measure {
+      for path in paths { #expect(file.owners(of: path).isEmpty) }
+    }
+
+    #expect(elapsed < .seconds(2))
+  }
+
+  @Test func manyWildcardsStillMatchWhatTheyDescribe() throws {
+    let file = try #require(
+      CodeOwnersFile.parse(
+        [
+          String(repeating: "*a", count: 20) + "*Z @stars", String(repeating: "**/", count: 30) + "Z @deep",
+        ].joined(separator: "\n")))
+
+    #expect(file.owners(of: String(repeating: "xa", count: 20) + "Z") == ["@stars"])
+    #expect(file.owners(of: "one/two/three/Z") == ["@deep"])
+    #expect(file.owners(of: "Z") == ["@deep"])
+  }
 }
 
 // MARK: - Config
@@ -695,8 +728,7 @@ private let hogqlTeam = [["@PostHog/hogql"]]
     ownerVerdict("bob", teams: []),
     ownerVerdict("bob", teams: nil),
     ownerVerdict("bob", teams: ["PostHog/team-devex"]),
-    ownerVerdict("bob", teams: ["PostHog/hogql"], on: "olderhead"),
-    ownerVerdict("bob", teams: ["PostHog/hogql"], on: nil),
+    ownerVerdict("bob", teams: ["PostHog/team-devex"], on: "olderhead"),
     ownerVerdict("bob", "CHANGES_REQUESTED", teams: ["PostHog/hogql"]),
     ownerVerdict("bob", "DISMISSED", teams: ["PostHog/hogql"]),
     ownerVerdict("bob", "COMMENTED", teams: ["PostHog/hogql"]),
@@ -717,7 +749,7 @@ private let hogqlTeam = [["@PostHog/hogql"]]
 
   @Test(arguments: [
     ownerVerdict("bob", teams: ["PostHog/hogql"]),
-    ownerVerdict("alice", on: "olderhead"),
+    ownerVerdict("bob", on: "olderhead"),
     ownerVerdict("alice", "CHANGES_REQUESTED"),
   ])
   func aUserGroupWaitsWithoutTheUsersApprovalAtTheHead(_ verdict: Review) throws {
@@ -792,10 +824,33 @@ private let hogqlTeam = [["@PostHog/hogql"]]
     #expect(try #require(CodeOwnerStatus(pr)).satisfied)
   }
 
-  /// GitHub can still want other reviews, so only APPROVED refuses.
+  /// GitHub can still want other reviews, so another decision alone does not refuse.
   @Test(arguments: [ReviewDecision.reviewRequired, .changesRequested])
   func anotherDecisionWithAWaitingGroupIsShown(_ decision: ReviewDecision) {
     #expect(CodeOwnerStatus(ownedPR(hogqlTeam, decision: decision)) != nil)
+  }
+
+  /// GitHub keeps an older commit's approval on a base that keeps stale
+  /// reviews. sbd does not read that setting, so the owner's group may not wait.
+  @Test(arguments: [
+    (hogqlTeam, ownerVerdict("bob", teams: ["PostHog/hogql"], on: "olderhead")),
+    (hogqlTeam, ownerVerdict("bob", teams: ["PostHog/hogql"], on: nil)),
+    ([["@alice"]], ownerVerdict("alice", on: "olderhead")),
+  ])
+  func anOlderApprovalByAWaitingGroupsOwnerShowsNothing(_ groups: [[String]], _ verdict: Review) {
+    for decision in [ReviewDecision.reviewRequired, .changesRequested] {
+      #expect(CodeOwnerStatus(ownedPR(groups + [["@carol"]], verdicts: [verdict], decision: decision)) == nil)
+    }
+  }
+
+  @Test func anOlderApprovalOfAGroupThatAnotherOwnerApprovedAtTheHeadIsShown() throws {
+    let verdicts = [
+      ownerVerdict("bob", teams: ["PostHog/hogql"]), ownerVerdict("dave", teams: ["PostHog/hogql"], on: "olderhead"),
+    ]
+
+    let status = try #require(CodeOwnerStatus(ownedPR(hogqlTeam + [["@carol"]], verdicts: verdicts)))
+
+    #expect(status.groups.map(\.approved) == [false, true])
   }
 
   @Test(arguments: ["@PostHog/other", "@bob"])

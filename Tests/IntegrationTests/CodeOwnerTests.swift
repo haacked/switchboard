@@ -502,32 +502,21 @@ extension Instance {
     }
   }
 
-  @Test func approvalAtAnOlderHeadLeavesTheTeamWaiting() throws {
-    let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
-    arrange(github)
-    github.verdict(Self.number, by: "hogql-member", on: String(repeating: "0", count: 40), for: ["PostHog/hogql"])
-    let s = try session(sbd)
-
-    try sbd.poll()
-
-    #expect(try sbd.owners(s.id)?.groups == [CodeOwnerGroup(owners: [Self.hogql], approved: false)])
-  }
-
   /// GitHub keeps counting an older head's approval when the ruleset keeps
-  /// stale reviews. sbd does not, so it disagrees with APPROVED and hides the field.
-  @Test func approvalAtAnOlderHeadThatGitHubApprovesShowsNoField() throws {
+  /// stale reviews. sbd does not read that setting, so it hides the field
+  /// whatever GitHub's decision is.
+  @Test(arguments: ["REVIEW_REQUIRED", "CHANGES_REQUESTED", "APPROVED"])
+  func approvalAtAnOlderHeadShowsNoField(decision: String) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     arrange(github)
     github.verdict(Self.number, by: "hogql-member", on: String(repeating: "0", count: 40), for: ["PostHog/hogql"])
+    github.change(Self.number) { $0["reviewDecision"] = .string(decision) }
     let s = try session(sbd)
+
     try sbd.poll()
-    #expect(try sbd.owners(s.id) != nil)
 
-    github.change(Self.number) { $0["reviewDecision"] = "APPROVED" }
-    try pollAgain(sbd)
-
+    #expect(github.count(FakeGitHub.approvalsKind) == 1)
     try expectNoField(sbd, s)
   }
 

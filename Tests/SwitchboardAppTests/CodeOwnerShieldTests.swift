@@ -111,7 +111,6 @@ private func ownedPR(_ owners: [[String]], verdicts: [Review] = []) -> PullReque
         id: "PR_1", number: 1, url: "https://github.com/haacked/switchboard/pull/1", repo: "haacked/switchboard"))
 
     #expect(summary.codeOwners == nil)
-    #expect(summary.codeOwners == nil)
   }
 
   @Test func showsNoShieldWhenThePollDidNotReadTheAuthor() {
