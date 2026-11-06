@@ -71,16 +71,16 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct SummaryCardTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct SummaryCardTests {
   // MARK: The session's card
 
-  /// The app shows a label of up to 20 characters on its button, and the detail beside it.
-  @Test func summaryHelpAsksForAShortLabelAndADetail() throws {
+  /// The app shows each option as a card with its label as the title and the detail under it.
+  @Test func summaryHelpAsksForALabelADetailAndNamesMultiSelect() throws {
     let sbd = try Instance()
     let help = try sbd.sb("summary", "help")
 
-    #expect(help.contains("a verb phrase of up to \(TriageCard.buttonLabelLength) characters"))
     #expect(help.contains("\"detail\" says what the option does"))
+    #expect(help.contains("\"multiSelect\": true"))
   }
 
   @Test func aSessionsCardBecomesTheItemWithItsButtonsAndNoModelCall() throws {
@@ -346,7 +346,7 @@ extension Instance {
 
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Merge #18303", "Dismiss"])
+    #expect(item.options.map(\.label) == ["Merge #18303", "Acknowledge"])
     #expect(item.options.map(\.action) == [.merge, .dismiss])
     #expect(item.primary?.action == .merge)
     #expect(sbd.summaryCalls().isEmpty)
@@ -419,20 +419,22 @@ extension Instance {
     #expect(try sbd.messagesFromSbd(s.id) == [MergeTests.message])
   }
 
-  @Test func choosingDismissDismissesWithoutMerging() throws {
+  @Test func choosingAcknowledgeAcknowledgesWithoutMerging() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
     try sbd.poll()
 
-    try sbd.sb("choose", s.id, "Dismiss")
+    try sbd.sb("choose", s.id, "Acknowledge")
 
-    #expect(try sbd.get(s.id).state != .readyToMerge)
+    let got = try sbd.get(s.id)
+    #expect(got.state == .waiting)
+    #expect(got.acknowledged == true)
     #expect(sbd.ghMerges().isEmpty)
   }
 
-  @Test(arguments: ["Merge #18303", "Dismiss", "1", "2"])
-  func chooseRefusesMergeAndDismissInsideClaudeCode(_ option: String) throws {
+  @Test(arguments: ["Merge #18303", "Acknowledge", "1", "2"])
+  func chooseRefusesMergeAndAcknowledgeInsideClaudeCode(_ option: String) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
@@ -565,5 +567,113 @@ extension Instance {
 
     #expect(r.status != 0)
     #expect(try sbd.sentTexts(s.id).isEmpty)
+  }
+
+  // MARK: Several options
+
+  private static let fixes: [JSON] = [
+    ["label": "Fix item 3", "action": "send", "message": "Fix item 3."],
+    ["label": "Fix item 5", "action": "send", "message": "Fix item 5."],
+    ["label": "Rename the flag", "action": "send"],
+  ]
+
+  private func multiSession(_ sbd: Instance) throws -> SessionSummary {
+    let s = try sbd.endedSession()
+    let text = JSON.object(["summary": "Three review items.", "multiSelect": true, "options": .array(Self.fixes)]).text
+    try sbd.setSummary(s.id, text)
+    return try sbd.waitFor(s.id, "the session's card") { $0.triage?.multiSelect == true }
+  }
+
+  @Test func choosingSeveralOptionsSendsOneMessageThatListsThem() throws {
+    let sbd = try Instance()
+    let s = try multiSession(sbd)
+
+    try sbd.sb("choose", s.id, "3,Fix item 3")
+
+    let message = "- Fix item 3.\n- Rename the flag"
+    try sbd.waitFor(s.id, "the reply to the choice") { $0.lastReply == "Done: \(message)" }
+    #expect(try sbd.sentTexts(s.id) == [message])
+  }
+
+  /// The app names the ticked options by number.
+  @Test func theAppsOptionsListSendsOneMessage() throws {
+    let sbd = try Instance()
+    let s = try multiSession(sbd)
+    let ref = try #require(s.triage?.ref)
+
+    _ = try sbd.client.call(
+      "choose", ["session": .string(s.id), "options": ["2", "1"], "ref": .string(ref)])
+
+    try sbd.waitFor("the message") { try sbd.sentTexts(s.id) == ["- Fix item 3.\n- Fix item 5."] }
+  }
+
+  @Test func aLabelWithACommaNamesItsOwnOption() throws {
+    let sbd = try Instance()
+    let s = try sbd.endedSession()
+    let options: [JSON] = [
+      ["label": "Yes, push", "action": "send", "message": "Push it."], ["label": "Hold", "action": "send"],
+    ]
+    let text = JSON.object(["summary": "Ready.", "multiSelect": true, "options": .array(options)]).text
+    try sbd.setSummary(s.id, text)
+    try sbd.waitFor(s.id, "the session's card") { $0.triage?.multiSelect == true }
+
+    try sbd.sb("choose", s.id, "Yes, push")
+
+    try sbd.waitFor("the message") { try sbd.sentTexts(s.id) == ["Push it."] }
+  }
+
+  @Test func oneTickedOptionSendsItsOwnMessage() throws {
+    let sbd = try Instance()
+    let s = try multiSession(sbd)
+
+    try sbd.sb("choose", s.id, "2")
+
+    try sbd.waitFor("the message") { try sbd.sentTexts(s.id) == ["Fix item 5."] }
+  }
+
+  @Test func severalOptionsOfASingleChoiceCardAreRefused() throws {
+    let sbd = try Instance()
+    let s = try sbd.endedSession()
+    try sbd.setSummary(s.id, cardText(Self.fixes))
+    let seen = try sbd.waitFor(s.id, "the session's card") { $0.triage?.source == .session }
+
+    #expect(throws: (any Error).self) {
+      _ = try sbd.client.call(
+        "choose", ["session": .string(s.id), "options": ["1", "2"], "ref": .string(seen.triage?.ref ?? "")])
+    }
+    #expect(try sbd.sentTexts(s.id).isEmpty)
+  }
+
+  @Test func anEmptyListOfOptionsIsRefused() throws {
+    let sbd = try Instance()
+    let s = try multiSession(sbd)
+
+    #expect(throws: (any Error).self) {
+      _ = try sbd.client.call(
+        "choose", ["session": .string(s.id), "options": [], "ref": .string(s.triage?.ref ?? "")])
+    }
+    #expect(try sbd.sentTexts(s.id).isEmpty)
+  }
+
+  @Test func triageMarksAMultiSelectCard() throws {
+    let sbd = try Instance()
+    let s = try multiSession(sbd)
+
+    let out = try sbd.sb("triage")
+
+    #expect(out.contains("pick any"), "\(out)")
+    #expect(out.contains("sb choose \(s.id) 1,3"), "\(out)")
+  }
+
+  @Test func chooseAnswersAHeldMultiSelectQuestionWithSeveralOptions() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "pick colors")
+    let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    #expect(asked.triage?.multiSelect == true)
+
+    try sbd.sb("choose", s.id, "green,1")
+
+    let after = try sbd.waitFor(s.id, "the answer") { $0.lastReply?.hasPrefix("Picked:") == true }
+    #expect(after.lastReply == #"Picked: {"Which colors?":"red, green"}"#)
   }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwitchboardCore
 import Testing
 
@@ -8,7 +9,12 @@ final class Counter: @unchecked Sendable {
   private let lock = NSLock()
   private var count = 0
   var value: Int { lock.withLock { count } }
-  func increment() { lock.withLock { count += 1 } }
+  @discardableResult func increment() -> Int {
+    lock.withLock {
+      count += 1
+      return count
+    }
+  }
 }
 
 /// A session whose triage item is a decision, or a card when `card` is true.
@@ -24,11 +30,36 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   return s
 }
 
-/// A model that has applied `list`. `apply` sets the Dock badge, which needs NSApp.
+/// A model whose client finds no sbd, so a refresh fails at once. `Client()`
+/// reads `SB_HOME`, which can name the user's running sbd. A refresh from that
+/// sbd replaces the test's groups and sessions. `apply` sets the Dock badge,
+/// which needs NSApp.
+@MainActor
+func offlineModel() -> BoardModel {
+  _ = NSApplication.shared
+  return BoardModel(client: Client(home: Home(path: NSTemporaryDirectory() + "no-sbd-" + UUID().uuidString)))
+}
+
+/// Runs `action` on a model whose `send` counts requests, waits until sbd gets
+/// the first one, and returns that request and the count at that moment.
+@MainActor
+func firstRequest(_ action: (BoardModel) -> Void) async -> (op: String, args: [String: JSON], count: Int) {
+  let model = offlineModel()
+  let sent = Counter()
+  let (op, args) = await withCheckedContinuation { first in
+    model.send = { op, args in
+      if sent.increment() == 1 { first.resume(returning: (op, args)) }
+      return .null
+    }
+    action(model)
+  }
+  return (op, args, sent.value)
+}
+
+/// A model that has applied `list`.
 @MainActor
 func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) -> BoardModel {
-  _ = NSApplication.shared
-  let model = BoardModel()
+  let model = offlineModel()
   model.apply(.success(list), followups: followups)
   return model
 }
@@ -39,13 +70,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     needsItem(id, state: state)
   }
 
-  func model(_ ids: [String]) -> BoardModel {
-    // apply() sets the Dock badge, which needs NSApp.
-    _ = NSApplication.shared
-    let model = BoardModel()
-    model.apply(.success(ids.map { summary($0) }), followups: nil)
-    return model
-  }
+  func model(_ ids: [String]) -> BoardModel { appliedModel(ids.map { summary($0) }) }
 
   @Test func clearsASelectionWhoseSessionWasRemoved() {
     let model = model(["a", "b"])
@@ -180,20 +205,20 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 @MainActor
 @Suite struct BoardModelVisibleView {
   @Test func isTheMainViewWhileNothingIsSelected() {
-    let model = BoardModel()
+    let model = offlineModel()
     #expect(model.visibleView == .inbox)
     model.show(.board)
     #expect(model.visibleView == .board)
   }
 
   @Test func isNilWhileASessionIsSelected() {
-    let model = BoardModel()
+    let model = offlineModel()
     model.selection = "a"
     #expect(model.visibleView == nil)
   }
 
   @Test func showClearsTheSelection() {
-    let model = BoardModel()
+    let model = offlineModel()
     model.selection = "a"
     model.show(.inbox)
     #expect(model.selection == nil)
@@ -322,20 +347,14 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(text.contains("fails its check after the worktree is gone"))
   }
 
-  @Test func ignoresASecondDeleteWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondDeleteWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      let session = done()
+      model.deleteDone(session)
+      model.deleteDone(session)
+      #expect(model.deleting == [session.id])
     }
-    let session = done()
-    model.deleteDone(session)
-    model.deleteDone(session)
-    #expect(model.deleting == [session.id])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
   }
 
   @Test func labelsTheIconWithWhatItRemoves() {
@@ -524,142 +543,304 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 
 @MainActor
 @Suite(.timeLimit(.minutes(1))) struct BoardModelSuggestions {
-  /// The request that `action` sends to sbd.
-  func request(_ action: (BoardModel) -> Void) async -> (op: String, args: [String: JSON]) {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    return await withCheckedContinuation { sent in
-      model.send = { op, args in
-        sent.resume(returning: (op, args))
-        return .null
-      }
-      action(model)
-    }
-  }
-
   @Test func acceptSendsGroupSuggestWithTheId() async {
-    let sent = await request { $0.acceptSuggestion("merge:g1:g2") }
+    let sent = await firstRequest { $0.acceptSuggestion("merge:g1:g2") }
 
     #expect(sent.op == "group-suggest")
     #expect(sent.args == ["accept": "merge:g1:g2"])
   }
 
   @Test func declineSendsGroupSuggestWithTheId() async {
-    let sent = await request { $0.declineSuggestion("dependency:s1:g1") }
+    let sent = await firstRequest { $0.declineSuggestion("dependency:s1:g1") }
 
     #expect(sent.op == "group-suggest")
     #expect(sent.args == ["decline": "dependency:s1:g1"])
   }
 
   @Test func mergeSendsMergeWithTheSession() async {
-    let sent = await request { $0.merge("a") }
+    let sent = await firstRequest { $0.merge("a") }
 
     #expect(sent.op == "merge")
     #expect(sent.args == ["session": "a"])
   }
 
-  @Test func dismissSendsMergeWithDismiss() async {
-    let sent = await request { $0.merge("a", dismiss: true) }
-
-    #expect(sent.op == "merge")
-    #expect(sent.args == ["session": "a", "dismiss": true])
-  }
-
-  @Test func ignoresASecondMergeWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondMergeWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.merge("a")
+      model.merge("a")
+      #expect(model.merging == ["a"])
     }
-    model.merge("a")
-    model.merge("a", dismiss: true)
-    #expect(model.merging == ["a"])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
   }
 
   @Test func chooseSendsTheTypedTextOfAReplyOption() async {
-    let sent = await request { $0.choose("a", ref: "summary:1", option: 2, action: .reply, text: "Use SQLite.") }
+    let sent = await firstRequest { $0.choose("a", ref: "summary:1", option: 2, action: .reply, text: "Use SQLite.") }
 
     #expect(sent.op == "choose")
     #expect(sent.args == ["session": "a", "option": "2", "ref": "summary:1", "text": "Use SQLite."])
   }
 
-  @Test func ignoresACardsMergeWhileAMergeRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
-    }
-    model.merge("a")
-    model.choose("a", ref: "summary:1", option: 2, action: .dismiss)
-    #expect(model.merging == ["a"])
-    #expect(model.choosing.isEmpty)
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+  @Test func chooseSendsTheTickedOptionsAsAList() async {
+    let sent = await firstRequest { $0.choose("a", ref: "summary:1", picks: ["1", "3"]) }
+
+    #expect(sent.op == "choose")
+    #expect(sent.args == ["session": "a", "options": ["1", "3"], "ref": "summary:1"])
   }
 
-  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondSubmitWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.choose("a", ref: "summary:1", picks: ["1"])
+      model.choose("a", ref: "summary:1", picks: ["1"])
+      #expect(model.choosing == ["a/picks"])
     }
-    model.acceptSuggestion("merge:g1:g2")
-    model.declineSuggestion("merge:g1:g2")
-    #expect(model.answeringSuggestions == ["merge:g1:g2"])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
+  }
+
+  @Test func submitWithNoPicksSendsNothing() async {
+    let sent = await firstRequest { model in
+      model.choose("a", ref: "summary:1", picks: [])
+      #expect(model.choosing.isEmpty)
+      model.choose("a", ref: "summary:1", picks: ["2"])
+    }
+    #expect(sent.count == 1)
+    #expect(sent.args == ["session": "a", "options": ["2"], "ref": "summary:1"])
+  }
+
+  @Test func ignoresACardsMergeWhileAMergeRuns() async {
+    let sent = await firstRequest { model in
+      model.merge("a")
+      model.choose("a", ref: "summary:1", option: 2, action: .dismiss)
+      #expect(model.merging == ["a"])
+      #expect(model.choosing.isEmpty)
+    }
+    #expect(sent.count == 1)
+  }
+
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.acceptSuggestion("merge:g1:g2")
+      model.declineSuggestion("merge:g1:g2")
+      #expect(model.answeringSuggestions == ["merge:g1:g2"])
+    }
+    #expect(sent.count == 1)
   }
 }
 
 @MainActor
 @Suite(.timeLimit(.minutes(1))) struct BoardModelPlanFollowups {
   @Test func followUpSendsPlanFollowupWithThePlanAndRow() async {
-    let sent = await BoardModelSuggestions().request { $0.followUp(plan: "p1", row: "2") }
+    let sent = await firstRequest { $0.followUp(plan: "p1", row: "2") }
 
     #expect(sent.op == "plan-followup")
     #expect(sent.args == ["plan": "p1", "row": "2"])
   }
 
-  @Test func ignoresASecondFollowUpWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondFollowUpWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.followUp(plan: "p1", row: "2")
+      model.followUp(plan: "p1", row: "2")
+      #expect(model.followingUp == ["p1 2"])
     }
-    model.followUp(plan: "p1", row: "2")
-    model.followUp(plan: "p1", row: "2")
-    #expect(model.followingUp == ["p1 2"])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
   }
 
   /// The row leaves `canFollowUp` in the same turn that turns its button
   /// back on, before the refresh lists the plan again.
-  @Test func aMadeFollowUpDropsItsRowBeforeTheButtonTurnsBackOn() async throws {
-    _ = NSApplication.shared
-    let model = BoardModel()
+  @Test func aMadeFollowUpDropsItsRowBeforeTheButtonTurnsBackOn() async {
+    let model = offlineModel()
     var plan = PlanDocument(id: "p1", source: PlanSource(kind: .file, path: "/tmp/plan.md"), group: "g", attached: 0)
     plan.update(from: "| # | Item | Status |\n| --- | --- | --- |\n| 2 | Docs | Not started |\n", now: 1)
     var group = GroupSummary(SessionGroup(id: "g", name: "G", created: 0), sessions: [])
     group.plans = [PlanSummary(plan)]
     model.groups = [group]
     model.send = { _, _ in .null }
+    func rows() -> [PlanRow]? { model.groups.first?.plans?.first?.canFollowUp }
 
-    model.followUp(plan: "p1", row: "2")
-    for _ in 0..<100 where !model.followingUp.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+    // `@Published` publishes before it stores the new value, so the sink runs
+    // in the turn that turns the button back on.
+    var turnedOn: AnyCancellable?
+    let rowsWhenTheButtonTurnsOn = await withCheckedContinuation { done in
+      turnedOn = model.$followingUp.dropFirst().first(where: \.isEmpty).sink { _ in
+        done.resume(returning: MainActor.assumeIsolated { rows() })
+      }
+      model.followUp(plan: "p1", row: "2")
+    }
+    turnedOn?.cancel()
+    #expect(rowsWhenTheButtonTurnsOn?.isEmpty == true)
 
-    #expect(model.followingUp.isEmpty)
-    #expect(model.groups.first?.plans?.first?.canFollowUp.isEmpty == true)
+    // The refresh that the follow-up started finds no sbd and sets `unreachable`.
+    for await problem in model.$unreachable.values where problem != nil { break }
+    #expect(rows()?.isEmpty == true)
+  }
+}
+
+@MainActor
+@Suite(.timeLimit(.minutes(1))) struct BoardModelAcknowledge {
+  @Test func acknowledgeSendsAckWithTheSession() async {
+    let sent = await firstRequest { $0.acknowledge("a") }
+
+    #expect(sent.op == "ack")
+    #expect(sent.args == ["session": "a"])
+  }
+
+  @Test func undoSendsAckWithUndo() async {
+    let sent = await firstRequest { $0.acknowledge("a", undo: true) }
+
+    #expect(sent.op == "ack")
+    #expect(sent.args == ["session": "a", "undo": true])
+  }
+
+  @Test func ignoresASecondAcknowledgeWhileTheFirstRuns() {
+    let model = offlineModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.acknowledge("a")
+    model.acknowledge("a", undo: true)
+    #expect(model.acknowledging == ["a"])
+    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 1)
+  }
+
+  @Test func acknowledgingOneSessionLeavesAnotherFree() {
+    let model = offlineModel()
+    let sent = Counter()
+    model.send = { _, _ in
+      sent.increment()
+      return .null
+    }
+    model.acknowledge("a")
+    model.acknowledge("b")
+    #expect(model.acknowledging == ["a", "b"])
+    for _ in 0..<100 where sent.value < 2 { Thread.sleep(forTimeInterval: 0.01) }
+    #expect(sent.value == 2)
+  }
+
+  @Test func theAcknowledgingSetEmptiesWhenTheRequestFinishes() async throws {
+    let model = offlineModel()
+    model.send = { _, _ in .null }
+
+    model.acknowledge("a")
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.acknowledging.isEmpty)
+  }
+
+  @Test func theAcknowledgingSetEmptiesWhenTheRequestFails() async throws {
+    struct Refused: Error {}
+    let model = offlineModel()
+    model.send = { _, _ in throw Refused() }
+
+    model.acknowledge("a")
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.acknowledging.isEmpty)
+  }
+
+  func inboxModel(focus: String) -> BoardModel {
+    let model = appliedModel([needsItem("a"), needsItem("b"), needsItem("c")])
+    model.send = { _, _ in .null }
+    model.show(.inbox)
+    model.inboxFocus = focus
+    return model
+  }
+
+  @Test func acknowledgingTheCurrentItemFocusesTheNextOne() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("b")
+    #expect(model.inboxFocus == "c")
+  }
+
+  @Test func acknowledgingAnotherItemLeavesTheFocus() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("c")
+    #expect(model.inboxFocus == "b")
+  }
+
+  @Test func undoLeavesTheFocus() {
+    let model = inboxModel(focus: "b")
+    model.acknowledge("b", undo: true)
+    #expect(model.inboxFocus == "b")
+  }
+
+  @Test func acknowledgeTargetIsTheCurrentInboxItemWhileTheInboxShows() {
+    #expect(inboxModel(focus: "b").acknowledgeTarget?.id == "b")
+  }
+
+  /// A selection shows the session's terminals in place of the Inbox.
+  @Test func acknowledgeTargetIsTheSelectionOutsideTheInbox() {
+    let model = inboxModel(focus: "b")
+    model.selection = "a"
+    #expect(model.acknowledgeTarget?.id == "a")
+  }
+
+  @Test func undoDoesNotNotifyAboutTheRestoredItem() async throws {
+    var acked = needsItem("a", state: .waiting)
+    acked.acknowledged = true
+    let model = appliedModel([acked])
+    let restored = try JSON(encoding: needsItem("a"))
+    model.send = { _, _ in restored }
+
+    model.acknowledge("a", undo: true)
+    for _ in 0..<100 where !model.acknowledging.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+
+    #expect(model.sessionsToNotify([needsItem("a")]).isEmpty)
+  }
+}
+
+/// Whether the Inbox makes Acknowledge the item's primary button.
+@Suite struct InformationalItems {
+  func item(
+    state: AttentionState = .needsYou, kind: TriageKind = .info, options: [TriageOption] = [], card: Bool = false,
+    openPrompt: Bool = false, triage: Bool = true
+  ) throws -> SessionSummary {
+    var s = needsItem("a", state: state)
+    s.triage = triage ? TriageItem(title: "Done", kind: kind, summary: "", options: options, source: .summary) : nil
+    s.openPrompt = openPrompt
+    if card {
+      let json: JSON = [
+        "id": 3, "session": "a", "kind": "permission", "tool": "Bash", "summary": "`ls`", "input": [:],
+        "questions": [], "since": 0, "deferred": false, "hookClosed": false,
+      ]
+      s.cards = [try JSONCoding.convert(json, to: Card.self)]
+    }
+    return s
+  }
+
+  static let option = TriageOption(label: "Go", message: "go")
+
+  @Test func needsYouInfoItemIsInformational() throws {
+    #expect(try item().isInformational)
+  }
+
+  @Test(arguments: [TriageKind.decision, .question, .approval, .review, .action])
+  func needsYouItemWithNoOptionsIsInformational(_ kind: TriageKind) throws {
+    #expect(try item(kind: kind).isInformational)
+  }
+
+  /// An item with options has its own primary button, so Acknowledge stays quiet.
+  @Test(arguments: [TriageKind.decision, .question, .approval, .review, .action, .info])
+  func itemWithOptionsIsNotInformational(_ kind: TriageKind) throws {
+    #expect(try !item(kind: kind, options: [InformationalItems.option]).isInformational)
+  }
+
+  @Test(arguments: AttentionState.allCases.filter { $0 != .needsYou })
+  func itemOutsideNeedsYouIsNotInformational(_ state: AttentionState) throws {
+    #expect(try !item(state: state).isInformational)
+  }
+
+  @Test func sessionWithACardIsNotInformational() throws {
+    #expect(try !item(card: true).isInformational)
+  }
+
+  @Test func sessionWithAnOpenDialogIsNotInformational() throws {
+    #expect(try !item(openPrompt: true).isInformational)
+  }
+
+  @Test func sessionWithoutATriageItemIsNotInformational() throws {
+    #expect(try !item(triage: false).isInformational)
   }
 }
 
@@ -667,27 +848,19 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 @Suite(.timeLimit(.minutes(1))) struct BoardModelProposalAnswers {
   @Test(arguments: [(true, "plan-apply"), (false, "plan-reject")])
   func answerSendsTheOpWithTheProposal(_ apply: Bool, _ op: String) async {
-    let sent = await BoardModelSuggestions().request {
-      apply ? $0.applyProposal("u1") : $0.rejectProposal("u1")
-    }
+    let sent = await firstRequest { apply ? $0.applyProposal("u1") : $0.rejectProposal("u1") }
 
     #expect(sent.op == op)
     #expect(sent.args == ["proposal": "u1"])
   }
 
-  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.applyProposal("u1")
+      model.rejectProposal("u1")
+      #expect(model.answeringProposals == ["u1"])
     }
-    model.applyProposal("u1")
-    model.rejectProposal("u1")
-    #expect(model.answeringProposals == ["u1"])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
   }
 }
 
@@ -695,32 +868,25 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
 @Suite(.timeLimit(.minutes(1))) struct BoardModelArtifactAnswers {
   @Test(arguments: [(true, "plan-artifact-apply"), (false, "plan-artifact-reject")])
   func answerSendsTheOpForApplyOrReject(_ apply: Bool, _ op: String) async {
-    let sent = await BoardModelSuggestions().request { $0.answerArtifact(plan: "p1", apply: apply) }
+    let sent = await firstRequest { $0.answerArtifact(plan: "p1", apply: apply) }
 
     #expect(sent.op == op)
     #expect(sent.args == ["plan": "p1"])
   }
 
-  @Test func ignoresASecondAnswerWhileTheFirstRuns() {
-    _ = NSApplication.shared
-    let model = BoardModel()
-    let sent = Counter()
-    model.send = { _, _ in
-      sent.increment()
-      return .null
+  @Test func ignoresASecondAnswerWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.answerArtifact(plan: "p1", apply: true)
+      model.answerArtifact(plan: "p1", apply: false)
+      #expect(model.answeringArtifacts == ["p1"])
     }
-    model.answerArtifact(plan: "p1", apply: true)
-    model.answerArtifact(plan: "p1", apply: false)
-    #expect(model.answeringArtifacts == ["p1"])
-    for _ in 0..<100 where sent.value == 0 { Thread.sleep(forTimeInterval: 0.01) }
-    #expect(sent.value == 1)
+    #expect(sent.count == 1)
   }
 
   /// sbd's reply replaces the plan's summary in the same turn that turns the
   /// buttons back on, before the refresh lists the plan again.
   @Test func answerTakesThePlanFromSbdsReply() async throws {
-    _ = NSApplication.shared
-    let model = BoardModel()
+    let model = offlineModel()
     var plan = PlanDocument(
       id: "p1", source: PlanSource(kind: .artifact, url: "https://claude.ai/artifact/a"), group: "g", attached: 0)
     plan.artifact?.copy = "a\n"
@@ -733,10 +899,16 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     let reply = try JSONCoding.convert(answered, to: JSON.self)
     model.send = { _, _ in reply }
 
-    model.answerArtifact(plan: "p1", apply: false)
-    for _ in 0..<100 where !model.answeringArtifacts.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-
-    #expect(model.answeringArtifacts.isEmpty)
-    #expect(model.groups.first?.plans?.first?.proposal == nil)
+    // `@Published` publishes before it stores the new value, so the sink runs
+    // in the turn that turns the buttons back on.
+    var turnedOn: AnyCancellable?
+    let proposalGoneWhenTheButtonsTurnOn = await withCheckedContinuation { done in
+      turnedOn = model.$answeringArtifacts.dropFirst().first(where: \.isEmpty).sink { _ in
+        done.resume(returning: MainActor.assumeIsolated { model.groups.first?.plans?.first?.proposal == nil })
+      }
+      model.answerArtifact(plan: "p1", apply: false)
+    }
+    turnedOn?.cancel()
+    #expect(proposalGoneWhenTheButtonsTurnOn)
   }
 }

@@ -22,6 +22,8 @@ public struct Home: Sendable {
   /// The folder of the account that `sb account use` chose, or no file.
   public var activeAccount: String { "\(path)/account" }
   public var log: String { "\(path)/sbd.log" }
+  /// Where the app saves the message fields' unsent text and images.
+  public var drafts: String { "\(path)/drafts" }
   /// Holds `on` while `sb autocontinue on` is in force.
   public var autoContinue: String { "\(path)/auto-continue" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
@@ -65,8 +67,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var claude: String = "claude"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
-  /// The most claude processes that may run at once.
-  public var liveCap = 12
+  /// The most claude processes that may run at once. Further starts queue.
+  public var liveCap = 10
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
   /// The model for new sessions, or nil for claude's default.

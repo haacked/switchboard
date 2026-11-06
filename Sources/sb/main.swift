@@ -78,10 +78,15 @@ let usage = """
                                   after the merge, a running turn, and a folder sbd didn't make.
     merge <session|PR> [--dismiss]
                                   merge a Ready to merge session's PR with a merge commit, then resume
-                                  the session. A PR (#N, owner/name#N, or a URL) names the session by
-                                  its open PR. --dismiss keeps the session out of Ready to merge until
-                                  the PR's head commit changes.
+                                  the session. In a repo with GitHub's merge queue or Trunk, add it to
+                                  the queue instead, and resume the session once it merges. A PR (#N,
+                                  owner/name#N, or a URL) names the session by its open PR. --dismiss
+                                  acknowledges the session's Ready to merge item, as sb ack does.
                                   Refuses inside Claude Code
+    ack <session> [--undo]        acknowledge the session's Inbox item: it moves to Waiting until its
+                                  reason or its PR's head commit changes or a new turn starts. Nothing
+                                  else about the session changes. --undo puts it back in the Inbox.
+                                  Refuses the session that runs it
     import [--all] [--repo R]     list the Claude sessions outside Switchboard that
                                   run in a worktree, or every one with --all, and
                                   only those of the repo named R with --repo
@@ -103,7 +108,9 @@ let usage = """
     choose <session> <option> [--text T]
                                   click an option, by number or label: run its action,
                                   such as send its message or merge. A reply option
-                                  sends T. Card and merge options refuse inside Claude Code
+                                  sends T. On a pick-any card, options separated by
+                                  commas (1,3) go as one reply. Card and merge options
+                                  refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
@@ -197,6 +204,9 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
+    live [--set N]                list the sessions whose claude runs and the
+                                  starts that queue behind the cap. --set changes
+                                  the cap and saves it in config.json
     service install|uninstall|status
     version
 
@@ -227,7 +237,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--description", "--artifact", "--kind", "--version",
+      "--set", "--description", "--artifact", "--kind", "--version",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -306,7 +316,7 @@ func printTable(_ sessions: [SessionSummary]) {
     let live = s.live ? "●" : "○"
     let name = oneLine(s.name, max: nameWidth)
     print(
-      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reason)"
+      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reasonLine)"
         .printable
     )
   }
@@ -314,7 +324,7 @@ func printTable(_ sessions: [SessionSummary]) {
 
 func printSession(_ s: SessionSummary) {
   print("\(s.id)  \(s.name)".printable)
-  print("  state:   \(s.state.title): \(s.reason) (\(ago(s.since)))".printable)
+  print("  state:   \(s.state.title): \(s.reasonLine) (\(ago(s.since)))".printable)
   if s.waitsToStart {
     printFollowup(s)
     return printWaitsAndNotes(s)
@@ -607,6 +617,8 @@ case "rm":
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":
   merge(a)
+case "ack":
+  acknowledge(a)
 case "cleanup":
   let result = call("cleanup", ["session": .string(a.session("cleanup"))], timeout: 300)
   if a.json { printJSON(result) } else { print("cleaned up \(result["cleaned"]?.string ?? "")") }
@@ -663,6 +675,8 @@ case "mcp-server":
   mcpServer(a)
 case "autocontinue":
   autoContinue(a)
+case "live":
+  live(a)
 case "group", "groups":
   group(a)
 case "chat":

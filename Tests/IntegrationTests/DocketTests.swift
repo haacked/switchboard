@@ -99,7 +99,7 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct DocketTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DocketTests {
   @Test func startsAReviewAndListsItsRow() throws {
     let docket = try DocketHome()
     let sbd = try Instance(config: docket.config)

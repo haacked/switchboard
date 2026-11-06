@@ -43,7 +43,7 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
 
 /// Polls resolve waits on the PR kinds, and merge triggers fire, through
 /// `sb poll` against the fake GitHub.
-@Suite(.timeLimit(.minutes(2))) struct PollerWaitTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct PollerWaitTests {
   static let charts = "PostHog/charts"
   static let branch = "haacked/cdp-dlq-runbook-lookup-step"
   static let posthog = "PostHog/posthog"

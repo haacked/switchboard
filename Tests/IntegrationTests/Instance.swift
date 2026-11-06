@@ -84,6 +84,7 @@ final class Instance {
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
     inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
   ) throws {
+    Blocking.requireSlot()
     _ = Instance.watcher
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
@@ -114,6 +115,8 @@ final class Instance {
       "triage": ["systemPrompt": ""],
       // Nor do they expect --permission-mode auto. AutoModeTests turn it on.
       "autoMode": false,
+      // Tests that start many sessions don't expect sbd to stop the idle ones.
+      "liveCap": 50,
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
@@ -208,9 +211,14 @@ final class Instance {
     try runCommand("\(Instance.bin)/sb", args, env: environment(extra))
   }
 
+  /// The settings in config.json.
+  func config() throws -> [String: JSON] {
+    try #require(JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object)
+  }
+
   /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
   func restart(setting key: String, to value: JSON) throws {
-    var config = try #require(JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object)
+    var config = try config()
     config[key] = value
     try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     stopSbd()

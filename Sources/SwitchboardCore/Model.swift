@@ -220,6 +220,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var docket: DocketSummary?
   /// gh's error from the last failed merge of the PR's head commit.
   public var mergeError: String?
+  /// True when the user acknowledged the session's Inbox item, which moves
+  /// it to Waiting until its reason changes or a new turn starts.
+  public var acknowledged: Bool?
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?

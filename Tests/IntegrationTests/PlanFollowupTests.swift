@@ -93,7 +93,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct PlanFollowupTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct PlanFollowupTests {
   // MARK: making the follow-up
 
   @Test func notStartedRowBecomesAFollowupInThePlansGroup() throws {

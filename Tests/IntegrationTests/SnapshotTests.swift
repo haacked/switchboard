@@ -30,7 +30,7 @@ extension Instance {
   func restart(snapshotEvery: Int) throws { try restart(setting: "snapshotEvery", to: .number(Double(snapshotEvery))) }
 }
 
-@Suite(.timeLimit(.minutes(3))) struct SnapshotTests {
+@Suite(.blocking(timeLimit: .seconds(180))) struct SnapshotTests {
   /// Sessions with a PR and a wait, a queued message, a card, and notes, and
   /// then more events after a snapshot.
   func busyInstance() throws -> (Instance, [String]) {

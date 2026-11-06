@@ -51,8 +51,11 @@ struct SessionView: View {
         ProgressView("Opening terminals…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
       Divider()
-      MessageField(session: session.id, shortcut: KeyboardShortcut(.return, modifiers: [.command]))
-        .padding(8)
+      MessageField(
+        session: session.id, draft: model.messageDraft(for: session),
+        shortcut: KeyboardShortcut(.return, modifiers: [.command])
+      )
+      .padding(8)
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.

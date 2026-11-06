@@ -45,7 +45,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
   try runCommand(t.tmux, ["-S", t.socket, "has-session", "-t", "=\(target)"]).status == 0
 }
 
-@Suite(.timeLimit(.minutes(2))) struct WorktreeCleanupTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct WorktreeCleanupTests {
   /// A session in a worktree that sbd made on PR 122953's branch, after a commit. GitHub reports
   /// the PR with `state` and with the branch tip as its head commit, and the poller has counted
   /// the folder.
@@ -628,7 +628,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
 }
 
 /// `sb rm --worktree` deletes ignored files with the worktree, and refuses the changes that git status skips.
-@Suite(.timeLimit(.minutes(2))) struct RemoveWorktreeLossTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct RemoveWorktreeLossTests {
   @Test func deletesIgnoredFilesWithTheWorktree() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()

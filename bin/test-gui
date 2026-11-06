@@ -6,10 +6,16 @@
 # It then quits the app, and separately kills it, and starts it again each
 # time. It checks through sb and tmux that the session and both its panes are
 # the same processes with the same screens.
+# Last it types into a session's message field through the app's DraftSelfTest,
+# selects another session and comes back, presses Esc, quits, and checks the
+# draft after a relaunch and after two Escs.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, or SB_DRAFT_TEST, so the app
+# runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
+# normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
@@ -149,6 +155,10 @@ check_terminal() {
 
   grep -q '^selftest: done' "$shots/app.log" || fail "the self test did not reach the end"
   grep -q '^selftest: attached after' "$shots/app.log" || fail "the app never saw the session attach: $(grep '^selftest: gave up' "$shots/app.log")"
+  if [ "${SB_TEST_VISIBLE:-}" != 1 ]; then
+    grep -qx 'selftest: launch accessory active=false alpha=0.0' "$shots/app.log" ||
+      fail "the app did not stay hidden and inactive: $(grep '^selftest: launch' "$shots/app.log")"
+  fi
 
   local got
   got=$(sed -n 's/^rx //p' "$shots/screen.txt" | tr '\n' ' ' | tr -s ' ' | sed 's/ $//')
@@ -253,3 +263,40 @@ check_relaunch() {
 }
 
 check_relaunch
+
+# The draft lives in the app, not in sbd, so the app's own log is the evidence.
+check_drafts() {
+  check=drafts
+  local shots="$home/shots/drafts" other typed="draft survives a switch"
+  mkdir "$shots"
+  echo "Checking message drafts…"
+  new_session drafts-other
+  other=$session
+  new_session drafts
+  run_step() { # <step>
+    SB_SELECT="$session" SB_DRAFT_TEST="$1" SB_DRAFT_TEST_OTHER="$other" \
+      "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+    app_pid=$!
+    wait_for 120 app_gone || fail "the app did not finish the $1 step"
+    end_app
+  }
+  logged() { grep -qxF "drafttest: $1" "$shots/app.log" || fail "the app did not log: $1"; }
+
+  run_step type
+  logged "typed: $typed"
+  logged "other session: "
+  logged "after switch: $typed"
+  logged "after one esc: $typed hint true"
+  logged "hint after the window: false"
+  jq -e --arg id "$session" --arg text "$typed" '.[$id].text == $text' "$home/drafts/drafts.json" >/dev/null ||
+    fail "drafts.json does not hold the draft"
+
+  run_step check
+  logged "after relaunch: $typed"
+  logged "after two escs: "
+  wait_for 5 jq -e 'length == 0' "$home/drafts/drafts.json" >/dev/null || fail "drafts.json still holds a draft after two Escs"
+  save_shots
+  echo "ok: drafts (switch, Esc, relaunch)"
+}
+
+check_drafts

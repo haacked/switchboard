@@ -6,7 +6,7 @@ import UserNotifications
 @main
 struct SwitchboardApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-  @StateObject private var model = BoardModel()
+  @StateObject private var model = BoardModel(client: Client(), draftsFolder: Home().drafts)
 
   var body: some Scene {
     Window("Switchboard", id: "main") {
@@ -31,6 +31,7 @@ struct SwitchboardApp: App {
           .disabled(model.presentingSheet)
       }
       CommandMenu("Session") {
+        let acknowledgeTarget = model.acknowledgeTarget
         Button("Next Needing You") { model.selectNextNeedingYou() }
           .keyboardShortcut("j")
         Button("Open Manager") { model.openManager() }
@@ -51,6 +52,11 @@ struct SwitchboardApp: App {
         }
         .keyboardShortcut("d", modifiers: [.command, .shift])
         .disabled(model.selected == nil)
+        Button(acknowledgeTarget?.acknowledgeTitle ?? "Acknowledge") {
+          if let s = model.acknowledgeTarget { model.acknowledge(s.id, undo: s.acknowledged == true) }
+        }
+        .keyboardShortcut("a", modifiers: [.command, .shift])
+        .disabled(acknowledgeTarget?.canAcknowledge != true)
       }
     }
 
@@ -67,10 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   static let openSession = Notification.Name("SwitchboardOpenSession")
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    // A build-folder executable has no Info.plist, so it starts as a
-    // background process without this.
-    NSApp.setActivationPolicy(.regular)
-    NSApp.activate(ignoringOtherApps: true)
+    if BackgroundLaunch.applies(to: ProcessInfo.processInfo.environment) {
+      BackgroundLaunch.start()
+    } else {
+      // A build-folder executable has no Info.plist, so it starts as a
+      // background process without this.
+      NSApp.setActivationPolicy(.regular)
+      NSApp.activate(ignoringOtherApps: true)
+    }
     // Notifications need a bundle identifier, which only the app bundle has.
     if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = self }
   }

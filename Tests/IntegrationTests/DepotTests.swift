@@ -41,7 +41,7 @@ extension Instance {
 }
 
 /// The Depot poller, through `sb poll` against a fake Depot and a fake GitHub.
-@Suite(.timeLimit(.minutes(2))) struct DepotTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct DepotTests {
   static let posthog = "PostHog/posthog"
   /// The branch of PostHog/posthog#122953, which fires no PR rule.
   static let branch = "haacked/cdp-dlq-breaker-counts-lookups"

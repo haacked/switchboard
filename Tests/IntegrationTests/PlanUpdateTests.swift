@@ -183,7 +183,7 @@ extension Instance {
   }
 }
 
-@Suite(.timeLimit(.minutes(2))) struct PlanUpdateTests {
+@Suite(.blocking(timeLimit: .seconds(120))) struct PlanUpdateTests {
   // MARK: proposing
 
   @Test func outOfDateRowProducesOneUpdateProposal() throws {
@@ -799,7 +799,7 @@ extension PlanUpdateTests {
 
 /// One real update turn: the installed claude with Haiku answers for a plan
 /// whose PR merged, and sbd turns the answer into a proposal.
-@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .timeLimit(.minutes(5)))
+@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .blocking(timeLimit: .seconds(300)))
 struct PlanUpdateClaudeTests {
   /// Checks the row edit that Haiku's answer made and prints it, so a run
   /// shows what the model wrote.

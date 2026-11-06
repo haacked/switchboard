@@ -4,14 +4,16 @@ import SwitchboardCore
 extension Service {
   static let mergeTimeoutSeconds = 120.0
 
-  /// The `merge` request, which merges a Ready to merge session's PR with a
-  /// merge commit, or with `dismiss` takes the session out of Ready to merge
-  /// until its PR's head commit changes. `session` names the session, or `pr`
-  /// and an optional `repository` name it by its open PR. After a merge, sbd
-  /// resumes the session with a message. A failed merge records gh's error
-  /// and fails the request. It changes nothing else.
+  /// The `merge` request, which lands a Ready to merge session's PR the way
+  /// its repository merges: a merge commit, GitHub's merge queue, or Trunk's
+  /// queue. With `dismiss` it acknowledges the session's Ready to merge
+  /// item. `session` names the session, or `pr` and
+  /// an optional `repository` name it by its open PR. After a merge, sbd
+  /// resumes the session with a message. After an enqueue, sbd sets a queue
+  /// wait that resumes the session when the PR merges. A failed command
+  /// records its error and fails the request. It changes nothing else.
   func mergeRequest(_ args: JSON) throws -> JSON {
-    let (id, pr): (String, PullRequest?) = try queue.sync {
+    let (id, pr, method): (String, PullRequest?, MergeMethod) = try queue.sync {
       let id = try mergeTarget(args)
       let e = entries[id]!
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
@@ -19,12 +21,16 @@ extension Service {
         throw APIError("\(e.session.name) isn't ready to merge: \(verdict.reason)")
       }
       guard !merging.contains(id) else { throw APIError("#\(pr.number) is already merging") }
+      let method = e.facts.mergeMethod
       if args["dismiss"]?.bool == true {
-        record(id, "merge", try JSON(encoding: MergeAttempt(head: pr.headSha, result: .dismissed)))
-        return (id, nil)
+        try acknowledge(id, verdict)
+        return (id, nil, method)
+      }
+      guard method != .unknown else {
+        throw APIError("can't tell how \(pr.repo) merges, so merge #\(pr.number) on GitHub")
       }
       merging.insert(id)
-      return (id, pr)
+      return (id, pr, method)
     }
     guard let pr else {
       return try queue.sync {
@@ -33,16 +39,32 @@ extension Service {
       }
     }
     defer { queue.sync { _ = merging.remove(id) } }
-    let error = runMerge(pr)
+    let error = method == .trunk ? runTrunkEnqueue(pr) : runMerge(pr)
     return try queue.sync {
-      let attempt = MergeAttempt(head: pr.headSha, result: error == nil ? .merged : .failed, error: error)
+      let landed: MergeAttempt.Result = method.enqueues ? .enqueued : .merged
+      let attempt = MergeAttempt(head: pr.headSha, result: error == nil ? landed : .failed, error: error)
       record(id, "merge", try JSON(encoding: attempt))
-      if let error { throw APIError("#\(pr.number) didn't merge: \(error)") }
+      if let error { throw APIError("#\(pr.number) didn't \(method.verb.lowercased()): \(error)") }
       if entries[id]?.session.done == false {
-        _ = try send(id, "PR #\(pr.number) merged; finish the post-merge steps", byUser: false)
+        if method.enqueues {
+          try waitForQueue(id, pr)
+        } else {
+          _ = try send(id, "PR #\(pr.number) merged; finish the post-merge steps", byUser: false)
+        }
       }
       return try JSON(encoding: summary(id))
     }
+  }
+
+  /// Sets the wait that keeps an enqueued session in Waiting until its PR
+  /// merges or closes, or Trunk removes it from its queue. The GitHub poller
+  /// resolves it and resumes the session.
+  private func waitForQueue(_ id: String, _ pr: PullRequest) throws {
+    let args: JSON = [
+      "session": .string(id), "kind": .string(Wait.Kind.queue.rawValue), "target": .string("\(pr.repo)#\(pr.number)"),
+      "note": "enqueued; once it merges, finish the post-merge steps", "by": .string(Author.you.rawValue),
+    ]
+    _ = try waitRequest("wait", args)
   }
 
   /// The session that `session` names, or the one whose open PR has the
@@ -65,20 +87,28 @@ extension Service {
     return matches[0].id
   }
 
-  /// Runs `gh pr merge` and returns its error, or nil when it merged.
+  /// Runs `gh pr merge` and returns its error, or nil when it merged or
+  /// GitHub added the PR to the base branch's merge queue.
   /// `--match-head-commit` makes GitHub refuse the merge when a push landed
   /// after the session became Ready to merge.
   private func runMerge(_ pr: PullRequest) -> String? {
+    runGH(["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha])
+  }
+
+  /// Comments `/trunk merge` on the PR, which adds it to Trunk's queue, and
+  /// returns gh's error, or nil when the comment posted.
+  private func runTrunkEnqueue(_ pr: PullRequest) -> String? {
+    runGH(["pr", "comment", String(pr.number), "--repo", pr.repo, "--body", "/trunk merge"])
+  }
+
+  private func runGH(_ args: [String]) -> String? {
     guard let gh = findExecutable(config.github.gh) else { return "can't find \(config.github.gh)" }
-    let args = [
-      "pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha,
-    ]
     do {
       let r = try runCommand(gh, args, timeout: Service.mergeTimeoutSeconds)
       if r.status == 0 { return nil }
       let text = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .first { !$0.isEmpty }
-      return text ?? "gh pr merge exited with status \(r.status)"
+      return text ?? "gh \(args.prefix(2).joined(separator: " ")) exited with status \(r.status)"
     } catch {
       return "\(error)"
     }

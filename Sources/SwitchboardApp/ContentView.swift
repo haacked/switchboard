@@ -626,7 +626,7 @@ struct BoardCard: View {
           CleanupNote(session: s)
           MergeNote(session: s)
           Text(
-            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))"
+            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))\(s.acknowledged == true ? " · acknowledged" : "")"
           )
           .font(.caption2).foregroundStyle(.tertiary)
         }
@@ -638,7 +638,7 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
-        if s.state == .readyToMerge { MergeButton(session: s) }
+        if s.canMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if s.isRemovableDone { DeleteButton(session: s) }
       }

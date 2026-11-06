@@ -200,7 +200,9 @@ func scratchFolder() throws -> String {
   }
 
   /// A FIFO with no writer blocks a plain open. The read runs on another
-  /// thread, so a blocked open fails the test instead of hanging it.
+  /// thread, so a blocked open fails the test instead of hanging it. That
+  /// thread comes from a queue of its own, because a global queue gets no
+  /// thread while other tests block every thread of Swift's cooperative pool.
   @Test(.timeLimit(.minutes(1))) func refusesAFIFOWithoutBlocking() throws {
     let dir = try scratchFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -209,7 +211,7 @@ func scratchFolder() throws -> String {
     let finished = DispatchSemaphore(value: 0)
     let result = Locked<String?>(nil)
 
-    DispatchQueue.global().async {
+    DispatchQueue(label: "refusesAFIFOWithoutBlocking").async {
       result.value = refusal { try Attachments.read(path: path) } ?? "read returned data"
       finished.signal()
     }
