@@ -113,7 +113,9 @@ let usage = """
     choose <session> <option> [--text T]
                                   click an option, by number or label: run its action,
                                   such as send its message or merge. A reply option
-                                  sends T. Card and merge options refuse inside Claude Code
+                                  sends T. On a pick-any card, options separated by
+                                  commas (1,3) go as one reply. Card and merge options
+                                  refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
@@ -207,6 +209,9 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
+    live [--set N]                list the sessions whose claude runs and the
+                                  starts that queue behind the cap. --set changes
+                                  the cap and saves it in config.json
     service install|uninstall|status
     version
 
@@ -237,7 +242,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--description", "--artifact", "--kind", "--version",
+      "--set", "--description", "--artifact", "--kind", "--version",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -681,6 +686,8 @@ case "mcp-server":
   mcpServer(a)
 case "autocontinue":
   autoContinue(a)
+case "live":
+  live(a)
 case "group", "groups":
   group(a)
 case "chat":

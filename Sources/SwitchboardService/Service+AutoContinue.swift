@@ -25,7 +25,7 @@ extension Service {
     }
     return try JSON(
       encoding: AutoContinueStatus(
-        enabled: autoContinueOn, settings: config.autoContinue, liveCap: config.liveCap, live: live,
+        enabled: autoContinueOn, settings: config.autoContinue, liveCap: liveCap, live: live,
         sessions: sessions))
   }
 
@@ -70,7 +70,7 @@ extension Service {
     let e = entries[id]!
     var input = AutoContinueInput(session: e.session, facts: e.facts, verdict: verdict, now: now)
     input.settings = config.autoContinue
-    input.liveCap = config.liveCap
+    input.liveCap = liveCap
     switch claudeState(id) {
     case .running: input.process = .running
     case .starting: input.process = .starting
@@ -84,7 +84,4 @@ extension Service {
     input.hasBudget = quota.hasBudget(account: input.account)
     return AutoContinue.blocker(input)
   }
-
-  /// The sessions whose claude runs or is starting.
-  private func liveCount() -> Int { entries.keys.filter { claudeState($0) != .stopped }.count }
 }

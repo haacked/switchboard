@@ -10,8 +10,6 @@ public enum TriageCard {
   public static let maxOptions = 6
   public static let maxCallouts = 5
   public static let labelLength = 80
-  /// The longest label that the app shows on its button. A longer label moves beside the button.
-  public static let buttonLabelLength = 20
   public static let messageLength = 2_000
   public static let bodyLength = 1_000
 
@@ -32,15 +30,21 @@ public enum TriageCard {
     guard let first = lines.first else { throw APIError("the summary needs a summary") }
     var dropped: [String] = []
     if lines.count > summaryLines { dropped.append("lines after the first \(summaryLines) of the summary") }
+    let multiSelect = raw["multiSelect"]?.bool ?? false
     let options = keep(raw["options"], "option", max: maxOptions, &dropped) {
-      try option($0, actions: actions, now: now)
+      let option = try option($0, actions: actions, now: now)
+      if multiSelect, option.action != .send {
+        throw APIError("a multiSelect card's options all send a message, and this one is \(option.action.rawValue)")
+      }
+      return option
     }
     let callouts = keep(raw["callouts"], "callout", max: maxCallouts, &dropped) { try callout($0) }
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let card = TriageSummary(
       title: title.isEmpty ? oneLine(first, max: Triage.titleLength) : title,
       kind: kind ?? self.kind(for: options),
-      summary: lines.prefix(summaryLines).joined(separator: "\n"), options: options, callouts: callouts)
+      summary: lines.prefix(summaryLines).joined(separator: "\n"), options: options, callouts: callouts,
+      multiSelect: multiSelect)
     return Cleaned(card: card, dropped: dropped)
   }
 
@@ -140,18 +144,22 @@ public enum TriageCard {
               then what you need from the user.
     title     Optional. Under \(Triage.titleLength) characters, what the user does ("Pick how to land #98").
               It defaults to the summary's first line.
-    options   Up to \(maxOptions) buttons, each with a short label (a verb phrase of up to \(buttonLabelLength) characters,
-              such as "Fix + merge") and an action:
+    options   Up to \(maxOptions) options, each with a label (a short verb phrase such as "Fix + merge", under
+              \(labelLength) characters) and an action:
                 send    sends "message" to you as the user's reply, so write it as the user would say it
                         ("Yes, push."). Without "message" it sends the label.
                 reply   shows a text field; the user's text comes to you ("placeholder" is its hint)
                 merge   merges your PR, as `sb merge` does, once it is ready to merge
                 wait    sets the wait in "wait", such as {"kind": "ci", "target": "98"} (see `sb help`)
                 done    marks you done
-              "recommended": true makes an option the main button. "detail" says what the option does, in a
-              line beside its button. A label over \(buttonLabelLength) characters moves beside the button too.
+              "recommended": true makes an option the main one. "detail" says what the option does, in a
+              line under its label.
               Give exactly one option when the next step is obvious. Otherwise give one option per real
               choice, recommend at most one, and leave out filler such as Cancel or Skip.
+    multiSelect  Optional. "multiSelect": true lets the user tick any of the options and submit them at
+              once, when several choices apply together, such as which review items to fix. Every option
+              must then be a send option. A single pick sends its message, and several send one message
+              that lists each picked option's message on its own line.
     callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that
               the summary doesn't already say: a conflict, a failing check, a risk, a call you made
               without asking, a destructive step. Each has "kind" (warning, decision, or info), "title"

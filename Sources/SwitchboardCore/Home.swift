@@ -67,8 +67,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var claude: String = "claude"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
-  /// The most claude processes that may run at once.
-  public var liveCap = 12
+  /// The most claude processes that may run at once. Further starts queue.
+  public var liveCap = 10
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
   /// The model for new sessions, or nil for claude's default.

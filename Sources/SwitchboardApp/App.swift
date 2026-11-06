@@ -77,10 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   static let openSession = Notification.Name("SwitchboardOpenSession")
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    // A build-folder executable has no Info.plist, so it starts as a
-    // background process without this.
-    NSApp.setActivationPolicy(.regular)
-    NSApp.activate(ignoringOtherApps: true)
+    if BackgroundLaunch.applies(to: ProcessInfo.processInfo.environment) {
+      BackgroundLaunch.start()
+    } else {
+      // A build-folder executable has no Info.plist, so it starts as a
+      // background process without this.
+      NSApp.setActivationPolicy(.regular)
+      NSApp.activate(ignoringOtherApps: true)
+    }
     // Notifications need a bundle identifier, which only the app bundle has.
     if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = self }
   }

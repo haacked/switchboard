@@ -278,7 +278,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(settings.message == "Yes, go ahead.")
     #expect(settings.quietSeconds == 600)
     #expect(settings.perHour == 3)
-    #expect(Config().liveCap == 12)
+    #expect(Config().liveCap == 10)
   }
 
   @Test(arguments: [#"{}"#, #"{"autoContinue": {}}"#])

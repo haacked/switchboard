@@ -23,20 +23,32 @@ struct AcknowledgeButton: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   var primary = false
+  /// Drawn as an option's box, as on a decision card, rather than as a plain button.
+  var boxed = false
 
   private var undo: Bool { session.acknowledged == true }
 
+  /// What the button does. It sits among options that send text, so it says that it sends nothing.
+  static func detail(undo: Bool) -> String {
+    undo
+      ? "Puts the session back in the Inbox."
+      : "Sends nothing. The item leaves the Inbox until its reason changes or a new turn starts."
+  }
+
   var body: some View {
-    let button = Button(session.acknowledgeTitle) { model.acknowledge(session.id, undo: undo) }
-      .disabled(model.acknowledging.contains(session.id))
-      .help(
-        undo
-          ? "Put the session back in the Inbox"
-          : "Mark it as seen. It leaves the Inbox until its reason changes or a new turn starts (⇧⌘A)")
-    if primary {
-      button.buttonStyle(.borderedProminent).keyboardShortcut(OptionButton.primaryShortcut)
-    } else {
-      button.buttonStyle(.bordered)
+    let button = Button {
+      model.acknowledge(session.id, undo: undo)
+    } label: {
+      if boxed {
+        OptionCardLabel(
+          mark: .go, title: session.acknowledgeTitle, description: Self.detail(undo: undo), shortcut: primary)
+      } else {
+        Text(session.acknowledgeTitle)
+      }
     }
+    .disabled(model.acknowledging.contains(session.id))
+    .help(undo ? Self.detail(undo: true) : "\(Self.detail(undo: false)) (⇧⌘A)")
+    .primaryShortcut(primary)
+    if boxed { button.buttonStyle(OptionCardStyle(prominent: primary)) } else { button.buttonStyle(.bordered) }
   }
 }

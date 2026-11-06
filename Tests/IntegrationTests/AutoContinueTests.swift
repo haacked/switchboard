@@ -356,12 +356,14 @@ extension Instance {
 
   @Test func oneTickResumesNoMoreStoppedSessionsThanTheLiveCapAllows() throws {
     let sbd = try instance(liveCap: 1)
-    let a = try offerSession(sbd, name: "a")
-    let b = try offerSession(sbd, name: "b")
-    for s in [a, b] {
+    // Under a cap of 1, each session stops before the next one starts.
+    var stopped: [SessionSummary] = []
+    for name in ["a", "b"] {
+      let s = try offerSession(sbd, name: name)
       try sbd.sb("stop", s.id)
-      try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+      stopped.append(try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil })
     }
+    let (a, b) = (stopped[0], stopped[1])
     try sbd.sb("autocontinue", "on")
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
     let continued = try sbd.waitFor(
@@ -374,9 +376,8 @@ extension Instance {
 
   @Test func aRunningSessionIgnoresAFullLiveCap() throws {
     let sbd = try instance(liveCap: 1)
+    // The session's own claude fills the cap of 1.
     let a = try offerSession(sbd, name: "a")
-    let b = try sbd.new(prompt: "hello", name: "b")
-    try sbd.waitFor(b.id, "b's reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("autocontinue", "on")
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
     let event = try #require(try waitForContinue(sbd, a.id).first)

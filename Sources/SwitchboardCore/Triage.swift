@@ -100,6 +100,10 @@ public struct TriageOption: Codable, Equatable, Sendable {
     }
   }
 
+  /// Whether a multi-select card shows the option with a checkbox. Only
+  /// messages and answers combine into one reply.
+  public var isCheckable: Bool { action == .send || action == .answer }
+
   /// A `triage` event recorded before options had actions holds `send`
   /// options.
   public init(from decoder: Decoder) throws {
@@ -141,18 +145,23 @@ public struct TriageSummary: Codable, Equatable, Sendable {
   public var summary: String
   public var options: [TriageOption]
   public var callouts: [Callout]
+  /// The user ticks any of the options and submits them as one reply.
+  public var multiSelect: Bool
 
   public init(
-    title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = []
+    title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
+    multiSelect: Bool = false
   ) {
     self.title = title
     self.kind = kind
     self.summary = summary
     self.options = options
     self.callouts = callouts
+    self.multiSelect = multiSelect
   }
 
-  /// A `triage` event recorded before cards had callouts holds none.
+  /// A `triage` event recorded before cards had callouts or multiSelect holds
+  /// none and a single-choice card.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     title = try c.decode(String.self, forKey: .title)
@@ -160,6 +169,7 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     summary = try c.decode(String.self, forKey: .summary)
     options = try c.decodeIfPresent([TriageOption].self, forKey: .options) ?? []
     callouts = try c.decodeIfPresent([Callout].self, forKey: .callouts) ?? []
+    multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
   }
 }
 
@@ -172,6 +182,8 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var options: [TriageOption]
   /// What the user should read before deciding.
   public var callouts: [Callout]
+  /// The user ticks any of the checkable options and submits them as one reply.
+  public var multiSelect: Bool
   public var source: TriageSource
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
@@ -180,7 +192,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    source: TriageSource, ref: String = ""
+    multiSelect: Bool = false, source: TriageSource, ref: String = ""
   ) {
     self.ref = ref
     self.title = title
@@ -188,13 +200,48 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.summary = summary
     self.options = options
     self.callouts = callouts
+    self.multiSelect = multiSelect
     self.source = source
   }
 
   init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
-      callouts: summary.callouts, source: source, ref: ref)
+      callouts: summary.callouts, multiSelect: summary.multiSelect, source: source, ref: ref)
+  }
+
+  /// An item that an older sbd wrote has no multiSelect.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    title = try c.decode(String.self, forKey: .title)
+    kind = try c.decode(TriageKind.self, forKey: .kind)
+    summary = try c.decode(String.self, forKey: .summary)
+    options = try c.decode([TriageOption].self, forKey: .options)
+    callouts = try c.decode([Callout].self, forKey: .callouts)
+    multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    source = try c.decode(TriageSource.self, forKey: .source)
+    ref = try c.decode(String.self, forKey: .ref)
+  }
+
+  /// Whether the user ticks the option rather than clicks it.
+  public func isTickable(_ option: TriageOption) -> Bool { multiSelect && option.isCheckable }
+
+  /// The options that the keys name, in the options' order and each once.
+  /// Every one must be tickable on a multi-select item.
+  public func picks(_ keys: [String]) throws -> [TriageOption] {
+    guard multiSelect else { throw APIError("the card takes one option. Name one") }
+    let keys = keys.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    guard !keys.isEmpty else { throw APIError("name at least one option, by number or label") }
+    var numbers = Set<Int>()
+    for key in keys {
+      let chosen = try option(key)
+      guard isTickable(chosen) else {
+        throw APIError("\"\(chosen.label)\" runs on its own and can't be picked with other options")
+      }
+      // A label written twice names its first option.
+      numbers.insert(options.firstIndex(of: chosen)!)
+    }
+    return numbers.sorted().map { options[$0] }
   }
 
   /// The option that the card's main button runs: the recommended one, or
@@ -202,6 +249,12 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var primary: TriageOption? {
     options.first(where: \.recommended) ?? (options.count == 1 ? options.first : nil)
   }
+
+  /// The index of the main option. An option written twice is one main option.
+  public var primaryIndex: Int? { primary.flatMap { options.firstIndex(of: $0) } }
+
+  /// Whether the user ticks some of the options and submits them together.
+  public var hasTickable: Bool { options.contains(where: isTickable) }
 
   /// The option that `sb choose` and a click name: a 1-based number, or a
   /// label without regard to case.
@@ -349,16 +402,15 @@ public enum Triage {
         ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
         source: .card)
     }
-    let first = card.questions.first
-    // Several questions, or a multi-select one, take more than a click.
-    let options =
-      card.questions.count == 1 && first?.multiSelect == false
-      ? (first?.options ?? []).map {
-        TriageOption(label: $0.label, detail: $0.description, action: .answer, message: $0.label)
-      } : []
+    // Several questions take more than a click or a set of ticks.
+    let only = card.questions.count == 1 ? card.questions.first : nil
+    let options = (only?.options ?? []).map {
+      TriageOption(label: $0.label, detail: $0.description, action: .answer, message: $0.label)
+    }
     return TriageItem(
       title: title(card.reason), kind: .question,
-      summary: card.questions.map(\.question).joined(separator: " "), options: options, source: .card)
+      summary: card.questions.map(\.question).joined(separator: " "), options: options,
+      multiSelect: only?.multiSelect ?? false, source: .card)
   }
 
   static func ruleItem(_ verdict: Verdict) -> TriageItem {
@@ -387,6 +439,23 @@ public enum Triage {
   static func title(_ reason: String) -> String {
     let text = capitalized(reason).replacingOccurrences(of: "; ", with: ": ")
     return oneLine(text, max: titleLength)
+  }
+
+  /// The picks as one option, whose message is the one reply that they send.
+  /// `picks` is not empty.
+  public static func combined(_ picks: [TriageOption]) -> TriageOption {
+    var option = picks[0]
+    option.message = message(for: picks)
+    return option
+  }
+
+  /// The one reply that a multi-select card's picks send. Answers name
+  /// their labels separated by commas, as `Card.match` reads them. Messages
+  /// go one per line as a list, or alone for a single pick.
+  public static func message(for picks: [TriageOption]) -> String {
+    let texts = picks.map { $0.message ?? $0.label }
+    if picks.first?.action == .answer { return texts.joined(separator: ", ") }
+    return texts.count == 1 ? texts[0] : texts.map { "- \($0)" }.joined(separator: "\n")
   }
 
   public static func capitalized(_ text: String) -> String {

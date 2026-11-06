@@ -7,13 +7,62 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the change can affect a build or a test. Only the
+  # Markdown files at the repository root cannot, because no build or test
+  # reads them. A skipped swift-test job counts as passed, so a docs-only PR
+  # still gets passing checks.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          names='.filename, (.previous_filename // empty)'
+          # The PR API lists at most 3000 files. A compare lists at most 300
+          # and does not say how many it left out, so a full page runs the
+          # tests.
+          if [ -n "$PR" ]; then
+            files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq ".[] | $names")
+            count=$PR_FILES
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq ".files[] | $names")
+            count=$(grep -c . <<<"$files" || true)
+            if [ "$count" -ge 300 ]; then count=0; fi
+          else
+            files=
+            count=0
+          fi
+          echo "$files"
+          # A list that comes back empty, short, or long runs the tests. A
+          # rename lists its old path too, so a renamed file in a PR runs them.
+          listed=$(grep -c . <<<"$files" || true)
+          other=$(grep -c -v -E '^[^/]+\.md$' <<<"$files" || true)
+          code=true
+          if [ "$count" -gt 0 ] && [ "$listed" -eq "$count" ] && [ "$other" -eq 0 ]; then
+            code=false
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   swift-test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -22,4 +71,7 @@ jobs:
       - run: brew install tmux
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
-      - run: bin/test
+      # A 3-CPU runner with 2 integration shards keeps about half its CPU idle.
+      # With 3 or 4 it has almost none, and a shared MCP server's Python stub
+      # can take longer than sbd's fixed 10 s start window.
+      - run: bin/test --shards 2
