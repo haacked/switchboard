@@ -91,7 +91,7 @@ shards() {
   run_shard $((n + 1)) .build || status=$?
   local ran=0 count
   for i in "${!patterns[@]}"; do
-    count=$(sed -n -E 's/.*Test run with ([0-9]+) tests.*/\1/p' "$clones/$i.log" | tail -1) || count=
+    count=$(sed -n -E 's/.*Test run with ([0-9]+) tests?.*/\1/p' "$clones/$i.log" | tail -1) || count=
     ran=$((ran + ${count:-0}))
   done
   if [ "$status" -eq 0 ] && [ "$ran" -ne "$total" ]; then
