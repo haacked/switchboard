@@ -79,6 +79,9 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     self.signedOut = signedOut
   }
 
+  /// Whether the last read failed and no earlier reading has limits to show.
+  public var failedWithoutLimits: Bool { limits.isEmpty && error != nil }
+
   /// Whether the account can take more work: `.spent` when any limit is
   /// spent by `UsageLimit.isSpent`, with the latest reset among those limits.
   public func budget(limit: Double = 100, now: Int64 = nowMs()) -> UsageBudget {

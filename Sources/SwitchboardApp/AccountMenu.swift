@@ -58,7 +58,7 @@ struct AccountMenu: View {
   /// does not need the user.
   static func needsYou(_ row: AccountRow?) -> Bool {
     guard let reading = row?.usage else { return false }
-    return reading.budget().isSpent || (reading.limits.isEmpty && reading.error != nil)
+    return reading.budget().isSpent || reading.failedWithoutLimits
   }
 
   /// The toolbar text: the account's name, its session percent, and its
@@ -198,7 +198,7 @@ private struct AccountBlock: View {
         }
         if let error = usage.error {
           Text("✗ \(error)")
-            .foregroundStyle(usage.limits.isEmpty ? AttentionState.needsYou.color : .secondary)
+            .foregroundStyle(usage.failedWithoutLimits ? AttentionState.needsYou.color : .secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
       } else {
