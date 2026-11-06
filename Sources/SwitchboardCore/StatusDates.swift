@@ -27,13 +27,17 @@ enum StatusDates {
   /// The first date after the first "status as of" on the line, with the
   /// format of each shape that matches it, in the order of `shapes`. "May"
   /// is both a month and its short name, so a May date has two formats.
+  /// Nil when a letter or digit sits between the phrase and that date,
+  /// because then the date may belong to other text on the line.
   static func find(in line: String) -> (range: Range<String.Index>, formats: [String])? {
-    guard let phrase = line.range(of: phrase, options: .caseInsensitive) else { return nil }
-    let from = NSRange(phrase.upperBound..., in: line)
+    guard let asOf = line.range(of: phrase, options: .caseInsensitive) else { return nil }
+    let from = NSRange(asOf.upperBound..., in: line)
     let found = shapes.compactMap { regex, format in
       regex.firstMatch(in: line, range: from).map { ($0.range, format) }
     }
-    guard let first = found.min(by: { $0.0.location < $1.0.location }), let range = Range(first.0, in: line) else {
+    guard let first = found.min(by: { $0.0.location < $1.0.location }), let range = Range(first.0, in: line),
+      !line[asOf.upperBound..<range.lowerBound].contains(where: { $0.isLetter || $0.isNumber })
+    else {
       return nil
     }
     return (range, found.filter { $0.0 == first.0 }.map(\.1))

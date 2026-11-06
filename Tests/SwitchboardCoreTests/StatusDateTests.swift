@@ -32,6 +32,8 @@ private func rewrite(_ old: String, _ new: String) throws {
     // "May" is a full month name and a short one, so either shape may follow it.
     ("Status as of May 1, 2026.", "Status as of Nov 5, 2026."),
     ("Status as of May 1, 2026.", "Status as of November 5, 2026."),
+    // The status date is the earliest date on the line, whatever its shape.
+    ("Status as of 1 Nov 2026, kickoff 2026-10-01.", "Status as of 5 Nov 2026, kickoff 2026-10-01."),
   ]
 
   @Test(arguments: accepted)
@@ -51,6 +53,10 @@ private func rewrite(_ old: String, _ new: String) throws {
     ("Status as of 2026-11-01 14:30.", "Status as of 2026-11-05 09:15."),
     ("Status as of 2026-11-01; status as of 2026-10-01.", "Status as of 2026-11-05; status as of 2026-11-05."),
     ("Status as of 2026-11-01. Done.", "Status as of 2026-11-05. Publish now."),
+    ("Status as of 1 Nov 2026, kickoff 2026-10-01.", "Status as of 1 Nov 2026, kickoff 2026-10-05."),
+    // Other text sits between the phrase and the date, so the date may not be the status date.
+    ("Status as of this week, launch is 2026-12-01.", "Status as of this week, launch is 2027-03-01."),
+    ("Server status as offline since 2026-11-01.", "Server status as offline since 2026-01-01."),
     // The text before the date changes.
     ("Status as of 2026-11-01.", "Note: status as of 2026-11-05."),
     ("Status as of 2026-11-01.", "Status as of  2026-11-05."),
@@ -79,5 +85,23 @@ private func rewrite(_ old: String, _ new: String) throws {
     #expect(new != line)
 
     try rewrite(line, new)
+  }
+
+  /// "May" matches the full month shape first, so plan updates write the full month name.
+  @Test func mayDateTakesTheFullMonthName() throws {
+    let today = try #require(ISO8601DateFormatter().date(from: "2026-11-05T12:00:00Z"))
+
+    #expect(
+      PlanUpdates.dated("Status as of May 1, 2026.", today: today, timeZone: TimeZone(identifier: "UTC")!)
+        == "Status as of November 5, 2026.")
+  }
+
+  @Test(arguments: [
+    "Status as of this week, launch is 2026-12-01.", "Server status as offline since 2026-11-01.",
+  ])
+  func dateAfterOtherTextIsNotDated(_ line: String) throws {
+    let today = try #require(ISO8601DateFormatter().date(from: "2026-11-05T12:00:00Z"))
+
+    #expect(PlanUpdates.dated(line, today: today, timeZone: TimeZone(identifier: "UTC")!) == nil)
   }
 }
