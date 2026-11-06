@@ -146,6 +146,19 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         == Verdict(state: .needsYou, reason: "#42 \(word); commit or discard the uncommitted changes"))
   }
 
+  @Test(arguments: [(manager: true, chat: nil), (manager: nil, chat: "g")] as [(manager: Bool?, chat: String?)])
+  func managerAndChatSessionsIgnoreThePR(_ kind: (manager: Bool?, chat: String?)) throws {
+    var s = session()
+    s.manager = kind.manager
+    s.chat = kind.chat
+    let withoutPR = try prFacts(nil, dirty: 2)
+
+    for pr in [samplePR(state: .merged), samplePR(state: .closed), samplePR(reviewDecision: .approved)] {
+      let f = try prFacts(pr, dirty: 2)
+      #expect(Attention.evaluate(s, f, now: Self.now) == Attention.evaluate(s, withoutPR, now: Self.now))
+    }
+  }
+
   @Test(arguments: PRAttention.finished)
   func finishedPRWithUncommittedChangesKeepsARunningTurnWorking(_ state: PRState, _ word: String) throws {
     let f = try prFacts(samplePR(state: state), dirty: 2, then: runningTurn)

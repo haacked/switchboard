@@ -389,6 +389,10 @@ final class BoardModel: ObservableObject {
   }
 
   func open(_ id: String) { perform("open", ["session": .string(id)]) }
+  /// Starts the session's shell pane, or ends it. sbd keeps a closed shell closed until this opens it.
+  func setShellOpen(_ id: String, _ open: Bool) {
+    perform("shell", ["session": .string(id), "open": .bool(open)])
+  }
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }

@@ -9,11 +9,17 @@
 # Last it types into a session's message field through the app's DraftSelfTest,
 # selects another session and comes back, presses Esc, quits, and checks the
 # draft after a relaunch and after two Escs.
+# Then it closes the shell pane of the Manager, a work session, an Inbox item, and a chat
+# through the app's ShellSelfTest: the pane's close button, `exit`, Ctrl-D, and
+# the Session menu. It checks that the shell stays closed after a relaunch and
+# a switch to another session, that Open Shell starts it again, that the pane
+# attaches to a shell that `sb shell --open` starts right after `exit`, and that the
+# Claude terminal keeps its tmux client and claude its process throughout.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
-# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, or SB_DRAFT_TEST, so the app
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, or SB_SHELL_TEST, so the app
 # runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
 # normal launch does.
 set -euo pipefail
@@ -178,7 +184,15 @@ check_terminal() {
     if [ "$size" = "$last" ]; then seen=1; elif [ -n "$seen" ]; then changed=1; fi
   done
   [ -n "$changed" ] || fail "the pane did not shrink and return to $last: ${sizes[*]}"
-  for png in pane-start pane-resized pane-end; do
+  # The app logs the width of the padded pane and of one cell. The stand-in's last column count must be
+  # the number of whole cells in the padded pane less 10 pt on each side.
+  local padded
+  padded=$(sed -n 's/^selftest: padded pane \([0-9.]*\) cell \([0-9.]*\)$/\1 \2/p' "$shots/app.log")
+  [ -n "$padded" ] || fail "the app did not log the padded pane's size"
+  awk -v cols="${last%x*}" -v sizes="$padded" 'BEGIN {
+    split(sizes, s, " "); exit cols != int((s[1] - 20) / s[2])
+  }' || fail "$last does not fill the padded pane (width and cell: $padded)"
+  for png in pane-start pane-resized pane-end pane-padded; do
     [ -s "$shots/$png.png" ] || fail "missing $png.png"
   done
   echo "ok: $check (sizes ${sizes[*]})"
@@ -300,3 +314,120 @@ check_drafts() {
 }
 
 check_drafts
+
+# sbd records whether the shell is closed, so sb and tmux are the evidence. The
+# app's log shows each step, and its PNGs show the window after the close.
+check_shell() {
+  check=shell
+  local shots="$home/shots/shell" tmux_socket="$home/tmux.sock" manager work chat group cc cp
+  mkdir "$shots"
+  echo "Checking the shell pane…"
+  manager=$(sb manager --json | jq -r .id)
+  new_session shell-work
+  work=$session
+  sb group add shell-group "$work" >/dev/null
+  group=$(sb groups --json | jq -r '.groups[] | select(.name == "shell-group") | .id')
+  chat=$(sb chat "$group" --json | jq -r .id)
+  clients() { tmux -S "$tmux_socket" list-clients -t "=$1" -F '#{client_pid}' 2>/dev/null | sort | tr '\n' ' '; }
+  has_clients() { [ -n "$(clients "$1")" ]; }
+  shell_gone() { ! tmux -S "$tmux_socket" has-session -t "=$1-shell" 2>/dev/null; }
+  closed() { sb get "$1" --json | jq -e '.shellClosed == true' >/dev/null; }
+  is_open() { ! closed "$1"; }
+  cmd_done() { [ ! -e "$shots/cmd" ]; }
+  app() { # runs one ShellSelfTest command and prints its result
+    echo "$*" >"$shots/cmd"
+    wait_for 20 cmd_done || fail "the app did not run: $*"
+    grep "^shelltest: " "$shots/app.log" | tail -n 1 | sed 's/.*-> //'
+  }
+  panes_are() { [ "$(app panes)" = "$1" ]; }
+  # A chat shows its messages until the test shows its terminals, so `attached` waits only when asked.
+  start_app() { # <session> [attached]
+    SB_SELECT="$1" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+    app_pid=$!
+    [ -z "${2:-}" ] || wait_for 120 has_clients "$1-claude" || fail "the app did not attach to $1's Claude pane"
+  }
+  remember_claude() { cc=$(clients "$1-claude") cp=$(sb get "$1" --json | jq -r .claudePid); }
+  same_claude() {
+    [ "$(clients "$1-claude")" = "$cc" ] || fail "the Claude terminal of $1 attached again"
+    [ "$(sb get "$1" --json | jq -r .claudePid)" = "$cp" ] || fail "claude of $1 is a new process"
+  }
+  closes() { # <session> <how>
+    wait_for 10 closed "$1" || fail "$2 did not close the shell of $1"
+    wait_for 10 shell_gone "$1" || fail "$2 left the shell of $1 in tmux"
+    wait_for 10 panes_are 1 || fail "$2 left the shell pane of $1 in the window"
+    same_claude "$1"
+  }
+
+  start_app "$manager" attached
+  wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the Manager's shell"
+  remember_claude "$manager"
+  [ "$(app click close)" != "no pane" ] || fail "the window has no shell pane"
+  closes "$manager" "the close button"
+  app snapshot "$shots/manager-closed.png" >/dev/null
+  end_app
+  start_app "$manager" attached
+  sleep 2
+  shell_gone "$manager" && panes_are 1 || fail "a relaunch started the Manager's shell again"
+  remember_claude "$manager"
+  app click open >/dev/null
+  wait_for 10 is_open "$manager" || fail "Open Shell did not open the Manager's shell"
+  wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the opened shell"
+  app type exit >/dev/null
+  closes "$manager" "exit"
+  end_app
+
+  start_app "$work" attached
+  wait_for 60 has_clients "$work-shell" || fail "the app did not attach to the work session's shell"
+  remember_claude "$work"
+  app ctrl-d >/dev/null
+  closes "$work" "Ctrl-D"
+  app select "$manager" >/dev/null
+  sleep 3
+  app select "$work" >/dev/null
+  sleep 3
+  shell_gone "$work" && shell_gone "$manager" || fail "switching sessions started a closed shell again"
+  [ "$(app menu Session Open Shell)" = ran ] || fail "the Session menu has no Open Shell"
+  wait_for 60 has_clients "$work-shell" || fail "the menu's Open Shell did not open the shell"
+  remember_claude "$work"
+  # A shell that closes and opens again before the app's next refresh leaves the pane on screen.
+  exited() { shell_gone "$work" || tmux -S "$tmux_socket" display -p -t "=$work-shell:" '#{pane_dead}' | grep -q 1; }
+  app type exit >/dev/null
+  wait_for 10 exited || fail "exit did not end the work session's shell"
+  sb shell "$work" --open >/dev/null
+  wait_for 30 has_clients "$work-shell" || fail "the shell pane did not attach to the reopened shell"
+  wait_for 10 panes_are 2 || fail "the reopened shell has no pane"
+  same_claude "$work"
+  [ "$(app menu Session Close Shell)" = ran ] || fail "the Session menu has no Close Shell"
+  closes "$work" "the menu's Close Shell"
+  end_app
+
+  # The Inbox shows an item's terminals without selecting the session.
+  SB_INBOX="$work" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  app show-terminal >/dev/null
+  wait_for 120 has_clients "$work-claude" || fail "the Inbox did not attach to the work session's Claude pane"
+  remember_claude "$work"
+  [ "$(app click open)" != "no pane" ] || fail "the Inbox shows no terminal"
+  wait_for 10 is_open "$work" || fail "the Inbox's Open Shell did not open the shell"
+  wait_for 60 has_clients "$work-shell" || fail "the Inbox did not attach to the opened shell"
+  wait_for 10 panes_are 2 || fail "the Inbox shows no shell pane"
+  app click close >/dev/null
+  closes "$work" "the Inbox's close button"
+  end_app
+
+  start_app "$chat"
+  app show-terminal >/dev/null
+  wait_for 120 has_clients "$chat-claude" || fail "the app did not attach to the chat's Claude pane"
+  wait_for 60 has_clients "$chat-shell" || fail "the app did not attach to the chat's shell"
+  remember_claude "$chat"
+  app click close >/dev/null
+  closes "$chat" "the chat's close button"
+  app snapshot "$shots/chat-closed.png" >/dev/null
+  # Close acts on the key window. An app that a script starts may have none, so this checks only the binding.
+  [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
+  end_app
+  save_shots
+  echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat)"
+}
+
+check_shell
