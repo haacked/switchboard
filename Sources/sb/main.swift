@@ -99,7 +99,12 @@ let usage = """
                                   import Claude sessions by id, id prefix, or name.
                                   --stop first exits the claude of a session that
                                   waits idle at its prompt in another terminal
-    attach <session> [--shell]    attach this terminal to the Claude pane or the shell
+    attach <session> [--shell]    attach this terminal to the Claude pane or the shell.
+                                  --shell starts a closed shell again
+    shell <session> --open | --close
+                                  start the session's shell pane, or end it. A shell
+                                  that exits ends its pane too. A closed shell stays
+                                  closed until --open or attach --shell
     screen <session> [--shell]    print the pane's screen
     watch <session> --until <state> [--timeout S]
     events [--session S] [--since ID] [--follow]
@@ -423,10 +428,12 @@ func hook() -> Never {
 
 func attach(_ a: Args) -> Never {
   let id = a.session("attach")
+  let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
   _ = call("open", ["session": .string(id)])
+  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let terminals: Terminals
   do { terminals = try client.terminals(id) } catch { die("\(error)") }
-  let command = terminals.attachCommand(a.switches.contains("--shell") ? .shell : .claude)
+  let command = terminals.attachCommand(pane)
   let argv = command.map { strdup($0) } + [nil]
   execv(command[0], argv)
   die("can't run \(command[0]): \(UnixSocket.errnoText())")
@@ -601,6 +608,10 @@ case "wait":
   waitCommand(a)
 case "note":
   noteCommand(a)
+case "shell":
+  let open = a.switches.contains("--open")
+  guard open != a.switches.contains("--close") else { die("shell needs --open or --close") }
+  sessionCommand("shell", a, extra: ["open": .bool(open)])
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])

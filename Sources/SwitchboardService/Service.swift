@@ -171,7 +171,7 @@ public final class Service {
   // MARK: Requests
 
   static let actsOnProcesses: Set<String> = [
-    "send", "send-group", "stop", "resume", "open", "terminals", "resolve-wait", "answer", "account-move",
+    "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
     "dependency-resolved",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
@@ -282,6 +282,8 @@ public final class Service {
       return try JSON(encoding: summary(try lookup(args)))
     case "terminals":
       return try JSON(encoding: terminals(try lookup(args)))
+    case "shell":
+      return try shellRequest(args)
     case "open":
       let id = try lookup(args)
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
@@ -366,8 +368,10 @@ public final class Service {
 
   // MARK: Hooks
 
-  /// Records a hook event and returns it, or nil for an unknown session.
-  func hook(_ args: JSON) throws -> Event? {
+  /// Records a hook event and returns it with what the hook prints, or nil
+  /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
+  /// the digest of its children, which sbd records as a `digest` event.
+  func hook(_ args: JSON) throws -> (event: Event, answer: JSON)? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
       return nil
     }
@@ -379,6 +383,7 @@ public final class Service {
       recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
     }
     let event = record(id, kind, payload)
+    var answer: JSON = [:]
     switch kind {
     case "SessionStart":
       // `/clear` and `/resume` in the pane start another conversation, which
@@ -394,6 +399,10 @@ public final class Service {
       deliverPending(id, after: 1.5)
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
+      if let text = digest(id, now: event.t) {
+        record(id, "digest", ["text": .string(text)])
+        answer = ParentDigest.hookOutput(text)
+      }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -401,7 +410,7 @@ public final class Service {
     default:
       break
     }
-    return event
+    return (event, answer)
   }
 
   /// Appends an event to the log and folds it into the session's facts.
@@ -600,22 +609,15 @@ public final class Service {
     return env
   }
 
-  /// The two panes' tmux targets. It starts a missing pane, and a shell
+  /// The two panes' tmux targets. It starts a missing Claude pane, and a
+  /// missing shell pane unless the shell is closed. It closes a shell pane
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try requireFolder(session)
     let shell = paneName(id, .shell)
-    switch snapshot.panes[shell] {
-    case nil:
-      try host.create(shell, cwd: session.cwd, env: paneEnv(id))
-      markStarting(shell)
-    case let row? where row.dead:
-      try host.respawn(shell, cwd: session.cwd, env: paneEnv(id), command: nil)
-      markStarting(shell)
-    default:
-      break
-    }
+    if snapshot.panes[shell]?.dead == true { try closeShell(id) }
+    if entries[id]?.session.shellClosed != true { try startShell(id) }
     if snapshot.panes[paneName(id, .claude)] == nil { try launch(id, prompt: nil) }
     return Terminals(tmux: host.tmux, socket: host.socket, claude: paneName(id, .claude), shell: shell)
   }
@@ -1320,6 +1322,7 @@ public final class Service {
       install(fresh)
       let now = nowMs()
       superviseMCPServers(now: now)
+      closeExitedShells()
       for id in entries.keys.sorted() {
         let live = entries[id]?.facts.live ?? false
         switch claudeState(id) {
@@ -1443,6 +1446,7 @@ public final class Service {
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
+    out.shellClosed = s.shellClosed
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

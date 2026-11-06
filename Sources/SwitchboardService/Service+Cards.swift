@@ -33,17 +33,18 @@ extension Service {
   /// Records a hook event. When the event opened a card, it holds the hook
   /// off the state queue until the card gets an answer. When the hook goes
   /// away first, it records `card_closed`. No or Escape in the terminal ends
-  /// the hook.
+  /// the hook. Any other hook gets what `hook` answers.
   func handleHook(_ args: JSON, hookGone: @escaping () -> Bool) throws -> Response {
-    let opened: (card: Int64, request: HeldRequest)? = try queue.sync {
-      guard let event = try hook(args),
-        entries[event.session]?.facts.cards.contains(where: { $0.id == event.id }) == true
-      else { return nil }
+    let (answer, opened): (JSON, (card: Int64, request: HeldRequest)?) = try queue.sync {
+      guard let (event, answer) = try hook(args) else { return ([:], nil) }
+      guard entries[event.session]?.facts.cards.contains(where: { $0.id == event.id }) == true else {
+        return (answer, nil)
+      }
       let request = HeldRequest(session: event.session, hookGone: hookGone)
       held[event.id] = request
-      return (event.id, request)
+      return (answer, (event.id, request))
     }
-    guard let (card, request) = opened else { return .success([:]) }
+    guard let (card, request) = opened else { return .success(answer) }
     request.wait()
     return .success(
       queue.sync {
