@@ -188,7 +188,10 @@ struct SessionView: View {
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         if let pr = session.pr, let url = pr.link {
-          Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
+          HStack(spacing: 4) {
+            Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
+            if let owners = CodeOwnerShield.status(for: pr) { CodeOwnerShield(status: owners) }
+          }
         }
         CleanupNote(session: session)
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
