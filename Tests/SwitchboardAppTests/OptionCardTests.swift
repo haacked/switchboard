@@ -16,6 +16,8 @@ private let fixes = [
   TriageOption(label: "Rename the flag", action: .send),
 ]
 
+private let checks = TriageOption(label: "Fix the checks", action: .send)
+
 @Suite struct OptionPicksState {
   @Test func nothingIsTickedAtFirst() {
     let picks = OptionPicks()
@@ -82,7 +84,6 @@ private let fixes = [
 
   /// A rule can drop an option from the card without a change to its ref.
   @Test func aPickWhoseOptionLeftTheCardIsDropped() {
-    let checks = TriageOption(label: "Fix the checks", action: .send)
     var picks = OptionPicks(ref: "summary:1")
     picks.toggle(4, checks)
     #expect(picks.on(item(fixes + [checks], multiSelect: true, ref: "summary:1")).canSubmit)
@@ -94,7 +95,6 @@ private let fixes = [
 
   /// A rule can put an option that runs on its own at a ticked number.
   @Test func aPickWhoseOptionCanNoLongerBeTickedIsDropped() {
-    let checks = TriageOption(label: "Fix the checks", action: .send)
     var picks = OptionPicks(ref: "summary:1")
     picks.toggle(1, fixes[0])
     picks.toggle(4, checks)
@@ -106,7 +106,7 @@ private let fixes = [
   /// A rule can put another tickable option at a ticked number. The user did not tick that one.
   @Test func aPickWhoseNumberNowHoldsAnotherOptionIsDropped() {
     var picks = OptionPicks(ref: "summary:1")
-    picks.toggle(4, TriageOption(label: "Fix the checks", action: .send))
+    picks.toggle(4, checks)
     let card = item(fixes + [TriageOption(label: "Rebase", action: .send)], multiSelect: true, ref: "summary:1")
 
     let after = picks.on(card)

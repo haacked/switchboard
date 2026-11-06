@@ -140,7 +140,7 @@ struct OptionPicks: Equatable {
     guard item.ref == ref else { return OptionPicks(ref: item.ref) }
     var kept = self
     kept.ticked = ticked.filter { number, option in
-      item.options.indices.contains(number - 1) && item.options[number - 1] == option && item.isTickable(option)
+      (try? item.option(String(number))) == option && item.isTickable(option)
     }
     return kept
   }
