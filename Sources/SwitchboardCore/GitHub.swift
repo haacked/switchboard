@@ -416,6 +416,12 @@ public enum GitHub {
 
   /// One query with an alias per key. Each key's values go in variables, so
   /// no branch name appears in the query text.
+  /// Splits `owner/name`. A repo without a slash has an empty name.
+  public static func ownerAndName(_ repo: String) -> (owner: String, name: String) {
+    let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+    return (parts.first ?? "", parts.count > 1 ? parts[1] : "")
+  }
+
   public static func lookupQuery(_ keys: [PRKey]) -> (query: String, variables: JSON) {
     var declarations: [String] = []
     var fields: [String] = []
@@ -436,10 +442,10 @@ public enum GitHub {
         variables["k\(i)"] = .number(Double(number))
         field = "pullRequest(number: $k\(i)) { id }"
       }
-      let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+      let (owner, name) = ownerAndName(repo)
       declarations += ["$o\(i): String!", "$n\(i): String!"]
-      variables["o\(i)"] = .string(parts.first ?? "")
-      variables["n\(i)"] = .string(parts.count > 1 ? parts[1] : "")
+      variables["o\(i)"] = .string(owner)
+      variables["n\(i)"] = .string(name)
       fields.append("  q\(i): repository(owner: $o\(i), name: $n\(i)) { \(field) }")
     }
     let query =

@@ -5,14 +5,12 @@ struct CodeOwnerShield: View {
   let status: CodeOwnerStatus
   @Environment(\.backgroundProminence) private var prominence
 
-  static func status(for pr: PRSummary) -> CodeOwnerStatus? { pr.codeOwners }
-
   static func symbol(for status: CodeOwnerStatus) -> String {
     status.satisfied ? "checkmark.shield.fill" : "shield"
   }
 
   static func color(for status: CodeOwnerStatus) -> Color {
-    status.satisfied ? .green : PRStatus.reviewRequired.color
+    (status.satisfied ? PRStatus.approved : PRStatus.reviewRequired).color
   }
 
   static func label(for status: CodeOwnerStatus) -> String { status.text(separator: "\n") }

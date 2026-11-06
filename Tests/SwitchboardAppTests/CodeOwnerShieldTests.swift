@@ -111,14 +111,14 @@ private func ownedPR(_ owners: [[String]], verdicts: [Review] = []) -> PullReque
         id: "PR_1", number: 1, url: "https://github.com/haacked/switchboard/pull/1", repo: "haacked/switchboard"))
 
     #expect(summary.codeOwners == nil)
-    #expect(CodeOwnerShield.status(for: summary) == nil)
+    #expect(summary.codeOwners == nil)
   }
 
   @Test func showsNoShieldWhenThePollDidNotReadTheAuthor() {
     var pr = ownedPR([["@PostHog/hogql"]])
     pr.author = nil
 
-    #expect(CodeOwnerShield.status(for: PRSummary(pr)) == nil)
+    #expect(PRSummary(pr).codeOwners == nil)
   }
 
   @Test(arguments: [PRState.merged, .closed])
@@ -126,20 +126,15 @@ private func ownedPR(_ owners: [[String]], verdicts: [Review] = []) -> PullReque
     var pr = ownedPR([["@PostHog/hogql"]])
     pr.state = state
 
-    #expect(CodeOwnerShield.status(for: PRSummary(pr)) == nil)
+    #expect(PRSummary(pr).codeOwners == nil)
   }
 
-  @Test func showsTheSummarysStatusForAPRWithARequirement() {
-    let summary = PRSummary(ownedPR([["@PostHog/hogql"]]))
-
-    let status = CodeOwnerShield.status(for: summary)
-
-    #expect(status != nil)
-    #expect(status == summary.codeOwners)
+  @Test func showsAShieldForAPRWithARequirement() {
+    #expect(PRSummary(ownedPR([["@PostHog/hogql"]])).codeOwners != nil)
   }
 
   @Test func showsAWaitingBlueShieldForAnUnapprovedRequirement() throws {
-    let status = try #require(CodeOwnerShield.status(for: PRSummary(ownedPR([["@PostHog/hogql"]]))))
+    let status = try #require(PRSummary(ownedPR([["@PostHog/hogql"]])).codeOwners)
 
     #expect(CodeOwnerShield.symbol(for: status) == "shield")
     #expect(CodeOwnerShield.color(for: status) == PRStatus.reviewRequired.color)
@@ -148,7 +143,7 @@ private func ownedPR(_ owners: [[String]], verdicts: [Review] = []) -> PullReque
   @Test func showsAGreenCheckmarkShieldOnceAnOwnerApprovesTheHead() throws {
     let pr = ownedPR([["@bob"]], verdicts: [Review(author: "bob", state: "APPROVED", commit: "head")])
 
-    let status = try #require(CodeOwnerShield.status(for: PRSummary(pr)))
+    let status = try #require(PRSummary(pr).codeOwners)
 
     #expect(CodeOwnerShield.symbol(for: status) == "checkmark.shield.fill")
     #expect(CodeOwnerShield.color(for: status) == .green)

@@ -58,7 +58,7 @@ struct TriageDetail: View {
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
       if let pr = session.pr, let url = pr.link {
         Link(pr.line, destination: url).font(.caption)
-        if let owners = CodeOwnerShield.status(for: pr) { CodeOwnerShield(status: owners) }
+        if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
       }
       Spacer()
       Button("Open") { model.selection = session.id }

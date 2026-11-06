@@ -4,7 +4,6 @@ import SwitchboardCore
 /// Whether each session's open PR needs a code owner review. The poller
 /// reads a base branch's config, a PR's changed files, and the teams of each
 /// approval, and keeps each read for as long as it can't change.
-/// `plans/codeowner-shield.md` in the notes repo describes the rules.
 extension GitHubPoller {
   struct CodeOwnerReads {
     struct ConfigKey: Hashable {
@@ -22,15 +21,28 @@ extension GitHubPoller {
       var prId: String
       var author: String
       var submittedAt: String?
+
+      init(prId: String, author: String, submittedAt: String?) {
+        self.prId = prId
+        self.author = author
+        self.submittedAt = submittedAt
+      }
+
+      init(_ prId: String, _ verdict: Review) {
+        self.init(prId: prId, author: verdict.author, submittedAt: verdict.submittedAt)
+      }
     }
 
     /// Each base branch's config, and when the poller read it. A failed read
     /// keeps the last one.
     var configs: [ConfigKey: (config: CodeOwnersConfig, read: Int64)] = [:]
-    /// A head and a base fix a PR's diff, so the poller reads a key's files once.
+    /// A head and a base fix a PR's diff. The poller reads a key's files once.
     var files: [FilesKey: (paths: [String], total: Int)] = [:]
     /// The teams that each verdict was on behalf of, as `org/team`.
     var teams: [TeamsKey: [String]] = [:]
+    /// Each key's requirement, and the config read it came from. Matching
+    /// every changed file is too slow to repeat on each cycle.
+    var requirements: [FilesKey: (configRead: Int64, requirement: CodeOwnerRequirement?)] = [:]
   }
 
   /// Reads the configs that are due, the changed files that no read holds,
@@ -70,7 +82,7 @@ extension GitHubPoller {
       }
     }
     let approved = open.filter { pr in
-      requirement(pr) != nil && pr.verdicts.contains { $0.state == "APPROVED" && teams(pr.id, $0) == nil }
+      pr.verdicts.contains { $0.state == "APPROVED" && teams(pr.id, $0) == nil } && requirement(pr) != nil
     }
     for chunk in GitHub.chunks(approved.map(\.id)) {
       do {
@@ -102,7 +114,7 @@ extension GitHubPoller {
       var page = GitHub.parseFiles(node)
     else { throw APIError("GitHub failed to read the changed files of \(id): \(GitHub.message(response))") }
     var paths = page.paths
-    // Each page holds up to 100 files, so 10 pages reach `CodeOwners.maxFiles`.
+    // Each page holds up to 100 files. Ten pages reach `CodeOwners.maxFiles`.
     var pages = 1
     while let next = page.next, page.total <= CodeOwners.maxFiles, pages < CodeOwners.maxFiles / 100 {
       let response = try request(GitHub.filesPageQuery, ["id": .string(id), "after": .string(next)], stats: &stats)
@@ -139,22 +151,25 @@ extension GitHubPoller {
     let files = Set(read.map(filesKey))
     let teams = Set(
       read.flatMap { pr in
-        pr.verdicts.map { CodeOwnerReads.TeamsKey(prId: pr.id, author: $0.author, submittedAt: $0.submittedAt) }
+        pr.verdicts.map { CodeOwnerReads.TeamsKey(pr.id, $0) }
       })
     codeOwners.configs = codeOwners.configs.filter { configs.contains($0.key) }
     codeOwners.files = codeOwners.files.filter { files.contains($0.key) }
+    codeOwners.requirements = codeOwners.requirements.filter { files.contains($0.key) }
     codeOwners.teams = codeOwners.teams.filter { teams.contains($0.key) }
   }
 
   private func requirement(_ pr: PullRequest) -> CodeOwnerRequirement? {
-    guard let config = codeOwners.configs[configKey(pr)]?.config, let files = codeOwners.files[filesKey(pr)] else {
-      return nil
-    }
-    return CodeOwners.requirement(config, paths: files.paths, total: files.total)
+    let key = filesKey(pr)
+    guard let config = codeOwners.configs[configKey(pr)], let files = codeOwners.files[key] else { return nil }
+    if let known = codeOwners.requirements[key], known.configRead == config.read { return known.requirement }
+    let requirement = CodeOwners.requirement(config.config, paths: files.paths, total: files.total)
+    codeOwners.requirements[key] = (config.read, requirement)
+    return requirement
   }
 
   private func teams(_ prId: String, _ verdict: Review) -> [String]? {
-    codeOwners.teams[CodeOwnerReads.TeamsKey(prId: prId, author: verdict.author, submittedAt: verdict.submittedAt)]
+    codeOwners.teams[CodeOwnerReads.TeamsKey(prId, verdict)]
   }
 
   private func configKey(_ pr: PullRequest) -> CodeOwnerReads.ConfigKey {
@@ -166,9 +181,9 @@ extension GitHubPoller {
   }
 
   private func configVariables(_ key: CodeOwnerReads.ConfigKey) -> JSON {
-    let parts = key.repo.split(separator: "/", maxSplits: 1).map(String.init)
+    let (owner, name) = GitHub.ownerAndName(key.repo)
     return [
-      "owner": .string(parts.first ?? ""), "name": .string(parts.count > 1 ? parts[1] : ""), "ref": .string(key.base),
+      "owner": .string(owner), "name": .string(name), "ref": .string(key.base),
       "github": .string("\(key.base):.github/CODEOWNERS"), "root": .string("\(key.base):CODEOWNERS"),
       "docs": .string("\(key.base):docs/CODEOWNERS"),
     ]

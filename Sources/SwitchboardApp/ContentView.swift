@@ -347,7 +347,7 @@ struct SessionRow: View {
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
-              if let owners = CodeOwnerShield.status(for: pr) { CodeOwnerShield(status: owners) }
+              if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
             }
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -617,7 +617,7 @@ struct BoardCard: View {
                   .font(.caption.bold())
                   .foregroundStyle(pr.status.color)
                   .help(pr.tooltip)
-                if let owners = CodeOwnerShield.status(for: pr) { CodeOwnerShield(status: owners) }
+                if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
               }
             }
           }

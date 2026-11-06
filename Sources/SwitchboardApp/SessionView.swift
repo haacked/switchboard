@@ -190,7 +190,7 @@ struct SessionView: View {
         if let pr = session.pr, let url = pr.link {
           HStack(spacing: 4) {
             Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
-            if let owners = CodeOwnerShield.status(for: pr) { CodeOwnerShield(status: owners) }
+            if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
           }
         }
         CleanupNote(session: session)
