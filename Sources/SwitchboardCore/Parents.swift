@@ -20,24 +20,45 @@ public enum ParentNotice {
   /// The most lines in one message. The rest become a count.
   static let maxLines = 20
 
-  /// The lines that say what changed between two sightings of a child: a new
-  /// PR, then a move into Needs you or Done.
+  /// What changed between two sightings of a child that a parent hears
+  /// about: a new PR, then a move into Needs you, Ready to merge, or Done.
+  enum Change: Equatable {
+    case pr(Int, url: String?)
+    case needsYou(String)
+    case readyToMerge(String)
+    case done
+
+    static func between(_ before: ChildMark, _ after: ChildMark, reason: String, prURL: String?) -> [Change] {
+      var changes: [Change] = []
+      if let number = after.pr, number != before.pr { changes.append(.pr(number, url: prURL)) }
+      if after.state != before.state {
+        switch after.state {
+        case .needsYou: changes.append(.needsYou(oneLine(reason)))
+        case .readyToMerge: changes.append(.readyToMerge(oneLine(reason)))
+        case .done: changes.append(.done)
+        default: break
+        }
+      }
+      return changes
+    }
+
+    static func opened(_ number: Int, url: String?) -> String {
+      "opened PR #\(number)" + (url.map { ": \($0)" } ?? "")
+    }
+  }
+
+  /// The lines that say what changed between two sightings of a child, one per change.
   public static func lines(
     name: String, id: String, before: ChildMark, after: ChildMark, reason: String, prURL: String?
   ) -> [String] {
-    var lines: [String] = []
-    if let number = after.pr, number != before.pr {
-      lines.append("\(name) (\(id)) opened PR #\(number)" + (prURL.map { ": \($0)" } ?? ""))
-    }
-    if after.state != before.state {
-      switch after.state {
-      case .needsYou: lines.append("\(name) (\(id)) needs you: \(oneLine(reason))")
-      case .readyToMerge: lines.append("\(name) (\(id)): \(oneLine(reason))")
-      case .done: lines.append("\(name) (\(id)) is done")
-      default: break
+    Change.between(before, after, reason: reason, prURL: prURL).map {
+      switch $0 {
+      case .pr(let number, let url): "\(name) (\(id)) \(Change.opened(number, url: url))"
+      case .needsYou(let reason): "\(name) (\(id)) needs you: \(reason)"
+      case .readyToMerge(let reason): "\(name) (\(id)): \(reason)"
+      case .done: "\(name) (\(id)) is done"
       }
     }
-    return lines
   }
 
   /// One line for all the changes that a parent has not heard yet.
@@ -45,5 +66,71 @@ public enum ParentNotice {
     let more = lines.count > maxLines ? ["and \(lines.count - maxLines) more"] : []
     return "Switchboard: sessions you started changed: "
       + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."
+  }
+}
+
+extension SessionKind {
+  /// Whether sbd sends this kind of session a message when a child changes. A
+  /// Manager or a chat instead gets a digest with the user's next prompt.
+  public var hearsChildNotices: Bool { self == .work }
+}
+
+/// How many sessions outside a parent's own children need the user.
+public struct BoardCounts: Equatable, Sendable {
+  public var needsYou: Int
+  public var readyToMerge: Int
+
+  public init(needsYou: Int = 0, readyToMerge: Int = 0) {
+    self.needsYou = needsYou
+    self.readyToMerge = readyToMerge
+  }
+
+  public mutating func add(_ state: AttentionState?) {
+    switch state {
+    case .needsYou: needsYou += 1
+    case .readyToMerge: readyToMerge += 1
+    default: break
+    }
+  }
+}
+
+/// The text that a Manager or a chat gets with a prompt, through the
+/// `additionalContext` of its UserPromptSubmit hook. Claude Code shows it to
+/// the model and keeps it out of the conversation's messages.
+public enum ParentDigest {
+  /// The most child lines in one digest. The rest become a count.
+  static let maxLines = 15
+
+  /// One line for what changed in a child between what its parent last heard
+  /// and now, or nil when nothing it would hear about changed. A child that
+  /// moved into a state and out again before the parent heard gets no line.
+  public static func line(
+    name: String, id: String, heard: ChildMark, now: ChildMark, reason: String, prURL: String?
+  ) -> String? {
+    let parts = ParentNotice.Change.between(heard, now, reason: reason, prURL: prURL).map {
+      switch $0 {
+      case .pr(let number, let url): ParentNotice.Change.opened(number, url: url)
+      case .needsYou(let reason): "needs you: \(reason)"
+      case .readyToMerge(let reason): reason
+      case .done: "done"
+      }
+    }
+    return parts.isEmpty ? nil : "\(name) (\(id)): " + parts.joined(separator: "; ")
+  }
+
+  public static func text(_ lines: [String], elsewhere: BoardCounts) -> String {
+    var out = ["Switchboard: what changed since your last turn."]
+    if !lines.isEmpty {
+      out.append("Sessions you started:")
+      out += lines.prefix(maxLines).map { "- \($0)" }
+      if lines.count > maxLines { out.append("- and \(lines.count - maxLines) more") }
+    }
+    out.append("Other sessions: \(elsewhere.needsYou) in Needs you, \(elsewhere.readyToMerge) in Ready to merge.")
+    return out.joined(separator: "\n")
+  }
+
+  /// What sbd answers a UserPromptSubmit hook with to add `text` to the prompt.
+  public static func hookOutput(_ text: String) -> JSON {
+    ["hookSpecificOutput": ["hookEventName": "UserPromptSubmit", "additionalContext": .string(text)]]
   }
 }
