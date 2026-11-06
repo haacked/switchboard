@@ -25,7 +25,7 @@ private func activity(after kind: String) -> Int64 {
 
   @Test(arguments: [
     "running", "exited", "stopped", "deferred", "followup-ready", "wait-resolved", "delivered", "requeued",
-    "pr", "worktree", "triage", "job", "cleanup", "auto-continue", "dependencies",
+    "pr", "branch", "worktree", "triage", "job", "cleanup", "auto-continue", "dependencies",
   ])
   func anSbdEventThatOnlyObservesTheSessionIsNotActivity(_ kind: String) {
     #expect(activity(after: kind) == 1)
