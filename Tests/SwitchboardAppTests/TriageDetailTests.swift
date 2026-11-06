@@ -1,3 +1,4 @@
+import Foundation
 import SwitchboardCore
 import Testing
 
@@ -36,5 +37,36 @@ import Testing
 
   @Test func showsTheSummaryWhileTerminalIsOff() {
     #expect(TriageDetail.pane(for: session(waitsToStart: false), showingTerminal: false) == .summary)
+  }
+
+  func docketRow(url: String) -> SessionSummary {
+    var s = session(waitsToStart: false)
+    s.cwd = ""
+    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: url), DocketStatus())
+    return s
+  }
+
+  @Test func linksADocketRowToItsPullRequest() {
+    let link = TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1"))
+    #expect(link?.label == "o/r#1")
+    #expect(link?.url == URL(string: "https://github.com/o/r/pull/1"))
+  }
+
+  @Test func refusesADocketUrlThatIsNotHttps() {
+    #expect(TriageDetail.prLink(for: docketRow(url: "file:///etc/passwd")) == nil)
+    #expect(TriageDetail.prLink(for: docketRow(url: "")) == nil)
+  }
+
+  @Test func linksASessionToItsPullRequest() {
+    var s = session(waitsToStart: false)
+    s.pr = PRSummary(
+      PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
+    let link = TriageDetail.prLink(for: s)
+    #expect(link?.label == s.pr?.line)
+    #expect(link?.url == URL(string: "https://github.com/o/r/pull/5"))
+  }
+
+  @Test func hasNoPullRequestLinkForASessionWithoutOne() {
+    #expect(TriageDetail.prLink(for: session(waitsToStart: false)) == nil)
   }
 }

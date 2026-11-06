@@ -14,6 +14,13 @@ struct TriageDetail: View {
     showingTerminal && !session.waitsToStart && session.runsClaude ? .terminal : .summary
   }
 
+  /// The PR that the bar links to. A docket row has no `pr`, so it links to the PR that docket reviews.
+  static func prLink(for session: SessionSummary) -> (label: String, url: URL)? {
+    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0) } }
+    if let pr = session.pr, let url = pr.link { return (pr.line, url) }
+    return nil
+  }
+
   var body: some View {
     VStack(spacing: 0) {
       bar
@@ -56,7 +63,7 @@ struct TriageDetail: View {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
-      if let pr = session.pr, let url = pr.link { Link(pr.line, destination: url).font(.caption) }
+      if let link = Self.prLink(for: session) { Link(link.label, destination: link.url).font(.caption) }
       Spacer()
       Button("Open") { model.selection = session.id }
         .help("Show the session in the sidebar, with its terminals")
