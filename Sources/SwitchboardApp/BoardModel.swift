@@ -548,7 +548,11 @@ final class BoardModel: ObservableObject {
   }
 
   /// Clicks the item's option. `text` is what the user typed for a reply option.
-  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
+  /// `sent` runs once sbd accepts the choice.
+  func choose(
+    _ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil,
+    sent: (() -> Void)? = nil
+  ) {
     let key = "\(session)/\(number)"
     // The Board's merge buttons read `merging`, so a merge from the card shows there too.
     let merge = action.isMerge
@@ -559,7 +563,7 @@ final class BoardModel: ObservableObject {
     if merge { merging.insert(session) }
     // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
-      "choose", args, on: merge ? merges : nil,
+      "choose", args, on: merge ? merges : nil, then: { _ in sent?() },
       finally: {
         self.choosing.remove(key)
         if merge { self.merging.remove(session) }

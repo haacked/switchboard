@@ -288,7 +288,7 @@ struct ReplyOption: View {
   let option: TriageOption
   @Binding var text: String
 
-  private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var trimmed: String { Self.trimmed(text) }
 
   var body: some View {
     OptionCardChrome(interactive: false) {
@@ -310,8 +310,6 @@ struct ReplyOption: View {
   }
 
   private func send() {
-    guard !trimmed.isEmpty else { return }
-    model.choose(session.id, ref: ref, option: number, action: .reply, text: trimmed)
-    text = ""
+    Self.submit($text, session: session.id, ref: ref, option: number, to: model)
   }
 }
