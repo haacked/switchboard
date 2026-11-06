@@ -497,9 +497,10 @@ public enum Triage {
   /// first sentence and the first sentence that recommends.
   static func itemLine(_ text: String) -> String {
     let line = oneLine(text, max: .max)
-    // A list item can start with a flag such as --squash. This trim keeps its dashes.
-    let sentences = Attention.sentences(
-      line, trimming: Attention.sentenceTrim.subtracting(CharacterSet(charactersIn: "-")))
+    guard line.localizedCaseInsensitiveContains("recommend") else { return line }
+    // A list item can start with a flag such as --squash. The text has no markup left, so the split trims only
+    // whitespace.
+    let sentences = Attention.sentences(line, trimming: .whitespaces)
     guard let pick = sentences.dropFirst().first(where: { $0.localizedCaseInsensitiveContains("recommend") }) else {
       return line
     }
