@@ -36,6 +36,13 @@ public struct UsageLimit: Codable, Equatable, Sendable {
   /// `normal`, `warning`, or `critical`, when the endpoint reports one.
   public var severity: String?
 
+  /// Whether the limit is at `limit` percent or more. A limit whose reset is
+  /// at or before `now` counts as unused, because the reading can be older
+  /// than the reset.
+  public func isSpent(limit: Double = 100, now: Int64 = nowMs()) -> Bool {
+    percent >= limit && (resetsAt ?? .max) > now
+  }
+
   public init(kind: String, label: String, percent: Double, resetsAt: Int64? = nil, severity: String? = nil) {
     self.kind = kind
     self.label = label
@@ -55,10 +62,13 @@ public struct AccountUsage: Codable, Equatable, Sendable {
   public var checked: Int64?
   /// Why the last read failed. `limits` then holds the reading before it.
   public var error: String?
+  /// True when the account holds no login, so claude would ask for /login.
+  /// nil means signed in, or a reading from an sbd that does not report it.
+  public var signedOut: Bool?
 
   public init(
     name: String, folder: String, email: String? = nil, limits: [UsageLimit] = [], checked: Int64? = nil,
-    error: String? = nil
+    error: String? = nil, signedOut: Bool? = nil
   ) {
     self.name = name
     self.folder = folder
@@ -66,15 +76,17 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     self.limits = limits
     self.checked = checked
     self.error = error
+    self.signedOut = signedOut
   }
 
-  /// Whether the account can take more work: `.spent` when any limit is at
-  /// `limit` percent or more, with the latest reset among those limits. A
-  /// limit whose reset is at or before `now` counts as unused, because the
-  /// reading can be older than the reset.
+  /// Whether the last read failed and no earlier reading has limits to show.
+  public var failedWithoutLimits: Bool { limits.isEmpty && error != nil }
+
+  /// Whether the account can take more work: `.spent` when any limit is
+  /// spent by `UsageLimit.isSpent`, with the latest reset among those limits.
   public func budget(limit: Double = 100, now: Int64 = nowMs()) -> UsageBudget {
     if limits.isEmpty { return .unknown(error ?? "no reading yet") }
-    let spent = limits.filter { $0.percent >= limit && ($0.resetsAt ?? .max) > now }
+    let spent = limits.filter { $0.isSpent(limit: limit, now: now) }
     if spent.isEmpty { return .left }
     return .spent(resetsAt: spent.compactMap(\.resetsAt).max())
   }

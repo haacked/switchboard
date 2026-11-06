@@ -135,23 +135,7 @@ struct ContentView: View {
         .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
       ToolbarItem { ManagerButton() }
-      ToolbarItem { UsageMenu() }
-      ToolbarItem {
-        if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
-          Menu {
-            Picker("Account", selection: Binding(get: { active.folder }, set: model.useAccount)) {
-              ForEach(model.accounts) { account in
-                Text("\(account.name) (\(account.sessions))").tag(account.folder)
-              }
-            }
-            .pickerStyle(.inline)
-          } label: {
-            Label("Account: \(active.name)", systemImage: "person.crop.circle")
-              .labelStyle(.titleAndIcon)
-          }
-          .help("The Claude account for new sessions without a parent. Spawned sessions use their parent's.")
-        }
-      }
+      ToolbarItem { AccountMenu() }
       ToolbarItem {
         Button {
           model.showingImport = true
@@ -235,13 +219,17 @@ struct Sidebar: View {
       }
     }
     .confirmationDialog(
-      "Switch to \(model.switchingAccount?.name ?? "this account")?", isPresented: isSwitchingAccount,
-      presenting: model.switchingAccount
+      accountSwitchTitle, isPresented: isSwitchingAccount, presenting: model.switchingAccount
     ) { change in
-      Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
+      if change.switches {
+        Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
+      }
       if !change.plan.moved.isEmpty {
         let n = change.plan.moved.count
-        Button("Also Move \(n) Existing Session\(n == 1 ? "" : "s")") { model.confirmAccountSwitch(change, move: true) }
+        let s = n == 1 ? "" : "s"
+        Button(change.switches ? "Also Move \(n) Existing Session\(s)" : "Move \(n) Session\(s)") {
+          model.confirmAccountSwitch(change, move: true)
+        }
       }
     } message: { change in
       Text(accountSwitchMessage(change))
@@ -261,8 +249,13 @@ struct Sidebar: View {
     Binding(get: { model.switchingAccount != nil }, set: { if !$0 { model.switchingAccount = nil } })
   }
 
+  private var accountSwitchTitle: String {
+    guard let change = model.switchingAccount else { return "Switch accounts?" }
+    return change.switches ? "Switch to \(change.name)?" : "Move sessions to \(change.name)?"
+  }
+
   private func accountSwitchMessage(_ change: AccountSwitch) -> String {
-    var lines = ["New sessions use \(change.name) either way."]
+    var lines = change.switches ? ["New sessions use \(change.name) either way."] : []
     if !change.plan.moved.isEmpty { lines.append(AccountMove.consequences) }
     let blocked = change.plan.blocked
     if !blocked.isEmpty {
