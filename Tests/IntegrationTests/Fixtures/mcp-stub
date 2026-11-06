@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """A stand-in for a shared MCP server in sbd's integration tests.
 
-Usage: mcp-stub <name> <port> [--delay <seconds>]
+Usage: mcp-stub <name> <port> [--delay <seconds>] [--gate <file>]
 
 It answers every GET and POST with "<name> <pid>". With --delay, it waits
-that long before it listens.
+that long before it listens. With --gate, it writes its pid to <file>.ready
+and then waits until <file> doesn't exist before it listens.
 """
 import http.server
 import os
@@ -12,8 +13,15 @@ import sys
 import time
 
 name, port = sys.argv[1], int(sys.argv[2])
-if sys.argv[3:5] and sys.argv[3] == "--delay":
-    time.sleep(float(sys.argv[4]))
+options = dict(zip(sys.argv[3::2], sys.argv[4::2]))
+if "--delay" in options:
+    time.sleep(float(options["--delay"]))
+if "--gate" in options:
+    gate = options["--gate"]
+    with open(gate + ".ready", "w") as ready:
+        ready.write(str(os.getpid()))
+    while os.path.exists(gate):
+        time.sleep(0.05)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):

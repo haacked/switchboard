@@ -83,6 +83,11 @@ let usage = """
                                   owner/name#N, or a URL) names the session by its open PR. --dismiss
                                   acknowledges the session's Ready to merge item, as sb ack does.
                                   Refuses inside Claude Code
+    review <session|PR> [<reviewer>...] [--dismiss]
+                                  list the suggested reviewers of a session whose PR shows the
+                                  review card, or request a review from each login, org/team,
+                                  or @copilot with gh. --dismiss acknowledges the card, as ack
+                                  does. Refuses inside Claude Code
     ack <session> [--undo]        acknowledge the session's Inbox item: it moves to Waiting until its
                                   reason or its PR's head commit changes or a new turn starts. Nothing
                                   else about the session changes. --undo puts it back in the Inbox.
@@ -114,7 +119,8 @@ let usage = """
                                   click an option, by number or label: run its action,
                                   such as send its message or merge. A reply option
                                   sends T. On a pick-any card, options separated by
-                                  commas (1,3) go as one reply. Card and merge options
+                                  commas (1,3) go as one reply. Request review requests
+                                  the reviewers in T. Card, merge, and review options
                                   refuse inside Claude Code
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
@@ -628,6 +634,8 @@ case "rm":
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":
   merge(a)
+case "review":
+  review(a)
 case "ack":
   acknowledge(a)
 case "cleanup":

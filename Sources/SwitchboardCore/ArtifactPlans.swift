@@ -117,8 +117,8 @@ extension Plans {
     return lines.joined(separator: "\n")
   }
 
-  /// Refuses a rewrite that changed anything but the named rows and the
-  /// numeric date after "status as of", or that added or removed a line.
+  /// Refuses a rewrite that added or removed a line, or that changed a line
+  /// other than a named row in any way but `StatusDates.onlyDateDiffers`.
   public static func checkRewrite(base: String, text: String, rows: [String]) throws {
     let old = lines(base)
     let new = lines(text)
@@ -128,18 +128,10 @@ extension Plans {
     let named = Set(rows)
     for (a, b) in zip(old, new) where a != b {
       let line = a.trimmingCharacters(in: .whitespaces)
-      guard named.contains(line) || withoutStatusDate(a) == withoutStatusDate(b) else {
+      guard named.contains(line) || StatusDates.onlyDateDiffers(a, b) else {
         throw APIError("the rewrite changed a line that is not a named row: \(oneLine(line, max: 160))")
       }
     }
-  }
-
-  /// The line with the date after "status as of" removed. A date here is
-  /// digit runs joined by single separators, such as `2026-11-05`, so a
-  /// date written with a month name does not match and its rewrite is refused.
-  static func withoutStatusDate(_ line: String) -> String {
-    line.replacingOccurrences(
-      of: #"(?i)(status as of\s+)\d+(?:[-/.: ]\d+)*"#, with: "$1", options: .regularExpression)
   }
 
   /// The text's lines without their `\r`, which a CRLF document has and `parse` drops.

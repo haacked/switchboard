@@ -111,8 +111,8 @@ final class BoardModel: ObservableObject {
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
   private let worker = DispatchQueue(label: "switchboard.actions")
-  /// Merges wait on `gh pr merge` for up to 120 s each, so they run apart
-  /// from other actions and from each other.
+  /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
+  /// They run apart from other actions and from each other.
   private let merges = DispatchQueue(label: "switchboard.merges", attributes: .concurrent)
   /// A plan apply waits for sbd's GitHub poll and then writes to GitHub, so
   /// it runs apart from other actions too.
@@ -551,8 +551,13 @@ final class BoardModel: ObservableObject {
     visibleView == .inbox ? sessions.first { $0.id == currentInboxItem } : selected
   }
 
-  /// Clicks the item's option. `text` is what the user typed for a reply option.
-  func choose(_ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil) {
+  /// Clicks the item's option. `text` is what the user typed for a reply
+  /// option, or the reviewers, separated by commas, for a review request.
+  /// `sent` runs once sbd accepts the choice.
+  func choose(
+    _ session: String, ref: String, option number: Int, action: TriageAction, text: String? = nil,
+    sent: (() -> Void)? = nil
+  ) {
     let key = "\(session)/\(number)"
     // The Board's merge buttons read `merging`, so a merge from the card shows there too.
     let merge = action.isMerge
@@ -561,13 +566,27 @@ final class BoardModel: ObservableObject {
     var args: [String: JSON] = ["session": .string(session), "option": .string(String(number)), "ref": .string(ref)]
     if let text { args["text"] = .string(text) }
     if merge { merging.insert(session) }
-    // A merge runs gh for up to two minutes, so it does not hold the other actions back.
     perform(
-      "choose", args, on: merge ? merges : nil,
+      "choose", args, on: action.waitsOnGh ? merges : nil, then: { _ in sent?() },
       finally: {
         self.choosing.remove(key)
         if merge { self.merging.remove(session) }
       })
+  }
+
+  /// The reviewers that sbd suggests for the session's PR. sbd asks GitHub
+  /// with gh, which can take seconds. The request runs off the action queue.
+  func reviewSuggestions(_ session: String) async throws -> [ReviewerSuggestion] {
+    let send = send
+    return try await withCheckedThrowingContinuation { done in
+      DispatchQueue.global(qos: .userInitiated).async {
+        done.resume(
+          with: Result {
+            let result = try send("review", ["session": .string(session)])
+            return try JSONCoding.convert(result["suggestions"] ?? [], to: [ReviewerSuggestion].self)
+          })
+      }
+    }
   }
 
   /// Submits a multi-select card's ticked options, by number, as one reply.

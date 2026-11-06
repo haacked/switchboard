@@ -71,7 +71,4 @@ jobs:
       - run: brew install tmux
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
-      # A 3-CPU runner with 2 integration shards keeps about half its CPU idle.
-      # With 3 or 4 it has almost none, and a shared MCP server's Python stub
-      # can take longer than sbd's fixed 10 s start window.
-      - run: bin/test --shards 2
+      - run: bin/test --shards 4

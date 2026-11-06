@@ -14,7 +14,7 @@ extension Service {
   /// records its error and fails the request. It changes nothing else.
   func mergeRequest(_ args: JSON) throws -> JSON {
     let (id, pr, method): (String, PullRequest?, MergeMethod) = try queue.sync {
-      let id = try mergeTarget(args)
+      let id = try sessionByPR(args)
       let e = entries[id]!
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       guard verdict.state == .readyToMerge, let pr = e.facts.pr else {
@@ -69,7 +69,7 @@ extension Service {
 
   /// The session that `session` names, or the one whose open PR has the
   /// number `pr`, in the repository `repository` when it is set.
-  private func mergeTarget(_ args: JSON) throws -> String {
+  func sessionByPR(_ args: JSON) throws -> String {
     guard let number = args["pr"]?.int else { return try lookup(args) }
     let repository = args["repository"]?.string
     let matches = entries.values.filter { e in
@@ -92,25 +92,38 @@ extension Service {
   /// `--match-head-commit` makes GitHub refuse the merge when a push landed
   /// after the session became Ready to merge.
   private func runMerge(_ pr: PullRequest) -> String? {
-    runGH(["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha])
+    ghError(
+      ["pr", "merge", String(pr.number), "--repo", pr.repo, "--merge", "--match-head-commit", pr.headSha],
+      timeout: Service.mergeTimeoutSeconds)
   }
 
   /// Comments `/trunk merge` on the PR, which adds it to Trunk's queue, and
   /// returns gh's error, or nil when the comment posted.
   private func runTrunkEnqueue(_ pr: PullRequest) -> String? {
-    runGH(["pr", "comment", String(pr.number), "--repo", pr.repo, "--body", "/trunk merge"])
+    ghError(
+      ["pr", "comment", String(pr.number), "--repo", pr.repo, "--body", "/trunk merge"],
+      timeout: Service.mergeTimeoutSeconds)
   }
 
-  private func runGH(_ args: [String]) -> String? {
-    guard let gh = findExecutable(config.github.gh) else { return "can't find \(config.github.gh)" }
+  /// Runs gh and returns its error, or nil when it exited 0.
+  func ghError(_ args: [String], timeout: TimeInterval) -> String? {
     do {
-      let r = try runCommand(gh, args, timeout: Service.mergeTimeoutSeconds)
-      if r.status == 0 { return nil }
-      let text = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .first { !$0.isEmpty }
-      return text ?? "gh \(args.prefix(2).joined(separator: " ")) exited with status \(r.status)"
+      _ = try runGh(args, timeout: timeout)
+      return nil
     } catch {
       return "\(error)"
     }
+  }
+
+  /// Runs gh and returns its stdout. A non-zero exit throws gh's error, or
+  /// its exit status when it printed nothing.
+  func runGh(_ args: [String], timeout: TimeInterval) throws -> String {
+    guard let gh = findExecutable(config.github.gh) else { throw APIError("can't find \(config.github.gh)") }
+    let r = try runCommand(gh, args, timeout: timeout)
+    guard r.status == 0 else {
+      let text = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+      throw APIError(text ?? "gh \(args.prefix(2).joined(separator: " ")) exited with status \(r.status)")
+    }
+    return r.stdout
   }
 }

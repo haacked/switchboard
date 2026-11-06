@@ -31,12 +31,12 @@ extension Attention {
     guard let pr = readyPR(facts), pr.needsReview == true else { return nil }
     let checks = pr.checks.map { "checks \($0.lowercased())" } ?? "no checks"
     let title = pr.title.isEmpty ? "" : " \(pr.title)"
-    return "#\(pr.number)\(title); \(reviewState(pr)), \(checks)"
+    return "#\(pr.number)\(title); \(reviewState(pr, requested: facts.requestedReviewers)), \(checks)"
   }
 
   /// Whether GitHub requires a review, then who approved, who requested
-  /// changes, and whose review GitHub still asks for.
-  static func reviewState(_ pr: PullRequest) -> String {
+  /// changes, and whose review is asked for, which `requested` names.
+  static func reviewState(_ pr: PullRequest, requested: [String]?) -> String {
     var parts: [String] = []
     if pr.reviewDecision == .reviewRequired { parts.append("review required") }
     if !pr.approvers.isEmpty { parts.append("approved by \(names(pr.approvers))") }
@@ -45,7 +45,7 @@ extension Attention {
     } else if pr.reviewDecision == .changesRequested {
       parts.append("changes requested")
     }
-    if let requested = pr.reviewRequests, !requested.isEmpty {
+    if let requested, !requested.isEmpty {
       parts.append("review requested from \(names(requested))")
     }
     return parts.joined(separator: "; ")

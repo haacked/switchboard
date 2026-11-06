@@ -15,8 +15,9 @@ extension Instance {
   }
 
   /// The arguments of each gh call that the stub ran and that starts with
-  /// `prefix`, oldest first.
-  func ghCalls(_ prefix: String) -> [String] {
+  /// `prefix`, oldest first. A call with a multi-line argument takes several
+  /// lines.
+  func ghCalls(_ prefix: String = "") -> [String] {
     let text = (try? String(contentsOfFile: "\(home.path)/gh-calls.log", encoding: .utf8)) ?? ""
     return text.split(separator: "\n").map(String.init).filter { $0.hasPrefix(prefix) }
   }
