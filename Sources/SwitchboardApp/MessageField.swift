@@ -357,6 +357,11 @@ struct FileDropTarget: NSViewRepresentable {
   final class DropView: NSView {
     var drop: ([URL]) -> Void = { _ in }
     var targeted: (Bool) -> Void = { _ in }
+    /// Receives promised files into a folder and calls `done` on the main queue with their URLs, in the order of
+    /// the promises. A URL whose promise failed names a file that does not exist, so `drop` reports it.
+    var receivePromises:
+      (_ promises: [NSFilePromiseReceiver], _ folder: URL, _ done: @escaping @MainActor ([URL]) -> Void) -> Void =
+        DropView.receive
 
     /// Which drop view limited each field editor. Every text field in a window shares one field editor, so
     /// focus that moves between two message fields can reach the new field's view before the old one's.
@@ -367,7 +372,8 @@ struct FileDropTarget: NSViewRepresentable {
 
     override init(frame: NSRect) {
       super.init(frame: frame)
-      registerForDraggedTypes([.fileURL, .string])
+      registerForDraggedTypes(
+        [.fileURL, .string] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -406,10 +412,11 @@ struct FileDropTarget: NSViewRepresentable {
       editor.updateDragTypeRegistration()
     }
 
-    /// Files become images. Text goes into the field when the field has focus, as the editor would insert it.
+    /// Files and promised files become images. Text goes into the field when the field has focus, as the editor
+    /// would insert it.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
       let pasteboard = sender.draggingPasteboard
-      let files = !pasteboard.fileURLs.isEmpty
+      let files = !pasteboard.fileURLs.isEmpty || pasteboard.canReadObject(forClasses: [NSFilePromiseReceiver.self])
       operation = files || (fieldEditor != nil && pasteboard.string(forType: .string) != nil) ? .copy : []
       targeted(files)
       return operation
@@ -429,6 +436,17 @@ struct FileDropTarget: NSViewRepresentable {
         drop(urls)
         return true
       }
+      let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver] ?? []
+      if !promises.isEmpty {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("switchboard-drop-\(UUID())")
+        guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
+        else { return false }
+        receivePromises(promises, folder) { [drop] urls in
+          drop(urls)
+          try? FileManager.default.removeItem(at: folder)
+        }
+        return true
+      }
       guard let editor = fieldEditor, let text = pasteboard.string(forType: .string) else { return false }
       let index = editor.characterIndexForInsertion(at: editor.convert(sender.draggingLocation, from: nil))
       var location = min(index, (editor.string as NSString).length)
@@ -446,6 +464,46 @@ struct FileDropTarget: NSViewRepresentable {
       editor.setSelectedRange(at)
       editor.insertText(text, replacementRange: at)
       return true
+    }
+
+    /// AppKit lets a receiver take its files only during `performDragOperation` and the calls around it. Each
+    /// promise writes one file per promised type, and the reader runs once for each file.
+    static func receive(
+      _ promises: [NSFilePromiseReceiver], into folder: URL, then done: @escaping @MainActor ([URL]) -> Void
+    ) {
+      let received = Received(expected: promises.map(\.fileTypes.count))
+      let group = DispatchGroup()
+      let queue = OperationQueue()
+      for (index, promise) in promises.enumerated() {
+        for _ in promise.fileTypes { group.enter() }
+        promise.receivePromisedFiles(atDestination: folder, options: [:], operationQueue: queue) { url, _ in
+          if received.add(url, at: index) { group.leave() }
+        }
+      }
+      group.notify(queue: .main) { MainActor.assumeIsolated { done(received.urls) } }
+    }
+
+    /// The files that each promise wrote, which the readers add from the operation queue's threads.
+    private final class Received: @unchecked Sendable {
+      private let lock = NSLock()
+      private let expected: [Int]
+      private var files: [[URL]]
+
+      init(expected: [Int]) {
+        self.expected = expected
+        files = Array(repeating: [], count: expected.count)
+      }
+
+      /// Adds the file and returns true, or returns false for a file beyond the count that the promise named.
+      func add(_ url: URL, at index: Int) -> Bool {
+        lock.withLock {
+          guard files[index].count < expected[index] else { return false }
+          files[index].append(url)
+          return true
+        }
+      }
+
+      var urls: [URL] { lock.withLock { files.flatMap { $0 } } }
     }
   }
 }

@@ -153,8 +153,87 @@ import Testing
     return DropSelfTest.DraggingInfo(window: nil, location: .zero, pasteboard: board)
   }
 
-  @Test func dropViewRegistersFileURLsAndText() {
-    #expect(Set(FileDropTarget.DropView().registeredDraggedTypes) == [.fileURL, .string])
+  @Test func dropViewRegistersFileURLsTextAndFilePromises() {
+    let promises = NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+
+    #expect(Set(FileDropTarget.DropView().registeredDraggedTypes) == Set([.fileURL, .string] + promises))
+  }
+
+  /// Writes a promised file when a receiver asks for it. The screenshot thumbnail offers its file this way.
+  final class Promise: NSObject, NSFilePromiseProviderDelegate {
+    let name: String
+    init(_ name: String) { self.name = name }
+    func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String { name }
+    func filePromiseProvider(
+      _ provider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping (Error?) -> Void
+    ) { completionHandler(nil) }
+  }
+
+  /// A drag of promised files. AppKit fulfills a promise only during a real drag, so `fulfill` stands in for the
+  /// source: it writes each promise's file into the folder that the view chose, in the order of the promises.
+  func promiseDrag(_ files: [(name: String, data: Data)], into view: FileDropTarget.DropView)
+    -> (DropSelfTest.DraggingInfo, folders: () -> [URL])
+  {
+    let promises = files.map { Promise($0.name) }
+    let info = drag(promises.map { NSFilePromiseProvider(fileType: "public.png", delegate: $0) })
+    var folders: [URL] = []
+    view.receivePromises = { receivers, folder, done in
+      folders.append(folder)
+      #expect(receivers.count == files.count)
+      let urls = files.map { folder.appendingPathComponent($0.name) }
+      for (url, file) in zip(urls, files) { try? file.data.write(to: url) }
+      done(urls)
+    }
+    return (info, { withExtendedLifetime(promises) { folders } })
+  }
+
+  @Test func dropViewAttachesPromisedImagesInTheOrderOfTheDrag() throws {
+    let draft = MessageField.Draft()
+    let view = FileDropTarget.DropView()
+    view.drop = { draft.add(paths: $0.map(\.path)) }
+    var targeted: [Bool] = []
+    view.targeted = { targeted.append($0) }
+    let (info, folders) = promiseDrag(
+      [("Screenshot 2.png", Self.png), ("Screenshot 1.png", Self.png)], into: view)
+
+    #expect(view.draggingEntered(info) == .copy)
+    #expect(view.performDragOperation(info))
+
+    #expect(draft.images.map(\.name) == ["Screenshot 2.png", "Screenshot 1.png"])
+    #expect(draft.error == nil)
+    #expect(targeted.first == true)
+    let folder = try #require(folders().first)
+    #expect(!FileManager.default.fileExists(atPath: folder.path))
+  }
+
+  @Test func dropViewRefusesAPromisedFileThatIsNotAnImageAndKeepsTheRest() {
+    let draft = MessageField.Draft()
+    let view = FileDropTarget.DropView()
+    view.drop = { draft.add(paths: $0.map(\.path)) }
+    let (info, _) = promiseDrag([("notes.png", Data("just some text".utf8)), ("shot.png", Self.png)], into: view)
+
+    #expect(view.performDragOperation(info))
+
+    #expect(draft.images.map(\.name) == ["shot.png"])
+    #expect(draft.error == "notes.png isn't an image.")
+  }
+
+  /// A drag that names a file needs no promise, so the view never waits for one.
+  @Test func dropViewTakesFileURLsOverPromises() throws {
+    let view = FileDropTarget.DropView()
+    var dropped: [URL] = []
+    view.drop = { dropped = $0 }
+    var asked = false
+    view.receivePromises = { _, _, _ in asked = true }
+    let promise = Promise("thumbnail.png")
+    let info = drag([
+      URL(fileURLWithPath: try file("a.png")) as NSURL,
+      NSFilePromiseProvider(fileType: "public.png", delegate: promise),
+    ])
+
+    #expect(view.performDragOperation(info))
+    #expect(dropped.map(\.lastPathComponent) == ["a.png"])
+    #expect(!asked)
   }
 
   @Test func dropViewPassesClicksThrough() {

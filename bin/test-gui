@@ -478,6 +478,7 @@ check_drops() {
     "focused two: targets DropView | chips a.png b.jpg | error  | text "
     "typed then three: targets DropView | chips a.png b.jpg c.gif | error  | text look at these"
     "file with its text: targets DropView | chips a.png | error  | text "
+    "promise drag: targets DropView copy"
     "text drag: targets DropView | chips  | error  | text look at this"
     "link drag: targets DropView | chips  | error  | text see https://example.com/a.png"
     "focused two drags: targets DropView DropView | chips a.png b.jpg c.gif | error  | text "

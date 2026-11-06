@@ -95,6 +95,7 @@ enum DropSelfTest {
     await step("typed then three", typed: "look at these", [files(["a.png", "b.jpg", "c.gif"])])
     await step("focused two drags", [files(["a.png"]), files(["b.jpg", "c.gif"])])
     await step("file with its text", [fileWithText("\(folder)/a.png")])
+    log("promise drag: \(route(thumbnailDrag().board, on: field))")
     await step("text drag", typed: "look ", [pasteboard(["at this" as NSString])])
     await step("link drag", typed: "see ", [link("https://example.com/a.png")])
 
@@ -165,6 +166,32 @@ enum DropSelfTest {
     item.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
     item.setString(path, forType: .string)
     return pasteboard([item])
+  }
+
+  /// A drag that offers its file only as a promise, as the screenshot thumbnail does. AppKit fulfills a promise
+  /// only during a real drag, so the step checks which view takes the drag and does not drop it.
+  private static func thumbnailDrag() -> (board: NSPasteboard, promise: Promise) {
+    let promise = Promise()
+    return (pasteboard([NSFilePromiseProvider(fileType: "public.png", delegate: promise)]), promise)
+  }
+
+  private final class Promise: NSObject, NSFilePromiseProviderDelegate {
+    func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+      "Screenshot.png"
+    }
+    func filePromiseProvider(
+      _ provider: NSFilePromiseProvider, writePromiseTo url: URL, completionHandler: @escaping (Error?) -> Void
+    ) { completionHandler(nil) }
+  }
+
+  /// The class of the view that AppKit picks under the field's center, and what that view would do with the drag.
+  private static func route(_ board: NSPasteboard, on field: NSTextField) -> String {
+    guard let window = field.window, let frame = window.contentView?.superview else { return "<no window>" }
+    let point = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
+    guard let target = appKitDestination(in: frame, at: point, for: board) else { return "<none>" }
+    let operation = target.draggingEntered(DraggingInfo(window: window, location: point, pasteboard: board))
+    target.draggingExited(nil)
+    return "targets \(type(of: target)) \(operation == .copy ? "copy" : "\(operation.rawValue)")"
   }
 
   /// A link dragged from a browser: its URL, and its text.
