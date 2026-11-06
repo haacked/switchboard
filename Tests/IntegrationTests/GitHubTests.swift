@@ -301,6 +301,42 @@ extension Instance {
     #expect(try sbd.get(s.id).pr == nil)
   }
 
+  @Test func showsTheBranchThatTheFolderHasCheckedOut() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/cdp-dlq-breaker-counts-lookups")
+    #expect(try sbd.events(s.id).filter { $0.kind == "branch" }.isEmpty)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    #expect(try sbd.sb("get", s.id).contains("branch:  haacked/mcp-experiment-condition-ids"))
+    #expect(try sbd.client.sessions().first { $0.id == s.id }?.branch == "haacked/mcp-experiment-condition-ids")
+    // A detached HEAD keeps the last branch, and a poll that finds no change records nothing.
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+    #expect(try sbd.events(s.id).filter { $0.kind == "branch" }.count == 1)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+  }
+
+  @Test func showsTheCheckedOutBranchOfAFolderWithoutAGitHubRemote() throws {
+    let sbd = try Instance.withGitHub(try FakeGitHub())
+    let s = try sbd.new(prompt: "hello")
+    let path = s.cwd
+    try sbd.git(path, "init", "-q", "-b", "main")
+    try sbd.git(
+      path, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty",
+      "-m", "first")
+    try sbd.git(path, "checkout", "-q", "-b", "haacked/local-only")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/local-only")
+  }
+
   @Test func dropsTheLinkedPROfAnEarlierBranch() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
