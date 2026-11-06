@@ -6,9 +6,10 @@ import Foundation
 /// PNG file that the app draws its main window, or the window's open sheet,
 /// into after SB_SNAPSHOT_DELAY seconds (default 3). The app draws the
 /// window itself, so this needs no screen recording permission. The drawing
-/// leaves out the window's background, so a snapshot run uses the light
-/// appearance, whose text reads on the white that remains. SwiftTerm draws
-/// text in layers that the drawing misses, so `sb screen` checks terminals.
+/// leaves out the window's background, so the snapshot fills it in with the
+/// window background color first. A snapshot run uses the light appearance,
+/// or the dark one with SB_SNAPSHOT_APPEARANCE=dark. SwiftTerm draws text in
+/// layers that the drawing misses, so `sb screen` checks terminals.
 @MainActor
 enum Snapshot {
   static func start(_ model: BoardModel) {
@@ -31,7 +32,7 @@ enum Snapshot {
     TerminalSelfTest.start(model)
     DraftSelfTest.start(model)
     guard let path = env["SB_SNAPSHOT"] else { return }
-    NSApp.appearance = NSAppearance(named: .aqua)
+    NSApp.appearance = NSAppearance(named: env["SB_SNAPSHOT_APPEARANCE"] == "dark" ? .darkAqua : .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
       write(to: path)
@@ -48,8 +49,21 @@ enum Snapshot {
       return
     }
     view.cacheDisplay(in: view.bounds, to: rep)
+    var background = NSColor.white.cgColor
+    view.effectiveAppearance.performAsCurrentDrawingAppearance { background = NSColor.windowBackgroundColor.cgColor }
+    guard let image = rep.cgImage,
+      let context = CGContext(
+        data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return }
+    let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+    context.setFillColor(background)
+    context.fill(bounds)
+    context.draw(image, in: bounds)
+    guard let composed = context.makeImage() else { return }
+    let out = NSBitmapImageRep(cgImage: composed)
     do {
-      try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+      try out.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     } catch {
       FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8))
     }

@@ -19,7 +19,7 @@ struct DecisionCard: View {
           ForEach(Array(item.callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
         }
       }
-      actions
+      VStack(alignment: .leading, spacing: 8) { actions }
       CardDetails(session: session)
     }
   }
@@ -54,7 +54,9 @@ struct DecisionCard: View {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
     // A Ready to merge card offers Acknowledge as one of its options.
-    if session.state != .readyToMerge { AcknowledgeButton(session: session, primary: session.isInformational) }
+    if session.state != .readyToMerge {
+      AcknowledgeButton(session: session, primary: session.isInformational, boxed: true)
+    }
   }
 }
 
@@ -68,84 +70,17 @@ extension TriageOption {
     return "\(label), merge #\(pr)"
   }
 
-  /// Whether the option's row shows `effect` beside its button. A session
-  /// writes the label, so the row shows what a click does unless the label is
-  /// the text that a click sends.
+  /// Whether the option's box shows `effect` under its description. A
+  /// session writes the label, so the box shows what a click does unless the
+  /// label is the text that a click sends.
   var showsEffect: Bool { action != .send || (message ?? label) != label }
 
   /// What VoiceOver reads after the label: the option's detail and what a
   /// click does.
   func accessibilityHint(mergeMethod: MergeMethod?) -> String {
     let effect = effect(mergeMethod: mergeMethod)
-    return OptionRow.join(detail, effect) ?? effect
-  }
-}
-
-/// An option's compact button. A click runs the option's action, or
-/// `onClick` when it is set. The primary one is filled and answers ⌘⇧Return.
-struct OptionButton: View {
-  @EnvironmentObject var model: BoardModel
-  let session: SessionSummary
-  let ref: String
-  let number: Int
-  let option: TriageOption
-  let title: OptionTitle
-  let primary: Bool
-  var onClick: (() -> Void)?
-
-  static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
-
-  var body: some View {
-    let effect = option.effect(mergeMethod: session.pr?.mergeMethod)
-    let button = Button {
-      if let onClick { onClick() } else { model.choose(session.id, ref: ref, option: number, action: option.action) }
-    } label: {
-      title
-    }
-    .disabled(
-      model.choosing.contains("\(session.id)/\(number)")
-        || (option.action.isMerge && model.merging.contains(session.id))
-    )
-    .help(effect)
-    .accessibilityLabel(option.accessibilityLabel(pr: session.pr?.number))
-    .accessibilityHint(option.accessibilityHint(mergeMethod: session.pr?.mergeMethod))
-    if primary {
-      button.buttonStyle(.borderedProminent).keyboardShortcut(Self.primaryShortcut)
-    } else {
-      button.buttonStyle(.bordered)
-    }
-  }
-}
-
-/// A choice that needs typing: a short field and a Send button. The option's
-/// row shows its title beside them.
-struct ReplyOption: View {
-  @EnvironmentObject var model: BoardModel
-  let session: SessionSummary
-  let ref: String
-  let number: Int
-  let option: TriageOption
-  @Binding var text: String
-
-  private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-  var body: some View {
-    HStack {
-      TextField(option.placeholder ?? option.label, text: $text)
-        .textFieldStyle(.roundedBorder)
-        .onSubmit(send)
-        .accessibilityLabel(option.label)
-        .accessibilityHint(option.detail ?? "")
-      Button("Send", action: send)
-        .disabled(trimmed.isEmpty || model.choosing.contains("\(session.id)/\(number)"))
-        .accessibilityLabel("Send: \(option.label)")
-    }
-  }
-
-  private func send() {
-    guard !trimmed.isEmpty else { return }
-    model.choose(session.id, ref: ref, option: number, action: .reply, text: trimmed)
-    text = ""
+    guard let detail, !detail.isEmpty else { return effect }
+    return detail.last.map(".?!".contains) == true ? "\(detail) \(effect)" : "\(detail). \(effect)"
   }
 }
 

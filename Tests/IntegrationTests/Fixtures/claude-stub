@@ -30,6 +30,8 @@
 #   perm <command>   asks permission to run a Bash command
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
+#   pick colors      asks only the multi-select question
+#   pick fruit       asks only the single-choice question
 #   For perm and pick, the PermissionRequest hook runs while a stand-in for
 #   Claude Code's dialog shows on the terminal and reads keys: Enter on the
 #   first item or y allows, and Escape, Enter on No, or esc refuses and kills
@@ -589,6 +591,13 @@ turn() {
     ;;
   perm*)
     asks "$p" Bash "$(jq -nc --arg c "${p#perm }" '{command: $c}')"
+    return
+    ;;
+  "pick colors" | "pick fruit")
+    local one
+    one=$(jq -c --argjson i "$([ "$p" = "pick colors" ] && echo 1 || echo 0)" '{questions: [.questions[$i]]}' <<<"$questions")
+    # A pick in the terminal answers with the question's first option.
+    asks "$p" AskUserQuestion "$one" "$(jq -c '. + {answers: {(.questions[0].question): .questions[0].options[0].label}}' <<<"$one")"
     return
     ;;
   pick*)

@@ -12,6 +12,9 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
   for c in item.callouts {
     out("   [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
+  if item.hasTickable {
+    out("   pick any, as in: sb choose \(s.id) 1,3")
+  }
   for (i, o) in item.options.enumerated() {
     out("   \(i + 1)) \(o.label)\(o.recommended ? " (recommended)" : "")\(o.detail.map { ": \($0)" } ?? "")")
     // Clicking sends this text as you, so you read it first.
@@ -55,7 +58,14 @@ func choose(_ a: Args) {
   if key.isEmpty { die("choose needs an option, by number or label") }
   // The item that the user is about to click, so a new one is not clicked by mistake.
   guard let item = summary(call("get", ["session": .string(id)])).triage else { die("\(id) needs nothing from you") }
-  var args: [String: JSON] = ["session": .string(id), "option": .string(key), "ref": .string(item.ref)]
+  var args: [String: JSON] = ["session": .string(id), "ref": .string(item.ref)]
+  // A multi-select card takes several options separated by commas, as `sb answer` does.
+  // A label that holds a comma still names its own option.
+  if item.multiSelect, key.contains(","), (try? item.option(key)) == nil {
+    args["options"] = .array(key.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) })
+  } else {
+    args["option"] = .string(key)
+  }
   if let text { args["text"] = .string(text) }
   // A choice can allow, answer, merge, or request a review. `allow`, `answer`, `merge`, and `review` refuse those
   // inside Claude Code.

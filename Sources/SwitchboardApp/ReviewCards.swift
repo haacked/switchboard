@@ -9,14 +9,14 @@ struct RequestReviewOption: View {
   let ref: String
   let number: Int
   let option: TriageOption
-  let title: OptionTitle
   let primary: Bool
+  var shortcut = false
   @State private var picking = false
 
   var body: some View {
-    OptionButton(session: session, ref: ref, number: number, option: option, title: title, primary: primary) {
-      picking = true
-    }
+    OptionButton(
+      session: session, ref: ref, number: number, option: option, primary: primary, shortcut: shortcut
+    ) { picking = true }
     .popover(isPresented: $picking, arrowEdge: .bottom) {
       ReviewerPicker(session: session, ref: ref, number: number)
     }

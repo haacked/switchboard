@@ -41,8 +41,13 @@ extension Service {
     if let ref = args["ref"]?.string, ref != item.ref {
       throw APIError("\(name) has a new item since you looked. Look again")
     }
-    guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
-    let option = try item.option(key)
+    let option: TriageOption
+    if let keys = args["options"]?.array {
+      option = Triage.combined(try item.picks(keys.map { $0.string ?? "" }))
+    } else {
+      guard let key = args["option"]?.string else { throw APIError("name an option, by number or label") }
+      option = try item.option(key)
+    }
     // Claude Code may not approve its own prompt or act on its own PR.
     if args["insideClaude"]?.bool == true, item.source == .card || option.action.needsClick {
       throw APIError("choose answers a prompt or acts on a PR for you, so it doesn't run inside Claude Code")

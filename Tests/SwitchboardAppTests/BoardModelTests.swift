@@ -580,6 +580,32 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(sent.args == ["session": "a", "option": "2", "ref": "summary:1", "text": "Use SQLite."])
   }
 
+  @Test func chooseSendsTheTickedOptionsAsAList() async {
+    let sent = await firstRequest { $0.choose("a", ref: "summary:1", picks: ["1", "3"]) }
+
+    #expect(sent.op == "choose")
+    #expect(sent.args == ["session": "a", "options": ["1", "3"], "ref": "summary:1"])
+  }
+
+  @Test func ignoresASecondSubmitWhileTheFirstRuns() async {
+    let sent = await firstRequest { model in
+      model.choose("a", ref: "summary:1", picks: ["1"])
+      model.choose("a", ref: "summary:1", picks: ["1"])
+      #expect(model.choosing == ["a/picks"])
+    }
+    #expect(sent.count == 1)
+  }
+
+  @Test func submitWithNoPicksSendsNothing() async {
+    let sent = await firstRequest { model in
+      model.choose("a", ref: "summary:1", picks: [])
+      #expect(model.choosing.isEmpty)
+      model.choose("a", ref: "summary:1", picks: ["2"])
+    }
+    #expect(sent.count == 1)
+    #expect(sent.args == ["session": "a", "options": ["2"], "ref": "summary:1"])
+  }
+
   @Test func ignoresACardsMergeWhileAMergeRuns() async {
     let sent = await firstRequest { model in
       model.merge("a")
