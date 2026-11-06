@@ -44,6 +44,8 @@ public final class Service {
     var summaryAttempt: Int64 = 0
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// Set when a held start runs, until its queued message starts a turn.
+    var startedFromHold = false
 
     /// Whether a message is queued for the session or on its way.
     func messageWaiting(now: Int64) -> Bool {
@@ -84,8 +86,9 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
-  /// The most claude processes that may run at once. `sb live --set` changes it.
-  var liveCap: Int
+  /// The most claude processes that may run at once, or nil for no limit.
+  /// `sb live --set` and `sb live --unlimited` change it.
+  var liveCap: Int?
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
@@ -1362,6 +1365,7 @@ public final class Service {
         }
         if var e = entries[id] {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
+          if e.startedFromHold, e.facts.turnRunning || !e.messageWaiting(now: now) { e.startedFromHold = false }
           entries[id] = e
           summarizeTurn(id, verdict)
         }
@@ -1413,7 +1417,10 @@ public final class Service {
 
   func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
-    let verdict = Attention.shown(Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts)
+    let now = nowMs()
+    let held = showsHeld(e, now: now)
+    let verdict = Attention.shown(
+      Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState), e.facts, held: held)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
@@ -1445,7 +1452,14 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason }
+    if verdict.held {
+      let place = heldPosition(id)
+      out.reason = heldReason(place: place)
+      out.held = true
+      out.heldSince = e.queuedSince
+      out.heldPosition = place
+      if let queuedSince = e.queuedSince { out.since = queuedSince }
+    }
     out.shellClosed = s.shellClosed
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.

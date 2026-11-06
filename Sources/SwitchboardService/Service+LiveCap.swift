@@ -9,9 +9,33 @@ extension Service {
 
   /// Whether a launch would start claude now instead of queueing. A launch
   /// waits behind any queued start, so the oldest start takes the next free slot.
-  func hasRoom() -> Bool { !entries.values.contains { $0.queuedSince != nil } && liveCount() < liveCap }
+  func hasRoom() -> Bool {
+    guard let liveCap else { return true }
+    return !entries.values.contains { $0.queuedSince != nil } && liveCount() < liveCap
+  }
 
-  var queuedReason: String { "queued: \(liveCount()) of \(liveCap) live" }
+  /// The reason line of a session whose start is held, from its place in line.
+  func heldReason(place: Int?) -> String {
+    guard let liveCap, let place else { return "held: starting" }
+    return "held: \(liveCount()) of \(liveCap) running, \(Service.ordinal(place)) in line"
+  }
+
+  /// Whether the session shows as held: its start waits for a slot, or has
+  /// just run, and the message that it carries has not started a turn. A queued
+  /// start with no message, such as `open`, changes nothing the user must decide.
+  func showsHeld(_ e: Entry, now: Int64) -> Bool {
+    (e.queuedSince != nil && !e.pending.isEmpty) || (e.startedFromHold && e.messageWaiting(now: now))
+  }
+
+  /// The session's place among the held starts, from 1, or nil when none is held.
+  func heldPosition(_ id: String) -> Int? {
+    queuedStarts().firstIndex { $0.session.id == id }.map { $0 + 1 }
+  }
+
+  static func ordinal(_ n: Int) -> String {
+    let suffix = (11...13).contains(n % 100) ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]
+    return "\(n)\(suffix)"
+  }
 
   /// The session, when its folder exists and its claude is stopped.
   func requireStartable(_ id: String) throws -> Session {
@@ -29,7 +53,9 @@ extension Service {
     _ = try requireStartable(id)
     if entries[id]?.queuedSince == nil {
       entries[id]?.queuedSince = nowMs()
-      record(id, "start-queued", ["live": .number(Double(liveCount())), "cap": .number(Double(liveCap))])
+      var data: [String: JSON] = ["live": .number(Double(liveCount()))]
+      if let liveCap { data["cap"] = .number(Double(liveCap)) }
+      record(id, "start-queued", .object(data))
     }
     if let prompt, !prompt.isEmpty { queueMessage(id, prompt, byUser: true) }
   }
@@ -42,9 +68,10 @@ extension Service {
     guard !queued.isEmpty else { return }
     var live = liveEntries()
     // A start needs the shared MCP servers, as the tick's other launches do.
-    while !mcpStarting(now: now), live.count < liveCap, let next = queued.popFirst() {
+    while !mcpStarting(now: now), liveCap.map({ live.count < $0 }) ?? true, let next = queued.popFirst() {
       let id = next.session.id
       entries[id]?.queuedSince = nil
+      entries[id]?.startedFromHold = true
       do {
         try startClaude(id, prompt: nil)
         live.append(entries[id]!)
@@ -52,6 +79,7 @@ extension Service {
         logLine("can't start queued \(id): \(error)")
       }
     }
+    guard let liveCap else { return }
     // A session that sbd stopped keeps its slot until its claude exits.
     let needed = queued.count - (liveCap - live.count) - live.filter(\.facts.exiting).count
     guard needed > 0 else { return }
@@ -61,7 +89,7 @@ extension Service {
   }
 
   /// The sessions whose start queued, oldest first.
-  private func queuedStarts() -> [Entry] {
+  func queuedStarts() -> [Entry] {
     entries.values.filter { $0.queuedSince != nil }.sorted {
       ($0.queuedSince!, $0.session.id) < ($1.queuedSince!, $1.session.id)
     }
@@ -92,12 +120,17 @@ extension Service {
   /// turn that reports it. A stop in that gap loses the report.
   static let jobReportMs: Int64 = 5_000
 
-  /// Sets the cap when the request names `cap`, and returns the status. A
-  /// new cap is saved in config.json and holds at once.
+  /// Sets the limit when the request names `cap`, or removes it when the
+  /// request says `unlimited`, and returns the status. A new limit is saved in
+  /// config.json and holds at once.
   func liveRequest(_ args: JSON) throws -> JSON {
-    if let value = args["cap"] {
-      guard let cap = value.int, cap >= 1 else { throw APIError("the live cap is a whole number of at least 1") }
-      try saveLiveCap(cap)
+    if args["unlimited"]?.bool == true {
+      try saveSetting("liveCap", nil)
+      liveCap = nil
+      logLine("the live cap is off")
+    } else if let value = args["cap"] {
+      guard let cap = value.int, cap >= 1 else { throw APIError("the limit is a whole number of at least 1") }
+      try saveSetting("liveCap", .number(Double(cap)))
       liveCap = cap
       logLine("the live cap is \(cap)")
     }
@@ -113,18 +146,19 @@ extension Service {
     return try JSON(encoding: LiveStatus(cap: liveCap, live: live, queued: queued))
   }
 
-  /// Writes the cap into config.json and keeps every other setting there.
-  /// It refuses to rewrite a file that it can't read as a JSON object.
-  private func saveLiveCap(_ cap: Int) throws {
+  /// Writes the setting into config.json, or removes it when `value` is nil,
+  /// and keeps every other setting there. It refuses to rewrite a file that
+  /// it can't read as a JSON object.
+  private func saveSetting(_ key: String, _ value: JSON?) throws {
     var settings: [String: JSON] = [:]
     if FileManager.default.fileExists(atPath: home.config) {
       let text = try String(contentsOfFile: home.config, encoding: .utf8)
       guard let object = JSON.parse(text)?.object else {
-        throw APIError("\(home.config) isn't a JSON object, so the cap can't be saved there")
+        throw APIError("\(home.config) isn't a JSON object, so \(key) can't be saved there")
       }
       settings = object
     }
-    settings["liveCap"] = .number(Double(cap))
+    settings[key] = value
     try (JSON.object(settings).prettyText + "\n").write(toFile: home.config, atomically: true, encoding: .utf8)
   }
 }

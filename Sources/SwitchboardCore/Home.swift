@@ -67,8 +67,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var claude: String = "claude"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
-  /// The most claude processes that may run at once. Further starts queue.
-  public var liveCap = 10
+  /// The most claude processes that may run at once, or nil for no limit.
+  /// Further starts are held until a slot frees.
+  public var liveCap: Int?
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
   /// The model for new sessions, or nil for claude's default.
@@ -129,7 +130,10 @@ public struct Config: Codable, Equatable, Sendable {
     claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? d.claude
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
-    liveCap = try c.decodeIfPresent(Int.self, forKey: .liveCap) ?? d.liveCap
+    // A value that isn't a whole number of at least 1 means no limit.
+    if let n = try? c.decodeIfPresent(Double.self, forKey: .liveCap), n >= 1, let cap = Int(exactly: n) {
+      liveCap = cap
+    }
     model = try c.decodeIfPresent(String.self, forKey: .model)
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)

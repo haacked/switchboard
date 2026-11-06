@@ -58,13 +58,24 @@ extension Attention {
   /// head commit are the ones that the user saw. sbd's own rules, such as
   /// waits, parent notices, and auto-continue, read `evaluate`'s verdict. An
   /// acknowledgment therefore changes nothing that sbd does.
-  public static func shown(_ verdict: Verdict, _ facts: SessionFacts) -> Verdict {
-    guard AttentionState.inbox.contains(verdict.state), facts.acknowledgment == Acknowledgment(verdict, facts) else {
-      return verdict
-    }
+  public static func shown(_ verdict: Verdict, _ facts: SessionFacts, held: Bool = false) -> Verdict {
     var out = verdict
+    if held, mayHold(verdict, facts) {
+      out.state = .waiting
+      out.held = true
+    }
+    guard AttentionState.inbox.contains(verdict.state), facts.acknowledgment == Acknowledgment(verdict, facts) else {
+      return out
+    }
     out.state = .waiting
     out.acknowledged = true
     return out
+  }
+
+  /// Whether a session whose start is held shows in Waiting. A session with
+  /// an open card, prompt, or question keeps its state, so that a held start
+  /// never hides a decision from the user. A running turn can't be held.
+  private static func mayHold(_ verdict: Verdict, _ facts: SessionFacts) -> Bool {
+    verdict.state != .working && facts.cards.isEmpty && facts.openPermission == nil && facts.openQuestion == nil
   }
 }

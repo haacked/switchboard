@@ -54,12 +54,13 @@ extension Instance {
     return try sbd.waitFor(s.id, "\(name)'s stop") { $0.claudePid == nil && !$0.live }
   }
 
-  /// The reason of a queued session while every slot is taken.
-  func queuedReason(cap: Int) -> String { "queued: \(cap) of \(cap) live" }
+  /// The start of the reason of a held session while every slot is taken. The
+  /// rest names its place in line.
+  func heldPrefix(cap: Int) -> String { "held: \(cap) of \(cap) running, " }
 
   @discardableResult
   func waitForQueued(_ sbd: Instance, _ id: String, cap: Int) throws -> SessionSummary {
-    try sbd.waitFor(id, "the queued start") { $0.reason == queuedReason(cap: cap) }
+    try sbd.waitFor(id, "the queued start") { $0.reason.hasPrefix(heldPrefix(cap: cap)) }
   }
 
   // MARK: The cap holds
@@ -96,7 +97,7 @@ extension Instance {
       row = try JSONCoding.decode(SessionSummary.self, from: try sbd.sb("get", "--json", c.id))
     }
 
-    #expect(row.reason == queuedReason(cap: 2))
+    #expect(row.reason == heldPrefix(cap: 2) + "1st in line")
     #expect(row.claudePid == nil)
   }
 
@@ -130,10 +131,10 @@ extension Instance {
 
     let text = try sbd.sb("live")
 
-    #expect(text.contains("2 of 2 claude processes live, 1 queued"), "\(text)")
+    #expect(text.contains("2 of 2 claude processes running, 1 held"), "\(text)")
     #expect(text.contains("alpha-busy"), "\(text)")
     #expect(text.contains("bravo-busy"), "\(text)")
-    #expect(text.contains("charlie-queued  queued"), "\(text)")
+    #expect(text.contains("charlie-queued  held"), "\(text)")
   }
 
   @Test func theQueuedListKeepsTheOrderOfTheStarts() throws {
@@ -191,7 +192,7 @@ extension Instance {
     try sbd.sb("stop", a.id)
 
     let started = try sbd.waitFor(c.id, "the queued start to run") { $0.lastReply == "Done: hello" }
-    #expect(started.reason != queuedReason(cap: 2))
+    #expect(!started.reason.hasPrefix(heldPrefix(cap: 2)))
     #expect(try sbd.liveIds("queued").isEmpty)
   }
 
@@ -207,7 +208,7 @@ extension Instance {
     try sbd.sb("stop", a.id)
 
     try sbd.waitFor(b.id, "the oldest start to run") { $0.state == .working && $0.claudePid != nil }
-    #expect(try sbd.get(c.id).reason == queuedReason(cap: 1))
+    #expect(try sbd.get(c.id).reason.hasPrefix(heldPrefix(cap: 1)))
     #expect(try sbd.liveIds("queued") == [c.id])
   }
 
@@ -253,7 +254,7 @@ extension Instance {
 
     #expect(try sbd.get(a.id).claudePid == a.claudePid)
     #expect(try !sbd.events(a.id).contains { $0.kind == "stopped" })
-    #expect(try sbd.get(b.id).reason == queuedReason(cap: 1))
+    #expect(try sbd.get(b.id).reason.hasPrefix(heldPrefix(cap: 1)))
 
     try sbd.waitFor(b.id, "the queued start after a's turn", timeout: 40) { $0.lastReply == "Done: hello" }
     #expect(try !sbd.capStops(a.id).isEmpty)
@@ -273,7 +274,7 @@ extension Instance {
     #expect(after.claudePid == a.claudePid)
     #expect(after.cards.count == 1)
     #expect(try !sbd.events(a.id).contains { $0.kind == "stopped" })
-    #expect(try sbd.get(b.id).reason == queuedReason(cap: 1))
+    #expect(try sbd.get(b.id).reason.hasPrefix(heldPrefix(cap: 1)))
   }
 
   /// claude starts the turn that reports a background job up to 1.3 s after
@@ -389,7 +390,7 @@ extension Instance {
     try sbd.advanceClock(1_000)
 
     #expect(try sbd.get(a.id).claudePid == a.claudePid)
-    #expect(try sbd.get(b.id).reason == queuedReason(cap: 1))
+    #expect(try sbd.get(b.id).reason.hasPrefix(heldPrefix(cap: 1)))
   }
 
   // MARK: Messages
@@ -504,5 +505,103 @@ extension Instance {
     #expect(throws: (any Error).self) { try sbd.client.call("live", ["cap": cap]) }
     #expect(try sbd.config() == before)
     #expect(try sbd.liveStatus()["cap"]?.int == 2)
+  }
+
+  // MARK: Held sessions
+
+  @Test func aHeldSessionShowsInWaitingAndNotInTheInbox() throws {
+    let sbd = try instance(cap: 2)
+    _ = try busySession(sbd, name: "a")
+    _ = try busySession(sbd, name: "b")
+
+    // Underneath, a new session with no turn yet is Needs you ("give it a first prompt").
+    let c = try sbd.new(prompt: "hello", name: "c")
+    let held = try waitForQueued(sbd, c.id, cap: 2)
+
+    #expect(held.state == .waiting)
+    #expect(held.held == true)
+    #expect(held.heldPosition == 1)
+    #expect(held.heldSince != nil)
+    #expect(try sbd.triage().map(\.id).contains(c.id) == false)
+    let rows = try JSONCoding.decode([SessionSummary].self, from: try sbd.sb("ls", "--json"))
+    #expect(try #require(rows.first { $0.id == c.id }).held == true)
+    #expect(rows.filter { $0.id != c.id }.allSatisfy { $0.held == nil })
+  }
+
+  @Test func aHeldSessionLeavesWaitingWhenItsStartRuns() throws {
+    let sbd = try instance(cap: 1)
+    let a = try busySession(sbd, name: "a", seconds: 30)
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try waitForQueued(sbd, b.id, cap: 1)
+
+    try sbd.sb("stop", a.id)
+
+    let started = try sbd.waitFor(b.id, "the held start to run") { $0.claudePid != nil }
+    #expect(started.held == nil)
+    #expect(!started.reason.hasPrefix(heldPrefix(cap: 1)))
+  }
+
+  // MARK: sb live --unlimited
+
+  @Test func unlimitedRemovesTheLimitAndReleasesHeldStarts() throws {
+    let sbd = try instance(cap: 1)
+    _ = try busySession(sbd, name: "a")
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try waitForQueued(sbd, b.id, cap: 1)
+
+    let result = try #require(JSON.parse(try sbd.sb("live", "--unlimited", "--json")))
+
+    #expect(result["cap"] == nil)
+    #expect(try sbd.config()["liveCap"] == nil)
+    try sbd.waitFor(b.id, "the held start to run") { $0.claudePid != nil }
+    #expect(try sbd.liveIds("queued").isEmpty)
+    #expect(try sbd.sb("live").contains("no limit"))
+  }
+
+  @Test func withNoLimitNoStartIsHeld() throws {
+    let sbd = try instance(cap: 1)
+    try sbd.sb("live", "--unlimited")
+
+    let sessions = try (1...4).map { try busySession(sbd, name: "s\($0)") }
+
+    #expect(try sbd.liveIds("queued").isEmpty)
+    #expect(try sessions.allSatisfy { try sbd.get($0.id).held == nil })
+    #expect(try sbd.autoContinueStatus().liveCap == nil)
+  }
+
+  @Test func unlimitedSavesTheOtherKeysAndSurvivesARestart() throws {
+    let sbd = try instance(cap: 2, extra: ["autoContinue": ["perHour": 2]])
+    var before = try sbd.config()
+
+    try sbd.sb("live", "--unlimited")
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    before["liveCap"] = nil
+    #expect(try sbd.config() == before)
+    #expect(try sbd.liveStatus()["cap"] == nil)
+  }
+
+  @Test func setAndUnlimitedTogetherAreRefused() throws {
+    let sbd = try instance(cap: 2)
+    let before = try sbd.config()
+
+    #expect(try sbd.run("live", "--set", "3", "--unlimited").status != 0)
+    #expect(try sbd.config() == before)
+  }
+
+  @Test func openingAStoppedSessionKeepsItsDecisionInTheInbox() throws {
+    let sbd = try instance(cap: 1)
+    let idle = try stoppedSession(sbd, name: "idle")
+    let before = try sbd.get(idle.id)
+    _ = try busySession(sbd, name: "busy")
+
+    // The start queues with no message, so nothing replaces the state the user must decide.
+    try sbd.sb("open", idle.id)
+    try waitForQueued(sbd, idle.id, cap: 1)
+
+    let after = try sbd.get(idle.id)
+    #expect(after.held == nil)
+    #expect(after.state == before.state)
   }
 }
