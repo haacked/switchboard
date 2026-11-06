@@ -131,7 +131,9 @@ public struct Config: Codable, Equatable, Sendable {
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
     // A value that isn't a whole number of at least 1 means no limit.
-    if let n = try? c.decodeIfPresent(Double.self, forKey: .liveCap), n >= 1, n == n.rounded() { liveCap = Int(n) }
+    if let n = try? c.decodeIfPresent(Double.self, forKey: .liveCap), n >= 1, let cap = Int(exactly: n) {
+      liveCap = cap
+    }
     model = try c.decodeIfPresent(String.self, forKey: .model)
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)

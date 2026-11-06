@@ -298,7 +298,8 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
 
   @Test(arguments: [
     (#"{"liveCap": 3}"#, 3 as Int?), (#"{}"#, nil), (#"{"liveCap": 0}"#, nil), (#"{"liveCap": -1}"#, nil),
-    (#"{"liveCap": 2.5}"#, nil), (#"{"liveCap": "4"}"#, nil), (#"{"liveCap": null}"#, nil),
+    (#"{"liveCap": 2.5}"#, nil), (#"{"liveCap": 1e19}"#, nil), (#"{"liveCap": "4"}"#, nil),
+    (#"{"liveCap": null}"#, nil),
   ])
   func theLimitIsAWholeNumberOfAtLeastOneOrNothing(_ text: String, _ expected: Int?) throws {
     #expect(try JSONCoding.decode(Config.self, from: text).liveCap == expected)

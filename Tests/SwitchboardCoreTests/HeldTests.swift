@@ -101,3 +101,17 @@ extension HeldTests {
     }
   }
 }
+
+extension HeldTests {
+  @Suite struct Coding {
+    @Test func aSummaryOmitsHeldWhenItIsNotSet() throws {
+      let s = SessionSummary(
+        id: "s1", name: "s1", cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: "c1", state: .waiting, reason: "",
+        since: 0, lastActivity: 0, live: false, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+      let json = try JSON(encoding: s)
+      #expect(json["held"] == nil)
+      #expect(json["heldSince"] == nil)
+      #expect(json["heldPosition"] == nil)
+    }
+  }
+}

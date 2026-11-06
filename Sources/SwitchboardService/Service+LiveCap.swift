@@ -20,6 +20,13 @@ extension Service {
     return "held: \(liveCount()) of \(liveCap) running, \(Service.ordinal(place)) in line"
   }
 
+  /// Whether the session shows as held: its start waits for a slot, or has
+  /// just run, and the message that it carries has not started a turn. A queued
+  /// start with no message, such as `open`, changes nothing the user must decide.
+  func showsHeld(_ e: Entry, now: Int64) -> Bool {
+    (e.queuedSince != nil && !e.pending.isEmpty) || (e.startedFromHold && e.messageWaiting(now: now))
+  }
+
   /// The session's place among the held starts, from 1, or nil when none is held.
   func heldPosition(_ id: String) -> Int? {
     queuedStarts().firstIndex { $0.session.id == id }.map { $0 + 1 }
@@ -64,6 +71,7 @@ extension Service {
     while !mcpStarting(now: now), liveCap.map({ live.count < $0 }) ?? true, let next = queued.popFirst() {
       let id = next.session.id
       entries[id]?.queuedSince = nil
+      entries[id]?.startedFromHold = true
       do {
         try startClaude(id, prompt: nil)
         live.append(entries[id]!)

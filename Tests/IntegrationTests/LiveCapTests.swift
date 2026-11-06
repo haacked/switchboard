@@ -549,9 +549,9 @@ extension Instance {
     let b = try sbd.new(prompt: "hello", name: "b")
     try waitForQueued(sbd, b.id, cap: 1)
 
-    let result = JSON.parse(try sbd.sb("live", "--unlimited", "--json"))
+    let result = try #require(JSON.parse(try sbd.sb("live", "--unlimited", "--json")))
 
-    #expect(result?["cap"] == nil)
+    #expect(result["cap"] == nil)
     #expect(try sbd.config()["liveCap"] == nil)
     try sbd.waitFor(b.id, "the held start to run") { $0.claudePid != nil }
     #expect(try sbd.liveIds("queued").isEmpty)
@@ -588,5 +588,20 @@ extension Instance {
 
     #expect(try sbd.run("live", "--set", "3", "--unlimited").status != 0)
     #expect(try sbd.config() == before)
+  }
+
+  @Test func openingAStoppedSessionKeepsItsDecisionInTheInbox() throws {
+    let sbd = try instance(cap: 1)
+    let idle = try stoppedSession(sbd, name: "idle")
+    let before = try sbd.get(idle.id)
+    _ = try busySession(sbd, name: "busy")
+
+    // The start queues with no message, so nothing replaces the state the user must decide.
+    try sbd.sb("open", idle.id)
+    try waitForQueued(sbd, idle.id, cap: 1)
+
+    let after = try sbd.get(idle.id)
+    #expect(after.held == nil)
+    #expect(after.state == before.state)
   }
 }
