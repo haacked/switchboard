@@ -241,38 +241,14 @@ public enum PlanUpdates {
 
   // MARK: Dates
 
-  static let asOf = "status as of"
+  static func isDateLine(_ line: String) -> Bool { line.lowercased().contains(StatusDates.phrase) }
 
-  private static let months =
-    "January|February|March|April|May|June|July|August|September|October|November|December"
-  private static let shortMonths = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
-
-  /// The date shapes that a "status as of" line can hold, with the format
-  /// that writes each one. A date starts and ends away from letters and
-  /// digits. `\b` would miss a date between underscores, as in an italic
-  /// `_status as of Nov 1, 2026_`.
-  private static let dateShapes: [(NSRegularExpression, String)] = [
-    (#"\d{4}-\d{2}-\d{2}"#, "yyyy-MM-dd"),
-    (#"(\#(months)) \d{1,2}, \d{4}"#, "MMMM d, yyyy"),
-    (#"(\#(shortMonths)) \d{1,2}, \d{4}"#, "MMM d, yyyy"),
-    (#"(\#(shortMonths))\. \d{1,2}, \d{4}"#, "MMM. d, yyyy"),
-    (#"\d{1,2} (\#(months)) \d{4}"#, "d MMMM yyyy"),
-    (#"\d{1,2} (\#(shortMonths)) \d{4}"#, "d MMM yyyy"),
-    (#"\d{1,2} (\#(shortMonths))\. \d{4}"#, "d MMM. yyyy"),
-  ].map { (try! NSRegularExpression(pattern: "(?<![A-Za-z0-9])(?:\($0.0))(?![A-Za-z0-9])"), $0.1) }
-
-  static func isDateLine(_ line: String) -> Bool { line.lowercased().contains(asOf) }
-
-  /// The line with the first date after "status as of" set to `today`, in
-  /// the date's own format, or nil when the line holds no such date.
+  /// The line with the date right after "status as of" set to `today`, in
+  /// the date's own format. Nil when no date follows the phrase, or when a
+  /// letter or digit sits between them.
   static func dated(_ line: String, today: Date, timeZone: TimeZone) -> String? {
-    guard let phrase = line.range(of: asOf, options: .caseInsensitive) else { return nil }
-    let from = NSRange(phrase.upperBound..., in: line)
-    let found = dateShapes.compactMap { regex, format in
-      regex.firstMatch(in: line, range: from).map { ($0.range, format) }
-    }.min { $0.0.location < $1.0.location }
-    guard let (range, format) = found, let r = Range(range, in: line) else { return nil }
-    var date = Wait.formatter(format, timeZone).string(from: today)
+    guard let (r, formats) = StatusDates.find(in: line) else { return nil }
+    var date = Wait.formatter(formats[0], timeZone).string(from: today)
     // The formatter writes September as "Sep". A line that spelled it "Sept" keeps that spelling.
     if line[r].range(of: #"Sept(?![a-z])"#, options: .regularExpression) != nil,
       let sep = date.range(of: #"Sep(?![a-z])"#, options: .regularExpression)
@@ -284,7 +260,7 @@ public enum PlanUpdates {
 
   /// The line with every date it holds removed.
   static func undated(_ line: String) -> String {
-    dateShapes.reduce(line) { text, shape in
+    StatusDates.shapes.reduce(line) { text, shape in
       shape.0.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
     }
   }
