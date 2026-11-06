@@ -120,8 +120,12 @@ fail() {
   echo "FAIL ($check): $*" >&2
   echo "--- sbd log" >&2
   tail -n 20 "$home/sbd.log" >&2 || true
-  echo "--- app log" >&2
-  tail -n 20 "$home/shots/$check/app.log" >&2 || true
+  local log
+  for log in "$home/shots/$check/app.log" "$home/shots/$check/session.log" "$home/shots/$check/inbox.log" "$home/shots/$check/chat.log"; do
+    [ -f "$log" ] || continue
+    echo "--- ${log##*/}" >&2
+    tail -n 20 "$log" >&2 || true
+  done
   echo "--- screen" >&2
   cat "$home/shots/$check/screen.txt" >&2 || true
   exit 1

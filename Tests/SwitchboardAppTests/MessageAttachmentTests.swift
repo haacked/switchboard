@@ -309,6 +309,44 @@ import Testing
     #expect((field.currentEditor() as? NSTextView)?.string == "look at this")
   }
 
+  /// A field that holds `text`, with `selected` selected, under a drop view. The drag starts in the field's editor.
+  func movingText(_ text: String, selected: NSRange, dropAt x: CGFloat) throws -> (NSTextField, Bool) {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 280, height: 24))
+    field.stringValue = text
+    let view = FileDropTarget.DropView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+    window.contentView?.addSubview(field)
+    window.contentView?.addSubview(view)
+    try #require(window.makeFirstResponder(field))
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    editor.setSelectedRange(selected)
+    let board = pasteboard()
+    board.writeObjects([(text as NSString).substring(with: selected) as NSString])
+    let info = DropSelfTest.DraggingInfo(
+      window: window, location: NSPoint(x: x, y: 22), pasteboard: board, source: editor)
+    _ = view.draggingEntered(info)
+    let handled = view.performDragOperation(info)
+    return (field, handled)
+  }
+
+  @Test func dropViewMovesTextDraggedWithinTheFocusedField() throws {
+    let (field, handled) = try movingText("hello world", selected: NSRange(location: 6, length: 5), dropAt: 2)
+
+    #expect(handled)
+    #expect((field.currentEditor() as? NSTextView)?.string.count == 11)
+    #expect((field.currentEditor() as? NSTextView)?.string.contains("worldworld") == false)
+  }
+
+  @Test func dropViewLeavesTextDroppedInsideItsOwnSelection() throws {
+    let (field, handled) = try movingText("hello world", selected: NSRange(location: 2, length: 7), dropAt: 40)
+
+    #expect(handled)
+    #expect((field.currentEditor() as? NSTextView)?.string == "hello world")
+  }
+
   // MARK: paste(from:)
 
   @Test func pasteAttachesPNGData() {

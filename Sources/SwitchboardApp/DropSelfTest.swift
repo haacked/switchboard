@@ -220,13 +220,15 @@ enum DropSelfTest {
     0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
   ])
 
-  /// A drag from another app, with no source in this one.
+  /// A drag from another app when `source` is nil.
   final class DraggingInfo: NSObject, NSDraggingInfo {
     let window: NSWindow?
     let location: NSPoint
     let pasteboard: NSPasteboard
+    let source: Any?
 
-    init(window: NSWindow?, location: NSPoint, pasteboard: NSPasteboard) {
+    init(window: NSWindow?, location: NSPoint, pasteboard: NSPasteboard, source: Any? = nil) {
+      self.source = source
       self.window = window
       self.location = location
       self.pasteboard = pasteboard
@@ -238,7 +240,7 @@ enum DropSelfTest {
     var draggedImageLocation: NSPoint { location }
     var draggedImage: NSImage? { nil }
     var draggingPasteboard: NSPasteboard { pasteboard }
-    var draggingSource: Any? { nil }
+    var draggingSource: Any? { source }
     var draggingSequenceNumber: Int { 1 }
     func slideDraggedImage(to screenPoint: NSPoint) {}
     var draggingFormation: NSDraggingFormation = .default

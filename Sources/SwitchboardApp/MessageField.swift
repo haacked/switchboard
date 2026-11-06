@@ -46,13 +46,16 @@ struct MessageField: View {
 
     /// Adds each image file in order, and sets `error` for each file that is not one.
     func add(paths: [String]) {
-      attach(paths.map { path in ((path as NSString).lastPathComponent, { try Attachments.read(path: path) }) })
+      attach(
+        paths.map { path in
+          ((path as NSString).lastPathComponent, { try Attachments.read(path: path, remaining: $0) })
+        })
     }
 
     /// Adds each file in order while the message stays within `Attachments.checkMessage`. It leaves out a file
     /// that fails to read or would pass a limit, and `error` names that file. The files after it still attach.
-    /// A file past the count limit is not read.
-    private func attach(_ files: [(name: String, read: () throws -> Data)]) {
+    /// A file past the count limit is not read. A file larger than the room left under the total limit is not read.
+    private func attach(_ files: [(name: String, read: (_ remaining: Int) throws -> Data)]) {
       var refused: [String] = []
       var overLimit: [(reason: String, names: [String])] = []
       func leaveOut(_ name: String, _ error: any Error) {
@@ -73,7 +76,10 @@ struct MessageField: View {
         }
         let data: Data
         do {
-          data = try file.read()
+          data = try file.read(Attachments.totalLimit - total)
+        } catch let error as Attachments.OverTotalLimit {
+          leaveOut(file.name, error)
+          continue
         } catch {
           refused.append("\(error)")
           continue
@@ -109,7 +115,7 @@ struct MessageField: View {
       guard !items.contains(where: { $0.types.contains(.string) }) else { return false }
       let images = items.filter { $0.types.contains(.png) || $0.types.contains(.tiff) }
       guard !images.isEmpty else { return false }
-      attach(images.map { item in (Self.pastedName, { try Self.png(item) }) })
+      attach(images.map { item in (Self.pastedName, { _ in try Self.png(item) }) })
       return true
     }
 
@@ -425,7 +431,18 @@ struct FileDropTarget: NSViewRepresentable {
       }
       guard let editor = fieldEditor, let text = pasteboard.string(forType: .string), let window else { return false }
       let index = editor.characterIndexForInsertion(at: window.convertPoint(toScreen: sender.draggingLocation))
-      let at = NSRange(location: min(index, (editor.string as NSString).length), length: 0)
+      var location = min(index, (editor.string as NSString).length)
+      if sender.draggingSource as AnyObject? === editor {
+        // The editor takes no drags, so it never deletes the text it dragged.
+        // A drop inside the dragged text changes nothing.
+        let moved = editor.selectedRange()
+        if moved.length > 0 {
+          guard location <= moved.location || location >= NSMaxRange(moved) else { return true }
+          editor.insertText("", replacementRange: moved)
+          if location > moved.location { location -= moved.length }
+        }
+      }
+      let at = NSRange(location: location, length: 0)
       editor.setSelectedRange(at)
       editor.insertText(text, replacementRange: at)
       return true

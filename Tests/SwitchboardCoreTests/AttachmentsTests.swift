@@ -262,6 +262,18 @@ func scratchFolder() throws -> String {
     #expect(refusal { try Attachments.read(path: path) } == "big.png is larger than 20 MB.")
   }
 
+  @Test func readRefusesAFileLargerThanTheRoomLeftBeforeReadingIt() throws {
+    let dir = try scratchFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let path = "\(dir)/big.png"
+    try Data(count: 1000).write(to: URL(fileURLWithPath: path))
+
+    // A read file would fail as "isn't an image", so this error shows the content was never read.
+    #expect(
+      refusal { try Attachments.read(path: path, remaining: 999) } == "a message's images can total at most 100 MB.")
+    #expect(refusal { try Attachments.read(path: path, remaining: 1000) }?.contains("isn't an image") == true)
+  }
+
   @Test func readsAFileOfExactlyTheLimit() throws {
     let dir = try scratchFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
