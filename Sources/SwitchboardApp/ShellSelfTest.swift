@@ -2,8 +2,8 @@ import AppKit
 import SwiftTerm
 
 /// A scripted check of the shell pane, run by `bin/test-gui`. SB_SHELL_TEST=<folder> makes the app run each
-/// command that a script writes to <folder>/cmd, one at a time. The app deletes the file and appends
-/// "shelltest: <command> -> <result>" to standard error when the command is done. The commands are:
+/// command that a script writes to <folder>/cmd, one at a time. When the command is done, the app appends
+/// "shelltest: <command> -> <result>" to standard error and then deletes the file. The commands are:
 /// `click close` clicks the × on the Shell pane's label with mouse events at the button's place in the
 /// window. `click open` clicks Open Shell on the Claude pane's label the same way. SwiftUI builds no
 /// accessibility elements without an assistive app, so the test can't press a button by its label.
@@ -20,9 +20,10 @@ enum ShellSelfTest {
     Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
       MainActor.assumeIsolated {
         guard let command = try? String(contentsOfFile: path, encoding: .utf8) else { return }
-        try? FileManager.default.removeItem(atPath: path)
         let line = command.trimmingCharacters(in: .whitespacesAndNewlines)
         log("\(line) -> \(run(line, model))")
+        // The script reads the result once the file is gone, so the file goes only after the log line.
+        try? FileManager.default.removeItem(atPath: path)
       }
     }
   }
