@@ -184,12 +184,12 @@ extension Service {
   /// Removes a follow-up that hasn't started. It has no panes, folder, or
   /// worktree, so only its row and events go.
   private func removeFollowup(_ args: JSON) throws -> JSON {
-    try queue.sync {
+    let resolving = try resolveArgument(args)
+    return try queue.sync {
       let id = try lookup(args)
       guard entries[id]!.session.waitsToStart else { throw APIError("\(id) has started. sb rm removes a session") }
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
-      entries[id] = nil
-      try store.delete(session: id)
+      try forgetSession(id, resolving: resolving)
       try detachPlans { $0.session == id }
       return ["removed": .string(id)]
     }

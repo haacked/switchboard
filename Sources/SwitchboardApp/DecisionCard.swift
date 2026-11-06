@@ -50,6 +50,7 @@ struct DecisionCard: View {
         .background(Capsule().fill(session.state.color.opacity(0.18)))
         .foregroundStyle(session.state.color)
         .accessibilityLabel("Kind: \(item.kind.rawValue)")
+      NotesButton(session: session)
     }
   }
 
@@ -185,8 +186,8 @@ struct CalloutView: View {
   }
 }
 
-/// The full last reply, the PR and its checks, notes, waits, and the newest
-/// events, collapsed until the user opens them.
+/// The full last reply, the PR and its checks, waits, and the newest events,
+/// collapsed until the user opens them.
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -202,9 +203,6 @@ struct CardDetails: View {
         }
         if !session.waits.isEmpty {
           section("Waits") { ForEach(session.waits, id: \.id) { Text($0.line) } }
-        }
-        if !session.notes.isEmpty {
-          section("Notes") { ForEach(session.notes, id: \.id) { Text($0.text).textSelection(.enabled) } }
         }
         if let text = model.replies[session.id] ?? session.lastReply, !text.isEmpty {
           section("Last reply") { MarkdownView(text: text) }

@@ -31,7 +31,7 @@ enum DoneRemovalText {
     if item.worktree != nil { parts.append("worktree") }
     if item.branch != nil { parts.append("branch") }
     if item.remoteBranch { parts.append("remote branch") }
-    return BoardModel.DeletePlan.list(parts)
+    return englishList(parts)
   }
 }
 

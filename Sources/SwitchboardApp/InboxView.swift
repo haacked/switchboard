@@ -113,6 +113,7 @@ struct TriageRow: View {
         .lineLimit(1)
       }
       Spacer(minLength: 0)
+      NotesButton(session: session)
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 6)

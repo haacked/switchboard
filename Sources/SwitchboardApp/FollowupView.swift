@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// See SessionViewState for why this isn't `@State`.
 final class FollowupViewState: ObservableObject {
-  @Published var confirmingRemove = false
+  @Published var removal: TodoDeletion?
 }
 
 /// A follow-up that hasn't started: its prompt, where it came from, and the
@@ -13,6 +13,10 @@ struct FollowupView: View {
   let session: SessionSummary
   let followup: Followup
   @StateObject private var ui = FollowupViewState()
+
+  private var isConfirmingRemove: Binding<Bool> {
+    Binding(get: { ui.removal != nil }, set: { if !$0 { ui.removal = nil } })
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -31,7 +35,7 @@ struct FollowupView: View {
         if followup.repository != nil { StartButton(session: session, inFolder: true) }
         Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
         Button(role: .destructive) {
-          ui.confirmingRemove = true
+          ui.removal = TodoDeletion(session)
         } label: {
           Image(systemName: "trash")
         }
@@ -74,10 +78,10 @@ struct FollowupView: View {
       }
     }
     .padding(16)
-    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove) {
-      Button("Remove Follow-up", role: .destructive) { model.remove(session.id) }
-    } message: {
-      Text("An import of Followups.md won't add it again.")
+    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: ui.removal) { todos in
+      Button(todos.button("Remove Follow-up"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
+    } message: { todos in
+      Text(todos.message(before: "An import of Followups.md won't add it again."))
     }
   }
 
