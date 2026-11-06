@@ -12,16 +12,19 @@ private final class Field {
   var binding: Binding<String> { Binding(get: { self.text }, set: { self.text = $0 }) }
 }
 
-/// A model whose requests wait until the test signals the semaphore.
+/// A model whose requests wait until the test signals the semaphore. The
+/// counter counts the requests that reach sbd.
 @MainActor
-private func heldModel() -> (BoardModel, DispatchSemaphore) {
+private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
   let model = offlineModel()
   let release = DispatchSemaphore(value: 0)
+  let requests = Counter()
   model.send = { _, _ in
+    requests.increment()
     release.wait()
     return .null
   }
-  return (model, release)
+  return (model, release, requests)
 }
 
 @MainActor
@@ -63,7 +66,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore) {
   }
 
   @Test func textEditedWhileTheChooseRunsSurvivesItsSuccess() async {
-    let (model, release) = heldModel()
+    let (model, release, _) = heldModel()
     let field = Field("Use SQLite.")
 
     submit(field, to: model)
@@ -71,6 +74,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore) {
     release.signal()
     await settle { model.choosing.isEmpty }
 
+    #expect(model.choosing.isEmpty)
     #expect(model.actionError == nil)
     #expect(field.text == "Use SQLite, and Postgres later.")
   }
@@ -92,7 +96,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore) {
 @Suite struct BoardModelChooseSent {
 
   @Test func doesNotReportAChooseThatTheDuplicateGuardDropped() async {
-    let (model, release) = heldModel()
+    let (model, release, requests) = heldModel()
     let first = Counter()
     let second = Counter()
 
@@ -101,12 +105,13 @@ private func heldModel() -> (BoardModel, DispatchSemaphore) {
     release.signal()
     await settle { model.choosing.isEmpty }
 
+    #expect(requests.value == 1)
     #expect(first.value == 1)
     #expect(second.value == 0)
   }
 
   @Test func doesNotReportAChooseThatARunningMergeDropped() async {
-    let (model, release) = heldModel()
+    let (model, release, requests) = heldModel()
     let sent = Counter()
 
     model.merge("a")
@@ -114,6 +119,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore) {
     release.signal()
     await settle { model.merging.isEmpty }
 
+    #expect(requests.value == 1)
     #expect(sent.value == 0)
   }
 }

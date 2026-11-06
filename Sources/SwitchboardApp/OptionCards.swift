@@ -171,8 +171,9 @@ struct OptionList: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let item: TriageItem
-  /// Typed replies by option index.
-  @State private var replies: [Int: String] = [:]
+  /// Typed replies by item ref and option index. The view outlives its item,
+  /// so a reply that sbd refused as stale would otherwise fill the next item's field.
+  @State private var replies: [String: String] = [:]
   @State private var picks = OptionPicks()
 
   /// The picks for the item on screen. A pick made on another item, such as
@@ -199,9 +200,10 @@ struct OptionList: View {
       ForEach(item.options.indices, id: \.self) { i in
         let option = item.options[i]
         if option.action == .reply {
+          let key = "\(item.ref)/\(i)"
           ReplyOption(
             session: session, ref: item.ref, number: i + 1, option: option,
-            text: Binding(get: { replies[i, default: ""] }, set: { replies[i] = $0 }))
+            text: Binding(get: { replies[key, default: ""] }, set: { replies[key] = $0 }))
         } else if item.isTickable(option) {
           tickBox(i, option)
         } else {
