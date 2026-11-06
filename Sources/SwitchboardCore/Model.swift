@@ -223,6 +223,13 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the user acknowledged the session's Inbox item, which moves
   /// it to Waiting until its reason changes or a new turn starts.
   public var acknowledged: Bool?
+  /// True while the start of the session's claude waits for a free slot under
+  /// the limit. The session shows in Waiting and stays out of the Inbox.
+  public var held: Bool?
+  /// When the start was held, in ms since the epoch.
+  public var heldSince: Int64?
+  /// The session's place in line, from 1.
+  public var heldPosition: Int?
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?

@@ -93,6 +93,9 @@ final class BoardModel: ObservableObject {
   @Published var accounts: [AccountInfo] = []
   /// Each account's last usage reading.
   @Published var usage: [AccountUsage] = []
+  /// How many claude processes run and how many starts are held, read with
+  /// the follow-ups.
+  @Published var limit: LiveStatus?
   /// A switch of the active account that waits for the user to say whether
   /// the sessions on the other accounts move too.
   @Published var switchingAccount: AccountSwitch?
@@ -222,7 +225,9 @@ final class BoardModel: ObservableObject {
       let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
       let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
       let usage = readUsage ? try? client.usage() : nil
+      let limit = readFollowups ? try? client.call("live", as: LiveStatus.self) : nil
       Task { @MainActor in
+        if let limit, self.limit != limit { self.limit = limit }
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
@@ -324,6 +329,13 @@ final class BoardModel: ObservableObject {
         self.refresh(followups: true)
       }
     }
+  }
+
+  /// Sets how many claude processes may run at once, or removes the limit.
+  func setLimit(_ cap: Int?) {
+    var args: [String: JSON] = ["unlimited": true]
+    if let cap { args = ["cap": .number(Double(cap))] }
+    perform("live", args)
   }
 
   /// Makes new sessions run under the account. When sessions on other

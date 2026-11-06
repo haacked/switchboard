@@ -135,6 +135,7 @@ struct ContentView: View {
         .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
       ToolbarItem { ManagerButton() }
+      ToolbarItem { LimitMenu() }
       ToolbarItem { UsageMenu() }
       ToolbarItem {
         if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {

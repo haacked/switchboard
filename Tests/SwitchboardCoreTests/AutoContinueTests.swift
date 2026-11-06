@@ -217,6 +217,16 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(stopped(live: 1, cap: 1) == "the live cap of 1 is full")
   }
 
+  @Test func aStoppedSessionGoesWhenThereIsNoLimit() {
+    let reason = blocker {
+      $0.process = .stopped
+      $0.facts.live = false
+      $0.live = 500
+      $0.liveCap = nil
+    }
+    #expect(reason == nil)
+  }
+
   @Test func aRunningSessionIgnoresAFullLiveCap() {
     let reason = blocker {
       $0.process = .running
@@ -249,6 +259,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     input.process = .starting
     input.onScreen = true
     input.live = 12
+    input.liveCap = 12
     input.account = "/a"
     input.hasBudget = false
     let fixes: [(String, (inout AutoContinueInput) -> Void)] = [
@@ -282,7 +293,15 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(settings.message == "Yes, go ahead.")
     #expect(settings.quietSeconds == 600)
     #expect(settings.perHour == 3)
-    #expect(Config().liveCap == 10)
+    #expect(Config().liveCap == nil)
+  }
+
+  @Test(arguments: [
+    (#"{"liveCap": 3}"#, 3 as Int?), (#"{}"#, nil), (#"{"liveCap": 0}"#, nil), (#"{"liveCap": -1}"#, nil),
+    (#"{"liveCap": 2.5}"#, nil), (#"{"liveCap": "4"}"#, nil), (#"{"liveCap": null}"#, nil),
+  ])
+  func theLimitIsAWholeNumberOfAtLeastOneOrNothing(_ text: String, _ expected: Int?) throws {
+    #expect(try JSONCoding.decode(Config.self, from: text).liveCap == expected)
   }
 
   @Test(arguments: [#"{}"#, #"{"autoContinue": {}}"#])

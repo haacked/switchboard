@@ -311,6 +311,8 @@ public struct Verdict: Equatable, Sendable {
   public var source: VerdictSource = .rule
   /// True when `Attention.shown` moved an acknowledged Inbox verdict to Waiting.
   public var acknowledged = false
+  /// True when `Attention.shown` moved a verdict to Waiting because the session's start is held.
+  public var held = false
   /// What the session's card offers for a rule that knows the next step.
   public var options: [TriageOption] = []
   /// What the user should read before deciding.

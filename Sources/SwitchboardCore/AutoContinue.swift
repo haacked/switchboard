@@ -50,8 +50,8 @@ public struct AutoContinueInput {
   public var lastOnScreen: Int64 = 0
   /// Sessions whose claude runs or is starting, this one included.
   public var live = 0
-  /// `Config.liveCap`. A continue that has to start claude needs a free slot.
-  public var liveCap = 12
+  /// `Config.liveCap`, or nil for no limit. A continue that has to start claude needs a free slot.
+  public var liveCap: Int?
   /// The session's Claude config folder.
   public var account = ""
   public var hasBudget = true
@@ -85,14 +85,15 @@ public struct AutoContinueStatus: Codable, Equatable, Sendable {
   public var message: String
   public var quietSeconds: Int
   public var perHour: Int
-  public var liveCap: Int
+  /// The most claude processes that may run at once, or nil for no limit.
+  public var liveCap: Int?
   /// Sessions whose claude runs or is starting.
   public var live: Int
   /// The sessions in Claude can continue, oldest first.
   public var sessions: [AutoContinueCandidate]
 
   public init(
-    enabled: Bool, settings: AutoContinueSettings, liveCap: Int, live: Int, sessions: [AutoContinueCandidate]
+    enabled: Bool, settings: AutoContinueSettings, liveCap: Int?, live: Int, sessions: [AutoContinueCandidate]
   ) {
     self.enabled = enabled
     message = settings.message
@@ -132,7 +133,7 @@ public enum AutoContinue {
     // A continue leaves the state as it was until claude reports its prompt.
     // The in-flight window alone can't stop a second continue.
     if let last = f.autoContinues.last, last >= f.stateSince { return "already continued this offer" }
-    if input.process == .stopped, input.live >= input.liveCap { return "the live cap of \(input.liveCap) is full" }
+    if input.process == .stopped, let cap = input.liveCap, input.live >= cap { return "the live cap of \(cap) is full" }
     if !input.hasBudget { return "no quota left for \(input.account)" }
     return nil
   }

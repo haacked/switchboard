@@ -21,7 +21,7 @@ public struct LiveStatus: Codable, Equatable, Sendable {
   public struct QueuedStart: Codable, Equatable, Sendable {
     public var session: String
     public var name: String
-    /// When the start queued, in ms since the epoch.
+    /// When the start was held, in ms since the epoch.
     public var since: Int64
 
     public init(session: String, name: String, since: Int64) {
@@ -31,12 +31,13 @@ public struct LiveStatus: Codable, Equatable, Sendable {
     }
   }
 
-  public var cap: Int
+  /// Nil when there is no limit.
+  public var cap: Int?
   public var live: [LiveSession]
   /// Oldest first, the order in which they start.
   public var queued: [QueuedStart]
 
-  public init(cap: Int, live: [LiveSession], queued: [QueuedStart]) {
+  public init(cap: Int?, live: [LiveSession], queued: [QueuedStart]) {
     self.cap = cap
     self.live = live
     self.queued = queued

@@ -84,8 +84,9 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
-  /// The most claude processes that may run at once. `sb live --set` changes it.
-  var liveCap: Int
+  /// The most claude processes that may run at once, or nil for no limit.
+  /// `sb live --set` and `sb live --unlimited` change it.
+  var liveCap: Int?
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
@@ -1410,7 +1411,9 @@ public final class Service {
 
   func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
     let e = entries[id]!
-    let verdict = Attention.shown(Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts)
+    let held = e.queuedSince != nil
+    let verdict = Attention.shown(
+      Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts, held: held)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
@@ -1442,7 +1445,16 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason }
+    if let queuedSince = e.queuedSince {
+      let place = heldPosition(id)
+      out.reason = heldReason(place: place)
+      if verdict.held {
+        out.held = true
+        out.heldSince = queuedSince
+        out.heldPosition = place
+        out.since = queuedSince
+      }
+    }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

@@ -210,9 +210,10 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
-    live [--set N]                list the sessions whose claude runs and the
-                                  starts that queue behind the cap. --set changes
-                                  the cap and saves it in config.json
+    live [--set N|--unlimited]    list the sessions whose claude runs and the
+                                  starts that are held behind the limit. --set
+                                  changes the limit and --unlimited removes it.
+                                  Both save it in config.json
     service install|uninstall|status
     version
 
