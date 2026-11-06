@@ -43,7 +43,7 @@ enum TerminalSelfTest {
 
   private static func claudePane() -> TerminalView? { panes().first }
 
-  static var window: NSWindow? { NSApp.windows.first { $0.isVisible && $0.title == "Switchboard" } }
+  static var window: NSWindow? { NSApp.switchboardWindow }
 
   /// The window's terminals from left to right.
   static func panes() -> [TerminalView] {
