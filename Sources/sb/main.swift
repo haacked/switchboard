@@ -357,6 +357,7 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let owners = s.pr?.codeOwners { print("  owners:  \(owners.text(separator: "; "))".printable) }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
   for d in s.dependencies ?? [] {
     let deploy = d.deploy ? (d.deployed == true ? ", deployed" : ", deploy") : ""
@@ -719,6 +720,7 @@ case "poll":
   }
   if let error = result["depotError"]?.string { warn(error) }
   if let error = result["trunkError"]?.string { warn(error) }
+  if let error = result["codeOwnersError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)
