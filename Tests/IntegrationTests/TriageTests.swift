@@ -25,6 +25,10 @@ extension Instance {
   }
 }
 
+/// A real reply that asks the user to make six decisions.
+let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCoreTests/Fixtures/replies/decisions.md")
+  .path
+
 @Suite(.blocking(timeLimit: .seconds(120))) struct TriageTests {
   @Test func summarizesATurnThatEndsInProse() throws {
     let sbd = try Instance()
@@ -217,6 +221,32 @@ extension Instance {
     #expect(item.summary == "Which database should I use, Postgres or SQLite?")
     #expect(item.options.isEmpty)
     #expect(item.kind == .question)
+  }
+
+  @Test func aFailedSummaryOfDecisionsFallsBackToTheirList() throws {
+    let sbd = try Instance()
+    try FileManager.default.copyItem(atPath: decisionsReply, toPath: "\(sbd.home.path)/decisions.md")
+    let s = try sbd.new(prompt: "reply decisions", name: "FAIL-SUMMARY")
+    try sbd.waitForTriageEvent(s.id)
+    let item = try #require(try sbd.get(s.id).triage)
+    #expect(item.source == .fallback)
+    #expect(item.summary.hasPrefix("Decisions I need from you:\n1. Should a due follow-up"))
+  }
+
+  @Test func keepsEachLineOfASummaryThatListsDecisions() throws {
+    let sbd = try Instance()
+    try FileManager.default.copyItem(atPath: decisionsReply, toPath: "\(sbd.home.path)/decisions.md")
+    let summary =
+      (["It planned follow-ups."] + (1...6).map { "\($0). Decision \($0)? It recommends yes." }
+      + ["It needs all six."]).joined(separator: "\n")
+    let answer: JSON = [
+      "title": "Answer six design choices", "kind": "decision", "summary": .string(summary), "options": [],
+    ]
+    try answer.text.write(toFile: "\(sbd.home.path)/summary-answer.json", atomically: true, encoding: .utf8)
+    let s = try sbd.new(prompt: "reply decisions")
+    let item = try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }.triage!
+    #expect(item.kind == .decision)
+    #expect(item.summary == summary)
   }
 
   @Test func aSummaryThatTimesOutFallsBack() throws {
@@ -451,5 +481,54 @@ extension Instance {
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
     #expect(sbd.stubArgs().allSatisfy { !$0.contains("--append-system-prompt") })
+  }
+}
+
+/// Summaries from the installed claude with Haiku, with the prompt and the
+/// parser that sbd uses. A run prints what the model wrote.
+@Suite(.enabled(if: ClaudeTier.enabled, "bin/test --claude runs it"), .serialized, .blocking(timeLimit: .seconds(300)))
+struct TriageClaudeTests {
+  func summarize(_ reply: String) throws -> TriageSummary {
+    let claude = try #require(ClaudeTier.claude, "can't find claude. Set SB_TEST_CLAUDE_PATH to its path")
+    let session = SessionSummary(
+      id: "s1", name: "followup-notes", cwd: "/tmp", repo: "haacked/switchboard", branch: "haacked/followup-notes",
+      claudeSessionId: "u", state: .needsYou, reason: "read its last reply and decide what's next", since: 0,
+      lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+    let input = TriageSummarizer.input(session: session, reply: reply)
+    let result = try runCommand(
+      claude, TriageSummarizer.arguments(model: "haiku"), input: Data(input.utf8), timeout: 120,
+      cwd: NSTemporaryDirectory())
+    let summary = try TriageSummarizer.parse(result.stdout)
+    print("Haiku wrote (\(summary.kind.rawValue)): \(summary.title)\n\(summary.summary)")
+    return summary
+  }
+
+  @Test func listsEachDecisionWithItsRecommendation() throws {
+    let summary = try summarize(try String(contentsOfFile: decisionsReply, encoding: .utf8))
+    #expect(summary.kind == .decision)
+    let lines = summary.summary.lowercased().components(separatedBy: "\n")
+    // A word of each decision's recommended answer.
+    let answers = ["yes", "to-do", "table", "refus", "dim", "no"]
+    for (i, answer) in answers.enumerated() {
+      let line = lines.first { $0.hasPrefix("\(i + 1).") }
+      #expect(line?.contains(answer) == true, "decision \(i + 1) lacks \"\(answer)\": \(line ?? "no line")")
+    }
+  }
+
+  @Test func aListOfChangesIsNotADecision() throws {
+    let reply = """
+      I fixed the retry loop.
+
+      Changes I made:
+
+      1. Added a backoff to `retry()`, which doubles the wait up to 30 s.
+      2. Wrote a test for the timeout.
+      3. Renamed `attempts` to `maxAttempts`.
+
+      The tests pass.
+      """
+    let summary = try summarize(reply)
+    #expect(summary.kind != .decision)
+    #expect(summary.options.isEmpty)
   }
 }

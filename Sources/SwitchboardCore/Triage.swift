@@ -444,18 +444,69 @@ public enum Triage {
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
-  /// The last paragraph of the reply as the summary, with no options.
+  /// The reply's closing section as the summary, with no options.
   static func fallbackItem(_ reply: String, _ verdict: Verdict) -> TriageItem {
-    let paragraphs = reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
     let kind: TriageKind
     switch Attention.classify(reply) {
     case .question: kind = .question
     case .offer: kind = .approval
     case .other: kind = .info
     }
-    return TriageItem(
-      title: title(verdict.reason), kind: kind, summary: paragraphs.last ?? "", source: .fallback)
+    return TriageItem(title: title(verdict.reason), kind: kind, summary: closingSection(reply), source: .fallback)
+  }
+
+  /// A fallback summary lists at most this many items of a list.
+  static let closingItems = 10
+
+  /// The reply's last list when at most one paragraph follows it: the line
+  /// before the list, a line for each item, and that paragraph. Otherwise the
+  /// reply's last paragraph. Every word comes from the reply, so a list of
+  /// changes reads as the reply wrote it and not as a list of decisions.
+  static func closingSection(_ reply: String) -> String {
+    let lastParagraph = Attention.lastParagraph(reply) ?? ""
+    let blocks = MarkdownBlock.parse(reply)
+    guard let at = blocks.lastIndex(where: { if case .list = $0 { true } else { false } }),
+      case .list(let number, let items) = blocks[at]
+    else { return lastParagraph }
+    var closing: String?
+    switch blocks[(at + 1)...].first {
+    case nil: break
+    case .paragraph(let text) where at + 2 == blocks.count: closing = plain(text)
+    default: return lastParagraph
+    }
+    let itemLines = items.prefix(closingItems).enumerated().compactMap { i, item -> String? in
+      guard case .paragraph(let text) = item.blocks.first else { return nil }
+      let marker = number.map { "\($0 + i). " } ?? "- "
+      return oneLine(marker + itemLine(plain(text)), max: TriageCard.lineLength)
+    }
+    guard !itemLines.isEmpty else { return lastParagraph }
+    let lead: String? =
+      switch at > 0 ? blocks[at - 1] : nil {
+      case .paragraph(let text): text.components(separatedBy: "\n").last
+      case .heading(_, let text): text
+      default: nil
+      }
+    let lines =
+      [lead.map { oneLine(plain($0), max: TriageCard.lineLength) }] + itemLines
+      + [items.count > closingItems ? "…" : nil, closing]
+    return lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+  }
+
+  /// A list item on one line. An item that names a recommendation keeps its
+  /// first sentence and the first sentence that recommends.
+  static func itemLine(_ text: String) -> String {
+    let line = oneLine(text, max: .max)
+    let sentences = Attention.sentences(line)
+    guard let pick = sentences.dropFirst().first(where: { $0.localizedCaseInsensitiveContains("recommend") }) else {
+      return line
+    }
+    return sentences[0] + " " + pick
+  }
+
+  /// The text without the bold and code markers that the card would show as
+  /// characters.
+  static func plain(_ text: String) -> String {
+    text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
   }
 
   /// A reason line as a title: its first letter capitalized, and the first
