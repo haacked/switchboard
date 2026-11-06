@@ -345,7 +345,7 @@ final class Outcome<T>: @unchecked Sendable {
     let sbd = try Instance()
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets"])
     let todo = try sbd.addTodo(f.id, "tell Alex in #flags that the fix shipped")
-    // shortId never uses 0, so n00000 names no note.
+    // shortId never uses 0. Therefore n00000 names no note.
     let lists: [(String, JSON?)] = [
       ("no resolve", nil),
       ("an unknown id", ["n00000"]),

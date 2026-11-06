@@ -39,7 +39,7 @@ func followup(_ a: Args) {
     if a.json { printJSON(result) } else { printSession(summary(result)) }
   case "rm":
     var args: [String: JSON] = ["session": .string(followupRef(a, "rm"))]
-    args["resolve"] = resolveFlags(a, "followup rm")
+    addResolveFlags(a, to: &args)
     let result = call("followup-rm", args)
     if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
   case "import":

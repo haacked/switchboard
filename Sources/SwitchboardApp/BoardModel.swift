@@ -651,8 +651,8 @@ final class BoardModel: ObservableObject {
     return draft
   }
   /// A follow-up that hasn't started goes through `followup-rm`, which
-  /// refuses it if it started since the board last read it. `resolve` is the
-  /// open to-dos that the confirmation showed.
+  /// refuses it if it started since the board last read it. `resolve` holds the
+  /// ids of the open to-dos that the confirmation showed.
   func remove(_ id: String, resolve: [String] = []) {
     let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }

@@ -158,7 +158,7 @@ import Testing
     #expect(noted.notes.map(\.by) == [.claude])
   }
 
-  /// `group rm` drops the group's notes, so a group never holds a to-do.
+  /// `group rm` drops the group's notes. A group therefore never holds a to-do.
   @Test func groupNoteRefusesAToDo() throws {
     let sbd = try Instance()
     _ = try add(sbd, "Flags")

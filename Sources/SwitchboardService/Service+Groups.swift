@@ -10,9 +10,8 @@ extension Service {
       guard let name = args["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
         throw APIError("group add needs a name")
       }
-      try refuseGroupTodo(args)
       let ids = try sessionRefs(args)
-      let notes = try args["note"].map { try [makeNote($0.string, by: args["by"]?.string, after: [])] } ?? []
+      let notes = try args["note"].map { try [groupNote($0.string, args, after: [])] } ?? []
       let description = try SessionGroup.cleanDescription(args["description"]?.string)
       try refuseUngroupable(ids)
       let id = try createGroup(name, description: description, notes: notes).id
@@ -32,10 +31,9 @@ extension Service {
       try place(ids, in: group)
       return try JSON(encoding: ids.map { summary($0) })
     case "group-note":
-      try refuseGroupTodo(args)
       let id = try lookupGroup(args)
       var group = groups[id]!
-      group.notes.append(try makeNote(args["text"]?.string, by: args["by"]?.string, after: group.notes))
+      group.notes.append(try groupNote(args["text"]?.string, args, after: group.notes))
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
     case "group-describe":
@@ -87,6 +85,13 @@ extension Service {
 
   private func sessionRefs(_ args: JSON) throws -> [String] {
     try (args["sessions"]?.array ?? []).compactMap(\.string).map { try lookup(["session": .string($0)]) }
+  }
+
+  /// A note with the request's `by` and `kind`. It throws for a to-do, which a group can't have.
+  private func groupNote(_ text: String?, _ args: JSON, after notes: [Note]) throws -> Note {
+    let note = try makeNote(text, by: args["by"]?.string, kind: args["kind"]?.string, after: notes)
+    guard note.kind != .todo else { throw APIError("To-dos belong on sessions, not groups.") }
+    return note
   }
 
   /// Refuses a name that another group has. A name then finds one group.

@@ -589,7 +589,7 @@ private func parse(_ r: CommandResult) throws -> JSON {
 
   // MARK: To-dos
 
-  /// rm's worktree checks are skipped without --worktree, and the to-do check must not be.
+  /// Without --worktree, rm skips its worktree checks. The to-do check must still run.
   @Test(arguments: [true, false])
   func previewSkipsASessionWithAnOpenToDoAndNamesTheToDo(worktree: Bool) throws {
     let sbd = try Instance()
@@ -598,14 +598,14 @@ private func parse(_ r: CommandResult) throws -> JSON {
     let clean = try sbd.worktreeSession(repo, branch: "haacked/clean")
     try sbd.markDone(held.id)
     try sbd.markDone(clean.id)
-    try sbd.addTodo(held.id, "tell Alex in #flags that the fix shipped")
+    let todo = try sbd.addTodo(held.id, "tell Alex in #flags that the fix shipped")
 
     let plan = try sbd.planDoneRemoval(worktree: worktree)
 
     #expect(planned(plan) == [clean.id])
     let reason = try #require(skip(plan["skip"], held.id)?["reason"]?.string, Comment(rawValue: plan.text))
     #expect(
-      reason.contains("\(held.name) has an open to-do: tell Alex in #flags that the fix shipped"),
+      reason.contains("\(held.name) has an open to-do: \(todo.id) \"tell Alex in #flags that the fix shipped\""),
       Comment(rawValue: reason))
     #expect(try sbd.intact(held))
   }
@@ -625,7 +625,9 @@ private func parse(_ r: CommandResult) throws -> JSON {
 
     #expect(removed(result) == [clean.id])
     let reason = try #require(skip(result["skipped"], held.id)?["reason"]?.string, Comment(rawValue: result.text))
-    #expect(reason.contains("has an open to-do: tell Alex in #flags that the fix shipped"), Comment(rawValue: reason))
+    #expect(
+      reason.contains("has an open to-do: \(todo.id) \"tell Alex in #flags that the fix shipped\""),
+      Comment(rawValue: reason))
     #expect(try sbd.intact(held))
     #expect(try sbd.isOpenTodo(held.id, todo.id))
     #expect(try sbd.resolvedTodos().isEmpty)

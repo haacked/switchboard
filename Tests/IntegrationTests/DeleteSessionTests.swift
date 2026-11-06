@@ -822,8 +822,8 @@ extension Instance {
     #expect(rows.first { $0["note"]?.string == second.id }?["text"]?.string == second.text)
   }
 
-  /// `resolve` must name exactly the session's open to-dos. Each other list refuses before anything stops, and
-  /// resolves nothing.
+  /// `resolve` must name exactly the session's open to-dos. Each other list refuses before anything stops.
+  /// It resolves nothing.
   @Test func rmRefusesAResolveListThatIsNotTheOpenToDosAndResolvesNothing() throws {
     let sbd = try Instance()
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
@@ -836,7 +836,7 @@ extension Instance {
     let elsewhere = try sbd.addTodo(other.id, "ping Ana")
     let rowsBefore = try sbd.resolvedTodoIds()
     let open: [JSON] = [.string(first.id), .string(second.id)]
-    // shortId never uses 0, so n00000 names no note.
+    // shortId never uses 0. Therefore n00000 names no note.
     let lists: [(String, JSON)] = [
       ("a subset of the open ids", [.string(first.id)]),
       ("an unknown id", .array(open + ["n00000"])),
@@ -881,7 +881,7 @@ extension Instance {
     #expect(try sbd.resolvedTodos().isEmpty)
   }
 
-  /// The stub writes notes.txt when SIGTERM arrives, so only the check after claude exits refuses.
+  /// The stub writes notes.txt when SIGTERM arrives. Only the check after claude exits refuses.
   @Test(arguments: [false, true])
   func aRefusalForAnotherReasonLeavesTheToDoOpen(writtenAsClaudeStops: Bool) throws {
     let sbd = try Instance()
@@ -941,7 +941,7 @@ extension Instance {
     }
   }
 
-  /// The check before the stop runs the inserts too, so a store that refuses the record refuses the delete first.
+  /// The check before the stop runs the inserts too. A store that refuses the record therefore refuses the delete first.
   @Test func aStoreThatCannotRecordTheResolutionRefusesBeforeAnythingStops() throws {
     let sbd = try Instance()
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
@@ -971,6 +971,22 @@ extension Instance {
     let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id], env: ["CLAUDECODE": "1"])
 
     #expect(r.status != 0)
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  @Test func rmRequestWithResolveByClaudeRefusesAndChangesNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let message = failure(
+      sbd, "rm",
+      ["session": .string(s.id), "worktree": true, "resolve": [.string(todo.id)], "by": "claude"])
+
+    #expect(message.contains("Only you can resolve a to-do."), Comment(rawValue: message))
     #expect(try sbd.intact(s))
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.isOpenTodo(s.id, todo.id))

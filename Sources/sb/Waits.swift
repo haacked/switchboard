@@ -53,8 +53,7 @@ func noteCommand(_ a: Args) {
     result = call("remove-note", ["session": session, "note": .string(id)])
   } else if let id = a.values["--resolve"] {
     if !text.isEmpty { refuse(text, "note") }
-    refuseInsideClaude("note --resolve")
-    result = call("resolve-note", ["session": session, "note": .string(id), "by": .string(Author.you.rawValue)])
+    result = call("resolve-note", ["session": session, "note": .string(id), "by": .string(author.rawValue)])
   } else if !text.isEmpty {
     var args: [String: JSON] = ["session": session, "text": .string(text), "by": .string(author.rawValue)]
     if a.switches.contains("--todo") { args["kind"] = .string(Note.Kind.todo.rawValue) }
@@ -85,19 +84,12 @@ func resolvedTodosCommand(_ a: Args) {
   }
 }
 
-/// Removing a session with --resolve resolves its to-dos, which only you do.
-/// Returns the `resolve` argument, or nil without the flag.
-func resolveFlags(_ a: Args, _ command: String) -> JSON? {
-  guard let ids = a.allValues["--resolve"] else { return nil }
-  refuseInsideClaude("\(command) --resolve")
-  return .array(ids.map(JSON.string))
-}
-
-/// A session that read injected instructions could otherwise resolve a to-do that is meant for you.
-func refuseInsideClaude(_ command: String) {
-  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
-    die("\(command) resolves a to-do, which only you do, so it doesn't run inside Claude Code.")
-  }
+/// Sets `resolve` to the --resolve ids and `by` to the author. sbd refuses
+/// the removal for Claude. Only you resolve a to-do.
+func addResolveFlags(_ a: Args, to args: inout [String: JSON]) {
+  guard let ids = a.allValues["--resolve"] else { return }
+  args["resolve"] = .array(ids.map(JSON.string))
+  args["by"] = .string(author.rawValue)
 }
 
 /// Exits for words after the session that the command's flags leave no place for.
@@ -112,10 +104,7 @@ func noteLine(_ n: Note) -> String {
 }
 
 /// The open to-dos first, then the plain notes, then the resolved to-dos.
-func listOrder(_ notes: [Note]) -> [Note] {
-  notes.filter(\.isOpenTodo) + notes.filter { $0.kind != .todo }
-    + notes.filter { $0.kind == .todo && $0.resolved != nil }
-}
+func listOrder(_ notes: [Note]) -> [Note] { notes.openTodos + notes.plainNotes + notes.resolvedTodos }
 
 func printWaitsAndNotes(_ s: SessionSummary) {
   for w in s.waits { print("  wait:    \(w.id)  \(w.line) (\(w.kind.rawValue), \(w.by.rawValue), \(ago(w.created)))") }

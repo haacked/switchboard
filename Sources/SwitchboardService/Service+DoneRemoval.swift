@@ -110,9 +110,10 @@ extension Service {
       guard summary(id).isRemovableDone else {
         return .failure(Skipped(skip: .init(id: id, name: s.name, reason: "\(s.name) is no longer in Done")))
       }
-      let todos = s.openTodos.map { oneLine($0.text, max: .max) }
-      guard todos.isEmpty else {
-        let reason = "\(s.name) has an open to-do: \(todos.joined(separator: "; "))"
+      do {
+        try checkTodos(id, resolving: [])
+      } catch {
+        let reason = (error as? OpenTodoError).map { "\(s.name) has an open to-do: \($0.list)" } ?? "\(error)"
         return .failure(Skipped(skip: .init(id: id, name: s.name, reason: reason)))
       }
       let removesWorktree = worktree && s.repo != nil

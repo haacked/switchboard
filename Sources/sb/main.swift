@@ -247,10 +247,10 @@ let usage = """
 
 struct Args {
   var positional: [String] = []
-  /// The last value of each valued flag.
-  var values: [String: String] = [:]
   /// Every value of each valued flag, in order, for a flag that repeats.
   var allValues: [String: [String]] = [:]
+  /// The last value of each valued flag.
+  var values: [String: String] { allValues.compactMapValues(\.last) }
   var switches: Set<String> = []
 
   /// After `literalAfter` positional arguments, every argument is text, even
@@ -270,7 +270,6 @@ struct Args {
         positional.append(arg)
       } else if valued.contains(arg) {
         guard let value = rest.popFirst() else { die("\(arg) needs a value") }
-        values[arg] = value
         allValues[arg, default: []].append(value)
       } else if arg.hasPrefix("--") {
         switches.insert(arg)
@@ -646,7 +645,7 @@ case "rm":
     "branch": .bool(a.switches.contains("--delete-branch")),
     "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
   ]
-  args["resolve"] = resolveFlags(a, "rm")
+  addResolveFlags(a, to: &args)
   let result = call("rm", args)
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":

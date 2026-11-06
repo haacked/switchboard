@@ -28,8 +28,8 @@ import Testing
   }
 }
 
-/// The delete requests carry the open to-dos that the dialog showed, so a
-/// to-do added after the dialog opened still makes sbd refuse.
+/// The delete requests carry the open to-dos that the dialog showed.
+/// A to-do added after the dialog opened therefore still makes sbd refuse.
 @MainActor
 @Suite struct DeletingSessionsWithTodos {
   func session(_ notes: [Note], state: AttentionState = .done) -> SessionSummary {

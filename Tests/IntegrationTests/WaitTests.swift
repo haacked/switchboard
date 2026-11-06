@@ -370,7 +370,7 @@ import Testing
     let elsewhere = try sbd.addTodo(other.id, "ping Ana")
     let before = try sbd.get(s.id).notes
     let rowsBefore = try sbd.resolvedTodoIds()
-    // shortId never uses 0, so n00000 names no note.
+    // shortId never uses 0. Therefore n00000 names no note.
     let ids: [(String, String)] = [
       ("a plain note", plain.id), ("a resolved to-do", resolved.id), ("an unknown id", "n00000"),
       ("another session's to-do", elsewhere.id),

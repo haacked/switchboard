@@ -173,7 +173,7 @@ func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "
 }
 
 @Suite struct NotesBadgePopover {
-  /// Added in this order, so that each kind is interleaved with the others.
+  /// The order interleaves each kind with the others.
   let notes = [
     noteFixture("p1", "plain one"),
     todoFixture("r1", "resolved one", resolved: true),
@@ -230,7 +230,7 @@ func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "
     let deletion = TodoDeletion(notedSession([todoFixture("n1", "tell Alex in #flags")]))
 
     #expect(deletion.button("Delete") == "Resolve 1 To-do and Delete")
-    #expect(deletion.button("Remove Session") == "Resolve 1 To-do and Delete")
+    #expect(deletion.button("Remove Session") == "Resolve 1 To-do and Remove Session")
   }
 
   @Test func namesTwoTodosInTheButton() {

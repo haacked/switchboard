@@ -186,7 +186,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(after.cleanup?.state == .removed)
   }
 
-  /// Cleanup keeps the record, so an open to-do does not stop it.
+  /// Cleanup keeps the record. An open to-do therefore does not stop it.
   @Test func cleanupSucceedsWithAnOpenToDoAndKeepsTheSessionAndTheToDo() throws {
     let github = try FakeGitHub()
     let (sbd, _, s) = try finishedSession(github)

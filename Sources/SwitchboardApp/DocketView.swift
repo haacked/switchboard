@@ -3,8 +3,6 @@ import SwitchboardCore
 
 /// See SessionViewState for why this isn't `@State`.
 final class DocketViewState: ObservableObject {
-  @Published var confirmingRemove = false
-  /// The open to-dos when the user clicked remove. The dialog lists and resolves these.
   @Published var removal: TodoDeletion?
   @Published var log: [Event] = []
 }
@@ -16,6 +14,10 @@ struct DocketView: View {
   let session: SessionSummary
   let docket: DocketSummary
   @StateObject private var ui = DocketViewState()
+
+  private var isConfirmingRemove: Binding<Bool> {
+    Binding(get: { ui.removal != nil }, set: { if !$0 { ui.removal = nil } })
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -41,7 +43,6 @@ struct DocketView: View {
               : "Mark the row done. It leaves the Inbox, and sbd stops asking docket about it")
         Button(role: .destructive) {
           ui.removal = TodoDeletion(session)
-          ui.confirmingRemove = true
         } label: {
           Image(systemName: "trash")
         }
@@ -71,7 +72,7 @@ struct DocketView: View {
     }
     .padding(16)
     .task(id: docket) { await loadLog() }
-    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove, presenting: ui.removal) { todos in
+    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: ui.removal) { todos in
       Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
       Text(todos.message(before: "docket keeps the review. Open docket to abandon it."))

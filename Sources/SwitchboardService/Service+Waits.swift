@@ -151,7 +151,7 @@ extension Service {
       let noteId = args["note"]?.string ?? ""
       guard let note = notes.first(where: { $0.id == noteId }) else { throw APIError("\(id) has no note \(noteId)") }
       guard !note.isOpenTodo else {
-        throw APIError("\(noteId) is an open to-do. Resolve it with sb note \(id) --resolve \(noteId).")
+        throw APIError("\(noteId) is an open to-do. \(OpenTodoError.resolveHint(id, noteId)).")
       }
       try update(id) { $0.notes = notes.filter { $0.id != noteId } }
       record(id, "note-removed", ["note": .string(noteId)])

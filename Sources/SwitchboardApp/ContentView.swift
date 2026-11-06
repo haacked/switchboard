@@ -169,12 +169,11 @@ struct ContentView: View {
     }
     .confirmationDialog(
       "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
-      presenting: model.confirmingDelete
-    ) { session in
-      let todos = TodoDeletion(session)
+      presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
+    ) { session, todos in
       Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
-    } message: { session in
-      Text(TodoDeletion(session).message(before: BoardModel.deletePlan(session).message))
+    } message: { session, todos in
+      Text(todos.message(before: BoardModel.deletePlan(session).message))
     }
     .sheet(isPresented: $model.showingNew) {
       NewSessionView().environmentObject(model)

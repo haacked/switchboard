@@ -435,7 +435,7 @@ public struct Note: Codable, Equatable, Sendable {
   public struct Resolution: Codable, Equatable, Sendable {
     /// Milliseconds since the epoch.
     public var t: Int64
-    /// Always `you`, because only the user resolves a to-do.
+    /// Always `you`. Only the user resolves a to-do.
     public var by: Author
     /// "resolved", or "resolved and deleted the session".
     public var how: String
@@ -486,25 +486,9 @@ public struct ResolvedTodo: Codable, Equatable, Sendable {
   /// When the user resolved it, in ms since the epoch.
   public var resolved: Int64
   public var how: String
+}
 
-  public init(
-    id: Int64? = nil, session: String, name: String, repo: String?, branch: String?, pr: Int?, note: String,
-    text: String, by: Author, added: Int64, resolved: Int64, how: String
-  ) {
-    self.id = id
-    self.session = session
-    self.name = name
-    self.repo = repo
-    self.branch = branch
-    self.pr = pr
-    self.note = note
-    self.text = text
-    self.by = by
-    self.added = added
-    self.resolved = resolved
-    self.how = how
-  }
-
+extension ResolvedTodo {
   public init(session: Session, note: Note, pr: Int?, resolution: Note.Resolution) {
     self.init(
       session: session.id, name: session.name, repo: session.repo, branch: session.branch, pr: pr, note: note.id,
@@ -512,14 +496,22 @@ public struct ResolvedTodo: Codable, Equatable, Sendable {
   }
 }
 
+extension Array where Element == Note {
+  /// The open to-dos, in the order they were added.
+  public var openTodos: [Note] { filter(\.isOpenTodo) }
+  /// The notes that are not to-dos, including rows without a kind.
+  public var plainNotes: [Note] { filter { $0.kind != .todo } }
+  public var resolvedTodos: [Note] { filter { $0.kind == .todo && $0.resolved != nil } }
+}
+
 extension Session {
   /// The open to-dos, in the order they were added.
-  public var openTodos: [Note] { (notes ?? []).filter(\.isOpenTodo) }
+  public var openTodos: [Note] { (notes ?? []).openTodos }
 }
 
 extension SessionSummary {
   /// The open to-dos, in the order they were added.
-  public var openTodos: [Note] { notes.filter(\.isOpenTodo) }
+  public var openTodos: [Note] { notes.openTodos }
 }
 
 /// A prefix and 5 random characters that aren't in `taken`, such as `w3k9ap`.

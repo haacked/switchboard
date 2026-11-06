@@ -42,9 +42,9 @@ public final class Store {
 
   /// Throws when `delete(session:resolving:)` hits an abort or a constraint, a
   /// read-only connection, or a write lock held past the busy timeout. It runs
-  /// the same statements in a transaction that it rolls back, so it doesn't see
+  /// the same statements in a transaction that it rolls back. It does not see
   /// a failure that only the commit causes.
-  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo] = []) throws {
+  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo]) throws {
     try exec("BEGIN IMMEDIATE")
     defer { try? exec("ROLLBACK") }
     try deleteRows(session: id, resolving: todos)

@@ -1,8 +1,8 @@
 import Foundation
 import Testing
 
-/// `forgetSession` refuses to delete a session that holds an open to-do. These tests read the service's source,
-/// because a second caller of `store.delete(session:)` would delete records without that check.
+/// `forgetSession` refuses to delete a session that holds an open to-do. These tests read the service's source.
+/// A second caller of `store.delete(session:)` would delete records without that check.
 @Suite struct ForgetSessionTests {
   static let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().appendingPathComponent("Sources/SwitchboardService")

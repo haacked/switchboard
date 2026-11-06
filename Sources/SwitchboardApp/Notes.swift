@@ -19,15 +19,16 @@ struct NotesBadge {
   let plain: [Note]
   let resolved: [Note]
 
+  private let total: Int
+
   init?(_ s: SessionSummary) {
     guard !s.notes.isEmpty else { return nil }
-    open = s.openTodos
-    plain = s.notes.filter { $0.kind != .todo }
-    resolved = s.notes.filter { $0.kind == .todo && $0.resolved != nil }
+    open = s.notes.openTodos
+    plain = s.notes.plainNotes
+    resolved = s.notes.resolvedTodos
+    total = s.notes.count
     tone = open.isEmpty ? .dimmed : s.state == .done ? .needsYou : .secondary
   }
-
-  private var total: Int { open.count + plain.count + resolved.count }
 
   /// Nil below two, because one open to-do needs no number.
   var count: Int? { open.count >= 2 ? open.count : nil }
@@ -49,10 +50,12 @@ struct NotesBadge {
 }
 
 /// What a delete or remove confirmation says about the session's open to-dos.
-/// The confirmation sends `ids` as `resolve`, so sbd still refuses a to-do
-/// that was added after the confirmation read the session.
-struct TodoDeletion {
+/// The confirmation sends `ids` as `resolve`.
+/// sbd therefore still refuses a to-do that was added after the confirmation read the session.
+/// `id` lets `.sheet(item:)` keep a dialog's content while it closes.
+struct TodoDeletion: Identifiable {
   let ids: [String]
+  var id: [String] { ids }
   /// Nil when the session has no open to-do.
   let message: String?
 
@@ -66,16 +69,16 @@ struct TodoDeletion {
         + open.map { "\n• \($0.text)" }.joined()
   }
 
-  /// The destructive button's title, or `otherwise` when the session has no open to-do.
-  func button(_ otherwise: String) -> String {
+  /// The destructive button's title. It names the to-dos the button resolves, then `verb`.
+  func button(_ verb: String) -> String {
     switch ids.count {
-    case 0: otherwise
-    case 1: "Resolve 1 To-do and Delete"
-    default: "Resolve \(ids.count) To-dos and Delete"
+    case 0: verb
+    case 1: "Resolve 1 To-do and \(verb)"
+    default: "Resolve \(ids.count) To-dos and \(verb)"
     }
   }
 
-  /// `message` and `rest` as one dialog message.
+  /// Joins `message` and `rest` into one dialog message.
   func message(before rest: String) -> String { [message, rest].compactMap { $0 }.joined(separator: "\n\n") }
 }
 
@@ -91,7 +94,7 @@ extension NotesBadge.Tone {
 
 /// The note icon of a session with notes. A click opens the notes, where the
 /// user resolves a to-do or adds a note. With `always`, the icon shows on a
-/// session without notes too, so the user can add the first one.
+/// session without notes too. The user can then add the first note.
 struct NotesButton: View {
   let session: SessionSummary
   var always = false
@@ -169,7 +172,7 @@ struct NotesPopover: View {
     let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !clean.isEmpty else { return }
     model.addNote(session.id, text: clean, todo: todo) {
-      // A failed request keeps the text, so the user can send it again.
+      // A failed request keeps the text. The user can then send it again.
       if text.trimmingCharacters(in: .whitespacesAndNewlines) == clean { text = "" }
     }
   }
