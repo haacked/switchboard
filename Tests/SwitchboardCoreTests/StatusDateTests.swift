@@ -57,6 +57,7 @@ private func rewrite(_ old: String, _ new: String) throws {
     // Other text sits between the phrase and the date, so the date may not be the status date.
     ("Status as of this week, launch is 2026-12-01.", "Status as of this week, launch is 2027-03-01."),
     ("Server status as offline since 2026-11-01.", "Server status as offline since 2026-01-01."),
+    ("Status as of 11/01/2026, 2026-12-01.", "Status as of 11/01/2026, 2027-03-01."),
     // The text before the date changes.
     ("Status as of 2026-11-01.", "Note: status as of 2026-11-05."),
     ("Status as of 2026-11-01.", "Status as of  2026-11-05."),
@@ -98,6 +99,7 @@ private func rewrite(_ old: String, _ new: String) throws {
 
   @Test(arguments: [
     "Status as of this week, launch is 2026-12-01.", "Server status as offline since 2026-11-01.",
+    "Status as of 11/01/2026, 2026-12-01.",
   ])
   func dateAfterOtherTextIsNotDated(_ line: String) throws {
     let today = try #require(ISO8601DateFormatter().date(from: "2026-11-05T12:00:00Z"))

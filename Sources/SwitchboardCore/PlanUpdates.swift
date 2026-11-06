@@ -243,8 +243,9 @@ public enum PlanUpdates {
 
   static func isDateLine(_ line: String) -> Bool { line.lowercased().contains(StatusDates.phrase) }
 
-  /// The line with the first date after "status as of" set to `today`, in
-  /// the date's own format, or nil when the line holds no such date.
+  /// The line with the date right after "status as of" set to `today`, in
+  /// the date's own format. Nil when no date follows the phrase, or when a
+  /// letter or digit sits between them.
   static func dated(_ line: String, today: Date, timeZone: TimeZone) -> String? {
     guard let (r, formats) = StatusDates.find(in: line) else { return nil }
     var date = Wait.formatter(formats[0], timeZone).string(from: today)
