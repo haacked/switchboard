@@ -6,9 +6,10 @@ extension Instance {
   static let mcpStub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/mcp-stub").path
 
   /// A config.json entry that runs Fixtures/mcp-stub.
-  static func stubServer(_ name: String, type: String = "http", delay: Double? = nil) -> JSON {
+  static func stubServer(_ name: String, type: String = "http", delay: Double? = nil, gate: MCPGate? = nil) -> JSON {
     var args: [JSON] = [.string(name), "{port}"]
     if let delay { args += ["--delay", .string("\(delay)")] }
+    if let gate { args += ["--gate", .string(gate.path)] }
     return ["type": .string(type), "command": .string(mcpStub), "args": .array(args)]
   }
 
@@ -32,6 +33,10 @@ extension Instance {
   /// which comes a moment after the session stops being live.
   func stopClaude(_ id: String) throws {
     try sb("stop", id)
+    try waitForDeadClaude(id)
+  }
+
+  func waitForDeadClaude(_ id: String) throws {
     try waitFor("the Claude pane to die") {
       try tmux("display", "-p", "-t", "=\(id)-claude:", "#{pane_dead}").stdout == "1\n"
     }
@@ -41,11 +46,12 @@ extension Instance {
     try waitForServer(name, "\(name) to accept connections") { $0.state == .running && $0.pid != nil }
   }
 
-  /// Kills the server and waits for sbd to start it again.
-  func restartServer(_ server: MCPServerStatus) throws {
+  /// Kills the server, waits for sbd to start it again, and returns it.
+  @discardableResult
+  func restartServer(_ server: MCPServerStatus) throws -> MCPServerStatus {
     kill(pid_t(server.pid!), SIGKILL)
-    try waitForServer(server.name, "\(server.name) to start again") {
-      $0.state == .starting && $0.restarts == server.restarts + 1
+    return try waitForServer(server.name, "\(server.name) to start again") {
+      $0.state == .starting && $0.restarts == server.restarts + 1 && $0.pid != nil
     }
   }
 
@@ -87,18 +93,19 @@ extension Instance {
   }
 
   @Test func aLaunchWaitsForAServerThatIsStarting() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 1.5)]])
-    let s = try sbd.new(prompt: "mcp slow")
+    let gate = try MCPGate()
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    let s = try gate.open(sbd) { try sbd.new(prompt: "mcp slow") }
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
   }
 
   @Test func aSendToALiveSessionDoesNotWaitForAStartingServer() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    let slow = try sbd.waitForRunning("slow")
-    try sbd.restartServer(slow)
+    try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
     let start = Date()
     try sbd.sb("send", s.id, "while it starts")
     #expect(Date().timeIntervalSince(start) < 2)
@@ -106,51 +113,57 @@ extension Instance {
   }
 
   @Test func aSendThatResumesASessionWaitsForAStartingServer() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
     try sbd.stopClaude(s.id)
-    try sbd.restartServer(slow)
-    try sbd.sb("send", s.id, "mcp slow")
-    let restarted = try sbd.waitForRunning("slow")
+    let restarted = try sbd.restartServer(slow, behind: gate)
+    try gate.open(sbd) { try sbd.sb("send", s.id, "mcp slow") }
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
   @Test func aSendWaitsForAStartingServerBeforeATickSeesClaudeStop() throws {
+    let gate = try MCPGate()
     let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow")]])
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     sbd.stopSbd()
     // Without ticks, sbd's snapshot changes only when a request takes a new one.
     // The changed server starts again when sbd starts.
-    try sbd.setConfig(["tickSeconds": 3600, "mcpServers": ["slow": Instance.stubServer("slow", delay: 5)]])
+    try sbd.setConfig(["tickSeconds": 3600, "mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     try sbd.startSbd()
     try sbd.stopClaude(s.id)
-    try sbd.sb("send", s.id, "mcp slow")
+    try gate.open(sbd) { try sbd.sb("send", s.id, "mcp slow") }
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
   @Test func aWaitThatResumesASessionWaitsForAStartingServer() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let a = try sbd.new(prompt: "hello", name: "a")
     let b = try sbd.new(prompt: "hello", name: "b")
     try sbd.waitFor(a.id, "a's first reply") { $0.lastReply == "Done: hello" }
     try sbd.waitFor(b.id, "b's first reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
     try sbd.waitFor(a.id, "the stop", timeout: 10) { !$0.live }
-    let slow = try sbd.waitForRunning("slow")
-    try sbd.restartServer(slow)
-    // `done` doesn't launch claude itself. The tick resolves the wait and launches it.
+    try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
+    // `done` doesn't launch claude itself. The tick resolves the wait and
+    // launches it, but not while the server starts. `clock` runs a tick.
     try sbd.sb("done", b.id)
+    try sbd.advanceClock(1)
+    #expect(try !sbd.events(a.id).contains { $0.kind == "resumed" })
+    try gate.open()
     try sbd.waitFor(a.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: b to reach Done: it did." }
     #expect(try sbd.events(a.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
   @Test func aLaunchStopsWaitingForAServerThatStartedMoreThanTenSecondsAgo() throws {
-    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", delay: 60)]])
+    let gate = try MCPGate()
+    let sbd = try Instance(config: ["mcpServers": ["stuck": Instance.stubServer("stuck", gate: gate)]])
     try sbd.waitForServer("stuck", "the server to start") { $0.state == .starting }
     try sbd.advanceClock(11_000)
     let start = Date()
@@ -160,12 +173,13 @@ extension Instance {
   }
 
   @Test func terminalsDoNotWaitForAStartingServerWhenTheyLeaveClaudeStopped() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
     try sbd.stopClaude(s.id)
-    try sbd.restartServer(slow)
+    try sbd.restartServer(slow, behind: gate)
     let start = Date()
     _ = try sbd.client.terminals(s.id)
     #expect(Date().timeIntervalSince(start) < 2)
@@ -173,14 +187,15 @@ extension Instance {
   }
 
   @Test func terminalsWaitForAStartingServerWhenTheyStartClaude() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 3)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     let slow = try sbd.waitForRunning("slow")
     try sbd.stopClaude(s.id)
     try sbd.tmux("kill-session", "-t", "=\(s.id)-claude")
-    try sbd.restartServer(slow)
-    _ = try sbd.client.terminals(s.id)
+    try sbd.restartServer(slow, behind: gate)
+    _ = try gate.open(sbd) { try sbd.client.terminals(s.id) }
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
 
@@ -227,15 +242,21 @@ extension Instance {
   }
 
   @Test func aQueuedMessageWaitsForAStartingServer() throws {
-    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", delay: 4)]])
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
     let s = try sbd.new(prompt: "slow 10")
     let working = try sbd.waitFor(s.id, "the turn") { $0.state == .working && $0.claudePid != nil }
     #expect(try sbd.sb("send", s.id, "mcp slow") == "queued\n")
     // This moves sbd's clock past the 5 s that it keeps between a session's launches.
     try sbd.advanceClock(5_000)
-    try sbd.restartServer(try sbd.waitForRunning("slow"))
+    let restarted = try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
     kill(pid_t(working.claudePid!), SIGKILL)
-    let restarted = try sbd.waitForRunning("slow")
+    try sbd.waitForDeadClaude(s.id)
+    // The tick that `clock` runs sees the dead pane. It leaves the queued
+    // message alone while the server starts.
+    try sbd.advanceClock(1)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "resumed" })
+    try gate.open()
     try sbd.waitFor(s.id, "the queued call") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
     #expect(try sbd.events(s.id).last { $0.kind == "resumed" }?.data["mcp"] == ["slow"])
   }
