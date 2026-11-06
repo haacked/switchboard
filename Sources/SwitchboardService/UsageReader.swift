@@ -81,8 +81,7 @@ final class UsageReader: @unchecked Sendable {
       usage.limits = try Usage.parse(try fetch(token))
       usage.checked = nowMs()
     } catch {
-      usage.error = "\(error)"
-      if error is SignedOut { usage.signedOut = true }
+      usage.fail(with: error)
     }
     return usage
   }
@@ -122,10 +121,7 @@ final class UsageReader: @unchecked Sendable {
           "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"],
           timeout: 10)
         if r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8)) { return creds }
-        if r.status != 0 && r.status != Self.keychainItemNotFound {
-          keychainFailure =
-            "security exited with status \(r.status): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
-        }
+        keychainFailure = Self.keychainFailure(status: r.status, stderr: r.stderr)
       } catch {
         keychainFailure = "\(error)"
       }
@@ -141,6 +137,13 @@ final class UsageReader: @unchecked Sendable {
 
   /// The exit status of `security find-generic-password` when no item matches.
   private static let keychainItemNotFound: Int32 = 44
+
+  /// Why `security find-generic-password` failed, or nil when it succeeded or
+  /// found no item. A missing item means the account is signed out.
+  static func keychainFailure(status: Int32, stderr: String) -> String? {
+    guard status != 0, status != keychainItemNotFound else { return nil }
+    return "security exited with status \(status): \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+  }
 
   /// claude refreshes an expired token when `claude mcp get` looks up the
   /// claude.ai connectors. The server name does not need to exist.
@@ -183,6 +186,16 @@ extension Service {
 }
 
 extension UsageReader: QuotaBudget {}
+
+extension AccountUsage {
+  /// Records why the read failed. Only an account with no credentials is
+  /// signed out: any other failure, such as a locked keychain, leaves
+  /// `signedOut` unset.
+  mutating func fail(with error: Error) {
+    self.error = "\(error)"
+    if error is SignedOut { signedOut = true }
+  }
+}
 
 /// The account has no credentials, so claude would ask for /login.
 struct SignedOut: Error, CustomStringConvertible {

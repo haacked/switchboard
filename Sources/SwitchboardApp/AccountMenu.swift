@@ -101,6 +101,7 @@ private struct AccountList: View {
     .onAppear {
       maxListHeight = Self.maxListHeight()
       model.readMovable()
+      model.rereadUsage()
     }
   }
 

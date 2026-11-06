@@ -172,6 +172,39 @@ final class OpLog: @unchecked Sendable {
     #expect(log.value == ["account-use"])
   }
 
+  @Test func readMovableFillsTheFooterPlanFromTheDryRun() async throws {
+    let log = OpLog()
+    let model = offlineModel()
+    let planJSON = try JSONCoding.convert(plan, to: JSON.self)
+    model.send = { op, _ in
+      log.append(op)
+      return planJSON
+    }
+    model.accounts = [
+      AccountInfo(name: "a", folder: "/a", active: true, sessions: 0),
+      AccountInfo(name: "b", folder: "/b", active: false, sessions: 2),
+    ]
+
+    model.readMovable()
+
+    await settle { model.movable == plan }
+    #expect(model.movable == plan)
+    #expect(log.value == ["account-move"])
+  }
+
+  @Test func readMovableClearsTheFooterPlanWhenNothingCanMove() async {
+    let log = OpLog()
+    let model = model(log)
+    model.accounts = [AccountInfo(name: "a", folder: "/a", active: true, sessions: 0)]
+    model.movable = plan
+
+    model.readMovable()
+
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(model.movable == nil)
+    #expect(log.value.isEmpty)
+  }
+
   @Test func choosingAnAccountClosesTheMenu() {
     let model = model(OpLog())
     model.showingAccounts = true

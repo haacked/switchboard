@@ -364,10 +364,21 @@ final class BoardModel: ObservableObject {
   }
 
   private func planMove(to folder: String, then: @escaping @MainActor (AccountMove?) -> Void) {
-    let client = client
+    let send = send
     worker.async {
-      let plan = try? client.moveSessions(to: folder, dryRun: true)
+      let plan = try? JSONCoding.convert(
+        send("account-move", ["account": .string(folder), "dryRun": .bool(true)]), to: AccountMove.self)
       Task { @MainActor in then(plan) }
+    }
+  }
+
+  /// Asks sbd to read every account's usage now, so an account that has just
+  /// signed in can be chosen without waiting for the next timed read.
+  func rereadUsage() {
+    let client = client
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let usage = try? client.usage(refresh: true) else { return }
+      Task { @MainActor in if self.usage != usage { self.usage = usage } }
     }
   }
 
