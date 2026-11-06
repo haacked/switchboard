@@ -40,6 +40,9 @@ public struct Review: Codable, Equatable, Sendable {
   public var commit: String?
   /// True when a GitHub App wrote the review. nil for a person.
   public var bot: Bool?
+  /// The teams, as `org/team`, that the reviewer approved on behalf of. nil
+  /// until sbd reads them.
+  public var teams: [String]?
 
   public init(
     author: String, state: String, submittedAt: String? = nil, commit: String? = nil, bot: Bool? = nil
@@ -149,6 +152,14 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// Whether the PR is in GitHub's merge queue. nil when the poll did not
   /// read it.
   public var inMergeQueue: Bool?
+  /// The PR author's login. nil when the poll did not read it.
+  public var author: String?
+  /// The code owner groups that the changed files need. nil when the base
+  /// branch requires no code owner review. Also nil when sbd cannot tell.
+  public var codeOwners: CodeOwnerRequirement?
+  /// The users and teams that GitHub asked to review as code owners, as
+  /// `@login` or `@org/team`. nil when the poll did not read every request.
+  public var codeOwnerRequests: [String]?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,
@@ -157,7 +168,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
     reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
-    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil
+    trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil,
+    author: String? = nil, codeOwnerRequests: [String]? = nil
   ) {
     self.id = id
     self.number = number
@@ -188,6 +200,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.reviewDecisionRead = reviewDecisionRead
     self.mergeQueue = mergeQueue
     self.inMergeQueue = inMergeQueue
+    self.author = author
+    self.codeOwnerRequests = codeOwnerRequests
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
@@ -293,6 +307,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// How sbd merges the PR. sbd sets it from the session's facts, so a
   /// summary made from the PR alone leaves it nil.
   public var mergeMethod: MergeMethod?
+  /// nil when the PR has no known code owner requirement.
+  public var codeOwners: CodeOwnerStatus?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -312,6 +328,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     approvers = pr.approvers
     approvedAt = pr.approvedAt
     inMergeQueue = pr.inMergeQueue
+    codeOwners = CodeOwnerStatus(pr)
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can
