@@ -61,8 +61,6 @@ struct ContentView: View {
       set: { if let view = $0 { model.show(view) } })
   }
 
-  private var confirmingDeleteSession: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
-
   private var isConfirmingDelete: Binding<Bool> {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
@@ -170,12 +168,13 @@ struct ContentView: View {
       }
     }
     .confirmationDialog(
-      "Delete \(confirmingDeleteSession?.name ?? "this session")?", isPresented: isConfirmingDelete,
-      presenting: confirmingDeleteSession
+      "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
+      presenting: model.confirmingDelete
     ) { session in
-      Button("Delete", role: .destructive) { model.deleteDone(session) }
+      let todos = TodoDeletion(session)
+      Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
     } message: { session in
-      Text(BoardModel.deletePlan(session).message)
+      Text(TodoDeletion(session).message(before: BoardModel.deletePlan(session).message))
     }
     .sheet(isPresented: $model.showingNew) {
       NewSessionView().environmentObject(model)
@@ -208,6 +207,7 @@ struct Sidebar: View {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
               SessionRow(session: row.session, repo: repos[row.id])
+              NotesButton(session: row.session)
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if row.session.isRemovableDone { DeleteButton(session: row.session) }
             }
@@ -219,7 +219,7 @@ struct Sidebar: View {
               }
               if row.session.isRemovableDone {
                 Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
-                  model.confirmingDelete = row.id
+                  model.confirmingDelete = row.session
                 }
               }
             }
@@ -286,7 +286,7 @@ struct DeleteButton: View {
   var body: some View {
     let summary = BoardModel.deletePlan(session).summary
     Button {
-      model.confirmingDelete = session.id
+      model.confirmingDelete = session
     } label: {
       Image(systemName: "trash")
     }
@@ -638,6 +638,7 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
+        NotesButton(session: s)
         if s.canMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if s.isRemovableDone { DeleteButton(session: s) }

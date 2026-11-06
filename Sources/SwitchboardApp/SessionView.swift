@@ -11,6 +11,8 @@ final class SessionViewState: ObservableObject {
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
   @Published var removeOptions: RemoveOptions?
+  /// The open to-dos when the user clicked remove. The sheet lists and resolves these.
+  @Published var removal: TodoDeletion?
   /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
   @Published var shellAttach = 0
 }
@@ -120,6 +122,7 @@ struct SessionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
+      if let message = ui.removal?.message { Text(message) }
       if session.repo != nil, let options = ui.removeOptions {
         Toggle(
           isOn: Binding(
@@ -153,12 +156,13 @@ struct SessionView: View {
         Spacer()
         Button("Cancel", role: .cancel) { ui.confirmingRemove = false }
           .keyboardShortcut(.cancelAction)
-        Button("Remove Session", role: .destructive) {
+        let todos = ui.removal?.ids ?? []
+        Button(ui.removal?.button("Remove Session") ?? "Remove Session", role: .destructive) {
           ui.confirmingRemove = false
           if ui.deleteWorktree {
-            model.delete(session.id, branch: ui.deleteBranch)
+            model.delete(session.id, branch: ui.deleteBranch, resolve: todos)
           } else {
-            model.remove(session.id)
+            model.remove(session.id, resolve: todos)
           }
         }
       }
@@ -212,17 +216,20 @@ struct SessionView: View {
             session.markedDone
               ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
               : "Mark the session done. It leaves the Inbox and moves to Done on the board.")
+        NotesButton(session: session, always: true)
         if CleanupOffer.canCleanUp(session) {
           Button("Clean Up…") { model.confirmingCleanup = session.id }
             .disabled(model.cleaningUp.contains(session.id))
             .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
         }
         Button(role: .destructive) {
+          let todos = TodoDeletion(session)
           Task {
             let options = await RemoveOptions.load(session)
             ui.removeOptions = options
             ui.deleteWorktree = options.worktree
             ui.deleteBranch = options.branch
+            ui.removal = todos
             ui.confirmingRemove = true
           }
         } label: {

@@ -31,6 +31,7 @@ struct DecisionCard: View {
         .background(Capsule().fill(session.state.color.opacity(0.18)))
         .foregroundStyle(session.state.color)
         .accessibilityLabel("Kind: \(item.kind.rawValue)")
+      NotesButton(session: session)
     }
   }
 

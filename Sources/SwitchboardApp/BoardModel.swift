@@ -21,8 +21,9 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
-  /// The id of the Done session whose delete the confirmation dialog in ContentView asks about.
-  @Published var confirmingDelete: String?
+  /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
+  /// board showed it when the user asked. The dialog's message and request both read this value.
+  @Published var confirmingDelete: SessionSummary?
   /// The ids of the Done sessions whose delete is running.
   @Published var deleting: Set<String> = []
   /// The id of the session whose cleanup the confirmation dialog in ContentView asks about.
@@ -650,11 +651,33 @@ final class BoardModel: ObservableObject {
     return draft
   }
   /// A follow-up that hasn't started goes through `followup-rm`, which
-  /// refuses it if it started since the board last read it.
-  func remove(_ id: String) {
+  /// refuses it if it started since the board last read it. `resolve` is the
+  /// open to-dos that the confirmation showed.
+  func remove(_ id: String, resolve: [String] = []) {
     let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }
-    perform(followup ? "followup-rm" : "rm", ["session": .string(id)])
+    perform(followup ? "followup-rm" : "rm", Self.resolving(["session": .string(id)], resolve))
+  }
+
+  /// `args` with `resolve` set to `ids`. An empty `ids` adds no key.
+  nonisolated static func resolving(_ args: [String: JSON], _ ids: [String]) -> [String: JSON] {
+    var args = args
+    if !ids.isEmpty { args["resolve"] = .array(ids.map(JSON.string)) }
+    return args
+  }
+
+  func addNote(_ id: String, text: String, todo: Bool, added: (() -> Void)? = nil) {
+    perform(
+      "note",
+      [
+        "session": .string(id), "text": .string(text), "kind": .string((todo ? Note.Kind.todo : .note).rawValue),
+        "by": .string(Author.you.rawValue),
+      ],
+      then: { _ in added?() })
+  }
+
+  func resolveNote(_ id: String, note: String) {
+    perform("resolve-note", ["session": .string(id), "note": .string(note), "by": .string(Author.you.rawValue)])
   }
 
   /// What the Done column's delete icon removes, for the confirmation.
@@ -704,19 +727,20 @@ final class BoardModel: ObservableObject {
   /// The request that the icon sends: the same `rm` as the trash dialog, with the worktree, the
   /// branch, and the remote branch on. The branch is on only for a merged PR, because sbd
   /// refuses the whole delete for a branch with no merged PR.
-  nonisolated static func deleteRequest(_ s: SessionSummary) -> [String: JSON] {
+  nonisolated static func deleteRequest(_ s: SessionSummary, resolve: [String] = []) -> [String: JSON] {
     let plan = deletePlan(s)
-    return [
-      "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
-      "remote_branch": .bool(plan.branch != nil),
-    ]
+    return resolving(
+      [
+        "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
+        "remote_branch": .bool(plan.branch != nil),
+      ], resolve)
   }
 
   /// Deletes a Done session with everything `deletePlan` names. sbd runs the safety checks of `rm`.
-  func deleteDone(_ s: SessionSummary) {
+  func deleteDone(_ s: SessionSummary, resolve: [String] = []) {
     guard deleting.insert(s.id).inserted else { return }
     perform(
-      "rm", Self.deleteRequest(s),
+      "rm", Self.deleteRequest(s, resolve: resolve),
       then: { _ in if self.selection == s.id { self.selection = nil } },
       finally: { self.deleting.remove(s.id) })
   }
@@ -735,8 +759,9 @@ final class BoardModel: ObservableObject {
   /// local branch, and sbd refuses unless the session's PR is merged. When the
   /// branch fails its check after the worktree is gone, sbd removes the session
   /// and keeps the branch. The error shows in the banner.
-  func delete(_ id: String, branch: Bool = false) {
-    perform("rm", ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]) { _ in
+  func delete(_ id: String, branch: Bool = false, resolve: [String] = []) {
+    let args: [String: JSON] = ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]
+    perform("rm", Self.resolving(args, resolve)) { _ in
       if self.selection == id { self.selection = nil }
     }
   }

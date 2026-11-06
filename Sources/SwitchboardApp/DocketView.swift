@@ -4,6 +4,8 @@ import SwitchboardCore
 /// See SessionViewState for why this isn't `@State`.
 final class DocketViewState: ObservableObject {
   @Published var confirmingRemove = false
+  /// The open to-dos when the user clicked remove. The dialog lists and resolves these.
+  @Published var removal: TodoDeletion?
   @Published var log: [Event] = []
 }
 
@@ -38,6 +40,7 @@ struct DocketView: View {
               ? "Mark the row not done. sbd asks docket about it again"
               : "Mark the row done. It leaves the Inbox, and sbd stops asking docket about it")
         Button(role: .destructive) {
+          ui.removal = TodoDeletion(session)
           ui.confirmingRemove = true
         } label: {
           Image(systemName: "trash")
@@ -68,10 +71,10 @@ struct DocketView: View {
     }
     .padding(16)
     .task(id: docket) { await loadLog() }
-    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove) {
-      Button("Remove Row", role: .destructive) { model.remove(session.id) }
-    } message: {
-      Text("docket keeps the review. Open docket to abandon it.")
+    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove, presenting: ui.removal) { todos in
+      Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
+    } message: { todos in
+      Text(todos.message(before: "docket keeps the review. Open docket to abandon it."))
     }
   }
 
