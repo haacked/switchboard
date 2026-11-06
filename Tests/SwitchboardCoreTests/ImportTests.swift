@@ -10,8 +10,12 @@ private func writeTranscript(_ lines: [JSON], in dir: String, newlineAtEnd: Bool
   return path
 }
 
-private func userLine(_ content: JSON, at time: String) -> JSON {
-  ["type": "user", "isSidechain": false, "timestamp": .string(time), "message": ["role": "user", "content": content]]
+private func userLine(_ content: JSON, at time: String, origin: String? = nil) -> JSON {
+  var line: [String: JSON] = [
+    "type": "user", "isSidechain": false, "timestamp": .string(time), "message": ["role": "user", "content": content],
+  ]
+  if let origin { line["origin"] = ["kind": .string(origin)] }
+  return .object(line)
 }
 
 private func assistantLine(_ content: JSON, at time: String, type: String = "assistant", sidechain: Bool = false)
@@ -70,6 +74,33 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
       (0..<5).map { userLine(.string("m\($0)"), at: "2026-10-25T10:00:0\($0).000Z") }, in: dir)
 
     #expect(Transcript.messages(path, limit: 2).map(\.text) == ["m3", "m4"])
+  }
+
+  @Test(arguments: ["peer", "human"])
+  func promptOriginReadsTheKindOfTheLastPromptWithThatText(_ kind: String) throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let last = userLine("Rebase please.", at: "2026-10-25T10:00:03.000Z", origin: kind)
+    let path = try writeTranscript(
+      [
+        userLine("Fix the parser.", at: "2026-10-25T10:00:00.000Z"),
+        assistantLine([textBlock("Done.")], at: "2026-10-25T10:00:01.000Z"),
+        last,
+        ["type": "last-prompt", "lastPrompt": "Rebase please."],
+      ], in: dir)
+
+    #expect(Transcript.promptOrigin(path, prompt: "Rebase please.") == kind)
+  }
+
+  @Test func promptOriginIsNilWhenTheLastPromptHasOtherTextOrNoOrigin() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let peer = userLine("Rebase please.", at: "2026-10-25T10:00:00.000Z", origin: "peer")
+    let path = try writeTranscript(
+      [peer, userLine("Fix the parser.", at: "2026-10-25T10:00:01.000Z")], in: dir)
+
+    #expect(Transcript.promptOrigin(path, prompt: "Rebase please.") == nil)
+    #expect(Transcript.promptOrigin(path, prompt: "Fix the parser.") == nil)
   }
 
   @Test func tailReadsTheLastMainReplyAndTheLastTimestamp() throws {

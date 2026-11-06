@@ -345,6 +345,21 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(f.lastTouched == 1000)
   }
 
+  @Test(arguments: ["peer", "task-notification"])
+  func aMessageWithAnotherOriginIsNotATouch(_ kind: String) {
+    let f = facts([
+      event("UserPromptSubmit", 1000, ["prompt": "go"]),
+      event("UserPromptSubmit", 5000, ["prompt": "Rebase please.", "origin": ["kind": .string(kind)]]),
+    ])
+    #expect(f.lastTouched == 1000)
+    #expect(f.prompts == 1)
+  }
+
+  @Test func aHumanOriginPromptIsATouch() {
+    let f = facts([event("UserPromptSubmit", 5000, ["prompt": "go", "origin": ["kind": "human"]])])
+    #expect(f.lastTouched == 5000)
+  }
+
   @Test func theUserTypingTheSameTextAsSbdsReportedMessageIsATouch() {
     let f = facts([
       event("UserPromptSubmit", 1000, ["prompt": "go"]),

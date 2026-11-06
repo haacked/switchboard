@@ -378,7 +378,14 @@ public final class Service {
     if kind == "Stop", case .running(let pid) = claudeState(id) {
       recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
     }
-    let event = record(id, kind, payload)
+    var recorded = payload
+    if kind == "UserPromptSubmit", case .object(var fields) = payload, let prompt = payload["prompt"]?.string,
+      let path = transcriptFile(session), let origin = Transcript.promptOrigin(path, prompt: prompt)
+    {
+      fields["origin"] = ["kind": .string(origin)]
+      recorded = .object(fields)
+    }
+    let event = record(id, kind, recorded)
     switch kind {
     case "SessionStart":
       // `/clear` and `/resume` in the pane start another conversation, which
