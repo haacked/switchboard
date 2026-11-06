@@ -96,6 +96,10 @@ final class BoardModel: ObservableObject {
   /// A switch of the active account that waits for the user to say whether
   /// the sessions on the other accounts move too.
   @Published var switchingAccount: AccountSwitch?
+  @Published var showingAccounts = false
+  /// The sessions that could move to the active account, read when the
+  /// account menu opens.
+  @Published var movable: AccountMove?
   /// What the user picked or typed on each open card, by card id. The Inbox
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
@@ -326,28 +330,74 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// Makes new sessions run under the account. When sessions on other
-  /// accounts could move to it, this asks first.
+  /// The account that new sessions without a parent use.
+  var activeAccount: AccountInfo? { accounts.first(where: \.active) }
+
+  /// Closes the account menu and makes new sessions run under the account.
+  /// When sessions on other accounts could move to it, this asks first.
   func useAccount(_ folder: String) {
-    let client = client
-    worker.async {
-      let plan = try? client.moveSessions(to: folder, dryRun: true)
-      Task { @MainActor in
-        if let plan, !plan.moved.isEmpty {
-          self.switchingAccount = AccountSwitch(folder: folder, plan: plan)
-        } else {
-          self.perform("account-use", ["account": .string(folder)])
-        }
+    showingAccounts = false
+    planMove(to: folder) { plan in
+      if let plan, !plan.moved.isEmpty {
+        self.switchingAccount = AccountSwitch(folder: folder, plan: plan, switches: true)
+      } else {
+        self.perform("account-use", ["account": .string(folder)])
       }
     }
   }
 
-  /// Makes the account the one for new sessions, and with `move` moves the
-  /// sessions whose claude is stopped to it.
+  /// The account that the account menu offers to move sessions to: the active
+  /// one, when a session runs under another account. A signed-out account
+  /// gets no offer, because a moved session's next resume would ask for /login.
+  var moveTarget: AccountInfo? {
+    guard let active = activeAccount, usage.first(where: { $0.folder == active.folder })?.signedOut != true,
+      accounts.contains(where: { !$0.active && $0.sessions > 0 })
+    else { return nil }
+    return active
+  }
+
+  /// Reads which stopped sessions on other accounts could move to `moveTarget`.
+  func readMovable() {
+    movable = nil
+    guard let target = moveTarget else { return }
+    planMove(to: target.folder) { self.movable = $0 }
+  }
+
+  private func planMove(to folder: String, then: @escaping @MainActor (AccountMove?) -> Void) {
+    let send = send
+    worker.async {
+      let plan = try? JSONCoding.convert(
+        send("account-move", ["account": .string(folder), "dryRun": .bool(true)]), to: AccountMove.self)
+      Task { @MainActor in then(plan) }
+    }
+  }
+
+  /// Asks sbd to read every account's usage now, so an account that has just
+  /// signed in can be chosen without waiting for the next timed read.
+  func rereadUsage() {
+    let client = client
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let usage = try? client.usage(refresh: true) else { return }
+      Task { @MainActor in if self.usage != usage { self.usage = usage } }
+    }
+  }
+
+  /// Closes the account menu and asks whether to move the sessions in `plan`
+  /// to the active account.
+  func offerMove(_ plan: AccountMove) {
+    showingAccounts = false
+    switchingAccount = AccountSwitch(folder: plan.account, plan: plan, switches: false)
+  }
+
+  /// Makes the account the one for new sessions when the change switches,
+  /// and with `move` moves the sessions whose claude is stopped to it.
   func confirmAccountSwitch(_ change: AccountSwitch, move: Bool) {
     switchingAccount = nil
-    perform("account-use", ["account": .string(change.folder)]) { _ in
-      if move { self.perform("account-move", ["account": .string(change.folder)]) }
+    let moveSessions = { if move { self.perform("account-move", ["account": .string(change.folder)]) } }
+    if change.switches {
+      perform("account-use", ["account": .string(change.folder)]) { _ in moveSessions() }
+    } else {
+      moveSessions()
     }
   }
 
@@ -855,6 +905,8 @@ final class BoardModel: ObservableObject {
 struct AccountSwitch: Identifiable {
   var folder: String
   var plan: AccountMove
+  /// False when the change only moves sessions to the active account.
+  var switches: Bool
   var id: String { folder }
   var name: String { ClaudeAccount.name(folder) }
 }

@@ -81,7 +81,7 @@ final class UsageReader: @unchecked Sendable {
       usage.limits = try Usage.parse(try fetch(token))
       usage.checked = nowMs()
     } catch {
-      usage.error = "\(error)"
+      usage.fail(with: error)
     }
     return usage
   }
@@ -90,12 +90,10 @@ final class UsageReader: @unchecked Sendable {
   /// refreshed first, through claude.
   private func accessToken(_ folder: String) throws -> String {
     let login = ClaudeAccount.command(service.config.claude, in: folder)
-    guard var creds = credentials(folder) else {
-      throw APIError("not signed in; run `\(login)` and /login")
-    }
+    guard var creds = try credentials(folder) else { throw SignedOut(login: login) }
     if expiresSoon(creds.expiresAt) {
       refresh(folder)
-      guard let fresh = credentials(folder), !expiresSoon(fresh.expiresAt) else {
+      guard let fresh = try credentials(folder), !expiresSoon(fresh.expiresAt) else {
         throw APIError("the access token expired and claude could not refresh it; run `\(login)` and /login")
       }
       creds = fresh
@@ -111,16 +109,40 @@ final class UsageReader: @unchecked Sendable {
     return expiresAt < nowMs() + Self.refreshMarginMs
   }
 
-  /// The credentials from the login keychain, else from .credentials.json.
-  private func credentials(_ folder: String) -> (token: String, expiresAt: Int64?)? {
-    if settings.keychain,
-      let r = try? runCommand(
-        "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"], timeout: 10),
-      r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8))
+  /// The credentials from the login keychain, else from .credentials.json,
+  /// or nil when neither holds a login. It throws when the keychain read
+  /// fails for a reason other than a missing item and the file holds no
+  /// login, because a locked keychain does not mean the account signed out.
+  private func credentials(_ folder: String) throws -> (token: String, expiresAt: Int64?)? {
+    var keychainFailure: String?
+    if settings.keychain {
+      do {
+        let r = try runCommand(
+          "/usr/bin/security", ["find-generic-password", "-s", ClaudeAccount.keychainService(folder), "-w"],
+          timeout: 10)
+        if r.status == 0, let creds = Usage.credentials(from: Data(r.stdout.utf8)) { return creds }
+        keychainFailure = Self.keychainFailure(status: r.status, stderr: r.stderr)
+      } catch {
+        keychainFailure = "\(error)"
+      }
+    }
+    if let creds = FileManager.default.contents(atPath: ClaudeAccount.credentialsFile(folder)).flatMap(
+      Usage.credentials)
     {
       return creds
     }
-    return FileManager.default.contents(atPath: ClaudeAccount.credentialsFile(folder)).flatMap(Usage.credentials)
+    if let keychainFailure { throw APIError("could not read the login from the keychain: \(keychainFailure)") }
+    return nil
+  }
+
+  /// The exit status of `security find-generic-password` when no item matches.
+  private static let keychainItemNotFound: Int32 = 44
+
+  /// Why `security find-generic-password` failed, or nil when it succeeded or
+  /// found no item. A missing item means the account is signed out.
+  static func keychainFailure(status: Int32, stderr: String) -> String? {
+    guard status != 0, status != keychainItemNotFound else { return nil }
+    return "security exited with status \(status): \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
   }
 
   /// claude refreshes an expired token when `claude mcp get` looks up the
@@ -164,3 +186,19 @@ extension Service {
 }
 
 extension UsageReader: QuotaBudget {}
+
+extension AccountUsage {
+  /// Records why the read failed. Only an account with no credentials is
+  /// signed out: any other failure, such as a locked keychain, leaves
+  /// `signedOut` unset.
+  mutating func fail(with error: Error) {
+    self.error = "\(error)"
+    if error is SignedOut { signedOut = true }
+  }
+}
+
+/// The account has no credentials, so claude would ask for /login.
+struct SignedOut: Error, CustomStringConvertible {
+  var login: String
+  var description: String { "not signed in; run `\(login)` and /login" }
+}
