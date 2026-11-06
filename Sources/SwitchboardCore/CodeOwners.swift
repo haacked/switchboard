@@ -67,10 +67,9 @@ public struct CodeOwnersFile: Sendable {
         steps.append(.segment(Array(segment)))
       }
     }
-    let wildcard = segments.last!.contains { $0 == "*" || $0 == "?" }
     if directory {
       steps.append(.someSegments)
-    } else if !wildcard {
+    } else if !segments.last!.contains(where: "*?".contains) {
       steps.append(.anySegments)
     }
     return steps
@@ -80,7 +79,7 @@ public struct CodeOwnersFile: Sendable {
   /// to their product. The repository writes the CODEOWNERS lines. A
   /// backtracking regex runs for minutes on a line with many wildcards.
   static func matches(_ steps: [Step], _ segments: [[Character]]) -> Bool {
-    // `rest[j]` is whether `steps[i...]` matches `segments[j...]`, filled from the last step back.
+    // `rest[j]` is whether the steps after the current one match `segments[j...]`.
     var rest = [Bool](repeating: false, count: segments.count + 1)
     rest[segments.count] = true
     for step in steps.reversed() {
