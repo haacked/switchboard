@@ -14,8 +14,8 @@ extension Service {
   /// and sends SIGTERM to claude. It runs on the state queue, after `install`
   /// of a fresh snapshot, because it reads the panes' processes from it.
   func beginPaneStop(_ id: String) -> PaneStop {
-    let panes = [Pane.claude, .shell].compactMap { snapshot.panes[paneName(id, $0)] }.filter { !$0.dead }.map(\.pid)
-    let processes = Processes.descendants(of: panes.filter(Processes.isValidPid), in: snapshot.children)
+    let pids = [Pane.claude, .shell].compactMap { snapshot.panes[paneName(id, $0)] }.filter { !$0.dead }.map(\.pid)
+    let processes = Processes.descendants(of: pids.filter(Processes.isValidPid), in: snapshot.children)
     host.kill(paneName(id, .shell))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {
@@ -44,7 +44,7 @@ extension Service {
     var users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
     while running.isEmpty, !users.isEmpty, Date() < deadline {
       Thread.sleep(forTimeInterval: 0.25)
-      users = Processes.using(session.cwd)
+      users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
     }
     guard !running.isEmpty || !users.isEmpty else { return }
     let commands = Dictionary(
