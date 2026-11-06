@@ -41,8 +41,9 @@ final class GitHubPoller {
   /// The PRs that waits and merge triggers name, by the key they were looked up with.
   var targets: [PRKey: Target] = [:]
   /// The `ci` waits whose outcome one read showed, by wait id. The wait resolves
-  /// when a later read shows the same head commit and outcome. `outcome` is
-  /// "failed" for any failure.
+  /// when a later read shows the same head commit and outcome, unless the read
+  /// shows the head commit that the wait recorded. `outcome` is "failed" for
+  /// any failure.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
   /// The `queue` waits whose PR a read showed in GitHub's merge queue.
   /// GitHub reports no removal state, so a later read that shows the open PR

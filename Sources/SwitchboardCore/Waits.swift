@@ -124,6 +124,10 @@ public struct Wait: Codable, Equatable, Sendable {
   /// When a `date` wait resolves, or when a `manual` wait returns to Needs you.
   public var until: Int64?
   public var note: String?
+  /// The commit that the session's checked-out branch pointed at when a `ci`
+  /// wait on the session's own PR was set. Nil for a wait on another PR, and
+  /// for a wait set before sbd recorded it.
+  public var head: String?
   public var by: Author
   /// Milliseconds since the epoch.
   public var created: Int64
@@ -132,7 +136,7 @@ public struct Wait: Codable, Equatable, Sendable {
   public init(
     id: String, kind: Kind, pr: PullRequest? = nil, session: SessionTarget? = nil, state: AttentionState? = nil,
     who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, note: String? = nil,
-    by: Author = .you, created: Int64, then: Then = .resume
+    head: String? = nil, by: Author = .you, created: Int64, then: Then = .resume
   ) {
     self.id = id
     self.kind = kind
@@ -144,6 +148,7 @@ public struct Wait: Codable, Equatable, Sendable {
     self.service = service
     self.until = until
     self.note = note
+    self.head = head
     self.by = by
     self.created = created
     self.then = then

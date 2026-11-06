@@ -17,9 +17,12 @@ extension Service {
     case "wait":
       try refuseNotStarted(entries[id]!.session)
       let request = try JSONCoding.convert(args, to: WaitRequest.self)
-      let wait = try request.makeWait(id: shortId("w", taken: open.map(\.id)), waiter: id, now: nowMs()) { ref in
+      var wait = try request.makeWait(id: shortId("w", taken: open.map(\.id)), waiter: id, now: nowMs()) { ref in
         let other = try lookup(["session": .string(ref)])
         return Wait.SessionTarget(id: other, name: entries[other]!.session.name)
+      }
+      if wait.kind == .ci && wait.pr == nil {
+        wait.head = try? gitOutput(entries[id]!.session.cwd, ["rev-parse", "HEAD"])
       }
       try update(id) { $0.waits = open + [wait] }
       record(id, "wait", ["wait": try JSON(encoding: wait)])
