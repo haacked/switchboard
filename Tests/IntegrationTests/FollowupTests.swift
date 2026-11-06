@@ -20,6 +20,18 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
 final class Outcome<T>: @unchecked Sendable {
   var result: Result<T, Error>?
   let done = DispatchSemaphore(value: 0)
+
+  /// Runs the body on a thread of its own, because the global queue gets no
+  /// thread while the parallel tests block every thread of Swift's
+  /// cooperative pool.
+  static func detached(_ body: @escaping () throws -> T) -> Outcome<T> {
+    let outcome = Outcome<T>()
+    Thread.detachNewThread {
+      outcome.result = Result { try body() }
+      outcome.done.signal()
+    }
+    return outcome
+  }
 }
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct FollowupTests {
@@ -128,9 +140,11 @@ final class Outcome<T>: @unchecked Sendable {
     let f = try add(sbd, ["prompt": "mcp slow", "repository": "acme/widgets"])
     let folder = "\(sbd.home.path)/worktrees/widgets/mcp-slow"
     let started = Outcome.detached { try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)]) }
-    try sbd.waitFor("git to make \(folder)", timeout: 60) {
+    // git makes the folder before it checks out the files. The test waits
+    // for the hook instead of the folder.
+    try sbd.waitFor("git to reach the post-checkout hook in \(folder)", timeout: 60) {
       if let result = started.result { _ = try result.get() }
-      return FileManager.default.fileExists(atPath: folder)
+      return FileManager.default.fileExists(atPath: hold + ".held")
     }
     let restarted = try sbd.restartServer(slow, behind: gate)
     try FileManager.default.removeItem(atPath: hold)
@@ -142,18 +156,12 @@ final class Outcome<T>: @unchecked Sendable {
   @Test func leavesAFollowupAloneWhileItsWorktreeIsMade() throws {
     let repos = try Repos()
     let repo = try repos.make("acme/widgets")
-    let gate = try repos.holdCheckouts(in: repo)
+    let hold = try repos.holdCheckouts(in: repo)
     let sbd = try Instance(config: ["repoRoots": [.string(repos.root)]])
     let f = try add(sbd, ["prompt": "Fix the cache.", "repository": "acme/widgets", "on": "1h"])
     let folder = "\(sbd.home.path)/worktrees/widgets/fix-the-cache"
-    let started = Outcome<SessionSummary>()
-    // A thread of its own, because the global queue gets no thread while the
-    // parallel tests block every thread of Swift's cooperative pool.
-    Thread.detachNewThread {
-      started.result = Result {
-        try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)], as: SessionSummary.self)
-      }
-      started.done.signal()
+    let started = Outcome.detached {
+      try Client(home: sbd.home).call("followup-start", ["session": .string(f.id)], as: SessionSummary.self)
     }
     // git is slow when many tests run it at once. A start that ends before
     // git makes the folder fails with its own error.
@@ -172,7 +180,7 @@ final class Outcome<T>: @unchecked Sendable {
     usleep(400_000)
     #expect(try sbd.events(f.id).map(\.kind) == ["followup"])
 
-    try FileManager.default.removeItem(atPath: gate)
+    try FileManager.default.removeItem(atPath: hold)
     #expect(started.done.wait(timeout: .now() + 30) == .success)
     #expect(try started.result?.get().cwd == folder)
     #expect(try sbd.client.call("followup-ls", as: [SessionSummary].self).isEmpty)

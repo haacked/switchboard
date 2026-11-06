@@ -65,20 +65,6 @@ final class MCPGate {
   }
 }
 
-extension Outcome {
-  /// Runs the body on a thread of its own, because the global queue gets no
-  /// thread while the parallel tests block every thread of Swift's
-  /// cooperative pool.
-  static func detached(_ body: @escaping () throws -> T) -> Outcome<T> {
-    let outcome = Outcome<T>()
-    Thread.detachNewThread {
-      outcome.result = Result { try body() }
-      outcome.done.signal()
-    }
-    return outcome
-  }
-}
-
 extension Instance {
   /// Closes the gate before it kills the server, so the stub that sbd starts
   /// next waits at the gate.
@@ -114,5 +100,11 @@ extension Instance {
     #expect(try sbd.mcpServers().first?.state == .starting)
     try gate.open()
     #expect(try sbd.waitForRunning("slow").pid == restarted.pid)
+  }
+
+  @Test func aRequestThatReturnsBeforeTheGateOpensFails() throws {
+    let gate = try MCPGate()
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    #expect(throws: TestError.self) { try gate.open(sbd) { 0 } }
   }
 }

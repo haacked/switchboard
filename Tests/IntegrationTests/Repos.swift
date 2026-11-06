@@ -21,12 +21,13 @@ final class Repos {
 
   /// Installs a post-checkout hook in the repo that holds each checkout, such
   /// as a new worktree's, while the returned file exists, or for at most 30 s.
-  /// The caller removes the file to let git finish.
+  /// The hook creates `<file>.held` when it starts. The caller removes the
+  /// file to let git finish.
   func holdCheckouts(in repo: String) throws -> String {
     let hold = "\(root)/checkout-hold"
     FileManager.default.createFile(atPath: hold, contents: nil)
     let hook = "\(repo)/.git/hooks/post-checkout"
-    try "#!/bin/sh\ni=0\nwhile [ -e '\(hold)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
+    try "#!/bin/sh\n: > '\(hold).held'\ni=0\nwhile [ -e '\(hold)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
       .write(toFile: hook, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
     return hold
