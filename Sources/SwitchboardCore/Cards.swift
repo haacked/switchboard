@@ -297,15 +297,16 @@ extension SessionFacts {
   }
 
   /// Whether the event is a prompt that the user wrote, not a subagent's
-  /// result or a message that sbd sent on its own. A wait's outcome and the
-  /// answer to a deferred card are such messages. This remembers each one
-  /// from its `sent` event and forgets it when claude reports it.
+  /// result, a message from another session, or a message that sbd sent on
+  /// its own. A wait's outcome and the answer to a deferred card are sbd's
+  /// own messages. This remembers each one from its `sent` event and forgets
+  /// it when claude reports it.
   mutating func isUserPrompt(_ event: Event) -> Bool {
     let text = event.data[event.kind == "sent" ? "text" : "prompt"]?.string ?? ""
     switch event.kind {
     case "sent" where event.data["by"]?.string == "sbd":
       sbdMessages.append(text)
-    case "UserPromptSubmit" where !Attention.isSubagentResult(text):
+    case "UserPromptSubmit" where !Attention.isSubagentResult(text) && !Attention.isPeerMessage(text):
       guard let i = sbdMessages.firstIndex(of: text) else { return true }
       sbdMessages.remove(at: i)
     default:

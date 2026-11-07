@@ -1,9 +1,83 @@
 import Foundation
+import cmark_gfm
+import cmark_gfm_extensions
 
-/// A block of Markdown. The app draws each block with SwiftUI's inline
-/// Markdown, which handles emphasis, code spans, and links but no blocks.
+private typealias Node = UnsafeMutablePointer<cmark_node>
+
+/// Text with inline styles: the content of a paragraph, heading, or table cell.
+public struct MarkdownText: Equatable, Sendable, ExpressibleByStringLiteral {
+  public struct Style: OptionSet, Hashable, Sendable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+
+    public static let emphasis = Style(rawValue: 1 << 0)
+    public static let strong = Style(rawValue: 1 << 1)
+    public static let strikethrough = Style(rawValue: 1 << 2)
+    public static let code = Style(rawValue: 1 << 3)
+    /// A footnote reference. The run's text is the footnote's number.
+    public static let footnote = Style(rawValue: 1 << 4)
+  }
+
+  public struct Run: Equatable, Sendable {
+    public var text: String
+    public var style: Style
+    public var link: String?
+    /// An image's source. The run's text is the image's alt text.
+    public var image: String?
+
+    public init(_ text: String, _ style: Style = [], link: String? = nil, image: String? = nil) {
+      self.text = text
+      self.style = style
+      self.link = link
+      self.image = image
+    }
+  }
+
+  public var runs: [Run]
+
+  public init(_ runs: [Run] = []) { self.runs = runs }
+  public init(stringLiteral value: String) { self.init(value.isEmpty ? [] : [Run(value)]) }
+
+  /// The text without its styles and links. An image gives its alt text.
+  public var plain: String { runs.map(\.text).joined() }
+
+  /// Appends a run, and joins it to the last run when the two differ only in text.
+  mutating func append(_ run: Run) {
+    guard !run.text.isEmpty || run.image != nil else { return }
+    if let last = runs.last, last.image == nil, run.image == nil, !run.style.contains(.footnote),
+      last.style == run.style, last.link == run.link
+    {
+      runs[runs.count - 1].text += run.text
+    } else {
+      runs.append(run)
+    }
+  }
+
+  /// Removes the whitespace at the start and the end.
+  func trimmed() -> MarkdownText {
+    var runs = runs
+    while let first = runs.first, first.image == nil, first.text.first?.isWhitespace ?? true {
+      if let start = first.text.firstIndex(where: { !$0.isWhitespace }) {
+        runs[0].text = String(first.text[start...])
+      } else {
+        runs.removeFirst()
+      }
+    }
+    while let last = runs.last, last.image == nil, last.text.last?.isWhitespace ?? true {
+      if let end = last.text.lastIndex(where: { !$0.isWhitespace }) {
+        runs[runs.count - 1].text = String(last.text[...end])
+      } else {
+        runs.removeLast()
+      }
+    }
+    return MarkdownText(runs)
+  }
+}
+
+/// A block of GitHub Flavored Markdown. `parse` reads a reply with cmark-gfm,
+/// GitHub's own parser, and turns its tree into these blocks for the app to draw.
 public enum MarkdownBlock: Equatable, Sendable {
-  /// A list item. `checked` is nil unless the item starts with `[ ]` or `[x]`.
+  /// A list item. `checked` is nil unless the item is a task.
   public struct Item: Equatable, Sendable {
     public var checked: Bool?
     public var blocks: [MarkdownBlock]
@@ -18,284 +92,513 @@ public enum MarkdownBlock: Equatable, Sendable {
     case leading, center, trailing
   }
 
-  case heading(level: Int, text: String)
-  case paragraph(String)
+  public struct Image: Equatable, Sendable {
+    public var source: String
+    public var alt: String
+    public var link: String?
+
+    public init(source: String, alt: String, link: String?) {
+      self.source = source
+      self.alt = alt
+      self.link = link
+    }
+  }
+
+  public struct Footnote: Equatable, Sendable {
+    public var number: Int
+    public var blocks: [MarkdownBlock]
+
+    public init(number: Int, blocks: [MarkdownBlock]) {
+      self.number = number
+      self.blocks = blocks
+    }
+  }
+
+  case heading(level: Int, text: MarkdownText)
+  case paragraph(MarkdownText)
+  /// A paragraph that holds only images.
+  case images([Image])
   /// `number` is the first item's number for a numbered list, or nil for bullets.
   case list(number: Int?, items: [Item])
   case code(language: String?, text: String)
   case quote([MarkdownBlock])
   /// Every row has one cell for each header cell.
-  case table(header: [String], alignments: [Alignment], rows: [[String]])
+  case table(header: [MarkdownText], alignments: [Alignment], rows: [[MarkdownText]])
   case rule
+  /// An HTML `<details>` element. `open` says whether it starts expanded.
+  case details(summary: MarkdownText, open: Bool, blocks: [MarkdownBlock])
+  /// The footnote definitions, in the order the text first cites them. cmark-gfm
+  /// moves them to the end of the document and drops the ones nothing cites.
+  case footnotes([Footnote])
 
-  /// Reads the blocks of a reply. Text that no rule below recognizes becomes a
-  /// paragraph, so nothing is lost.
   public static func parse(_ markdown: String) -> [MarkdownBlock] {
-    blocks(of: markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n"), depth: 0)
+    _ = registered
+    // A single tilde means "about" in replies, such as "~5 min", so only a
+    // double tilde strikes text through.
+    guard let parser = cmark_parser_new(CMARK_OPT_FOOTNOTES | CMARK_OPT_STRIKETHROUGH_DOUBLE_TILDE) else { return [] }
+    defer { cmark_parser_free(parser) }
+    for name in ["table", "strikethrough", "tasklist", "autolink"] {
+      if let syntax = cmark_find_syntax_extension(name) { cmark_parser_attach_syntax_extension(parser, syntax) }
+    }
+    cmark_parser_feed(parser, markdown, markdown.utf8.count)
+    guard let document = cmark_parser_finish(parser) else { return [] }
+    defer { cmark_node_free(document) }
+    return blocks(of: document, depth: 0)
   }
 
-  /// Lists and quotes nest this deep at most. Deeper text becomes one paragraph,
-  /// which keeps the recursion in the parser and in the view from overflowing
-  /// the stack on a reply such as ten thousand `>`.
-  private static let maxDepth = 32
+  /// cmark-gfm registers its extensions in a global list without a lock, so
+  /// this registers them once.
+  private static let registered: Void = cmark_gfm_core_extensions_ensure_registered()
 
-  private static func blocks(of lines: [String], depth: Int) -> [MarkdownBlock] {
+  /// Blocks nest this deep at most. A deeper container becomes one paragraph of
+  /// its text. The limit keeps the recursion here and in the view from
+  /// overflowing the stack on a reply such as ten thousand `>`.
+  static let maxDepth = 32
+
+  /// A table has this many columns at most. A wider table loses the columns past it.
+  static let maxColumns = 64
+
+  private static func blocks(of parent: Node, depth: Int) -> [MarkdownBlock] {
     guard depth <= maxDepth else {
-      let text = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-      return text.isEmpty ? [] : [.paragraph(text.joined(separator: "\n"))]
+      let text = plainText(parent)
+      return text.isEmpty ? [] : [.paragraph(MarkdownText(stringLiteral: text))]
     }
-    var blocks: [MarkdownBlock] = []
-    var paragraph: [String] = []
-    func endParagraph() {
-      if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
-      paragraph = []
-    }
-    var i = 0
-    while i < lines.count {
-      let line = lines[i]
-      let trimmed = line.trimmingCharacters(in: .whitespaces)
-      i += 1
-      if let fence = Self.fence(trimmed) {
-        endParagraph()
-        var body: [String] = []
-        // An unclosed fence runs to the end, as a reply cut off mid-block does.
-        while i < lines.count, !fence.closes(lines[i].trimmingCharacters(in: .whitespaces)) {
-          body.append(Self.dedent(lines[i], by: Self.indent(line)))
-          i += 1
-        }
-        i += 1
-        blocks.append(.code(language: fence.info.isEmpty ? nil : fence.info, text: body.joined(separator: "\n")))
-      } else if trimmed.isEmpty {
-        endParagraph()
-      } else if let heading = Self.heading(trimmed) {
-        endParagraph()
-        blocks.append(heading)
-      } else if Self.isRule(trimmed) {
-        endParagraph()
-        blocks.append(.rule)
-      } else if trimmed.hasPrefix(">") {
-        endParagraph()
-        var quoted = [Self.unquoted(trimmed)]
-        while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(">") {
-          quoted.append(Self.unquoted(lines[i].trimmingCharacters(in: .whitespaces)))
-          i += 1
-        }
-        blocks.append(.quote(Self.blocks(of: quoted, depth: depth + 1)))
-      } else if i < lines.count, let table = Self.table(header: trimmed, delimiter: lines[i]) {
-        endParagraph()
-        i += 1
-        var rows: [[String]] = []
-        while i < lines.count {
-          let row = lines[i].trimmingCharacters(in: .whitespaces)
-          guard row.contains("|"), !Self.startsBlock(row) else { break }
-          let cells = Self.cells(row)
-          rows.append((0..<table.header.count).map { $0 < cells.count ? cells[$0] : "" })
-          i += 1
-        }
-        blocks.append(.table(header: table.header, alignments: table.alignments, rows: rows))
-      } else if let first = Self.listItem(line) {
-        endParagraph()
-        let (list, next) = Self.list(lines, from: i - 1, first: first, depth: depth)
-        blocks.append(list)
-        i = next
-      } else {
-        paragraph.append(trimmed)
+    var builder = BlockBuilder(depth: depth)
+    var footnotes: [Footnote] = []
+    for node in children(parent) {
+      switch kind(node) {
+      case "html_block":
+        builder.html(literal(node))
+      case "footnote_definition":
+        footnotes.append(Footnote(number: footnotes.count + 1, blocks: blocks(of: node, depth: depth + 1)))
+      default:
+        if let block = block(node, depth: builder.depth) { builder.append(block) }
       }
     }
-    endParagraph()
+    var blocks = builder.finish()
+    if !footnotes.isEmpty { blocks.append(.footnotes(footnotes)) }
     return blocks
   }
 
-  /// Whether a line begins a block of its own, which ends a table. A rule
-  /// is not listed, because a table row contains a `|` and a rule does not.
-  private static func startsBlock(_ trimmed: String) -> Bool {
-    fence(trimmed) != nil || heading(trimmed) != nil || trimmed.hasPrefix(">") || listItem(trimmed) != nil
+  private static func block(_ node: Node, depth: Int) -> MarkdownBlock? {
+    switch kind(node) {
+    case "paragraph":
+      return textBlock(inlines(node))
+    case "heading":
+      return .heading(level: Int(cmark_node_get_heading_level(node)), text: inlines(node))
+    case "list":
+      let number = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST ? Int(cmark_node_get_list_start(node)) : nil
+      let items = children(node).map { item in
+        Item(
+          checked: kind(item) == "tasklist" ? cmark_gfm_extensions_get_tasklist_item_checked(item) : nil,
+          blocks: blocks(of: item, depth: depth + 1))
+      }
+      return .list(number: number, items: items)
+    case "code_block":
+      let info = string(cmark_node_get_fence_info(node)).split(whereSeparator: \.isWhitespace).first.map(String.init)
+      var text = literal(node)
+      if text.hasSuffix("\n") { text.removeLast() }
+      return .code(language: info, text: text)
+    case "block_quote":
+      return .quote(blocks(of: node, depth: depth + 1))
+    case "thematic_break":
+      return .rule
+    case "table":
+      return table(node)
+    default:
+      return nil
+    }
   }
 
-  /// Reads the list that starts at `lines[start]`, and returns it with the
-  /// index of the first line after it. A line indented deeper than the first
-  /// item belongs to the item above it, and the item's lines are read as
-  /// blocks of their own. A list item of the same kind that is not deeper
-  /// starts the next item, even after blank lines. Any other line ends the list.
-  private static func list(_ lines: [String], from start: Int, first: ListMarker, depth: Int) -> (MarkdownBlock, Int) {
-    let base = indent(lines[start])
-    func sibling(_ line: String) -> ListMarker? {
-      listItem(line).flatMap { $0.numbered == first.numbered ? $0 : nil }
+  /// A paragraph of only images and whitespace becomes `.images`.
+  fileprivate static func textBlock(_ text: MarkdownText) -> MarkdownBlock? {
+    let text = text.trimmed()
+    if text.runs.isEmpty { return nil }
+    let images = text.runs.compactMap { run in run.image.map { Image(source: $0, alt: run.text, link: run.link) } }
+    if !images.isEmpty, text.runs.allSatisfy({ $0.image != nil || $0.text.allSatisfy(\.isWhitespace) }) {
+      return .images(images)
     }
-    var items: [Item] = []
-    // `indent` is how far the item's first deeper line is indented, up to the
-    // marker's width. Every later line of the item loses the same amount, so
-    // the lines keep their indentation relative to each other.
-    var current: (marker: ListMarker, body: [String], indent: Int?)?
-    func endItem() {
-      guard let (marker, body, _) = current else { return }
-      let checkbox = Self.checkbox(marker.text)
-      items.append(Item(checked: checkbox.checked, blocks: Self.blocks(of: [checkbox.text] + body, depth: depth + 1)))
+    return .paragraph(text)
+  }
+
+  private static func table(_ node: Node) -> MarkdownBlock {
+    let count = Int(cmark_gfm_extensions_get_table_columns(node))
+    let columns = min(count, maxColumns)
+    let marks = cmark_gfm_extensions_get_table_alignments(node)
+    let alignments: [Alignment] = (0..<columns).map { i in
+      switch marks?[i] {
+      case UInt8(ascii: "c"): .center
+      case UInt8(ascii: "r"): .trailing
+      default: .leading
+      }
     }
-    var i = start
-    while i < lines.count {
-      let line = lines[i]
-      if line.isBlank {
-        var next = i
-        while next < lines.count, lines[next].isBlank { next += 1 }
-        guard next < lines.count else { break }
-        if indent(lines[next]) > base {
-          current?.body += repeatElement("", count: next - i)
-        } else if sibling(lines[next]) == nil {
-          break
-        }
-        i = next
+    var rows = children(node).map { row in
+      let cells = children(row).prefix(columns).map { inlines($0) }
+      return cells + Array(repeating: MarkdownText(), count: columns - cells.count)
+    }
+    let header = rows.isEmpty ? [] : rows.removeFirst()
+    return .table(header: header, alignments: alignments, rows: rows)
+  }
+
+  /// The text of a node's inlines, with their styles and links. It walks the
+  /// tree with cmark's iterator, so deep emphasis needs no recursion.
+  private static func inlines(_ parent: Node) -> MarkdownText {
+    var builder = InlineBuilder()
+    guard let iterator = cmark_iter_new(parent) else { return MarkdownText() }
+    defer { cmark_iter_free(iterator) }
+    // The first event enters the parent itself.
+    _ = cmark_iter_next(iterator)
+    while case let event = cmark_iter_next(iterator), event != CMARK_EVENT_DONE {
+      guard let node = cmark_iter_get_node(iterator), node != parent else { continue }
+      let entering = event == CMARK_EVENT_ENTER
+      switch kind(node) {
+      // cmark-gfm's iterator also exits a footnote reference, so leaves act on entering.
+      case "text": if entering { builder.add(literal(node)) }
+      case "softbreak", "linebreak": if entering { builder.add("\n") }
+      case "code": if entering { builder.add(literal(node), .code) }
+      case "html_inline": if entering { builder.tag(literal(node)) }
+      case "footnote_reference": if entering { builder.add(literal(node), .footnote) }
+      case "emph": entering ? builder.push(style: .emphasis) : builder.pop()
+      case "strong": entering ? builder.push(style: .strong) : builder.pop()
+      case "strikethrough": entering ? builder.push(style: .strikethrough) : builder.pop()
+      case "link": entering ? builder.push(link: string(cmark_node_get_url(node))) : builder.pop()
+      case "image": entering ? builder.beginImage() : builder.endImage(source: string(cmark_node_get_url(node)))
+      default: break
+      }
+    }
+    return builder.text
+  }
+
+  /// The text of every node under `parent`, without styles.
+  private static func plainText(_ parent: Node) -> String {
+    guard let text = cmark_render_plaintext(parent, CMARK_OPT_DEFAULT, 0) else { return "" }
+    defer { free(text) }
+    return String(cString: text).trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  fileprivate static func children(_ node: Node) -> [Node] {
+    var nodes: [Node] = []
+    var child = cmark_node_first_child(node)
+    while let node = child {
+      nodes.append(node)
+      child = cmark_node_next(node)
+    }
+    return nodes
+  }
+
+  /// cmark-gfm's name for the node's type. It names no footnote type, so
+  /// those get names here.
+  private static func kind(_ node: Node) -> String {
+    switch cmark_node_get_type(node) {
+    case CMARK_NODE_FOOTNOTE_DEFINITION: "footnote_definition"
+    case CMARK_NODE_FOOTNOTE_REFERENCE: "footnote_reference"
+    default: string(cmark_node_get_type_string(node))
+    }
+  }
+  private static func literal(_ node: Node) -> String { string(cmark_node_get_literal(node)) }
+  private static func string(_ c: UnsafePointer<CChar>?) -> String { c.map { String(cString: $0) } ?? "" }
+}
+
+/// Collects a container's blocks, and nests the blocks between an HTML
+/// `<details>` and its `</details>` inside a `.details` block. cmark-gfm leaves
+/// each tag in an HTML block of its own when blank lines surround the Markdown
+/// between them.
+private struct BlockBuilder {
+  private struct Frame {
+    var summary: MarkdownText?
+    var open = false
+    var blocks: [MarkdownBlock] = []
+  }
+
+  /// The bottom frame is the container. Each frame above it is an open `<details>`.
+  private var frames = [Frame()]
+  /// The `<details>` tags that went past the depth limit and opened no frame.
+  private var skipped = 0
+  private let base: Int
+
+  init(depth: Int) { base = depth }
+
+  /// The depth of a block that is appended now.
+  var depth: Int { base + frames.count - 1 }
+
+  mutating func append(_ block: MarkdownBlock) { frames[frames.count - 1].blocks.append(block) }
+
+  /// Reads an HTML block's tags. The text between them becomes a paragraph.
+  mutating func html(_ html: String) {
+    var text = InlineBuilder(collapsesWhitespace: true)
+    var summary: InlineBuilder?
+    func flush() {
+      if let block = MarkdownBlock.textBlock(text.text) { append(block) }
+      text = InlineBuilder(collapsesWhitespace: true)
+    }
+    func endSummary() {
+      if let s = summary, frames.count > 1 { frames[frames.count - 1].summary = s.text.trimmed() }
+      summary = nil
+    }
+    for token in HTML.tokens(html) {
+      guard case .tag(let tag) = token, ["details", "summary"].contains(tag.name) else {
+        if summary != nil { summary?.feed(token) } else { text.feed(token) }
         continue
       }
-      if indent(line) > base, let marker = current?.marker {
-        let width = current?.indent ?? min(indent(line), marker.width)
-        current?.indent = width
-        current?.body.append(dedent(line, by: width))
-      } else if let marker = sibling(line) {
-        endItem()
-        current = (marker, [], nil)
-      } else {
-        break
-      }
-      i += 1
-    }
-    endItem()
-    return (.list(number: first.number, items: items), i)
-  }
-
-  private static func indent(_ line: String) -> Int {
-    line.prefix { $0 == " " || $0 == "\t" }.count
-  }
-
-  /// Removes up to `width` leading whitespace characters.
-  private static func dedent(_ line: String, by width: Int) -> String {
-    String(line.dropFirst(min(indent(line), width)))
-  }
-
-  private static func heading(_ line: String) -> MarkdownBlock? {
-    let hashes = line.prefix { $0 == "#" }
-    guard (1...6).contains(hashes.count), line.dropFirst(hashes.count).first == " " else { return nil }
-    return .heading(level: hashes.count, text: line.dropFirst(hashes.count).trimmingCharacters(in: .whitespaces))
-  }
-
-  private static func isRule(_ line: String) -> Bool {
-    let chars = line.filter { $0 != " " }
-    return chars.count >= 3
-      && (chars.allSatisfy { $0 == "-" } || chars.allSatisfy { $0 == "*" } || chars.allSatisfy { $0 == "_" })
-  }
-
-  /// Removes the `>` and the one space after it. The rest keeps its
-  /// indentation, which a quoted code block needs.
-  private static func unquoted(_ line: String) -> String {
-    let rest = line.dropFirst()
-    return String(rest.hasPrefix(" ") ? rest.dropFirst() : rest)
-  }
-
-  private struct Fence {
-    let character: Character
-    let length: Int
-    let info: String
-
-    /// A fence closes on a line of only its character, at least as long as the opening.
-    func closes(_ trimmed: String) -> Bool {
-      let run = trimmed.prefix { $0 == character }
-      return run.count >= length && run.count == trimmed.count
-    }
-  }
-
-  /// A backtick fence's info text can't hold a backtick, so "```x``` y" is
-  /// text with code spans.
-  private static func fence(_ trimmed: String) -> Fence? {
-    guard let character = trimmed.first, character == "`" || character == "~" else { return nil }
-    let run = trimmed.prefix { $0 == character }
-    let info = trimmed.dropFirst(run.count).trimmingCharacters(in: .whitespaces)
-    guard run.count >= 3, !(character == "`" && info.contains("`")) else { return nil }
-    return Fence(character: character, length: run.count, info: info)
-  }
-
-  /// A table has this many columns at most. Every row is padded to the header's
-  /// width, so a wider header would let a few bytes of `|` rows build millions of cells.
-  private static let maxColumns = 64
-
-  /// A header row and the delimiter row under it that has one cell for each
-  /// header cell. Both rows need a `|`.
-  private static func table(header: String, delimiter: String) -> (header: [String], alignments: [Alignment])? {
-    let delimiter = delimiter.trimmingCharacters(in: .whitespaces)
-    guard header.contains("|"), delimiter.contains("|") else { return nil }
-    let head = cells(header)
-    let marks = cells(delimiter)
-    guard !head.isEmpty, head.count <= maxColumns, marks.count == head.count else { return nil }
-    var alignments: [Alignment] = []
-    for mark in marks {
-      let left = mark.hasPrefix(":")
-      let right = mark.hasSuffix(":") && mark.count > 1
-      let dashes = mark.dropFirst(left ? 1 : 0).dropLast(right ? 1 : 0)
-      guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
-      alignments.append(left && right ? .center : right ? .trailing : .leading)
-    }
-    return (head, alignments)
-  }
-
-  /// The cells of a row, split at each `|` that a backslash doesn't escape.
-  private static func cells(_ row: String) -> [String] {
-    var cells: [String] = []
-    var cell = ""
-    var characters = Substring(row).makeIterator()
-    var escaped = false
-    while let c = characters.next() {
-      if escaped {
-        cell.append(c == "|" ? "|" : "\\\(c)")
-        escaped = false
-      } else if c == "\\" {
-        escaped = true
-      } else if c == "|" {
-        cells.append(cell)
-        cell = ""
-      } else {
-        cell.append(c)
+      switch (tag.name, tag.closing) {
+      case ("details", false):
+        flush()
+        endSummary()
+        if depth < MarkdownBlock.maxDepth {
+          frames.append(Frame(open: tag.attributes["open"] != nil))
+        } else {
+          skipped += 1
+        }
+      case ("details", true):
+        flush()
+        endSummary()
+        if skipped > 0 { skipped -= 1 } else { close() }
+      case ("summary", false):
+        // A summary outside an open `<details>` stays as text.
+        guard frames.count > 1, skipped == 0 else { continue }
+        flush()
+        summary = InlineBuilder(collapsesWhitespace: true)
+      default:
+        endSummary()
       }
     }
-    if escaped { cell.append("\\") }
-    cells.append(cell)
-    // A leading and a trailing `|` frame the row and hold no cell.
-    if row.hasPrefix("|") { cells.removeFirst() }
-    if row.hasSuffix("|"), !row.hasSuffix("\\|"), !cells.isEmpty { cells.removeLast() }
-    return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+    endSummary()
+    flush()
   }
 
-  private static func checkbox(_ text: String) -> (checked: Bool?, text: String) {
-    for (mark, checked) in [("[ ] ", false), ("[x] ", true), ("[X] ", true)] where text.hasPrefix(mark) {
-      return (checked, String(text.dropFirst(mark.count)))
-    }
-    return (nil, text)
+  private mutating func close() {
+    guard frames.count > 1 else { return }
+    let frame = frames.removeLast()
+    let summary = frame.summary.flatMap { $0.runs.isEmpty ? nil : $0 } ?? "Details"
+    append(.details(summary: summary, open: frame.open, blocks: frame.blocks))
   }
 
-  private struct ListMarker {
-    let text: String
-    let number: Int?
-    var numbered: Bool { number != nil }
-    /// The column where the item's text starts: the line's own indentation,
-    /// the marker, and the space after it. A line of the item that is indented
-    /// at least this far lies inside the item's text.
-    let width: Int
-  }
-
-  private static func listItem(_ line: String) -> ListMarker? {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    let lead = indent(line)
-    for bullet in ["- ", "* ", "+ "] where trimmed.hasPrefix(bullet) {
-      return ListMarker(text: String(trimmed.dropFirst(2)), number: nil, width: lead + 2)
-    }
-    let digits = trimmed.prefix { $0.isNumber }
-    let rest = trimmed.dropFirst(digits.count)
-    if !digits.isEmpty, digits.count <= 9, rest.hasPrefix(". ") || rest.hasPrefix(") ") {
-      return ListMarker(
-        text: String(rest.dropFirst(2)), number: Int(digits), width: lead + digits.count + 2)
-    }
-    return nil
+  /// Closes every `<details>` that is still open, as a browser does at the end
+  /// of a document.
+  mutating func finish() -> [MarkdownBlock] {
+    while frames.count > 1 { close() }
+    return frames[0].blocks
   }
 }
 
-extension String {
-  fileprivate var isBlank: Bool { trimmingCharacters(in: .whitespaces).isEmpty }
+/// Builds styled text from text and the tags around it, from both Markdown and HTML.
+private struct InlineBuilder {
+  private struct Frame {
+    /// The HTML tag that opened the frame, or nil for a Markdown span.
+    var tag: String?
+    var style: MarkdownText.Style
+    var link: String?
+  }
+
+  private(set) var text = MarkdownText()
+  private var frames: [Frame] = []
+  /// The alt text of the image that is open, which collects its text as plain text.
+  private var alt: String?
+  /// The images open inside the image whose alt text is collecting. Their text joins its alt.
+  private var innerImages = 0
+  /// The `<pre>` elements that are open. Their text keeps its whitespace.
+  private var preformatted = 0
+  /// HTML text collapses each run of whitespace to one space, as a browser shows it.
+  let collapsesWhitespace: Bool
+
+  init(collapsesWhitespace: Bool = false) { self.collapsesWhitespace = collapsesWhitespace }
+
+  /// Spans nest this deep at most. The limit keeps the style of each run quick
+  /// to find. A deeper span adds no style.
+  private static let maxFrames = 64
+  /// The Markdown spans that opened past `maxFrames` and pushed no frame.
+  /// `pop` ends these before it removes a frame.
+  private var skipped = 0
+
+  private var style: MarkdownText.Style { frames.reduce([]) { $0.union($1.style) } }
+  private var link: String? { frames.last { $0.link != nil }?.link }
+
+  mutating func add(_ string: String, _ extra: MarkdownText.Style = []) {
+    if alt != nil {
+      alt? += string
+      return
+    }
+    text.append(MarkdownText.Run(string, style.union(extra), link: link))
+  }
+
+  mutating func image(source: String, alt: String) {
+    text.append(MarkdownText.Run(alt, style, link: link, image: source))
+  }
+
+  mutating func beginImage() {
+    if alt == nil { alt = "" } else { innerImages += 1 }
+  }
+
+  mutating func endImage(source: String) {
+    guard innerImages == 0 else {
+      innerImages -= 1
+      return
+    }
+    image(source: source, alt: alt ?? "")
+    alt = nil
+  }
+
+  mutating func push(style: MarkdownText.Style = [], link: String? = nil, tag: String? = nil) {
+    guard frames.count < Self.maxFrames else {
+      if tag == nil { skipped += 1 }
+      return
+    }
+    frames.append(Frame(tag: tag, style: style, link: link))
+  }
+
+  /// Ends the innermost Markdown span. An HTML tag that is still open inside it stays open.
+  mutating func pop() {
+    if skipped > 0 {
+      skipped -= 1
+    } else if let i = frames.lastIndex(where: { $0.tag == nil }) {
+      frames.remove(at: i)
+    }
+  }
+
+  /// Reads an inline HTML node, which cmark-gfm gives one tag at a time.
+  mutating func tag(_ html: String) {
+    for token in HTML.tokens(html) { feed(token) }
+  }
+
+  mutating func feed(_ token: HTML.Token) {
+    switch token {
+    case .text(let string):
+      guard collapsesWhitespace, preformatted == 0 else { return add(HTML.decode(string)) }
+      var string = HTML.collapsed(HTML.decode(string))
+      if string.hasPrefix(" "), text.runs.last.map({ $0.image == nil && $0.text.last?.isWhitespace == true }) ?? true {
+        string.removeFirst()
+      }
+      add(string)
+    case .literal(let string):
+      add(string)
+    case .tag(let tag):
+      if tag.name == "pre", !tag.selfClosing { preformatted = max(0, preformatted + (tag.closing ? -1 : 1)) }
+      if HTML.breaks.contains(tag.name) {
+        lineBreak()
+      } else if tag.name == "img" {
+        if let source = tag.attributes["src"] { image(source: source, alt: tag.attributes["alt"] ?? "") }
+      } else {
+        if tag.closing, let i = frames.lastIndex(where: { $0.tag == tag.name }) { frames.remove(at: i) }
+        if HTML.blocks.contains(tag.name) { lineBreak() }
+        if !tag.closing, !tag.selfClosing, !HTML.void.contains(tag.name) {
+          push(style: HTML.styles[tag.name] ?? [], link: tag.name == "a" ? tag.attributes["href"] : nil, tag: tag.name)
+        }
+      }
+    }
+  }
+
+  /// Starts a new line, unless the text is empty or already ends one.
+  private mutating func lineBreak() {
+    if let i = text.runs.indices.last, text.runs[i].image == nil {
+      while text.runs[i].text.last == " " { text.runs[i].text.removeLast() }
+      if text.runs[i].text.isEmpty { text.runs.removeLast() }
+    }
+    if let last = text.runs.last, last.image != nil || last.text.last != "\n" { add("\n") }
+  }
+}
+
+/// The few parts of HTML that Markdown replies use. A tag that HTML doesn't
+/// define, such as the `<T>` in `Array<T>`, stays as text.
+enum HTML {
+  struct Tag {
+    var name: String
+    var closing: Bool
+    var selfClosing: Bool
+    var attributes: [String: String]
+  }
+
+  enum Token {
+    case text(String)
+    /// Text that shows as written, such as an unknown tag.
+    case literal(String)
+    case tag(Tag)
+  }
+
+  static let styles: [String: MarkdownText.Style] = [
+    "b": .strong, "strong": .strong, "i": .emphasis, "em": .emphasis, "cite": .emphasis, "var": .emphasis,
+    "s": .strikethrough, "del": .strikethrough, "strike": .strikethrough,
+    "code": .code, "kbd": .code, "samp": .code, "tt": .code, "pre": .code,
+  ]
+  static let void: Set = ["br", "hr", "img", "wbr", "input", "source", "col", "area", "meta", "link"]
+  static let breaks: Set = ["br", "hr"]
+  static let blocks: Set = [
+    "p", "div", "li", "ul", "ol", "dl", "dt", "dd", "tr", "table", "thead", "tbody", "tfoot", "blockquote", "pre",
+    "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer", "center", "figure", "figcaption",
+  ]
+  static let known: Set<String> = Set(styles.keys).union(void).union(blocks).union([
+    "a", "abbr", "details", "summary", "span", "sub", "sup", "u", "ins", "mark", "small", "big", "q", "font",
+    "picture", "th", "td", "caption", "colgroup", "nav", "main", "aside", "time", "dfn", "bdi", "bdo", "ruby", "rt",
+    "rp",
+  ])
+
+  private static let tagPattern = try! NSRegularExpression(
+    pattern:
+      #"<!--[\s\S]*?(?:-->|$)|<[!?][^>]*(?:>|$)|<(/?)([A-Za-z][A-Za-z0-9-]*)((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(/?)>"#
+  )
+  private static let attributePattern = try! NSRegularExpression(
+    pattern: #"([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"#)
+
+  /// Splits HTML into text and tags. Comments and declarations drop out. An
+  /// unclosed comment runs to the end, as in a browser. That also keeps the
+  /// search linear when a block holds thousands of `<!--`.
+  static func tokens(_ html: String) -> [Token] {
+    let ns = html as NSString
+    var tokens: [Token] = []
+    var at = 0
+    for match in tagPattern.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+      if match.range.location > at {
+        tokens.append(.text(ns.substring(with: NSRange(location: at, length: match.range.location - at))))
+      }
+      at = match.range.location + match.range.length
+      guard match.range(at: 2).location != NSNotFound else { continue }
+      let name = ns.substring(with: match.range(at: 2)).lowercased()
+      guard known.contains(name) else {
+        tokens.append(.literal(ns.substring(with: match.range)))
+        continue
+      }
+      var attributes: [String: String] = [:]
+      let list = ns.substring(with: match.range(at: 3))
+      let listNS = list as NSString
+      for a in attributePattern.matches(in: list, range: NSRange(location: 0, length: listNS.length)) {
+        let value = (2...4).lazy.map { a.range(at: $0) }.first { $0.location != NSNotFound }
+        attributes[listNS.substring(with: a.range(at: 1)).lowercased()] =
+          value.map { decode(listNS.substring(with: $0)) } ?? ""
+      }
+      tokens.append(
+        .tag(
+          Tag(
+            name: name, closing: match.range(at: 1).length > 0, selfClosing: match.range(at: 4).length > 0,
+            attributes: attributes)))
+    }
+    if at < ns.length { tokens.append(.text(ns.substring(from: at))) }
+    return tokens
+  }
+
+  /// The text with each run of ASCII whitespace as one space. A no-break space stays.
+  static func collapsed(_ string: String) -> String {
+    var result = ""
+    var space = false
+    for c in string {
+      if c == " " || c == "\n" || c == "\t" || c == "\r" || c == "\u{0C}" {
+        space = true
+      } else {
+        if space { result.append(" ") }
+        space = false
+        result.append(c)
+      }
+    }
+    return space ? result + " " : result
+  }
+
+  /// Replaces character references in text that came from an HTML block, with
+  /// cmark-gfm's decoder. cmark-gfm already decodes them in Markdown text.
+  static func decode(_ string: String) -> String {
+    guard string.contains("&") else { return string }
+    var buffer = cmark_strbuf()
+    cmark_strbuf_init(cmark_get_default_mem_allocator(), &buffer, 0)
+    defer { cmark_strbuf_free(&buffer) }
+    var source = string
+    source.withUTF8 { houdini_unescape_html_f(&buffer, $0.baseAddress, bufsize_t($0.count)) }
+    return String(decoding: UnsafeBufferPointer(start: buffer.ptr, count: Int(buffer.size)), as: UTF8.self)
+  }
 }
