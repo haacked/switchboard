@@ -16,7 +16,7 @@ private func activity(after kind: String) -> Int64 {
 
   @Test(arguments: [
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
-    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
+    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "note-resolved", "done", "undone",
     "account-moved", "idle",
   ])
   func anSbdEventThatUsesTheSessionIsActivity(_ kind: String) {

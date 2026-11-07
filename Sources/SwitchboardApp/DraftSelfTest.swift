@@ -59,17 +59,18 @@ enum DraftSelfTest {
     log("after two escs: \(field.stringValue)")
   }
 
-  private static func draft(_ model: BoardModel, _ session: String) -> MessageField.Draft? {
+  static func draft(_ model: BoardModel, _ session: String) -> MessageField.Draft? {
     model.sessions.first { $0.id == session }.map(model.messageDraft)
   }
 
-  /// Waits up to 60 s for the session to be listed, selected, and its message field drawn.
-  private static func waitForField(_ model: BoardModel, _ session: String) async -> NSTextField? {
+  /// Waits up to 60 s for the session to be listed and its message field drawn. With `select`, it also
+  /// selects the session. Without it, the caller has shown the field some other way, such as in the Inbox.
+  static func waitForField(_ model: BoardModel, _ session: String, select: Bool = true) async -> NSTextField? {
     for _ in 0..<240 {
-      if model.selection != session, model.sessions.contains(where: { $0.id == session }) {
+      if select, model.selection != session, model.sessions.contains(where: { $0.id == session }) {
         model.selection = session
       }
-      if model.selection == session, let field = field() { return field }
+      if !select || model.selection == session, let field = field() { return field }
       try? await Task.sleep(for: .seconds(0.25))
     }
     log("no message field")
@@ -77,7 +78,7 @@ enum DraftSelfTest {
   }
 
   private static func field() -> NSTextField? {
-    guard let root = NSApp.windows.first(where: { $0.isVisible && $0.title == "Switchboard" })?.contentView
+    guard let root = NSApp.switchboardWindow?.contentView
     else { return nil }
     func find(_ view: NSView) -> NSTextField? {
       if let field = view as? NSTextField, field.placeholderString == "Message Claude…" { return field }

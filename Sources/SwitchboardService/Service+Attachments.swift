@@ -21,10 +21,14 @@ extension Service {
     guard let images = request.args["images"]?.array, !images.isEmpty else {
       throw APIError("send needs images when it names them")
     }
+    var total = 0
+    try Attachments.checkMessage(count: images.count, total: 0)
     let files = try images.map { image -> (name: String, data: Data) in
       guard let name = image["name"]?.string, let encoded = image["data"]?.string,
         let data = Data(base64Encoded: encoded)
       else { throw APIError("each image needs a name and base64 data") }
+      total += data.count
+      try Attachments.checkMessage(count: images.count, total: total)
       let kind = try Attachments.validate(name: name, data: data)
       if kind == .heic { return (Self.attachmentName(name, ext: "png"), try Attachments.png(fromHEIC: data)) }
       return (Self.attachmentName(name, ext: kind.fileExtension), data)

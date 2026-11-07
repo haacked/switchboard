@@ -263,6 +263,237 @@ import Testing
     #expect(after.reason == "CI on #12")
   }
 
+  // MARK: To-dos
+
+  /// The line of the output that names the id.
+  func line(_ output: String, naming id: String) -> String? {
+    output.split(separator: "\n").map(String.init).first { $0.contains(id) }
+  }
+
+  @Test func noteTodoAddsAToDoByTheUserOrByClaude() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    try sbd.sb("note", s.id, "--todo", "tell Alex in #flags that the fix shipped")
+    try sbd.sb(["note", s.id, "--todo", "close the incident"], env: ["CLAUDECODE": "1"])
+
+    let notes = try sbd.get(s.id).notes
+    #expect(notes.map(\.text) == ["tell Alex in #flags that the fix shipped", "close the incident"])
+    #expect(notes.map(\.kind) == [.todo, .todo])
+    #expect(notes.map(\.by) == [.you, .claude])
+    #expect(notes.allSatisfy { $0.isOpenTodo })
+    #expect(try sbd.get(s.id).openTodos.map(\.id) == notes.map(\.id))
+    #expect(try sbd.events(s.id).filter { $0.kind == "note" }.count == 2)
+  }
+
+  @Test func aNoteWithoutKindIsAPlainNote() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    try sbd.sb("note", s.id, "stacked on #1190")
+
+    let note = try #require(try sbd.get(s.id).notes.first)
+    #expect((note.kind ?? .note) == .note)
+    #expect(!note.isOpenTodo)
+    #expect(try sbd.get(s.id).openTodos.isEmpty)
+  }
+
+  @Test func lsCountsTheOpenToDos() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    #expect(try !sbd.sb("ls").contains("to-do"))
+
+    _ = try sbd.addTodo(s.id, "tell Alex")
+    #expect(try sbd.sb("ls").contains("[1 to-do]"))
+
+    _ = try sbd.addTodo(s.id, "close the incident")
+    #expect(try sbd.sb("ls").contains("[2 to-dos]"))
+  }
+
+  /// Claude can write a note whose text holds terminal escapes. `sb note` prints them escaped.
+  @Test func noteListEscapesTheText() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    _ = try sbd.addTodo(s.id, "done\u{1b}[2Kremoved", by: .claude)
+
+    let text = try sbd.sb("note", s.id)
+
+    #expect(text.contains("done\\u{1b}[2Kremoved"), Comment(rawValue: text))
+    #expect(!text.contains("\u{1b}"), Comment(rawValue: text))
+  }
+
+  @Test func noteRefusesAnUnknownKind() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    let message = failure(sbd, "note", ["session": .string(s.id), "text": "tell Alex", "kind": "chore"])
+
+    #expect(message != "no error")
+    #expect(try sbd.get(s.id).notes.isEmpty)
+  }
+
+  @Test func noteResolveResolvesAToDoAndKeepsTheRecord() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags")
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped", by: .claude)
+
+    try sbd.sb("note", s.id, "--resolve", todo.id)
+
+    let after = try #require(try sbd.storedNote(s.id, todo.id))
+    #expect(after.kind == .todo)
+    #expect(after.by == .claude)
+    #expect(after.resolved?.by == .you)
+    #expect(after.resolved?.how == "resolved")
+    #expect(after.resolved.map { $0.t >= todo.t } == true)
+    #expect(!after.isOpenTodo)
+    #expect(try sbd.get(s.id).openTodos.isEmpty)
+    let event = try #require(try sbd.events(s.id).last { $0.kind == "note-resolved" })
+    #expect(event.data["note"]?.string == todo.id || event.data["note"]?["id"]?.string == todo.id)
+    let rows = try sbd.resolvedTodos()
+    #expect(rows.count == 1)
+    #expect(rows.first?["session"]?.string == s.id)
+    #expect(rows.first?["name"]?.string == "flags")
+    #expect(rows.first?["note"]?.string == todo.id)
+    #expect(rows.first?["text"]?.string == todo.text)
+    #expect(rows.first?["how"]?.string == "resolved")
+  }
+
+  @Test func resolveNoteByClaudeRefusesAndResolvesNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let message = failure(
+      sbd, "resolve-note", ["session": .string(s.id), "note": .string(todo.id), "by": "claude"])
+
+    #expect(message != "no error")
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "note-resolved" })
+  }
+
+  @Test func noteResolveInsideClaudeCodeExitsWithAnError() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let r = try sbd.run(["note", s.id, "--resolve", todo.id], env: ["CLAUDECODE": "1"])
+
+    #expect(r.status != 0)
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  @Test func resolveNoteRefusesANoteThatIsNotAnOpenToDo() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let plain = try sbd.addPlainNote(s.id, "stacked on #1190")
+    let resolved = try sbd.addTodo(s.id, "update the runbook")
+    try sbd.resolveTodo(s.id, resolved.id)
+    let other = try sbd.new(name: "other")
+    let elsewhere = try sbd.addTodo(other.id, "ping Ana")
+    let before = try sbd.get(s.id).notes
+    let rowsBefore = try sbd.resolvedTodoIds()
+    // shortId never uses 0. Therefore n00000 names no note.
+    let ids: [(String, String)] = [
+      ("a plain note", plain.id), ("a resolved to-do", resolved.id), ("an unknown id", "n00000"),
+      ("another session's to-do", elsewhere.id),
+    ]
+
+    for (what, id) in ids {
+      let message = failure(sbd, "resolve-note", ["session": .string(s.id), "note": .string(id), "by": "you"])
+
+      #expect(message != "no error", "\(what)")
+      #expect(try sbd.get(s.id).notes == before, "\(what)")
+      #expect(try sbd.isOpenTodo(other.id, elsewhere.id), "\(what)")
+      #expect(try sbd.resolvedTodoIds() == rowsBefore, "\(what)")
+    }
+  }
+
+  @Test func removeNoteRefusesAnOpenToDo() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let r = try sbd.run(["note", s.id, "--rm", todo.id])
+    let message = failure(sbd, "remove-note", ["session": .string(s.id), "note": .string(todo.id)])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("\(todo.id) is an open to-do"), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("sb note \(s.id) --resolve \(todo.id)"), Comment(rawValue: r.stderr))
+    #expect(message.contains("\(todo.id) is an open to-do"), Comment(rawValue: message))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try !sbd.events(s.id).contains { $0.kind == "note-removed" })
+  }
+
+  @Test func removeNoteRemovesAPlainNoteAndAResolvedToDo() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let plain = try sbd.addPlainNote(s.id, "stacked on #1190")
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    try sbd.resolveTodo(s.id, todo.id)
+
+    try sbd.sb("note", s.id, "--rm", plain.id)
+    try sbd.sb("note", s.id, "--rm", todo.id)
+
+    #expect(try sbd.get(s.id).notes.isEmpty)
+    #expect(try sbd.resolvedTodoIds() == [todo.id])
+  }
+
+  @Test func noteListsOpenToDosFirstThenPlainNotesThenResolvedToDos() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let resolved = try sbd.addTodo(s.id, "update the runbook")
+    let plain = try sbd.addPlainNote(s.id, "stacked on #1190")
+    let open = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    try sbd.resolveTodo(s.id, resolved.id)
+
+    let output = try sbd.sb("note", s.id)
+
+    let order = [open, plain, resolved].map { output.range(of: $0.id)?.lowerBound }
+    #expect(order.allSatisfy { $0 != nil }, Comment(rawValue: output))
+    #expect(order.compactMap { $0 } == order.compactMap { $0 }.sorted(), Comment(rawValue: output))
+    #expect(line(output, naming: open.id)?.contains("to-do") == true, Comment(rawValue: output))
+    #expect(line(output, naming: open.id)?.contains("resolved") == false, Comment(rawValue: output))
+    #expect(line(output, naming: plain.id)?.contains("to-do") == false, Comment(rawValue: output))
+    #expect(line(output, naming: resolved.id)?.contains("to-do, resolved") == true, Comment(rawValue: output))
+  }
+
+  @Test func getMarksEachToDo() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let plain = try sbd.addPlainNote(s.id, "stacked on #1190")
+    let open = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let output = try sbd.sb("get", s.id)
+
+    #expect(line(output, naming: open.id)?.contains("to-do") == true, Comment(rawValue: output))
+    #expect(line(output, naming: plain.id)?.contains("to-do") == false, Comment(rawValue: output))
+  }
+
+  @Test func noteResolvedListsTheRecordsNewestFirstAndHonorsTheLimit() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    var todos: [Note] = []
+    for text in ["update the runbook", "close the incident", "tell Alex in #flags that the fix shipped"] {
+      let todo = try sbd.addTodo(s.id, text)
+      try sbd.resolveTodo(s.id, todo.id)
+      try sbd.advanceClock(60_000)
+      todos.append(todo)
+    }
+    let newestFirst = todos.reversed().map(\.id)
+
+    let all = try sbd.resolvedTodos()
+    let limited = try #require(
+      JSON.parse(try sbd.sb("note", "--resolved", "--limit", "2", "--json"))?.array)
+    let text = try sbd.sb("note", "--resolved")
+
+    #expect(all.compactMap { $0["note"]?.string } == newestFirst)
+    #expect(try sbd.resolvedTodos(limit: 2).compactMap { $0["note"]?.string } == Array(newestFirst.prefix(2)))
+    #expect(limited.compactMap { $0["note"]?.string } == Array(newestFirst.prefix(2)))
+    for todo in todos { #expect(text.contains(todo.text), Comment(rawValue: text)) }
+  }
+
   @Test func theClockMovesOnlyInATestInstance() throws {
     let sbd = try Instance(testClock: false)
     #expect(throws: APIError.self) { try sbd.advanceClock(1000) }

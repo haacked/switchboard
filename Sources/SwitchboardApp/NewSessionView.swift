@@ -49,7 +49,7 @@ struct NewSessionView: View {
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
         if model.accounts.count > 1 {
           Picker("Account", selection: $form.account) {
-            Text("Active (\(model.accounts.first(where: \.active)?.name ?? "default"))").tag("")
+            Text("Active (\(model.activeAccount?.name ?? "default"))").tag("")
             ForEach(model.accounts) { Text($0.name).tag($0.folder) }
           }
         }
