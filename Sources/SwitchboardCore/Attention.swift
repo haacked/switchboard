@@ -126,7 +126,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// `dialog_closed` and `card_closed` can be the only record of the answer.
   static let activityKinds = Set(hookKinds).union([
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
-    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
+    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "note-resolved", "done", "undone",
     "account-moved", "idle", "ack", "unack",
   ])
 
@@ -355,6 +355,9 @@ public enum Attention {
   public static func evaluate(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
   ) -> Verdict {
+    var facts = facts
+    // Only a work session has a PR. A pr event recorded for a Manager or a chat must not fire a PR rule.
+    if session.kind != .work { facts.pr = nil }
     let verdict = rules(session, facts, now: now, stateOf: stateOf)
     return readyForReview(verdict, facts) ?? verdict
   }
@@ -434,9 +437,7 @@ public enum Attention {
   /// Classifies a reply by the last question in its last paragraph, or by a
   /// next step that the paragraph announces.
   public static func classify(_ reply: String) -> ReplyKind {
-    let paragraphs = reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
-    guard let last = paragraphs.last else { return .other }
+    guard let last = lastParagraph(reply) else { return .other }
     let parts = sentences(last)
     if let q = parts.last(where: { $0.hasSuffix("?") }) {
       let lower = q.lowercased()
@@ -448,9 +449,16 @@ public enum Attention {
     return .other
   }
 
+  static func lastParagraph(_ reply: String) -> String? {
+    reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .last { !$0.isEmpty }
+  }
+
   static let sentenceClosers: Set<Character> = ["*", "_", "`", "\"", "'", "\u{201D}", "\u{2019}", ")", "]"]
 
-  static func sentences(_ text: String) -> [String] {
+  static let sentenceTrim = CharacterSet(charactersIn: "*_` -").union(.whitespaces)
+
+  static func sentences(_ text: String, trimming: CharacterSet = sentenceTrim) -> [String] {
     var out: [String] = []
     var current = ""
     let chars = Array(text)
@@ -467,7 +475,7 @@ public enum Attention {
       }
     }
     out.append(current)
-    return out.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*_` -").union(.whitespaces)) }.filter {
+    return out.map { $0.trimmingCharacters(in: trimming) }.filter {
       !$0.isEmpty
     }
   }

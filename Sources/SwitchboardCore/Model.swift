@@ -93,6 +93,9 @@ public struct Session: Codable, Equatable, Sendable {
   /// keeps it. Otherwise sbd passes no permission mode, and Claude's settings
   /// choose one. Nil in a session that an older sbd stored.
   public var autoMode: Bool?
+  /// True after the shell pane's shell exited or the user closed the pane.
+  /// sbd then starts no shell for the session until the user opens one.
+  public var shellClosed: Bool?
 
   public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
@@ -226,6 +229,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?
+  /// True when the session has no shell pane, because its shell exited or
+  /// the user closed it.
+  public var shellClosed: Bool?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
@@ -290,6 +296,15 @@ public func oneLine(_ text: String, max: Int = 70) -> String {
   let line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     .filter { !$0.isEmpty }.joined(separator: " ")
   return line.count <= max ? line : String(line.prefix(max - 1)) + "…"
+}
+
+/// The parts joined as an English list: "a", "a and b", or "a, b, and c".
+public func englishList(_ parts: [String]) -> String {
+  switch parts.count {
+  case 0, 1: parts.joined()
+  case 2: parts.joined(separator: " and ")
+  default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
+  }
 }
 
 private let timestamp = ISO8601DateFormatter()
