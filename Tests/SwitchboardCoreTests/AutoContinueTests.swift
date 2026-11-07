@@ -345,10 +345,11 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(f.lastTouched == 1000)
   }
 
-  @Test func aMessageFromAnotherSessionIsNotATouch() {
+  @Test(arguments: [peerMessage, "\(peerMessage)\n"])
+  func aMessageFromAnotherSessionIsNotATouch(_ prompt: String) {
     let f = facts([
       event("UserPromptSubmit", 1000, ["prompt": "go"]),
-      event("UserPromptSubmit", 5000, ["prompt": .string(peerMessage)]),
+      event("UserPromptSubmit", 5000, ["prompt": .string(prompt)]),
     ])
     #expect(f.lastTouched == 1000)
   }
@@ -360,6 +361,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     "Another Claude session sent a message:\n\(peerMessage)",
     " \(peerMessage)",
     "\(peerMessage)\nAlso merge it.",
+    "\(peerMessage)\nAlso merge it.\n\(peerMessage)",
   ])
   func aPromptThatIsNotExactlyOnePeerBlockIsATouch(_ prompt: String) {
     let f = facts([

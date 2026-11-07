@@ -489,12 +489,15 @@ public enum Attention {
   /// A message from another Claude session arrives as a prompt. On Claude Code
   /// 2.1.319 the prompt is one <cross-session-message from="…"> block. Only the
   /// transcript's `origin.kind` names the sender for certain. Claude writes
-  /// that line after UserPromptSubmit fires. A prompt that is not exactly one
-  /// such block counts as the user's. On 2.1.310 a peer message had no block,
-  /// so it counts as the user's.
+  /// the prompt's transcript line only after UserPromptSubmit fires. A prompt
+  /// that is not exactly one such block, with one closing tag, counts as the
+  /// user's. On 2.1.310 a peer message had no block, so it counts as the
+  /// user's.
   static func isPeerMessage(_ prompt: String) -> Bool {
-    prompt.hasPrefix("<cross-session-message from=\"")
-      && prompt.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("</cross-session-message>")
+    let close = "</cross-session-message>"
+    let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    return prompt.hasPrefix("<cross-session-message from=\"") && trimmed.hasSuffix(close)
+      && trimmed.components(separatedBy: close).count == 2
   }
 
   static func call(_ tool: String, _ d: JSON, _ t: Int64) -> ToolCall {

@@ -209,7 +209,7 @@ let turnEnds = [
       questionTurn() + [
         event("deferred", 4, ["card": 3]), event("Stop", 5),
         event("UserPromptSubmit", 6, ["prompt": .string(prompt)]),
-        // The agent's turn asks again, and the terminal answers that question.
+        // The turn that this message starts asks again, and the terminal answers that question.
         event("PostToolUse", 7, ask(id: "q2")),
       ])
     #expect(f.cards.map(\.deferred) == [true])
