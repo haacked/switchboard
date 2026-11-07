@@ -20,19 +20,10 @@ enum DecisionKeyAction: Equatable, Sendable {
   case focusOther, skip, review, submit
 }
 
-extension TriageItem {
-  /// Whether the Inbox card shows the item's decisions one step at a time.
-  var showsSteps: Bool { decisions.count > 1 }
-}
-
 extension SessionSummary {
-  /// The list that the step view shows: the open list, or the one that the
-  /// first answer opens from the item. Nil when the card has no step view,
-  /// and once sbd sent the answers to the item's decisions.
-  var stepList: DecisionList? {
-    guard let item = triage, item.showsSteps, decisionsSent != true else { return nil }
-    return decisions ?? DecisionList(decisions: item.decisions, ref: item.ref)
-  }
+  /// The list that the step view shows. Nil while the item doesn't carry the
+  /// list, as a held prompt's item doesn't, even when a list is open.
+  var stepList: DecisionList? { triage?.hasDecisionList == true ? shownDecisions : nil }
 }
 
 /// Which step Next, Back, an answer, and a key go to. The reply numbers its

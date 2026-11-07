@@ -27,14 +27,11 @@ extension Service {
   /// again.
   private func decisionList(_ id: String) throws -> DecisionList {
     let s = summary(id)
-    if let open = s.decisions { return open }
+    if let list = s.shownDecisions { return list }
     if s.decisionsSent == true { throw noOpenList(s) }
-    guard let item = s.triage, item.decisions.count > 1 else {
-      let count = s.triage?.decisions.count ?? 0
-      throw APIError(
-        "\(s.name) has \(count == 0 ? "no decisions" : "one decision") to answer. sb decide needs two or more")
-    }
-    return DecisionList(decisions: item.decisions, ref: item.ref)
+    let count = s.triage?.decisions.count ?? 0
+    throw APIError(
+      "\(s.name) has \(count == 0 ? "no decisions" : "one decision") to answer. sb decide needs two or more")
   }
 
   private func noOpenList(_ s: SessionSummary) -> APIError {
@@ -67,31 +64,21 @@ extension Service {
     guard let number = args["number"]?.int, let decision = list.decisions.first(where: { $0.number == number }) else {
       throw APIError("name a decision by its number: \(numbers)")
     }
-    let keys = args["options"]?.array
-    let skip = args["skip"]?.bool == true
-    guard [keys != nil, args["text"] != nil, skip].filter({ $0 }).count == 1 else {
-      throw APIError("answer decision \(number) with options, text, or skip")
-    }
-    var answer: [String: JSON] = ["number": .number(Double(number))]
-    if let keys {
-      answer["labels"] = .array(try decision.labels(keys.map { $0.string ?? "" }).map(JSON.string))
-    } else if skip {
-      answer["skip"] = true
-    } else {
-      let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-      guard !text.isEmpty else { throw APIError("the answer to decision \(number) is empty") }
-      answer["text"] = .string(text)
-    }
+    let text = args["text"].map { $0.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+    if text?.isEmpty == true { throw APIError("the answer to decision \(number) is empty") }
+    let answer = DecisionAnswer(
+      number: number, labels: try args["options"]?.array.map { try decision.labels($0.map { $0.string ?? "" }) },
+      text: text, skip: args["skip"]?.bool == true ? true : nil)
+    guard answer.isValid else { throw APIError("answer decision \(number) with options, text, or skip") }
     if entries[id]!.facts.decisionList == nil {
-      record(
-        id, "decisions_opened",
-        [
-          "decisions": try JSON(encoding: list.decisions), "ref": .string(list.ref),
-          "lastStop": .number(Double(entries[id]!.facts.lastStop)),
-        ])
+      record(id, "decisions_opened", ["decisions": try JSON(encoding: list.decisions), "ref": .string(list.ref)])
     }
-    record(id, "decision_answered", .object(answer))
-    return try JSON(encoding: decisionList(id))
+    record(id, "decision_answered", try JSON(encoding: answer))
+    // An answer changes neither the verdict nor the live item.
+    // The list's newer decisions stay as they were.
+    var answered = entries[id]!.facts.decisionList!
+    answered.newer = list.newer
+    return try JSON(encoding: answered)
   }
 
   /// Sends the message that answers every decision, as `send` does, and

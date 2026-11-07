@@ -1466,9 +1466,10 @@ public final class Service {
     out.kind = s.kind
     out.chat = s.chat
     if Triage.mayHaveItem(out) {
-      out.triage = Triage.item(e.facts, verdict)
-      out.decisions = Triage.decisionList(e.facts, verdict)
-      if Triage.decisionsSent(e.facts, verdict) { out.decisionsSent = true }
+      let shown = Triage.itemAndDecisions(e.facts, verdict)
+      out.triage = shown.item
+      out.decisions = shown.decisions
+      if shown.decisionsSent { out.decisionsSent = true }
     }
     out.followup = s.followup
     out.created = s.created

@@ -90,7 +90,7 @@ public struct DecisionAnswer: Codable, Equatable, Sendable {
     self.skip = skip
   }
 
-  var isValid: Bool {
+  public var isValid: Bool {
     [labels?.isEmpty == false, text?.isEmpty == false, skip == true].filter { $0 }.count == 1
   }
 }
@@ -146,14 +146,42 @@ public struct DecisionList: Codable, Equatable, Sendable {
     return (["My decisions on the \(decisions.count) questions in your last reply:"] + lines).joined(separator: "\n")
   }
 
-  /// The answer as the decision's line in the message says it.
-  public static func text(of answer: DecisionAnswer, for decision: PendingDecision) -> String {
+  /// The answer as the decision's line in the message says it. A skip reads
+  /// as `skip`. Picked labels that match the recommendation get `recommended`
+  /// after them, and with `period` they end with a period unless they already
+  /// end a sentence.
+  public static func text(
+    of answer: DecisionAnswer, for decision: PendingDecision, skip: String = skipText,
+    recommended suffix: String = " (your recommendation)", period: Bool = true
+  ) -> String {
     if let text = answer.text { return text }
-    guard let labels = answer.labels else { return skipText }
+    guard let labels = answer.labels else { return skip }
     let recommended = decision.options.filter(\.recommended).map(\.label)
     var text = labels.joined(separator: ", ")
-    if !recommended.isEmpty, labels == recommended { text += " (your recommendation)" }
+    if !recommended.isEmpty, labels == recommended { text += suffix }
+    guard period else { return text }
     return text.last.map { ".!?".contains($0) } == true ? text : text + "."
+  }
+}
+
+extension Array where Element == PendingDecision {
+  /// Whether the decisions make a list that the user answers one at a time.
+  /// A lone decision does not.
+  public var formList: Bool { count > 1 }
+}
+
+extension TriageItem {
+  public var hasDecisionList: Bool { decisions.formList }
+}
+
+extension SessionSummary {
+  /// The list that the user answers: the open list, or the one that the
+  /// first answer opens from the item. Nil when neither exists, and once sbd
+  /// sent the answers to the item's decisions.
+  public var shownDecisions: DecisionList? {
+    if let decisions { return decisions }
+    guard let item = triage, item.hasDecisionList, decisionsSent != true else { return nil }
+    return DecisionList(decisions: item.decisions, ref: item.ref)
   }
 }
 

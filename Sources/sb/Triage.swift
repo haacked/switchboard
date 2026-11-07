@@ -16,10 +16,20 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
     out("   pick any, as in: sb choose \(s.id) 1,3")
   }
   for (i, o) in item.options.enumerated() {
-    out("   \(i + 1)) \(o.label)\(o.recommended ? " (recommended)" : "")\(o.detail.map { ": \($0)" } ?? "")")
+    out(optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
     // Clicking sends this text as you, so you read it first.
     out("      \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
   }
+}
+
+/// An option as `sb triage` and `sb decide` list it, under its item.
+func optionLine(_ number: Int, _ label: String, recommended: Bool, detail: String?) -> String {
+  "   \(number)) \(label)\(recommended ? " (recommended)" : "")\(detail.map { ": \($0)" } ?? "")"
+}
+
+/// The options that a key separated by commas names, each trimmed.
+func commaKeys(_ key: String) -> JSON {
+  .array(key.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) })
 }
 
 /// `sb triage` lists the sessions that need you or that Claude can continue,
@@ -62,7 +72,7 @@ func choose(_ a: Args) {
   // A multi-select card takes several options separated by commas, as `sb answer` does.
   // A label that holds a comma still names its own option.
   if item.multiSelect, key.contains(","), (try? item.option(key)) == nil {
-    args["options"] = .array(key.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) })
+    args["options"] = commaKeys(key)
   } else {
     args["option"] = .string(key)
   }

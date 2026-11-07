@@ -14,7 +14,7 @@ extension SessionSummary {
   /// primary button, and the step view's Next and Submit take ⇧⌘Return.
   var isInformational: Bool {
     guard state == .needsYou, cards.isEmpty, !openPrompt, let item = triage else { return false }
-    return item.options.isEmpty && !item.showsSteps
+    return item.options.isEmpty && !item.hasDecisionList
   }
 }
 

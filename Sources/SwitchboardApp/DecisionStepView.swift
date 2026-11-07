@@ -169,7 +169,9 @@ struct DecisionStepView: View {
   }
 
   private func reviewRow(_ d: PendingDecision) -> some View {
-    let answer = list.answer(d.number).map { Self.shortAnswer($0, for: d) }
+    let answer = list.answer(d.number).map {
+      DecisionList.text(of: $0, for: d, skip: "Not decided", recommended: " (recommended)", period: false)
+    }
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text("\(d.number)").monospacedDigit().foregroundStyle(.secondary)
       VStack(alignment: .leading, spacing: 2) {
@@ -184,14 +186,6 @@ struct DecisionStepView: View {
         .accessibilityLabel("Edit decision \(d.number), \(d.header)")
     }
     .accessibilityElement(children: .contain)
-  }
-
-  /// The answer as the Review step lists it.
-  static func shortAnswer(_ answer: DecisionAnswer, for decision: PendingDecision) -> String {
-    if let text = answer.text { return text }
-    guard let labels = answer.labels else { return "Not decided" }
-    let recommended = decision.options.filter(\.recommended).map(\.label)
-    return labels.joined(separator: ", ") + (!recommended.isEmpty && labels == recommended ? " (recommended)" : "")
   }
 
   private var submitBox: some View {
@@ -245,11 +239,10 @@ struct DecisionStepView: View {
 
   private var newerBanner: some View {
     let count = list.newer.count
+    let style = CalloutView.style(.decision)
     return VStack(alignment: .leading, spacing: 8) {
-      Label(
-        "The session replied with \(count) new decision\(count == 1 ? "" : "s").", systemImage: "arrow.triangle.branch"
-      )
-      .fontWeight(.medium)
+      Label("The session replied with \(count) new decision\(count == 1 ? "" : "s").", systemImage: style.icon)
+        .fontWeight(.medium)
       if confirmingNewer {
         confirmation("Discard your answers to these decisions and answer the new ones?", action: "Discard Answers") {
           model.discardDecisions(session.id)
@@ -265,8 +258,7 @@ struct DecisionStepView: View {
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RoundedRectangle(cornerRadius: 8).fill(Color.purple.opacity(0.1)))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.purple.opacity(0.35)))
+    .calloutChrome(style.color)
   }
 
   /// A question that the card asks inside itself, with a button that does the
@@ -312,7 +304,7 @@ struct DecisionDots: View {
     }
   }
 
-  /// The Review button is filled while Review shows, as the current dot has its ring.
+  /// The Review button is filled while Review shows. The current dot has a ring instead.
   @ViewBuilder
   private var reviewButton: some View {
     let button = Button("Review") { go(.review) }
@@ -449,14 +441,9 @@ struct OtherAnswer: View {
     Self.submit($draft.text, session: session, ref: ref, decision: decision, to: model)
   }
 
-  /// Sends the trimmed text as the decision's answer. The field keeps the text until sbd accepts the answer.
-  /// It then empties unless the user changed the text meanwhile.
+  /// Sends the trimmed text as the decision's answer, as a reply option sends its text.
   static func submit(_ text: Binding<String>, session: String, ref: String, decision: Int, to model: BoardModel) {
-    let sent = ReplyOption.trimmed(text.wrappedValue)
-    guard !sent.isEmpty else { return }
-    model.answerDecision(session, ref: ref, number: decision, .text(sent)) {
-      if ReplyOption.trimmed(text.wrappedValue) == sent { text.wrappedValue = "" }
-    }
+    ReplyOption.submit(text) { model.answerDecision(session, ref: ref, number: decision, .text($0), answered: $1) }
   }
 }
 
@@ -498,12 +485,13 @@ struct WrappingRow: Layout {
     var row = Row()
     for i in subviews.indices {
       let size = subviews[i].sizeThatFits(.unspecified)
-      let needed = row.indices.isEmpty ? size.width : row.width + spacing + size.width
-      if !row.indices.isEmpty, needed > limit {
+      var width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+      if !row.indices.isEmpty, width > limit {
         rows.append(row)
         row = Row()
+        width = size.width
       }
-      row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+      row.width = width
       row.height = max(row.height, size.height)
       row.indices.append(i)
     }

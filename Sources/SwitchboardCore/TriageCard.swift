@@ -52,7 +52,7 @@ public enum TriageCard {
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let card = TriageSummary(
       title: title.isEmpty ? oneLine(first, max: Triage.titleLength) : title,
-      kind: kind ?? (decisions.count > 1 ? .decision : self.kind(for: options)),
+      kind: kind ?? (decisions.formList ? .decision : self.kind(for: options)),
       summary: lines.prefix(maxLines).joined(separator: "\n"), options: options, callouts: callouts,
       multiSelect: multiSelect, decisions: decisions)
     return Cleaned(card: card, dropped: dropped)
@@ -200,9 +200,11 @@ public enum TriageCard {
               once, when several choices apply together, such as which review items to fix. Every option
               must then be a send option. A single pick sends its message, and several send one message
               that lists each picked option's message on its own line.
-    decisions Optional. Use it when the turn ends with two or more separate decisions for the user, each
-              with its own options, instead of "options". Up to \(TriageSummarizer.maxDecisions) decisions, each with:
-                number      the decision's number in your reply, from 1, each one different
+    decisions Optional. Use it in place of "options" when the turn ends with two or more separate decisions
+              for the user, each with its own options. Still write the summary.
+              Up to \(TriageSummarizer.maxDecisions) decisions, each with:
+                number      the decision's number in your reply, from 1, each one different. When your reply
+                            doesn't number its decisions, use each one's position.
                 header      under \(PendingDecision.headerLength) characters, such as "Name" or "Storage"
                 question    under \(PendingDecision.questionLength) characters
                 context     optional, under \(PendingDecision.contextLength) characters: why it matters, from your reply
@@ -223,6 +225,18 @@ public enum TriageCard {
       {"title": "Push haacked/fix-retry",
        "summary": "Fixed the retry loop and added a test.\\nThe tests pass, and the branch is ready to push.",
        "options": [{"label": "Push", "action": "send", "message": "Yes, push.", "recommended": true}]}
+      EOF
+
+    Example, with two decisions:
+
+      sb summary set <<'EOF'
+      {"title": "Pick a name and a ship date",
+       "summary": "Wrote the CLI and its tests.\\nIt needs a name and a ship date.",
+       "decisions": [
+         {"number": 1, "header": "Name", "question": "Should the app be Switchboard or Hub?",
+          "options": [{"label": "Switchboard", "recommended": true}, {"label": "Hub"}]},
+         {"number": 2, "header": "Ship it now", "question": "Should I ship the CLI now?",
+          "options": [{"label": "Yes", "recommended": true}, {"label": "No", "detail": "Wait for the app"}]}]}
       EOF
 
     sbd shows the card until your next turn starts. It drops an option, a decision, or a callout that doesn't fit this

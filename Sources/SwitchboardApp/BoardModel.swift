@@ -667,23 +667,25 @@ final class BoardModel: ObservableObject {
     case .text(let text): args["text"] = .string(text)
     case .skip: args["skip"] = true
     }
-    decide("decision-answer", args, key: "\(session)/\(number)", then: answered)
+    decide(session, "decision-answer", args, key: "\(session)/\(number)", then: answered)
   }
 
   /// Sends the answers. `stale` sends a list that a turn made stale, which the card asks about first.
   func submitDecisions(_ session: String, stale: Bool = false) {
     var args: [String: JSON] = ["session": .string(session)]
     if stale { args["stale"] = true }
-    decide("decision-submit", args, key: "\(session)/submit")
+    decide(session, "decision-submit", args, key: "\(session)/submit")
   }
 
   func discardDecisions(_ session: String) {
-    decide("decision-discard", ["session": .string(session)], key: "\(session)/discard")
+    decide(session, "decision-discard", ["session": .string(session)], key: "\(session)/discard")
   }
 
   /// A second request with the same key does nothing until sbd answers the first.
-  private func decide(_ op: String, _ args: [String: JSON], key: String, then: (() -> Void)? = nil) {
-    guard let session = args["session"]?.string, deciding.insert(key).inserted else { return }
+  private func decide(
+    _ session: String, _ op: String, _ args: [String: JSON], key: String, then: (() -> Void)? = nil
+  ) {
+    guard deciding.insert(key).inserted else { return }
     perform(
       op, args,
       then: { _ in

@@ -36,12 +36,8 @@ let decisionSummaryJSON: JSON = [
 ]
 
 /// The `decisions_opened` event that the first answer records.
-func decisionsOpened(
-  _ id: Int64, t: Int64 = 200, ref: String, lastStop: Int64, decisions: JSON = threeDecisions
-) -> Event {
-  Event(
-    id: id, session: "s1", t: t, kind: "decisions_opened",
-    data: ["decisions": decisions, "ref": .string(ref), "lastStop": .number(Double(lastStop))])
+func decisionsOpened(_ id: Int64, t: Int64 = 200, ref: String, decisions: JSON = threeDecisions) -> Event {
+  Event(id: id, session: "s1", t: t, kind: "decisions_opened", data: ["decisions": decisions, "ref": .string(ref)])
 }
 
 /// A `decision_answered` event. `answer` holds one of `labels`, `text`, or `skip`.
@@ -259,19 +255,19 @@ private func recordedDecisionsAnswer() throws -> JSON {
   func aDecisionEventLeavesTheVerdictAndTheItemRef(_ kind: String) throws {
     let base = facts(decisionTurn())
     var opened = base
-    opened.apply(decisionsOpened(4, ref: "summary:3", lastStop: 2))
+    opened.apply(decisionsOpened(4, ref: "summary:3"))
     try #require(opened.decisionList != nil, "the facts ignore decisions_opened")
     let chain: [Event] =
       switch kind {
-      case "decisions_opened": [decisionsOpened(4, ref: "summary:3", lastStop: 2)]
+      case "decisions_opened": [decisionsOpened(4, ref: "summary:3")]
       case "decision_answered":
-        [decisionsOpened(4, ref: "summary:3", lastStop: 2), decisionAnswered(5, 1, ["skip": true])]
+        [decisionsOpened(4, ref: "summary:3"), decisionAnswered(5, 1, ["skip": true])]
       case "decisions_submitted":
         [
-          decisionsOpened(4, ref: "summary:3", lastStop: 2), decisionAnswered(5, 1, ["skip": true]),
+          decisionsOpened(4, ref: "summary:3"), decisionAnswered(5, 1, ["skip": true]),
           Event(id: 6, session: "s1", t: 220, kind: kind, data: ["message": "My decisions"]),
         ]
-      default: [decisionsOpened(4, ref: "summary:3", lastStop: 2), Event(id: 5, session: "s1", t: 220, kind: kind)]
+      default: [decisionsOpened(4, ref: "summary:3"), Event(id: 5, session: "s1", t: 220, kind: kind)]
       }
     var after = base
     for e in chain { after.apply(e) }
@@ -281,14 +277,14 @@ private func recordedDecisionsAnswer() throws -> JSON {
   }
 
   @Test func openingKeepsACopyOfTheDecisionsAndTheOriginRef() {
-    let f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3", lastStop: 2)])
+    let f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3")])
 
     #expect(f.decisionList?.decisions.map(\.header) == ["Database", "Name", "Icons"])
     #expect(f.decisionList?.ref == "summary:3")
   }
 
   @Test func aPromptAfterTheListOpenedMakesItStale() {
-    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3", lastStop: 2)])
+    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3")])
     let before = f.decisionList?.stale
 
     f.apply(Event(id: 5, session: "s1", t: 300, kind: "UserPromptSubmit", data: ["prompt": "go on"]))
@@ -299,7 +295,7 @@ private func recordedDecisionsAnswer() throws -> JSON {
 
   @Test(arguments: ["decisions_submitted", "decisions_discarded"])
   func submittingOrDiscardingClosesTheList(_ kind: String) throws {
-    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3", lastStop: 2)])
+    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3")])
     try #require(f.decisionList != nil)
 
     f.apply(
@@ -314,7 +310,7 @@ private func recordedDecisionsAnswer() throws -> JSON {
     later["decisions"] = [decision(1, options: 2), decision(2, options: 2)]
     let f = facts(
       decisionTurn() + [
-        decisionsOpened(4, ref: "summary:3", lastStop: 2),
+        decisionsOpened(4, ref: "summary:3"),
         Event(id: 5, session: "s1", t: 300, kind: "UserPromptSubmit", data: ["prompt": "go on"]),
         stop(6, 310, "I planned more."),
         Event(id: 7, session: "s1", t: 320, kind: Triage.sessionEvent, data: .object(later)),
@@ -330,7 +326,7 @@ private func recordedDecisionsAnswer() throws -> JSON {
   /// The message of a list whose decisions have the answers. A decision
   /// without an answer here is skipped.
   func message(_ answers: [Int: [[String: JSON]]]) throws -> String {
-    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3", lastStop: 2)])
+    var f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3")])
     var id: Int64 = 5
     for number in 1...3 {
       for answer in answers[number] ?? [["skip": true]] {

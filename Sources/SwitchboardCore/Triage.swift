@@ -355,26 +355,37 @@ public enum Triage {
   /// replace the answers. A held prompt's item keeps none, because the
   /// prompt needs its own answer first.
   public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    guard var item = liveItem(facts, verdict) else { return nil }
+    item(facts, live: liveItem(facts, verdict))
+  }
+
+  /// The session's item, its open decision list, and whether a submit sent
+  /// the item's decisions, all from one live item.
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+    item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
+  ) {
+    let live = liveItem(facts, verdict)
+    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+  }
+
+  private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
+    guard var item = live else { return nil }
     if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
     return item
   }
 
   /// The open decision list, with the decisions of a later item in `newer`.
-  public static func decisionList(_ facts: SessionFacts, _ verdict: Verdict) -> DecisionList? {
+  private static func decisionList(_ facts: SessionFacts, live: TriageItem?) -> DecisionList? {
     guard var list = facts.decisionList else { return nil }
-    if let live = liveItem(facts, verdict), live.ref != list.ref { list.newer = live.decisions }
+    if let live, live.ref != list.ref { list.newer = live.decisions }
     return list
   }
 
   /// Whether the last accepted submit sent the decisions of the session's
   /// item. The item keeps them until the session's next prompt lands, and
   /// they don't open again.
-  public static func decisionsSent(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
-    guard facts.decisionList == nil, let sent = facts.submittedDecisionsRef, let live = liveItem(facts, verdict) else {
-      return false
-    }
-    return live.ref == sent && live.decisions.count > 1
+  private static func decisionsSent(_ facts: SessionFacts, live: TriageItem?) -> Bool {
+    guard facts.decisionList == nil, let sent = facts.submittedDecisionsRef, let live else { return false }
+    return live.ref == sent && live.hasDecisionList
   }
 
   /// The item that the session's card, summary, rule, or reply gives.
@@ -617,7 +628,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. When a turn ends with three or more decisions for the user, write them with `sb summary set` and its decisions field instead of AskUserQuestion. `sb summary help` shows the format."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format."
 
   public init() {}
 

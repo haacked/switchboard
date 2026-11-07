@@ -120,7 +120,7 @@ public enum AutoContinue {
       return "an open card"
     }
     // A continue would answer the reply while the user answers its decisions.
-    if f.decisionList != nil || Triage.item(f, input.verdict)?.decisions.isEmpty == false {
+    if f.decisionList != nil || Triage.item(f, input.verdict)?.hasDecisionList == true {
       return "decisions to answer"
     }
     if !(input.session.waits ?? []).isEmpty { return "an open wait" }

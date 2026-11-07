@@ -78,7 +78,7 @@ struct DecisionCard: View {
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
-    } else if !item.options.isEmpty, !item.showsSteps {
+    } else if !item.options.isEmpty, !item.hasDecisionList {
       OptionList(session: session, item: item)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog.
@@ -167,6 +167,14 @@ struct SummaryCalloutColumns: Layout {
   }
 }
 
+extension View {
+  /// The tinted, outlined box that a callout sits in.
+  func calloutChrome(_ color: Color) -> some View {
+    background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(0.1)))
+      .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.35)))
+  }
+}
+
 /// A callout: an icon and tint for its kind, a title, and a body.
 struct CalloutView: View {
   let callout: Callout
@@ -193,8 +201,7 @@ struct CalloutView: View {
       Spacer(minLength: 0)
     }
     .padding(10)
-    .background(RoundedRectangle(cornerRadius: 8).fill(style.color.opacity(0.1)))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(style.color.opacity(0.35)))
+    .calloutChrome(style.color)
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(callout.kind.rawValue.capitalized): \(callout.title). \(callout.body)")
   }
