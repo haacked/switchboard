@@ -51,12 +51,14 @@
 #                    turn. sb's output goes to $SB_HOME/summary-set.log
 #   a prompt that holds "Switchboard plan artifact task." plays the chat's
 #                    side of the task with a fake Artifact tool. See artifact
+#   reply <name>     replies with the text of $SB_HOME/<name>.md
 #   anything else    replies "Done: <prompt>"
 # `claude -p ...` is the summary call. It reads the prompt on stdin and prints
 # the JSON that claude prints with --output-format json: a decision with two
 # options for a reply that holds "Postgres or SQLite", an approval with one for
-# "Want me to", and info otherwise. A reply that holds FAIL-SUMMARY makes it
-# exit 1, and SLOW-SUMMARY makes it hang. It appends the arguments to
+# "Want me to", and info otherwise. $SB_HOME/summary-answer.json, a fixture
+# that the test writes, replaces that answer. A reply that holds FAIL-SUMMARY
+# makes it exit 1, and SLOW-SUMMARY makes it hang. It appends the arguments to
 # $SB_HOME/summary-calls.log, and keeps the last prompt in
 # $SB_HOME/summary-input.txt.
 # A `claude -p` prompt that holds <rows> is the plan update call instead. It
@@ -81,6 +83,7 @@
 # Each run appends one record to $SB_HOME/stub-calls.log in one write:
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK and the arguments, split by tabs. A NUL
 # ends the record, because a prompt can hold a newline.
+# What the hooks print goes to $SB_HOME/hook-output.log. See answer.
 # Each line it reads from the terminal goes to $SB_HOME/stub-input.log as it
 # arrived, with the paste markers.
 
@@ -111,6 +114,7 @@ if [ "${1-}" = -p ]; then
     ;;
   *) out='{"title":"Read the reply","kind":"info","summary":"It finished.","options":[]}' ;;
   esac
+  [ -f "$SB_HOME/summary-answer.json" ] && out=$(cat "$SB_HOME/summary-answer.json")
   jq -nc --argjson o "$out" '{type: "result", subtype: "success", is_error: false, result: ($o | tojson), structured_output: $o}'
   exit 0
 fi
@@ -321,6 +325,22 @@ vars() {
   jq -nc --arg p "$1" --arg r "$2" --arg c "${3:-}" '{prompt: $p, reply: $r, command: $c, description: $p}'
 }
 
+# answer <output>: handles what a hook printed. It appends the conversation's
+# id, a tab, and the output to $SB_HOME/hook-output.log, with a NUL after it.
+# It writes an additionalContext to the transcript as the attachment line
+# that Claude Code 2.1.318 writes.
+answer() {
+  [ -z "$1" ] && return
+  printf '%s\t%s\0' "$session" "$1" >>"$SB_HOME/hook-output.log"
+  local context
+  context=$(jq -r '.hookSpecificOutput.additionalContext // empty' <<<"$1" 2>/dev/null)
+  [ -z "$context" ] && return
+  mkdir -p "$project"
+  jq -nc --arg c "$context" --arg e "$(jq -r .hookSpecificOutput.hookEventName <<<"$1")" \
+    '{type: "attachment", attachment: {type: "hook_additional_context", content: [$c], hookEvent: $e}}' \
+    >>"$project/$session.jsonl"
+}
+
 # emit [vars] [<text> <command>]: runs the hook command with each payload on
 # stdin, and runs the shell command before the first payload that contains
 # the text. Each {{name}} takes its value from the vars, or from this session for
@@ -342,7 +362,7 @@ emit() {
       eval "$3"
       paused=1
     fi
-    [ "${STUB_HOOKS-}" = off ] || printf '%s\n' "$payload" | sh -c "$hook_cmd" >/dev/null
+    [ "${STUB_HOOKS-}" = off ] || answer "$(printf '%s\n' "$payload" | sh -c "$hook_cmd")"
   done <<<"$payloads"
 }
 
@@ -610,6 +630,7 @@ turn() {
     marker='"hook_event_name":"Stop"'
     before="$sb_cmd summary set <'$SB_HOME/${p#card }.json' >>'$SB_HOME/summary-set.log' 2>&1"
     ;;
+  reply\ *) reply=$(cat "$SB_HOME/${p#reply }.md") ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
   *) reply="Done: $p" ;;

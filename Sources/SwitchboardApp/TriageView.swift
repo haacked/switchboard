@@ -63,7 +63,12 @@ struct TriageDetail: View {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
-      if let link = Self.prLink(for: session) { Link(link.label, destination: link.url).font(.caption) }
+      if let link = Self.prLink(for: session) {
+        HStack(spacing: 4) {
+          Link(link.label, destination: link.url).font(.caption)
+          if let owners = session.pr?.codeOwners { CodeOwnerShield(status: owners) }
+        }
+      }
       Spacer()
       Button("Open") { model.selection = session.id }
         .help("Show the session in the sidebar, with its terminals")

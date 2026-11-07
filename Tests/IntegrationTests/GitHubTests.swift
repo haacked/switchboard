@@ -91,13 +91,13 @@ extension Instance {
     let result = try sbd.poll()
     #expect(result["lookups"]?.int == 1)
     #expect(result["polled"]?.int == 1)
-    #expect(result["points"]?.int == 2)
+    #expect(result["points"]?.int == 3)
     let after = try sbd.get(s.id)
     #expect(after.pr?.number == 18303)
     #expect(after.pr?.status == .approved)
     #expect(after.state == .readyToMerge)
     #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
-    #expect(github.requests.map(\.kind) == ["lookup", "status"])
+    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners"])
     #expect(github.requests.first?.ids == ["PostHog/charts:haacked/cdp-dlq-runbook-lookup-step"])
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
     #expect(
@@ -340,7 +340,7 @@ extension Instance {
     #expect(after.pr?.number == 189)
     #expect(after.pr?.status == .draft)
     #expect(after.reason == "read its last reply and decide what's next")
-    #expect(github.requests.map(\.kind) == ["lookup", "status"])
+    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners"])
     #expect(github.requests.first?.ids == ["haacked/review-code#189"])
 
     let file = try #require(FileHandle(forWritingAtPath: sbd.transcript(s)))
@@ -493,7 +493,8 @@ extension Instance {
     let s = try sbd.session(in: "PostHog/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
     github.reply(401, #"{"message":"Bad credentials"}"#)
     try sbd.poll()
-    #expect(github.requests.map(\.authorization) == ["bearer token-1", "bearer token-2", "bearer token-2"])
+    #expect(
+      github.requests.map(\.authorization) == ["bearer token-1", "bearer token-2", "bearer token-2", "bearer token-2"])
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 

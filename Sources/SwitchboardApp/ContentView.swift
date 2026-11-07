@@ -61,8 +61,6 @@ struct ContentView: View {
       set: { if let view = $0 { model.show(view) } })
   }
 
-  private var confirmingDeleteSession: SessionSummary? { model.board.first { $0.id == model.confirmingDelete } }
-
   private var isConfirmingDelete: Binding<Bool> {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
   }
@@ -135,23 +133,7 @@ struct ContentView: View {
         .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
       ToolbarItem { ManagerButton() }
-      ToolbarItem { UsageMenu() }
-      ToolbarItem {
-        if let active = model.accounts.first(where: \.active), model.accounts.count > 1 {
-          Menu {
-            Picker("Account", selection: Binding(get: { active.folder }, set: model.useAccount)) {
-              ForEach(model.accounts) { account in
-                Text("\(account.name) (\(account.sessions))").tag(account.folder)
-              }
-            }
-            .pickerStyle(.inline)
-          } label: {
-            Label("Account: \(active.name)", systemImage: "person.crop.circle")
-              .labelStyle(.titleAndIcon)
-          }
-          .help("The Claude account for new sessions without a parent. Spawned sessions use their parent's.")
-        }
-      }
+      ToolbarItem { AccountMenu() }
       ToolbarItem {
         Button {
           model.showingImport = true
@@ -170,12 +152,12 @@ struct ContentView: View {
       }
     }
     .confirmationDialog(
-      "Delete \(confirmingDeleteSession?.name ?? "this session")?", isPresented: isConfirmingDelete,
-      presenting: confirmingDeleteSession
-    ) { session in
-      Button("Delete", role: .destructive) { model.deleteDone(session) }
-    } message: { session in
-      Text(BoardModel.deletePlan(session).message)
+      "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
+      presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
+    ) { session, todos in
+      Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
+    } message: { session, todos in
+      Text(todos.message(before: BoardModel.deletePlan(session).message))
     }
     .sheet(isPresented: $model.showingNew) {
       NewSessionView().environmentObject(model)
@@ -208,6 +190,7 @@ struct Sidebar: View {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
               SessionRow(session: row.session, repo: repos[row.id])
+              NotesButton(session: row.session)
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if row.session.isRemovableDone { DeleteButton(session: row.session) }
             }
@@ -219,7 +202,7 @@ struct Sidebar: View {
               }
               if row.session.isRemovableDone {
                 Button("Delete \(BoardModel.deletePlan(row.session).summary)…", role: .destructive) {
-                  model.confirmingDelete = row.id
+                  model.confirmingDelete = row.session
                 }
               }
             }
@@ -235,13 +218,17 @@ struct Sidebar: View {
       }
     }
     .confirmationDialog(
-      "Switch to \(model.switchingAccount?.name ?? "this account")?", isPresented: isSwitchingAccount,
-      presenting: model.switchingAccount
+      accountSwitchTitle, isPresented: isSwitchingAccount, presenting: model.switchingAccount
     ) { change in
-      Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
+      if change.switches {
+        Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
+      }
       if !change.plan.moved.isEmpty {
         let n = change.plan.moved.count
-        Button("Also Move \(n) Existing Session\(n == 1 ? "" : "s")") { model.confirmAccountSwitch(change, move: true) }
+        let s = n == 1 ? "" : "s"
+        Button(change.switches ? "Also Move \(n) Existing Session\(s)" : "Move \(n) Session\(s)") {
+          model.confirmAccountSwitch(change, move: true)
+        }
       }
     } message: { change in
       Text(accountSwitchMessage(change))
@@ -261,8 +248,13 @@ struct Sidebar: View {
     Binding(get: { model.switchingAccount != nil }, set: { if !$0 { model.switchingAccount = nil } })
   }
 
+  private var accountSwitchTitle: String {
+    guard let change = model.switchingAccount else { return "Switch accounts?" }
+    return change.switches ? "Switch to \(change.name)?" : "Move sessions to \(change.name)?"
+  }
+
   private func accountSwitchMessage(_ change: AccountSwitch) -> String {
-    var lines = ["New sessions use \(change.name) either way."]
+    var lines = change.switches ? ["New sessions use \(change.name) either way."] : []
     if !change.plan.moved.isEmpty { lines.append(AccountMove.consequences) }
     let blocked = change.plan.blocked
     if !blocked.isEmpty {
@@ -286,7 +278,7 @@ struct DeleteButton: View {
   var body: some View {
     let summary = BoardModel.deletePlan(session).summary
     Button {
-      model.confirmingDelete = session.id
+      model.confirmingDelete = session
     } label: {
       Image(systemName: "trash")
     }
@@ -348,11 +340,14 @@ struct SessionRow: View {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
           if let pr = session.pr, let url = pr.link {
-            Link(destination: url) { Text(verbatim: "#\(pr.number)") }
-              .font(.caption)
-              .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
-              .help(pr.tooltip)
-              .accessibilityValue(pr.status.rawValue)
+            HStack(spacing: 3) {
+              Link(destination: url) { Text(verbatim: "#\(pr.number)") }
+                .font(.caption)
+                .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
+                .help(pr.tooltip)
+                .accessibilityValue(pr.status.rawValue)
+              if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+            }
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
@@ -616,10 +611,13 @@ struct BoardCard: View {
             Text(s.name).fontWeight(.medium).lineLimit(1)
             Spacer()
             if let pr = s.pr {
-              Text(verbatim: "#\(pr.number)")
-                .font(.caption.bold())
-                .foregroundStyle(pr.status.color)
-                .help(pr.tooltip)
+              HStack(spacing: 3) {
+                Text(verbatim: "#\(pr.number)")
+                  .font(.caption.bold())
+                  .foregroundStyle(pr.status.color)
+                  .help(pr.tooltip)
+                if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+              }
             }
           }
           Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
@@ -638,6 +636,7 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       HStack(spacing: 4) {
+        NotesButton(session: s)
         if s.canMerge { MergeButton(session: s) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if s.isRemovableDone { DeleteButton(session: s) }

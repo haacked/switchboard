@@ -21,8 +21,9 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
-  /// The id of the Done session whose delete the confirmation dialog in ContentView asks about.
-  @Published var confirmingDelete: String?
+  /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
+  /// board showed it when the user asked. The dialog's message and request both read this value.
+  @Published var confirmingDelete: SessionSummary?
   /// The ids of the Done sessions whose delete is running.
   @Published var deleting: Set<String> = []
   /// The id of the session whose cleanup the confirmation dialog in ContentView asks about.
@@ -96,6 +97,10 @@ final class BoardModel: ObservableObject {
   /// A switch of the active account that waits for the user to say whether
   /// the sessions on the other accounts move too.
   @Published var switchingAccount: AccountSwitch?
+  @Published var showingAccounts = false
+  /// The sessions that could move to the active account, read when the
+  /// account menu opens.
+  @Published var movable: AccountMove?
   /// What the user picked or typed on each open card, by card id. The Inbox
   /// and the session view show the same draft.
   private var drafts: [Int64: CardView.Draft] = [:]
@@ -326,28 +331,74 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// Makes new sessions run under the account. When sessions on other
-  /// accounts could move to it, this asks first.
+  /// The account that new sessions without a parent use.
+  var activeAccount: AccountInfo? { accounts.first(where: \.active) }
+
+  /// Closes the account menu and makes new sessions run under the account.
+  /// When sessions on other accounts could move to it, this asks first.
   func useAccount(_ folder: String) {
-    let client = client
-    worker.async {
-      let plan = try? client.moveSessions(to: folder, dryRun: true)
-      Task { @MainActor in
-        if let plan, !plan.moved.isEmpty {
-          self.switchingAccount = AccountSwitch(folder: folder, plan: plan)
-        } else {
-          self.perform("account-use", ["account": .string(folder)])
-        }
+    showingAccounts = false
+    planMove(to: folder) { plan in
+      if let plan, !plan.moved.isEmpty {
+        self.switchingAccount = AccountSwitch(folder: folder, plan: plan, switches: true)
+      } else {
+        self.perform("account-use", ["account": .string(folder)])
       }
     }
   }
 
-  /// Makes the account the one for new sessions, and with `move` moves the
-  /// sessions whose claude is stopped to it.
+  /// The account that the account menu offers to move sessions to: the active
+  /// one, when a session runs under another account. A signed-out account
+  /// gets no offer, because a moved session's next resume would ask for /login.
+  var moveTarget: AccountInfo? {
+    guard let active = activeAccount, usage.first(where: { $0.folder == active.folder })?.signedOut != true,
+      accounts.contains(where: { !$0.active && $0.sessions > 0 })
+    else { return nil }
+    return active
+  }
+
+  /// Reads which stopped sessions on other accounts could move to `moveTarget`.
+  func readMovable() {
+    movable = nil
+    guard let target = moveTarget else { return }
+    planMove(to: target.folder) { self.movable = $0 }
+  }
+
+  private func planMove(to folder: String, then: @escaping @MainActor (AccountMove?) -> Void) {
+    let send = send
+    worker.async {
+      let plan = try? JSONCoding.convert(
+        send("account-move", ["account": .string(folder), "dryRun": .bool(true)]), to: AccountMove.self)
+      Task { @MainActor in then(plan) }
+    }
+  }
+
+  /// Asks sbd to read every account's usage now, so an account that has just
+  /// signed in can be chosen without waiting for the next timed read.
+  func rereadUsage() {
+    let client = client
+    DispatchQueue.global(qos: .userInitiated).async {
+      guard let usage = try? client.usage(refresh: true) else { return }
+      Task { @MainActor in if self.usage != usage { self.usage = usage } }
+    }
+  }
+
+  /// Closes the account menu and asks whether to move the sessions in `plan`
+  /// to the active account.
+  func offerMove(_ plan: AccountMove) {
+    showingAccounts = false
+    switchingAccount = AccountSwitch(folder: plan.account, plan: plan, switches: false)
+  }
+
+  /// Makes the account the one for new sessions when the change switches,
+  /// and with `move` moves the sessions whose claude is stopped to it.
   func confirmAccountSwitch(_ change: AccountSwitch, move: Bool) {
     switchingAccount = nil
-    perform("account-use", ["account": .string(change.folder)]) { _ in
-      if move { self.perform("account-move", ["account": .string(change.folder)]) }
+    let moveSessions = { if move { self.perform("account-move", ["account": .string(change.folder)]) } }
+    if change.switches {
+      perform("account-use", ["account": .string(change.folder)]) { _ in moveSessions() }
+    } else {
+      moveSessions()
     }
   }
 
@@ -377,6 +428,10 @@ final class BoardModel: ObservableObject {
   }
 
   func open(_ id: String) { perform("open", ["session": .string(id)]) }
+  /// Starts the session's shell pane, or ends it. sbd keeps a closed shell closed until this opens it.
+  func setShellOpen(_ id: String, _ open: Bool) {
+    perform("shell", ["session": .string(id), "open": .bool(open)])
+  }
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
@@ -646,11 +701,33 @@ final class BoardModel: ObservableObject {
     return draft
   }
   /// A follow-up that hasn't started goes through `followup-rm`, which
-  /// refuses it if it started since the board last read it.
-  func remove(_ id: String) {
+  /// refuses it if it started since the board last read it. `resolve` holds the
+  /// ids of the open to-dos that the confirmation showed.
+  func remove(_ id: String, resolve: [String] = []) {
     let followup = board.first { $0.id == id }?.waitsToStart == true
     if selection == id { selection = nil }
-    perform(followup ? "followup-rm" : "rm", ["session": .string(id)])
+    perform(followup ? "followup-rm" : "rm", Self.resolving(["session": .string(id)], resolve))
+  }
+
+  /// `args` with `resolve` set to `ids`. An empty `ids` adds no key.
+  nonisolated static func resolving(_ args: [String: JSON], _ ids: [String]) -> [String: JSON] {
+    var args = args
+    if !ids.isEmpty { args["resolve"] = .array(ids.map(JSON.string)) }
+    return args
+  }
+
+  func addNote(_ id: String, text: String, todo: Bool, added: (() -> Void)? = nil) {
+    perform(
+      "note",
+      [
+        "session": .string(id), "text": .string(text), "kind": .string((todo ? Note.Kind.todo : .note).rawValue),
+        "by": .string(Author.you.rawValue),
+      ],
+      then: { _ in added?() })
+  }
+
+  func resolveNote(_ id: String, note: String) {
+    perform("resolve-note", ["session": .string(id), "note": .string(note), "by": .string(Author.you.rawValue)])
   }
 
   /// What the Done column's delete icon removes, for the confirmation.
@@ -674,19 +751,11 @@ final class BoardModel: ObservableObject {
         parts.append("its local branch \(branch)")
         parts.append("the remote branch \(branch), only if it is still at the merged PR's head")
       }
-      var text = "This stops claude, closes both terminals, and deletes " + Self.list(parts) + "."
+      var text = "This stops claude, closes both terminals, and deletes " + englishList(parts) + "."
       if worktree != nil && branch == nil { text += " The branch stays, because its PR is not merged." }
       text +=
         " The conversation's transcript stays. sbd refuses a worktree with uncommitted files or commits on no remote branch, a worktree that a tool other than Supacode locked, a branch that is not at the merged PR's head, and a branch checked out in another worktree. A refusal before anything stops deletes nothing. A branch that fails its check after the worktree is gone stays, and the session and worktree are deleted anyway."
       return text
-    }
-
-    static func list(_ parts: [String]) -> String {
-      switch parts.count {
-      case 0, 1: parts.joined()
-      case 2: parts.joined(separator: " and ")
-      default: parts.dropLast().joined(separator: ", ") + ", and " + parts.last!
-      }
     }
   }
 
@@ -700,19 +769,20 @@ final class BoardModel: ObservableObject {
   /// The request that the icon sends: the same `rm` as the trash dialog, with the worktree, the
   /// branch, and the remote branch on. The branch is on only for a merged PR, because sbd
   /// refuses the whole delete for a branch with no merged PR.
-  nonisolated static func deleteRequest(_ s: SessionSummary) -> [String: JSON] {
+  nonisolated static func deleteRequest(_ s: SessionSummary, resolve: [String] = []) -> [String: JSON] {
     let plan = deletePlan(s)
-    return [
-      "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
-      "remote_branch": .bool(plan.branch != nil),
-    ]
+    return resolving(
+      [
+        "session": .string(s.id), "worktree": .bool(plan.worktree != nil), "branch": .bool(plan.branch != nil),
+        "remote_branch": .bool(plan.branch != nil),
+      ], resolve)
   }
 
   /// Deletes a Done session with everything `deletePlan` names. sbd runs the safety checks of `rm`.
-  func deleteDone(_ s: SessionSummary) {
+  func deleteDone(_ s: SessionSummary, resolve: [String] = []) {
     guard deleting.insert(s.id).inserted else { return }
     perform(
-      "rm", Self.deleteRequest(s),
+      "rm", Self.deleteRequest(s, resolve: resolve),
       then: { _ in if self.selection == s.id { self.selection = nil } },
       finally: { self.deleting.remove(s.id) })
   }
@@ -731,8 +801,9 @@ final class BoardModel: ObservableObject {
   /// local branch, and sbd refuses unless the session's PR is merged. When the
   /// branch fails its check after the worktree is gone, sbd removes the session
   /// and keeps the branch. The error shows in the banner.
-  func delete(_ id: String, branch: Bool = false) {
-    perform("rm", ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]) { _ in
+  func delete(_ id: String, branch: Bool = false, resolve: [String] = []) {
+    let args: [String: JSON] = ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]
+    perform("rm", Self.resolving(args, resolve)) { _ in
       if self.selection == id { self.selection = nil }
     }
   }
@@ -851,6 +922,8 @@ final class BoardModel: ObservableObject {
 struct AccountSwitch: Identifiable {
   var folder: String
   var plan: AccountMove
+  /// False when the change only moves sessions to the active account.
+  var switches: Bool
   var id: String { folder }
   var name: String { ClaudeAccount.name(folder) }
 }

@@ -68,6 +68,18 @@ extension Instance {
   func intact(_ s: SessionSummary) throws -> Bool {
     try FileManager.default.fileExists(atPath: s.cwd) && client.sessions().map(\.id).contains(s.id)
   }
+
+  /// Makes every `statement`, such as `DELETE` or `INSERT`, on `table` abort, as a constraint on the store would.
+  func block(_ statement: String, on table: String) throws {
+    let trigger = "block_\(statement.lowercased())_\(table)"
+    let r = try runCommand(
+      "/usr/bin/sqlite3",
+      [
+        home.database,
+        "CREATE TRIGGER \(trigger) BEFORE \(statement) ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
+      ])
+    try #require(r.status == 0)
+  }
 }
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct DeleteSessionTests {
@@ -323,22 +335,11 @@ extension Instance {
       "git -C \"$REPO\" branch -D \(Self.mergedBranch) >/dev/null", error: "no longer exists")
   }
 
-  /// Makes every delete from `table` abort, as a constraint on the store would.
-  private func blockDeletes(from table: String, _ sbd: Instance) throws {
-    let r = try runCommand(
-      "/usr/bin/sqlite3",
-      [
-        sbd.home.database,
-        "CREATE TRIGGER block_\(table) BEFORE DELETE ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
-      ])
-    #expect(r.status == 0)
-  }
-
   /// The store refuses the delete, so sbd refuses before it stops claude or removes the worktree.
   private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool) throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
-    try blockDeletes(from: table, sbd)
+    try sbd.block("DELETE", on: table)
     let r = try (branch ? sbd.deleteSessionAndBranch(s.id) : sbd.deleteSession(s.id))
     #expect(r.status != 0)
     #expect(r.stderr.contains("store is read-only"))
@@ -748,5 +749,270 @@ extension Instance {
     try refusesAndChangesNothing("checked out") { sbd, _, s, _ in
       try sbd.git(s.cwd, "checkout", "-q", "--detach", "HEAD~1")
     }
+  }
+
+  @Test func leavesEverythingWhenTheSessionHasAnOpenToDo() throws {
+    try refusesAndChangesNothing("open to-do") { sbd, _, s, _ in
+      _ = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    }
+  }
+
+  // MARK: To-dos
+
+  private func paneRuns(_ t: Terminals, _ pane: String) throws -> Bool {
+    try runCommand(t.tmux, ["-S", t.socket, "has-session", "-t", "=\(pane)"]).status == 0
+  }
+
+  /// Without --worktree, rm sends SIGTERM to claude once its checks pass. Only a claude that still runs after the
+  /// refusal shows that the check came first.
+  @Test(arguments: [false, true])
+  func rmRefusesAnOpenToDoNamesItAndChangesNothing(worktree: Bool) throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let first = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let second = try sbd.addTodo(s.id, "close the incident")
+    let pid = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    let terminals = try sbd.client.terminals(s.id)
+    try #require(try paneRuns(terminals, terminals.claude))
+    try #require(try paneRuns(terminals, terminals.shell))
+
+    let r = try sbd.run(["rm", s.id] + (worktree ? ["--worktree"] : []))
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("\(s.id) has an open to-do"), Comment(rawValue: r.stderr))
+    for todo in [first, second] {
+      #expect(r.stderr.contains(todo.id), Comment(rawValue: r.stderr))
+      #expect(r.stderr.contains("\"\(todo.text)\""), Comment(rawValue: r.stderr))
+    }
+    #expect(r.stderr.contains("sb note \(s.id) --resolve"), Comment(rawValue: r.stderr))
+    #expect(
+      r.stderr.contains("sb rm \(s.id)\(worktree ? " --worktree" : "") --resolve"), Comment(rawValue: r.stderr))
+    sleep(1)
+    #expect(Processes.exists(pid))
+    #expect(try paneRuns(terminals, terminals.claude))
+    #expect(try paneRuns(terminals, terminals.shell))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.isOpenTodo(s.id, first.id))
+    #expect(try sbd.isOpenTodo(s.id, second.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  /// Claude can write a to-do whose text holds terminal escapes. The refusal prints them escaped.
+  @Test func rmRefusalEscapesTheToDoText() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    _ = try sbd.addTodo(s.id, "done\u{1b}[2Kremoved", by: .claude)
+
+    let r = try sbd.run(["rm", s.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("done\\u{1b}[2Kremoved"), Comment(rawValue: r.stderr))
+    #expect(!r.stderr.contains("\u{1b}"), Comment(rawValue: r.stderr))
+  }
+
+  /// Two to-dos need two --resolve flags, and each one counts.
+  @Test func rmResolveWithEveryOpenIdRemovesTheSessionAndKeepsTheRecord() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let first = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let second = try sbd.addTodo(s.id, "close the incident", by: .claude)
+    try sbd.addPlainNote(s.id, "stacked on #1190")
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", first.id, "--resolve", second.id])
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    let rows = try sbd.resolvedTodos()
+    #expect(Set(rows.compactMap { $0["note"]?.string }) == [first.id, second.id])
+    #expect(rows.count == 2)
+    for row in rows {
+      #expect(row["session"]?.string == s.id, Comment(rawValue: row.text))
+      #expect(row["name"]?.string == s.name, Comment(rawValue: row.text))
+      #expect(row["branch"]?.string == "haacked/feature", Comment(rawValue: row.text))
+      #expect(row["how"]?.string == "resolved and deleted the session", Comment(rawValue: row.text))
+    }
+    #expect(rows.first { $0["note"]?.string == first.id }?["text"]?.string == first.text)
+    #expect(rows.first { $0["note"]?.string == second.id }?["text"]?.string == second.text)
+  }
+
+  /// `resolve` must name exactly the session's open to-dos. Each other list refuses before anything stops.
+  /// It resolves nothing.
+  @Test func rmRefusesAResolveListThatIsNotTheOpenToDosAndResolvesNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let first = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let second = try sbd.addTodo(s.id, "close the incident")
+    let plain = try sbd.addPlainNote(s.id, "stacked on #1190")
+    let resolved = try sbd.addTodo(s.id, "update the runbook")
+    try sbd.resolveTodo(s.id, resolved.id)
+    let other = try sbd.new(name: "other")
+    let elsewhere = try sbd.addTodo(other.id, "ping Ana")
+    let rowsBefore = try sbd.resolvedTodoIds()
+    let open: [JSON] = [.string(first.id), .string(second.id)]
+    // shortId never uses 0. Therefore n00000 names no note.
+    let lists: [(String, JSON)] = [
+      ("a subset of the open ids", [.string(first.id)]),
+      ("an unknown id", .array(open + ["n00000"])),
+      ("a plain note's id", .array(open + [.string(plain.id)])),
+      ("a resolved to-do's id", .array(open + [.string(resolved.id)])),
+      ("another session's to-do", .array(open + [.string(elsewhere.id)])),
+      ("another session's to-do in place of one", [.string(first.id), .string(elsewhere.id)]),
+      ("a boolean", true),
+    ]
+
+    for (what, resolve) in lists {
+      let message = failure(sbd, "rm", ["session": .string(s.id), "worktree": true, "resolve": resolve])
+
+      #expect(message != "no error", "\(what)")
+      #expect(try sbd.intact(s), "\(what)")
+      #expect(try sbd.get(s.id).live, "\(what)")
+      #expect(try sbd.isOpenTodo(s.id, first.id), "\(what)")
+      #expect(try sbd.isOpenTodo(s.id, second.id), "\(what)")
+      #expect(try sbd.storedNote(s.id, plain.id) == plain, "\(what)")
+      #expect(try sbd.isOpenTodo(other.id, elsewhere.id), "\(what)")
+      #expect(try sbd.resolvedTodoIds() == rowsBefore, "\(what)")
+    }
+  }
+
+  /// The dialog sends the ids it showed. A to-do that arrived after that is not among them.
+  @Test func aToDoAddedAfterTheIdsWereReadBlocksTheDelete() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let first = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let shown = try sbd.get(s.id).openTodos.map(\.id)
+    #expect(shown == [first.id])
+    let late = try sbd.addTodo(s.id, "close the incident")
+
+    let r = try sbd.run(["rm", s.id, "--worktree"] + shown.flatMap { ["--resolve", $0] })
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains(late.id), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("\"close the incident\""), Comment(rawValue: r.stderr))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.isOpenTodo(s.id, first.id))
+    #expect(try sbd.isOpenTodo(s.id, late.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  /// The stub writes notes.txt when SIGTERM arrives. Only the check after claude exits refuses.
+  @Test(arguments: [false, true])
+  func aRefusalForAnotherReasonLeavesTheToDoOpen(writtenAsClaudeStops: Bool) throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    if writtenAsClaudeStops {
+      try sbd.sb("send", s.id, "onterm notes.txt")
+      try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll write notes.txt when I stop." }
+    } else {
+      try "x".write(toFile: "\(s.cwd)/notes.txt", atomically: true, encoding: .utf8)
+    }
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("uncommitted"), Comment(rawValue: r.stderr))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  @Test func aStoreThatCannotDeleteTheSessionLeavesTheToDoOpenAndWritesNoRecord() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    try sbd.block("DELETE", on: "sessions")
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("store is read-only"), Comment(rawValue: r.stderr))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  /// A resolve list must hold only note ids. Dropping the other elements would leave exactly the open ids.
+  @Test func rmRefusesAResolveThatIsNotAListOfIds() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let first = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let second = try sbd.addTodo(s.id, "close the incident")
+    let lists: [(String, JSON)] = [
+      ("the open ids and a number", [.string(first.id), .string(second.id), 1]),
+      ("the open ids and null", [.string(first.id), .string(second.id), .null]),
+      ("one id as a string", .string(first.id)),
+    ]
+
+    for (what, resolve) in lists {
+      let message = failure(sbd, "rm", ["session": .string(s.id), "worktree": true, "resolve": resolve])
+
+      #expect(message.contains("resolve is a list of note ids"), "\(what): \(message)")
+      #expect(try sbd.intact(s), "\(what)")
+      #expect(try sbd.isOpenTodo(s.id, first.id), "\(what)")
+      #expect(try sbd.isOpenTodo(s.id, second.id), "\(what)")
+      #expect(try sbd.resolvedTodos().isEmpty, "\(what)")
+    }
+  }
+
+  /// The check before the stop runs the inserts too. A store that refuses the record therefore refuses the delete first.
+  @Test func aStoreThatCannotRecordTheResolutionRefusesBeforeAnythingStops() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    try sbd.block("INSERT", on: "resolved_todos")
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("store is read-only"), Comment(rawValue: r.stderr))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+  }
+
+  @Test func rmResolveInsideClaudeCodeExitsWithAnErrorAndChangesNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id], env: ["CLAUDECODE": "1"])
+
+    #expect(r.status != 0)
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  @Test func rmRequestWithResolveByClaudeRefusesAndChangesNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+
+    let message = failure(
+      sbd, "rm",
+      ["session": .string(s.id), "worktree": true, "resolve": [.string(todo.id)], "by": "claude"])
+
+    #expect(message.contains("Only you can resolve a to-do."), Comment(rawValue: message))
+    #expect(try sbd.intact(s))
+    #expect(try sbd.get(s.id).live)
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  @Test func rmRemovesASessionWhoseNotesArePlainOrResolvedToDos() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    try sbd.addPlainNote(s.id, "stacked on #1190")
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    try sbd.resolveTodo(s.id, todo.id)
+
+    let r = try sbd.deleteSession(s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try sbd.resolvedTodos().map { $0["how"]?.string } == ["resolved"])
   }
 }

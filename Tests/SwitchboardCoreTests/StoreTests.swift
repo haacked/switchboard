@@ -135,3 +135,98 @@ func tempFolder() throws -> String {
     #expect(try JSONCoding.decode(Config.self, from: text).claudeConfigDirs == dirs)
   }
 }
+
+/// A resolved to-do's record and the session change that resolves it commit together, or neither does.
+@Suite struct ResolvedTodoStoreTests {
+  static func todo(_ id: String) -> Note { Note(id: id, text: "tell Alex", by: .claude, t: 10, kind: .todo) }
+
+  static func record(_ session: Session, _ note: Note, how: String) -> ResolvedTodo {
+    ResolvedTodo(session: session, note: note, pr: 12, resolution: Note.Resolution(t: 20, by: .you, how: how))
+  }
+
+  /// Makes every `when` on `table` abort, as a constraint on the store would.
+  static func block(_ when: String, on table: String, in path: String) throws {
+    let r = try runCommand(
+      "/usr/bin/sqlite3",
+      [path, "CREATE TRIGGER block BEFORE \(when) ON \(table) BEGIN SELECT RAISE(ABORT, 'blocked'); END;"])
+    try #require(r.status == 0, Comment(rawValue: r.stderr))
+  }
+
+  func session() -> Session {
+    var s = Session(
+      id: "s1", name: "one", cwd: "/tmp/a", repo: "/tmp/repo", branch: "haacked/a", claudeSessionId: "u1", created: 5)
+    s.notes = [Self.todo("n1")]
+    return s
+  }
+
+  @Test func deleteRecordsTheResolvedToDosAndTheyOutliveTheSession() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = session()
+    try store.save(s)
+
+    try store.delete(
+      session: s.id, resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")])
+
+    #expect(try store.sessions().isEmpty)
+    let rows = try store.resolvedTodos(limit: 50)
+    #expect(rows.map(\.note) == ["n1"])
+    #expect(rows.first?.repo == "/tmp/repo")
+    #expect(rows.first?.branch == "haacked/a")
+    #expect(rows.first?.pr == 12)
+    #expect(rows.first?.by == .claude)
+  }
+
+  @Test func aDeleteThatFailsWritesNoRecord() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = session()
+    try store.save(s)
+    try Self.block("DELETE", on: "sessions", in: "\(dir)/sb.db")
+
+    #expect(throws: APIError.self) {
+      try store.delete(
+        session: s.id, resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")])
+    }
+
+    #expect(try store.sessions() == [s])
+    #expect(try store.resolvedTodos(limit: 50).isEmpty)
+  }
+
+  @Test func aResolveWhoseSessionSaveFailsWritesNoRecord() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = session()
+    try store.save(s)
+    try Self.block("INSERT", on: "sessions", in: "\(dir)/sb.db")
+    var resolved = s
+    resolved.notes?[0].resolved = Note.Resolution(t: 20, by: .you, how: "resolved")
+
+    #expect(throws: APIError.self) {
+      try store.save(resolved, resolving: Self.record(s, Self.todo("n1"), how: "resolved"))
+    }
+
+    #expect(try store.sessions() == [s])
+    #expect(try store.resolvedTodos(limit: 50).isEmpty)
+  }
+
+  @Test func aSessionWithoutARepoBranchOrPRReadsBackAsNil() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = Session(id: "s1", name: "one", cwd: "/tmp/a", claudeSessionId: "u1", created: 5)
+    try store.save(s)
+    var row = Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")
+    row.pr = nil
+
+    try store.delete(session: s.id, resolving: [row])
+
+    let read = try #require(try store.resolvedTodos(limit: 50).first)
+    #expect(read.repo == nil)
+    #expect(read.branch == nil)
+    #expect(read.pr == nil)
+  }
+}

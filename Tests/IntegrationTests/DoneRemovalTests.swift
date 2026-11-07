@@ -586,6 +586,52 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(removed(result).union(skipped) == Set(targets))
     #expect(removed(result).isDisjoint(with: skipped))
   }
+
+  // MARK: To-dos
+
+  /// Without --worktree, rm skips its worktree checks. The to-do check must still run.
+  @Test(arguments: [true, false])
+  func previewSkipsASessionWithAnOpenToDoAndNamesTheToDo(worktree: Bool) throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let held = try sbd.worktreeSession(repo, branch: "haacked/held")
+    let clean = try sbd.worktreeSession(repo, branch: "haacked/clean")
+    try sbd.markDone(held.id)
+    try sbd.markDone(clean.id)
+    let todo = try sbd.addTodo(held.id, "tell Alex in #flags that the fix shipped")
+
+    let plan = try sbd.planDoneRemoval(worktree: worktree)
+
+    #expect(planned(plan) == [clean.id])
+    let reason = try #require(skip(plan["skip"], held.id)?["reason"]?.string, Comment(rawValue: plan.text))
+    #expect(
+      reason.contains("\(held.name) has an open to-do: \(todo.id) \"tell Alex in #flags that the fix shipped\""),
+      Comment(rawValue: reason))
+    #expect(try sbd.intact(held))
+  }
+
+  @Test(arguments: [true, false])
+  func confirmedRemovalSkipsATargetWhoseToDoWasAddedAfterThePreview(worktree: Bool) throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let held = try sbd.worktreeSession(repo, branch: "haacked/held")
+    let clean = try sbd.worktreeSession(repo, branch: "haacked/clean")
+    try sbd.markDone(held.id)
+    try sbd.markDone(clean.id)
+    #expect(planned(try sbd.planDoneRemoval(worktree: worktree)) == [held.id, clean.id])
+    let todo = try sbd.addTodo(held.id, "tell Alex in #flags that the fix shipped")
+
+    let result = try sbd.removeDone([held.id, clean.id], worktree: worktree)
+
+    #expect(removed(result) == [clean.id])
+    let reason = try #require(skip(result["skipped"], held.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(
+      reason.contains("has an open to-do: \(todo.id) \"tell Alex in #flags that the fix shipped\""),
+      Comment(rawValue: reason))
+    #expect(try sbd.intact(held))
+    #expect(try sbd.isOpenTodo(held.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
 }
 
 // MARK: - Worktrees that Supacode locked

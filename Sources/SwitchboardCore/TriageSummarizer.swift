@@ -5,6 +5,10 @@ import Foundation
 public enum TriageSummarizer {
   /// How much of the reply the model sees.
   public static let replyCharacters = 4_000
+  /// How many decisions the summary lists one per line.
+  static let maxDecisions = 10
+  /// A summary that lists decisions has a line before them and one after them.
+  static let summaryLines = maxDecisions + 2
 
   static let system = """
     You turn the last reply of a Claude Code session into one item for a list of things that need the user. \
@@ -18,10 +22,16 @@ public enum TriageSummarizer {
     - kind: decision (the user picks between options), question (the session needs information), approval \
     (the session offers a next step and waits for a yes), review (finished work to read), action (the user \
     does something outside the session), or info (nothing is asked). Use decision only when the reply names \
-    two or more choices.
-    - summary: two to four plain lines separated by newlines, each under \(TriageCard.lineLength) characters. The first says what \
-    the session did. The last says what it needs from the user, or what is finished when it asks nothing. Use \
-    only facts that the reply states.
+    two or more choices, or asks the user to make two or more decisions.
+    - summary: plain lines separated by newlines, each under \(TriageCard.lineLength) characters. Use only facts that the reply \
+    states. Usually it has two to four lines. The first says what the session did. The last says what it needs \
+    from the user, or what is finished when it asks nothing. When the reply asks the user to make several \
+    decisions, such as a numbered list of questions, write one line per decision between the first and last \
+    lines, in the reply's order and with the reply's numbers when it has them. Each names the decision and the \
+    answer that the reply recommends, shortened to fit the line, such as "1. Move a due follow-up to Needs you? \
+    It recommends yes." When the reply recommends nothing for a decision, write only the decision. Write at most \
+    \(maxDecisions) decision lines, and when the reply has more, say in the last line that more remain. A list of work \
+    the session finished or of steps it took is not a list of decisions, so write it as ordinary summary lines.
     - options: at most \(TriageCard.maxOptions) buttons, and only choices that the reply offers or clearly asks for. Never add a \
     Cancel, Skip, or Other button, and never invent a step. Each has a short label, an optional detail, an \
     action, and recommended set to true only for the one option that the reply recommends. The action send \
@@ -98,6 +108,6 @@ public enum TriageSummarizer {
       throw APIError("claude's summary has no title or text")
     }
     let kind = TriageKind(rawValue: payload["kind"]?.string ?? "") ?? .info
-    return try TriageCard.clean(payload, actions: actions, kind: kind).card
+    return try TriageCard.clean(payload, actions: actions, kind: kind, lines: summaryLines).card
   }
 }
