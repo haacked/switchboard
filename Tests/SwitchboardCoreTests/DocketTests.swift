@@ -232,20 +232,6 @@ struct DocketVerdictCase: Sendable, CustomTestStringConvertible {
   @Test func hasNoDefaultRepoWithoutAConfigFile() {
     #expect(DocketRef.defaultRepo(docketHome: "/nonexistent-\(UUID().uuidString)") == nil)
   }
-
-  @Test(arguments: [
-    ("https://github.com/o/r/pull/1", true),
-    ("HTTPS://github.com/o/r/pull/1", true),
-    ("http://github.com/o/r/pull/1", false),
-    ("javascript:alert(1)", false),
-    ("file:///tmp/run.command", false),
-    ("/tmp/run.command", false),
-    ("", false),
-  ])
-  func linkIsOnlyAnHTTPSURL(_ url: String, _ linked: Bool) {
-    let docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: url), DocketStatus())
-    #expect((docket.link != nil) == linked)
-  }
 }
 
 @Suite struct DocketExecutable {

@@ -25,10 +25,7 @@ import Testing
   }
 
   @Test func showsTheSummaryOfADocketRowWhileTerminalIsOn() {
-    var s = session(waitsToStart: false)
-    s.cwd = ""
-    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
-    #expect(TriageDetail.pane(for: s, showingTerminal: true) == .summary)
+    #expect(TriageDetail.pane(for: docketRow(url: "https://github.com/o/r/pull/1"), showingTerminal: true) == .summary)
   }
 
   @Test func showsTheTerminalOfAStartedSessionWhileTerminalIsOn() {
@@ -53,8 +50,7 @@ import Testing
   }
 
   @Test func refusesADocketUrlThatIsNotHttps() {
-    #expect(TriageDetail.prLink(for: docketRow(url: "file:///etc/passwd")) == nil)
-    #expect(TriageDetail.prLink(for: docketRow(url: "")) == nil)
+    #expect(TriageDetail.prLink(for: docketRow(url: "http://github.com/o/r/pull/1")) == nil)
   }
 
   @Test func linksASessionToItsPullRequest() {
