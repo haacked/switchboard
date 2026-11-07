@@ -12,9 +12,10 @@ extension SessionSummary {
   var enqueues: Bool { pr?.mergeMethod?.enqueues == true }
 
   /// The base branch of the session's open PR while the PR conflicts with
-  /// it and a claude can merge it in, else nil.
+  /// it and a claude can merge it in, else nil. A working session gets nil,
+  /// so a second click can't queue the same merge for another turn.
   var mergeBase: String? {
-    runsClaude && pr?.state == .open && pr?.mergeable == .conflicting ? pr?.base : nil
+    runsClaude && state != .working && pr?.state == .open && pr?.mergeable == .conflicting ? pr?.base : nil
   }
 
   var mergeVerb: String { (pr?.mergeMethod ?? .merge).verb }

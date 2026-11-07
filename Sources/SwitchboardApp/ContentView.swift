@@ -400,7 +400,7 @@ enum BoardLanes: String, CaseIterable {
 /// stage. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
-  @AppStorage("boardLanes") private var lanes = BoardLanes.repo
+  @AppStorage("boardLanes") private var laneKind = BoardLanes.repo
   static let labelWidth: CGFloat = 140
   static let columnWidth: CGFloat = 200
 
@@ -412,9 +412,9 @@ struct BoardView: View {
   }
 
   private func lanes(_ open: [SessionSummary], labelling board: [SessionSummary]) -> [Lane] {
-    switch lanes {
+    switch laneKind {
     case .repo:
-      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, oneRepo: true)).map {
+      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true)).map {
         Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
       }
     case .group:
@@ -458,7 +458,7 @@ struct BoardView: View {
             DoneFooter(sessions: done)
           } header: {
             HStack(alignment: .center, spacing: 12) {
-              Picker("Lanes", selection: $lanes) {
+              Picker("Lanes", selection: $laneKind) {
                 ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
               }
               .pickerStyle(.segmented)
@@ -523,12 +523,22 @@ private struct DoneFooter: View {
   let sessions: [SessionSummary]
   @State private var expanded = false
 
+  private static let grid = [GridItem(.adaptive(minimum: BoardView.columnWidth), alignment: .top)]
+
   var body: some View {
     if !sessions.isEmpty {
+      // A merged session can still have an Inbox item, such as its post-merge
+      // steps. Its card stays visible while the rest collapse.
+      let needsUser = sessions.filter { AttentionState.inbox.contains($0.state) }
       Divider()
+      if !needsUser.isEmpty {
+        LazyVGrid(columns: Self.grid, spacing: 8) {
+          ForEach(needsUser) { s in BoardCard(session: s) }
+        }
+      }
       DisclosureGroup(isExpanded: $expanded) {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: BoardView.columnWidth), alignment: .top)], spacing: 8) {
-          ForEach(sessions) { s in BoardCard(session: s) }
+        LazyVGrid(columns: Self.grid, spacing: 8) {
+          ForEach(sessions.filter { !AttentionState.inbox.contains($0.state) }) { s in BoardCard(session: s) }
         }
         .padding(.top, 8)
       } label: {
@@ -668,12 +678,15 @@ struct BoardCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
 
-  /// A card without a stage shows its state's time instead.
+  /// A card without a stage shows its state's time instead. A blocked card
+  /// names its state, because the blocker replaces the reason and the tint
+  /// alone tells Needs you from Working only by color.
   private var statusLine: String {
     let s = session
     let process = s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped"
     let parts = [
       s.pipeline.map { "\($0.stage.title) \(ago($0.since))" }, process, s.pipeline == nil ? ago(s.since) : nil,
+      s.pipeline?.blocker != nil ? s.state.title : nil,
       s.acknowledged == true ? "acknowledged" : nil,
     ]
     return parts.compactMap { $0 }.joined(separator: " · ")

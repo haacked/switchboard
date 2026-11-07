@@ -374,8 +374,8 @@ extension PipelineTests {
       #expect(try pipeline(samplePR(draft: true, mergeable: .conflicting)).blocker == "conflicts with main")
     }
 
-    /// Every failure that puts the PR in CI is the failure that the blocker
-    /// names, and the other way around.
+    /// Outside a queue and without a conflict, every failure that puts the PR
+    /// in CI is the failure that the blocker names.
     @Test(arguments: [
       ("checks failed", approvedPR(checks: "FAILURE")),
       ("checks errored", awaitingReviewPR(checks: "ERROR")),
@@ -386,6 +386,12 @@ extension PipelineTests {
       let p = try pipeline(pr)
 
       #expect(p.stage == .ci && p.blocker == "CI failed")
+    }
+
+    @Test func depotFailureOnATrunkQueuedPRIsNoBlocker() throws {
+      let p = try pipeline(withDepot(approvedPR(checks: "PENDING", queue: .testing), depotRun()))
+
+      #expect(p.stage == .merging && p.blocker == nil)
     }
   }
 }

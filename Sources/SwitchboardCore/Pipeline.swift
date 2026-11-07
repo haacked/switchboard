@@ -67,7 +67,9 @@ public struct Pipeline: Codable, Equatable, Sendable {
     guard pr.state == .open else { return nil }
     if pr.mergeable == .conflicting { return "conflicts with \(pr.base)" }
     guard !pr.draft else { return nil }
-    if pr.ciFailed { return "CI failed" }
+    // Trunk queues a PR only after its required checks pass, so a failed
+    // Depot job on a queued PR does not block the merge.
+    if pr.checksFailed || (pr.queue?.isQueued != true && pr.depotFailure != nil) { return "CI failed" }
     if !pr.changesRequestedBy.isEmpty { return "changes requested by \(Attention.names(pr.changesRequestedBy))" }
     if let d = dependencies.first(where: \.holds) { return "waits on \(d.label(from: pr.repo))" }
     return nil

@@ -77,11 +77,11 @@ private func followup(_ repository: String?) -> Followup {
     let sessions = [session("a", repo: folder), session("b", repo: folder, pr: "haacked/switchboard"), session("none")]
 
     #expect(RepoLabels.labels(sessions).isEmpty)
-    #expect(RepoLabels.labels(sessions, oneRepo: true) == ["a": "switchboard", "b": "switchboard"])
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true) == ["a": "switchboard", "b": "switchboard"])
   }
 
-  @Test func oneRepoGivesNoLabelWhenNoSessionHasARepo() {
-    #expect(RepoLabels.labels([session("none")], oneRepo: true).isEmpty)
+  @Test func evenForOneRepoGivesNoLabelWhenNoSessionHasARepo() {
+    #expect(RepoLabels.labels([session("none")], evenForOneRepo: true).isEmpty)
   }
 
   @Test func countsAStartedFollowupWithoutAPRAndAWaitingFollowupForItsRepoAsOneRepo() {
