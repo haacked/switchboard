@@ -40,6 +40,9 @@ import Testing
     var s = session(waitsToStart: false)
     s.cwd = ""
     s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: url), DocketStatus())
+    // The bar must link a docket row to docket's URL and never to this `pr`.
+    s.pr = PRSummary(
+      PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
     return s
   }
 
