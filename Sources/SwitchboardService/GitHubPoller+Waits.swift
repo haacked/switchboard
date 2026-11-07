@@ -120,13 +120,11 @@ extension GitHubPoller {
     var polled: Int64
 
     /// Whether the PR's head is the commit that the `ci` wait recorded, and
-    /// the read came at least `window` after the wait was set. GitHub creates
-    /// an event's Actions suites a few seconds after the event. A later event
-    /// on the same commit, such as marking a draft ready, adds suites beside
-    /// the completed ones of an earlier run. By the end of the window, every
-    /// event from before the wait has its suites.
+    /// the read came at least `window` after the wait was set. GitHub adds an
+    /// event's Actions suites a few seconds after the event, so a read soon
+    /// after marking a draft ready can show only an earlier run's suites.
     func mayResolveOnOneRead(window: Int64) -> Bool {
-      wait.kind == .ci && wait.headSha == pr.headSha && polled - wait.created >= window
+      wait.kind == .ci && wait.headSha == pr.headSha && GitHub.elapsed(since: wait.created, window, now: polled)
     }
   }
 
