@@ -170,7 +170,10 @@ extension SessionFacts {
     case "decision_answered":
       guard let answer = try? JSONCoding.convert(event.data, to: DecisionAnswer.self), answer.isValid else { return }
       decisionList?.record(answer)
-    case "decisions_submitted", "decisions_discarded":
+    case "decisions_submitted":
+      submittedDecisionsRef = event.data["ref"]?.string
+      decisionList = nil
+    case "decisions_discarded":
       decisionList = nil
     case "UserPromptSubmit":
       decisionList?.stale = true

@@ -23,13 +23,15 @@ func decide(_ a: Args) {
     return a.json ? printJSON(result) : printDecisions(decode(result, as: DecisionList.self))
   }
   guard let number = Int(first) else { die("decide takes a decision's number, then its answer") }
-  var args: [String: JSON] = ["session": session, "number": .number(Double(number))]
   let key = words.dropFirst().joined(separator: " ")
   let text = a.values["--text"]
   let skip = a.switches.contains("--skip")
   guard [!key.isEmpty, text != nil, skip].filter({ $0 }).count == 1 else {
     die("answer decision \(number) with one of an option by number or label, --text, or --skip")
   }
+  // The list that the user is about to answer, so an answer never lands in a list that replaced it.
+  let shown = decode(call("decisions", ["session": session]), as: DecisionList.self)
+  var args: [String: JSON] = ["session": session, "number": .number(Double(number)), "ref": .string(shown.ref)]
   if let text {
     args["text"] = .string(text)
   } else if skip {
@@ -38,13 +40,10 @@ func decide(_ a: Args) {
     args["options"] = [.string(key)]
     // A pick-any decision takes several options separated by commas. A label that holds a comma still names its own
     // option.
-    if key.contains(",") {
-      let list = decode(call("decisions", ["session": session]), as: DecisionList.self)
-      if let decision = list.decisions.first(where: { $0.number == number }), decision.multiSelect,
-        (try? decision.labels([key])) == nil
-      {
-        args["options"] = .array(key.split(separator: ",").map { .string(String($0)) })
-      }
+    if key.contains(","), let decision = shown.decisions.first(where: { $0.number == number }), decision.multiSelect,
+      (try? decision.labels([key])) == nil
+    {
+      args["options"] = .array(key.split(separator: ",").map { .string(String($0)) })
     }
   }
   let result = call("decision-answer", args)

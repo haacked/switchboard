@@ -63,6 +63,8 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The sessions whose decision list `decision-submit` is sending.
+  var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -1466,6 +1468,7 @@ public final class Service {
     if Triage.mayHaveItem(out) {
       out.triage = Triage.item(e.facts, verdict)
       out.decisions = Triage.decisionList(e.facts, verdict)
+      if Triage.decisionsSent(e.facts, verdict) { out.decisionsSent = true }
     }
     out.followup = s.followup
     out.created = s.created

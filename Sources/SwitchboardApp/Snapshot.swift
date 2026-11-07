@@ -10,7 +10,7 @@ import Foundation
 /// translucent backgrounds, so each window gets a plain background color
 /// first. SB_SNAPSHOT_APPEARANCE=dark draws the dark appearance, and the default is
 /// light. SB_SNAPSHOT_SIZE=<width>x<height> sets the window's content size in
-/// points just before the drawing, so a narrow layout can be drawn, and puts
+/// points 1 s before the drawing, so a narrow layout can be drawn, and puts
 /// the window's frame back after it. SwiftTerm draws text in layers that the
 /// drawing misses, so `sb screen` checks terminals.
 @MainActor
@@ -51,10 +51,13 @@ enum Snapshot {
         window.setContentSize(size)
         window.contentView?.layoutSubtreeIfNeeded()
       }
-      write(to: path)
-      // AppKit saves the main window's frame on every change. Restoring it keeps the next launch at the user's last size.
-      if let window, let frame { window.setFrame(frame, display: false) }
-      if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
+      // The split views fit their panes to the new size only on a later turn of the run loop.
+      DispatchQueue.main.asyncAfter(deadline: .now() + (size == nil ? 0 : 1)) {
+        write(to: path)
+        // AppKit saves the main window's frame on every change. Restoring it keeps the next launch at the user's last size.
+        if let window, let frame { window.setFrame(frame, display: false) }
+        if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
+      }
     }
   }
 

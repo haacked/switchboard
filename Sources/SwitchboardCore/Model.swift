@@ -208,6 +208,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var triage: TriageItem?
   /// The decisions that the user started to answer, or nil when no list is open.
   public var decisions: DecisionList?
+  /// True when sbd sent the answers to the item's decisions and the item
+  /// waits for the session's next prompt to replace it.
+  public var decisionsSent: Bool?
   /// The Claude account's folder, or nil when the session never recorded one.
   public var account: String?
   /// Whether `sb cleanup` can remove the worktree of a finished PR, or did.

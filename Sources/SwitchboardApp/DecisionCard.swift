@@ -3,27 +3,41 @@ import SwitchboardCore
 
 /// The Inbox card of a session: what it did and needs, the buttons that act
 /// on it, what to read before deciding, and the details behind a disclosure.
+/// An item with decisions shows them one step at a time in place of its
+/// options. Its summary shrinks to its first line, and its callouts move
+/// into Details.
 struct DecisionCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let item: TriageItem
+  @Binding var step: DecisionStep?
 
   static let rowSpacing: CGFloat = 14
 
   var body: some View {
+    let list = session.stepList
     VStack(alignment: .leading, spacing: Self.rowSpacing) {
       header
-      if Self.splitsSummary(item) {
+      if list != nil {
+        if let line = item.summary.split(separator: "\n").first { summary(String(line)) }
+      } else if Self.splitsSummary(item) {
         SummaryCalloutColumns {
-          summary
+          summary(item.summary)
           callouts
         }
       } else {
-        if !item.summary.isEmpty { summary }
+        if !item.summary.isEmpty { summary(item.summary) }
         if !item.callouts.isEmpty { callouts }
       }
-      VStack(alignment: .leading, spacing: 8) { actions }
-      CardDetails(session: session)
+      VStack(alignment: .leading, spacing: 8) {
+        if let list {
+          DecisionStepView(session: session, list: list, step: $step).id(list.ref)
+        } else if session.decisionsSent == true {
+          Text("Sent your answers. The session gets them as its next prompt.").foregroundStyle(.secondary)
+        }
+        actions
+      }
+      CardDetails(session: session, callouts: list == nil ? [] : item.callouts)
     }
   }
 
@@ -33,8 +47,8 @@ struct DecisionCard: View {
     !item.summary.isEmpty && !item.callouts.isEmpty
   }
 
-  private var summary: some View {
-    Text(item.summary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+  private func summary(_ text: String) -> some View {
+    Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
   }
 
   private var callouts: some View {
@@ -64,7 +78,7 @@ struct DecisionCard: View {
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
-    } else if !item.options.isEmpty {
+    } else if !item.options.isEmpty, !item.showsSteps {
       OptionList(session: session, item: item)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog.
@@ -191,11 +205,18 @@ struct CalloutView: View {
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  /// The item's callouts, when the step view takes their place on the card.
+  var callouts: [Callout] = []
   @State private var open = false
 
   var body: some View {
     DisclosureGroup(isExpanded: $open) {
       VStack(alignment: .leading, spacing: 12) {
+        if !callouts.isEmpty {
+          section("Callouts") {
+            ForEach(Array(callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
+          }
+        }
         if let pr = session.pr {
           section("Pull request") {
             if let url = pr.link { Link("\(pr.line): \(pr.title)", destination: url) } else { Text(pr.line) }

@@ -301,3 +301,245 @@ extension Instance {
     #expect(try sbd.decisionMessages(s.id).isEmpty)
   }
 }
+
+/// A ref that is not the session's current item's ref.
+enum OtherRef: String, CaseIterable, CustomStringConvertible {
+  /// The ref of the item that the session showed before its last turn.
+  case earlierItem
+  case empty
+  case unknown
+
+  var description: String { rawValue }
+
+  func ref(earlier: String) -> String {
+    switch self {
+    case .earlierItem: earlier
+    case .empty: ""
+    case .unknown: "summary:no-such-item"
+    }
+  }
+}
+
+/// A request that changes the decision list.
+enum ListChange: String, CaseIterable, CustomStringConvertible {
+  case submit
+  case answer
+  case discard
+
+  var description: String { rawValue }
+
+  /// The `sb decide` arguments after the session.
+  var args: [String] {
+    switch self {
+    case .submit: ["--submit"]
+    case .answer: ["2", "--text", "Changed while sending"]
+    case .discard: ["--discard"]
+    }
+  }
+}
+
+extension Instance {
+  /// A session whose item changed from the three-decision card to a card
+  /// with two other decisions while no list was open. Returns the session
+  /// and the first item's ref.
+  func sessionWithAChangedItem() throws -> (session: SessionSummary, earlier: String) {
+    let s = try decisionSession()
+    let earlier = try #require(s.triage?.ref)
+    try writeCard("c2", decisionCard(["Retries", "Timeouts"]))
+    try sb("send", s.id, "card c2")
+    let changed = try waitFor(s.id, "the second card") {
+      $0.lastReply == "I wrote the card c2." && $0.triage?.source == .session && $0.triage?.ref != earlier
+    }
+    try #require(changed.decisions == nil)
+    return (changed, earlier)
+  }
+
+  /// Sends `decision-answer` for option 1 of decision 1 with the ref the caller saw.
+  func answerFirstDecision(_ id: String, ref: String) throws -> JSON {
+    try client.call(
+      "decision-answer",
+      ["session": .string(id), "number": 1, "options": ["1"], "ref": .string(ref)])
+  }
+}
+
+/// The guards that the app depends on: an answer names the item the user saw,
+/// and nothing changes the list while its submit is on its way.
+@Suite(.blocking(timeLimit: .seconds(120))) struct DecideGuardTests {
+  // MARK: The ref on the first answer
+
+  /// The answer with the current ref shows that the refusal came from the ref.
+  @Test(arguments: OtherRef.allCases)
+  func theFirstAnswerRefusesARefThatIsNotTheCurrentItems(_ other: OtherRef) throws {
+    let sbd = try Instance()
+    let (s, earlier) = try sbd.sessionWithAChangedItem()
+    let current = try #require(s.triage?.ref)
+
+    #expect(throws: (any Error).self) { try sbd.answerFirstDecision(s.id, ref: other.ref(earlier: earlier)) }
+
+    #expect(try sbd.count("decisions_opened", of: s.id) == 0)
+    #expect(try sbd.count("decision_answered", of: s.id) == 0)
+    #expect(try sbd.get(s.id).decisions == nil)
+    let list = try JSONCoding.convert(try sbd.answerFirstDecision(s.id, ref: current), to: DecisionList.self)
+    #expect(list.ref == current)
+    #expect(list.decisions.map(\.header) == ["Retries", "Timeouts"])
+  }
+
+  /// Only the first answer compares the ref with the current item. Once the
+  /// list is open, an answer with the list's own ref still lands after a
+  /// later turn changed the item.
+  @Test func anAnswerToAnOpenListTakesTheListsRefAfterTheItemChanged() throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+    let ref = try #require(s.triage?.ref)
+    _ = try sbd.answerFirstDecision(s.id, ref: ref)
+    try sbd.writeCard("c2", decisionCard(["Retries", "Timeouts"]))
+    try sbd.sb("send", s.id, "card c2")
+    try sbd.waitFor(s.id, "the second card") { $0.lastReply == "I wrote the card c2." }
+
+    _ = try sbd.client.call(
+      "decision-answer", ["session": .string(s.id), "number": 3, "options": ["Groups"], "ref": .string(ref)])
+
+    #expect(try sbd.decisionList(s.id).answer(3)?.labels == ["Groups"])
+  }
+
+  /// The user saw the newer item, so the answer would land in a list they never saw.
+  @Test func anAnswerToAnOpenListRefusesTheNewerItemsRef() throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+    _ = try sbd.answerFirstDecision(s.id, ref: try #require(s.triage?.ref))
+    try sbd.writeCard("c2", decisionCard(["Retries", "Timeouts"]))
+    try sbd.sb("send", s.id, "card c2")
+    let changed = try sbd.waitFor(s.id, "the second card") { $0.lastReply == "I wrote the card c2." }
+    let answered = try sbd.count("decision_answered", of: s.id)
+
+    #expect(throws: (any Error).self) {
+      try sbd.client.call(
+        "decision-answer",
+        ["session": .string(s.id), "number": 2, "skip": true, "ref": .string(try #require(changed.triage?.ref))])
+    }
+
+    #expect(try sbd.count("decision_answered", of: s.id) == answered)
+    #expect(try sbd.decisionList(s.id).answer(2) == nil)
+  }
+
+  // MARK: A submit on its way
+
+  /// The submit resumes a stopped claude, and sbd's send waits for the MCP
+  /// server that the gate holds. The second request reaches sbd while the
+  /// first submit waits there. Before the guard, a second submit also waits
+  /// and then sends again, so it gets 5 s to come back with a refusal.
+  @Test(arguments: ListChange.allCases)
+  func aSubmitOnItsWayRefusesEveryOtherChangeToTheList(_ change: ListChange) throws {
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    let s = try sbd.decisionSession()
+    try sbd.answerThreeDecisions(s.id)
+    let answered = try sbd.count("decision_answered", of: s.id)
+    let slow = try sbd.waitForRunning("slow")
+    try sbd.stopClaude(s.id)
+    try sbd.restartServer(slow, behind: gate)
+
+    let sent = Date()
+    let submit = Outcome.detached { try sbd.sb("decide", s.id, "--submit") }
+    try sbd.waitFor("the MCP stub to wait at its gate", timeout: 30) { gate.waitingPid() != nil }
+    let left = 0.5 - Date().timeIntervalSince(sent)
+    if left > 0 { usleep(useconds_t(left * 1_000_000)) }
+    let other = Outcome.detached { try sbd.run(["decide", s.id] + change.args) }
+    let returned = other.done.wait(timeout: .now() + 5) == .success
+    try gate.open(sbd, after: submit, sentAt: sent)
+    if !returned { _ = other.done.wait(timeout: .now() + 30) }
+
+    #expect(returned, "the \(change) waited for the submit's send instead of being refused")
+    let r = try #require(try other.result?.get())
+    #expect(r.status != 0, "the \(change) was accepted while the submit was on its way: \(r.stdout)")
+    let messages = try sbd.decisionMessages(s.id)
+    #expect(messages.count == 1)
+    #expect(messages.first?.contains("Call it task") == true)
+    #expect(try sbd.count("decisions_submitted", of: s.id) == 1)
+    #expect(try sbd.count("decisions_discarded", of: s.id) == 0)
+    #expect(try sbd.count("decision_answered", of: s.id) == answered)
+    #expect(try sbd.get(s.id).decisions == nil)
+  }
+
+  // MARK: A submitted list
+
+  /// The stub holds the submit's prompt, so the item keeps the sent decisions
+  /// until the test writes `report`. The precondition shows that the refusal
+  /// comes from the sent list and not from an item that already left.
+  @Test(arguments: SubmitRestart.allCases)
+  func aSubmittedListDoesNotOpenAgainBeforeThePromptLands(_ restart: SubmitRestart) throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+    try sbd.answerThreeDecisions(s.id)
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/hold", contents: nil)
+    try sbd.sb("decide", s.id, "--submit")
+    try restart.run(sbd)
+
+    let sent = try sbd.get(s.id)
+    try #require(sent.triage?.ref == s.triage?.ref && sent.triage?.decisions.count == 3, "the prompt landed")
+    #expect(sent.decisions == nil)
+    #expect(sent.decisionsSent == true)
+    for args in [[], ["1", "1"], ["2", "--skip"], ["--submit"], ["--submit", "--stale"], ["--discard"]] {
+      let r = try sbd.run(["decide", s.id] + args)
+      #expect(r.status != 0, "decide \(args) was accepted: \(r.stdout)")
+      #expect(r.stderr.contains("already got your answers to these decisions"), "decide \(args): \(r.stderr)")
+    }
+    #expect(throws: (any Error).self) { try sbd.answerFirstDecision(s.id, ref: try #require(s.triage?.ref)) }
+    #expect(try sbd.count("decisions_opened", of: s.id) == 1)
+    #expect(try sbd.count("decisions_submitted", of: s.id) == 1)
+    #expect(try sbd.decisionMessages(s.id).count == 1)
+
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
+    // After the restart, the stub never reads the submit's message, so no reply comes. That is outside this test.
+    guard restart == .none else { return }
+    let replied = try sbd.waitFor(s.id, "the reply to the decisions") {
+      $0.lastReply?.hasPrefix("Done: My decisions") == true
+    }
+    #expect(replied.decisionsSent == nil)
+  }
+
+  /// A stale submit sends the open list while a newer item has decisions of
+  /// its own. Only the sent list's ref stays closed, so the newer list opens.
+  @Test func aStaleSubmitLeavesTheNewerDecisionsOpenToAnswer() throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+    try sbd.answerThreeDecisions(s.id)
+    try sbd.writeCard("c2", decisionCard(["Retries", "Timeouts"]))
+    try sbd.sb("send", s.id, "card c2")
+    let newer = try sbd.waitFor(s.id, "the second card") {
+      $0.lastReply == "I wrote the card c2." && $0.decisions?.newer.isEmpty == false
+    }
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/hold", contents: nil)
+
+    try sbd.sb("decide", s.id, "--submit", "--stale")
+
+    let after = try sbd.get(s.id)
+    try #require(after.triage?.ref == newer.triage?.ref, "the prompt landed")
+    #expect(after.decisionsSent == nil)
+    try sbd.sb("decide", s.id, "1", "Yes")
+    #expect(try sbd.decisionList(s.id).decisions.map(\.header) == ["Retries", "Timeouts"])
+    #expect(try sbd.count("decisions_opened", of: s.id) == 2)
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
+  }
+}
+
+/// How sbd comes back between a submit and the checks that follow it.
+enum SubmitRestart: String, CaseIterable, CustomStringConvertible {
+  case none
+  /// sbd replays the session's events.
+  case events
+  /// sbd reads the session's facts from a snapshot.
+  case snapshot
+
+  var description: String { rawValue }
+
+  func run(_ sbd: Instance) throws {
+    switch self {
+    case .none: break
+    case .events: try sbd.restart(setting: "snapshotEvery", to: 0)
+    case .snapshot:
+      try sbd.restart(setting: "snapshotEvery", to: 500)
+      try sbd.restart(setting: "snapshotEvery", to: 500)
+    }
+  }
+}

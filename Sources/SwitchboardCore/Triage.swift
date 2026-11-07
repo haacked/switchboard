@@ -367,6 +367,16 @@ public enum Triage {
     return list
   }
 
+  /// Whether the last accepted submit sent the decisions of the session's
+  /// item. The item keeps them until the session's next prompt lands, and
+  /// they don't open again.
+  public static func decisionsSent(_ facts: SessionFacts, _ verdict: Verdict) -> Bool {
+    guard facts.decisionList == nil, let sent = facts.submittedDecisionsRef, let live = liveItem(facts, verdict) else {
+      return false
+    }
+    return live.ref == sent && live.decisions.count > 1
+  }
+
   /// The item that the session's card, summary, rule, or reply gives.
   static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }

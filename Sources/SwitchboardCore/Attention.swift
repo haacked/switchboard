@@ -113,6 +113,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The decisions that the user started to answer, from the first answer
   /// until a submit or a discard.
   public var decisionList: DecisionList?
+  /// The ref of the item whose decisions the last accepted submit sent.
+  /// It matters only while that item is the session's item.
+  public var submittedDecisionsRef: String?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [

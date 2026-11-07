@@ -9,11 +9,12 @@ extension SessionSummary {
   var acknowledgeTitle: String { acknowledged == true ? "Undo Acknowledge" : "Acknowledge" }
 
   /// Whether the session's item only tells the user something: it needs
-  /// you, no card or dialog waits for an answer, and it offers no option.
-  /// An item with options has its own primary button.
+  /// you, no card or dialog waits for an answer, and it offers no option
+  /// and no decisions to step through. An item with options has its own
+  /// primary button, and the step view's Next and Submit take ⇧⌘Return.
   var isInformational: Bool {
     guard state == .needsYou, cards.isEmpty, !openPrompt, let item = triage else { return false }
-    return item.options.isEmpty
+    return item.options.isEmpty && !item.showsSteps
   }
 }
 

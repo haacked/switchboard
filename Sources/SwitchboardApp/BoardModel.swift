@@ -74,6 +74,11 @@ final class BoardModel: ObservableObject {
   /// Artifact plans whose Apply or Reject is on its way to sbd. Their buttons
   /// stay disabled until sbd replies, so a second click can't answer again.
   @Published var answeringArtifacts: Set<String> = []
+  /// The decision requests that wait for sbd: `<session>/<number>` for an
+  /// answer, and `<session>/submit` and `<session>/discard`.
+  @Published var deciding: Set<String> = []
+  /// sbd's refusal of the last decision request, by session. The card shows it.
+  @Published var decisionErrors: [String: String] = [:]
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -271,7 +276,7 @@ final class BoardModel: ObservableObject {
       if loaded { sessionsToNotify(list).forEach(notify) }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
-      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)))
+      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)), sessions: Set(list.map(\.id)))
       if !sameShown(sessions, list) { sessions = list }
       let listed = Set(board.map(\.id))
       if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
@@ -309,10 +314,11 @@ final class BoardModel: ObservableObject {
   }
 
   /// Runs a request off the main thread, then refreshes. `finally` runs
-  /// whether the request succeeds or fails.
+  /// whether the request succeeds or fails. `failed` takes sbd's refusal in
+  /// place of the window's error banner.
   func perform(
     _ op: String, _ args: [String: JSON], on queue: DispatchQueue? = nil, then: ((JSON) -> Void)? = nil,
-    finally: (() -> Void)? = nil
+    failed: ((Error) -> Void)? = nil, finally: (() -> Void)? = nil
   ) {
     let send = send
     (queue ?? worker).async {
@@ -320,10 +326,10 @@ final class BoardModel: ObservableObject {
       Task { @MainActor in
         switch result {
         case .success(let value):
-          self.actionError = nil
+          if failed == nil { self.actionError = nil }
           then?(value)
         case .failure(let error):
-          self.actionError = "\(op): \(error)"
+          if let failed { failed(error) } else { self.actionError = "\(op): \(error)" }
         }
         finally?()
         self.refresh(followups: true)
@@ -650,6 +656,44 @@ final class BoardModel: ObservableObject {
     perform("choose", args, finally: { self.choosing.remove(key) })
   }
 
+  /// Answers one decision of the list whose ref the user saw. `answered`
+  /// runs once sbd accepts the answer.
+  func answerDecision(
+    _ session: String, ref: String, number: Int, _ reply: DecisionReply, answered: (() -> Void)? = nil
+  ) {
+    var args: [String: JSON] = ["session": .string(session), "ref": .string(ref), "number": .number(Double(number))]
+    switch reply {
+    case .options(let picks): args["options"] = .array(picks.map { .string(String($0)) })
+    case .text(let text): args["text"] = .string(text)
+    case .skip: args["skip"] = true
+    }
+    decide("decision-answer", args, key: "\(session)/\(number)", then: answered)
+  }
+
+  /// Sends the answers. `stale` sends a list that a turn made stale, which the card asks about first.
+  func submitDecisions(_ session: String, stale: Bool = false) {
+    var args: [String: JSON] = ["session": .string(session)]
+    if stale { args["stale"] = true }
+    decide("decision-submit", args, key: "\(session)/submit")
+  }
+
+  func discardDecisions(_ session: String) {
+    decide("decision-discard", ["session": .string(session)], key: "\(session)/discard")
+  }
+
+  /// A second request with the same key does nothing until sbd answers the first.
+  private func decide(_ op: String, _ args: [String: JSON], key: String, then: (() -> Void)? = nil) {
+    guard let session = args["session"]?.string, deciding.insert(key).inserted else { return }
+    perform(
+      op, args,
+      then: { _ in
+        self.decisionErrors[session] = nil
+        then?()
+      },
+      failed: { self.decisionErrors[session] = "\($0)" },
+      finally: { self.deciding.remove(key) })
+  }
+
   /// Reads the session's newest events for its card's details.
   func loadEvents(_ session: String) {
     let client = client
@@ -692,6 +736,11 @@ final class BoardModel: ObservableObject {
 
   func messageDraft(for session: SessionSummary) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.key(for: session))
+  }
+
+  /// What the user typed as the Other answer to one decision and has not sent.
+  func otherAnswerDraft(session: String, decision: Int) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, decision: decision))
   }
 
   func draft(for card: Card) -> CardView.Draft {
