@@ -592,8 +592,9 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
 
   @Test(arguments: [
     "<task-notification><task-id>a1</task-id></task-notification>", "<agent-message from=\"a1\"> [Subagent] done",
+    peerMessage,
   ])
-  func subagentResultLeavesTheOutcome(_ prompt: String) throws {
+  func anotherAgentsMessageLeavesTheOutcome(_ prompt: String) throws {
     let f = try afterNotify([event("UserPromptSubmit", 3, ["prompt": .string(prompt)])])
     #expect(f.waitOutcome == "CI on #1204: the checks passed")
   }

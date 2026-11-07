@@ -247,24 +247,6 @@ public enum Transcript {
     return tail
   }
 
-  /// The `origin.kind` of the main conversation's last user line that has
-  /// text, such as `peer` or `human`. It is nil when that line has other text
-  /// than `prompt`, which happens before claude writes the prompt, or has no
-  /// origin.
-  public static func promptOrigin(_ path: String, prompt: String) -> String? {
-    var kind: String?
-    eachLineFromEnd(path) { line in
-      guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line), message(line)?.role == .user else {
-        return false
-      }
-      if text(of: object) == prompt.trimmingCharacters(in: .whitespacesAndNewlines) {
-        kind = object["origin"]?["kind"]?.string
-      }
-      return true
-    }
-    return kind
-  }
-
   /// The main conversation's last `limit` messages that have text, oldest first.
   public static func messages(_ path: String, limit: Int) -> [ChatMessage] {
     var messages: [ChatMessage] = []

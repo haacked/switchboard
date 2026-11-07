@@ -14,6 +14,12 @@ func event(_ kind: String, _ t: Int64, _ fields: [String: JSON] = [:]) -> Event 
   Event(session: "s1", t: t, kind: kind, data: .object(fields))
 }
 
+/// The prompt that UserPromptSubmit carried for a message from another
+/// session on Claude Code 2.1.319.
+let peerMessage =
+  "<cross-session-message from=\"uds:/tmp/cc-socks/86186.sock\" from-name=\"rebase-7\" from-mode=\"prompting\">\n"
+  + "Rebase please.\n</cross-session-message>"
+
 func facts(_ events: [Event]) -> SessionFacts {
   var f = SessionFacts()
   for e in events { f.apply(e) }
@@ -231,10 +237,11 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(Attention.evaluate(session(), f, now: 2 + Attention.subagentQuietMs + 1).state == .needsYou)
   }
 
-  @Test func subagentResultPromptsDontCountAsPrompts() {
+  @Test func subagentResultAndPeerPromptsDontCountAsPrompts() {
     let f = facts([
       event("UserPromptSubmit", 0, ["prompt": "<agent-message from=\"a1\"> [Subagent hand-back] done"]),
       event("UserPromptSubmit", 1, ["prompt": "<task-notification><task-id>a1</task-id></task-notification>"]),
+      event("UserPromptSubmit", 2, ["prompt": .string(peerMessage)]),
     ])
     #expect(f.prompts == 0)
   }

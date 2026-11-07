@@ -345,19 +345,28 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(f.lastTouched == 1000)
   }
 
-  @Test(arguments: ["peer", "task-notification"])
-  func aMessageWithAnotherOriginIsNotATouch(_ kind: String) {
+  @Test func aMessageFromAnotherSessionIsNotATouch() {
     let f = facts([
       event("UserPromptSubmit", 1000, ["prompt": "go"]),
-      event("UserPromptSubmit", 5000, ["prompt": "Rebase please.", "origin": ["kind": .string(kind)]]),
+      event("UserPromptSubmit", 5000, ["prompt": .string(peerMessage)]),
     ])
     #expect(f.lastTouched == 1000)
-    #expect(f.prompts == 1)
   }
 
-  @Test func aHumanOriginPromptIsATouch() {
-    let f = facts([event("UserPromptSubmit", 5000, ["prompt": "go", "origin": ["kind": "human"]])])
+  /// Each prompt carries the block, but not as the whole prompt that claude
+  /// sends for a message from another session.
+  @Test(arguments: [
+    "<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\">\nRebase please.",
+    "Another Claude session sent a message:\n\(peerMessage)",
+    " \(peerMessage)",
+    "\(peerMessage)\nAlso merge it.",
+  ])
+  func aPromptThatIsNotExactlyOnePeerBlockIsATouch(_ prompt: String) {
+    let f = facts([
+      event("UserPromptSubmit", 1000, ["prompt": "go"]), event("UserPromptSubmit", 5000, ["prompt": .string(prompt)]),
+    ])
     #expect(f.lastTouched == 5000)
+    #expect(f.prompts == 2)
   }
 
   @Test func theUserTypingTheSameTextAsSbdsReportedMessageIsATouch() {
