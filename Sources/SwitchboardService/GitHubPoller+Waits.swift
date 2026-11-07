@@ -121,7 +121,7 @@ extension GitHubPoller {
     var polled: Int64
 
     /// Whether the PR's head is the commit that the `ci` wait recorded.
-    var onRecordedHead: Bool { wait.kind == .ci && wait.head == pr.headSha }
+    var onRecordedHead: Bool { wait.kind == .ci && wait.headSha == pr.headSha }
   }
 
   /// Reads the GitHub Actions suites of each PR whose head is the commit that

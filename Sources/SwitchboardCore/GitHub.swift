@@ -137,7 +137,7 @@ public enum GitHub {
               commit {
                 oid
                 statusCheckRollup { state }
-                checkSuites(first: 100, filterBy: {appId: \(actionsAppId)}) { pageInfo { hasNextPage } nodes { status } }
+                checkSuites(first: 100, filterBy: {appId: \(actionsAppId)}) { pageInfo { hasNextPage } nodes { status conclusion } }
               }
             }
           }
@@ -378,11 +378,12 @@ public enum GitHub {
     guard let id = node["id"]?.string else { return nil }
     let commit = nodes(node["commits"]).first?["commit"]
     let suites = commit?["checkSuites"]
-    let statuses = nodes(suites).map { $0["status"]?.string }
+    let suiteNodes = nodes(suites)
     let read = ActionsRead(
       sha: commit?["oid"]?.string ?? "", checks: commit?["statusCheckRollup"]?["state"]?.string,
-      completed: suites?["pageInfo"]?["hasNextPage"]?.bool == false && !statuses.isEmpty
-        && statuses.allSatisfy { $0 == "COMPLETED" })
+      completed: suites?["pageInfo"]?["hasNextPage"]?.bool == false
+        && suiteNodes.allSatisfy { $0["status"]?.string == "COMPLETED" }
+        && suiteNodes.contains { $0["conclusion"]?.string != "SKIPPED" })
     return (id, read)
   }
 
@@ -689,8 +690,11 @@ public struct ActionsRead: Equatable, Sendable {
   public var sha: String
   /// The commit's rollup state.
   public var checks: String?
-  /// Whether the commit has at least one GitHub Actions suite, the read's one
-  /// page holds all of them, and each one completed.
+  /// Whether the read's one page holds every GitHub Actions suite of the
+  /// commit, each one completed, and at least one ran a job. A workflow whose
+  /// jobs all skip completes at once, before the suites of a later event such
+  /// as `pull_request` exist. A suite that ran a job waited for a runner, so
+  /// the later suites exist by the time it completes.
   public var completed: Bool
 
   /// Whether the read shows that `pr`'s rollup state is the result of a

@@ -128,7 +128,7 @@ public struct Wait: Codable, Equatable, Sendable {
   /// wait on the session's own PR was set. Nil for a wait on another PR, for
   /// a folder that doesn't have the session's branch checked out, and for a
   /// wait set before sbd recorded it.
-  public var head: String?
+  public var headSha: String?
   public var by: Author
   /// Milliseconds since the epoch.
   public var created: Int64
@@ -137,7 +137,7 @@ public struct Wait: Codable, Equatable, Sendable {
   public init(
     id: String, kind: Kind, pr: PullRequest? = nil, session: SessionTarget? = nil, state: AttentionState? = nil,
     who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, note: String? = nil,
-    head: String? = nil, by: Author = .you, created: Int64, then: Then = .resume
+    headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume
   ) {
     self.id = id
     self.kind = kind
@@ -149,7 +149,7 @@ public struct Wait: Codable, Equatable, Sendable {
     self.service = service
     self.until = until
     self.note = note
-    self.head = head
+    self.headSha = headSha
     self.by = by
     self.created = created
     self.then = then

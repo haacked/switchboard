@@ -22,7 +22,7 @@ extension Service {
         return Wait.SessionTarget(id: other, name: entries[other]!.session.name)
       }
       if wait.kind == .ci && wait.pr == nil {
-        wait.head = try? checkedOutBranch(entries[id]!.session).tip
+        wait.headSha = try? checkedOutBranch(entries[id]!.session).tip
       }
       try update(id) { $0.waits = open + [wait] }
       record(id, "wait", ["wait": try JSON(encoding: wait)])

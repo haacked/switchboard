@@ -8,13 +8,14 @@ extension FakeGitHub {
   }
 
   /// Gives the PR's last commit the PR's head as its oid, and GitHub Actions
-  /// suites with `statuses`. Call it after `checks`, which replaces the commit.
+  /// suites with `statuses`. Each completed suite succeeded. Call it after `checks`, which replaces the commit.
   func actions(_ number: Int, _ statuses: [String]) {
     change(number) { pr in
       var commit = pr["commits"]?["nodes"]?.array?.first?["commit"]?.object ?? [:]
       commit["oid"] = pr["headRefOid"] ?? ""
       commit["checkSuites"] = [
-        "pageInfo": ["hasNextPage": false], "nodes": .array(statuses.map { ["status": .string($0)] }),
+        "pageInfo": ["hasNextPage": false],
+        "nodes": .array(statuses.map { ["status": .string($0), "conclusion": $0 == "COMPLETED" ? "SUCCESS" : .null] }),
       ]
       pr["commits"] = ["nodes": [["commit": .object(commit)]]]
     }
@@ -137,7 +138,7 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
     github.change(18303) { $0["headRefOid"] = .string(head) }
     try sbd.sb("wait", s.id, "--kind", "ci")
-    #expect(try sbd.get(s.id).waits.first?.head == head)
+    #expect(try sbd.get(s.id).waits.first?.headSha == head)
     return s
   }
 
@@ -148,6 +149,16 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     github.actions(18303, ["COMPLETED", "COMPLETED"])
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
+  }
+
+  @Test func aFailedCIWaitSetOnTheHeadCommitResolvesOnOneReadOnceItsActionsRunsComplete() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try headWait(sbd, github)
+    github.checks(18303, "FAILURE")
+    github.actions(18303, ["COMPLETED"])
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
   }
 
   /// An external status that reports before CI queues shows SUCCESS for the
@@ -181,6 +192,17 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     github.fail(18303, in: .actions)
     #expect(try sbd.poll()["resolved"]?.int == 0)
     #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
+  @Test func aCIWaitSetWithoutTheSessionsBranchCheckedOutRecordsNoHead() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    _ = try sbd.git(s.cwd, "switch", "--detach")
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    let waits = try sbd.get(s.id).waits
+    #expect(waits.count == 1)
+    #expect(waits.first?.headSha == nil)
   }
 
   @Test func aCIWaitKeepsTwoReadsWhenTheHeadCommitDiffers() throws {
