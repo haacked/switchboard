@@ -172,7 +172,7 @@ final class GitHubPoller {
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
           configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde,
-          branch: e.facts.branch ?? e.session.branch, facts: e.facts)
+          branch: e.branch, facts: e.facts)
       }
     }
     let now = nowMs()

@@ -689,6 +689,24 @@ extension Instance {
     #expect(try placed(sbd, repo, s, origin) == before)
   }
 
+  /// `sb get` shows the other branch once the poller reads it. The delete still reads the
+  /// session's own branch, so it deletes neither branch.
+  @Test func refusesAnotherBranchThatThePollerRecorded() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/other")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == "haacked/other")
+    let before = try placed(sbd, repo, s, origin)
+
+    let r = try sbd.deleteDoneSession(s.id)
+
+    #expect(r.status != 0)
+    #expect(["checked out", "no merged PR"].contains { r.stderr.contains($0) }, Comment(rawValue: r.stderr))
+    #expect(try placed(sbd, repo, s, origin) == before)
+    #expect(try sbd.git(repo, "branch", "--list", "haacked/other") != "")
+  }
+
   @Test func deletesADoneSessionWhoseWorktreeAndBranchesExist() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
