@@ -550,11 +550,12 @@ final class GitHubPoller {
 
   // MARK: Events
 
-  /// Records the folder's count of uncommitted files once the PR has merged
-  /// or closed, with whether the folder is gone, and the session's PR when it
-  /// changed. The count comes first,
-  /// so the attention rules never judge a finished PR by the count of the
-  /// session's previous PR. Returns whether it recorded a `pr` event.
+  /// Records the folder's branch when it differs from the branch that sbd
+  /// shows. Once the PR has merged or closed, it records the folder's count of
+  /// uncommitted files and whether the folder is gone. It records the
+  /// session's PR when the PR changed. The count comes before the PR, so the
+  /// attention rules never judge a finished PR by the count of the session's
+  /// previous PR. Returns whether it recorded a `pr` event.
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
     guard var t = tracked[s.id] else { return false }
     defer { tracked[s.id] = t }

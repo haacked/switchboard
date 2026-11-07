@@ -694,17 +694,26 @@ extension Instance {
   @Test func refusesAnotherBranchThatThePollerRecorded() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
-    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/other")
+    // The other branch has its own merged PR at its tip, so only the read of the session's own
+    // branch refuses.
+    let other = "haacked/mcp-experiment-condition-ids"
+    try sbd.git(s.cwd, "checkout", "-q", "-b", other)
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(122896) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
     try sbd.poll(all: true)
-    #expect(try sbd.get(s.id).branch == "haacked/other")
+    #expect(try sbd.get(s.id).branch == other)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
     let before = try placed(sbd, repo, s, origin)
 
     let r = try sbd.deleteDoneSession(s.id)
 
     #expect(r.status != 0)
-    #expect(["checked out", "no merged PR"].contains { r.stderr.contains($0) }, Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("checked out"), Comment(rawValue: r.stderr))
     #expect(try placed(sbd, repo, s, origin) == before)
-    #expect(try sbd.git(repo, "branch", "--list", "haacked/other") != "")
+    #expect(try sbd.git(repo, "branch", "--list", other) != "")
   }
 
   @Test func deletesADoneSessionWhoseWorktreeAndBranchesExist() throws {

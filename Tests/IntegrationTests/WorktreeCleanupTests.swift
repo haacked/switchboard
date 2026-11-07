@@ -541,11 +541,20 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
   @Test func refusesAnotherBranchThatThePollerRecorded() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)
-    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/other")
+    // The other branch has its own merged PR at its tip, so only the read of the session's own
+    // branch refuses.
+    let other = "haacked/mcp-experiment-condition-ids"
+    try sbd.git(s.cwd, "checkout", "-q", "-b", other)
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(122896) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
     try sbd.poll(all: true)
-    #expect(try sbd.get(s.id).branch == "haacked/other")
+    #expect(try sbd.get(s.id).branch == other)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
 
-    try expectRefusal(sbd, repo, s, ["checked out", "no merged PR"], ref: "haacked/other")
+    try expectRefusal(sbd, repo, s, ["checked out"], ref: other)
 
     #expect(try sbd.hasBranch(repo, branch))
   }
