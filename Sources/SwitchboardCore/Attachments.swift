@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 /// of their own.
 public enum Attachments {
   public static let limit = 20 * 1024 * 1024
+  /// The most images one message carries. The app and `sb` hold every image of a message in memory and send
+  /// them in one request.
+  public static let countLimit = 20
+  public static let totalLimit = 100 * 1024 * 1024
   public static let extensions = Set(Kind.allCases.map(\.rawValue)).union(["jpg"])
 
   public enum Kind: String, CaseIterable, Sendable {
@@ -40,6 +44,19 @@ public enum Attachments {
     APIError("\(name) is larger than \(limit / 1024 / 1024) MB.")
   }
 
+  private static var totalText: String { "a message's images can total at most \(totalLimit / 1024 / 1024) MB." }
+
+  /// `read` throws this when a file is larger than the room left in the message.
+  public struct OverTotalLimit: Error, CustomStringConvertible {
+    public var description: String { Attachments.totalText }
+  }
+
+  /// Refuses a message of more than `countLimit` images or more than `totalLimit` bytes of them.
+  public static func checkMessage(count: Int, total: Int) throws {
+    guard count <= countLimit else { throw APIError("a message can carry at most \(countLimit) images.") }
+    guard total <= totalLimit else { throw APIError(totalText) }
+  }
+
   /// Checks the name's extension, the size, and the content.
   public static func validate(name: String, data: Data) throws -> Kind {
     guard data.count <= limit else { throw tooLarge(name) }
@@ -49,9 +66,9 @@ public enum Attachments {
   }
 
   /// Reads an image file. It refuses a symlink, anything but a regular file,
-  /// and a file over the limit before reading it. O_NONBLOCK keeps a FIFO from
-  /// blocking the open.
-  public static func read(path: String) throws -> Data {
+  /// and a file over the limit or over `remaining` bytes before reading it.
+  /// O_NONBLOCK keeps a FIFO from blocking the open.
+  public static func read(path: String, remaining: Int = totalLimit) throws -> Data {
     let name = (path as NSString).lastPathComponent
     let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
     guard fd >= 0 else {
@@ -63,6 +80,7 @@ public enum Attachments {
     guard fstat(fd, &info) == 0 else { throw APIError("can't read \(name): \(UnixSocket.errnoText())") }
     guard info.st_mode & S_IFMT == S_IFREG else { throw APIError("\(name) isn't an image.") }
     guard info.st_size <= limit else { throw tooLarge(name) }
+    guard info.st_size <= remaining else { throw OverTotalLimit() }
     let data = try FileHandle(fileDescriptor: fd, closeOnDealloc: false).readToEnd() ?? Data()
     _ = try validate(name: name, data: data)
     return data
