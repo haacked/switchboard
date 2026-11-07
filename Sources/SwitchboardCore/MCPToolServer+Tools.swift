@@ -111,8 +111,12 @@ extension MCPToolServer {
       "Clears all of a session's waits, by default the calling session's, or only the wait that `wait` names.",
       ["session": session, "wait": string("The id of one wait.")]),
     Tool(
-      "add_note", "Adds a note to a session.", ["session": session, "text": string("The note.")],
-      required: ["session", "text"]),
+      "add_note",
+      "Adds a note to a session, or with `todo` a to-do: a task for the user, which only the user resolves.",
+      [
+        "session": session, "text": string("The note."),
+        "todo": boolean("Adds a to-do. The user must resolve it before the session can be deleted."),
+      ], required: ["session", "text"]),
     Tool(
       "list_groups", "Lists the groups with their descriptions, sessions, and notes, then the sessions in no group."),
     Tool(

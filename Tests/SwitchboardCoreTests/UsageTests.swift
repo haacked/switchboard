@@ -193,6 +193,14 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
     #expect(reading(try parsedUsage("with-session")).budget(limit: 47.5, now: 0) == .left)
   }
 
+  @Test func aLimitIsSpentUntilItsResetPasses() {
+    let session = limit("session", 100, resetsAt: 10)
+    #expect(session.isSpent(now: 0))
+    #expect(!session.isSpent(now: 10))
+    #expect(limit("weekly_all", 100, resetsAt: nil).isSpent(now: .max - 1))
+    #expect(!limit("weekly_all", 99.9, resetsAt: 10).isSpent(now: 0))
+  }
+
   /// Every spent limit must reset before the account has budget again.
   @Test func severalSpentLimitsWaitForTheLatestReset() {
     let limits = [

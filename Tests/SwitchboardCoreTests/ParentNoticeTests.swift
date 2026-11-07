@@ -57,3 +57,52 @@ import Testing
     #expect(message.hasSuffix("and 5 more."))
   }
 }
+
+@Suite struct ParentDigestTests {
+  func line(_ heard: ChildMark, _ now: ChildMark, url: String? = nil) -> String? {
+    ParentDigest.line(name: "fix", id: "s1", heard: heard, now: now, reason: "answer: which?", prURL: url)
+  }
+
+  @Test func putsEveryChangeOfAChildOnOneLine() {
+    let result = line(.fresh, ChildMark(state: .needsYou, pr: 7), url: "https://github.com/o/r/pull/7")
+    #expect(result == "fix (s1): opened PR #7: https://github.com/o/r/pull/7; needs you: answer: which?")
+    #expect(line(.fresh, ChildMark(state: .done, pr: nil)) == "fix (s1): done")
+    #expect(line(.fresh, ChildMark(state: .readyToMerge, pr: nil)) == "fix (s1): answer: which?")
+  }
+
+  @Test func hasNoLineForAChildThatIsBackWhereItsParentLastHeard() {
+    let needs = ChildMark(state: .needsYou, pr: nil)
+    #expect(line(needs, needs) == nil)
+    #expect(line(.fresh, ChildMark(state: .canContinue, pr: nil)) == nil)
+  }
+
+  @Test func listsTheLinesThenTheCounts() {
+    let text = ParentDigest.text(["a (s1): done"], elsewhere: BoardCounts(needsYou: 2, readyToMerge: 1))
+    #expect(
+      text == """
+        Switchboard: what changed since your last turn.
+        Sessions you started:
+        - a (s1): done
+        Other sessions: 2 in Needs you, 1 in Ready to merge.
+        """)
+  }
+
+  @Test func countsTheLinesPastTheLimit() {
+    let text = ParentDigest.text((1...18).map { "s\($0): done" }, elsewhere: BoardCounts())
+    #expect(text.contains("- s15: done"))
+    #expect(!text.contains("- s16: done"))
+    #expect(text.contains("- and 3 more\n"))
+  }
+
+  @Test func answersTheHookWithTheTextAsAdditionalContext() {
+    let output = ParentDigest.hookOutput("t")
+    #expect(output["hookSpecificOutput"]?["hookEventName"] == "UserPromptSubmit")
+    #expect(output["hookSpecificOutput"]?["additionalContext"] == "t")
+  }
+
+  @Test func onlyAWorkSessionHearsChildNotices() {
+    #expect(SessionKind.work.hearsChildNotices)
+    #expect(!SessionKind.manager.hearsChildNotices)
+    #expect(!SessionKind.chat.hearsChildNotices)
+  }
+}

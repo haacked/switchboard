@@ -38,7 +38,9 @@ func followup(_ a: Args) {
     let result = call("followup-start", args, timeout: 300)
     if a.json { printJSON(result) } else { printSession(summary(result)) }
   case "rm":
-    let result = call("followup-rm", ["session": .string(followupRef(a, "rm"))])
+    var args: [String: JSON] = ["session": .string(followupRef(a, "rm"))]
+    addResolveFlags(a, to: &args)
+    let result = call("followup-rm", args)
     if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
   case "import":
     let file = a.values["--file"].map { URL(fileURLWithPath: $0.expandingTilde).path }

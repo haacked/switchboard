@@ -550,6 +550,44 @@ final class MCPClient {
     #expect(noted.notes.map(\.by) == [.claude])
   }
 
+  @Test func addNoteWithTodoAddsAToDoByClaude() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let mcp = try MCPClient(sbd)
+
+    let noted = try mcp.call(
+      "add_note", ["session": .string(s.id), "text": "Tell Alex in #flags that the fix shipped.", "todo": true]
+    ).decode(SessionSummary.self)
+
+    let todo = try #require(noted.notes.first)
+    #expect(todo.kind == .todo)
+    #expect(todo.by == .claude)
+    #expect(todo.isOpenTodo)
+    #expect(try sbd.get(s.id).openTodos.map(\.id) == [todo.id])
+  }
+
+  @Test func addNoteWithoutTodoAddsAPlainNote() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let mcp = try MCPClient(sbd)
+
+    let noted = try mcp.call("add_note", ["session": .string(s.id), "text": "Ask Ana first.", "todo": false])
+      .decode(SessionSummary.self)
+
+    #expect(noted.notes.map(\.isOpenTodo) == [false])
+    #expect(try sbd.get(s.id).openTodos.isEmpty)
+  }
+
+  @Test func addNotesSchemaTakesTodo() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let tool = try #require(try mcp.tools().first { $0["name"]?.string == "add_note" })
+
+    let properties = try #require(tool["inputSchema"]?["properties"]?.object)
+    #expect(properties["todo"]?["type"]?.string == "boolean")
+  }
+
   // MARK: Group tools
 
   @Test func addGroupCreatesAGroupWithItsSessionsAndNote() throws {

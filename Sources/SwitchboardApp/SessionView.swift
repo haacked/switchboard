@@ -7,10 +7,13 @@ import SwitchboardCore
 final class SessionViewState: ObservableObject {
   @Published var terminals: Terminals?
   @Published var terminalsError: String?
-  @Published var confirmingRemove = false
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
   @Published var removeOptions: RemoveOptions?
+  /// The open to-dos when the user clicked remove. The remove confirmation shows while this is set.
+  @Published var removal: TodoDeletion?
+  /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
+  @Published var shellAttach = 0
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -25,22 +28,38 @@ struct SessionView: View {
       header
       Divider()
       CardList(cards: session.cards)
-      if session.cleanup?.state == .removed {
+      if !session.hasTerminals {
         Text("Cleanup removed this session's worktree, so it has no terminals.")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if let terminals = ui.terminals {
         HSplitView {
           VStack(spacing: 0) {
-            paneLabel("Claude")
+            paneLabel("Claude") {
+              if session.shellClosed == true {
+                Button("Open Shell") { model.setShellOpen(session.id, true) }
+                  .help("Start a shell in the session's folder beside the Claude terminal")
+              }
+            }
             TerminalPane(command: terminals.attachCommand(.claude))
           }
-          .frame(minWidth: 480, idealWidth: 760)
-          VStack(spacing: 0) {
-            paneLabel("Shell")
-            TerminalPane(command: terminals.attachCommand(.shell))
+          .frame(minWidth: 320, idealWidth: 760)
+          if session.shellClosed != true {
+            VStack(spacing: 0) {
+              paneLabel("Shell") {
+                Button {
+                  model.setShellOpen(session.id, false)
+                } label: {
+                  Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Close Shell")
+                .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
+              }
+              TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
+            }
+            .id(ui.shellAttach)
+            .frame(minWidth: 200, idealWidth: 360)
           }
-          .frame(minWidth: 240, idealWidth: 360)
         }
       } else if let error = ui.terminalsError {
         Text("Can't open the terminals: \(error)")
@@ -59,7 +78,7 @@ struct SessionView: View {
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if session.cleanup?.state == .removed { return }
+      if !session.hasTerminals { return }
       let id = session.id
       let model = model
       // Opening a session resumes a stopped claude. The selection has to rest
@@ -80,14 +99,29 @@ struct SessionView: View {
         if Task.isCancelled { return }
       }
     }
-    .sheet(isPresented: $ui.confirmingRemove) { removeSheet }
+    .sheet(item: $ui.removal) { removeSheet($0) }
+  }
+
+  static let labelWidth: CGFloat = 44
+  static let labelSpacing: CGFloat = 8
+
+  /// The shell pane's tmux client exits when sbd ends the shell's tmux session. A shell that closed and
+  /// opened again between two refreshes leaves `shellClosed` unchanged, so the pane attaches again
+  /// while sbd still reports the shell open. The wait lets a closed shell reach the summary first.
+  private func reattachShell() {
+    let id = session.id
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model, ui] in
+      // The Inbox shows a session without selecting it, so this finds the session by its id.
+      if let s = model.board.first(where: { $0.id == id }), s.shellClosed != true { ui.shellAttach += 1 }
+    }
   }
 
   /// A confirmation dialog can't hold toggles, so the options are in a sheet.
-  private var removeSheet: some View {
+  private func removeSheet(_ todos: TodoDeletion) -> some View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
+      if let message = todos.message { Text(message) }
       if session.repo != nil, let options = ui.removeOptions {
         Toggle(
           isOn: Binding(
@@ -119,14 +153,14 @@ struct SessionView: View {
       }
       HStack {
         Spacer()
-        Button("Cancel", role: .cancel) { ui.confirmingRemove = false }
+        Button("Cancel", role: .cancel) { ui.removal = nil }
           .keyboardShortcut(.cancelAction)
-        Button("Remove Session", role: .destructive) {
-          ui.confirmingRemove = false
+        Button(todos.button("Remove Session"), role: .destructive) {
+          ui.removal = nil
           if ui.deleteWorktree {
-            model.delete(session.id, branch: ui.deleteBranch)
+            model.delete(session.id, branch: ui.deleteBranch, resolve: todos.ids)
           } else {
-            model.remove(session.id)
+            model.remove(session.id, resolve: todos.ids)
           }
         }
       }
@@ -156,7 +190,10 @@ struct SessionView: View {
         }
         Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         if let pr = session.pr, let url = pr.link {
-          Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
+          HStack(spacing: 4) {
+            Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
+            if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+          }
         }
         CleanupNote(session: session)
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
@@ -180,18 +217,20 @@ struct SessionView: View {
             session.markedDone
               ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
               : "Mark the session done. It leaves the Inbox and moves to Done on the board.")
+        NotesButton(session: session, always: true)
         if CleanupOffer.canCleanUp(session) {
           Button("Clean Up…") { model.confirmingCleanup = session.id }
             .disabled(model.cleaningUp.contains(session.id))
             .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
         }
         Button(role: .destructive) {
+          let todos = TodoDeletion(session)
           Task {
             let options = await RemoveOptions.load(session)
             ui.removeOptions = options
             ui.deleteWorktree = options.worktree
             ui.deleteBranch = options.branch
-            ui.confirmingRemove = true
+            ui.removal = todos
           }
         } label: {
           Image(systemName: "trash")
@@ -202,13 +241,22 @@ struct SessionView: View {
     .padding(12)
   }
 
-  private func paneLabel(_ text: String) -> some View {
-    Text(text)
-      .font(.caption.bold())
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(.bar)
+  /// The text has a fixed width, so a pane's button is at the same place in every view. The button sits
+  /// next to the text, so it stays visible when a narrow column cuts off the end of the label.
+  private func paneLabel(_ text: String, @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {
+    HStack(spacing: SessionView.labelSpacing) {
+      Text(text).font(.caption.bold()).foregroundStyle(.secondary)
+        .frame(width: SessionView.labelWidth, alignment: .leading)
+      trailing().buttonStyle(.borderless).font(.caption).controlSize(.small)
+      Spacer()
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(.bar)
   }
+}
+
+extension SessionSummary {
+  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
+  var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
 }

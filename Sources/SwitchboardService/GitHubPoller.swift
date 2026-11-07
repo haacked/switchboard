@@ -54,6 +54,7 @@ final class GitHubPoller {
   var recheck: Set<String> = []
   /// What the poller knows about each plan document, by plan id.
   var trackedPlans: [String: TrackedPlan] = [:]
+  var codeOwners = CodeOwnerReads()
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -196,6 +197,11 @@ final class GitHubPoller {
       logLine("github: \(error)")
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
+    // Each status read rebuilds its PR without a requirement. The reads
+    // above can throw after they rebuild some PRs, so the apply runs after
+    // the catch and before `record` compares each PR.
+    let codeOwnersError = readCodeOwners(all: all, now: now, stats: &stats)
+    applyCodeOwners()
     stats.trunkRuns = readTrunk(sessions, all: all, now: now)
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
@@ -204,11 +210,13 @@ final class GitHubPoller {
     let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
+    pruneCodeOwners()
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
+    if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
@@ -469,11 +477,11 @@ final class GitHubPoller {
     return result.error
   }
 
-  private func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
+  func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
 
   /// Sends one GraphQL request and returns the response, whose `data` isn't
   /// null.
-  private func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
+  func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
     var req = try apiRequest("graphql")
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
