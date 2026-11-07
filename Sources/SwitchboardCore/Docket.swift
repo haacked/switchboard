@@ -115,6 +115,10 @@ public struct DocketSummary: Codable, Equatable, Sendable {
   public var closed: Bool
   public var problem: String?
 
+  /// The PR's page, or nil unless `url` is https. The app opens this link
+  /// when the user clicks it.
+  public var link: URL? { URL(httpsOnly: url) }
+
   public init(_ session: DocketSession, _ status: DocketStatus) {
     pullRequest = session.pullRequest
     url = session.url
