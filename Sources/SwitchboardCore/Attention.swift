@@ -110,6 +110,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// When a `pr` event first showed the PR open and not a draft. An event
   /// with a draft, a merged or closed PR, or no PR clears it.
   public var readySince: Int64?
+  /// When the PR entered its pipeline stage. `notePipeline` sets it.
+  public var pipelineSince: Int64?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -235,7 +237,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "SubagentStop":
       if let id = d["agent_id"]?.string { subagents.remove(id) }
     case "pr":
-      pr = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
+      let next = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
+      notePipeline(from: pr, to: next, at: event.t)
+      pr = next
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
       applyReviewListing()
       // A pr event carries the comments only when they changed. An event

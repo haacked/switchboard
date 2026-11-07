@@ -196,9 +196,9 @@ extension Instance {
     let r = try sbd.run(["merge", s.id])
 
     #expect(got["state"]?.string != "ready_to_merge")
-    #expect(got["reason"]?.string == "rebase; #18303 conflicts with main")
+    #expect(got["reason"]?.string == "merge main in; #18303 conflicts with main")
     #expect(r.status != 0)
-    #expect(r.stderr.contains("rebase; #18303 conflicts with main"))
+    #expect(r.stderr.contains("merge main in; #18303 conflicts with main"))
     #expect(sbd.ghMerges().isEmpty)
   }
 

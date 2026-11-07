@@ -285,7 +285,9 @@ extension MergeAttentionTests {
 
     // Conflict reason
 
-    @Test(arguments: [("main", "rebase; #42 conflicts with main"), ("develop", "rebase; #42 conflicts with develop")])
+    @Test(arguments: [
+      ("main", "merge main in; #42 conflicts with main"), ("develop", "merge develop in; #42 conflicts with develop"),
+    ])
     func conflictReasonNamesTheBaseBranch(_ base: String, _ reason: String) throws {
       let f = try prFacts(readyPR(base: base, mergeable: .conflicting))
 

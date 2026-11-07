@@ -209,8 +209,8 @@ extension FakeGitHub {
 
     let got = try sbd.get(s.id)
 
-    #expect(got.reason == "rebase; #18303 conflicts with main")
-    #expect(got.triage?.options.map(\.label) == ["Rebase"])
+    #expect(got.reason == "merge main in; #18303 conflicts with main")
+    #expect(got.triage?.options.map(\.label) == ["Merge main"])
   }
 
   // Merge

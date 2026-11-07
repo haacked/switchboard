@@ -308,7 +308,7 @@ let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCore
     try sbd.sb("send", s.id, "again")
     try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Done: again" }
     let stop = try #require(try sbd.lastStop(s.id))
-    #expect(try sbd.get(s.id).reason == "rebase; #18303 conflicts with main")
+    #expect(try sbd.get(s.id).reason == "merge main in; #18303 conflicts with main")
     #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" || $0.id < stop })
 
     github.change(MergeTests.number) { $0["mergeable"] = "MERGEABLE" }

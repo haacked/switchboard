@@ -927,7 +927,8 @@ public final class Service {
           remoteRemoved ? "the remote branch" : nil,
         ].compactMap { $0 }
         let kept =
-          removed.isEmpty ? "Kept \(session.id)" : "Removed \(englishList(removed)) of \(session.id) and kept the session"
+          removed.isEmpty
+          ? "Kept \(session.id)" : "Removed \(englishList(removed)) of \(session.id) and kept the session"
         var stayed = ""
         if let branchError, let branch {
           stayed = " It kept \(branch.name): \(branchError)"
@@ -1481,6 +1482,7 @@ public final class Service {
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
     out.shellClosed = s.shellClosed
+    if s.kind == .work && s.docket == nil { out.pipeline = Pipeline(e.facts, created: s.created) }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
