@@ -119,6 +119,33 @@ public enum GitHub {
     }
     """
 
+  /// The id of the GitHub Actions app on github.com. Each workflow run is a
+  /// check suite of this app. A CI that isn't Actions has no suite here.
+  private static let actionsAppId = 15368
+
+  /// The GitHub Actions suites of each PR's last commit. The status query
+  /// leaves them out. A PostHog/posthog PR has about 30 to 60 of them, and
+  /// they made a status read of 20 such PRs take about twice as long.
+  public static let actionsQuery = """
+    query($ids: [ID!]!) {
+      rateLimit { cost }
+      nodes(ids: $ids) {
+        ... on PullRequest {
+          id
+          commits(last: 1) {
+            nodes {
+              commit {
+                oid
+                statusCheckRollup { state }
+                checkSuites(first: 100, filterBy: {appId: \(actionsAppId)}) { pageInfo { hasNextPage } nodes { status } }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
   /// Whether a base branch requires code owner review. It also reads the
   /// CODEOWNERS file in each place that GitHub looks. `$ref` is the branch name.
   /// `$github`, `$root`, and `$docs` are `<branch>:.github/CODEOWNERS`,
@@ -344,6 +371,19 @@ public enum GitHub {
   static func notFoundNodes(_ response: JSON, _ ids: [String]) -> Set<String> {
     let errors = errorTypes(response)
     return Set(ids.indices.filter { errors["nodes.\($0)"] == notFound }.map { ids[$0] })
+  }
+
+  /// One node of an actions response. nil when the node isn't a PR.
+  public static func parseActions(_ node: JSON) -> (id: String, read: ActionsRead)? {
+    guard let id = node["id"]?.string else { return nil }
+    let commit = nodes(node["commits"]).first?["commit"]
+    let suites = commit?["checkSuites"]
+    let statuses = nodes(suites).map { $0["status"]?.string }
+    let read = ActionsRead(
+      sha: commit?["oid"]?.string ?? "", checks: commit?["statusCheckRollup"]?["state"]?.string,
+      completed: suites?["pageInfo"]?["hasNextPage"]?.bool == false && !statuses.isEmpty
+        && statuses.allSatisfy { $0 == "COMPLETED" })
+    return (id, read)
   }
 
   /// The number of the PR that merged from the base branch, when nothing
@@ -641,5 +681,22 @@ public enum GitHub {
       searchEnd = start
     }
     return (nil, complete.count)
+  }
+}
+
+/// What one actions read shows about a PR's last commit.
+public struct ActionsRead: Equatable, Sendable {
+  public var sha: String
+  /// The commit's rollup state.
+  public var checks: String?
+  /// Whether the commit has at least one GitHub Actions suite, the read's one
+  /// page holds all of them, and each one completed.
+  public var completed: Bool
+
+  /// Whether the read shows that `pr`'s rollup state is the result of a
+  /// GitHub Actions run of its head commit that completed. A read of another
+  /// commit, or of another rollup state, shows nothing about `pr`.
+  public func showsFinishedRun(of pr: PullRequest) -> Bool {
+    completed && sha == pr.headSha && checks == pr.checks
   }
 }
