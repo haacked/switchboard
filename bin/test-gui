@@ -6,7 +6,7 @@
 # It then quits the app, and separately kills it, and starts it again each
 # time. It checks through sb and tmux that the session and both its panes are
 # the same processes with the same screens.
-# Last it types into a session's message field through the app's DraftSelfTest,
+# Next it types into a session's message field through the app's DraftSelfTest,
 # selects another session and comes back, presses Esc, quits, and checks the
 # draft after a relaunch and after two Escs.
 # Then it closes the shell pane of the Manager, a work session, an Inbox item, and a chat
@@ -15,16 +15,32 @@
 # a switch to another session, that Open Shell starts it again, that the pane
 # attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
+# Last it drops sets of files on the message field of a session, the Inbox, and
+# a group chat through the app's DropSelfTest, and checks the chips, the
+# errors, and the images that sbd received from the field's send.
+# Arguments name the checks to run (terminal, relaunch, drafts, shell, drops). With
+# none, it runs them all.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
-# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, or SB_SHELL_TEST, so the app
-# runs hidden and never takes focus. SB_TEST_VISIBLE=1 shows the app as a
-# normal launch does.
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, SB_SHELL_TEST, or
+# SB_DROP_TEST, so the app runs hidden and never takes focus. SB_TEST_VISIBLE=1
+# shows the app as a normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
+checks=("$@")
+for name in ${checks[@]+"${checks[@]}"}; do
+  case $name in
+  terminal | relaunch | drafts | shell | drops) ;;
+  *)
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, and drops." >&2
+    exit 2
+    ;;
+  esac
+done
+wants() { [ ${#checks[@]} -eq 0 ] || [[ " ${checks[*]} " == *" $1 "* ]]; }
 
 if [ "$(launchctl managername 2>/dev/null)" != Aqua ] && [ -z "${SB_GUI_ANY_SESSION:-}" ]; then
   echo "bin/test-gui needs a logged-in macOS session with a display. This is a $(launchctl managername) session." >&2
@@ -104,8 +120,12 @@ fail() {
   echo "FAIL ($check): $*" >&2
   echo "--- sbd log" >&2
   tail -n 20 "$home/sbd.log" >&2 || true
-  echo "--- app log" >&2
-  tail -n 20 "$home/shots/$check/app.log" >&2 || true
+  local log
+  for log in "$home/shots/$check/app.log" "$home/shots/$check/session.log" "$home/shots/$check/inbox.log" "$home/shots/$check/chat.log"; do
+    [ -f "$log" ] || continue
+    echo "--- ${log##*/}" >&2
+    tail -n 20 "$log" >&2 || true
+  done
   echo "--- screen" >&2
   cat "$home/shots/$check/screen.txt" >&2 || true
   exit 1
@@ -198,8 +218,10 @@ check_terminal() {
   echo "ok: $check (sizes ${sizes[*]})"
 }
 
-new_session selftest
-check_terminal
+if wants terminal; then
+  new_session selftest
+  check_terminal
+fi
 
 # The stand-in's screen keeps every byte it received, so a restarted stand-in
 # would lose them. The shell's pid shows whether its process is the same one.
@@ -276,7 +298,7 @@ check_relaunch() {
   echo "ok: relaunch (quit and kill)"
 }
 
-check_relaunch
+if wants relaunch; then check_relaunch; fi
 
 # The draft lives in the app, not in sbd, so the app's own log is the evidence.
 check_drafts() {
@@ -313,7 +335,7 @@ check_drafts() {
   echo "ok: drafts (switch, Esc, relaunch)"
 }
 
-check_drafts
+if wants drafts; then check_drafts; fi
 
 # sbd records whether the shell is closed, so sb and tmux are the evidence. The
 # app's log shows each step, and its PNGs show the window after the close.
@@ -430,4 +452,76 @@ check_shell() {
   echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat)"
 }
 
-check_shell
+if wants shell; then check_shell; fi
+
+# The drops live in the app until the send, so the app's log is the evidence
+# for each step, and sbd's copies are the evidence for the send.
+check_drops() {
+  check=drops
+  local shots="$home/shots/drops" view chat files line copies sent path target paths
+  mkdir "$shots"
+  echo "Checking drops on the message field…"
+  new_session drops-chat-member
+  "$bin_dir/sb" group add drops "$session" >/dev/null
+  chat=$("$bin_dir/sb" chat drops --json | jq -r '.id')
+  [ -n "$chat" ] && [ "$chat" != null ] || fail "sb chat returned no session id"
+  new_session drops
+  local expected=(
+    "two: targets DropView | chips a.png b.jpg | error  | text "
+    "three: targets DropView | chips a.png b.jpg c.gif | error  | text "
+    "five: targets DropView | chips e.png a.png d.png b.jpg c.gif | error  | text "
+    "two drags: targets DropView DropView | chips a.png b.jpg c.gif | error  | text "
+    "mixed: targets DropView | chips a.png b.jpg | error notes.txt isn't an image. | text "
+    "folder: targets DropView | chips a.png | error shots isn't an image. | text "
+    "over the count limit: targets DropView | chips $(printf 'n%02d.png ' $(seq 20))| error n21.png, n22.png aren't attached: a message can carry at most 20 images. | text "
+    "focused one: targets DropView | chips a.png | error  | text "
+    "focused two: targets DropView | chips a.png b.jpg | error  | text "
+    "typed then three: targets DropView | chips a.png b.jpg c.gif | error  | text look at these"
+    "file with its text: targets DropView | chips a.png | error  | text "
+    "promise drag: targets DropView copy"
+    "text drag: targets DropView | chips  | error  | text look at this"
+    "link drag: targets DropView | chips  | error  | text see https://example.com/a.png"
+    "focused two drags: targets DropView DropView | chips a.png b.jpg c.gif | error  | text "
+    "a click focuses the field: true"
+    "editor types after a click: "
+    "editor types after typing: "
+    "editor types after the draft changed: "
+    "editor types after another window was key: "
+    "editor types after focus left: "
+    "paste of three handled true | chips Pasted image.png Pasted image.png Pasted image.png"
+    "field moved with 20 chips: 0.0"
+    "after removing b.jpg: chips a.png c.gif"
+    "after send: chips  | text "
+    "done"
+  )
+  for view in session inbox chat; do
+    files="$shots/$view"
+    mkdir "$files"
+    case $view in
+    session) target=(SB_SELECT="$session") ;;
+    inbox) target=(SB_INBOX="$session") ;;
+    chat) target=(SB_SELECT="$chat") ;;
+    esac
+    env "${target[@]}" SB_DROP_TEST="$files" "$bin_dir/Switchboard" >"$shots/$view.log" 2>&1 &
+    app_pid=$!
+    wait_for 180 app_gone || fail "the app did not finish the drops in the $view"
+    end_app
+    for line in "${expected[@]}"; do
+      grep -qxF "droptest: $line" "$shots/$view.log" || fail "the $view field did not log: $line"
+    done
+    [ -s "$files/chips.png" ] || fail "the $view run drew no chips.png"
+  done
+
+  # The session view and the Inbox each sent a.png b.jpg c.gif to the session.
+  copies=$(find "$home/sessions/$session/attachments" -type f | wc -l | tr -d ' ')
+  [ "$copies" -eq 6 ] || fail "sbd kept $copies copies for the session, not 6"
+  sent=$("$bin_dir/sb" events --session "$session" --json | jq -rs '[.[] | select(.kind == "sent")] | last | .data.text')
+  [ "$(head -n 1 <<<"$sent")" = "look at these" ] || fail "the last send's text is not \"look at these\": $sent"
+  read -r -a paths <<<"$(tail -n 1 <<<"$sent")"
+  [ ${#paths[@]} -eq 3 ] || fail "the last send does not name 3 copies: $sent"
+  for path in "${paths[@]}"; do [ -f "$path" ] || fail "the send names $path, which is not a copy"; done
+  save_shots
+  echo "ok: drops (session, Inbox, chat)"
+}
+
+if wants drops; then check_drops; fi
