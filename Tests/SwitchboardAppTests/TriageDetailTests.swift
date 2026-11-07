@@ -40,16 +40,22 @@ import Testing
     var s = session(waitsToStart: false)
     s.cwd = ""
     s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: url), DocketStatus())
-    // The bar must link a docket row to docket's URL and never to this `pr`.
-    s.pr = PRSummary(
-      PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
+    // The bar must link a docket row to docket's URL and never show this `pr` or its code owners.
+    s.pr = prWithOwners()
     return s
+  }
+
+  func prWithOwners() -> PRSummary {
+    var pr = PRSummary(PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
+    pr.codeOwners = CodeOwnerStatus(satisfied: false, groups: [])
+    return pr
   }
 
   @Test func linksADocketRowToItsPullRequest() {
     let link = TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1"))
     #expect(link?.label == "o/r#1")
     #expect(link?.url == URL(string: "https://github.com/o/r/pull/1"))
+    #expect(link != nil && link?.owners == nil)
   }
 
   @Test func refusesADocketUrlThatIsNotHttps() {
@@ -58,11 +64,11 @@ import Testing
 
   @Test func linksASessionToItsPullRequest() {
     var s = session(waitsToStart: false)
-    s.pr = PRSummary(
-      PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
+    s.pr = prWithOwners()
     let link = TriageDetail.prLink(for: s)
     #expect(link?.label == s.pr?.line)
     #expect(link?.url == URL(string: "https://github.com/o/r/pull/5"))
+    #expect(link?.owners == s.pr?.codeOwners)
   }
 
   @Test func hasNoPullRequestLinkForASessionWithoutOne() {
