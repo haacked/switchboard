@@ -219,6 +219,8 @@ public final class Service {
         return .success(try JSON(encoding: importSessions(request.args)))
       case "triage", "choose", "reply", "summary-set":
         return try triageRequest(request.op, request.args)
+      case "decisions", "decision-answer", "decision-submit", "decision-discard":
+        return try decisionRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
       case "plan-propose", "plan-apply":
@@ -1461,7 +1463,10 @@ public final class Service {
     out.manager = s.manager
     out.kind = s.kind
     out.chat = s.chat
-    if Triage.mayHaveItem(out) { out.triage = Triage.item(e.facts, verdict) }
+    if Triage.mayHaveItem(out) {
+      out.triage = Triage.item(e.facts, verdict)
+      out.decisions = Triage.decisionList(e.facts, verdict)
+    }
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir

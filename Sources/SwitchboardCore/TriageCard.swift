@@ -41,12 +41,20 @@ public enum TriageCard {
       return option
     }
     let callouts = keep(raw["callouts"], "callout", max: maxCallouts, &dropped) { try callout($0) }
+    var numbers = Set<Int>()
+    let decisions = keep(raw["decisions"], "decision", max: TriageSummarizer.maxDecisions, &dropped) {
+      let decision = try decision($0)
+      guard numbers.insert(decision.number).inserted else {
+        throw APIError("another decision has the number \(decision.number)")
+      }
+      return decision
+    }
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let card = TriageSummary(
       title: title.isEmpty ? oneLine(first, max: Triage.titleLength) : title,
-      kind: kind ?? self.kind(for: options),
+      kind: kind ?? (decisions.count > 1 ? .decision : self.kind(for: options)),
       summary: lines.prefix(maxLines).joined(separator: "\n"), options: options, callouts: callouts,
-      multiSelect: multiSelect)
+      multiSelect: multiSelect, decisions: decisions)
     return Cleaned(card: card, dropped: dropped)
   }
 
@@ -122,6 +130,36 @@ public enum TriageCard {
     return option
   }
 
+  /// A decision keeps the reply's number, so `sb decide` names it as the
+  /// reply does. Its options' labels differ, so a label names one option.
+  static func decision(_ raw: JSON) throws -> PendingDecision {
+    typealias D = PendingDecision
+    guard let number = raw["number"]?.int, number > 0 else { throw APIError("it needs a number of 1 or more") }
+    let header = oneLine(raw["header"]?.string ?? "", max: D.headerLength)
+    guard !header.isEmpty else { throw APIError("it has no header") }
+    let question = oneLine(raw["question"]?.string ?? "", max: D.questionLength)
+    guard !question.isEmpty else { throw APIError("it has no question") }
+    let context = String(
+      (raw["context"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(D.contextLength))
+    let options = try (raw["options"]?.array ?? []).map { raw -> D.Option in
+      let label = oneLine(raw["label"]?.string ?? "", max: labelLength)
+      guard !label.isEmpty else { throw APIError("an option has no label") }
+      let detail = oneLine(raw["detail"]?.string ?? "", max: D.detailLength)
+      return D.Option(
+        label: label, detail: detail.isEmpty ? nil : detail, recommended: raw["recommended"]?.bool ?? false)
+    }
+    guard (D.minOptions...D.maxOptions).contains(options.count) else {
+      throw APIError("it has \(options.count) options, and a decision has \(D.minOptions) to \(D.maxOptions)")
+    }
+    guard options.filter(\.recommended).count <= 1 else { throw APIError("it recommends more than one option") }
+    guard Set(options.map { $0.label.lowercased() }).count == options.count else {
+      throw APIError("two of its options have the same label")
+    }
+    return D(
+      number: number, header: header, question: question, context: context.isEmpty ? nil : context,
+      options: options, multiSelect: raw["multiSelect"]?.bool ?? false)
+  }
+
   static func callout(_ raw: JSON) throws -> Callout {
     let name = raw["kind"]?.string ?? ""
     guard let kind = Callout.Kind(rawValue: name) else {
@@ -162,6 +200,18 @@ public enum TriageCard {
               once, when several choices apply together, such as which review items to fix. Every option
               must then be a send option. A single pick sends its message, and several send one message
               that lists each picked option's message on its own line.
+    decisions Optional. Use it when the turn ends with two or more separate decisions for the user, each
+              with its own options, instead of "options". Up to \(TriageSummarizer.maxDecisions) decisions, each with:
+                number      the decision's number in your reply, from 1, each one different
+                header      under \(PendingDecision.headerLength) characters, such as "Name" or "Storage"
+                question    under \(PendingDecision.questionLength) characters
+                context     optional, under \(PendingDecision.contextLength) characters: why it matters, from your reply
+                options     \(PendingDecision.minOptions) to \(PendingDecision.maxOptions), each with a "label" (under \(labelLength) characters, each
+                            different), an optional "detail" (under \(PendingDecision.detailLength) characters), and
+                            "recommended": true on at most one
+                multiSelect optional, true when the user may pick several options
+              The user answers each decision with an option, typed text, or a skip, and Switchboard sends
+              you one message that answers them all in order.
     callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that
               the summary doesn't already say: a conflict, a failing check, a risk, a call you made
               without asking, a destructive step. Each has "kind" (warning, decision, or info), "title"
@@ -175,7 +225,7 @@ public enum TriageCard {
        "options": [{"label": "Push", "action": "send", "message": "Yes, push.", "recommended": true}]}
       EOF
 
-    sbd shows the card until your next turn starts. It drops an option or a callout that doesn't fit this
+    sbd shows the card until your next turn starts. It drops an option, a decision, or a callout that doesn't fit this
     format and prints why, so fix the card and run the command again. Nothing in the card runs: each button
     only runs its action.
     """

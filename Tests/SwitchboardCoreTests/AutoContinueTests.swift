@@ -78,6 +78,33 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(reason == "an open card")
   }
 
+  /// Design A test 13. A continue would answer the reply while the user works through its decisions.
+  @Test func aSummaryWithDecisionsHoldsItBack() throws {
+    let summary = try JSONCoding.convert(decisionSummaryJSON, to: TriageSummary.self)
+
+    let reason = blocker { input in
+      input.verdict.source = .reply
+      input.facts.triage = summary
+    }
+
+    #expect(reason != nil)
+  }
+
+  @Test func anOpenDecisionListHoldsItBack() {
+    #expect(
+      blocker { $0.facts.apply(decisionsOpened(10, t: now - 2 * hourMs + 2000, ref: "stop:2", lastStop: 2)) } != nil)
+  }
+
+  @Test(arguments: ["decisions_submitted", "decisions_discarded"])
+  func aClosedDecisionListNoLongerHoldsItBack(_ kind: String) {
+    let reason = blocker { input in
+      input.facts.apply(decisionsOpened(10, t: now - 2 * hourMs + 2000, ref: "stop:2", lastStop: 2))
+      input.facts.apply(Event(id: 11, session: "s1", t: now - 2 * hourMs + 3000, kind: kind, data: ["message": "x"]))
+    }
+
+    #expect(reason == nil)
+  }
+
   @Test func anOpenWaitHoldsItBack() {
     #expect(blocker { $0.session = session(wait: "CI on #12") } == "an open wait")
   }

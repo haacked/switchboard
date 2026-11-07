@@ -108,9 +108,12 @@ func summaryCommand(_ a: Args) {
     if a.json { return printJSON(result) }
     let options = result["options"]?.int ?? 0
     let callouts = result["callouts"]?.int ?? 0
-    print(
-      "Recorded the summary with \(options) option\(options == 1 ? "" : "s") and \(callouts) callout\(callouts == 1 ? "" : "s")."
-    )
+    let decisions = result["decisions"]?.int ?? 0
+    let counts = [
+      "\(options) option\(options == 1 ? "" : "s")", "\(callouts) callout\(callouts == 1 ? "" : "s")",
+      decisions == 0 ? nil : "\(decisions) decision\(decisions == 1 ? "" : "s")",
+    ]
+    print("Recorded the summary with \(englishList(counts.compactMap { $0 })).")
     for line in result["dropped"]?.array ?? [] { print("Dropped \(line.string ?? "")".printable) }
   case "help", nil:
     print(TriageCard.instructions)

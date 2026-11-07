@@ -110,6 +110,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// When a `pr` event first showed the PR open and not a draft. An event
   /// with a draft, a merged or closed PR, or no PR clears it.
   public var readySince: Int64?
+  /// The decisions that the user started to answer, from the first answer
+  /// until a submit or a discard.
+  public var decisionList: DecisionList?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -263,6 +266,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     }
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
+    applyDecisions(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }

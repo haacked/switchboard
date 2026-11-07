@@ -131,6 +131,16 @@ let usage = """
                                   commas (1,3) go as one reply. Request review requests
                                   the reviewers in T. Card, merge, and review options
                                   refuse inside Claude Code
+    decide <session>              the decisions of the session's item, each with its
+                                  options and its answer so far
+    decide <session> <n> <option> | --text T | --skip
+                                  answer decision n with an option by number or label,
+                                  typed text, or a skip. On a pick-any decision, options
+                                  separated by commas (1,3) go together. The first answer
+                                  keeps a copy of the decisions until --submit or --discard
+    decide <session> --submit [--stale] | --discard
+                                  send every answer as one message, or drop the answers.
+                                  After the session took another turn, --submit needs --stale
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
@@ -701,6 +711,8 @@ case "next":
   next(a)
 case "choose":
   choose(a)
+case "decide":
+  decide(a)
 case "reply":
   replyCommand(a)
 case "summary":

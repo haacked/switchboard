@@ -3,8 +3,9 @@ import Foundation
 /// The request that sbd sends to `claude -p` to summarize a turn, and the
 /// reading of its answer.
 public enum TriageSummarizer {
-  /// How much of the reply the model sees.
-  public static let replyCharacters = 4_000
+  /// How much of the reply the model sees. A long reply can list its
+  /// decisions near the top.
+  public static let replyCharacters = 12_000
   /// How many decisions the summary lists one per line.
   static let maxDecisions = 10
   /// A summary that lists decisions has a line before them and one after them.
@@ -43,6 +44,16 @@ public enum TriageSummarizer {
     conflict, a failing check, a flagged risk, a call the session made without asking, or a destructive step. \
     Don't repeat the summary. Each has a kind (warning, decision, or info), a title under \(TriageCard.labelLength) characters, and a \
     body of one or two sentences. Most replies have none, so the array is usually empty.
+    - decisions: fill it only when the reply asks the user to make two or more separate decisions, each with its \
+    own answer. Otherwise leave it empty. Give one entry per decision, at most \(maxDecisions), in the reply's order. \
+    Each has a number (the reply's own number, or its position from 1), a header under \
+    \(PendingDecision.headerLength) characters that names the decision, the question under \
+    \(PendingDecision.questionLength) characters, an optional context with the reply's explanation, multiSelect set \
+    to true only when the user may pick several of its options, and \(PendingDecision.minOptions) to \
+    \(PendingDecision.maxOptions) options. Take each option from the reply: the answer it recommends and each \
+    alternative it names, or Yes and No for a yes-or-no question. Never invent an option. Each option has a label \
+    under \(TriageCard.labelLength) characters, an optional detail, and recommended set to true only on the one \
+    option that the reply recommends for that decision.
     """
 
   public static let schema: JSON = [
@@ -72,6 +83,27 @@ public enum TriageSummarizer {
             "title": ["type": "string"], "body": ["type": "string"],
           ],
           "required": ["kind", "title", "body"],
+        ],
+      ],
+      "decisions": [
+        "type": "array",
+        "items": [
+          "type": "object",
+          "properties": [
+            "number": ["type": "integer"], "header": ["type": "string"], "question": ["type": "string"],
+            "context": ["type": "string"], "multiSelect": ["type": "boolean"],
+            "options": [
+              "type": "array",
+              "items": [
+                "type": "object",
+                "properties": [
+                  "label": ["type": "string"], "detail": ["type": "string"], "recommended": ["type": "boolean"],
+                ],
+                "required": ["label"],
+              ],
+            ],
+          ],
+          "required": ["number", "header", "question", "options"],
         ],
       ],
     ],
