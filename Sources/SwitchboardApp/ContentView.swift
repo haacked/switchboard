@@ -529,25 +529,30 @@ private struct DoneFooter: View {
     if !sessions.isEmpty {
       // A merged session can still have an Inbox item, such as its post-merge
       // steps. Its card stays visible while the rest collapse.
-      let needsUser = sessions.filter { AttentionState.inbox.contains($0.state) }
+      let inInbox = sessions.filter { AttentionState.inbox.contains($0.state) }
+      let collapsed = sessions.filter { !AttentionState.inbox.contains($0.state) }
       Divider()
-      if !needsUser.isEmpty {
+      if !inInbox.isEmpty {
         LazyVGrid(columns: Self.grid, spacing: 8) {
-          ForEach(needsUser) { s in BoardCard(session: s) }
+          ForEach(inInbox) { s in BoardCard(session: s) }
         }
       }
-      DisclosureGroup(isExpanded: $expanded) {
-        LazyVGrid(columns: Self.grid, spacing: 8) {
-          ForEach(sessions.filter { !AttentionState.inbox.contains($0.state) }) { s in BoardCard(session: s) }
+      // Every Done session is outside the Inbox states, so Delete All has
+      // nothing to delete when the collapsed list is empty.
+      if !collapsed.isEmpty {
+        DisclosureGroup(isExpanded: $expanded) {
+          LazyVGrid(columns: Self.grid, spacing: 8) {
+            ForEach(collapsed) { s in BoardCard(session: s) }
+          }
+          .padding(.top, 8)
+        } label: {
+          HStack {
+            Text("Done and merged (\(collapsed.count))").fontWeight(.semibold)
+            DeleteAllDoneButton()
+          }
         }
-        .padding(.top, 8)
-      } label: {
-        HStack {
-          Text("Done and merged (\(sessions.count))").fontWeight(.semibold)
-          DeleteAllDoneButton()
-        }
+        .accessibilityIdentifier("board-done")
       }
-      .accessibilityIdentifier("board-done")
     }
   }
 }

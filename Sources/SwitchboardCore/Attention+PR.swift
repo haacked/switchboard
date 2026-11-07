@@ -72,10 +72,7 @@ extension Attention {
         state: .needsYou, reason: "find out why Trunk removed \(n) from its queue\(label)",
         options: [ask("Find out why", "Find out why Trunk removed \(n) from its queue\(label), and tell me.")])
     }
-    // A failed Depot job blocks the merge. Trunk adds a PR to its queue only
-    // after its required checks pass, so a failed job on a queued PR is one
-    // that the merge does not need.
-    if pr.queue?.isQueued != true, let run = pr.depotFailure {
+    if let run = pr.blockingDepotFailure {
       let reason = "fix Depot CI on \(n): "
       let failure = run.failureSummary(max: TriageCard.lineLength)
       return Verdict(

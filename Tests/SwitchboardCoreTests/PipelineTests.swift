@@ -393,6 +393,15 @@ extension PipelineTests {
 
       #expect(p.stage == .merging && p.blocker == nil)
     }
+
+    @Test(arguments: [TrunkQueueState.submitted, .removed, .unknown])
+    func depotFailureBlocksAPRThatTrunkHasNotQueued(_ queue: TrunkQueueState) throws {
+      #expect(try pipeline(withDepot(approvedPR(checks: "PENDING", queue: queue), depotRun())).blocker == "CI failed")
+    }
+
+    @Test func failedChecksBlockATrunkQueuedPR() throws {
+      #expect(try pipeline(approvedPR(checks: "FAILURE", queue: .failing)).blocker == "CI failed")
+    }
   }
 }
 
