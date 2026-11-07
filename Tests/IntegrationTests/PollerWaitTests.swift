@@ -7,6 +7,19 @@ extension FakeGitHub {
     change(number) { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": .string(state)]]]]] }
   }
 
+  /// Gives the PR's last commit the PR's head as its oid, and GitHub Actions
+  /// suites with `statuses`. Call it after `checks`, which replaces the commit.
+  func actions(_ number: Int, _ statuses: [String]) {
+    change(number) { pr in
+      var commit = pr["commits"]?["nodes"]?.array?.first?["commit"]?.object ?? [:]
+      commit["oid"] = pr["headRefOid"] ?? ""
+      commit["checkSuites"] = [
+        "pageInfo": ["hasNextPage": false], "nodes": .array(statuses.map { ["status": .string($0)] }),
+      ]
+      pr["commits"] = ["nodes": [["commit": .object(commit)]]]
+    }
+  }
+
   /// Adds a review of `commit` to the PR's last reviews, and to its verdicts
   /// when `verdict`.
   func review(
@@ -117,16 +130,57 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
   }
 
-  @Test func aCIWaitSetOnTheHeadCommitResolvesOnOneRead() throws {
-    let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
+  /// A session whose `ci` wait recorded the PR's head commit, whose checks
+  /// read SUCCESS.
+  func headWait(_ sbd: Instance, _ github: FakeGitHub) throws -> SessionSummary {
     let s = try chartsSession(sbd)
     let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
     github.change(18303) { $0["headRefOid"] = .string(head) }
     try sbd.sb("wait", s.id, "--kind", "ci")
     #expect(try sbd.get(s.id).waits.first?.head == head)
+    return s
+  }
+
+  @Test func aCIWaitSetOnTheHeadCommitResolvesOnOneReadOnceItsActionsRunsComplete() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED", "COMPLETED"])
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
+  }
+
+  /// An external status that reports before CI queues shows SUCCESS for the
+  /// head commit before it has any Actions suite. `ActionsReadTests` covers
+  /// the other reads that can't show a finished run.
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsBeforeItsActionsRunStarts() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, [])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    // The second poll's two agreeing reads settle the wait without a second Actions read.
+    #expect(github.requests.filter { $0.kind == "actions" }.count == 1)
+  }
+
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWhileItsActionsRunIsRunning() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED", "IN_PROGRESS"])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWhenTheActionsReadFails() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    github.fail(18303, in: .actions)
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
   }
 
   @Test func aCIWaitKeepsTwoReadsWhenTheHeadCommitDiffers() throws {
@@ -134,9 +188,11 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     let sbd = try Instance.withGitHub(github)
     let s = try chartsSession(sbd)
     github.change(18303) { $0["headRefOid"] = "pushed-commit" }
+    github.actions(18303, ["COMPLETED"])
     try sbd.sb("wait", s.id, "--kind", "ci")
     #expect(try sbd.poll()["resolved"]?.int == 0)
     #expect(try sbd.poll()["resolved"]?.int == 1)
+    #expect(!github.requests.contains { $0.kind == "actions" })
   }
 
   @Test func aWaitStaysOpenWhenTheReadAfterItFails() throws {

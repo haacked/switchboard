@@ -70,30 +70,37 @@ extension GitHubPoller {
   /// - a session marked done since the poll began;
   /// - the session's own PR when it finished before the wait was set, which is
   ///   an earlier PR of a reused branch;
-  /// - a `ci` outcome that only one read showed, unless the read shows the
-  ///   head commit that the wait recorded. A read just after a push can show
-  ///   the old head commit, or a status that reports before CI queues. Two reads
-  ///   that both show a failure agree.
+  /// - a `ci` outcome that only one read showed, since a read just after a
+  ///   push can show the old head commit, or a status that reports before CI
+  ///   queues. Two reads that both show a failure agree. One read is enough
+  ///   when the PR's head is the commit that the wait recorded and an Actions
+  ///   read shows that every GitHub Actions suite of that commit completed
+  ///   with the rollup state that the read shows.
   /// - a GitHub merge queue removal that only one read showed, since a read
   ///   while GitHub merges the PR can show it outside the queue before it
   ///   shows it merged.
   func resolveWaits(_ interest: Interest, stats: inout Stats) {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     queuedWaits = queuedWaits.filter { id in interest.waits.contains { $0.wait.id == id } }
-    for (session, wait) in interest.waits {
+    let settled = interest.waits.compactMap { session, wait -> Settled? in
       guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
         case let comments = keptComments(read.comments), let pr = shown(id, last: nil),
         let outcome = wait.kind == .deploy
           ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr) ?? githubQueueOutcome(wait, pr),
-        !(wait.pr == nil && wait.finishedBeforeSet(pr)),
-        confirmed(wait, pr, outcome, polled: read.polled),
-        !service.queue.sync(execute: { service.entries[session.id]?.session.done ?? true })
+        !(wait.pr == nil && wait.finishedBeforeSet(pr))
+      else { return nil }
+      return Settled(session: session.id, wait: wait, prId: id, pr: pr, outcome: outcome, polled: read.polled)
+    }
+    let actions = readActions(settled, stats: &stats)
+    for s in settled {
+      guard confirmed(s, actions: actions[s.prId]),
+        !service.queue.sync(execute: { service.entries[s.session]?.session.done ?? true })
       else { continue }
       do {
-        _ = try service.resolveWait(session: session.id, wait: wait.id, outcome: outcome)
+        _ = try service.resolveWait(session: s.session, wait: s.wait.id, outcome: s.outcome)
         stats.resolved += 1
       } catch {
-        logLine("github: can't resolve wait \(wait.id) of \(session.id): \(error)")
+        logLine("github: can't resolve wait \(s.wait.id) of \(s.session): \(error)")
       }
     }
     for pr in interest.merges {
@@ -102,6 +109,40 @@ extension GitHubPoller {
       }
       stats.merged += service.pullRequestMerged(pr).count
     }
+  }
+
+  /// A wait that its PR's last read settles, before `confirmed` checks it.
+  private struct Settled {
+    var session: String
+    var wait: Wait
+    var prId: String
+    var pr: PullRequest
+    var outcome: String
+    var polled: Int64
+
+    /// Whether the PR's head is the commit that the `ci` wait recorded.
+    var onRecordedHead: Bool { wait.kind == .ci && wait.head == pr.headSha }
+  }
+
+  /// Reads the GitHub Actions suites of each PR whose head is the commit that
+  /// a settled `ci` wait recorded. A wait that `confirming` holds at that head
+  /// had its Actions read on an earlier poll, so the two-read rule settles it
+  /// without another. A PR whose read fails is left out, so its waits need two
+  /// reads.
+  private func readActions(_ settled: [Settled], stats: inout Stats) -> [String: ActionsRead] {
+    let ids = Set(settled.filter { $0.onRecordedHead && confirming[$0.wait.id]?.sha != $0.pr.headSha }.map(\.prId))
+    var reads: [String: ActionsRead] = [:]
+    for chunk in GitHub.chunks(ids.sorted()) {
+      do {
+        let response = try request(GitHub.actionsQuery, idsVariable(chunk), stats: &stats)
+        for (id, read) in (response["data"]?["nodes"]?.array ?? []).compactMap(GitHub.parseActions) {
+          reads[id] = read
+        }
+      } catch {
+        logLine("github: can't read the Actions suites: \(error)")
+      }
+    }
+    return reads
   }
 
   static let leftGitHubQueue = "GitHub removed it from the merge queue"
@@ -116,16 +157,17 @@ extension GitHubPoller {
     return Self.leftGitHubQueue
   }
 
-  private func confirmed(_ wait: Wait, _ pr: PullRequest, _ outcome: String, polled: Int64) -> Bool {
+  private func confirmed(_ s: Settled, actions: ActionsRead?) -> Bool {
+    let (wait, pr, outcome) = (s.wait, s.pr, s.outcome)
     guard wait.kind == .ci || outcome == Self.leftGitHubQueue else { return true }
-    if wait.kind == .ci && wait.head == pr.headSha { return true }
+    if s.onRecordedHead, actions?.showsFinishedRun(of: pr) == true { return true }
     // More Depot jobs can fail between the two reads. That changes the
     // outcome's words but not the fact that the checks failed.
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
-      confirming[wait.id] = (pr.headSha, verdict, polled)
+      confirming[wait.id] = (pr.headSha, verdict, s.polled)
       return false
     }
-    return polled > first.polled
+    return s.polled > first.polled
   }
 }

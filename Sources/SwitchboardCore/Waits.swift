@@ -125,8 +125,9 @@ public struct Wait: Codable, Equatable, Sendable {
   public var until: Int64?
   public var note: String?
   /// The commit that the session's checked-out branch pointed at when a `ci`
-  /// wait on the session's own PR was set. Nil for a wait on another PR, and
-  /// for a wait set before sbd recorded it.
+  /// wait on the session's own PR was set. Nil for a wait on another PR, for
+  /// a folder that doesn't have the session's branch checked out, and for a
+  /// wait set before sbd recorded it.
   public var head: String?
   public var by: Author
   /// Milliseconds since the epoch.
