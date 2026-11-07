@@ -73,9 +73,8 @@ extension GitHubPoller {
   /// - a `ci` outcome that only one read showed, since a read just after a
   ///   push can show the old head commit, or a status that reports before CI
   ///   queues. Two reads that both show a failure agree. One read is enough
-  ///   when the PR's head is the commit that the wait recorded and an Actions
-  ///   read shows that every GitHub Actions suite of that commit completed
-  ///   with the rollup state that the read shows.
+  ///   when `Settled.mayResolveOnOneRead` holds and an Actions read of the
+  ///   head commit shows a finished run (`ActionsRead.showsFinishedRun`).
   /// - a GitHub merge queue removal that only one read showed, since a read
   ///   while GitHub merges the PR can show it outside the queue before it
   ///   shows it merged.
@@ -120,17 +119,27 @@ extension GitHubPoller {
     var outcome: String
     var polled: Int64
 
-    /// Whether the PR's head is the commit that the `ci` wait recorded.
-    var onRecordedHead: Bool { wait.kind == .ci && wait.headSha == pr.headSha }
+    /// Whether the PR's head is the commit that the `ci` wait recorded, and
+    /// the read came at least `window` after the wait was set. GitHub creates
+    /// an event's Actions suites a few seconds after the event. A later event
+    /// on the same commit, such as marking a draft ready, adds suites beside
+    /// the completed ones of an earlier run. By the end of the window, every
+    /// event from before the wait has its suites.
+    func mayResolveOnOneRead(window: Int64) -> Bool {
+      wait.kind == .ci && wait.headSha == pr.headSha && polled - wait.created >= window
+    }
   }
 
-  /// Reads the GitHub Actions suites of each PR whose head is the commit that
-  /// a settled `ci` wait recorded. A wait that `confirming` holds at that head
+  /// Reads the GitHub Actions suites of each PR on which a settled `ci` wait
+  /// may resolve on one read. A wait that `confirming` holds at that head
   /// had its Actions read on an earlier poll, so the two-read rule settles it
   /// without another. A PR whose read fails is left out, so its waits need two
   /// reads.
   private func readActions(_ settled: [Settled], stats: inout Stats) -> [String: ActionsRead] {
-    let ids = Set(settled.filter { $0.onRecordedHead && confirming[$0.wait.id]?.sha != $0.pr.headSha }.map(\.prId))
+    let ids = Set(
+      settled.filter {
+        $0.mayResolveOnOneRead(window: settings.pendingMs) && confirming[$0.wait.id]?.sha != $0.pr.headSha
+      }.map(\.prId))
     var reads: [String: ActionsRead] = [:]
     for chunk in GitHub.chunks(ids.sorted()) {
       do {
@@ -160,7 +169,7 @@ extension GitHubPoller {
   private func confirmed(_ s: Settled, actions: ActionsRead?) -> Bool {
     let (wait, pr, outcome) = (s.wait, s.pr, s.outcome)
     guard wait.kind == .ci || outcome == Self.leftGitHubQueue else { return true }
-    if s.onRecordedHead, actions?.showsFinishedRun(of: pr) == true { return true }
+    if s.mayResolveOnOneRead(window: settings.pendingMs), actions?.showsFinishedRun(of: pr) == true { return true }
     // More Depot jobs can fail between the two reads. That changes the
     // outcome's words but not the fact that the checks failed.
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome

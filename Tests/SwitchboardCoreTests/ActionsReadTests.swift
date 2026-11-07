@@ -2,16 +2,11 @@ import Testing
 
 @testable import SwitchboardCore
 
-/// A PR node of an actions response whose last commit has suites with
-/// `statuses`. Each completed suite ends with `conclusion`.
+/// A PR node of an actions response whose last commit has suites with `statuses`.
 private func actionsNode(
-  oid: String = "abc", checks: String? = "SUCCESS", statuses: [String], conclusion: String = "SUCCESS",
-  hasNextPage: JSON? = false
+  oid: String = "abc", checks: String? = "SUCCESS", statuses: [String], hasNextPage: JSON? = false
 ) -> JSON {
-  let nodes: [JSON] = statuses.map {
-    ["status": .string($0), "conclusion": $0 == "COMPLETED" ? .string(conclusion) : .null]
-  }
-  var suites: [String: JSON] = ["nodes": .array(nodes)]
+  var suites: [String: JSON] = ["nodes": .array(statuses.map { ["status": .string($0)] })]
   if let hasNextPage { suites["pageInfo"] = ["hasNextPage": hasNextPage] }
   let commit: JSON = [
     "oid": .string(oid), "statusCheckRollup": checks.map { ["state": .string($0)] } ?? .null,
@@ -33,8 +28,6 @@ private func actionsNode(
     actionsNode(statuses: []),
     actionsNode(statuses: ["COMPLETED", "IN_PROGRESS"]),
     actionsNode(statuses: ["QUEUED"]),
-    // Workflows whose jobs all skip complete before the pull_request suites exist.
-    actionsNode(statuses: ["COMPLETED", "COMPLETED"], conclusion: "SKIPPED"),
     // The read can't show that the suites on later pages completed.
     actionsNode(statuses: ["COMPLETED"], hasNextPage: true),
     actionsNode(statuses: ["COMPLETED"], hasNextPage: nil),

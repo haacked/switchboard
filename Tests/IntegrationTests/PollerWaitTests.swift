@@ -8,14 +8,13 @@ extension FakeGitHub {
   }
 
   /// Gives the PR's last commit the PR's head as its oid, and GitHub Actions
-  /// suites with `statuses`. Each completed suite succeeded. Call it after `checks`, which replaces the commit.
+  /// suites with `statuses`. Call it after `checks`, which replaces the commit.
   func actions(_ number: Int, _ statuses: [String]) {
     change(number) { pr in
       var commit = pr["commits"]?["nodes"]?.array?.first?["commit"]?.object ?? [:]
       commit["oid"] = pr["headRefOid"] ?? ""
       commit["checkSuites"] = [
-        "pageInfo": ["hasNextPage": false],
-        "nodes": .array(statuses.map { ["status": .string($0), "conclusion": $0 == "COMPLETED" ? "SUCCESS" : .null] }),
+        "pageInfo": ["hasNextPage": false], "nodes": .array(statuses.map { ["status": .string($0)] }),
       ]
       pr["commits"] = ["nodes": [["commit": .object(commit)]]]
     }
@@ -159,6 +158,29 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     github.actions(18303, ["COMPLETED"])
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
+  }
+
+  /// A later event on the head commit, such as marking a draft ready, adds
+  /// its Actions suites a few seconds after the event. A read that soon after
+  /// the wait can show only the completed suites of an earlier run.
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWithinAPollIntervalOfTheWait() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, pollSeconds: 60)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll(all: true)["resolved"]?.int == 1)
+    #expect(!github.requests.contains { $0.kind == "actions" })
+  }
+
+  @Test func aCIWaitOnTheHeadCommitResolvesOnOneReadAPollIntervalAfterTheWait() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, pollSeconds: 60)
+    let s = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
   }
 
   /// An external status that reports before CI queues shows SUCCESS for the
