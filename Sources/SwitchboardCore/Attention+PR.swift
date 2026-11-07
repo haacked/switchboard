@@ -42,8 +42,8 @@ extension Attention {
     }
     if pr.mergeable == .conflicting {
       return Verdict(
-        state: .needsYou, reason: oneLine("rebase; \(n) conflicts with \(pr.base)"),
-        options: [ask("Rebase", "Rebase onto \(pr.base), resolve the conflicts, and push.")],
+        state: .needsYou, reason: oneLine("merge \(pr.base) in; \(n) conflicts with \(pr.base)"),
+        options: [ask("Merge \(pr.base)", mergeBaseMessage(base: pr.base))],
         callouts: [
           Callout(
             kind: .warning, title: oneLine("\(n) conflicts with \(pr.base)", max: TriageCard.labelLength),
@@ -151,6 +151,13 @@ extension Attention {
 }
 
 extension Attention {
+  /// The message that asks a session to bring its base branch into its PR's
+  /// branch. It merges rather than rebases, because a rebase needs a force
+  /// push, which a session in auto mode can refuse.
+  public static func mergeBaseMessage(base: String) -> String {
+    "Merge origin/\(base) into this branch, resolve the conflicts, run the tests, and push."
+  }
+
   /// The one option of a rule whose next step the session takes: it sends
   /// `message` to the session.
   static func ask(_ label: String, _ message: String) -> TriageOption {

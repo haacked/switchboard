@@ -286,6 +286,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var title: String
   public var state: PRState
   public var status: PRStatus
+  /// The branch that the PR merges into.
+  public var base: String?
   public var checks: String?
   public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
@@ -317,6 +319,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     title = pr.title
     state = pr.state
     status = pr.status
+    base = pr.base
     checks = pr.checks
     mergeable = pr.mergeable
     queue = pr.queue

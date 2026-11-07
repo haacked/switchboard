@@ -240,7 +240,7 @@ private func edgeFacts(
 private let trunk = PRComment(
   id: "IC_trunk", author: "trunk-io[bot]", createdAt: "2026-10-25T00:00:00Z", body: "<!-- Trunk Merge -->")
 private let readsTheReply = Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
-private let conflict = Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main")
+private let conflict = Verdict(state: .needsYou, reason: "merge main in; #42 conflicts with main")
 private let held41 = sampleReadyForReview("waits on #41")
 private let approvedHeld41 = Verdict(state: .waiting, reason: "waits on #41; #42 approved")
 private let reviewRequired = samplePR(reviewDecision: .reviewRequired)
@@ -496,7 +496,7 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
   }
 
   @Test(arguments: [
-    (samplePR(mergeable: .conflicting), "rebase; #42 conflicts with main"),
+    (samplePR(mergeable: .conflicting), "merge main in; #42 conflicts with main"),
     (
       samplePR(verdicts: [sampleVerdict("alice", "CHANGES_REQUESTED", on: samplePRHead)]),
       "address the changes that alice requested on #42"

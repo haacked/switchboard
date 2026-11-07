@@ -11,6 +11,12 @@ extension SessionSummary {
 
   var enqueues: Bool { pr?.mergeMethod?.enqueues == true }
 
+  /// The base branch of the session's open PR while the PR conflicts with
+  /// it and a claude can merge it in, else nil.
+  var mergeBase: String? {
+    runsClaude && pr?.state == .open && pr?.mergeable == .conflicting ? pr?.base : nil
+  }
+
   var mergeVerb: String { (pr?.mergeMethod ?? .merge).verb }
 
   /// The Ready to merge sessions that Merge All merges or enqueues from this
@@ -95,5 +101,26 @@ struct MergeButton: View {
     } message: {
       Text(session.pr.map { "\($0.title) (\($0.repo))" } ?? session.name)
     }
+  }
+}
+
+/// Asks the session to merge its PR's base branch in and push, on a Board
+/// card whose PR conflicts.
+struct MergeBaseButton: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+  let base: String
+
+  var body: some View {
+    Button {
+      model.send(session.id, Attention.mergeBaseMessage(base: base))
+    } label: {
+      Image(systemName: "arrow.triangle.2.circlepath")
+    }
+    .buttonStyle(.borderless)
+    .foregroundStyle(.secondary)
+    .disabled(model.sending.contains(session.id))
+    .accessibilityLabel("Merge \(base) into \(session.name)")
+    .help("Ask the session to merge origin/\(base) in, resolve the conflicts, and push")
   }
 }

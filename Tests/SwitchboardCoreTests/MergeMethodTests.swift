@@ -379,19 +379,19 @@ extension MergeMethodTests {
 extension MergeMethodTests {
   @Suite struct ConflictedPR {
     @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk, .unknown])
-    func conflictedPRAsksForARebase(_ method: MergeMethod) throws {
+    func conflictedPRAsksToMergeTheBase(_ method: MergeMethod) throws {
       let f = try methodFacts(method) { $0.mergeable = .conflicting }
 
-      #expect(verdict(f) == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
+      #expect(verdict(f) == Verdict(state: .needsYou, reason: "merge main in; #42 conflicts with main"))
     }
 
     @Test(arguments: [MergeMethod.merge, .mergeQueue, .trunk, .unknown])
-    func conflictedPROffersARebaseAndNoMerge(_ method: MergeMethod) throws {
+    func conflictedPROffersToMergeTheBaseAndNoPRMerge(_ method: MergeMethod) throws {
       let f = try methodFacts(method) { $0.mergeable = .conflicting }
 
       let v = verdict(f)
 
-      #expect(v.options.map(\.label) == ["Rebase"])
+      #expect(v.options.map(\.label) == ["Merge main"])
       #expect(!v.options.contains { $0.action == .merge })
     }
   }

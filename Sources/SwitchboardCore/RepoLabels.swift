@@ -6,8 +6,9 @@ public enum RepoLabels {
 
   /// Each session's label by session id. A session with no known repo, the
   /// Manager, and a group chat get none. When the sessions span fewer than two repos, no
-  /// session gets one, because every row would say the same thing.
-  public static func labels(_ sessions: [SessionSummary]) -> [String: String] {
+  /// session gets one, because every row would say the same thing, unless
+  /// `oneRepo` is true, as for the merge board's lanes.
+  public static func labels(_ sessions: [SessionSummary], oneRepo: Bool = false) -> [String: String] {
     let listed = sessions.filter { $0.kind == .work }
     // Every session in a folder takes the owner/name of the first PR in that
     // folder, or else of the first started follow-up in it. A session's own PR
@@ -33,7 +34,7 @@ public enum RepoLabels {
       }
       repoIndexOfSession[s.id] = indexOfKey[repo.key]
     }
-    guard repos.count > 1 else { return [:] }
+    guard repos.count > 1 || oneRepo else { return [:] }
 
     // Repos that would show the same label move to their next longer form
     // until no two repos share a label or a repo has no longer form.

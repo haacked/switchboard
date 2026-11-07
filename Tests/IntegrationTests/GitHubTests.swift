@@ -118,12 +118,12 @@ extension Instance {
       try sbd.poll(all: true)
       return try sbd.get(s.id).reason
     }
-    #expect(try reason { $0["mergeable"] = "CONFLICTING" } == "rebase; #18303 conflicts with main")
+    #expect(try reason { $0["mergeable"] = "CONFLICTING" } == "merge main in; #18303 conflicts with main")
     // A pr event carries the comments only when they changed.
     #expect(try sbd.events(s.id).last { $0.kind == "pr" }?.data["comments"] == nil)
     // GitHub answers UNKNOWN while it computes mergeability again, as after
     // the base moved. A push changes the head commit, which can fix the conflict.
-    #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "rebase; #18303 conflicts with main")
+    #expect(try reason { $0["mergeable"] = "UNKNOWN" } == "merge main in; #18303 conflicts with main")
     #expect(
       try reason { $0["headRefOid"] = "pushed" }
         == "GitHub is still checking whether #18303 can merge; #18303 approved")

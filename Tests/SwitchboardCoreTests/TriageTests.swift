@@ -85,9 +85,9 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
     let item = item(f)
     #expect(item?.source == .rule)
     #expect(item?.kind == .action)
-    #expect(item?.title == "Rebase: #1204 conflicts with main")
-    #expect(item?.summary == "Rebase; #1204 conflicts with main.")
-    #expect(item?.options.map(\.label) == ["Rebase"])
+    #expect(item?.title == "Merge main in: #1204 conflicts with main")
+    #expect(item?.summary == "Merge main in; #1204 conflicts with main.")
+    #expect(item?.options.map(\.label) == ["Merge main"])
   }
 
   @Test func aMergedPRWithUncommittedChangesIsFinishedWorkToReview() {
