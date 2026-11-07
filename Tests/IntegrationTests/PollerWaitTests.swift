@@ -163,7 +163,7 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
   /// A later event on the head commit, such as marking a draft ready, adds
   /// its Actions suites a few seconds after the event. A read that soon after
   /// the wait can show only the completed suites of an earlier run.
-  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWithinAPollIntervalOfTheWait() throws {
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsSoonAfterTheWait() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github, pollSeconds: 60)
     _ = try headWait(sbd, github)
@@ -173,7 +173,7 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     #expect(!github.requests.contains { $0.kind == "actions" })
   }
 
-  @Test func aCIWaitOnTheHeadCommitResolvesOnOneReadAPollIntervalAfterTheWait() throws {
+  @Test func aCIWaitOnTheHeadCommitResolvesOnOneReadHalfAPollIntervalAfterTheWait() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github, pollSeconds: 60)
     let s = try headWait(sbd, github)
