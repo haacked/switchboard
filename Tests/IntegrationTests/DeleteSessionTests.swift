@@ -689,6 +689,33 @@ extension Instance {
     #expect(try placed(sbd, repo, s, origin) == before)
   }
 
+  /// `sb get` shows the other branch once the poller reads it. The delete still reads the
+  /// session's own branch, so it deletes neither branch.
+  @Test func refusesAnotherBranchThatThePollerRecorded() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s, origin) = try doneSessionWithRemote(github)
+    // The other branch is the head of #122896, which merged at its tip. So the only check that
+    // refuses is whether the folder has the session's starting branch checked out.
+    let other = "haacked/mcp-experiment-condition-ids"
+    try sbd.git(s.cwd, "checkout", "-q", "-b", other)
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(122896) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == other)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    let before = try placed(sbd, repo, s, origin)
+
+    let r = try sbd.deleteDoneSession(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("checked out"), Comment(rawValue: r.stderr))
+    #expect(try placed(sbd, repo, s, origin) == before)
+    #expect(try sbd.git(repo, "branch", "--list", other) != "")
+  }
+
   @Test func deletesADoneSessionWhoseWorktreeAndBranchesExist() throws {
     let github = try FakeGitHub()
     let (sbd, repo, s, origin) = try doneSessionWithRemote(github)

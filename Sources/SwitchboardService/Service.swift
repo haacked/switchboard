@@ -33,6 +33,9 @@ public final class Service {
     var lastJobSeen: Int64 = 0
     /// The time that the idle wait counts from.
     var idleSince: Int64 { max(facts.lastActivity, lastJobSeen) }
+    /// The branch that sbd shows: the folder's checked-out branch once the poller reads one.
+    /// Cleanup and branch deletion read `session.branch` instead.
+    var branch: String? { facts.branch ?? session.branch }
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
@@ -1451,8 +1454,9 @@ public final class Service {
     let verdict = Attention.shown(Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState), e.facts)
     let s = e.session
     var out = SessionSummary(
-      id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: s.branch, claudeSessionId: s.claudeSessionId,
-      state: verdict.state, reason: verdict.reason, since: e.facts.stateSince, lastActivity: e.facts.lastActivity,
+      id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: e.branch,
+      claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: e.facts.stateSince,
+      lastActivity: e.facts.lastActivity,
       live: e.facts.live, claudePid: snapshot.claudePids[id],
       attached: attached(id), lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,

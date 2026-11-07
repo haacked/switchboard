@@ -536,6 +536,29 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(after.cleanup?.state != .ready)
   }
 
+  /// `sb get` shows the other branch once the poller reads it. Cleanup still reads the session's
+  /// own branch, so it deletes neither branch.
+  @Test func refusesAnotherBranchThatThePollerRecorded() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    // The other branch is the head of #122896, which merged at its tip. So the only check that
+    // refuses is whether the folder has the session's starting branch checked out.
+    let other = "haacked/mcp-experiment-condition-ids"
+    try sbd.git(s.cwd, "checkout", "-q", "-b", other)
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(122896) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == other)
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+
+    try expectRefusal(sbd, repo, s, ["checked out"], ref: other)
+
+    #expect(try sbd.hasBranch(repo, branch))
+  }
+
   @Test func refusesADetachedHeadAtTheMergedCommit() throws {
     let after = try refusesAReadySession(["checked out"]) { sbd, _, s in
       try sbd.git(s.cwd, "checkout", "-q", "--detach")

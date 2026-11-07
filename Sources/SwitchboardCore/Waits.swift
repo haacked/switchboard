@@ -489,9 +489,10 @@ public struct ResolvedTodo: Codable, Equatable, Sendable {
 }
 
 extension ResolvedTodo {
-  public init(session: Session, note: Note, pr: Int?, resolution: Note.Resolution) {
+  /// `branch` and `pr` are the branch and the PR that sbd shows for the session.
+  public init(session: Session, branch: String?, note: Note, pr: Int?, resolution: Note.Resolution) {
     self.init(
-      session: session.id, name: session.name, repo: session.repo, branch: session.branch, pr: pr, note: note.id,
+      session: session.id, name: session.name, repo: session.repo, branch: branch, pr: pr, note: note.id,
       text: note.text, by: note.by, added: note.t, resolved: resolution.t, how: resolution.how)
   }
 }

@@ -59,6 +59,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var pr: PullRequest?
   /// The PR's comments from `GitHub.bodyAuthors`, with their bodies.
   public var prComments: [PRComment] = []
+  /// The branch that the session's folder has checked out, as the poller last
+  /// read it. Nil until the folder's branch differs from `Session.branch`.
+  public var branch: String?
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
@@ -249,6 +252,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       } else if pr == nil {
         prComments = []
       }
+    case "branch":
+      branch = d["branch"]?.string
     case "worktree":
       dirty = d["dirty"]?.int
       folderGone = d["gone"]?.bool ?? false

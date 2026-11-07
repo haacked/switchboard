@@ -301,6 +301,79 @@ extension Instance {
     #expect(try sbd.get(s.id).pr == nil)
   }
 
+  @Test func showsTheBranchThatTheFolderHasCheckedOut() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/cdp-dlq-breaker-counts-lookups")
+    #expect(try sbd.count("branch", of: s.id) == 0)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    #expect(try sbd.sb("get", s.id).contains("branch:  haacked/mcp-experiment-condition-ids"))
+    #expect(try sbd.client.sessions().first { $0.id == s.id }?.branch == "haacked/mcp-experiment-condition-ids")
+    // A detached HEAD keeps the last branch. A poll that finds no change records nothing.
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+    #expect(try sbd.count("branch", of: s.id) == 1)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+  }
+
+  @Test func showsTheCheckedOutBranchOfAFolderWithoutAGitHubRemote() throws {
+    let sbd = try Instance.withGitHub(try FakeGitHub())
+    let s = try sbd.new(prompt: "hello")
+    try Repos.create(s.cwd)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/local-only")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).branch == "haacked/local-only")
+  }
+
+  @Test func showsTheStartingBranchAfterACheckoutBackToIt() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+    try sbd.git(s.cwd, "checkout", "-q", "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    #expect(try sbd.get(s.id).branch == "haacked/cdp-dlq-breaker-counts-lookups")
+    #expect(try sbd.count("branch", of: s.id) == 2)
+  }
+
+  @Test func aResolvedTodoRecordsTheBranchOfItsPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    let todo = try sbd.addTodo(s.id, "check the flag")
+    try sbd.resolveTodo(s.id, todo.id)
+    let row = try #require(try sbd.resolvedTodos().first)
+    #expect(row["branch"]?.string == "haacked/mcp-experiment-condition-ids")
+    #expect(row["pr"]?.int == 122896)
+  }
+
+  @Test func keepsTheLastBranchOfAFolderThatIsGone() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll()
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).branch == "haacked/mcp-experiment-condition-ids")
+    #expect(try sbd.count("branch", of: s.id) == 1)
+  }
+
   @Test func dropsTheLinkedPROfAnEarlierBranch() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
