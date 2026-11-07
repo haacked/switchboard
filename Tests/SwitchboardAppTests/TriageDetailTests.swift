@@ -51,24 +51,24 @@ import Testing
     return pr
   }
 
-  @Test func linksADocketRowToItsPullRequest() {
-    let link = TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1"))
-    #expect(link?.label == "o/r#1")
-    #expect(link?.url == URL(string: "https://github.com/o/r/pull/1"))
-    #expect(link != nil && link?.owners == nil)
+  @Test func linksADocketRowToItsPullRequest() throws {
+    let link = try #require(TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1")))
+    #expect(link.label == "o/r#1")
+    #expect(link.url == URL(string: "https://github.com/o/r/pull/1"))
+    #expect(link.owners == nil)
   }
 
   @Test func refusesADocketUrlThatIsNotHttps() {
     #expect(TriageDetail.prLink(for: docketRow(url: "http://github.com/o/r/pull/1")) == nil)
   }
 
-  @Test func linksASessionToItsPullRequest() {
+  @Test func linksASessionToItsPullRequest() throws {
     var s = session(waitsToStart: false)
     s.pr = prWithOwners()
-    let link = TriageDetail.prLink(for: s)
-    #expect(link?.label == s.pr?.line)
-    #expect(link?.url == URL(string: "https://github.com/o/r/pull/5"))
-    #expect(link?.owners == s.pr?.codeOwners)
+    let link = try #require(TriageDetail.prLink(for: s))
+    #expect(link.label == s.pr?.line)
+    #expect(link.url == URL(string: "https://github.com/o/r/pull/5"))
+    #expect(link.owners == s.pr?.codeOwners)
   }
 
   @Test func hasNoPullRequestLinkForASessionWithoutOne() {
