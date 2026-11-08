@@ -6,6 +6,8 @@ import SwitchboardCore
 struct TriageDetail: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  /// The step that the card's decision view shows. Nil shows the first unanswered decision.
+  @State private var step: DecisionStep?
 
   enum Pane { case terminal, summary }
 
@@ -33,7 +35,7 @@ struct TriageDetail: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
             if let item = session.triage {
-              DecisionCard(session: session, item: item)
+              DecisionCard(session: session, item: item, step: $step)
             } else {
               working
               reply
@@ -41,6 +43,10 @@ struct TriageDetail: View {
           }
           .padding(16)
           .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let list = session.stepList {
+          Divider()
+          DecisionStepBar(session: session, list: list, step: $step)
         }
         Divider()
         if session.waitsToStart {
@@ -56,6 +62,7 @@ struct TriageDetail: View {
       }
     }
     .task(id: "\(session.id)/\(session.lastReply?.count ?? 0)/\(session.since)") { model.loadReply(session.id) }
+    .onChange(of: session.stepList?.ref) { step = nil }
   }
 
   private var bar: some View {

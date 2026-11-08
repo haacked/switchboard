@@ -849,6 +849,17 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   @Test func sessionWithoutATriageItemIsNotInformational() throws {
     #expect(try !item(triage: false).isInformational)
   }
+
+  /// The step view's Next and Submit take ⇧⌘Return, so Acknowledge stays quiet.
+  @Test func itemWithDecisionsToStepThroughIsNotInformational() throws {
+    var s = try item(kind: .decision)
+    let yesNo = [PendingDecision.Option(label: "Yes"), PendingDecision.Option(label: "No")]
+    s.triage?.decisions = [1, 2].map {
+      PendingDecision(number: $0, header: "H\($0)", question: "Q\($0)?", options: yesNo)
+    }
+
+    #expect(!s.isInformational)
+  }
 }
 
 @MainActor

@@ -1,0 +1,72 @@
+{
+  "title": "Answer six design choices",
+  "kind": "decision",
+  "summary": "It planned due follow-ups.\n1. Move a due follow-up to Needs you? It recommends yes.\n2. Name: it recommends to-do.\n3. Resolution record: it recommends a new table.\n4. Follow-ups on groups: it recommends refusing them.\n5. Icon for plain notes: it recommends yes, dimmed.\n6. Stale session brings up its follow-up? It recommends no.\nIt needs all six.",
+  "options": [],
+  "callouts": [],
+  "decisions": [
+    {
+      "number": 1,
+      "header": "Due follow-up",
+      "question": "Should a due follow-up move the session to Needs you?",
+      "context": "That adds 1 to the badge and sends one notification for each follow-up, at the moment it's due.",
+      "multiSelect": false,
+      "options": [
+        {"label": "Yes", "detail": "Adds 1 to the badge and notifies once", "recommended": true},
+        {"label": "A quieter Inbox section", "detail": "Needs a new state and Board column"},
+        {"label": "The icon alone"}
+      ]
+    },
+    {
+      "number": 2,
+      "header": "Name",
+      "question": "What should the new note be called?",
+      "multiSelect": false,
+      "options": [
+        {"label": "to-do", "detail": "sb note --todo", "recommended": true},
+        {"label": "follow-up note", "detail": "sb note --followup"}
+      ]
+    },
+    {
+      "number": 3,
+      "header": "Resolution record",
+      "question": "Where does the resolution record live?",
+      "multiSelect": false,
+      "options": [
+        {"label": "A new table in sbd's database", "recommended": true},
+        {"label": "A line in sbd.log"},
+        {"label": "A checked line in Followups.md"}
+      ]
+    },
+    {
+      "number": 4,
+      "header": "Follow-ups on groups",
+      "question": "Should groups take follow-ups?",
+      "multiSelect": false,
+      "options": [
+        {"label": "Refuse them for now", "recommended": true},
+        {"label": "Allow them", "detail": "sb group rm needs the same block"}
+      ]
+    },
+    {
+      "number": 5,
+      "header": "Plain note icon",
+      "question": "Show the icon for plain notes too?",
+      "multiSelect": false,
+      "options": [
+        {"label": "Yes, dimmed", "recommended": true},
+        {"label": "Only for follow-ups"}
+      ]
+    },
+    {
+      "number": 6,
+      "header": "Stale session",
+      "question": "Should a Stale session bring up its follow-up?",
+      "multiSelect": false,
+      "options": [
+        {"label": "No", "detail": "The icon still shows", "recommended": true},
+        {"label": "Yes"}
+      ]
+    }
+  ]
+}

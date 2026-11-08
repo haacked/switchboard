@@ -42,6 +42,22 @@ final class MessageDrafts {
     session.chat.map { "group:\($0)" } ?? session.id
   }
 
+  /// The key of the unsent Other answer to one decision of a session's list. The list's ref is part of the key,
+  /// so a later list's decision with the same number starts empty.
+  static func otherAnswerKey(session: String, ref: String, decision: Int) -> String {
+    "decision:\(session)/\(ref)/\(decision)/other"
+  }
+
+  /// The Other answer keys of every decision that the sessions show.
+  static func otherAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
+    Set(
+      sessions.flatMap { s in
+        s.shownDecisions.map { list in
+          list.decisions.map { otherAnswerKey(session: s.id, ref: list.ref, decision: $0.number) }
+        } ?? []
+      })
+  }
+
   func draft(for key: String) -> MessageField.Draft {
     if let draft = drafts[key] { return draft }
     let draft = MessageField.Draft()

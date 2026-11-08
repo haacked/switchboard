@@ -25,7 +25,8 @@
 #                    SIGTERM does not restart the wait
 #   lag ...          waits 1 s before it reports the prompt, which keeps the
 #                    message in flight. lag held waits until
-#                    $SB_HOME/report exists instead
+#                    $SB_HOME/report exists instead. While $SB_HOME/hold
+#                    exists, every prompt waits as lag held does
 #   onterm <file>    writes <file> in its folder first when SIGTERM arrives
 #   perm <command>   asks permission to run a Bash command
 #   pick             asks two questions with AskUserQuestion, the second
@@ -547,6 +548,7 @@ turn() {
   "lag held") until [ -e "$SB_HOME/report" ]; do sleep 0.05; done ;;
   lag*) sleep 1 ;;
   esac
+  if [ -e "$SB_HOME/hold" ]; then until [ -e "$SB_HOME/report" ]; do sleep 0.05; done; fi
   transcript "$p"
   status
   case $p in

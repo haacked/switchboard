@@ -113,6 +113,12 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// When a `pr` event first showed the PR open and not a draft. An event
   /// with a draft, a merged or closed PR, or no PR clears it.
   public var readySince: Int64?
+  /// The decisions that the user started to answer, from the first answer
+  /// until a submit or a discard.
+  public var decisionList: DecisionList?
+  /// The ref of the item whose decisions the last accepted submit sent.
+  /// It matters only while that item is the session's item.
+  public var submittedDecisionsRef: String?
   /// When the PR entered its pipeline stage. `notePipeline` sets it.
   public var pipelineSince: Int64?
 
@@ -272,6 +278,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     }
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
+    applyDecisions(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }

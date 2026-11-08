@@ -26,6 +26,7 @@ extension Service {
       "session": .string(id), "event": .number(Double(event.id)),
       "options": .number(Double(cleaned.card.options.count)),
       "callouts": .number(Double(cleaned.card.callouts.count)),
+      "decisions": .number(Double(cleaned.card.decisions.count)),
       "dropped": .array(cleaned.dropped.map(JSON.string)),
     ]
   }

@@ -3,8 +3,9 @@ import Foundation
 /// The request that sbd sends to `claude -p` to summarize a turn, and the
 /// reading of its answer.
 public enum TriageSummarizer {
-  /// How much of the reply the model sees.
-  public static let replyCharacters = 4_000
+  /// How much of the reply the model sees. A long reply can list its
+  /// decisions near the top.
+  public static let replyCharacters = 12_000
   /// How many decisions the summary lists one per line.
   static let maxDecisions = 10
   /// A summary that lists decisions has a line before them and one after them.
@@ -43,6 +44,29 @@ public enum TriageSummarizer {
     conflict, a failing check, a flagged risk, a call the session made without asking, or a destructive step. \
     Don't repeat the summary. Each has a kind (warning, decision, or info), a title under \(TriageCard.labelLength) characters, and a \
     body of one or two sentences. Most replies have none, so the array is usually empty.
+    - decisions: fill it only when the reply asks the user to make two or more separate decisions, each with its \
+    own answer. Otherwise leave it empty. A list of work the session finished or of steps it took is not a list of \
+    decisions. When you fill it, still write the summary lines, and leave options empty, because each decision \
+    carries its own options. Give one entry per decision, at most \(maxDecisions), in the reply's order. Each entry \
+    has these fields:
+      - number: the reply's own number for the decision. When the reply's numbers repeat, or it uses letters or \
+    bullets, use the decision's position from 1. No two entries share a number.
+      - header: under \(PendingDecision.headerLength) characters. It names the decision, such as "Storage".
+      - question: under \(PendingDecision.questionLength) characters, as the reply asks it.
+      - context: optional, under \(PendingDecision.contextLength) characters. It is the reply's own explanation of \
+    why the decision matters, shortened. Add nothing that the reply doesn't say.
+      - multiSelect: true only when the user may pick several of the options.
+      - options: \(PendingDecision.minOptions) to \(PendingDecision.maxOptions), each taken from the reply: the \
+    answer it recommends and each alternative it names. For a yes-or-no question, or a proposal such as "I'll use \
+    Postgres", the options are Yes and No. When the reply names fewer than two answers and the question is neither, \
+    leave that decision out. Never invent an option. Each option has a label under \(TriageCard.labelLength) \
+    characters, an optional detail with the reply's reason for that option in one short phrase, and recommended \
+    set to true only on the one option that the reply recommends. When the reply recommends nothing for a \
+    decision, no option is recommended.
+    For example, a reply that asks "1. Name: Hub or Switchboard? I'd pick Switchboard. 2. Ship the CLI now? I \
+    recommend yes." has these decisions: [{"number": 1, "header": "Name", "question": "Hub or Switchboard?", \
+    "options": [{"label": "Switchboard", "recommended": true}, {"label": "Hub"}]}, {"number": 2, "header": "CLI", \
+    "question": "Ship the CLI now?", "options": [{"label": "Yes", "recommended": true}, {"label": "No"}]}]
     """
 
   public static let schema: JSON = [
@@ -74,8 +98,31 @@ public enum TriageSummarizer {
           "required": ["kind", "title", "body"],
         ],
       ],
+      "decisions": [
+        "type": "array",
+        "maxItems": .number(Double(maxDecisions)),
+        "items": [
+          "type": "object",
+          "properties": [
+            "number": ["type": "integer"], "header": ["type": "string"], "question": ["type": "string"],
+            "context": ["type": "string"], "multiSelect": ["type": "boolean"],
+            "options": [
+              "type": "array",
+              "maxItems": .number(Double(PendingDecision.maxOptions)),
+              "items": [
+                "type": "object",
+                "properties": [
+                  "label": ["type": "string"], "detail": ["type": "string"], "recommended": ["type": "boolean"],
+                ],
+                "required": ["label"],
+              ],
+            ],
+          ],
+          "required": ["number", "header", "question", "options"],
+        ],
+      ],
     ],
-    "required": ["title", "kind", "summary", "options", "callouts"],
+    "required": ["title", "kind", "summary", "options", "callouts", "decisions"],
   ]
 
   /// The actions that the model may give an option. It reads text that other

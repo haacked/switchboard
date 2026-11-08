@@ -66,6 +66,8 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The sessions whose decision list `decision-submit` is sending.
+  var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
@@ -222,6 +224,8 @@ public final class Service {
         return .success(try JSON(encoding: importSessions(request.args)))
       case "triage", "choose", "reply", "summary-set":
         return try triageRequest(request.op, request.args)
+      case "decisions", "decision-answer", "decision-submit", "decision-discard":
+        return try decisionRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
       case "plan-propose", "plan-apply":
@@ -1466,7 +1470,12 @@ public final class Service {
     out.manager = s.manager
     out.kind = s.kind
     out.chat = s.chat
-    if Triage.mayHaveItem(out) { out.triage = Triage.item(e.facts, verdict) }
+    if Triage.mayHaveItem(out) {
+      let shown = Triage.itemAndDecisions(e.facts, verdict)
+      out.triage = shown.item
+      out.decisions = shown.decisions
+      if shown.decisionsSent { out.decisionsSent = true }
+    }
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir

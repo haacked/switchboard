@@ -170,10 +170,12 @@ public struct TriageSummary: Codable, Equatable, Sendable {
   public var callouts: [Callout]
   /// The user ticks any of the options and submits them as one reply.
   public var multiSelect: Bool
+  /// The separate decisions that the reply asks for, each with its own options.
+  public var decisions: [PendingDecision]
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false
+    multiSelect: Bool = false, decisions: [PendingDecision] = []
   ) {
     self.title = title
     self.kind = kind
@@ -181,10 +183,11 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     self.options = options
     self.callouts = callouts
     self.multiSelect = multiSelect
+    self.decisions = decisions
   }
 
-  /// A `triage` event recorded before cards had callouts or multiSelect holds
-  /// none and a single-choice card.
+  /// A `triage` event recorded before cards had callouts, multiSelect, or
+  /// decisions holds none and a single-choice card.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     title = try c.decode(String.self, forKey: .title)
@@ -193,6 +196,7 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     options = try c.decodeIfPresent([TriageOption].self, forKey: .options) ?? []
     callouts = try c.decodeIfPresent([Callout].self, forKey: .callouts) ?? []
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
   }
 }
 
@@ -207,6 +211,9 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var callouts: [Callout]
   /// The user ticks any of the checkable options and submits them as one reply.
   public var multiSelect: Bool
+  /// The separate decisions that the item asks for. While a decision list is
+  /// open, they are the list's copy.
+  public var decisions: [PendingDecision]
   public var source: TriageSource
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
@@ -215,7 +222,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, source: TriageSource, ref: String = ""
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], source: TriageSource, ref: String = ""
   ) {
     self.ref = ref
     self.title = title
@@ -224,16 +231,18 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.options = options
     self.callouts = callouts
     self.multiSelect = multiSelect
+    self.decisions = decisions
     self.source = source
   }
 
   init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
-      callouts: summary.callouts, multiSelect: summary.multiSelect, source: source, ref: ref)
+      callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions, source: source,
+      ref: ref)
   }
 
-  /// An item that an older sbd wrote has no multiSelect.
+  /// An item that an older sbd wrote has no multiSelect or decisions.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     title = try c.decode(String.self, forKey: .title)
@@ -242,6 +251,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
     options = try c.decode([TriageOption].self, forKey: .options)
     callouts = try c.decode([Callout].self, forKey: .callouts)
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
     source = try c.decode(TriageSource.self, forKey: .source)
     ref = try c.decode(String.self, forKey: .ref)
   }
@@ -282,21 +292,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// The option that `sb choose` and a click name: a 1-based number, or a
   /// label without regard to case.
   public func option(_ key: String) throws -> TriageOption {
-    let key = key.trimmingCharacters(in: .whitespaces)
-    if let n = Int(key) {
-      guard n > 0, options.indices.contains(n - 1) else {
-        throw APIError("there is no option \(n). There are \(options.count)")
-      }
-      return options[n - 1]
-    }
-    let matches = options.filter { $0.label.caseInsensitiveCompare(key) == .orderedSame }
-    guard matches.count == 1 else {
-      let labels = options.map(\.label).joined(separator: ", ")
-      throw APIError(
-        matches.isEmpty
-          ? "no option \"\(key)\". The options are: \(labels)" : "\"\(key)\" names \(matches.count) options")
-    }
-    return matches[0]
+    options[try optionIndex(key, labels: options.map(\.label))]
   }
 }
 
@@ -354,8 +350,46 @@ public enum Triage {
   public static let sessionEvent = "summary"
 
   /// The session's item, or nil when it needs nothing from the user.
-  /// `verdict` is the session's attention verdict.
+  /// `verdict` is the session's attention verdict. An open decision list
+  /// puts its stored decisions on the item, so a later card or rule doesn't
+  /// replace the answers. A held prompt's item keeps none, because the
+  /// prompt needs its own answer first.
   public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
+    item(facts, live: liveItem(facts, verdict))
+  }
+
+  /// The session's item, its open decision list, and whether a submit sent
+  /// the item's decisions, all from one live item.
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+    item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
+  ) {
+    let live = liveItem(facts, verdict)
+    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+  }
+
+  private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
+    guard var item = live else { return nil }
+    if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
+    return item
+  }
+
+  /// The open decision list, with the decisions of a later item in `newer`.
+  private static func decisionList(_ facts: SessionFacts, live: TriageItem?) -> DecisionList? {
+    guard var list = facts.decisionList else { return nil }
+    if let live, live.ref != list.ref { list.newer = live.decisions }
+    return list
+  }
+
+  /// Whether the last accepted submit sent the decisions of the session's
+  /// item. The item keeps them until the session's next prompt lands, and
+  /// they don't open again.
+  private static func decisionsSent(_ facts: SessionFacts, live: TriageItem?) -> Bool {
+    guard facts.decisionList == nil, let sent = facts.submittedDecisionsRef, let live else { return false }
+    return live.ref == sent && live.hasDecisionList
+  }
+
+  /// The item that the session's card, summary, rule, or reply gives.
+  static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
     var item: TriageItem
     if let card = facts.cards.first {
@@ -588,7 +622,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format."
 
   public init() {}
 
