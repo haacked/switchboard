@@ -505,24 +505,24 @@ public enum Triage {
     var closing: String?
     switch blocks[(at + 1)...].first {
     case nil: break
-    case .paragraph(let text) where at + 2 == blocks.count: closing = plain(text)
+    case .paragraph(let text) where at + 2 == blocks.count: closing = text.plain
     default: return lastParagraph
     }
     let itemLines = items.prefix(closingItems).enumerated().compactMap { i, item -> String? in
       guard case .paragraph(let text) = item.blocks.first else { return nil }
       let box = item.checked.map { $0 ? "[x] " : "[ ] " } ?? ""
       let marker = (number.map { "\($0 + i). " } ?? "- ") + box
-      return oneLine(marker + itemLine(plain(text)), max: TriageCard.lineLength)
+      return oneLine(marker + itemLine(text.plain), max: TriageCard.lineLength)
     }
     guard !itemLines.isEmpty else { return lastParagraph }
     let lead: String? =
       switch at > 0 ? blocks[at - 1] : nil {
-      case .paragraph(let text): text.components(separatedBy: "\n").last
-      case .heading(_, let text): text
+      case .paragraph(let text): text.plain.components(separatedBy: "\n").last
+      case .heading(_, let text): text.plain
       default: nil
       }
     let lines =
-      [lead.map { oneLine(plain($0), max: TriageCard.lineLength) }] + itemLines
+      [lead.map { oneLine($0, max: TriageCard.lineLength) }] + itemLines
       + [items.count > closingItems ? "…" : nil, closing]
     return lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
   }
@@ -539,12 +539,6 @@ public enum Triage {
       return line
     }
     return sentences[0] + " " + pick
-  }
-
-  /// The text without the bold and code markers that the card would show as
-  /// characters.
-  static func plain(_ text: String) -> String {
-    text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
   }
 
   /// A reason line as a title: its first letter capitalized, and the first

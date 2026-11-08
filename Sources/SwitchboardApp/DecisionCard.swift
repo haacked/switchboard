@@ -48,7 +48,7 @@ struct DecisionCard: View {
   }
 
   private func summary(_ text: String) -> some View {
-    Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    MarkdownView(text: text)
   }
 
   private var callouts: some View {
@@ -194,7 +194,7 @@ struct CalloutView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(callout.title).fontWeight(.semibold)
         if !callout.body.isEmpty {
-          Text(callout.body).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          MarkdownView(text: callout.body).font(.callout).foregroundStyle(.secondary)
         }
       }
       .textSelection(.enabled)
@@ -214,7 +214,7 @@ struct CardDetails: View {
   let session: SessionSummary
   /// The item's callouts, when the step view takes their place on the card.
   var callouts: [Callout] = []
-  @State private var open = false
+  @State private var open = Snapshot.opensDetails
 
   var body: some View {
     DisclosureGroup(isExpanded: $open) {

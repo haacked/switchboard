@@ -83,6 +83,8 @@ final class GitHubPoller {
     /// config when git last ran, which change with the branch or a remote.
     var head: String?
     var configStamp: Date?
+    /// The branch that HEAD names, kept while HEAD is detached.
+    var name: String?
     /// The session's branch in its GitHub repo, or nil outside one.
     var key: PRKey?
     /// The node id of the branch's PR.
@@ -119,6 +121,8 @@ final class GitHubPoller {
     var cwd: String
     var claudeSessionId: String
     var configDir: String
+    /// The branch that sbd shows for the session.
+    var branch: String?
     var facts: SessionFacts
   }
 
@@ -167,7 +171,8 @@ final class GitHubPoller {
       service.entries.map { id, e in
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
-          configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde, facts: e.facts)
+          configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde,
+          branch: e.branch, facts: e.facts)
       }
     }
     let now = nowMs()
@@ -277,7 +282,9 @@ final class GitHubPoller {
     // A rebase or a bisect detaches HEAD for a while, and the session keeps
     // its branch's PR meanwhile.
     var key = head != nil ? b.key : nil
-    if let branch = head.flatMap({ GitHub.branch(head: $0) }), let common = b.commonDir {
+    let branch = head.flatMap { GitHub.branch(head: $0) }
+    if let branch { b.name = branch }
+    if let branch, let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
@@ -543,14 +550,16 @@ final class GitHubPoller {
 
   // MARK: Events
 
-  /// Records the folder's count of uncommitted files once the PR has merged
-  /// or closed, with whether the folder is gone, and the session's PR when it
-  /// changed. The count comes first,
-  /// so the attention rules never judge a finished PR by the count of the
-  /// session's previous PR. Returns whether it recorded a `pr` event.
+  /// Records the folder's branch when it differs from the branch that sbd
+  /// shows. Once the PR has merged or closed, it records the folder's count of
+  /// uncommitted files and whether the folder is gone. It records the
+  /// session's PR when the PR changed. The count comes before the PR, so the
+  /// attention rules never judge a finished PR by the count of the session's
+  /// previous PR. Returns whether it recorded a `pr` event.
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
     guard var t = tracked[s.id] else { return false }
     defer { tracked[s.id] = t }
+    if let name = t.branch.name, name != s.branch { event(s.id, "branch", ["branch": .string(name)]) }
     if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open,
       s.facts.cleanedUp == nil,
       shouldCount(t, s, pr.id, all, now)

@@ -352,7 +352,7 @@ extension Instance {
     #expect(sbd.summaryCalls().isEmpty)
   }
 
-  @Test func aConflictBuildsARebaseCardWithoutTheModel() throws {
+  @Test func aConflictBuildsAMergeBaseCardWithoutTheModel() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
     try sbd.restart(setting: "triage", to: ["enabled": false, "systemPrompt": ""])
@@ -364,9 +364,11 @@ extension Instance {
 
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Rebase"])
+    #expect(item.options.map(\.label) == ["Merge main"])
     #expect(item.options.first?.action == .send)
-    #expect(item.options.first?.message == "Rebase onto main, resolve the conflicts, and push.")
+    #expect(
+      item.options.first?.message
+        == "Merge origin/main into this branch, resolve the conflicts, run the tests, and push.")
     #expect(item.callouts.first?.kind == .warning)
     #expect(sbd.summaryCalls().isEmpty)
   }
@@ -398,7 +400,7 @@ extension Instance {
 
     let item = try #require(try sbd.get(s.id).triage)
     #expect(item.source == .session)
-    #expect(item.options.map(\.label) == ["Go on", "Rebase"])
+    #expect(item.options.map(\.label) == ["Go on", "Merge main"])
     let lead = try #require(item.callouts.first)
     #expect(lead.kind == .warning)
     #expect((lead.title + " " + lead.body).contains("#18303 conflicts with main"))

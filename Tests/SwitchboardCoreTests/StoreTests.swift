@@ -141,7 +141,9 @@ func tempFolder() throws -> String {
   static func todo(_ id: String) -> Note { Note(id: id, text: "tell Alex", by: .claude, t: 10, kind: .todo) }
 
   static func record(_ session: Session, _ note: Note, how: String) -> ResolvedTodo {
-    ResolvedTodo(session: session, note: note, pr: 12, resolution: Note.Resolution(t: 20, by: .you, how: how))
+    ResolvedTodo(
+      session: session, branch: session.branch, note: note, pr: 12,
+      resolution: Note.Resolution(t: 20, by: .you, how: how))
   }
 
   /// Makes every `when` on `table` abort, as a constraint on the store would.

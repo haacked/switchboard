@@ -30,7 +30,7 @@ struct DocketView: View {
           Text(session.reason).foregroundStyle(.secondary)
         }
         Spacer()
-        if let url = URL(string: docket.url) {
+        if let url = docket.link {
           Button("Open PR") { NSWorkspace.shared.open(url) }
         }
         if let notes = docket.review?.notesPath, FileManager.default.fileExists(atPath: notes) {

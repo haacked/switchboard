@@ -16,6 +16,15 @@ struct TriageDetail: View {
     showingTerminal && !session.waitsToStart && session.runsClaude ? .terminal : .summary
   }
 
+  /// The PR that the bar links to, with the code owners of that PR. A docket
+  /// row links to the PR that docket reviews and ignores its `pr`. The bar
+  /// therefore never shows one PR's link beside another PR's code owners.
+  static func prLink(for session: SessionSummary) -> (label: String, url: URL, owners: CodeOwnerStatus?)? {
+    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0, nil) } }
+    if let pr = session.pr, let url = pr.link { return (pr.line, url, pr.codeOwners) }
+    return nil
+  }
+
   var body: some View {
     VStack(spacing: 0) {
       bar
@@ -63,10 +72,10 @@ struct TriageDetail: View {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
-      if let pr = session.pr, let url = pr.link {
+      if let link = Self.prLink(for: session) {
         HStack(spacing: 4) {
-          Link(pr.line, destination: url).font(.caption)
-          if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+          Link(link.label, destination: link.url).font(.caption)
+          if let owners = link.owners { CodeOwnerShield(status: owners) }
         }
       }
       Spacer()

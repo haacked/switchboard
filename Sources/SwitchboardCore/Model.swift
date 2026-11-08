@@ -237,6 +237,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the session has no shell pane, because its shell exited or
   /// the user closed it.
   public var shellClosed: Bool?
+  /// The PR's stage on the merge board. Nil for the Manager, a group chat,
+  /// and a docket row.
+  public var pipeline: Pipeline?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

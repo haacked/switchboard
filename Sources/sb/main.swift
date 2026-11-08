@@ -385,6 +385,9 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let p = s.pipeline {
+    print("  stage:   \(p.stage.title) \(ago(p.since))\(p.blocker.map { "; \($0)" } ?? "")".printable)
+  }
   if let owners = s.pr?.codeOwners { print("  owners:  \(owners.text(separator: "; "))".printable) }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
   for d in s.dependencies ?? [] {

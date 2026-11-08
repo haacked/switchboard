@@ -124,6 +124,11 @@ public struct Wait: Codable, Equatable, Sendable {
   /// When a `date` wait resolves, or when a `manual` wait returns to Needs you.
   public var until: Int64?
   public var note: String?
+  /// The commit that the session's checked-out branch pointed at when a `ci`
+  /// wait on the session's own PR was set. Nil for a wait on another PR, for
+  /// a folder that doesn't have the session's branch checked out, and for a
+  /// wait set before sbd recorded it.
+  public var headSha: String?
   public var by: Author
   /// Milliseconds since the epoch.
   public var created: Int64
@@ -132,7 +137,7 @@ public struct Wait: Codable, Equatable, Sendable {
   public init(
     id: String, kind: Kind, pr: PullRequest? = nil, session: SessionTarget? = nil, state: AttentionState? = nil,
     who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, note: String? = nil,
-    by: Author = .you, created: Int64, then: Then = .resume
+    headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume
   ) {
     self.id = id
     self.kind = kind
@@ -144,6 +149,7 @@ public struct Wait: Codable, Equatable, Sendable {
     self.service = service
     self.until = until
     self.note = note
+    self.headSha = headSha
     self.by = by
     self.created = created
     self.then = then
@@ -489,9 +495,10 @@ public struct ResolvedTodo: Codable, Equatable, Sendable {
 }
 
 extension ResolvedTodo {
-  public init(session: Session, note: Note, pr: Int?, resolution: Note.Resolution) {
+  /// `branch` and `pr` are the branch and the PR that sbd shows for the session.
+  public init(session: Session, branch: String?, note: Note, pr: Int?, resolution: Note.Resolution) {
     self.init(
-      session: session.id, name: session.name, repo: session.repo, branch: session.branch, pr: pr, note: note.id,
+      session: session.id, name: session.name, repo: session.repo, branch: branch, pr: pr, note: note.id,
       text: note.text, by: note.by, added: note.t, resolved: resolution.t, how: resolution.how)
   }
 }

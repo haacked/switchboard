@@ -389,17 +389,46 @@ struct ServiceBanner: View {
   }
 }
 
-/// The board: a row per group, with Ungrouped last, and a column per state
-/// that has sessions. Each session is a card in its group's row.
+/// How the board's lanes split the sessions.
+enum BoardLanes: String, CaseIterable {
+  case repo, group
+
+  var title: String { self == .repo ? "Repo" : "Group" }
+}
+
+/// The merge board: a lane per repo or per group, and a column per pipeline
+/// stage. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
+  @AppStorage("boardLanes") private var laneKind = BoardLanes.repo
   static let labelWidth: CGFloat = 140
-  static let columnWidth: CGFloat = 240
+  static let columnWidth: CGFloat = 200
+
+  private struct Lane: Identifiable {
+    var id: String
+    var title: String
+    var group: GroupSummary?
+    var sessions: [SessionSummary]
+  }
+
+  private func lanes(_ open: [SessionSummary], labelling board: [SessionSummary]) -> [Lane] {
+    switch laneKind {
+    case .repo:
+      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true)).map {
+        Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
+      }
+    case .group:
+      return BoardRows.make(sessions: open, groups: model.groups).map { row in
+        Lane(id: row.id, title: row.title, group: model.groups.first { $0.id == row.group }, sessions: row.sessions)
+      }
+    }
+  }
 
   var body: some View {
     let board = model.workBoard
-    let columns = AttentionState.allCases.filter { state in board.contains { $0.state == state } }
-    if columns.isEmpty {
+    let done = board.filter(MergeBoard.isDone)
+    let open = board.filter { !MergeBoard.isDone($0) }
+    if board.isEmpty {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
@@ -410,48 +439,35 @@ struct BoardView: View {
       ScrollView([.horizontal, .vertical]) {
         LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
           Section {
-            ForEach(BoardRows.make(sessions: board, groups: model.groups)) { row in
+            ForEach(lanes(open, labelling: board)) { lane in
               Divider()
               HStack(alignment: .top, spacing: 12) {
-                let group = model.groups.first { $0.id == row.group }
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(row.title).fontWeight(.semibold).lineLimit(2)
-                  if let group { GroupDescriptionView(group: group) }
-                  Text(row.sessions.count == 1 ? "1 session" : "\(row.sessions.count) sessions")
-                    .font(.caption).foregroundStyle(.secondary)
-                  if let group {
-                    Button("Chat") { model.openChat(group.id) }
-                      .buttonStyle(.link).font(.caption)
-                      .help(
-                        model.chat(of: group.id) == nil
-                          ? "Start a chat that manages this group's sessions" : "Open this group's chat")
-                  }
-                  let plans = group?.plans ?? []
-                  PlanFollowupList(plans: plans)
-                  PlanArtifactList(plans: plans)
-                }
-                .frame(width: Self.labelWidth, alignment: .leading)
-                ForEach(columns, id: \.self) { state in
+                LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
+                  .frame(width: Self.labelWidth, alignment: .leading)
+                ForEach(MergeBoard.columns, id: \.self) { stage in
                   VStack(spacing: 8) {
-                    ForEach(row.sessions.filter { $0.state == state }) { s in BoardCard(session: s) }
+                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in BoardCard(session: s) }
                   }
                   .frame(width: Self.columnWidth, alignment: .top)
                 }
               }
               .accessibilityElement(children: .contain)
-              .accessibilityLabel(row.title)
-              .accessibilityIdentifier("board-row-\(row.id)")
+              .accessibilityLabel(lane.title)
+              .accessibilityIdentifier("board-row-\(lane.id)")
             }
+            DoneFooter(sessions: done)
           } header: {
-            HStack(alignment: .top, spacing: 12) {
-              Spacer().frame(width: Self.labelWidth)
-              ForEach(columns, id: \.self) { state in
-                HStack {
-                  Text(state.title.uppercased()).font(.caption.bold()).foregroundStyle(state.color)
-                  Spacer()
-                  if state == .done { DeleteAllDoneButton() }
-                }
-                .frame(width: Self.columnWidth, alignment: .leading)
+            HStack(alignment: .center, spacing: 12) {
+              Picker("Lanes", selection: $laneKind) {
+                ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+              }
+              .pickerStyle(.segmented)
+              .labelsHidden()
+              .frame(width: Self.labelWidth)
+              .help("Show a lane per repo or per group")
+              ForEach(MergeBoard.columns, id: \.self) { stage in
+                Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
+                  .frame(width: Self.columnWidth, alignment: .leading)
               }
             }
             .padding(.vertical, 4)
@@ -469,6 +485,73 @@ struct BoardView: View {
           }
           .background(.background)
         }
+      }
+    }
+  }
+}
+
+/// A lane's label column. A group lane also shows the group's description,
+/// its chat, and its plans' Follow up rows and pending updates.
+private struct LaneLabel: View {
+  @EnvironmentObject var model: BoardModel
+  let title: String
+  let group: GroupSummary?
+  let count: Int
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title).fontWeight(.semibold).lineLimit(2)
+      if let group { GroupDescriptionView(group: group) }
+      Text(count == 1 ? "1 session" : "\(count) sessions")
+        .font(.caption).foregroundStyle(.secondary)
+      if let group {
+        Button("Chat") { model.openChat(group.id) }
+          .buttonStyle(.link).font(.caption)
+          .help(
+            model.chat(of: group.id) == nil
+              ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+      }
+      let plans = group?.plans ?? []
+      PlanFollowupList(plans: plans)
+      PlanArtifactList(plans: plans)
+    }
+  }
+}
+
+/// The Done sessions and the sessions whose PR merged, collapsed to one line.
+private struct DoneFooter: View {
+  let sessions: [SessionSummary]
+  @State private var expanded = false
+
+  private static let grid = [GridItem(.adaptive(minimum: BoardView.columnWidth), alignment: .top)]
+
+  var body: some View {
+    if !sessions.isEmpty {
+      // A merged session can still have an Inbox item, such as its post-merge
+      // steps. Its card stays visible while the rest collapse.
+      let inInbox = sessions.filter { AttentionState.inbox.contains($0.state) }
+      let collapsed = sessions.filter { !AttentionState.inbox.contains($0.state) }
+      Divider()
+      if !inInbox.isEmpty {
+        LazyVGrid(columns: Self.grid, spacing: 8) {
+          ForEach(inInbox) { s in BoardCard(session: s) }
+        }
+      }
+      // Every Done session is outside the Inbox states, so Delete All has
+      // nothing to delete when the collapsed list is empty.
+      if !collapsed.isEmpty {
+        DisclosureGroup(isExpanded: $expanded) {
+          LazyVGrid(columns: Self.grid, spacing: 8) {
+            ForEach(collapsed) { s in BoardCard(session: s) }
+          }
+          .padding(.top, 8)
+        } label: {
+          HStack {
+            Text("Done and merged (\(collapsed.count))").fontWeight(.semibold)
+            DeleteAllDoneButton()
+          }
+        }
+        .accessibilityIdentifier("board-done")
       }
     }
   }
@@ -600,6 +683,20 @@ struct BoardCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
 
+  /// A card without a stage shows its state's time instead. A blocked card
+  /// names its state, because the blocker replaces the reason and the tint
+  /// alone tells Needs you from Working only by color.
+  private var statusLine: String {
+    let s = session
+    let process = s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped"
+    let parts = [
+      s.pipeline.map { "\($0.stage.title) \(ago($0.since))" }, process, s.pipeline == nil ? ago(s.since) : nil,
+      s.pipeline?.blocker != nil ? s.state.title : nil,
+      s.acknowledged == true ? "acknowledged" : nil,
+    ]
+    return parts.compactMap { $0 }.joined(separator: " · ")
+  }
+
   var body: some View {
     let s = session
     ZStack(alignment: .bottomTrailing) {
@@ -608,6 +705,9 @@ struct BoardCard: View {
       } label: {
         VStack(alignment: .leading, spacing: 4) {
           HStack {
+            if AttentionState.inbox.contains(s.state) {
+              Circle().fill(s.state.color).frame(width: 8, height: 8).help(s.state.title)
+            }
             Text(s.name).fontWeight(.medium).lineLimit(1)
             Spacer()
             if let pr = s.pr {
@@ -620,13 +720,15 @@ struct BoardCard: View {
               }
             }
           }
-          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+          if let blocker = s.pipeline?.blocker {
+            Text(blocker).font(.caption).foregroundStyle(.orange).lineLimit(2)
+          } else {
+            Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          }
           CleanupNote(session: s)
           MergeNote(session: s)
-          Text(
-            "\(s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped") · \(ago(s.since))\(s.acknowledged == true ? " · acknowledged" : "")"
-          )
-          .font(.caption2).foregroundStyle(.tertiary)
+          Text(statusLine)
+            .font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -638,6 +740,7 @@ struct BoardCard: View {
       HStack(spacing: 4) {
         NotesButton(session: s)
         if s.canMerge { MergeButton(session: s) }
+        if let base = s.mergeBase { MergeBaseButton(session: s, base: base) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
         if s.isRemovableDone { DeleteButton(session: s) }
       }

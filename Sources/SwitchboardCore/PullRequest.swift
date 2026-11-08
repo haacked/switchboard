@@ -286,6 +286,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var title: String
   public var state: PRState
   public var status: PRStatus
+  /// The branch that the PR merges into.
+  public var base: String?
   public var checks: String?
   public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
@@ -317,6 +319,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     title = pr.title
     state = pr.state
     status = pr.status
+    base = pr.base
     checks = pr.checks
     mergeable = pr.mergeable
     queue = pr.queue
@@ -333,10 +336,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
 
   /// The PR's page, or nil unless `url` is https. Any local process can
   /// record a `pr` event, and the app opens this link when the user clicks it.
-  public var link: URL? {
-    guard let url = URL(string: url), url.scheme?.lowercased() == "https" else { return nil }
-    return url
-  }
+  public var link: URL? { URL(httpsOnly: url) }
 
   /// The PR in one line, such as "#18303 Approved, checks success, Trunk
   /// testing".
@@ -345,5 +345,14 @@ public struct PRSummary: Codable, Equatable, Sendable {
     if let queue, queue != .unknown { line += ", Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
     if trunkLoginNeeded == true { line += "; trunk login needed" }
     return line
+  }
+}
+
+extension URL {
+  /// The URL in `string`, or nil unless its scheme is https. The app opens a
+  /// PR link with NSWorkspace, which would also run a file or app URL.
+  public init?(httpsOnly string: String) {
+    guard let url = URL(string: string), url.scheme?.lowercased() == "https" else { return nil }
+    self = url
   }
 }

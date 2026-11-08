@@ -197,7 +197,7 @@ extension Instance {
 
     let row = try sbd.listed(s.id)
     #expect(row["state"]?.string == "needs_you")
-    #expect(row["reason"]?.string == "rebase; #18303 conflicts with main")
+    #expect(row["reason"]?.string == "merge main in; #18303 conflicts with main")
     #expect(row["acknowledged"] == nil)
   }
 

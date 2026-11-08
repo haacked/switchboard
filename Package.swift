@@ -12,10 +12,17 @@ let package = Package(
     .executable(name: "Switchboard", targets: ["SwitchboardApp"]),
   ],
   dependencies: [
-    .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.99.1")
+    .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.99.1"),
+    .package(url: "https://github.com/swiftlang/swift-cmark.git", from: "0.9.0"),
   ],
   targets: [
-    .target(name: "SwitchboardCore", swiftSettings: swift5),
+    .target(
+      name: "SwitchboardCore",
+      dependencies: [
+        .product(name: "cmark-gfm", package: "swift-cmark"),
+        .product(name: "cmark-gfm-extensions", package: "swift-cmark"),
+      ],
+      swiftSettings: swift5),
     .target(name: "SwitchboardService", dependencies: ["SwitchboardCore"], swiftSettings: swift5),
     .executableTarget(name: "sbd", dependencies: ["SwitchboardService"], swiftSettings: swift5),
     .executableTarget(name: "sb", dependencies: ["SwitchboardCore"], swiftSettings: swift5),

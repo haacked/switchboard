@@ -77,7 +77,8 @@ extension Service {
     }
     let resolution = Note.Resolution(t: nowMs(), by: .you, how: "resolved and deleted the session")
     return open.map {
-      ResolvedTodo(session: entry.session, note: $0, pr: entry.facts.pr?.number, resolution: resolution)
+      ResolvedTodo(
+        session: entry.session, branch: entry.branch, note: $0, pr: entry.facts.pr?.number, resolution: resolution)
     }
   }
 
@@ -104,7 +105,9 @@ extension Service {
     session.notes?[index].resolved = resolution
     try store.save(
       session,
-      resolving: ResolvedTodo(session: session, note: note, pr: entries[id]?.facts.pr?.number, resolution: resolution))
+      resolving: ResolvedTodo(
+        session: session, branch: entries[id]?.branch, note: note, pr: entries[id]?.facts.pr?.number,
+        resolution: resolution))
     entries[id]?.session = session
     record(id, "note-resolved", ["note": .string(noteId)])
   }

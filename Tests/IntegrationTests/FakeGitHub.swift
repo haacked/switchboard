@@ -11,9 +11,9 @@ import SwitchboardCore
 /// change, as GitHub does. It records each request.
 final class FakeGitHub {
   struct Request {
-    /// lookup, status, base, bodies, codeowners, files, or approvals.
+    /// lookup, status, base, bodies, codeowners, files, approvals, or actions.
     var kind: String
-    /// The node ids that a status, base, body, files, or approvals query
+    /// The node ids that a status, base, body, files, approvals, or actions query
     /// asked for, each lookup key as owner/name:branch or owner/name#number,
     /// or the owner/name:branch of a codeowners query.
     var ids: [String]
@@ -63,7 +63,7 @@ final class FakeGitHub {
 
   /// The queries that ask for PR nodes.
   enum PRQuery: String {
-    case status, base, files, approvals
+    case status, base, files, approvals, actions
   }
 
   /// A base branch's code owner settings, as the codeowners query reads them.
@@ -641,8 +641,16 @@ final class FakeGitHub {
           data["nodes"] = nodes(page, failing: { failing.contains(self.prs[$0]?["number"]?.int ?? 0) })
         }
       } else if let selection = Selection(query: query, on: "PullRequest") {
-        let prQuery: PRQuery =
-          query.contains("onBehalfOf(") ? .approvals : query.contains("reviews(") ? .status : .base
+        let prQuery: PRQuery
+        if query.contains("onBehalfOf(") {
+          prQuery = .approvals
+        } else if query.contains("reviews(") {
+          prQuery = .status
+        } else if query.contains("checkSuites(") {
+          prQuery = .actions
+        } else {
+          prQuery = .base
+        }
         kind = prQuery.rawValue
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
         let failing = failingPRs[prQuery, default: []]

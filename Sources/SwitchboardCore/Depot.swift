@@ -198,6 +198,11 @@ extension PullRequest {
     return run
   }
 
+  /// `depotFailure`, unless Trunk has queued the PR. Trunk queues a PR only
+  /// after its required checks pass, so the merge does not need a job that
+  /// failed on a queued PR.
+  public var blockingDepotFailure: DepotRun? { queue?.isQueued == true ? nil : depotFailure }
+
   /// Whether GitHub's rollup failed, or a Depot job failed on the head commit.
   public var ciFailed: Bool { checksFailed || depotFailure != nil }
 }
