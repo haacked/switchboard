@@ -52,9 +52,9 @@ final class MessageDrafts {
   static func otherAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
     Set(
       sessions.flatMap { s in
-        (s.shownDecisions.map { list in list.decisions.map { (list.ref, $0.number) } } ?? []).map {
-          otherAnswerKey(session: s.id, ref: $0.0, decision: $0.1)
-        }
+        s.shownDecisions.map { list in
+          list.decisions.map { otherAnswerKey(session: s.id, ref: list.ref, decision: $0.number) }
+        } ?? []
       })
   }
 
