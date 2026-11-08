@@ -35,7 +35,7 @@ extension AutoContinueTests {
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
 
     #expect(try sbd.get(s.id).state == .canContinue)
-    #expect(try sbd.blocker(s.id) != nil)
+    #expect(try sbd.blocker(s.id) == "decisions to answer")
     #expect(try sbd.autoContinues(s.id).isEmpty)
     #expect(try sbd.sbdMessages(s.id).isEmpty)
   }

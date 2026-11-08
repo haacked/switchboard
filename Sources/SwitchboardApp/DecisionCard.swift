@@ -3,9 +3,9 @@ import SwitchboardCore
 
 /// The Inbox card of a session: what it did and needs, the buttons that act
 /// on it, what to read before deciding, and the details behind a disclosure.
-/// An item with decisions shows them one step at a time in place of its
-/// options. Its summary shrinks to its first line, and its callouts move
-/// into Details.
+/// An item with decisions shows them one step at a time above its options.
+/// Its summary shrinks to its first line, and its callouts move into Details.
+/// The step view owns ⌘⇧Return.
 struct DecisionCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -78,8 +78,8 @@ struct DecisionCard: View {
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
-    } else if !item.options.isEmpty, !item.hasDecisionList {
-      OptionList(session: session, item: item)
+    } else if !item.options.isEmpty {
+      OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog.
       Text("Claude Code's dialog waits in the terminal. Open the Terminal to answer it.")

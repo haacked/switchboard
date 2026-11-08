@@ -42,18 +42,20 @@ final class MessageDrafts {
     session.chat.map { "group:\($0)" } ?? session.id
   }
 
-  /// The key of the unsent Other answer to one decision of a session's list.
-  static func otherAnswerKey(session: String, decision: Int) -> String { "decision:\(session)/\(decision)/other" }
+  /// The key of the unsent Other answer to one decision of a session's list. The list's ref is part of the key,
+  /// so a later list's decision with the same number starts empty.
+  static func otherAnswerKey(session: String, ref: String, decision: Int) -> String {
+    "decision:\(session)/\(ref)/\(decision)/other"
+  }
 
-  /// The session whose decision an Other answer key names, or nil for another key. The id is read from the
-  /// right, so an id that holds a slash still reads whole.
-  static func otherAnswerSession(_ key: String) -> String? {
-    let prefix = "decision:"
-    let suffix = "/other"
-    guard key.hasPrefix(prefix), key.hasSuffix(suffix) else { return nil }
-    let middle = key.dropFirst(prefix.count).dropLast(suffix.count)
-    guard let slash = middle.lastIndex(of: "/") else { return nil }
-    return String(middle[..<slash])
+  /// The Other answer keys of every decision that the sessions show.
+  static func otherAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
+    Set(
+      sessions.flatMap { s in
+        (s.shownDecisions.map { list in list.decisions.map { (list.ref, $0.number) } } ?? []).map {
+          otherAnswerKey(session: s.id, ref: $0.0, decision: $0.1)
+        }
+      })
   }
 
   func draft(for key: String) -> MessageField.Draft {
@@ -63,12 +65,9 @@ final class MessageDrafts {
     return draft
   }
 
-  /// Drops the drafts of targets that no longer exist. An Other answer's draft stays while its session is one of
-  /// `sessions`.
-  func prune(keeping keys: Set<String>, sessions: Set<String> = []) {
-    let gone = drafts.keys.filter { key in
-      !keys.contains(key) && !(Self.otherAnswerSession(key).map(sessions.contains) ?? false)
-    }
+  /// Drops the drafts of targets that no longer exist.
+  func prune(keeping keys: Set<String>) {
+    let gone = drafts.keys.filter { !keys.contains($0) }
     guard !gone.isEmpty else { return }
     for key in gone {
       drafts[key] = nil

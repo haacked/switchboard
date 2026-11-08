@@ -57,6 +57,14 @@ private func decision(_ number: Int, options count: Int, recommended: Set<Int> =
   ]
 }
 
+/// A decision whose options have the given labels.
+private func decision(_ number: Int, labels: [String]) -> JSON {
+  [
+    "number": .number(Double(number)), "header": .string("Decision \(number)"),
+    "question": .string("Pick one for \(number)?"), "options": .array(labels.map { ["label": .string($0)] }),
+  ]
+}
+
 /// A card that a session writes with `sb summary set`, with the decisions.
 private func cardWith(_ decisions: [JSON]) -> JSON {
   ["summary": "It planned the storage.\nIt needs some decisions.", "decisions": .array(decisions)]
@@ -132,12 +140,26 @@ private func recordedDecisionsAnswer() throws -> JSON {
     ("one option", decision(2, options: 1)),
     ("six options", decision(2, options: 6)),
     ("two recommended options", decision(2, options: 3, recommended: [0, 1])),
+    ("a number that another decision has", decision(1, options: 2)),
+    ("two labels that differ only in case", decision(2, labels: ["Yes", "yes"])),
+    ("number 0", decision(0, options: 2)),
   ])
   func cleaningDropsADecisionThatBreaksARuleAndSaysWhy(_ name: String, _ broken: JSON) throws {
     let result = try TriageCard.clean(cardWith([decision(1, options: 2), broken, decision(3, options: 2)]))
 
     #expect(result.card.decisions.map(\.number) == [1, 3], "\(name)")
     #expect(result.dropped.count == 1, "\(name): \(result.dropped)")
+  }
+
+  /// One decision makes no list, so the card offers its options instead.
+  @Test func cleaningTurnsALoneDecisionIntoTheCardsOptions() throws {
+    let result = try TriageCard.clean(cardWith([decision(1, options: 2)]))
+
+    #expect(result.card.decisions.isEmpty)
+    #expect(result.card.options.map(\.label) == ["Option 1", "Option 2"])
+    #expect(result.card.options.map(\.action) == [.send, .send])
+    #expect(result.card.options.map(\.recommended) == [true, false])
+    #expect(result.dropped.isEmpty)
   }
 
   enum Field: String, CaseIterable, Sendable {
@@ -317,6 +339,21 @@ private func recordedDecisionsAnswer() throws -> JSON {
       ])
 
     #expect(item(f)?.decisions.map(\.header) == ["Database", "Name", "Icons"])
+  }
+
+  /// A held prompt needs its own answer first, so its item keeps none of the open list's decisions.
+  @Test func aHeldPromptsItemKeepsNoDecisions() {
+    let f = facts(
+      decisionTurn() + [
+        decisionsOpened(4, ref: "summary:3"),
+        Event(
+          id: 5, session: "s1", t: 300, kind: "PermissionRequest",
+          data: .object(tool("Bash", ["command": "rm -rf build"]))),
+      ])
+
+    #expect(item(f)?.source == .card)
+    #expect(item(f)?.decisions.isEmpty == true)
+    #expect(f.decisionList != nil)
   }
 }
 

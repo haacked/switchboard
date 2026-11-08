@@ -129,9 +129,14 @@ extension Instance {
     let sbd = try Instance()
     let s = try sbd.decisionSession()
 
-    for (number, key) in [("0", "1"), ("4", "1"), ("1", "3"), ("1", "MySQL")] {
+    for (number, key) in [("0", "1"), ("4", "1"), ("1", "3"), ("1", "MySQL"), ("1", "1,2")] {
       let r = try sbd.run(["decide", s.id, number, key])
       #expect(r.status != 0, "decision \(number), option \(key)")
+    }
+    // An answer gives exactly one of an option, --text, and --skip.
+    for answer in [["1", "1", "--skip"], ["1"], ["1", "--text", "  "]] {
+      let r = try sbd.run(["decide", s.id] + answer)
+      #expect(r.status != 0, "decide \(answer)")
     }
 
     #expect(try sbd.count("decision_answered", of: s.id) == 0)
@@ -139,11 +144,29 @@ extension Instance {
     #expect(try sbd.count("decision_answered", of: s.id) == 1)
   }
 
-  @Test(arguments: [0, 1])
-  func theFirstAnswerRefusesAnItemWithFewerThanTwoDecisions(_ count: Int) throws {
+  /// A pick-any decision takes several options by number or label, and keeps them in the options' order.
+  @Test func aPickAnyDecisionTakesOptionsSeparatedByCommas() throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+
+    try sbd.sb("decide", s.id, "3", "Groups, 1")
+
+    #expect(try sbd.decisionList(s.id).answer(3)?.labels == ["Plain notes", "Groups"])
+  }
+
+  @Test func theFirstAnswerRefusesAnItemWithoutDecisions() throws {
+    try expectTheFirstAnswerRefused(decisionCard([]))
+  }
+
+  /// A lone decision becomes the card's options, so the item has no decision list.
+  @Test func theFirstAnswerRefusesAnItemWhoseLoneDecisionBecameOptions() throws {
+    try expectTheFirstAnswerRefused(decisionCard(["Database"]))
+  }
+
+  private func expectTheFirstAnswerRefused(_ card: String) throws {
     let sbd = try Instance()
     let s = try sbd.endedSession()
-    try sbd.setSummary(s.id, decisionCard(Array(["Database"].prefix(count))))
+    try sbd.setSummary(s.id, card)
     try sbd.waitFor(s.id, "the session's card") { $0.triage?.source == .session }
 
     let r = try sbd.run(["decide", s.id, "1", "1"])

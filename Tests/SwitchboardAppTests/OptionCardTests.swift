@@ -152,6 +152,16 @@ private let checks = TriageOption(label: "Fix the checks", action: .send)
     #expect(OptionList.shortcutOwner(item(options, multiSelect: true)) == .submit)
   }
 
+  @Test func aListThatDoesNotTakeTheShortcutClaimsItForNoControl() {
+    var options = fixes
+    options[1].recommended = true
+    let card = item(options)
+
+    #expect(OptionList.claimsShortcut(.option(1), item: card, takesShortcut: true))
+    #expect(!OptionList.claimsShortcut(.option(1), item: card, takesShortcut: false))
+    #expect(!OptionList.claimsShortcut(.submit, item: item(options, multiSelect: true), takesShortcut: false))
+  }
+
   @Test func aMultiSelectCardWithNothingToTickFallsBackToTheRecommendedOption() {
     let options = [TriageOption(label: "Merge #98", action: .merge, recommended: true)]
 

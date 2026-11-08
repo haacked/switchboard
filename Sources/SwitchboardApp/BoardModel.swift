@@ -276,7 +276,7 @@ final class BoardModel: ObservableObject {
       if loaded { sessionsToNotify(list).forEach(notify) }
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
-      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)), sessions: Set(list.map(\.id)))
+      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list)))
       if !sameShown(sessions, list) { sessions = list }
       let listed = Set(board.map(\.id))
       if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
@@ -688,8 +688,14 @@ final class BoardModel: ObservableObject {
     guard deciding.insert(key).inserted else { return }
     perform(
       op, args,
-      then: { _ in
+      then: { value in
         self.decisionErrors[session] = nil
+        // sbd answers with the updated list. A pick made before the next refresh lands builds on it.
+        if op == "decision-answer", let list = try? JSONCoding.convert(value, to: DecisionList.self),
+          let i = self.sessions.firstIndex(where: { $0.id == session })
+        {
+          self.sessions[i].decisions = list
+        }
         then?()
       },
       failed: { self.decisionErrors[session] = "\($0)" },
@@ -741,8 +747,8 @@ final class BoardModel: ObservableObject {
   }
 
   /// What the user typed as the Other answer to one decision and has not sent.
-  func otherAnswerDraft(session: String, decision: Int) -> MessageField.Draft {
-    messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, decision: decision))
+  func otherAnswerDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, ref: ref, decision: decision))
   }
 
   func draft(for card: Card) -> CardView.Draft {

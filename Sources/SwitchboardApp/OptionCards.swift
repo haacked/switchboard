@@ -171,6 +171,8 @@ struct OptionList: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let item: TriageItem
+  /// False when another control on the card answers ⌘⇧Return.
+  var takesShortcut = true
   /// Typed replies by item ref and option index. The view outlives its item,
   /// so a reply that sbd refused as stale would otherwise fill the next item's field.
   @State private var replies: [String: String] = [:]
@@ -193,6 +195,11 @@ struct OptionList: View {
     return item.primaryIndex.map(ShortcutOwner.option) ?? .none
   }
 
+  /// Whether `control` answers ⌘⇧Return on this list.
+  static func claimsShortcut(_ control: ShortcutOwner, item: TriageItem, takesShortcut: Bool) -> Bool {
+    takesShortcut && shortcutOwner(item) == control
+  }
+
   var body: some View {
     let owner = Self.shortcutOwner(item)
     let primary = item.primaryIndex
@@ -209,11 +216,11 @@ struct OptionList: View {
         } else if option.action == .requestReview {
           RequestReviewOption(
             session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
-            shortcut: owner == .option(i))
+            shortcut: Self.claimsShortcut(.option(i), item: item, takesShortcut: takesShortcut))
         } else {
           OptionButton(
             session: session, ref: item.ref, number: i + 1, option: option, primary: i == primary,
-            shortcut: owner == .option(i))
+            shortcut: Self.claimsShortcut(.option(i), item: item, takesShortcut: takesShortcut))
         }
       }
       if owner == .submit { submit }
@@ -246,7 +253,7 @@ struct OptionList: View {
     }
     .buttonStyle(OptionCardStyle(prominent: picks.canSubmit))
     .disabled(!picks.canSubmit || model.choosing.contains("\(session.id)/picks"))
-    .primaryShortcut(true)
+    .primaryShortcut(takesShortcut)
   }
 }
 

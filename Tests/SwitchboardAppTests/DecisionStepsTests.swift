@@ -50,6 +50,18 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
     #expect(DecisionSteps(list(numbers)).next(from: .decision(from)) == .decision(to))
   }
 
+  /// The card opens on the first unanswered decision, or on Review once every decision has an answer.
+  @Test func resolveWithNoStepOpensOnTheFirstUnansweredDecision() {
+    #expect(DecisionSteps(list([1, 2, 3], answered: [1])).resolve(nil) == .decision(2))
+    #expect(DecisionSteps(list([1, 2], answered: [1, 2])).resolve(nil) == .review)
+  }
+
+  /// A step that names a decision the list lacks, as after the list's ref changes, falls back the same way.
+  @Test func resolveOfADecisionTheListLacksOpensOnTheFirstUnansweredDecision() {
+    #expect(DecisionSteps(list([1, 2, 3])).resolve(.decision(9)) == .decision(1))
+    #expect(DecisionSteps(list([1, 2, 3])).resolve(.decision(2)) == .decision(2))
+  }
+
   @Test func nextFromTheLastDecisionGoesToReview() {
     #expect(DecisionSteps(list([1, 2, 3])).next(from: .decision(3)) == .review)
   }
@@ -180,48 +192,56 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
 
 // MARK: Other answer drafts
 
+/// A session whose item shows decisions 1 to 3 under `ref`.
+private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
+  var s = needsItem(id)
+  s.triage?.ref = ref
+  s.triage?.decisions = list([1, 2, 3]).decisions
+  return s
+}
+
 @MainActor
 @Suite struct DecisionDrafts {
-  @Test func theOtherAnswerKeyNamesTheSessionAndTheDecision() {
-    #expect(MessageDrafts.otherAnswerKey(session: "s1", decision: 2) == "decision:s1/2/other")
+  @Test func theOtherAnswerKeyNamesTheSessionTheListAndTheDecision() {
+    #expect(
+      MessageDrafts.otherAnswerKey(session: "s1", ref: "summary:3", decision: 2) == "decision:s1/summary:3/2/other")
   }
 
-  @Test func aRefreshKeepsTheOtherAnswerDraftWhileItsSessionIsListed() {
-    let model = appliedModel([needsItem("a"), needsItem("b")])
-    model.otherAnswerDraft(session: "a", decision: 2).text = "Call it task"
+  @Test func aRefreshKeepsTheOtherAnswerDraftWhileItsListShows() {
+    let model = appliedModel([listed("a"), listed("b")])
+    model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "Call it task"
 
-    model.apply(.success([needsItem("a")]), followups: nil)
+    model.apply(.success([listed("a")]), followups: nil)
 
-    #expect(model.otherAnswerDraft(session: "a", decision: 2).text == "Call it task")
+    #expect(model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text == "Call it task")
   }
 
   @Test func aRefreshDropsTheOtherAnswerDraftOnceItsSessionLeaves() {
-    let model = appliedModel([needsItem("a"), needsItem("b")])
-    model.otherAnswerDraft(session: "b", decision: 2).text = "Call it task"
+    let model = appliedModel([listed("a"), listed("b")])
+    model.otherAnswerDraft(session: "b", ref: "summary:1", decision: 2).text = "Call it task"
 
-    model.apply(.success([needsItem("a")]), followups: nil)
+    model.apply(.success([listed("a")]), followups: nil)
 
-    #expect(model.otherAnswerDraft(session: "b", decision: 2).text.isEmpty)
+    #expect(model.otherAnswerDraft(session: "b", ref: "summary:1", decision: 2).text.isEmpty)
   }
 
-  /// "decision:s10/…" starts with "decision:s1", so a prune that matches by prefix would keep it.
-  @Test func aRefreshDropsTheDraftOfASessionWhoseIdStartsWithAListedId() {
-    let model = appliedModel([needsItem("s1"), needsItem("s10")])
-    model.otherAnswerDraft(session: "s1", decision: 1).text = "kept"
-    model.otherAnswerDraft(session: "s10", decision: 1).text = "dropped"
+  /// A later list's decision 2 asks a different question, so it must not open with the old list's text.
+  @Test func aRefreshDropsTheOtherAnswerDraftOfAListThatNoLongerShows() {
+    let model = appliedModel([listed("a", ref: "summary:1")])
+    model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "maybe SQLite"
 
-    model.apply(.success([needsItem("s1")]), followups: nil)
+    model.apply(.success([listed("a", ref: "summary:2")]), followups: nil)
 
-    #expect(model.otherAnswerDraft(session: "s1", decision: 1).text == "kept")
-    #expect(model.otherAnswerDraft(session: "s10", decision: 1).text.isEmpty)
+    #expect(model.otherAnswerDraft(session: "a", ref: "summary:2", decision: 2).text.isEmpty)
+    #expect(model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text.isEmpty)
   }
 
   /// A session in a group keeps its message draft under `group:<id>`, so a draft under its bare id is stale.
   @Test func aRefreshDropsTheBareIdDraftOfASessionInAGroup() {
-    var chat = needsItem("a")
+    var chat = listed("a")
     chat.chat = "g1"
     let model = appliedModel([chat])
-    model.otherAnswerDraft(session: "a", decision: 2).text = "Call it task"
+    model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "Call it task"
     model.messageDraft(for: chat).text = "to the group"
     model.messageDraft(for: needsItem("a")).text = "stale"
 
@@ -229,7 +249,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
 
     #expect(model.messageDraft(for: needsItem("a")).text.isEmpty)
     #expect(model.messageDraft(for: chat).text == "to the group")
-    #expect(model.otherAnswerDraft(session: "a", decision: 2).text == "Call it task")
+    #expect(model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text == "Call it task")
   }
 
   @Test func anUnsentOtherAnswerSurvivesARelaunch() async throws {
@@ -238,14 +258,14 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
     _ = NSApplication.shared
     let client = Client(home: Home(path: NSTemporaryDirectory() + "no-sbd-" + UUID().uuidString))
     let first = BoardModel(client: client, draftsFolder: folder)
-    first.otherAnswerDraft(session: "a", decision: 2).text = "Call it task"
+    first.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "Call it task"
     await settle {
       (try? String(contentsOfFile: "\(folder)/drafts.json", encoding: .utf8))?.contains("Call it task") == true
     }
 
     let relaunched = BoardModel(client: client, draftsFolder: folder)
 
-    #expect(relaunched.otherAnswerDraft(session: "a", decision: 2).text == "Call it task")
+    #expect(relaunched.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text == "Call it task")
   }
 }
 
@@ -340,6 +360,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
 
     #expect(model.decisionErrors["a"]?.contains("a has a new item since you looked") == true)
     #expect(model.decisionErrors["b"] == nil)
+    #expect(model.actionError == nil)
   }
 
   @Test func anAcceptedRequestClearsTheSessionsError() async {
@@ -353,6 +374,36 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
     await settle { model.decisionErrors["a"] == nil }
 
     #expect(model.decisionErrors["a"] == nil)
+  }
+
+  /// A double click on Submit sends one request. Answers to different decisions each go out, because "Use the
+  /// recommendation" sends one per decision.
+  @Test func aSecondRequestWithTheSameKeyWaitsForTheFirst() async {
+    let (model, release, requests) = heldModel()
+
+    model.submitDecisions("a")
+    model.submitDecisions("a")
+    model.answerDecision("a", ref: "session:3", number: 1, .skip)
+    model.answerDecision("a", ref: "session:3", number: 2, .skip)
+    for _ in 0..<3 { release.signal() }
+    await settle { model.deciding.isEmpty }
+
+    #expect(model.deciding.isEmpty)
+    #expect(requests.value == 3)
+  }
+
+  /// A second tick on a multi-select decision builds its pick set from the list on screen, so the list that sbd
+  /// returns shows before the next refresh lands.
+  @Test func anAcceptedAnswerShowsTheListThatSbdReturns() async throws {
+    let model = appliedModel([listed("a", ref: "session:1")])
+    let answered = list([1, 2, 3], answered: [1])
+    let reply = try JSON(encoding: answered)
+    model.send = { _, _ in reply }
+
+    model.answerDecision("a", ref: "session:1", number: 1, .options([1]))
+    await settle { model.sessions.first?.decisions != nil }
+
+    #expect(model.sessions.first?.decisions == answered)
   }
 }
 

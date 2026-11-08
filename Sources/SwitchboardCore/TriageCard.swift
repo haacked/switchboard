@@ -32,8 +32,8 @@ public enum TriageCard {
     guard let first = lines.first else { throw APIError("the summary needs a summary") }
     var dropped: [String] = []
     if lines.count > maxLines { dropped.append("lines after the first \(maxLines) of the summary") }
-    let multiSelect = raw["multiSelect"]?.bool ?? false
-    let options = keep(raw["options"], "option", max: maxOptions, &dropped) {
+    var multiSelect = raw["multiSelect"]?.bool ?? false
+    var options = keep(raw["options"], "option", max: maxOptions, &dropped) {
       let option = try option($0, actions: actions, now: now)
       if multiSelect, option.action != .send {
         throw APIError("a multiSelect card's options all send a message, and this one is \(option.action.rawValue)")
@@ -42,12 +42,20 @@ public enum TriageCard {
     }
     let callouts = keep(raw["callouts"], "callout", max: maxCallouts, &dropped) { try callout($0) }
     var numbers = Set<Int>()
-    let decisions = keep(raw["decisions"], "decision", max: TriageSummarizer.maxDecisions, &dropped) {
+    var decisions = keep(raw["decisions"], "decision", max: TriageSummarizer.maxDecisions, &dropped) {
       let decision = try decision($0)
       guard numbers.insert(decision.number).inserted else {
         throw APIError("another decision has the number \(decision.number)")
       }
       return decision
+    }
+    // One decision makes no list, so the app would show none of its options. They become the card's options.
+    if decisions.count == 1, options.isEmpty, actions.contains(.send) {
+      let lone = decisions.removeFirst()
+      multiSelect = multiSelect || lone.multiSelect
+      options = lone.options.map {
+        TriageOption(label: $0.label, detail: $0.detail, action: .send, message: $0.label, recommended: $0.recommended)
+      }
     }
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let card = TriageSummary(

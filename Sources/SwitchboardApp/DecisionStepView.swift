@@ -88,7 +88,8 @@ struct DecisionStepView: View {
       }
       OtherAnswer(
         session: session.id, ref: list.ref, decision: decision.number, answered: answer?.text,
-        draft: model.otherAnswerDraft(session: session.id, decision: decision.number), focus: $focus)
+        draft: model.otherAnswerDraft(session: session.id, ref: list.ref, decision: decision.number),
+        focus: $focus)
       HStack {
         Spacer()
         let skipped = answer?.skip == true
@@ -391,6 +392,10 @@ struct DecisionStepBar: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
+    // A refused pick neither advances nor marks the option, so VoiceOver would say nothing.
+    .onChange(of: model.decisionErrors[session.id]) {
+      if let error = model.decisionErrors[session.id] { AccessibilityNotification.Announcement(error).post() }
+    }
   }
 
   private struct TrailingIcon: LabelStyle {
