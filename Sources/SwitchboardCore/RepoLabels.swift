@@ -15,10 +15,10 @@ public enum RepoLabels {
     // does not override it. The sessions in one folder therefore count as one repo.
     var slugOfFolder: [String: String] = [:]
     for s in listed {
-      if let folder = s.repo, let pr = s.pr, slugOfFolder[folder] == nil { slugOfFolder[folder] = pr.repo }
+      if let folder = s.repoFolder, let pr = s.pr, slugOfFolder[folder] == nil { slugOfFolder[folder] = pr.repo }
     }
     for s in listed {
-      if let folder = s.repo, let repository = s.followup?.repository, slugOfFolder[folder] == nil {
+      if let folder = s.repoFolder, let repository = s.followup?.repository, slugOfFolder[folder] == nil {
         slugOfFolder[folder] = repository
       }
     }
@@ -26,8 +26,9 @@ public enum RepoLabels {
     var indexOfKey: [String: Int] = [:]
     var repoIndexOfSession: [String: Int] = [:]
     for s in listed {
-      let slug = if let folder = s.repo { slugOfFolder[folder] } else { s.pr?.repo ?? s.followup?.repository }
-      guard let repo = Repo(folder: s.repo, slug: slug) else { continue }
+      let folder = s.repoFolder
+      let slug = if let folder { slugOfFolder[folder] } else { s.pr?.repo ?? s.followup?.repository }
+      guard let repo = Repo(folder: folder, slug: slug) else { continue }
       if indexOfKey[repo.key] == nil {
         indexOfKey[repo.key] = repos.count
         repos.append(repo)
