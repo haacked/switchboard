@@ -164,6 +164,23 @@ import Testing
     #expect(!DecisionCard.detailsHoldCall(cardSession: "s2", cardRef: "card:7", of: item, session: "s1"))
   }
 
+  /// An older sbd wrote no `message`, so the item decodes with empty Details
+  /// whatever the tool. A Write call's Summary names only the file.
+  @Test(arguments: [
+    ("Bash", "Claude asks to run `rm -rf build && make`."),
+    ("Write", "Claude asks to run Write b.swift."),
+  ])
+  func anOlderItemShowsTheCallForAnyTool(_ tool: String, _ summary: String) throws {
+    let old: JSON = [
+      "title": .string("Approve \(tool)"), "kind": "approval", "summary": .string(summary), "options": [],
+      "callouts": [], "source": "card", "ref": "card:7",
+    ]
+    let decoded = try JSONDecoder().decode(TriageItem.self, from: Data(old.text.utf8))
+
+    #expect(decoded.details.toolInput == nil)
+    #expect(!DecisionCard.detailsHoldCall(cardSession: "s1", cardRef: "card:7", of: decoded, session: "s1"))
+  }
+
   @Test func anItemFromAnOlderSbdHasNoCallInDetailsSoTheCardShowsIt() throws {
     let old = """
       {"title": "Approve", "kind": "approval", "summary": "Claude asks to run `ls`.", "options": [],
