@@ -92,6 +92,23 @@ enum TerminalSelfTest {
     }
   }
 
+  /// Sends a left click at `point` in the window's coordinates, as a click of the mouse arrives. A mouse-down can
+  /// start a tracking loop that reads events from the queue until a mouse-up arrives. The mouse-up therefore goes
+  /// to the queue before the mouse-down goes to the window, so the call returns whether or not such a loop runs.
+  /// Returns false when AppKit makes no event.
+  @discardableResult
+  static func click(at point: NSPoint, in window: NSWindow) -> Bool {
+    func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+      NSEvent.mouseEvent(
+        with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+    }
+    guard let down = mouse(.leftMouseDown), let up = mouse(.leftMouseUp) else { return false }
+    NSApp.postEvent(up, atStart: false)
+    window.sendEvent(down)
+    return true
+  }
+
   /// A modifier key on its own, which AppKit reports as flagsChanged. `flags` are the modifiers held after the change.
   private static func modifier(_ view: NSView, code: UInt16, flags: NSEvent.ModifierFlags) {
     guard let window = view.window,
@@ -239,7 +256,7 @@ enum TerminalSelfTest {
       await pause(1)
     }
     png(pane, to: "\(folder)/pane-end.png")
-    if let padded = pane.superview?.superview as? PaddedTerminalView {
+    if let padded = PaddedTerminalView.containing(pane) {
       png(padded, to: "\(folder)/pane-padded.png")
       // SwiftTerm's computeFontDimensions measures a cell the same way: the advance of the "W" glyph, rounded
       // to the backing pixel grid.
