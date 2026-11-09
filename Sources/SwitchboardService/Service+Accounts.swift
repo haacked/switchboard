@@ -55,11 +55,39 @@ extension Service {
     if op == "account-use" {
       guard let ref = args["account"]?.string, !ref.isEmpty else { throw APIError("name an account") }
       let folder = try resolveAccount(ref)
+      try requireSignedIn(folder)
       try folder.write(toFile: home.activeAccount, atomically: true, encoding: .utf8)
       chosenAccount = folder
       logLine("new sessions use the account \(folder)")
     }
     return try JSON(encoding: accountList())
+  }
+
+  /// Throws when the account's last usage reading found no login, because
+  /// claude would ask a session there for /login. A reading that failed for
+  /// another reason, such as a locked keychain, lets the account through. So
+  /// does an account that sbd has not read.
+  func requireSignedIn(_ folder: String) throws {
+    if let refusal = Self.signedOutRefusal(usageReader?.latest(folder)) { throw APIError(refusal) }
+  }
+
+  /// The account's name followed by the reading's `SignedOut` error. That
+  /// error names the login command.
+  static func signedOutRefusal(_ reading: AccountUsage?) -> String? {
+    guard let reading, reading.signedOut == true else { return nil }
+    return "\(reading.name) is \(reading.error ?? "not signed in")"
+  }
+
+  /// Reads the usage of the target of `account-use` or `account-move` again
+  /// when it last read as signed out, so an account that signed in since then
+  /// is not refused. It must run off the state queue, because a read waits on
+  /// the keychain and the network.
+  func rereadSignedOutTarget(_ args: JSON) {
+    guard let reader = usageReader, let ref = args["account"]?.string,
+      let folder = try? queue.sync(execute: { try resolveAccount(ref) }),
+      Self.signedOutRefusal(reader.latest(folder)) != nil
+    else { return }
+    reader.read(folder)
   }
 }
 
@@ -74,6 +102,7 @@ extension Service {
   func moveSessions(_ args: JSON) throws -> AccountMove {
     guard let ref = args["account"]?.string, !ref.isEmpty else { throw APIError("name an account") }
     let target = try resolveAccount(ref)
+    try requireSignedIn(target)
     let dryRun = args["dryRun"]?.bool ?? false
     var result = AccountMove(account: target)
     for id in entries.keys.sorted() {

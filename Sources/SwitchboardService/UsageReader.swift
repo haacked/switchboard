@@ -57,10 +57,18 @@ final class UsageReader: @unchecked Sendable {
     latest(account)?.budget().isSpent != true
   }
 
+  /// Reads one account now. The caller must not be on the service's queue.
+  func read(_ folder: String) {
+    queue.sync { _ = keep([read(folder, name: ClaudeAccount.name(folder))]) }
+  }
+
   private func readAll() -> [AccountUsage] {
     let accounts = service.queue.sync { service.accountList() }
-    let fresh = concurrentMap(accounts) { read($0.folder, name: $0.name) }
-    return lock.withLock {
+    return keep(concurrentMap(accounts) { read($0.folder, name: $0.name) })
+  }
+
+  private func keep(_ fresh: [AccountUsage]) -> [AccountUsage] {
+    lock.withLock {
       fresh.map { reading in
         var reading = reading
         // A failed read keeps the limits of the last good one.

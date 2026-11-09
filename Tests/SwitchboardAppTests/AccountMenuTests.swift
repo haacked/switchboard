@@ -225,6 +225,42 @@ final class OpLog: @unchecked Sendable {
     #expect(model.switchingAccount?.switches == false)
   }
 
+  static let refusal = "b is not signed in; run `CLAUDE_CONFIG_DIR=/b claude` and /login"
+
+  /// A model whose sbd refuses `account-use` and `account-move` as it refuses a signed-out account.
+  func refusingModel(_ log: OpLog) -> BoardModel {
+    let model = offlineModel()
+    model.send = { op, _ in
+      log.append(op)
+      if op == "account-use" || op == "account-move" { throw APIError(Self.refusal) }
+      return .null
+    }
+    return model
+  }
+
+  @Test func choosingARefusedAccountShowsTheRefusalAndAsksNothing() async {
+    let log = OpLog()
+    let model = refusingModel(log)
+
+    model.useAccount("/b")
+
+    await settle { log.value.contains("account-use") && model.actionError != nil }
+    #expect(model.actionError?.contains(Self.refusal) == true)
+    #expect(model.switchingAccount == nil)
+  }
+
+  @Test func aRefusedSwitchShowsTheRefusalAndMovesNoSessions() async {
+    let log = OpLog()
+    let model = refusingModel(log)
+
+    model.confirmAccountSwitch(AccountSwitch(folder: "/b", plan: plan, switches: true), move: true)
+
+    await settle { model.actionError != nil }
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(model.actionError?.contains(Self.refusal) == true)
+    #expect(log.value == ["account-use"])
+  }
+
   @Test func theMenuOffersAMoveOnlyToASignedInActiveAccountWithSessionsElsewhere() {
     let model = offlineModel()
     model.accounts = [
