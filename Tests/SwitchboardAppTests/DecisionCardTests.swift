@@ -144,3 +144,33 @@ import Testing
     #expect(option.accessibilityHint(mergeMethod: method) == "Adds the PR to its merge queue")
   }
 }
+
+/// The Inbox hides a held card's call in the Action only when Details holds
+/// that call, so the whole call always shows somewhere.
+@Suite struct DecisionCardHidesTheCallOnlyWhenDetailsHoldIt {
+  private let item = TriageItem(
+    title: "Approve", kind: .approval, summary: "Claude asks to run `ls`.", source: .card, ref: "card:7",
+    details: TriageDetails(toolInput: .init(tool: "Bash", text: "ls")))
+
+  @Test func theItemsOwnCardWithItsCallInDetailsIsCompact() {
+    #expect(DecisionCard.detailsHoldCall(cardSession: "s1", cardRef: "card:7", of: item, session: "s1"))
+  }
+
+  @Test func anotherCardOfTheSameSessionShowsItsCall() {
+    #expect(!DecisionCard.detailsHoldCall(cardSession: "s1", cardRef: "card:8", of: item, session: "s1"))
+  }
+
+  @Test func anotherSessionsCardWithTheSameRefShowsItsCall() {
+    #expect(!DecisionCard.detailsHoldCall(cardSession: "s2", cardRef: "card:7", of: item, session: "s1"))
+  }
+
+  @Test func anItemFromAnOlderSbdHasNoCallInDetailsSoTheCardShowsIt() throws {
+    let old = """
+      {"title": "Approve", "kind": "approval", "summary": "Claude asks to run `ls`.", "options": [],
+       "callouts": [], "source": "card", "ref": "card:7"}
+      """
+    let decoded = try JSONDecoder().decode(TriageItem.self, from: Data(old.utf8))
+
+    #expect(!DecisionCard.detailsHoldCall(cardSession: "s1", cardRef: "card:7", of: decoded, session: "s1"))
+  }
+}
