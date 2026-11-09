@@ -540,7 +540,9 @@ public final class Service {
     if let repo = s.repo { return realPath(repo) ?? repo }
     // A follow-up that hasn't started has no folder. `git -C ""` would read sbd's own folder.
     guard !s.cwd.isEmpty else { return nil }
-    if let known = checkouts[s.cwd], known.path != nil || nowMs() - known.readMs < Self.checkoutRetryMs {
+    if let known = checkouts[s.cwd],
+      known.path != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
+    {
       return known.path
     }
     let cwd = s.cwd
