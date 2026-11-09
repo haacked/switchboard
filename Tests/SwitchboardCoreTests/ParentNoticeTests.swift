@@ -3,7 +3,7 @@ import Testing
 @testable import SwitchboardCore
 
 /// The marks that a parent records as it hears a child show each PR number in turn.
-func heard(_ prs: [Int?]) -> [ChildMark] {
+private func heard(_ prs: [Int?]) -> [ChildMark] {
   var marks = [ChildMark.fresh]
   for pr in prs { marks.append(marks.last!.updated(to: ChildMark(state: .working, pr: pr))) }
   return marks
@@ -74,7 +74,12 @@ func heard(_ prs: [Int?]) -> [ChildMark] {
 
   @Test func saysEachLineOnce() {
     let message = ParentNotice.message(["a needs you", "b is done", "a needs you"])
-    #expect(message == "Switchboard: sessions you started changed: a needs you; b is done.")
+    #expect(message == "Switchboard: sessions you started changed: b is done; a needs you.")
+  }
+
+  @Test func endsWithTheChildsLatestLine() {
+    let message = ParentNotice.message(["a needs you: read", "a needs you: answer: Q", "a needs you: read"])
+    #expect(message == "Switchboard: sessions you started changed: a needs you: answer: Q; a needs you: read.")
   }
 
   @Test func countsOnlyTheDistinctLinesPastTheLimit() {

@@ -76,10 +76,11 @@ public enum ParentNotice {
 
   /// One line for all the changes that a parent has not heard yet. A child
   /// that returns to a state before its parent hears it adds the same line
-  /// twice, and the message keeps only the first.
+  /// twice. The message keeps only the last copy, so each child's latest
+  /// line stays after its older ones.
   public static func message(_ lines: [String]) -> String {
     var seen: Set<String> = []
-    let lines = lines.filter { seen.insert($0).inserted }
+    let lines = Array(lines.reversed().filter { seen.insert($0).inserted }.reversed())
     let more = lines.count > maxLines ? ["and \(lines.count - maxLines) more"] : []
     return "Switchboard: sessions you started changed: "
       + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."

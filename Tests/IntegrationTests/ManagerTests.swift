@@ -247,6 +247,21 @@ import Testing
     try sbd.poll()
     try #require(try sbd.get(kid.id).pr == nil)
     try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
+
+    // The PR returns while sbd runs.
+    heard = try sbd.messagesFromSbd(parent.id).count
+    try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
+    try sbd.poll()
+    try sbd.waitFor(kid.id, "the PR's first return") { $0.pr?.number == 18303 }
+    let inRun = try waitForNotice(sbd, parent.id, after: heard, containing: "#18303 is ready to merge")
+    #expect(!inRun.contains { $0.contains("opened PR #18303") }, "\(inRun)")
+
+    // It drops out again before the restart.
+    heard = try sbd.messagesFromSbd(parent.id).count
+    try sbd.git(kid.cwd, "checkout", "-q", "haacked/no-pr-yet")
+    try sbd.poll()
+    try #require(try sbd.get(kid.id).pr == nil)
+    try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
     try sbd.restart(setting: "tickSeconds", to: 0.2)
     try #require(try sbd.get(kid.id).pr == nil)
 
