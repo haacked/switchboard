@@ -3,7 +3,7 @@
 # that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
 # app's terminal, as `sb screen` shows them. It opens the app's window, so it
 # needs a logged-in macOS session with a display. bin/test never runs it. CI
-# runs it in its gui-test job.
+# runs every check but drops in its gui-test job.
 # It then quits the app, and separately kills it, and starts it again each
 # time. It checks through sb and tmux that the session and both its panes are
 # the same processes with the same screens.
