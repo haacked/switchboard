@@ -230,7 +230,9 @@ private let mobile = ".github/workflows/*mobile*.yml @o"
     #expect(CodeOwnersFile.parse(text) != nil)
   }
 
-  @Test func matchingAThousandPathsAgainstASixtyLineFileTakesUnderTwoSeconds() throws {
+  /// Matching takes about 80 ms in a debug build, but seconds on a loaded CI
+  /// runner. The time limit only catches a hang.
+  @Test(.timeLimit(.minutes(1))) func matchingAThousandPathsReusesThePatternsThatParseCompiled() throws {
     var lines: [String] = []
     for i in 0..<20 {
       lines += [
@@ -238,19 +240,20 @@ private let mobile = ".github/workflows/*mobile*.yml @o"
         "*.ext\(i) @PostHog/team-\(i)",
       ]
     }
-    let file = try #require(CodeOwnersFile.parse(lines.joined(separator: "\n")))
     let paths = (0..<1000).map {
       $0.isMultiple(of: 2)
         ? "posthog/module\($0 % 20)/sub/dir/file\($0).py" : "frontend/src/scenes/scene\($0 % 25)/a/b/c\($0).tsx"
     }
-    var owned = 0
+    let compilations = CodeOwnersFile.Compilations()
 
-    let elapsed = ContinuousClock().measure {
-      for path in paths where !file.owners(of: path).isEmpty { owned += 1 }
+    let owned = try CodeOwnersFile.$compilations.withValue(compilations) {
+      let file = try #require(CodeOwnersFile.parse(lines.joined(separator: "\n")))
+      #expect(compilations.count == lines.count)
+      return paths.count { !file.owners(of: $0).isEmpty }
     }
 
     #expect(owned > 0)
-    #expect(elapsed < .seconds(2))
+    #expect(compilations.count == lines.count)
   }
 
   /// A backtracking regex runs for seconds to hours on each of these lines.
