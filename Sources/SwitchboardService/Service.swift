@@ -58,6 +58,8 @@ public final class Service {
 
   /// How long a message counts as in flight without its UserPromptSubmit.
   static let inFlightMs: Int64 = 10_000
+  /// How long sbd keeps a lookup that found no repo before it reads the folder again.
+  static let checkoutRetryMs: Int64 = 60_000
 
   var entries: [String: Entry] = [:]
   /// The follow-ups that `followup start` is starting.
@@ -69,6 +71,13 @@ public final class Service {
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
+  /// The main checkout of each session folder that a lookup read, or nil for
+  /// a folder in no git repo, with the time of the lookup. A folder stays in
+  /// its repo, and sbd keeps a checkout that it found. A folder outside git
+  /// can become a repo. sbd reads such a folder again after `checkoutRetryMs`.
+  var checkouts: [String: (path: String?, readMs: Int64)] = [:]
+  /// The folders whose checkout a lookup off the queue is reading.
+  var checkoutLookups: Set<String> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   let triageJobs: OperationQueue = {
@@ -246,6 +255,8 @@ public final class Service {
         return .success(try JSON(encoding: usageRequest(request.args)))
       case "send" where request.args["images"] != nil:
         return try sendWithImages(request, hookGone: hookGone)
+      case "account-use", "account-move":
+        try requireSignedIn(request.args)
       default:
         break
       }
@@ -522,6 +533,32 @@ public final class Service {
       }
     }
     return entries
+  }
+
+  /// The real path of the main checkout that holds the session's folder.
+  /// The repo that `new` made the worktree from is that checkout. For any
+  /// other folder, this returns nil until a lookup off the queue has read it.
+  func checkout(_ s: Session) -> String? {
+    if let repo = s.repo { return realPath(repo) ?? repo }
+    // A follow-up that hasn't started has no folder. `git -C ""` would read sbd's own folder.
+    guard !s.cwd.isEmpty else { return nil }
+    if let known = checkouts[s.cwd],
+      known.path != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
+    {
+      return known.path
+    }
+    let cwd = s.cwd
+    if checkoutLookups.insert(cwd).inserted {
+      DispatchQueue.global().async { [self] in
+        // The first worktree that git lists is the main checkout.
+        let main = (try? worktreeEntries(cwd))?.first.flatMap { realPath($0.path) }
+        queue.async { [self] in
+          checkouts[cwd] = (main, nowMs())
+          checkoutLookups.remove(cwd)
+        }
+      }
+    }
+    return nil
   }
 
   func worktreeEntry(_ repo: String, at path: String) throws -> WorktreeEntry? {
@@ -1466,6 +1503,7 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
+    if s.kind == .work { out.checkout = checkout(s) }
     out.parent = s.parent
     out.manager = s.manager
     out.kind = s.kind

@@ -68,7 +68,7 @@ struct TriageDetail: View {
   private var bar: some View {
     HStack(spacing: 8) {
       Text(session.name).fontWeight(.medium)
-      if let repo = session.repo {
+      if let repo = session.repoFolder {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
