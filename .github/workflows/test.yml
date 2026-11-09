@@ -85,7 +85,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: brew install tmux
-      - run: bin/test-gui terminal relaunch drafts shell
+      - run: SB_GUI_SKIP=drops bin/test-gui
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

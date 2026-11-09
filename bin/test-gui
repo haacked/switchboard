@@ -20,7 +20,7 @@
 # a group chat through the app's DropSelfTest, and checks the chips, the
 # errors, and the images that sbd received from the field's send.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops). With
-# none, it runs them all.
+# none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -32,7 +32,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 checks=("$@")
-for name in ${checks[@]+"${checks[@]}"}; do
+read -r -a skips <<<"${SB_GUI_SKIP:-}"
+for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
   terminal | relaunch | drafts | shell | drops) ;;
   *)
@@ -41,7 +42,9 @@ for name in ${checks[@]+"${checks[@]}"}; do
     ;;
   esac
 done
-wants() { [ ${#checks[@]} -eq 0 ] || [[ " ${checks[*]} " == *" $1 "* ]]; }
+wants() {
+  [[ " ${SB_GUI_SKIP:-} " != *" $1 "* ]] && { [ ${#checks[@]} -eq 0 ] || [[ " ${checks[*]} " == *" $1 "* ]]; }
+}
 
 if [ "$(launchctl managername 2>/dev/null)" != Aqua ] && [ -z "${SB_GUI_ANY_SESSION:-}" ]; then
   echo "bin/test-gui needs a logged-in macOS session with a display. This is a $(launchctl managername) session." >&2
@@ -117,6 +120,10 @@ save_shots() {
 }
 
 fail() {
+  # The app runs the self tests on its main thread, so a sample shows where a stuck app waits.
+  if [ -n "${app_pid:-}" ] && [ -d "$home/shots/${check:-}" ] && kill -0 "$app_pid" 2>/dev/null; then
+    sample "$app_pid" 1 -file "$home/shots/$check/app-sample.txt" >/dev/null 2>&1 || true
+  fi
   save_shots || true
   echo "FAIL ($check): $*" >&2
   echo "--- sbd log" >&2
@@ -361,11 +368,7 @@ check_shell() {
     # The app polls for cmd. The rename makes the whole command appear at once.
     echo "$*" >"$shots/cmd.tmp"
     mv "$shots/cmd.tmp" "$shots/cmd"
-    if ! wait_for 20 cmd_done; then
-      # The app runs each command on its main thread, so a sample shows where that thread is stuck.
-      sample "$app_pid" 1 -file "$shots/app-sample.txt" >/dev/null 2>&1 || true
-      fail "the app did not run: $*"
-    fi
+    wait_for 20 cmd_done || fail "the app did not run: $*"
     grep "^shelltest: " "$shots/app.log" | tail -n 1 | sed 's/.*-> //'
   }
   panes_are() { [ "$(app panes)" = "$1" ]; }
