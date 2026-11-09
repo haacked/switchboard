@@ -219,10 +219,10 @@ let sessionCard = TriageSummary(
   }
 
   @Test(arguments: ["a\n\nb\nc\n\n\nd\ne\nf", "a\r\nb\r\n\r\nc\r\nd\r\ne", "  a  \n b\n\nc\nd\ne"])
-  func keepsTheFirstFourNonEmptyLines(_ summary: String) throws {
+  func keepsTheFirstThreeNonEmptyLines(_ summary: String) throws {
     let result = try cleaned(card(summary: summary))
 
-    #expect(result.card.summary == "a\nb\nc\nd")
+    #expect(result.card.summary == "a\nb\nc")
   }
 
   @Test func cutsEachLineToTwoHundredCharacters() throws {

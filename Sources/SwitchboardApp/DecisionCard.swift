@@ -1,10 +1,11 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The Inbox card of a session: what it did and needs, the buttons that act
-/// on it, what to read before deciding, and the details behind a disclosure.
-/// An item with decisions shows them one step at a time above its options.
-/// Its summary shrinks to its first line, and its callouts move into Details.
+/// The Inbox message of a session, in three sections that never change their
+/// order: the Summary (what it did and needs, and what to read before
+/// deciding), the Action (the buttons), and the Details (behind a disclosure).
+/// An item with decisions shows them one step at a time in its Action. Its
+/// Summary shrinks to its first line, and its callouts move into Details.
 /// The step view owns ⌘⇧Return.
 struct DecisionCard: View {
   @EnvironmentObject var model: BoardModel
@@ -18,18 +19,22 @@ struct DecisionCard: View {
     let list = session.stepList
     VStack(alignment: .leading, spacing: Self.rowSpacing) {
       header
-      if list != nil {
-        if let line = item.summary.split(separator: "\n").first { summary(String(line)) }
-      } else if Self.splitsSummary(item) {
-        SummaryCalloutColumns {
-          summary(item.summary)
-          callouts
+      VStack(alignment: .leading, spacing: 8) {
+        SectionTitle(text: "Summary")
+        if list != nil {
+          if let line = item.summary.split(separator: "\n").first { summary(String(line)) }
+        } else if Self.splitsSummary(item) {
+          SummaryCalloutColumns {
+            summary(item.summary)
+            callouts
+          }
+        } else {
+          if !item.summary.isEmpty { summary(item.summary) }
+          if !item.callouts.isEmpty { callouts }
         }
-      } else {
-        if !item.summary.isEmpty { summary(item.summary) }
-        if !item.callouts.isEmpty { callouts }
       }
       VStack(alignment: .leading, spacing: 8) {
+        SectionTitle(text: "Action")
         if let list {
           DecisionStepView(session: session, list: list, step: $step).id(list.ref)
         } else if session.decisionsSent == true {
@@ -37,7 +42,8 @@ struct DecisionCard: View {
         }
         actions
       }
-      CardDetails(session: session, callouts: list == nil ? [] : item.callouts)
+      // A new item starts with its own open or closed Details.
+      CardDetails(session: session, details: item.details, callouts: list == nil ? [] : item.callouts).id(item.ref)
     }
   }
 
@@ -74,10 +80,14 @@ struct DecisionCard: View {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
-      // The card shows the whole tool call, which an approval needs to see.
+      // Every other card shows its whole tool call, which an approval needs to see.
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
-      ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0)) }
+      // Details holds the call and message text of the item's own card only.
+      ForEach(cards) {
+        CardView(
+          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref)
+      }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
@@ -207,18 +217,45 @@ struct CalloutView: View {
   }
 }
 
-/// The full last reply, the PR and its checks, waits, and the newest events,
-/// collapsed until the user opens them.
+/// The heading of one of a message's sections.
+struct SectionTitle: View {
+  let text: String
+
+  var body: some View {
+    Text(text).font(.headline).accessibilityAddTraits(.isHeader)
+  }
+}
+
+/// The tool call or group message, the callouts that the step view moves
+/// here, the PR and its checks, waits, the full last reply, and the newest
+/// events. They stay collapsed until the user opens them, except for a
+/// permission call that the Summary shows in part.
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  let details: TriageDetails
   /// The item's callouts, when the step view takes their place on the card.
-  var callouts: [Callout] = []
-  @State private var open = Snapshot.opensDetails
+  let callouts: [Callout]
+  @State private var open: Bool
+
+  init(session: SessionSummary, details: TriageDetails, callouts: [Callout] = []) {
+    self.session = session
+    self.details = details
+    self.callouts = callouts
+    _open = State(initialValue: details.openByDefault || Snapshot.opensDetails)
+  }
 
   var body: some View {
     DisclosureGroup(isExpanded: $open) {
       VStack(alignment: .leading, spacing: 12) {
+        if let input = details.toolInput {
+          section(details.targets.isEmpty ? "Tool call: \(input.tool)" : "Message") {
+            CardView.textBox(input.text, maxHeight: 200)
+          }
+        }
+        if !details.targets.isEmpty {
+          section("Sends to") { ForEach(details.targets, id: \.self) { Text(verbatim: $0) } }
+        }
         if !callouts.isEmpty {
           section("Callouts") {
             ForEach(Array(callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
@@ -245,8 +282,9 @@ struct CardDetails: View {
       }
       .padding(.top, 6)
     } label: {
-      Text("Details").font(.headline)
+      SectionTitle(text: "Details")
     }
+    .onAppear { if open { model.loadEvents(session.id) } }
     .onChange(of: open) { if open { model.loadEvents(session.id) } }
   }
 

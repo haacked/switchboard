@@ -1511,6 +1511,8 @@ public final class Service {
     if Triage.mayHaveItem(out) {
       let shown = Triage.itemAndDecisions(e.facts, verdict)
       out.triage = shown.item
+      let details = Triage.details(for: out)
+      out.triage?.details = details
       out.decisions = shown.decisions
       if shown.decisionsSent { out.decisionsSent = true }
     }

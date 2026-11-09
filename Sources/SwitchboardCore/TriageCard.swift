@@ -5,7 +5,7 @@ import Foundation
 /// only keeps it: an option names an action from a fixed set, and nothing in
 /// the card runs.
 public enum TriageCard {
-  public static let summaryLines = 4
+  public static let summaryLines = 3
   public static let lineLength = 200
   public static let maxOptions = 6
   public static let maxCallouts = 5
@@ -188,8 +188,9 @@ public enum TriageCard {
       {"summary": "...", "options": [...], "callouts": [...]}
       EOF
 
-    summary   Required. Two to four lines separated by "\\n", each under \(lineLength) characters: what you did,
-              then what you need from the user.
+    summary   Required. Two to three lines separated by "\\n", each under \(lineLength) characters: what you did,
+              then what you need from the user. Write only what the user needs to understand the options
+              and pick one. The full reply stays in the card's Details, so don't repeat it.
     title     Optional. Under \(Triage.titleLength) characters, what the user does ("Pick how to land #98").
               It defaults to the summary's first line.
     options   Up to \(maxOptions) options, each with a label (a short verb phrase such as "Fix + merge", under
