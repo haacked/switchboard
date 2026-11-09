@@ -57,6 +57,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var sbdMessages: [String] = []
   /// The session's PR, as the GitHub poller last read it.
   public var pr: PullRequest?
+  /// The number of every PR that the session has had, including one that
+  /// dropped out since.
+  public var prNumbers: Set<Int> = []
   /// The PR's comments from `GitHub.bodyAuthors`, with their bodies.
   public var prComments: [PRComment] = []
   /// The branch that the session's folder has checked out, as the poller last
@@ -249,6 +252,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       let next = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
       notePipeline(from: pr, to: next, at: event.t)
       pr = next
+      if let number = next?.number { prNumbers.insert(number) }
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
       applyReviewListing()
       // A pr event carries the comments only when they changed. An event

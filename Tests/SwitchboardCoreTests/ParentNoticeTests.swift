@@ -2,6 +2,13 @@ import Testing
 
 @testable import SwitchboardCore
 
+/// The marks that a parent records as it hears a child show each PR number in turn.
+func heard(_ prs: [Int?]) -> [ChildMark] {
+  var marks = [ChildMark.fresh]
+  for pr in prs { marks.append(marks.last!.updated(to: ChildMark(state: .working, pr: pr))) }
+  return marks
+}
+
 @Suite struct ParentNoticeTests {
   func lines(_ before: ChildMark, _ after: ChildMark, url: String? = nil) -> [String] {
     ParentNotice.lines(name: "fix", id: "s1", before: before, after: after, reason: "answer: which?", prURL: url)
@@ -43,6 +50,38 @@ import Testing
     #expect(lines(.fresh, needs).count == 1)
   }
 
+  func announced(_ prs: [Int?]) -> [String] {
+    let marks = heard(prs)
+    return zip(marks, marks.dropFirst()).flatMap { lines($0, $1) }
+  }
+
+  @Test func saysNothingWhenAHeardPRDropsOutAndReturns() {
+    #expect(announced([26, nil, 26]) == ["fix (s1) opened PR #26"])
+  }
+
+  @Test func saysWhenAPRThatReturnsHasANewNumber() {
+    #expect(announced([26, nil, 28]) == ["fix (s1) opened PR #26", "fix (s1) opened PR #28"])
+  }
+
+  @Test func saysNothingWhenAnEarlierHeardNumberReturns() {
+    #expect(announced([26, 28, nil, 26]) == ["fix (s1) opened PR #26", "fix (s1) opened PR #28"])
+  }
+
+  @Test func keepsTheHeardNumbersWhenTheChildIsSeenAfresh() {
+    let marks = heard([26])
+    #expect(marks.last!.updated(to: .fresh).heardPRs == [26])
+  }
+
+  @Test func saysEachLineOnce() {
+    let message = ParentNotice.message(["a needs you", "b is done", "a needs you"])
+    #expect(message == "Switchboard: sessions you started changed: a needs you; b is done.")
+  }
+
+  @Test func countsOnlyTheDistinctLinesPastTheLimit() {
+    let many = (1...25).map { "s\($0) is done" }
+    #expect(ParentNotice.message(many + many).hasSuffix("and 5 more."))
+  }
+
   @Test func joinsEveryChangeIntoOneLine() {
     let message = ParentNotice.message(["a needs you", "b is done"])
     #expect(message == "Switchboard: sessions you started changed: a needs you; b is done.")
@@ -74,6 +113,14 @@ import Testing
     let needs = ChildMark(state: .needsYou, pr: nil)
     #expect(line(needs, needs) == nil)
     #expect(line(.fresh, ChildMark(state: .canContinue, pr: nil)) == nil)
+  }
+
+  @Test func hasNoLineForAHeardPRThatDropsOutAndReturns() {
+    let back = heard([26, nil, 26])
+    #expect(line(back[1], back[2]) == nil)
+    #expect(line(back[2], back[3]) == nil)
+    let other = heard([26, nil, 28])
+    #expect(line(other[2], other[3]) == "fix (s1): opened PR #28")
   }
 
   @Test func listsTheLinesThenTheCounts() {
