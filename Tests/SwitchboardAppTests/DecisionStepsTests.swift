@@ -337,8 +337,15 @@ private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
     #expect(sent.args == ["session": "a"])
   }
 
+  @Test func resendSendsDecisionResend() async {
+    let sent = await firstRequest { $0.resendDecisions("a") }
+
+    #expect(sent.op == "decision-resend")
+    #expect(sent.args == ["session": "a"])
+  }
+
   enum Request: String, CaseIterable, CustomStringConvertible {
-    case answer, submit, discard
+    case answer, submit, discard, resend
     var description: String { rawValue }
 
     @MainActor func run(on model: BoardModel, _ session: String) {
@@ -346,6 +353,7 @@ private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
       case .answer: model.answerDecision(session, ref: "session:3", number: 1, .skip)
       case .submit: model.submitDecisions(session)
       case .discard: model.discardDecisions(session)
+      case .resend: model.resendDecisions(session)
       }
     }
   }

@@ -3,7 +3,8 @@ import SwitchboardCore
 
 /// `sb decide <session>` lists the decisions of the session's item with the
 /// answers so far. With a decision's number it answers that decision, and
-/// `--submit` and `--discard` finish the list.
+/// `--submit` and `--discard` finish the list. `--resend` sends the
+/// submitted answers again when sbd can't tell whether the session got them.
 func decide(_ a: Args) {
   let id = a.session("decide")
   let session = JSON.string(id)
@@ -11,6 +12,10 @@ func decide(_ a: Args) {
     var args: [String: JSON] = ["session": session]
     if a.switches.contains("--stale") { args["stale"] = true }
     let result = call("decision-submit", args)
+    return a.json ? printJSON(result) : print(result["delivery"]?.string ?? "sent")
+  }
+  if a.switches.contains("--resend") {
+    let result = call("decision-resend", ["session": session])
     return a.json ? printJSON(result) : print(result["delivery"]?.string ?? "sent")
   }
   if a.switches.contains("--discard") {

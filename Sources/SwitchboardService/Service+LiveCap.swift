@@ -31,7 +31,7 @@ extension Service {
       entries[id]?.queuedSince = nowMs()
       record(id, "start-queued", ["live": .number(Double(liveCount())), "cap": .number(Double(liveCap))])
     }
-    if let prompt, !prompt.isEmpty { queueMessage(id, prompt, byUser: true) }
+    if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
   }
 
   /// Starts the oldest queued starts while slots are free. When starts still

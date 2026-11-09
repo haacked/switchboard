@@ -200,6 +200,8 @@ extension SessionFacts {
       decisionList?.record(answer)
     case "decisions_submitted":
       submittedDecisionsRef = event.data["ref"]?.string
+      submittedDecisionsMessage = event.data["message"]?.string
+      decisionsDelivery = DecisionsDelivery(Delivery(of: event))
       decisionList = nil
     case "decisions_discarded":
       decisionList = nil
@@ -207,6 +209,33 @@ extension SessionFacts {
       decisionList?.stale = true
     default:
       break
+    }
+    guard let message = submittedDecisionsMessage, event.data["text"]?.string == message else { return }
+    switch (event.kind, decisionsDelivery) {
+    case ("delivered", .sending): decisionsDelivery = .delivered
+    case ("delivery_unknown", .sending): decisionsDelivery = .unknown
+    case ("sent", .unknown): decisionsDelivery = DecisionsDelivery(Delivery(of: event))
+    default: break
+    }
+  }
+}
+
+/// Whether the message of a decisions submit reached claude.
+public enum DecisionsDelivery: String, Codable, Sendable {
+  /// sbd has not yet recorded that the paste succeeded.
+  case sending
+  case delivered
+  /// sbd restarted while the paste ran, and the transcript doesn't show the message.
+  case unknown
+
+  /// The state of a message that `send` handled with `delivery`. A launch
+  /// passes the message as claude's first prompt, so no paste follows. A
+  /// submit from before sbd recorded the delivery counts as delivered,
+  /// because that sbd recorded no `delivered` for a direct paste.
+  init(_ delivery: Delivery?) {
+    switch delivery {
+    case .pasted, .queued: self = .sending
+    case .resumed, nil: self = .delivered
     }
   }
 }

@@ -63,6 +63,42 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
       ])
   }
 
+  /// A paste records the transcript's size before it starts. Only a user
+  /// message from that byte on shows that the paste landed.
+  @Test func aUserMessageCountsOnlyFromTheOffset() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let earlier = try writeTranscript([userLine("Fix it.", at: "2026-10-25T10:00:00.000Z")], in: dir)
+    let offset = try #require(FileManager.default.attributesOfItem(atPath: earlier)[.size] as? NSNumber).uint64Value
+
+    #expect(Transcript.hasUserMessage(earlier, holding: "Fix it.", from: 0))
+    #expect(!Transcript.hasUserMessage(earlier, holding: "Fix it.", from: offset))
+
+    let path = try writeTranscript(
+      [
+        userLine("Fix it.", at: "2026-10-25T10:00:00.000Z"),
+        assistantLine("Done: Fix it.", at: "2026-10-25T10:00:01.000Z"),
+      ], in: dir)
+    #expect(!Transcript.hasUserMessage(path, holding: "Fix it.", from: offset), "an assistant line counted")
+
+    let landed = try writeTranscript(
+      [
+        userLine("Fix it.", at: "2026-10-25T10:00:00.000Z"),
+        userLine("Fix it.\n\n[Image #1]", at: "2026-10-25T10:00:02.000Z"),
+      ], in: dir)
+    #expect(Transcript.hasUserMessage(landed, holding: "Fix it.\n", from: offset))
+  }
+
+  /// A file shorter than the offset is not the one that the paste measured.
+  @Test func aFileShorterThanTheOffsetHasNoMessage() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let path = try writeTranscript([userLine("Fix it.", at: "2026-10-25T10:00:00.000Z")], in: dir)
+
+    #expect(!Transcript.hasUserMessage(path, holding: "Fix it.", from: 1 << 20))
+    #expect(!Transcript.hasUserMessage("\(dir)/missing.jsonl", holding: "Fix it.", from: 0))
+  }
+
   @Test func messagesKeepOnlyTheLastOnesUpToTheLimit() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }
