@@ -380,6 +380,7 @@ private func followup(_ repository: String?) -> Followup {
     let sessions = [session("plain"), session("external", checkout: "/Users/me/dev/haacked/switchboard")]
 
     #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true) == ["external": "switchboard"])
   }
 
   @Test func givesNoLabelToTheManagerOrAChatInACheckout() {
@@ -402,5 +403,8 @@ private func followup(_ repository: String?) -> Followup {
     ]
 
     #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(
+      RepoLabels.labels(sessions, evenForOneRepo: true)
+        == ["sbd": "switchboard", "external": "switchboard", "imported": "switchboard"])
   }
 }

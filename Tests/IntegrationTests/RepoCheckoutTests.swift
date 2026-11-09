@@ -82,4 +82,21 @@ import Testing
     #expect(followup.cwd.isEmpty)
     #expect(followup.checkout == nil)
   }
+
+  @Test func readsAFolderAgainAMinuteAfterItFoundNoRepo() throws {
+    let sbd = try Instance()
+    let folder = "\(sbd.home.path)/later"
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    let later = try new(sbd, folder, "later")
+    // A session in a git folder starts a lookup after the plain folder's lookup.
+    let other = try new(sbd, try sbd.makeRepo("beta"), "beta")
+    _ = try listed(sbd, [later.id, other.id], inGit: [other.id])
+    try sbd.git(folder, "init", "-q", "-b", "main")
+
+    #expect(try sbd.get(later.id).checkout == nil)
+    try sbd.advanceClock(61_000)
+
+    let sessions = try listed(sbd, [later.id], inGit: [later.id])
+    #expect(sessions[0].checkout == real(folder))
+  }
 }

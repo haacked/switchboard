@@ -58,6 +58,8 @@ public final class Service {
 
   /// How long a message counts as in flight without its UserPromptSubmit.
   static let inFlightMs: Int64 = 10_000
+  /// How long sbd keeps a lookup that found no repo before it reads the folder again.
+  static let checkoutRetryMs: Int64 = 60_000
 
   var entries: [String: Entry] = [:]
   /// The follow-ups that `followup start` is starting.
@@ -70,9 +72,10 @@ public final class Service {
   var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
   /// The main checkout of each session folder that a lookup read, or nil for
-  /// a folder in no git repo. A folder stays in its repo. sbd therefore runs
-  /// git once per folder.
-  var checkouts: [String: String?] = [:]
+  /// a folder in no git repo, with the time of the lookup. A folder stays in
+  /// its repo, and sbd keeps a checkout that it found. A folder outside git
+  /// can become a repo. sbd reads such a folder again after `checkoutRetryMs`.
+  var checkouts: [String: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<String> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
@@ -537,14 +540,16 @@ public final class Service {
     if let repo = s.repo { return realPath(repo) ?? repo }
     // A follow-up that hasn't started has no folder. `git -C ""` would read sbd's own folder.
     guard !s.cwd.isEmpty else { return nil }
-    if let known = checkouts[s.cwd] { return known }
+    if let known = checkouts[s.cwd], known.path != nil || nowMs() - known.readMs < Self.checkoutRetryMs {
+      return known.path
+    }
     let cwd = s.cwd
     if checkoutLookups.insert(cwd).inserted {
       DispatchQueue.global().async { [self] in
         // The first worktree that git lists is the main checkout.
         let main = (try? worktreeEntries(cwd))?.first.flatMap { realPath($0.path) }
         queue.async { [self] in
-          checkouts[cwd] = .some(main)
+          checkouts[cwd] = (main, nowMs())
           checkoutLookups.remove(cwd)
         }
       }
