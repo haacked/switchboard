@@ -246,6 +246,8 @@ public final class Service {
         return .success(try JSON(encoding: usageRequest(request.args)))
       case "send" where request.args["images"] != nil:
         return try sendWithImages(request, hookGone: hookGone)
+      case "account-use", "account-move":
+        try requireSignedIn(request.args)
       default:
         break
       }
