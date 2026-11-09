@@ -86,7 +86,7 @@ struct DecisionCard: View {
       // Details holds the call and message text of the item's own card only.
       ForEach(cards) {
         CardView(
-          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && "card:\($0.id)" == item.ref)
+          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref)
       }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)

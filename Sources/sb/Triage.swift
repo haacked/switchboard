@@ -17,9 +17,16 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
   if item.hasTickable {
     out("      pick any, as in: sb choose \(s.id) 1,3")
   }
-  let decisions = item.decisions
-  if !decisions.isEmpty { out("      \(decisions.count) decisions, answered one at a time: sb decide \(s.id)") }
-  if item.options.isEmpty && decisions.isEmpty { out("      none, except Acknowledge: sb ack \(s.id)") }
+  // The same condition that `sb decide` and the app's step view use.
+  let list = s.shownDecisions
+  if let list { out("      \(list.decisions.count) decisions, answered one at a time: sb decide \(s.id)") }
+  if item.options.isEmpty && list == nil {
+    // A held card with several questions has no options. `sb ack` would hide its blocked turn.
+    out(
+      item.source == .card
+        ? "      answer the questions: sb answer \(s.id) <answer>..."
+        : "      none, except Acknowledge: sb ack \(s.id)")
+  }
   for (i, o) in item.options.enumerated() {
     out("   " + optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
     // Clicking sends this text as you, so you read it first.

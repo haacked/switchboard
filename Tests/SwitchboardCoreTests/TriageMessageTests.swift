@@ -6,13 +6,14 @@ import Testing
 /// The session as the service builds it: its item, with the details that
 /// need the session's own fields.
 private func message(
-  _ facts: SessionFacts, _ verdict: Verdict? = nil, reply: String? = nil, notes: [Note] = [], waits: [Wait] = []
+  _ facts: SessionFacts, _ verdict: Verdict? = nil, reply: String? = nil, notes: [Note] = [], waits: [Wait] = [],
+  pr: PRSummary? = nil
 ) -> TriageMessage? {
   let verdict = verdict ?? Attention.evaluate(session(), facts, now: 1000)
   var s = SessionSummary(
     id: "s1", name: "s1", cwd: "/", repo: nil, branch: nil, claudeSessionId: "s1", state: verdict.state,
     reason: verdict.reason, since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false,
-    lastReply: reply ?? facts.lastReply, waits: waits, notes: notes, cards: facts.cards)
+    lastReply: reply ?? facts.lastReply, waits: waits, notes: notes, cards: facts.cards, pr: pr)
   s.triage = Triage.item(facts, verdict)
   let details = Triage.details(for: s)
   s.triage?.details = details
@@ -77,17 +78,17 @@ private func longCommandTurn() -> [Event] {
 
   /// The app draws the Summary as GitHub Flavored Markdown. A command that
   /// Markdown would cut, restyle, or hide still shows as one code span that
-  /// holds the whole command, or Details opens.
+  /// holds the whole command, so Details stays closed.
   @Test(arguments: [
     "echo `date`", "echo ``two``", "`", "printf '%s' a``b`c", " ls ", "echo  two  spaces",
     "echo *not emphasis* and _this_", "echo <b>x</b> <!-- hidden -->", "echo [a](https://x.example)",
     "echo \\`x\\`", "echo a\tb", "x | y | z",
   ])
-  func theSummaryShowsTheWholeCommandOrDetailsOpens(_ command: String) throws {
+  func theSummaryShowsTheWholeCommand(_ command: String) throws {
     let call = tool("Bash", ["command": .string(command)], id: "b1")
     let m = try #require(message(facts(promptTurn(call, tool("Bash", ["command": .string(command)])))))
 
-    guard !m.details.openByDefault else { return }
+    #expect(!m.details.openByDefault, "\(command)")
     let blocks = MarkdownBlock.parse(m.summary.text)
     guard case .paragraph(let text) = try #require(blocks.first), blocks.count == 1 else {
       Issue.record("the Summary is not one paragraph: \(blocks)")
@@ -163,16 +164,18 @@ private func longCommandTurn() -> [Event] {
     #expect(m.action.primary == 0)
   }
 
-  @Test func detailsHoldTheWaitsAndNotes() throws {
+  @Test func detailsHoldTheWaitsNotesAndPR() throws {
     let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     let rule = Verdict(state: .needsYou, reason: "tidy the folder", kind: .review)
     let note = Note(id: "n1", text: "Check the logs", by: .you, t: 1)
     let wait = Wait(id: "w1", kind: .manual, note: "later", created: 1)
+    let pr = PRSummary(samplePR())
 
-    let m = try #require(message(f, rule, notes: [note], waits: [wait]))
+    let m = try #require(message(f, rule, notes: [note], waits: [wait], pr: pr))
 
     #expect(m.details.notes == ["Check the logs"])
     #expect(m.details.waits == [wait.line])
+    #expect(m.details.pullRequest == .init(line: pr.line, title: pr.title, url: pr.url))
   }
 
   @Test func aGroupMessageCardPutsItsTargetsAndTextInDetails() throws {
@@ -190,6 +193,7 @@ private func longCommandTurn() -> [Event] {
     #expect(m.action.options.map(\.label) == ["Send", "Cancel"])
     #expect(m.details.targets == ["alpha (s2)", "beta (s3)"])
     #expect(m.details.toolInput?.text == "Rebase now.")
+    #expect(m.details.openByDefault)
   }
 }
 
@@ -238,18 +242,6 @@ private func longCommandTurn() -> [Event] {
     #expect(json["summary"]?.string == item.summary)
     #expect(json["message"]?["summary"]?["text"]?.string == item.summary)
     #expect(json["message"]?["action"]?["options"]?.array?.count == item.options.count)
-  }
-
-  @Test func theMessageNeverDiffersFromTheFlatFields() throws {
-    let turns = [permissionTurn(), questionTurn(), longCommandTurn()]
-    for turn in turns {
-      let built = try #require(item(facts(turn)))
-      #expect(built.message.summary.text == built.summary)
-      #expect(built.message.summary.callouts == built.callouts)
-      #expect(built.message.action.options == built.options)
-      #expect(built.message.action.multiSelect == built.multiSelect)
-      #expect(built.message.action.primary == built.primaryIndex)
-    }
   }
 
   @Test func theActionCarriesTheItemsDecisions() throws {

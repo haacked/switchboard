@@ -421,7 +421,7 @@ public enum Triage {
     var item: TriageItem
     if let card = facts.cards.first {
       item = cardItem(card)
-      item.ref = "card:\(card.id)"
+      item.ref = card.ref
     } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
       item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
       if verdict.source != .reply { addRule(verdict, to: &item) }
@@ -477,7 +477,7 @@ public enum Triage {
           TriageOption(label: "Cancel", action: .deny),
         ], source: .card,
         details: TriageDetails(
-          toolInput: .init(tool: card.tool, text: message.text),
+          openByDefault: true, toolInput: .init(tool: card.tool, text: message.text),
           targets: message.targets.map { "\($0.name) (\($0.id))" }))
     }
     if card.kind == .permission {
@@ -668,4 +668,9 @@ public struct TriageSettings: Codable, Equatable, Sendable {
     perHour = try c.decodeIfPresent(Int.self, forKey: .perHour) ?? d.perHour
     systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt) ?? d.systemPrompt
   }
+}
+
+extension Card {
+  /// The ref of the Inbox item that this card gives.
+  public var ref: String { "card:\(id)" }
 }

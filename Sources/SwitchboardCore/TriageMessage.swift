@@ -27,9 +27,9 @@ public struct TriageDetails: Codable, Equatable, Sendable {
     }
   }
 
-  /// Whether the app opens Details at first. It is true for a permission
-  /// prompt whose Summary does not show the whole call, so the user never
-  /// allows a call that the Inbox shows in part.
+  /// Whether the app opens Details at first. It is true for a group message
+  /// and for a permission prompt whose Summary does not show the whole call,
+  /// so the user never sends or allows text that the Inbox shows in part.
   public var openByDefault: Bool
   public var lastReply: String?
   public var toolInput: ToolInput?

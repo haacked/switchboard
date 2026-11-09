@@ -223,9 +223,9 @@ Every item has the same three sections in the same order, whatever its kind:
 
 - **Summary:** only the context you need to understand the options and pick one: the summary lines, and the callouts. A fact is in it only if you would misjudge or not understand an option without it. The three-line limit, the Haiku prompt, and `sb summary help` all state this, and the full reply is in Details.
 - **Action:** the buttons, and the decisions of a decision list: the options, Allow and Deny, Merge or Enqueue, Request review, Send and Cancel for a group message, a held question's answers, and Acknowledge.
-- **Details:** everything else, collapsed until you open it: the tool call that a prompt asks about, a group message's text and targets, the PR and its checks, waits, notes, the full last reply, and the newest events.
+- **Details:** everything else, collapsed until you open it: the tool call that a prompt asks about, a group message's text and targets, the PR and its checks, waits, the full last reply, and the newest events.
 
-A permission prompt is the one case where Details starts open. Its Summary shows a Bash command up to 200 characters on one line. A longer command, a command with a line break, or a tool such as Write whose Summary names only a file, opens Details with the whole call, so you never allow a call that the Inbox shows in part.
+Details starts open in two cases. A group message opens it, because its Summary names only the number of targets and the group, so you read the text and the targets before you send it. A permission prompt opens it when its Summary shows less than the whole call. Its Summary shows a Bash command up to 200 characters on one line. A longer command, a command with a line break, or a tool such as Write whose Summary names only a file, opens Details with the whole call, so you never allow a call that the Inbox shows in part.
 
 `sb ls --json`, `sb get --json`, `sb triage --json`, `sb next --json`, and the MCP `triage` tool carry the sections as `triage.message`, beside the item's own fields:
 
