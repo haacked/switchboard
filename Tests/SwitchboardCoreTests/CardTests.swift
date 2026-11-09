@@ -203,12 +203,13 @@ let turnEnds = [
     #expect(Attention.evaluate(session(), f, now: 7) == Verdict(state: .needsYou, reason: "answer: Which fruit?"))
   }
 
-  @Test func aSubagentResultLeavesADeferredQuestion() {
+  @Test(arguments: ["<agent-message from=\"a1\"> [Subagent hand-back] done", peerMessage])
+  func anotherAgentsMessageLeavesADeferredQuestion(_ prompt: String) {
     let f = facts(
       questionTurn() + [
         event("deferred", 4, ["card": 3]), event("Stop", 5),
-        event("UserPromptSubmit", 6, ["prompt": "<agent-message from=\"a1\"> [Subagent hand-back] done"]),
-        // The subagent's turn asks again, and the terminal answers that question.
+        event("UserPromptSubmit", 6, ["prompt": .string(prompt)]),
+        // The turn that this message starts asks again, and the terminal answers that question.
         event("PostToolUse", 7, ask(id: "q2")),
       ])
     #expect(f.cards.map(\.deferred) == [true])

@@ -59,6 +59,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var pr: PullRequest?
   /// The PR's comments from `GitHub.bodyAuthors`, with their bodies.
   public var prComments: [PRComment] = []
+  /// The branch that the session's folder has checked out, as the poller last
+  /// read it. Nil until the folder's branch differs from `Session.branch`.
+  public var branch: String?
   /// The uncommitted files in the folder, which the poller counts once the
   /// PR has merged or closed.
   public var dirty: Int?
@@ -110,6 +113,14 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// When a `pr` event first showed the PR open and not a draft. An event
   /// with a draft, a merged or closed PR, or no PR clears it.
   public var readySince: Int64?
+  /// The decisions that the user started to answer, from the first answer
+  /// until a submit or a discard.
+  public var decisionList: DecisionList?
+  /// The ref of the item whose decisions the last accepted submit sent.
+  /// It matters only while that item is the session's item.
+  public var submittedDecisionsRef: String?
+  /// When the PR entered its pipeline stage. `notePipeline` sets it.
+  public var pipelineSince: Int64?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -126,7 +137,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// `dialog_closed` and `card_closed` can be the only record of the answer.
   static let activityKinds = Set(hookKinds).union([
     "created", "imported", "followup", "started", "resumed", "followup-started", "sent", "answered",
-    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "done", "undone",
+    "dialog_closed", "card_closed", "wait", "wait-cleared", "note", "note-removed", "note-resolved", "done", "undone",
     "account-moved", "idle", "ack", "unack",
   ])
 
@@ -235,7 +246,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "SubagentStop":
       if let id = d["agent_id"]?.string { subagents.remove(id) }
     case "pr":
-      pr = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
+      let next = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
+      notePipeline(from: pr, to: next, at: event.t)
+      pr = next
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
       applyReviewListing()
       // A pr event carries the comments only when they changed. An event
@@ -245,6 +258,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       } else if pr == nil {
         prComments = []
       }
+    case "branch":
+      branch = d["branch"]?.string
     case "worktree":
       dirty = d["dirty"]?.int
       folderGone = d["gone"]?.bool ?? false
@@ -263,6 +278,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     }
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
+    applyDecisions(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }
@@ -355,6 +371,9 @@ public enum Attention {
   public static func evaluate(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
   ) -> Verdict {
+    var facts = facts
+    // Only a work session has a PR. A pr event recorded for a Manager or a chat must not fire a PR rule.
+    if session.kind != .work { facts.pr = nil }
     let verdict = rules(session, facts, now: now, stateOf: stateOf)
     return readyForReview(verdict, facts) ?? verdict
   }
@@ -434,9 +453,7 @@ public enum Attention {
   /// Classifies a reply by the last question in its last paragraph, or by a
   /// next step that the paragraph announces.
   public static func classify(_ reply: String) -> ReplyKind {
-    let paragraphs = reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
-    guard let last = paragraphs.last else { return .other }
+    guard let last = lastParagraph(reply) else { return .other }
     let parts = sentences(last)
     if let q = parts.last(where: { $0.hasSuffix("?") }) {
       let lower = q.lowercased()
@@ -448,9 +465,16 @@ public enum Attention {
     return .other
   }
 
+  static func lastParagraph(_ reply: String) -> String? {
+    reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .last { !$0.isEmpty }
+  }
+
   static let sentenceClosers: Set<Character> = ["*", "_", "`", "\"", "'", "\u{201D}", "\u{2019}", ")", "]"]
 
-  static func sentences(_ text: String) -> [String] {
+  static let sentenceTrim = CharacterSet(charactersIn: "*_` -").union(.whitespaces)
+
+  static func sentences(_ text: String, trimming: CharacterSet = sentenceTrim) -> [String] {
     var out: [String] = []
     var current = ""
     let chars = Array(text)
@@ -467,7 +491,7 @@ public enum Attention {
       }
     }
     out.append(current)
-    return out.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "*_` -").union(.whitespaces)) }.filter {
+    return out.map { $0.trimmingCharacters(in: trimming) }.filter {
       !$0.isEmpty
     }
   }
@@ -476,6 +500,20 @@ public enum Attention {
   /// <task-notification> block. On 2.1.310 it is an <agent-message> block.
   public static func isSubagentResult(_ prompt: String) -> Bool {
     prompt.hasPrefix("<task-notification>") || prompt.hasPrefix("<agent-message ")
+  }
+
+  /// A message from another Claude session arrives as a prompt. On Claude Code
+  /// 2.1.319 the prompt is one <cross-session-message from="…"> block. Only the
+  /// transcript's `origin.kind` names the sender for certain. Claude writes
+  /// the prompt's transcript line only after UserPromptSubmit fires. A prompt
+  /// that is not exactly one such block, with one closing tag, counts as the
+  /// user's. On 2.1.310 a peer message had no block, so it counts as the
+  /// user's.
+  static func isPeerMessage(_ prompt: String) -> Bool {
+    let close = "</cross-session-message>"
+    let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    return prompt.hasPrefix("<cross-session-message from=\"") && trimmed.hasSuffix(close)
+      && trimmed.components(separatedBy: close).count == 2
   }
 
   static func call(_ tool: String, _ d: JSON, _ t: Int64) -> ToolCall {

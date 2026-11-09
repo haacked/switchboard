@@ -57,16 +57,25 @@ let usage = """
                                   time. Inside a session, the session is optional
     wait <session> --clear [--id W]
     wait <session> --resolve <what happened> [--id W]
-    note <session> [<text>]       add a note, or list the notes
-    note <session> --rm <id>
+    note <session> [<text>]       add a note, or list the notes: open to-dos,
+                                  then plain notes, then resolved to-dos
+    note <session> --todo <text>  add a to-do, a task for you that blocks
+                                  removing the session until you resolve it
+    note <session> --resolve <id> resolve a to-do. It doesn't run inside Claude
+    note <session> --rm <id>      remove a note. It refuses an open to-do
+    note --resolved [--limit N]   list the resolved to-dos, newest first
+                                  (default 50). The record outlives the session
     rename <session> <name>
-    rm <session> [--worktree [--delete-branch [--delete-remote-branch]]]
+    rm <session> [--worktree [--delete-branch [--delete-remote-branch]]] [--resolve <id>]...
                                   remove the session, and its worktree with --worktree, which refuses
                                   uncommitted files, unpushed commits, and a folder sbd didn't make.
                                   --delete-branch also deletes the local branch, and refuses unless the
                                   session's PR is merged and the branch has no commit after it.
                                   --delete-remote-branch also deletes the branch on its remote, and keeps
-                                  it, with an error, unless it is at the merged PR's head
+                                  it, with an error, unless it is at the merged PR's head.
+                                  It refuses a session with an open to-do unless a
+                                  --resolve names each one, which resolves them all.
+                                  --resolve doesn't run inside Claude
     rm --done [--worktree [--delete-remote-branch]] [--yes]
                                   remove every Done session the same way, after listing
                                   them and the ones whose checks fail, which it skips.
@@ -99,7 +108,12 @@ let usage = """
                                   import Claude sessions by id, id prefix, or name.
                                   --stop first exits the claude of a session that
                                   waits idle at its prompt in another terminal
-    attach <session> [--shell]    attach this terminal to the Claude pane or the shell
+    attach <session> [--shell]    attach this terminal to the Claude pane or the shell.
+                                  --shell starts a closed shell again
+    shell <session> --open | --close
+                                  start the session's shell pane, or end it. A shell
+                                  that exits ends its pane too. A closed shell stays
+                                  closed until --open or attach --shell
     screen <session> [--shell]    print the pane's screen
     watch <session> --until <state> [--timeout S]
     events [--session S] [--since ID] [--follow]
@@ -117,6 +131,16 @@ let usage = """
                                   commas (1,3) go as one reply. Request review requests
                                   the reviewers in T. Card, merge, and review options
                                   refuse inside Claude Code
+    decide <session>              the decisions of the session's item, each with its
+                                  options and its answer so far
+    decide <session> <n> <option> | --text T | --skip
+                                  answer decision n with an option by number or label,
+                                  typed text, or a skip. On a pick-any decision, options
+                                  separated by commas (1,3) go together. The first answer
+                                  keeps a copy of the decisions until --submit or --discard
+    decide <session> --submit [--stale] | --discard
+                                  send every answer as one message, or drop the answers.
+                                  After the session took another turn, --submit needs --stale
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
@@ -187,7 +211,9 @@ let usage = """
     followup ls                   list follow-ups that haven't started
     followup start <f> [--path FOLDER] [--branch B] [--base REF]
                                   make its worktree and start claude with its text
-    followup rm <f>               remove a follow-up that hasn't started
+    followup rm <f> [--resolve <id>]...
+                                  remove a follow-up that hasn't started. Each open
+                                  to-do needs a --resolve
     followup import [--file F]    add the open items of Followups.md that no
                                   earlier import read
 
@@ -231,7 +257,10 @@ let usage = """
 
 struct Args {
   var positional: [String] = []
-  var values: [String: String] = [:]
+  /// Every value of each valued flag, in order, for a flag that repeats.
+  var allValues: [String: [String]] = [:]
+  /// The last value of each valued flag.
+  var values: [String: String] { allValues.compactMapValues(\.last) }
   var switches: Set<String> = []
 
   /// After `literalAfter` positional arguments, every argument is text, even
@@ -243,7 +272,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--set", "--description", "--artifact", "--kind", "--version",
+      "--set", "--description", "--artifact", "--kind", "--version", "--limit",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -251,7 +280,7 @@ struct Args {
         positional.append(arg)
       } else if valued.contains(arg) {
         guard let value = rest.popFirst() else { die("\(arg) needs a value") }
-        values[arg] = value
+        allValues[arg, default: []].append(value)
       } else if arg.hasPrefix("--") {
         switches.insert(arg)
       } else {
@@ -268,8 +297,10 @@ struct Args {
   }
 }
 
+/// Escapes each control character but newline and tab. A refusal
+/// from sbd can quote text that Claude wrote.
 func warn(_ message: String) {
-  FileHandle.standardError.write(Data("sb: \(message)\n".utf8))
+  FileHandle.standardError.write(Data("sb: \(controlsEscaped(message))\n".utf8))
 }
 
 func die(_ message: String) -> Never {
@@ -321,8 +352,10 @@ func printTable(_ sessions: [SessionSummary]) {
     }
     let live = s.live ? "●" : "○"
     let name = oneLine(s.name, max: nameWidth)
+    let todos = s.openTodos.count
+    let marker = todos == 0 ? "" : "  [\(todos) to-do\(todos == 1 ? "" : "s")]"
     print(
-      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reasonLine)"
+      "  \(live) \(s.id.padding(toLength: idWidth, withPad: " ", startingAt: 0))  \(name.padding(toLength: nameWidth, withPad: " ", startingAt: 0))  \(ago(s.since).padding(toLength: 4, withPad: " ", startingAt: 0))  \(s.reasonLine)\(marker)"
         .printable
     )
   }
@@ -352,6 +385,10 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let p = s.pipeline {
+    print("  stage:   \(p.stage.title) \(ago(p.since))\(p.blocker.map { "; \($0)" } ?? "")".printable)
+  }
+  if let owners = s.pr?.codeOwners { print("  owners:  \(owners.text(separator: "; "))".printable) }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }
   for d in s.dependencies ?? [] {
     let deploy = d.deploy ? (d.deployed == true ? ", deployed" : ", deploy") : ""
@@ -423,10 +460,12 @@ func hook() -> Never {
 
 func attach(_ a: Args) -> Never {
   let id = a.session("attach")
+  let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
   _ = call("open", ["session": .string(id)])
+  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let terminals: Terminals
   do { terminals = try client.terminals(id) } catch { die("\(error)") }
-  let command = terminals.attachCommand(a.switches.contains("--shell") ? .shell : .claude)
+  let command = terminals.attachCommand(pane)
   let argv = command.map { strdup($0) } + [nil]
   execv(command[0], argv)
   die("can't run \(command[0]): \(UnixSocket.errnoText())")
@@ -601,6 +640,10 @@ case "wait":
   waitCommand(a)
 case "note":
   noteCommand(a)
+case "shell":
+  let open = a.switches.contains("--open")
+  guard open != a.switches.contains("--close") else { die("shell needs --open or --close") }
+  sessionCommand("shell", a, extra: ["open": .bool(open)])
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])
@@ -613,13 +656,13 @@ case "send":
 case "rm" where a.switches.contains("--done"):
   removeDone(a)
 case "rm":
-  let result = call(
-    "rm",
-    [
-      "session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree")),
-      "branch": .bool(a.switches.contains("--delete-branch")),
-      "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
-    ])
+  var args: [String: JSON] = [
+    "session": .string(a.session("rm")), "worktree": .bool(a.switches.contains("--worktree")),
+    "branch": .bool(a.switches.contains("--delete-branch")),
+    "remote_branch": .bool(a.switches.contains("--delete-remote-branch")),
+  ]
+  addResolveFlags(a, to: &args)
+  let result = call("rm", args)
   if a.json { printJSON(result) } else { print("removed \(result["removed"]?.string ?? "")") }
 case "merge":
   merge(a)
@@ -671,6 +714,8 @@ case "next":
   next(a)
 case "choose":
   choose(a)
+case "decide":
+  decide(a)
 case "reply":
   replyCommand(a)
 case "summary":
@@ -708,6 +753,7 @@ case "poll":
   }
   if let error = result["depotError"]?.string { warn(error) }
   if let error = result["trunkError"]?.string { warn(error) }
+  if let error = result["codeOwnersError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)

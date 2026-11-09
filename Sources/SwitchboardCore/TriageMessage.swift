@@ -102,20 +102,22 @@ public struct TriageMessage: Codable, Equatable, Sendable {
     public var callouts: [Callout]
   }
 
-  /// The buttons.
+  /// The buttons, and the decisions that `sb decide` answers one at a time.
   public struct Action: Codable, Equatable, Sendable {
     public var options: [TriageOption]
     public var multiSelect: Bool
     /// The index of the main option, or nil when no option is the main one.
     public var primary: Int?
+    public var decisions: [PendingDecision]
 
-    private enum CodingKeys: String, CodingKey { case options, multiSelect, primary }
+    private enum CodingKeys: String, CodingKey { case options, multiSelect, primary, decisions }
 
     public func encode(to encoder: Encoder) throws {
       var c = encoder.container(keyedBy: CodingKeys.self)
       try c.encode(options, forKey: .options)
       try c.encode(multiSelect, forKey: .multiSelect)
       try c.encode(primary, forKey: .primary)
+      try c.encode(decisions, forKey: .decisions)
     }
   }
 
@@ -128,22 +130,49 @@ extension TriageItem {
   public var message: TriageMessage {
     TriageMessage(
       summary: .init(text: summary, callouts: callouts),
-      action: .init(options: options, multiSelect: multiSelect, primary: primaryIndex), details: details)
+      action: .init(options: options, multiSelect: multiSelect, primary: primaryIndex, decisions: decisions),
+      details: details)
   }
 }
 
 extension Triage {
-  /// The call in the Summary of a permission prompt. A Bash command shows
-  /// whole when it fits on one line, and cut at one line otherwise.
-  static func callSummary(_ card: Card) -> String {
-    guard card.tool == "Bash", let command = card.input["command"]?.string else { return card.summary }
-    return "`\(oneLine(command, max: TriageCard.lineLength))`"
+  /// The Summary of a permission prompt. A Bash command shows whole when it
+  /// fits on one line, and cut at one line otherwise.
+  static func permissionSummary(_ card: Card) -> String {
+    guard card.tool == "Bash", let command = card.input["command"]?.string else {
+      return "Claude asks to run \(card.summary)."
+    }
+    return "Claude asks to run \(codeSpan(fits(command) ? command : oneLine(command, max: TriageCard.lineLength)))."
   }
 
-  /// Whether the Summary of a permission prompt shows its whole call.
+  /// Whether the Summary of a permission prompt shows its whole call. The
+  /// app draws the Summary as Markdown, so this parses the Summary and
+  /// looks for the command as its one code span.
   static func summaryShowsCall(_ card: Card) -> Bool {
-    guard card.tool == "Bash", let command = card.input["command"]?.string else { return false }
-    return command.count <= TriageCard.lineLength && !command.contains(where: \.isNewline)
+    guard card.tool == "Bash", let command = card.input["command"]?.string, fits(command) else { return false }
+    let blocks = MarkdownBlock.parse(permissionSummary(card))
+    guard blocks.count == 1, case .paragraph(let text) = blocks[0] else { return false }
+    return text.runs.filter { $0.style.contains(.code) }.map(\.text) == [command]
+  }
+
+  private static func fits(_ command: String) -> Bool {
+    command.count <= TriageCard.lineLength && !command.contains(where: \.isNewline)
+  }
+
+  /// A Markdown code span that holds the text as it is. Its fence is longer
+  /// than any run of backticks in the text. CommonMark strips one space from
+  /// each end when both ends have one, so the text is padded with spaces
+  /// when an end is a backtick or both ends are spaces.
+  static func codeSpan(_ text: String) -> String {
+    var longest = 0
+    var run = 0
+    for c in text {
+      run = c == "`" ? run + 1 : 0
+      longest = max(longest, run)
+    }
+    let fence = String(repeating: "`", count: longest + 1)
+    let pad = text.first == "`" || text.last == "`" || (text.first == " " && text.last == " ")
+    return pad ? "\(fence) \(text) \(fence)" : "\(fence)\(text)\(fence)"
   }
 
   /// The item's Details, from the session's own fields. The item builder

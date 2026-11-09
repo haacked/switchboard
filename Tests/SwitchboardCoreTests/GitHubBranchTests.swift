@@ -132,6 +132,7 @@ import Testing
     ("https://github.com/PostHog/charts/pull/18303", true),
     ("HTTPS://github.com/PostHog/charts/pull/18303", true),
     ("http://github.com/PostHog/charts/pull/18303", false),
+    ("javascript:alert(1)", false),
     ("file:///tmp/run.command", false),
     ("/tmp/run.command", false),
     ("", false),
@@ -139,6 +140,8 @@ import Testing
   func linkIsOnlyAnHTTPSURL(_ url: String, _ linked: Bool) {
     let pr = PullRequest(id: "a", number: 1, url: url, repo: "a/b")
     #expect((PRSummary(pr).link != nil) == linked)
+    let docket = DocketSummary(DocketSession(pullRequest: "a/b#1", url: url), DocketStatus())
+    #expect((docket.link != nil) == linked)
   }
 
   @Test func elapsedCountsFromTheLastTime() {

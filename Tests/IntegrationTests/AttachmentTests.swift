@@ -349,6 +349,90 @@ import Testing
     #expect(copies(sbd, s.id).isEmpty)
   }
 
+  /// A PNG of exactly the per-image limit in the pictures folder. The file is sparse, so it costs no disk.
+  private func bigPicture(_ sbd: Instance, _ name: String) throws -> String {
+    let path = try picture(sbd, name)
+    let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+    try handle.truncate(atOffset: UInt64(Attachments.limit))
+    try handle.close()
+    return path
+  }
+
+  /// The stub reads a prompt in the terminal's canonical mode, which never completes a line over 1024 bytes.
+  /// This line of 20 paths is longer, so the test checks what sbd sent and not the stub's reply.
+  @Test func sendsTheMostImagesAMessageCanCarry() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let names = (0..<Attachments.countLimit).map { String(format: "%02d", $0) }
+    let args = try names.flatMap { ["--image", try picture(sbd, "\($0).png")] }
+
+    try sbd.sb(["send", s.id] + args + ["look at all of these"])
+
+    let files = copies(sbd, s.id)
+    try #require(files.count == Attachments.countLimit)
+    #expect(files.map(name).map { $0.split(separator: "-").last } == names.map { "\($0).png" })
+    let sent = try #require(try sentTexts(sbd, s.id).last)
+    #expect(messages(sbd, text: "look at all of these", copies: files).contains(sent))
+  }
+
+  @Test func refusesOneImageOverTheCountLimitInSb() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let path = try picture(sbd, "shot.png")
+    let before = try sentTexts(sbd, s.id)
+
+    let r = try sbd.run(
+      ["send", s.id] + Array(repeating: ["--image", path], count: Attachments.countLimit + 1).flatMap { $0 } + ["look"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("a message can carry at most 20 images."))
+    #expect(copies(sbd, s.id).isEmpty)
+    #expect(try sentTexts(sbd, s.id) == before)
+  }
+
+  @Test func refusesOneImageOverTheCountLimitInSbd() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let before = try sentTexts(sbd, s.id)
+    let images = (0...Attachments.countLimit).map { Attachments.json(name: "\($0).png", data: Self.png) }
+
+    let refused = failure(sbd, "send", ["session": .string(s.id), "text": "look", "images": .array(images)])
+
+    #expect(refused.contains("a message can carry at most 20 images."))
+    #expect(copies(sbd, s.id).isEmpty)
+    #expect(try sentTexts(sbd, s.id) == before)
+  }
+
+  @Test func refusesImagesOverTheTotalLimitInSb() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let count = Attachments.totalLimit / Attachments.limit
+    let args = try (0..<count).flatMap { ["--image", try bigPicture(sbd, "big\($0).png")] }
+
+    let r = try sbd.run(["send", s.id] + args + ["--image", try picture(sbd, "one.png"), "look"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("a message's images can total at most 100 MB."))
+    #expect(copies(sbd, s.id).isEmpty)
+  }
+
+  /// The request is a line of about 140 MB of base64.
+  @Test func refusesImagesOverTheTotalLimitInSbd() throws {
+    let sbd = try Instance()
+    let s = try readySession(sbd)
+    let before = try sentTexts(sbd, s.id)
+    let big = Self.png + Data(count: Attachments.limit - Self.png.count)
+    let images =
+      (0..<(Attachments.totalLimit / Attachments.limit)).map { Attachments.json(name: "big\($0).png", data: big) }
+      + [Attachments.json(name: "one.png", data: Self.png)]
+
+    let refused = failure(sbd, "send", ["session": .string(s.id), "text": "look", "images": .array(images)])
+
+    #expect(refused.contains("a message's images can total at most 100 MB."))
+    #expect(copies(sbd, s.id).isEmpty)
+    #expect(try sentTexts(sbd, s.id) == before)
+  }
+
   @Test func queuesAMessageWithImagesToAStoppedSession() throws {
     let sbd = try Instance()
     let s = try readySession(sbd)

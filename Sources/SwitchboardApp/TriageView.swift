@@ -6,12 +6,23 @@ import SwitchboardCore
 struct TriageDetail: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  /// The step that the card's decision view shows. Nil shows the first unanswered decision.
+  @State private var step: DecisionStep?
 
   enum Pane { case terminal, summary }
 
   /// An unstarted follow-up and a docket row have no terminals, so they show their summary whatever the toggle says.
   static func pane(for session: SessionSummary, showingTerminal: Bool) -> Pane {
     showingTerminal && !session.waitsToStart && session.runsClaude ? .terminal : .summary
+  }
+
+  /// The PR that the bar links to, with the code owners of that PR. A docket
+  /// row links to the PR that docket reviews and ignores its `pr`. The bar
+  /// therefore never shows one PR's link beside another PR's code owners.
+  static func prLink(for session: SessionSummary) -> (label: String, url: URL, owners: CodeOwnerStatus?)? {
+    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0, nil) } }
+    if let pr = session.pr, let url = pr.link { return (pr.line, url, pr.codeOwners) }
+    return nil
   }
 
   var body: some View {
@@ -24,7 +35,7 @@ struct TriageDetail: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 14) {
             if let item = session.triage {
-              DecisionCard(session: session, item: item)
+              DecisionCard(session: session, item: item, step: $step)
             } else {
               working
               reply
@@ -32,6 +43,10 @@ struct TriageDetail: View {
           }
           .padding(16)
           .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let list = session.stepList {
+          Divider()
+          DecisionStepBar(session: session, list: list, step: $step)
         }
         Divider()
         if session.waitsToStart {
@@ -47,6 +62,7 @@ struct TriageDetail: View {
       }
     }
     .task(id: "\(session.id)/\(session.lastReply?.count ?? 0)/\(session.since)") { model.loadReply(session.id) }
+    .onChange(of: session.stepList?.ref) { step = nil }
   }
 
   private var bar: some View {
@@ -56,7 +72,12 @@ struct TriageDetail: View {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
-      if let pr = session.pr, let url = pr.link { Link(pr.line, destination: url).font(.caption) }
+      if let link = Self.prLink(for: session) {
+        HStack(spacing: 4) {
+          Link(link.label, destination: link.url).font(.caption)
+          if let owners = link.owners { CodeOwnerShield(status: owners) }
+        }
+      }
       Spacer()
       Button("Open") { model.selection = session.id }
         .help("Show the session in the sidebar, with its terminals")

@@ -54,6 +54,7 @@ final class GitHubPoller {
   var recheck: Set<String> = []
   /// What the poller knows about each plan document, by plan id.
   var trackedPlans: [String: TrackedPlan] = [:]
+  var codeOwners = CodeOwnerReads()
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -82,6 +83,8 @@ final class GitHubPoller {
     /// config when git last ran, which change with the branch or a remote.
     var head: String?
     var configStamp: Date?
+    /// The branch that HEAD names, kept while HEAD is detached.
+    var name: String?
     /// The session's branch in its GitHub repo, or nil outside one.
     var key: PRKey?
     /// The node id of the branch's PR.
@@ -118,6 +121,8 @@ final class GitHubPoller {
     var cwd: String
     var claudeSessionId: String
     var configDir: String
+    /// The branch that sbd shows for the session.
+    var branch: String?
     var facts: SessionFacts
   }
 
@@ -166,7 +171,8 @@ final class GitHubPoller {
       service.entries.map { id, e in
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
-          configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde, facts: e.facts)
+          configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde,
+          branch: e.branch, facts: e.facts)
       }
     }
     let now = nowMs()
@@ -191,6 +197,11 @@ final class GitHubPoller {
       logLine("github: \(error)")
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
+    // Each status read rebuilds its PR without a requirement. The reads
+    // above can throw after they rebuild some PRs, so the apply runs after
+    // the catch and before `record` compares each PR.
+    let codeOwnersError = readCodeOwners(all: all, now: now, stats: &stats)
+    applyCodeOwners()
     stats.trunkRuns = readTrunk(sessions, all: all, now: now)
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
@@ -199,11 +210,13 @@ final class GitHubPoller {
     let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
+    pruneCodeOwners()
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
+    if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
@@ -269,7 +282,9 @@ final class GitHubPoller {
     // A rebase or a bisect detaches HEAD for a while, and the session keeps
     // its branch's PR meanwhile.
     var key = head != nil ? b.key : nil
-    if let branch = head.flatMap({ GitHub.branch(head: $0) }), let common = b.commonDir {
+    let branch = head.flatMap { GitHub.branch(head: $0) }
+    if let branch { b.name = branch }
+    if let branch, let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
@@ -462,11 +477,11 @@ final class GitHubPoller {
     return result.error
   }
 
-  private func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
+  func idsVariable(_ ids: [String]) -> JSON { ["ids": .array(ids.map(JSON.string))] }
 
   /// Sends one GraphQL request and returns the response, whose `data` isn't
   /// null.
-  private func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
+  func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
     var req = try apiRequest("graphql")
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -535,14 +550,16 @@ final class GitHubPoller {
 
   // MARK: Events
 
-  /// Records the folder's count of uncommitted files once the PR has merged
-  /// or closed, with whether the folder is gone, and the session's PR when it
-  /// changed. The count comes first,
-  /// so the attention rules never judge a finished PR by the count of the
-  /// session's previous PR. Returns whether it recorded a `pr` event.
+  /// Records the folder's branch when it differs from the branch that sbd
+  /// shows. Once the PR has merged or closed, it records the folder's count of
+  /// uncommitted files and whether the folder is gone. It records the
+  /// session's PR when the PR changed. The count comes before the PR, so the
+  /// attention rules never judge a finished PR by the count of the session's
+  /// previous PR. Returns whether it recorded a `pr` event.
   private func record(_ s: Watched, all: Bool, now: Int64) -> Bool {
     guard var t = tracked[s.id] else { return false }
     defer { tracked[s.id] = t }
+    if let name = t.branch.name, name != s.branch { event(s.id, "branch", ["branch": .string(name)]) }
     if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open,
       s.facts.cleanedUp == nil,
       shouldCount(t, s, pr.id, all, now)

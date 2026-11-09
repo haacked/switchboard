@@ -474,7 +474,7 @@ let sessionCard = TriageSummary(
     let item = try #require(itemOf(f))
 
     #expect(item.source == .session)
-    #expect(item.options.map(\.label) == sessionCard.options.map(\.label) + ["Rebase"])
+    #expect(item.options.map(\.label) == sessionCard.options.map(\.label) + ["Merge main"])
     #expect(item.primary == sessionCard.options.first)
     let lead = try #require(item.callouts.first)
     #expect(lead.kind == .warning)
@@ -553,7 +553,7 @@ let sessionCard = TriageSummary(
     let item = try #require(itemOf(f))
 
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Rebase"])
+    #expect(item.options.map(\.label) == ["Merge main"])
   }
 
   @Test func theModelsSummaryWinsOverTheFallback() {
@@ -646,22 +646,38 @@ let sessionCard = TriageSummary(
     #expect(!item.callouts.contains { ($0.title + " " + $0.body).contains("stale error") })
   }
 
-  @Test func aConflictOffersARebaseAndWarns() throws {
+  @Test func aConflictOffersAMergeOfTheBaseAndWarns() throws {
     let f = ended(samplePR(mergeable: .conflicting))
 
     let item = try #require(itemOf(f))
 
     #expect(item.source == .rule)
-    #expect(item.options.map(\.label) == ["Rebase"])
+    #expect(item.options.map(\.label) == ["Merge main"])
     #expect(item.options.map(\.action) == [.send])
-    #expect(item.options.first?.message == "Rebase onto main, resolve the conflicts, and push.")
+    #expect(
+      item.options.first?.message
+        == "Merge origin/main into this branch, resolve the conflicts, run the tests, and push.")
     #expect(item.callouts.first?.kind == .warning)
   }
 
-  @Test func aConflictsRebaseNamesThePRsBase() throws {
+  @Test func aConflictsMergeNamesThePRsBase() throws {
     let f = ended(samplePR(base: "release-2", mergeable: .conflicting))
 
-    #expect(item(f)?.options.first?.message == "Rebase onto release-2, resolve the conflicts, and push.")
+    #expect(
+      item(f)?.options.first?.message
+        == "Merge origin/release-2 into this branch, resolve the conflicts, run the tests, and push.")
+  }
+
+  @Test func aConflictsOptionSendsTheMergeBaseMessage() throws {
+    let f = ended(samplePR(base: "develop", mergeable: .conflicting))
+
+    #expect(item(f)?.options.first?.message == Attention.mergeBaseMessage(base: "develop"))
+  }
+
+  @Test func mergeBaseMessageMergesTheBaseFromOrigin() {
+    #expect(
+      Attention.mergeBaseMessage(base: "develop")
+        == "Merge origin/develop into this branch, resolve the conflicts, run the tests, and push.")
   }
 
   enum OneStep: String, CaseIterable, CustomTestStringConvertible {

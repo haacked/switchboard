@@ -7,6 +7,19 @@ extension FakeGitHub {
     change(number) { $0["commits"] = ["nodes": [["commit": ["statusCheckRollup": ["state": .string(state)]]]]] }
   }
 
+  /// Gives the PR's last commit the PR's head as its oid, and GitHub Actions
+  /// suites with `statuses`. Call it after `checks`, which replaces the commit.
+  func actions(_ number: Int, _ statuses: [String]) {
+    change(number) { pr in
+      var commit = pr["commits"]?["nodes"]?.array?.first?["commit"]?.object ?? [:]
+      commit["oid"] = pr["headRefOid"] ?? ""
+      commit["checkSuites"] = [
+        "pageInfo": ["hasNextPage": false], "nodes": .array(statuses.map { ["status": .string($0)] }),
+      ]
+      pr["commits"] = ["nodes": [["commit": .object(commit)]]]
+    }
+  }
+
   /// Adds a review of `commit` to the PR's last reviews, and to its verdicts
   /// when `verdict`.
   func review(
@@ -115,6 +128,115 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
     #expect(try sbd.poll()["resolved"]?.int == 0)
     #expect(try sbd.poll()["resolved"]?.int == 1)
     try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
+  }
+
+  /// A session whose `ci` wait recorded the PR's head commit, whose checks
+  /// read SUCCESS.
+  func headWait(_ sbd: Instance, _ github: FakeGitHub) throws -> SessionSummary {
+    let s = try chartsSession(sbd)
+    let head = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    github.change(18303) { $0["headRefOid"] = .string(head) }
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    #expect(try sbd.get(s.id).waits.first?.headSha == head)
+    return s
+  }
+
+  @Test func aCIWaitSetOnTheHeadCommitResolvesOnOneReadOnceItsActionsRunsComplete() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED", "COMPLETED"])
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
+  }
+
+  @Test func aFailedCIWaitSetOnTheHeadCommitResolvesOnOneReadOnceItsActionsRunsComplete() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try headWait(sbd, github)
+    github.checks(18303, "FAILURE")
+    github.actions(18303, ["COMPLETED"])
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks failed.")
+  }
+
+  /// A later event on the head commit, such as marking a draft ready, adds
+  /// its Actions suites a few seconds after the event. A read that soon after
+  /// the wait can show only the completed suites of an earlier run.
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsSoonAfterTheWait() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, pollSeconds: 60)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll(all: true)["resolved"]?.int == 1)
+    #expect(!github.requests.contains { $0.kind == "actions" })
+  }
+
+  @Test func aCIWaitOnTheHeadCommitResolvesOnOneReadHalfAPollIntervalAfterTheWait() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, pollSeconds: 60)
+    let s = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed.")
+  }
+
+  /// An external status that reports before CI queues shows SUCCESS for the
+  /// head commit before it has any Actions suite. `ActionsReadTests` covers
+  /// the other reads that can't show a finished run.
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsBeforeItsActionsRunStarts() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, [])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    // The second poll's two agreeing reads settle the wait without a second Actions read.
+    #expect(github.requests.filter { $0.kind == "actions" }.count == 1)
+  }
+
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWhileItsActionsRunIsRunning() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED", "IN_PROGRESS"])
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
+  @Test func aCIWaitOnTheHeadCommitNeedsTwoReadsWhenTheActionsReadFails() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    _ = try headWait(sbd, github)
+    github.actions(18303, ["COMPLETED"])
+    github.fail(18303, in: .actions)
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+  }
+
+  @Test func aCIWaitSetWithoutTheSessionsBranchCheckedOutRecordsNoHead() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    _ = try sbd.git(s.cwd, "switch", "--detach")
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    let waits = try sbd.get(s.id).waits
+    #expect(waits.count == 1)
+    #expect(waits.first?.headSha == nil)
+  }
+
+  @Test func aCIWaitKeepsTwoReadsWhenTheHeadCommitDiffers() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try chartsSession(sbd)
+    github.change(18303) { $0["headRefOid"] = "pushed-commit" }
+    github.actions(18303, ["COMPLETED"])
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    #expect(try sbd.poll()["resolved"]?.int == 0)
+    #expect(try sbd.poll()["resolved"]?.int == 1)
+    #expect(!github.requests.contains { $0.kind == "actions" })
   }
 
   @Test func aWaitStaysOpenWhenTheReadAfterItFails() throws {

@@ -276,9 +276,11 @@ public final class Client: Sendable {
     try call("accounts", as: [AccountInfo].self)
   }
 
-  /// Each account's last usage reading.
-  public func usage() throws -> [AccountUsage] {
-    try call("usage", as: [AccountUsage].self)
+  /// Each account's last usage reading, or with `refresh` a new reading of
+  /// every account.
+  public func usage(refresh: Bool = false) throws -> [AccountUsage] {
+    let args: [String: JSON] = refresh ? ["refresh": .bool(true)] : [:]
+    return try call("usage", args, as: [AccountUsage].self, timeout: refresh ? 90 : 30)
   }
 
   public func useAccount(_ ref: String) throws -> [AccountInfo] {

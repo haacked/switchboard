@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// See SessionViewState for why this isn't `@State`.
 final class DocketViewState: ObservableObject {
-  @Published var confirmingRemove = false
+  @Published var removal: TodoDeletion?
   @Published var log: [Event] = []
 }
 
@@ -14,6 +14,10 @@ struct DocketView: View {
   let session: SessionSummary
   let docket: DocketSummary
   @StateObject private var ui = DocketViewState()
+
+  private var isConfirmingRemove: Binding<Bool> {
+    Binding(get: { ui.removal != nil }, set: { if !$0 { ui.removal = nil } })
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -26,7 +30,7 @@ struct DocketView: View {
           Text(session.reason).foregroundStyle(.secondary)
         }
         Spacer()
-        if let url = URL(string: docket.url) {
+        if let url = docket.link {
           Button("Open PR") { NSWorkspace.shared.open(url) }
         }
         if let notes = docket.review?.notesPath, FileManager.default.fileExists(atPath: notes) {
@@ -38,7 +42,7 @@ struct DocketView: View {
               ? "Mark the row not done. sbd asks docket about it again"
               : "Mark the row done. It leaves the Inbox, and sbd stops asking docket about it")
         Button(role: .destructive) {
-          ui.confirmingRemove = true
+          ui.removal = TodoDeletion(session)
         } label: {
           Image(systemName: "trash")
         }
@@ -68,10 +72,10 @@ struct DocketView: View {
     }
     .padding(16)
     .task(id: docket) { await loadLog() }
-    .confirmationDialog("Remove \(session.name)?", isPresented: $ui.confirmingRemove) {
-      Button("Remove Row", role: .destructive) { model.remove(session.id) }
-    } message: {
-      Text("docket keeps the review. Open docket to abandon it.")
+    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: ui.removal) { todos in
+      Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
+    } message: { todos in
+      Text(todos.message(before: "docket keeps the review. Open docket to abandon it."))
     }
   }
 

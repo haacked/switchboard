@@ -88,4 +88,33 @@ import Testing
     #expect(headings.compactMap { $0 } == headings.compactMap { $0 }.sorted())
     #expect(text.contains("Details: tool input"))
   }
+
+  @Test func lsJSONKeepsTheFlatFieldsBesideTheMessage() throws {
+    let sbd = try Instance()
+    let s = try held(sbd)
+
+    let list = try #require(JSON.parse(try sbd.sb("ls", "--json"))?.array)
+
+    let triage = try #require(list.first { $0["id"]?.string == s.id }?["triage"])
+    for key in ["title", "kind", "summary", "options", "callouts", "multiSelect", "decisions", "source", "ref"] {
+      #expect(triage[key] != nil, "\(key)")
+    }
+    #expect(triage["summary"] == triage["message"]?["summary"]?["text"])
+    #expect(triage["options"] == triage["message"]?["action"]?["options"])
+    #expect(triage["callouts"] == triage["message"]?["summary"]?["callouts"])
+    #expect(triage["multiSelect"] == triage["message"]?["action"]?["multiSelect"])
+  }
+
+  @Test func aDecisionListIsInTheActionAndTheTextNamesSbDecide() throws {
+    let sbd = try Instance()
+    let s = try sbd.decisionSession()
+
+    let message = try #require(
+      try JSONCoding.decode(SessionSummary.self, from: try sbd.sb("get", "--json", s.id)).triage?.message)
+    #expect(message.action.decisions.map(\.header) == ["Database", "Name", "Icons"])
+
+    let text = try sbd.sb("triage")
+    #expect(text.contains("3 decisions, answered one at a time: sb decide \(s.id)"))
+    #expect(!text.contains("none, except Acknowledge: sb ack \(s.id)"))
+  }
 }

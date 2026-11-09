@@ -72,6 +72,18 @@ private func followup(_ repository: String?) -> Followup {
     #expect(labels == ["a": "alpha", "b": "beta"])
   }
 
+  @Test func labelsOneRepoOnlyWhenAsked() {
+    let folder = "/Users/me/dev/haacked/switchboard"
+    let sessions = [session("a", repo: folder), session("b", repo: folder, pr: "haacked/switchboard"), session("none")]
+
+    #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true) == ["a": "switchboard", "b": "switchboard"])
+  }
+
+  @Test func evenForOneRepoGivesNoLabelWhenNoSessionHasARepo() {
+    #expect(RepoLabels.labels([session("none")], evenForOneRepo: true).isEmpty)
+  }
+
   @Test func countsAStartedFollowupWithoutAPRAndAWaitingFollowupForItsRepoAsOneRepo() {
     let sessions = [
       session("started", repo: "/Users/me/dev/haacked/switchboard", followup: followup("haacked/switchboard")),

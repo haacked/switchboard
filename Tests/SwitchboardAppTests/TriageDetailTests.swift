@@ -1,3 +1,4 @@
+import Foundation
 import SwitchboardCore
 import Testing
 
@@ -24,10 +25,7 @@ import Testing
   }
 
   @Test func showsTheSummaryOfADocketRowWhileTerminalIsOn() {
-    var s = session(waitsToStart: false)
-    s.cwd = ""
-    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
-    #expect(TriageDetail.pane(for: s, showingTerminal: true) == .summary)
+    #expect(TriageDetail.pane(for: docketRow(url: "https://github.com/o/r/pull/1"), showingTerminal: true) == .summary)
   }
 
   @Test func showsTheTerminalOfAStartedSessionWhileTerminalIsOn() {
@@ -36,5 +34,44 @@ import Testing
 
   @Test func showsTheSummaryWhileTerminalIsOff() {
     #expect(TriageDetail.pane(for: session(waitsToStart: false), showingTerminal: false) == .summary)
+  }
+
+  func docketRow(url: String) -> SessionSummary {
+    var s = session(waitsToStart: false)
+    s.cwd = ""
+    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: url), DocketStatus())
+    // The bar must link a docket row to docket's URL and never show this `pr` or its code owners.
+    s.pr = prWithOwners()
+    return s
+  }
+
+  func prWithOwners() -> PRSummary {
+    var pr = PRSummary(PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r"))
+    pr.codeOwners = CodeOwnerStatus(satisfied: false, groups: [])
+    return pr
+  }
+
+  @Test func linksADocketRowToItsPullRequest() throws {
+    let link = try #require(TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1")))
+    #expect(link.label == "o/r#1")
+    #expect(link.url == URL(string: "https://github.com/o/r/pull/1"))
+    #expect(link.owners == nil)
+  }
+
+  @Test func refusesADocketUrlThatIsNotHttps() {
+    #expect(TriageDetail.prLink(for: docketRow(url: "http://github.com/o/r/pull/1")) == nil)
+  }
+
+  @Test func linksASessionToItsPullRequest() throws {
+    var s = session(waitsToStart: false)
+    s.pr = prWithOwners()
+    let link = try #require(TriageDetail.prLink(for: s))
+    #expect(link.label == s.pr?.line)
+    #expect(link.url == URL(string: "https://github.com/o/r/pull/5"))
+    #expect(link.owners == s.pr?.codeOwners)
+  }
+
+  @Test func hasNoPullRequestLinkForASessionWithoutOne() {
+    #expect(TriageDetail.prLink(for: session(waitsToStart: false)) == nil)
   }
 }

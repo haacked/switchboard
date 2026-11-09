@@ -66,6 +66,44 @@ private func longCommandTurn() -> [Event] {
     #expect(m.details.openByDefault)
   }
 
+  @Test func aShortCommandWithALineBreakOpensDetails() throws {
+    let command = "cd build\nrm -rf out"
+    let call = tool("Bash", ["command": .string(command)], id: "b1")
+    let m = try #require(message(facts(promptTurn(call, tool("Bash", ["command": .string(command)])))))
+
+    #expect(m.details.toolInput?.text.contains("rm -rf out") == true)
+    #expect(m.details.openByDefault)
+  }
+
+  /// The app draws the Summary as GitHub Flavored Markdown. A command that
+  /// Markdown would cut, restyle, or hide still shows as one code span that
+  /// holds the whole command, or Details opens.
+  @Test(arguments: [
+    "echo `date`", "echo ``two``", "`", "printf '%s' a``b`c", " ls ", "echo  two  spaces",
+    "echo *not emphasis* and _this_", "echo <b>x</b> <!-- hidden -->", "echo [a](https://x.example)",
+    "echo \\`x\\`", "echo a\tb", "x | y | z",
+  ])
+  func theSummaryShowsTheWholeCommandOrDetailsOpens(_ command: String) throws {
+    let call = tool("Bash", ["command": .string(command)], id: "b1")
+    let m = try #require(message(facts(promptTurn(call, tool("Bash", ["command": .string(command)])))))
+
+    guard !m.details.openByDefault else { return }
+    let blocks = MarkdownBlock.parse(m.summary.text)
+    guard case .paragraph(let text) = try #require(blocks.first), blocks.count == 1 else {
+      Issue.record("the Summary is not one paragraph: \(blocks)")
+      return
+    }
+    #expect(text.runs.filter { $0.style.contains(.code) }.map(\.text) == [command])
+  }
+
+  @Test func aCommandThatMarkdownWouldRestyleStillShowsInTheSummary() throws {
+    for command in ["echo `date`", "echo ``two``", "echo *x*", " ls ", "echo  two  spaces"] {
+      let call = tool("Bash", ["command": .string(command)], id: "b1")
+      let m = try #require(message(facts(promptTurn(call, tool("Bash", ["command": .string(command)])))))
+      #expect(m.details.openByDefault == false, "\(command)")
+    }
+  }
+
   @Test func aQuestionCardPutsTheQuestionInSummaryAndTheOptionsInAction() throws {
     let one: JSON = [
       "questions": [["question": "Which fruit?", "options": [["label": "apple"], ["label": "cherry"]]]]
@@ -214,6 +252,28 @@ private func longCommandTurn() -> [Event] {
     }
   }
 
+  @Test func theActionCarriesTheItemsDecisions() throws {
+    let decision = PendingDecision(
+      number: 2, header: "Name", question: "What is it called?",
+      options: [.init(label: "to-do", recommended: true), .init(label: "follow-up")])
+    let item = TriageItem(
+      title: "Answer", kind: .decision, summary: "It planned.\nIt needs decisions.", decisions: [decision],
+      source: .session)
+
+    #expect(item.message.action.decisions == [decision])
+    let json = try #require(JSON.parse(String(decoding: try JSONEncoder().encode(item), as: UTF8.self)))
+    #expect(json["message"]?["action"]?["decisions"]?.array?.first?["header"]?.string == "Name")
+    #expect(json["decisions"] == json["message"]?["action"]?["decisions"])
+    #expect(try JSONDecoder().decode(TriageItem.self, from: try JSONEncoder().encode(item)) == item)
+  }
+
+  @Test func anItemWithoutDecisionsHasAnEmptyDecisionsArray() throws {
+    let item = TriageItem(title: "t", kind: .info, summary: "s", source: .session)
+    let json = try #require(JSON.parse(String(decoding: try JSONEncoder().encode(item), as: UTF8.self)))
+
+    #expect(json["message"]?["action"]?["decisions"]?.array?.isEmpty == true)
+  }
+
   @Test func theItemRoundTripsWithItsDetails() throws {
     var built = try #require(item(facts(longCommandTurn())))
     built.details = TriageDetails(
@@ -253,6 +313,6 @@ private func longCommandTurn() -> [Event] {
     #expect(TriageCard.instructions.contains("Details"))
     #expect(TriageSummarizer.system.contains("Details"))
     #expect(TriageCard.instructions.contains("Two to three lines"))
-    #expect(TriageSummarizer.system.contains("two to three plain lines"))
+    #expect(TriageSummarizer.system.contains("two to three lines"))
   }
 }

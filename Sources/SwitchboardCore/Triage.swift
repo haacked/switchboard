@@ -170,10 +170,12 @@ public struct TriageSummary: Codable, Equatable, Sendable {
   public var callouts: [Callout]
   /// The user ticks any of the options and submits them as one reply.
   public var multiSelect: Bool
+  /// The separate decisions that the reply asks for, each with its own options.
+  public var decisions: [PendingDecision]
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false
+    multiSelect: Bool = false, decisions: [PendingDecision] = []
   ) {
     self.title = title
     self.kind = kind
@@ -181,10 +183,11 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     self.options = options
     self.callouts = callouts
     self.multiSelect = multiSelect
+    self.decisions = decisions
   }
 
-  /// A `triage` event recorded before cards had callouts or multiSelect holds
-  /// none and a single-choice card.
+  /// A `triage` event recorded before cards had callouts, multiSelect, or
+  /// decisions holds none and a single-choice card.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     title = try c.decode(String.self, forKey: .title)
@@ -193,6 +196,7 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     options = try c.decodeIfPresent([TriageOption].self, forKey: .options) ?? []
     callouts = try c.decodeIfPresent([Callout].self, forKey: .callouts) ?? []
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
   }
 }
 
@@ -207,6 +211,9 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var callouts: [Callout]
   /// The user ticks any of the checkable options and submits them as one reply.
   public var multiSelect: Bool
+  /// The separate decisions that the item asks for. While a decision list is
+  /// open, they are the list's copy.
+  public var decisions: [PendingDecision]
   public var source: TriageSource
   /// What the user can open after the Summary and the Action. The service
   /// fills it from the session, because the builder sees only its facts.
@@ -218,7 +225,8 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, source: TriageSource, ref: String = "", details: TriageDetails = TriageDetails()
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], source: TriageSource, ref: String = "",
+    details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
     self.details = details
@@ -228,22 +236,24 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.options = options
     self.callouts = callouts
     self.multiSelect = multiSelect
+    self.decisions = decisions
     self.source = source
   }
 
   init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
-      callouts: summary.callouts, multiSelect: summary.multiSelect, source: source, ref: ref)
+      callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions, source: source,
+      ref: ref)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case title, kind, summary, options, callouts, multiSelect, source, ref, message
+    case title, kind, summary, options, callouts, multiSelect, decisions, source, ref, message
   }
 
   private struct Sections: Decodable { var details: TriageDetails? }
 
-  /// An item that an older sbd wrote has no multiSelect and no message.
+  /// An item that an older sbd wrote has no multiSelect, decisions, or message.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     details = try c.decodeIfPresent(Sections.self, forKey: .message)?.details ?? TriageDetails()
@@ -253,6 +263,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
     options = try c.decode([TriageOption].self, forKey: .options)
     callouts = try c.decode([Callout].self, forKey: .callouts)
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
     source = try c.decode(TriageSource.self, forKey: .source)
     ref = try c.decode(String.self, forKey: .ref)
   }
@@ -265,6 +276,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
     try c.encode(options, forKey: .options)
     try c.encode(callouts, forKey: .callouts)
     try c.encode(multiSelect, forKey: .multiSelect)
+    try c.encode(decisions, forKey: .decisions)
     try c.encode(source, forKey: .source)
     try c.encode(ref, forKey: .ref)
     try c.encode(message, forKey: .message)
@@ -306,21 +318,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// The option that `sb choose` and a click name: a 1-based number, or a
   /// label without regard to case.
   public func option(_ key: String) throws -> TriageOption {
-    let key = key.trimmingCharacters(in: .whitespaces)
-    if let n = Int(key) {
-      guard n > 0, options.indices.contains(n - 1) else {
-        throw APIError("there is no option \(n). There are \(options.count)")
-      }
-      return options[n - 1]
-    }
-    let matches = options.filter { $0.label.caseInsensitiveCompare(key) == .orderedSame }
-    guard matches.count == 1 else {
-      let labels = options.map(\.label).joined(separator: ", ")
-      throw APIError(
-        matches.isEmpty
-          ? "no option \"\(key)\". The options are: \(labels)" : "\"\(key)\" names \(matches.count) options")
-    }
-    return matches[0]
+    options[try optionIndex(key, labels: options.map(\.label))]
   }
 }
 
@@ -378,8 +376,46 @@ public enum Triage {
   public static let sessionEvent = "summary"
 
   /// The session's item, or nil when it needs nothing from the user.
-  /// `verdict` is the session's attention verdict.
+  /// `verdict` is the session's attention verdict. An open decision list
+  /// puts its stored decisions on the item, so a later card or rule doesn't
+  /// replace the answers. A held prompt's item keeps none, because the
+  /// prompt needs its own answer first.
   public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
+    item(facts, live: liveItem(facts, verdict))
+  }
+
+  /// The session's item, its open decision list, and whether a submit sent
+  /// the item's decisions, all from one live item.
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+    item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
+  ) {
+    let live = liveItem(facts, verdict)
+    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+  }
+
+  private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
+    guard var item = live else { return nil }
+    if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
+    return item
+  }
+
+  /// The open decision list, with the decisions of a later item in `newer`.
+  private static func decisionList(_ facts: SessionFacts, live: TriageItem?) -> DecisionList? {
+    guard var list = facts.decisionList else { return nil }
+    if let live, live.ref != list.ref { list.newer = live.decisions }
+    return list
+  }
+
+  /// Whether the last accepted submit sent the decisions of the session's
+  /// item. The item keeps them until the session's next prompt lands, and
+  /// they don't open again.
+  private static func decisionsSent(_ facts: SessionFacts, live: TriageItem?) -> Bool {
+    guard facts.decisionList == nil, let sent = facts.submittedDecisionsRef, let live else { return false }
+    return live.ref == sent && live.hasDecisionList
+  }
+
+  /// The item that the session's card, summary, rule, or reply gives.
+  static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
     var item: TriageItem
     if let card = facts.cards.first {
@@ -442,7 +478,7 @@ public enum Triage {
     }
     if card.kind == .permission {
       return TriageItem(
-        title: title(card.reason), kind: .approval, summary: "Claude asks to run \(callSummary(card)).",
+        title: title(card.reason), kind: .approval, summary: permissionSummary(card),
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
@@ -468,18 +504,67 @@ public enum Triage {
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
-  /// The last paragraph of the reply as the summary, with no options.
+  /// The reply's closing section as the summary, with no options.
   static func fallbackItem(_ reply: String, _ verdict: Verdict) -> TriageItem {
-    let paragraphs = reply.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-      .filter { !$0.isEmpty }
     let kind: TriageKind
     switch Attention.classify(reply) {
     case .question: kind = .question
     case .offer: kind = .approval
     case .other: kind = .info
     }
-    return TriageItem(
-      title: title(verdict.reason), kind: kind, summary: paragraphs.last ?? "", source: .fallback)
+    return TriageItem(title: title(verdict.reason), kind: kind, summary: closingSection(reply), source: .fallback)
+  }
+
+  /// A fallback summary lists at most this many items of a list.
+  static let closingItems = TriageSummarizer.maxDecisions
+
+  /// The reply's last list when at most one paragraph follows it: the line
+  /// before the list, a line for each item, and that paragraph. Otherwise the
+  /// reply's last paragraph. Every word comes from the reply, so a list of
+  /// changes reads as the reply wrote it and not as a list of decisions.
+  static func closingSection(_ reply: String) -> String {
+    let lastParagraph = Attention.lastParagraph(reply) ?? ""
+    let blocks = MarkdownBlock.parse(reply)
+    guard let at = blocks.lastIndex(where: { if case .list = $0 { true } else { false } }),
+      case .list(let number, let items) = blocks[at]
+    else { return lastParagraph }
+    var closing: String?
+    switch blocks[(at + 1)...].first {
+    case nil: break
+    case .paragraph(let text) where at + 2 == blocks.count: closing = text.plain
+    default: return lastParagraph
+    }
+    let itemLines = items.prefix(closingItems).enumerated().compactMap { i, item -> String? in
+      guard case .paragraph(let text) = item.blocks.first else { return nil }
+      let box = item.checked.map { $0 ? "[x] " : "[ ] " } ?? ""
+      let marker = (number.map { "\($0 + i). " } ?? "- ") + box
+      return oneLine(marker + itemLine(text.plain), max: TriageCard.lineLength)
+    }
+    guard !itemLines.isEmpty else { return lastParagraph }
+    let lead: String? =
+      switch at > 0 ? blocks[at - 1] : nil {
+      case .paragraph(let text): text.plain.components(separatedBy: "\n").last
+      case .heading(_, let text): text.plain
+      default: nil
+      }
+    let lines =
+      [lead.map { oneLine($0, max: TriageCard.lineLength) }] + itemLines
+      + [items.count > closingItems ? "…" : nil, closing]
+    return lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+  }
+
+  /// A list item on one line. An item that names a recommendation keeps its
+  /// first sentence and the first sentence that recommends.
+  static func itemLine(_ text: String) -> String {
+    let line = oneLine(text, max: .max)
+    guard line.localizedCaseInsensitiveContains("recommend") else { return line }
+    // A list item can start with a flag such as --squash. The text has no markup left, so the split trims only
+    // whitespace.
+    let sentences = Attention.sentences(line, trimming: .whitespaces)
+    guard let pick = sentences.dropFirst().first(where: { $0.localizedCaseInsensitiveContains("recommend") }) else {
+      return line
+    }
+    return sentences[0] + " " + pick
   }
 
   /// A reason line as a title: its first letter capitalized, and the first
@@ -563,7 +648,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format."
 
   public init() {}
 

@@ -5,7 +5,9 @@ import Testing
 
 @MainActor
 struct BackgroundLaunchTests {
-  @Test(arguments: ["SB_SNAPSHOT", "SB_TERMINAL_TEST", "SB_DRAFT_TEST", "SB_QUIT_FILE"])
+  @Test(arguments: [
+    "SB_SNAPSHOT", "SB_TERMINAL_TEST", "SB_DRAFT_TEST", "SB_SHELL_TEST", "SB_DROP_TEST", "SB_QUIT_FILE",
+  ])
   func scriptedHookRunsInTheBackground(hook: String) {
     #expect(BackgroundLaunch.applies(to: [hook: "/tmp/x"]))
   }
@@ -61,6 +63,17 @@ struct BackgroundLaunchTests {
     center.post(name: NSWindow.didUpdateNotification, object: sheet)
     #expect(sheet.alphaValue == 0)
     #expect(sheet.ignoresMouseEvents)
+  }
+
+  @Test func hiddenPopoverAboveTheNormalLevelIsTransparentAndIgnoresTheMouse() {
+    let parent = window()
+    let popover = window([.borderless])
+    popover.level = .popUpMenu
+    parent.addChildWindow(popover, ordered: .above)
+    defer { parent.removeChildWindow(popover) }
+    BackgroundLaunch.hide(popover)
+    #expect(popover.alphaValue == 0)
+    #expect(popover.ignoresMouseEvents)
   }
 
   @Test func statusItemWindowStaysVisible() {

@@ -303,4 +303,92 @@ private final class Strays {
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(how, sbd, s)
   }
+
+  // MARK: To-dos
+
+  /// Starts `sleep 100` in the session's folder and waits until it runs sleep. The folder scan then holds the pane
+  /// stop until the test kills it, or for 5 s.
+  private func holdFolder(_ sbd: Instance, _ s: SessionSummary) throws -> Strays {
+    let strays = Strays(sbd)
+    try strays.spawn("/bin/sleep", ["100"], cwd: s.cwd)
+    _ = try sbd.waitFor("the stray to run sleep", fetch: strays.pids) { !$0.isEmpty && $0.allSatisfy(runsSleep) }
+    return strays
+  }
+
+  /// The to-do arrives after rm's first check, while the stop waits for the folder. The worktree goes, and the
+  /// record and the to-do stay. A second rm that resolves the to-do finishes the delete.
+  @Test func rmKeepsTheRecordWhenAToDoArrivesDuringThePaneStop() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let terminals = try sbd.client.terminals(s.id)
+    let strays = try holdFolder(sbd, s)
+    defer { strays.killAll() }
+
+    let removal = Outcome<CommandResult>.detached { try sbd.deleteSession(s.id) }
+    // finishPaneStop closes the Claude pane just before it waits for the folder.
+    try sbd.waitFor("the stop to close the Claude pane") { try !paneExists(terminals, terminals.claude) }
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    strays.killAll()
+    try #require(removal.done.wait(timeout: .now() + 60) == .success, "rm did not return")
+    let r = try #require(try removal.result?.get())
+
+    #expect(r.status != 0)
+    #expect(
+      r.stderr.contains("Removed the worktree of \(s.id) and kept the session, because it has an open to-do"),
+      Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains(todo.id), Comment(rawValue: r.stderr))
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+
+    let retry = try sbd.run(["rm", s.id, "--resolve", todo.id])
+
+    #expect(retry.status == 0, Comment(rawValue: retry.stderr))
+    #expect(try !sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(try sbd.resolvedTodoIds() == [todo.id])
+  }
+
+  /// `rm --delete-branch` deletes the branch before its last to-do check. A late refusal names the branch too.
+  @Test func aLateToDoRefusalNamesTheBranchThatRmDeleted() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    let terminals = try sbd.client.terminals(s.id)
+    let strays = try holdFolder(sbd, s)
+    defer { strays.killAll() }
+
+    let removal = Outcome<CommandResult>.detached { try sbd.deleteSessionAndBranch(s.id) }
+    try sbd.waitFor("the stop to close the Claude pane") { try !paneExists(terminals, terminals.claude) }
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    strays.killAll()
+    try #require(removal.done.wait(timeout: .now() + 60) == .success, "rm did not return")
+    let r = try #require(try removal.result?.get())
+
+    #expect(r.status != 0)
+    #expect(
+      r.stderr.contains(
+        "Removed the worktree and the local branch of \(s.id) and kept the session, because it has an open to-do"),
+      Comment(rawValue: r.stderr))
+    #expect(try !sbd.localBranchExists(repo, mergedBranch))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+  }
+
+  /// The folder scan refuses after the pane stop began, which is after the first check accepted the to-do's id.
+  @Test func aRefusalAfterThePaneStopBeganLeavesTheToDoOpen() throws {
+    let sbd = try Instance()
+    let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
+    let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
+    let strays = try holdFolder(sbd, s)
+    defer { strays.killAll() }
+
+    let r = try sbd.run(["rm", s.id, "--worktree", "--resolve", todo.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("still run"), Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(try sbd.isOpenTodo(s.id, todo.id))
+    #expect(try sbd.resolvedTodos().isEmpty)
+  }
 }

@@ -78,6 +78,47 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     #expect(reason == "an open card")
   }
 
+  /// Design A test 13. A continue would answer the reply while the user works through its decisions.
+  @Test func aSummaryWithDecisionsHoldsItBack() throws {
+    let summary = try JSONCoding.convert(decisionSummaryJSON, to: TriageSummary.self)
+
+    let reason = blocker { input in
+      input.verdict.source = .reply
+      input.facts.triage = summary
+    }
+
+    #expect(reason != nil)
+  }
+
+  /// A lone decision makes no list, so nothing waits for the user to step through it.
+  @Test func aSummaryWithOneDecisionDoesNotHoldItBack() throws {
+    var json = try #require(decisionSummaryJSON.object)
+    json["decisions"] = .array(Array(try #require(threeDecisions.array).prefix(1)))
+    let summary = try JSONCoding.convert(JSON.object(json), to: TriageSummary.self)
+
+    let reason = blocker { input in
+      input.verdict.source = .reply
+      input.facts.triage = summary
+    }
+
+    #expect(reason == nil)
+  }
+
+  @Test func anOpenDecisionListHoldsItBack() {
+    #expect(
+      blocker { $0.facts.apply(decisionsOpened(10, t: now - 2 * hourMs + 2000, ref: "stop:2")) } != nil)
+  }
+
+  @Test(arguments: ["decisions_submitted", "decisions_discarded"])
+  func aClosedDecisionListNoLongerHoldsItBack(_ kind: String) {
+    let reason = blocker { input in
+      input.facts.apply(decisionsOpened(10, t: now - 2 * hourMs + 2000, ref: "stop:2"))
+      input.facts.apply(Event(id: 11, session: "s1", t: now - 2 * hourMs + 3000, kind: kind, data: ["message": "x"]))
+    }
+
+    #expect(reason == nil)
+  }
+
   @Test func anOpenWaitHoldsItBack() {
     #expect(blocker { $0.session = session(wait: "CI on #12") } == "an open wait")
   }
@@ -343,6 +384,32 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
       event("UserPromptSubmit", 5100, ["prompt": "Yes, go ahead."]),
     ])
     #expect(f.lastTouched == 1000)
+  }
+
+  @Test(arguments: [peerMessage, "\(peerMessage)\n"])
+  func aMessageFromAnotherSessionIsNotATouch(_ prompt: String) {
+    let f = facts([
+      event("UserPromptSubmit", 1000, ["prompt": "go"]),
+      event("UserPromptSubmit", 5000, ["prompt": .string(prompt)]),
+    ])
+    #expect(f.lastTouched == 1000)
+  }
+
+  /// Each prompt carries the block, but not as the whole prompt that claude
+  /// sends for a message from another session.
+  @Test(arguments: [
+    "<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\">\nRebase please.",
+    "Another Claude session sent a message:\n\(peerMessage)",
+    " \(peerMessage)",
+    "\(peerMessage)\nAlso merge it.",
+    "\(peerMessage)\nAlso merge it.\n\(peerMessage)",
+  ])
+  func aPromptThatIsNotExactlyOnePeerBlockIsATouch(_ prompt: String) {
+    let f = facts([
+      event("UserPromptSubmit", 1000, ["prompt": "go"]), event("UserPromptSubmit", 5000, ["prompt": .string(prompt)]),
+    ])
+    #expect(f.lastTouched == 5000)
+    #expect(f.prompts == 2)
   }
 
   @Test func theUserTypingTheSameTextAsSbdsReportedMessageIsATouch() {

@@ -3,16 +3,19 @@ import SwitchboardCore
 
 /// A GitHub API on 127.0.0.1 for one test. It answers the poller's GraphQL
 /// lookup, status, and body queries from the PR nodes and comment bodies that
-/// Fixtures/github-*.json recorded, which a test can change between polls. It
+/// Fixtures/github-*.json recorded, which a test can change between polls,
+/// and its code owner queries from the configs and changed files that a test
+/// sets. It
 /// answers a REST GET from the routes that a test sets, and 404 for any other
 /// path. It also serves issues and contents files that GET, PATCH, and PUT
 /// change, as GitHub does. It records each request.
 final class FakeGitHub {
   struct Request {
-    /// lookup, status, base, or bodies.
+    /// lookup, status, base, bodies, codeowners, files, approvals, or actions.
     var kind: String
-    /// The node ids that a status or body query asked for, or each lookup
-    /// key as owner/name:branch or owner/name#number.
+    /// The node ids that a status, base, body, files, approvals, or actions query
+    /// asked for, each lookup key as owner/name:branch or owner/name#number,
+    /// or the owner/name:branch of a codeowners query.
     var ids: [String]
     var authorization: String?
   }
@@ -58,9 +61,19 @@ final class FakeGitHub {
     var contentType: String
   }
 
-  /// The two queries that ask for PR nodes.
+  /// The queries that ask for PR nodes.
   enum PRQuery: String {
-    case status, base
+    case status, base, files, approvals, actions
+  }
+
+  /// A base branch's code owner settings, as the codeowners query reads them.
+  struct CodeOwnerConfig {
+    var rules: [JSON]
+    var protection: JSON?
+    /// The CODEOWNERS text by its path in the repo.
+    var files: [String: String]
+    /// nil answers `codeowners: null`.
+    var errors: [JSON]?
   }
 
   static let fixtures = Instance.root.appendingPathComponent("Tests/IntegrationTests/Fixtures").path
@@ -88,6 +101,15 @@ final class FakeGitHub {
   private var afterGET: [String: () -> Void] = [:]
   /// The status that the next GET of each path gets instead of its answer.
   private var failingGETs: [String: Int] = [:]
+  /// By owner/name:branch.
+  private var codeOwnerConfigs: [String: CodeOwnerConfig] = [:]
+  /// The repos whose codeowners query answers a null repository and an error.
+  private var failingCodeOwners: Set<String> = []
+  /// Each PR's changed files, by number, with the `totalCount` that GitHub
+  /// reports when it differs from the number of paths.
+  private var changedFiles: [Int: (paths: [String], totalCount: Int?)] = [:]
+  /// What to run after the next files query.
+  private var afterFiles: (() -> Void)?
 
   init() throws {
     let listener = socket(AF_INET, SOCK_STREAM, 0)
@@ -176,6 +198,43 @@ final class FakeGitHub {
 
   func recover(_ number: Int, in query: PRQuery = .status) {
     lock.withLock { _ = failingPRs[query, default: []].remove(number) }
+  }
+
+  /// Sets the code owner config of `repo`'s `base`, in place of an earlier
+  /// one. `rules` are `ref.rules.nodes`, and `protection` is
+  /// `ref.branchProtectionRule`. `files` holds the CODEOWNERS text by its
+  /// path. `errors` are `codeowners.errors`. A repo with no config answers
+  /// no rules, null protection, null codeowners, and no files, as
+  /// haacked/switchboard does.
+  func codeOwners(
+    repo: String, base: String, rules: [JSON], protection: JSON?, files: [String: String], errors: [JSON]?
+  ) {
+    lock.withLock {
+      codeOwnerConfigs["\(repo):\(base)"] = CodeOwnerConfig(
+        rules: rules, protection: protection, files: files, errors: errors)
+    }
+  }
+
+  /// Makes each codeowners query for `repo` answer a null repository with an error.
+  func failCodeOwners(repo: String) {
+    lock.withLock { _ = failingCodeOwners.insert(repo) }
+  }
+
+  func recoverCodeOwners(repo: String) {
+    lock.withLock { _ = failingCodeOwners.remove(repo) }
+  }
+
+  /// Sets the PR's changed files. A files query reads them in pages of its
+  /// `first`, with the index of the next path as the cursor. `totalCount`
+  /// replaces the number of paths in the answer.
+  func changedFiles(_ number: Int, _ paths: [String], totalCount: Int? = nil) {
+    lock.withLock { changedFiles[number] = (paths, totalCount) }
+  }
+
+  /// Runs `action` once, after the fake answers the next files query and
+  /// before it answers any other request, as a push between two pages does.
+  func afterNextFiles(_ action: @escaping () -> Void) {
+    lock.withLock { afterFiles = action }
   }
 
   /// Makes the comment's node in a body query fail with an internal error.
@@ -530,7 +589,7 @@ final class FakeGitHub {
   private func answer(_ request: JSON, authorization: String?) -> Reply {
     let query = request["query"]?.string ?? ""
     let variables = request["variables"]?.object ?? [:]
-    return lock.withLock {
+    let (reply, after): (Reply, (() -> Void)?) = lock.withLock {
       var data: [String: JSON] = ["rateLimit": ["cost": 1]]
       var errors: [JSON] = []
       let kind: String
@@ -549,8 +608,49 @@ final class FakeGitHub {
             return found
           })
       }
-      if let selection = Selection(query: query, on: "PullRequest") {
-        let prQuery: PRQuery = query.contains("reviews(") ? .status : .base
+      if query.contains("codeowners(") {
+        kind = "codeowners"
+        let owner = variables["owner"]?.string ?? ""
+        let repo = "\(owner)/\(variables["name"]?.string ?? "")"
+        let base = variables["ref"]?.string ?? ""
+        ids = ["\(repo):\(base)"]
+        if failingCodeOwners.contains(repo) {
+          data["repository"] = .null
+          errors.append(["type": "INTERNAL", "path": ["repository"], "message": "Failed"])
+        } else {
+          data["repository"] = codeOwnersRepository(base, codeOwnerConfigs["\(repo):\(base)"], variables)
+        }
+      } else if query.contains("files(") {
+        kind = PRQuery.files.rawValue
+        let first = query.firstMatch(of: #/files\(first: (\d+)/#).flatMap { Int($0.1) } ?? 100
+        let failing = failingPRs[.files, default: []]
+        let page = { (id: String) -> JSON? in
+          self.prs[id].map { self.filesNode($0, first: first, after: variables["after"]?.string) }
+        }
+        if let id = variables["id"]?.string {
+          ids = [id]
+          let found = page(id)
+          if found == nil || failing.contains(prs[id]?["number"]?.int ?? 0) {
+            errors.append(["type": found == nil ? "NOT_FOUND" : "INTERNAL", "path": ["node"], "message": "Failed"])
+            data["node"] = .null
+          } else {
+            data["node"] = found!
+          }
+        } else {
+          ids = variables["ids"]?.array?.compactMap(\.string) ?? []
+          data["nodes"] = nodes(page, failing: { failing.contains(self.prs[$0]?["number"]?.int ?? 0) })
+        }
+      } else if let selection = Selection(query: query, on: "PullRequest") {
+        let prQuery: PRQuery
+        if query.contains("onBehalfOf(") {
+          prQuery = .approvals
+        } else if query.contains("reviews(") {
+          prQuery = .status
+        } else if query.contains("checkSuites(") {
+          prQuery = .actions
+        } else {
+          prQuery = .base
+        }
         kind = prQuery.rawValue
         ids = variables["ids"]?.array?.compactMap(\.string) ?? []
         let failing = failingPRs[prQuery, default: []]
@@ -584,10 +684,50 @@ final class FakeGitHub {
         }
       }
       log.append(Request(kind: kind, ids: ids, authorization: authorization))
-      if !queued.isEmpty { return queued.removeFirst() }
+      let after = kind == PRQuery.files.rawValue ? afterFiles.take() : nil
+      if !queued.isEmpty { return (queued.removeFirst(), after) }
       var response: [String: JSON] = ["data": .object(data)]
       if !errors.isEmpty { response["errors"] = .array(errors) }
-      return Reply(status: 200, headers: [:], body: JSON.object(response).text)
+      return (Reply(status: 200, headers: [:], body: JSON.object(response).text), after)
     }
+    // The accept loop answers one request at a time, so the next request
+    // sees this change.
+    after?()
+    return reply
+  }
+
+  /// The repository of a codeowners answer. Each of the github, root, and
+  /// docs aliases answers the file that its `<branch>:<path>` variable names.
+  /// The caller holds the lock.
+  private func codeOwnersRepository(_ base: String, _ config: CodeOwnerConfig?, _ variables: [String: JSON]) -> JSON {
+    var repository: [String: JSON] = [
+      "ref": [
+        "branchProtectionRule": config?.protection ?? .null,
+        "rules": ["totalCount": .number(Double(config?.rules.count ?? 0)), "nodes": .array(config?.rules ?? [])],
+      ],
+      "codeowners": config?.errors.map { ["errors": .array($0)] } ?? .null,
+    ]
+    for alias in ["github", "root", "docs"] {
+      let expression = variables[alias]?.string ?? ""
+      let text = expression.hasPrefix("\(base):") ? config?.files[String(expression.dropFirst(base.count + 1))] : nil
+      repository[alias] = text.map { ["text": .string($0), "isTruncated": false, "isBinary": false] } ?? .null
+    }
+    return .object(repository)
+  }
+
+  /// One page of the PR's changed files, from the path at index `after`.
+  /// The caller holds the lock.
+  private func filesNode(_ pr: [String: JSON], first: Int, after: String?) -> JSON {
+    let changed = changedFiles[pr["number"]?.int ?? 0] ?? ([], nil)
+    let start = min(after.flatMap(Int.init) ?? 0, changed.paths.count)
+    let end = min(start + first, changed.paths.count)
+    return [
+      "id": pr["id"] ?? .null, "headRefOid": pr["headRefOid"] ?? .null, "baseRefName": pr["baseRefName"] ?? .null,
+      "files": [
+        "totalCount": .number(Double(changed.totalCount ?? changed.paths.count)),
+        "pageInfo": ["hasNextPage": .bool(end < changed.paths.count), "endCursor": .string(String(end))],
+        "nodes": .array(changed.paths[start..<end].map { ["path": .string($0)] }),
+      ],
+    ]
   }
 }

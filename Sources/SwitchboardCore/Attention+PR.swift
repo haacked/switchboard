@@ -42,8 +42,8 @@ extension Attention {
     }
     if pr.mergeable == .conflicting {
       return Verdict(
-        state: .needsYou, reason: oneLine("rebase; \(n) conflicts with \(pr.base)"),
-        options: [ask("Rebase", "Rebase onto \(pr.base), resolve the conflicts, and push.")],
+        state: .needsYou, reason: oneLine("merge \(pr.base) in; \(n) conflicts with \(pr.base)"),
+        options: [ask("Merge \(pr.base)", mergeBaseMessage(base: pr.base))],
         callouts: [
           Callout(
             kind: .warning, title: oneLine("\(n) conflicts with \(pr.base)", max: TriageCard.labelLength),
@@ -72,10 +72,7 @@ extension Attention {
         state: .needsYou, reason: "find out why Trunk removed \(n) from its queue\(label)",
         options: [ask("Find out why", "Find out why Trunk removed \(n) from its queue\(label), and tell me.")])
     }
-    // A failed Depot job blocks the merge. Trunk adds a PR to its queue only
-    // after its required checks pass, so a failed job on a queued PR is one
-    // that the merge does not need.
-    if pr.queue?.isQueued != true, let run = pr.depotFailure {
+    if let run = pr.blockingDepotFailure {
       let reason = "fix Depot CI on \(n): "
       let failure = run.failureSummary(max: TriageCard.lineLength)
       return Verdict(
@@ -151,6 +148,13 @@ extension Attention {
 }
 
 extension Attention {
+  /// The message that asks a session to bring its base branch into its PR's
+  /// branch. It merges rather than rebases, because a rebase needs a force
+  /// push, which a session in auto mode can refuse.
+  public static func mergeBaseMessage(base: String) -> String {
+    "Merge origin/\(base) into this branch, resolve the conflicts, run the tests, and push."
+  }
+
   /// The one option of a rule whose next step the session takes: it sends
   /// `message` to the session.
   static func ask(_ label: String, _ message: String) -> TriageOption {

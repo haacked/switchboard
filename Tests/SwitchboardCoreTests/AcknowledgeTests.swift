@@ -215,11 +215,11 @@ extension AcknowledgeTests {
     @Test func acknowledgedNeedsYouPRRuleIsWaiting() throws {
       let f = try prFacts(
         mergeablePR(mergeable: .conflicting),
-        then: [try ackEvent(3, .needsYou, "rebase; #42 conflicts with main", head: samplePRHead)])
+        then: [try ackEvent(3, .needsYou, "merge main in; #42 conflicts with main", head: samplePRHead)])
 
       let v = verdict(f)
 
-      #expect(v == Verdict(state: .waiting, reason: "rebase; #42 conflicts with main"))
+      #expect(v == Verdict(state: .waiting, reason: "merge main in; #42 conflicts with main"))
       #expect(v.acknowledged)
     }
 
@@ -326,7 +326,7 @@ extension AcknowledgeTests {
 
       let v = verdict(f)
 
-      #expect(v == Verdict(state: .needsYou, reason: "rebase; #42 conflicts with main"))
+      #expect(v == Verdict(state: .needsYou, reason: "merge main in; #42 conflicts with main"))
       #expect(!v.acknowledged)
     }
 

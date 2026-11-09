@@ -11,7 +11,7 @@ extension Service {
         throw APIError("group add needs a name")
       }
       let ids = try sessionRefs(args)
-      let notes = try args["note"].map { try [makeNote($0.string, by: args["by"]?.string, after: [])] } ?? []
+      let notes = try args["note"].map { try [groupNote($0.string, args, after: [])] } ?? []
       let description = try SessionGroup.cleanDescription(args["description"]?.string)
       try refuseUngroupable(ids)
       let id = try createGroup(name, description: description, notes: notes).id
@@ -33,7 +33,7 @@ extension Service {
     case "group-note":
       let id = try lookupGroup(args)
       var group = groups[id]!
-      group.notes.append(try makeNote(args["text"]?.string, by: args["by"]?.string, after: group.notes))
+      group.notes.append(try groupNote(args["text"]?.string, args, after: group.notes))
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
     case "group-describe":
@@ -85,6 +85,13 @@ extension Service {
 
   private func sessionRefs(_ args: JSON) throws -> [String] {
     try (args["sessions"]?.array ?? []).compactMap(\.string).map { try lookup(["session": .string($0)]) }
+  }
+
+  /// A note with the request's `by` and `kind`. It throws for a to-do, which a group can't have.
+  private func groupNote(_ text: String?, _ args: JSON, after notes: [Note]) throws -> Note {
+    let note = try makeNote(text, by: args["by"]?.string, kind: args["kind"]?.string, after: notes)
+    guard note.kind != .todo else { throw APIError("To-dos belong on sessions, not groups.") }
+    return note
   }
 
   /// Refuses a name that another group has. A name then finds one group.
@@ -163,7 +170,7 @@ extension Service {
   func groupSuggestions() throws -> [GroupSuggestion] {
     let candidates = entries.values.filter { groupable($0.session) }.map { e in
       GroupSuggestions.Candidate(
-        id: e.session.id, branch: e.session.branch, prTitle: e.facts.pr?.title, group: e.session.group,
+        id: e.session.id, branch: e.branch, prTitle: e.facts.pr?.title, group: e.session.group,
         placedByHand: e.session.placedByHand ?? false, repo: e.facts.pr?.repo, pr: e.facts.pr?.number,
         dependencies: e.facts.dependencies)
     }
