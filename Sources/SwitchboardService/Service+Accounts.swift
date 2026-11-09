@@ -61,6 +61,28 @@ extension Service {
     }
     return try JSON(encoding: accountList())
   }
+
+  /// Throws when the target of `account-use` or `account-move` has no login,
+  /// because claude would ask a session there for /login. A target whose last
+  /// reading found no login is read again first, so an account that signed in
+  /// since then is accepted. A reading that failed for another reason, such
+  /// as a locked keychain, lets the account through. So does an account that
+  /// sbd has not read. It must run off the state queue, because a read waits
+  /// on the keychain and the network.
+  func requireSignedIn(_ args: JSON) throws {
+    guard let reader = usageReader, let ref = args["account"]?.string,
+      let folder = try? queue.sync(execute: { try resolveAccount(ref) }),
+      Self.signedOutRefusal(reader.latest(folder)) != nil
+    else { return }
+    if let refusal = Self.signedOutRefusal(reader.read(folder)) { throw APIError(refusal) }
+  }
+
+  /// The account's name followed by the reading's `SignedOut` error. That
+  /// error names the login command.
+  static func signedOutRefusal(_ reading: AccountUsage?) -> String? {
+    guard let reading, reading.signedOut == true else { return nil }
+    return "\(reading.name) is \(reading.error ?? "not signed in")"
+  }
 }
 
 // MARK: Moving sessions
