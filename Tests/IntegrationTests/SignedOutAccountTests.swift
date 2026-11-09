@@ -109,6 +109,17 @@ import Testing
     #expect(try active(sbd) == [sbd.account("B")])
   }
 
+  @Test func useAcceptsATargetWhoseRereadFailsForAnotherReason() throws {
+    let fake = try FakeUsage()
+    let sbd = try signedOutB(fake)
+    try sbd.signIn("B", token: "token-b")
+    fake.reply("", status: 500)
+
+    try sbd.sb("account", "use", "B")
+
+    #expect(try active(sbd) == [sbd.account("B")])
+  }
+
   @Test func moveAcceptsATargetThatSignedInAfterItsLastReading() throws {
     let fake = try FakeUsage()
     let sbd = try signedOutB(fake)

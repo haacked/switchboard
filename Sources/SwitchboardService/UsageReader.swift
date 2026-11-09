@@ -57,9 +57,10 @@ final class UsageReader: @unchecked Sendable {
     latest(account)?.budget().isSpent != true
   }
 
-  /// Reads one account now. The caller must not be on the service's queue.
-  func read(_ folder: String) {
-    queue.sync { _ = keep([read(folder, name: ClaudeAccount.name(folder))]) }
+  /// Reads one account now and returns the reading. The caller must not be on
+  /// the service's queue.
+  func read(_ folder: String) -> AccountUsage {
+    queue.sync { keep([read(folder, name: ClaudeAccount.name(folder))])[0] }
   }
 
   private func readAll() -> [AccountUsage] {

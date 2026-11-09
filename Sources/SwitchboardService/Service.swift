@@ -247,7 +247,7 @@ public final class Service {
       case "send" where request.args["images"] != nil:
         return try sendWithImages(request, hookGone: hookGone)
       case "account-use", "account-move":
-        rereadSignedOutTarget(request.args)
+        try requireSignedIn(request.args)
       default:
         break
       }
