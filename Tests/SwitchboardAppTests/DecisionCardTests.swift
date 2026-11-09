@@ -144,9 +144,3 @@ import Testing
     #expect(option.accessibilityHint(mergeMethod: method) == "Adds the PR to its merge queue")
   }
 }
-
-@Suite struct DecisionCardSections {
-  @Test func theSectionsComeInOneOrderWithOneSetOfNames() {
-    #expect(DecisionCard.sectionTitles == ["Summary", "Action", "Details"])
-  }
-}

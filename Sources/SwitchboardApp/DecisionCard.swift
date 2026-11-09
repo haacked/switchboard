@@ -20,7 +20,7 @@ struct DecisionCard: View {
     VStack(alignment: .leading, spacing: Self.rowSpacing) {
       header
       VStack(alignment: .leading, spacing: 8) {
-        SectionTitle(text: Self.sectionTitles[0])
+        SectionTitle(text: "Summary")
         if list != nil {
           if let line = item.summary.split(separator: "\n").first { summary(String(line)) }
         } else if Self.splitsSummary(item) {
@@ -34,7 +34,7 @@ struct DecisionCard: View {
         }
       }
       VStack(alignment: .leading, spacing: 8) {
-        SectionTitle(text: Self.sectionTitles[1])
+        SectionTitle(text: "Action")
         if let list {
           DecisionStepView(session: session, list: list, step: $step).id(list.ref)
         } else if session.decisionsSent == true {
@@ -63,9 +63,6 @@ struct DecisionCard: View {
     }
   }
 
-  /// The names of the three sections, in the order the card draws them.
-  static let sectionTitles = ["Summary", "Action", "Details"]
-
   private var header: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text(item.title).font(.title3.bold()).textSelection(.enabled)
@@ -83,11 +80,14 @@ struct DecisionCard: View {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
-      // The card shows the whole tool call, which an approval needs to see.
+      // Every other card shows its whole tool call, which an approval needs to see.
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
-      // Details holds this session's own call and message text.
-      ForEach(cards) { CardView(card: $0, draft: model.draft(for: $0), compact: $0.session == session.id) }
+      // Details holds the call and message text of the item's own card only.
+      ForEach(cards) {
+        CardView(
+          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && "card:\($0.id)" == item.ref)
+      }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
@@ -249,8 +249,8 @@ struct CardDetails: View {
     DisclosureGroup(isExpanded: $open) {
       VStack(alignment: .leading, spacing: 12) {
         if let input = details.toolInput {
-          section(session.cards.first?.send == nil ? "Tool call: \(input.tool)" : "Message") {
-            Text(verbatim: input.text).font(.body.monospaced()).textSelection(.enabled)
+          section(details.targets.isEmpty ? "Tool call: \(input.tool)" : "Message") {
+            CardView.textBox(input.text, maxHeight: 200)
           }
         }
         if !details.targets.isEmpty {
@@ -282,7 +282,7 @@ struct CardDetails: View {
       }
       .padding(.top, 6)
     } label: {
-      SectionTitle(text: DecisionCard.sectionTitles[2])
+      SectionTitle(text: "Details")
     }
     .onAppear { if open { model.loadEvents(session.id) } }
     .onChange(of: open) { if open { model.loadEvents(session.id) } }

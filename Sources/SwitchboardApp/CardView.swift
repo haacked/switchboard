@@ -15,8 +15,8 @@ struct CardView: View {
   @EnvironmentObject var model: BoardModel
   let card: Card
   @ObservedObject var draft: Draft
-  /// Leaves out the tool call and the group message's text, which the
-  /// Inbox's Details section shows.
+  /// Leaves out the tool call and the group message's text and targets,
+  /// which the Inbox's Details section shows.
   var compact = false
 
   var body: some View {
@@ -47,12 +47,10 @@ struct CardView: View {
   private var permission: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Claude wants to use \(card.tool)").font(.headline)
-      if !compact {
-        if let description = card.input["description"]?.string {
-          Text(description).foregroundStyle(.secondary)
-        }
-        textBox(card.details, maxHeight: 160)
+      if let description = card.input["description"]?.string {
+        Text(description).foregroundStyle(.secondary)
       }
+      if !compact { Self.textBox(card.details, maxHeight: 160) }
       HStack {
         Button("Allow") { model.answer(card, behavior: "allow") }
           .buttonStyle(.borderedProminent)
@@ -75,7 +73,7 @@ struct CardView: View {
   }
 
   /// The text verbatim, in a box that scrolls past `maxHeight`.
-  private func textBox(_ text: String, maxHeight: CGFloat) -> some View {
+  static func textBox(_ text: String, maxHeight: CGFloat) -> some View {
     ScrollView {
       Text(verbatim: text)
         .font(.body.monospaced())
@@ -109,7 +107,7 @@ struct CardView: View {
               }
             }
           }
-          textBox(message.text, maxHeight: 200)
+          Self.textBox(message.text, maxHeight: 200)
         }
         HStack {
           Button("Send") { model.answer(card, behavior: "allow") }

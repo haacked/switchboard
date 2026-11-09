@@ -175,23 +175,15 @@ extension Triage {
     return pad ? "\(fence) \(text) \(fence)" : "\(fence)\(text)\(fence)"
   }
 
-  /// The item's Details, from the session's own fields. The item builder
-  /// has only the session's facts, which hold neither its waits nor its notes.
+  /// The item's Details: the parts that its card gave, and the session's
+  /// own fields. The item builder has only the session's facts, which hold
+  /// neither its waits nor its notes.
   public static func details(for s: SessionSummary) -> TriageDetails {
-    var details = TriageDetails()
+    var details = s.triage?.details ?? TriageDetails()
     details.lastReply = (s.lastReply ?? "").isEmpty ? nil : s.lastReply
     details.pullRequest = s.pr.map { TriageDetails.PR(line: $0.line, title: $0.title, url: $0.url) }
     details.waits = s.waits.map(\.line)
     details.notes = s.notes.map(\.text)
-    if s.triage?.source == .card, let card = s.cards.first {
-      if let message = card.send {
-        details.toolInput = .init(tool: card.tool, text: message.text)
-        details.targets = message.targets.map { "\($0.name) (\($0.id))" }
-      } else if card.kind == .permission {
-        details.toolInput = .init(tool: card.tool, text: card.details)
-        details.openByDefault = !summaryShowsCall(card)
-      }
-    }
     return details
   }
 }

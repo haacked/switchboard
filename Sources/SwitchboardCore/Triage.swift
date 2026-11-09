@@ -215,8 +215,9 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// open, they are the list's copy.
   public var decisions: [PendingDecision]
   public var source: TriageSource
-  /// What the user can open after the Summary and the Action. The service
-  /// fills it from the session, because the builder sees only its facts.
+  /// What the user can open after the Summary and the Action. The builder
+  /// fills in the card's parts. The service adds the session's fields,
+  /// because the builder sees only the session's facts.
   public var details: TriageDetails
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
@@ -474,7 +475,10 @@ public enum Triage {
         options: [
           TriageOption(label: "Send", action: .allow),
           TriageOption(label: "Cancel", action: .deny),
-        ], source: .card)
+        ], source: .card,
+        details: TriageDetails(
+          toolInput: .init(tool: card.tool, text: message.text),
+          targets: message.targets.map { "\($0.name) (\($0.id))" }))
     }
     if card.kind == .permission {
       return TriageItem(
@@ -483,7 +487,9 @@ public enum Triage {
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
         ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
-        source: .card)
+        source: .card,
+        details: TriageDetails(
+          openByDefault: !summaryShowsCall(card), toolInput: .init(tool: card.tool, text: card.details)))
     }
     // Several questions take more than a click or a set of ticks.
     let only = card.questions.count == 1 ? card.questions.first : nil

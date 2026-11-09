@@ -5,28 +5,27 @@ import SwitchboardCore
 func printTriage(_ s: SessionSummary, position: Int? = nil) {
   guard let item = s.triage else { return }
   func out(_ line: String) { print(line.printable) }
-  let message = item.message
   let number = position.map { "\($0). " } ?? ""
   out("\(number)\(item.title)  [\(item.kind.rawValue)]")
   out("   \(s.name) (\(s.id)), \(s.repo.map { ($0 as NSString).lastPathComponent + ", " } ?? "")\(ago(s.since))")
   out("   Summary:")
-  if !message.summary.text.isEmpty { out("      \(oneLine(message.summary.text, max: 300))") }
-  for c in message.summary.callouts {
+  if !item.summary.isEmpty { out("      \(oneLine(item.summary, max: 300))") }
+  for c in item.callouts {
     out("      [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
   out("   Action:")
   if item.hasTickable {
     out("      pick any, as in: sb choose \(s.id) 1,3")
   }
-  let decisions = message.action.decisions
+  let decisions = item.decisions
   if !decisions.isEmpty { out("      \(decisions.count) decisions, answered one at a time: sb decide \(s.id)") }
-  if message.action.options.isEmpty && decisions.isEmpty { out("      none, except Acknowledge: sb ack \(s.id)") }
-  for (i, o) in message.action.options.enumerated() {
+  if item.options.isEmpty && decisions.isEmpty { out("      none, except Acknowledge: sb ack \(s.id)") }
+  for (i, o) in item.options.enumerated() {
     out("   " + optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
     // Clicking sends this text as you, so you read it first.
     out("         \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
   }
-  let held = message.details.parts
+  let held = item.details.parts
   out("   Details: \(held.isEmpty ? "none" : held.joined(separator: ", ")) (sb get --json \(s.id))")
 }
 
