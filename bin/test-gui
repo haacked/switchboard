@@ -361,7 +361,11 @@ check_shell() {
     # The app polls for cmd. The rename makes the whole command appear at once.
     echo "$*" >"$shots/cmd.tmp"
     mv "$shots/cmd.tmp" "$shots/cmd"
-    wait_for 20 cmd_done || fail "the app did not run: $*"
+    if ! wait_for 20 cmd_done; then
+      # The app runs each command on its main thread, so a sample shows where that thread is stuck.
+      sample "$app_pid" 1 -file "$shots/app-sample.txt" >/dev/null 2>&1 || true
+      fail "the app did not run: $*"
+    fi
     grep "^shelltest: " "$shots/app.log" | tail -n 1 | sed 's/.*-> //'
   }
   panes_are() { [ "$(app panes)" = "$1" ]; }

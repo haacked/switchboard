@@ -36,14 +36,7 @@ enum ShellSelfTest {
       let (target, offset): (TerminalView?, CGFloat) = rest == "close" ? (shellPane(), 6) : (panes().first, 25)
       guard let window, let pane = target else { return "no pane" }
       guard let point = labelPoint(of: pane, offset: offset) else { return "no label" }
-      for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-        guard
-          let event = NSEvent.mouseEvent(
-            with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
-        else { return "no event" }
-        window.sendEvent(event)
-      }
+      guard TerminalSelfTest.click(at: point, in: window) else { return "no event" }
       return "clicked at \(Int(point.x)),\(Int(point.y))"
     case "show-terminal":
       model.showingTerminal = true
