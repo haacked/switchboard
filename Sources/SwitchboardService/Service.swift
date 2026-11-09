@@ -20,8 +20,8 @@ public final class Service {
     var session: Session
     var facts = SessionFacts()
     /// Messages for a session whose turn runs or whose claude is starting.
-    /// Each end of a turn, and each SessionStart, pastes the oldest one.
-    var pending: [String] = []
+    /// Each end of a turn, each SessionStart, and sbd's start pastes the oldest one.
+    var pending: [QueuedMessage] = []
     /// When the tick first saw a running claude that no SessionStart reported.
     var unreportedSince: Int64?
     /// When sbd last pasted a message or launched claude with a prompt. Until
@@ -54,6 +54,14 @@ public final class Service {
     }
 
     var dialogs = DialogWatch()
+  }
+
+  /// A message on its way to claude.
+  struct QueuedMessage {
+    var text: String
+    /// The message's `sent` event, or nil for a message that sbd restored
+    /// from the log. A paste checks that the log still holds it.
+    var sent: Event?
   }
 
   /// How long a message counts as in flight without its UserPromptSubmit.
@@ -141,24 +149,30 @@ public final class Service {
 
   /// Loads the sessions, rebuilds their facts and queued messages from the
   /// event log, and writes the hook settings that every session's claude gets.
+  /// It records `delivered` or `delivery_unknown` for each message whose
+  /// paste may have reached claude. Its last step queues the pastes of each
+  /// running claude's queued messages on the state queue.
   public func load() throws {
     try writeClaudeSettings()
     loadChosenAccount()
     loadAutoContinue()
     try store.pruneSnapshots()
+    var uncertain: [String: [String]] = [:]
     for session in try store.sessions() {
       let session = try upgraded(session)
       let replay = try replayed(session)
       var e = Entry(session: session)
       e.facts = replay.facts
-      e.pending = replay.pending
+      e.pending = replay.pending.map { QueuedMessage(text: $0) }
       e.events = replay.events
       entries[session.id] = e
+      if !replay.uncertain.isEmpty { uncertain[session.id] = replay.uncertain }
     }
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
     snapshot = buildSnapshot() ?? Snapshot()
+    for (id, texts) in uncertain { try settleUncertain(id, texts) }
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -171,6 +185,12 @@ public final class Service {
     let reader = UsageReader(service: self, settings: config.usage)
     usageReader = reader
     quota = reader
+    // The deliveries change `entries` on the state queue, so they start after load's own changes.
+    queue.async { [self] in
+      for id in entries.keys {
+        if case .running = claudeState(id) { deliverPending(id, after: 0) }
+      }
+    }
   }
 
   // MARK: Requests
@@ -224,7 +244,7 @@ public final class Service {
         return .success(try JSON(encoding: importSessions(request.args)))
       case "triage", "choose", "reply", "summary-set":
         return try triageRequest(request.op, request.args)
-      case "decisions", "decision-answer", "decision-submit", "decision-discard":
+      case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard":
         return try decisionRequest(request.op, request.args)
       case "plan-attach", "plan-update":
         return .success(try planDocumentRequest(request.op, request.args))
@@ -249,29 +269,35 @@ public final class Service {
       default:
         break
       }
-      if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
-        settle(id)
-      }
-      if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
-      // A group send has no session argument. It waits for every server that is starting.
-      // A request from inside Claude only opens a card, so it sends nothing and waits for nothing.
-      if request.op == "send-group", request.args["confirmed"]?.bool == true, request.args["from"] == nil {
-        awaitMCPServers()
-      }
-      if request.op == "answer", request.args["behavior"]?.string == "allow",
-        queue.sync(execute: { answersGroupMessage(request.args) })
-      {
-        awaitMCPServers()
-      }
-      // A request that acts on claude decides from the current processes,
-      // so it takes a new snapshot. Other requests use the tick's.
-      let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
-      return try queue.sync {
-        if let fresh { install(fresh) }
-        return try .success(dispatch(request.op, request.args))
-      }
+      return try .success(prepared(request) { try dispatch(request.op, request.args) })
     } catch {
       return .failure("\(error)")
+    }
+  }
+
+  /// Takes the steps that `request` needs before it acts, then runs `body`
+  /// on the state queue.
+  func prepared(_ request: Request, _ body: () throws -> JSON) throws -> JSON {
+    if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
+      settle(id)
+    }
+    if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
+    // A group send has no session argument. It waits for every server that is starting.
+    // A request from inside Claude only opens a card, so it sends nothing and waits for nothing.
+    if request.op == "send-group", request.args["confirmed"]?.bool == true, request.args["from"] == nil {
+      awaitMCPServers()
+    }
+    if request.op == "answer", request.args["behavior"]?.string == "allow",
+      queue.sync(execute: { answersGroupMessage(request.args) })
+    {
+      awaitMCPServers()
+    }
+    // A request that acts on claude decides from the current processes,
+    // so it takes a new snapshot. Other requests use the tick's.
+    let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
+    return try queue.sync {
+      if let fresh { install(fresh) }
+      return try body()
     }
   }
 
@@ -422,15 +448,27 @@ public final class Service {
     return (event, answer)
   }
 
-  /// Appends an event to the log and folds it into the session's facts.
+  /// Appends an event to the log and folds it into the session's facts. It
+  /// folds in an event that the store failed to keep too.
   @discardableResult
   func record(_ id: String, _ kind: String, _ data: JSON = [:]) -> Event {
-    var event = Event(session: id, t: nowMs(), kind: kind, data: data)
     do {
-      event = try store.append(event)
+      return try recordStored(id, kind, data)
     } catch {
       logLine("can't store \(kind) for \(id): \(error)")
+      return fold(Event(session: id, t: nowMs(), kind: kind, data: data))
     }
+  }
+
+  /// Appends an event to the log and folds it into the session's facts. It
+  /// throws, and changes nothing, when the store can't keep the event.
+  @discardableResult
+  func recordStored(_ id: String, _ kind: String, _ data: JSON = [:]) throws -> Event {
+    fold(try store.append(Event(session: id, t: nowMs(), kind: kind, data: data)))
+  }
+
+  private func fold(_ event: Event) -> Event {
+    let id = event.session
     if var e = entries[id] {
       e.facts.apply(event)
       let verdict = Attention.track(e.session, &e.facts, now: event.t, stateOf: lastState)
@@ -720,44 +758,48 @@ public final class Service {
   }
 
   /// `byUser` is false for a message that sbd sends on its own, which can't
-  /// answer a deferred question.
-  func send(_ id: String, _ text: String, byUser: Bool = true) throws -> Delivery {
+  /// answer a deferred question. With `launchesWithPrompt` false, a stopped
+  /// claude starts without a prompt and gets the message as a paste, which
+  /// checks that the log still holds the `sent` event. It throws, and pastes
+  /// nothing, when the store can't keep the `sent` event.
+  func send(_ id: String, _ text: String, byUser: Bool = true, launchesWithPrompt: Bool = true) throws -> Delivery {
     guard entries[id] != nil else { throw APIError("no session \(id)") }
-    let delivery: Delivery
     let now = nowMs()
     // Claude Code does not attach the images of a prompt that starts it, so
     // a message with images waits for a paste.
     let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
-    if claudeState(id) == .stopped && entries[id]!.pending.isEmpty && !attaches && hasRoom() {
+    if launchesWithPrompt, claudeState(id) == .stopped, entries[id]!.pending.isEmpty, !attaches, hasRoom() {
       try startClaude(id, prompt: text)
-      delivery = .resumed
+      try recordSent(id, text, .resumed, byUser: byUser)
+      return .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
-      paste(id, text, queued: false)
-      delivery = .pasted
+      let sent = try recordSent(id, text, .pasted, byUser: byUser)
+      paste(id, QueuedMessage(text: text, sent: sent))
+      return .pasted
     } else {
       // A stopped session launches without a prompt when older messages wait,
       // the message has images, the live cap is full, or another start is
       // queued. Its messages arrive in order after SessionStart.
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
-      queueMessage(id, text, byUser: byUser)
+      try queueMessage(id, text, byUser: byUser)
       return .queued
     }
-    recordSent(id, text, delivery, byUser: byUser)
-    return delivery
   }
 
   /// Adds the message to the session's queue. The `sent` event lets a
   /// restart of sbd rebuild the queue.
-  func queueMessage(_ id: String, _ text: String, byUser: Bool) {
-    entries[id]?.pending.append(text)
-    recordSent(id, text, .queued, byUser: byUser)
+  func queueMessage(_ id: String, _ text: String, byUser: Bool) throws {
+    let sent = try recordSent(id, text, .queued, byUser: byUser)
+    entries[id]?.pending.append(QueuedMessage(text: text, sent: sent))
     deliverPending(id, after: 0.2)
   }
 
-  private func recordSent(_ id: String, _ text: String, _ delivery: Delivery, byUser: Bool) {
+  @discardableResult
+  private func recordSent(_ id: String, _ text: String, _ delivery: Delivery, byUser: Bool) throws -> Event {
     var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
+    if delivery == .pasted { data[Delivery.awaitsDeliveredKey] = true }
     if !byUser { data["by"] = "sbd" }
-    record(id, "sent", .object(data))
+    return try recordStored(id, "sent", .object(data))
   }
 
   /// Pastes the oldest queued message after `delay`, if claude is ready for
@@ -778,33 +820,101 @@ public final class Service {
         }
         return
       }
-      let text = entries[id]!.pending.removeFirst()
-      paste(id, text, queued: true)
+      paste(id, entries[id]!.pending.removeFirst())
+    }
+  }
+
+  /// Records `delivered` for each message whose paste started before sbd
+  /// stopped and whose text the transcript holds in a user message after
+  /// that paste started. It records `delivery_unknown` for the rest, which
+  /// sbd leaves for the user instead of pasting them again.
+  private func settleUncertain(_ id: String, _ texts: [String]) throws {
+    var pastings = try store.events(session: id).filter { $0.kind == "pasting" }
+    for text in texts {
+      let pasting = pastings.lastIndex { $0.data["text"]?.string == text }.map { pastings.remove(at: $0) }
+      // A paste that found no transcript started before claude wrote any of it.
+      let path = pasting?.data["transcript"]?.string ?? entries[id].flatMap { transcriptFile($0.session) }
+      let offset = UInt64(pasting?.data["transcript_bytes"]?.int ?? 0)
+      let pasted = Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text
+      let landed = pasting != nil && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset) } == true
+      record(id, landed ? "delivered" : "delivery_unknown", ["text": .string(text)])
     }
   }
 
   /// Pastes on the paste queue and marks the session busy until the prompt's
-  /// UserPromptSubmit. A failed paste puts the message back at the front of
-  /// the session's queue. A queued message's `sent` event already has no
-  /// `delivered`, so only a direct paste records `requeued` for the log.
-  private func paste(_ id: String, _ text: String, queued: Bool) {
+  /// UserPromptSubmit. `pasting` reaches the log before the paste starts, so
+  /// a restart never pastes a message that may have arrived. `delivered`
+  /// follows only a paste that succeeded. A failed paste records `requeued`
+  /// and puts the message back at the front of the session's queue.
+  private func paste(_ id: String, _ message: QueuedMessage) {
+    let text = message.text
     let name = paneName(id, .claude)
     let parts = Attachments.split(text, folder: home.attachmentsFolder(id))
     entries[id]?.inFlight = nowMs()
     pasteQueue.async { [self] in
+      waitAtGate("hold-paste")
+      guard queue.sync(execute: { startPaste(id, message) }) else { return }
       do {
         try host.paste(name, parts?.text ?? text, attachments: parts?.paths)
-        if queued { queue.async { self.record(id, "delivered", ["text": .string(text)]) } }
+        waitAtGate("hold-delivered")
+        queue.async { self.record(id, "delivered", ["text": .string(text)]) }
       } catch {
         logLine("can't paste into \(id): \(error)")
         queue.async {
-          self.entries[id]?.inFlight = nil
-          self.entries[id]?.pending.insert(text, at: 0)
-          if !queued { self.record(id, "requeued", ["text": .string(text)]) }
-          self.deliverPending(id, after: 1)
+          self.requeue(id, message)
+          self.record(id, "requeued", ["text": .string(text)])
         }
       }
     }
+  }
+
+  /// Puts the message back at the front of the session's queue and tries again after a second.
+  private func requeue(_ id: String, _ message: QueuedMessage) {
+    entries[id]?.inFlight = nil
+    entries[id]?.pending.insert(message, at: 0)
+    deliverPending(id, after: 1)
+  }
+
+  /// Checks that the log holds the message's `sent` event, then records
+  /// `pasting` with the transcript's path and size, so that a restart looks
+  /// for the message only in what claude wrote after it. A rolled-back
+  /// transaction can leave a message without its `sent` event, and SQLite
+  /// can give the event's id to a later row, so the check also compares the
+  /// session, the time, the kind, and the text. It returns false and drops
+  /// the message when the log lacks the `sent` event. It returns false and
+  /// requeues the message when the store fails.
+  private func startPaste(_ id: String, _ message: QueuedMessage) -> Bool {
+    var data: [String: JSON] = ["text": .string(message.text)]
+    if let session = entries[id]?.session, let path = transcriptFile(session),
+      let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber
+    {
+      data["transcript"] = .string(path)
+      data["transcript_bytes"] = .number(size.doubleValue)
+    }
+    do {
+      if let sent = message.sent {
+        guard let row = try store.event(id: sent.id), row.session == id, row.t == sent.t, row.kind == "sent",
+          row.data["text"] == sent.data["text"]
+        else {
+          logLine("drops a message for \(id), because the log lacks its sent event")
+          entries[id]?.inFlight = nil
+          return false
+        }
+      }
+      try recordStored(id, "pasting", .object(data))
+      return true
+    } catch {
+      logLine("can't start a paste into \(id): \(error)")
+      requeue(id, message)
+      return false
+    }
+  }
+
+  /// Waits while the gate file exists in the home. Only a test instance has
+  /// gates, and they run on the paste queue, never on the state queue.
+  private func waitAtGate(_ gate: String) {
+    guard config.testClock else { return }
+    while FileManager.default.fileExists(atPath: "\(home.path)/\(gate)") { usleep(50_000) }
   }
 
   /// Defers the session's held questions first, so that their cards stay.
@@ -1476,6 +1586,7 @@ public final class Service {
       out.decisions = shown.decisions
       if shown.decisionsSent { out.decisionsSent = true }
     }
+    out.decisionsDelivery = e.facts.decisionsDelivery
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir

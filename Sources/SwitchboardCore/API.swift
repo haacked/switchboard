@@ -223,6 +223,29 @@ public enum Delivery: String, Codable, Sendable {
   case resumed
   /// Queued, because a turn runs or claude is still drawing its prompt.
   case queued
+
+  /// The field of a `sent` event with delivery `pasted` that says sbd
+  /// records `delivered` once the paste succeeds. sbd recorded no
+  /// `delivered` for a direct paste before it added this field.
+  public static let awaitsDeliveredKey = "awaits_delivered"
+
+  /// The delivery that a `sent` or `decisions_submitted` event records.
+  public init?(of event: Event) {
+    guard let raw = event.data["delivery"]?.string else { return nil }
+    self.init(rawValue: raw)
+  }
+
+  /// Whether the `sent` event's message waits for a `delivered` event. A
+  /// queued message always does. A direct paste does only when its event
+  /// carries `awaitsDeliveredKey`, so a log from an older sbd never pastes
+  /// its direct messages again.
+  public static func awaitsDelivered(_ sent: Event) -> Bool {
+    switch Delivery(of: sent) {
+    case .queued: return true
+    case .pasted: return sent.data[awaitsDeliveredKey]?.bool == true
+    case .resumed, nil: return false
+    }
+  }
 }
 
 /// Sends requests to sbd. Each call opens a new connection, sends one

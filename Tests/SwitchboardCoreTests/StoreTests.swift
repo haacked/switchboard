@@ -12,6 +12,53 @@ func tempFolder() throws -> String {
 }
 
 @Suite struct StoreTests {
+  /// Another connection, as after a crash, sees none of the writes until
+  /// the body ends, and then all of them.
+  @Test func transactionKeepsItsWritesFromOtherConnectionsUntilTheEnd() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let other = try Store(path: "\(dir)/sb.db")
+
+    try store.transaction {
+      try store.append(Event(session: "s1", t: 1, kind: "sent", data: ["text": "fix it"]))
+      #expect(try other.events(session: "s1").isEmpty)
+      try store.append(Event(session: "s1", t: 2, kind: "decisions_submitted", data: ["message": "fix it"]))
+    }
+
+    #expect(try other.events(session: "s1").map(\.kind) == ["sent", "decisions_submitted"])
+  }
+
+  /// A body that throws leaves none of its writes, and the throw reaches the caller.
+  @Test func transactionRollsBackABodyThatThrows() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(throws: APIError.self) {
+      try store.transaction {
+        try store.append(Event(session: "s1", t: 1, kind: "sent", data: ["text": "fix it"]))
+        throw APIError("the next write failed")
+      }
+    }
+
+    #expect(try Store(path: "\(dir)/sb.db").events(session: "s1").isEmpty)
+  }
+
+  /// A transaction that can't start runs nothing, so a caller refuses before it acts.
+  @Test func transactionRunsNothingWhenItCantStart() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    var ran = false
+
+    try store.transaction {
+      #expect(throws: (any Error).self) { try store.transaction { ran = true } }
+    }
+
+    #expect(!ran)
+  }
+
   @Test func sessionsAndEventsRoundTrip() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }

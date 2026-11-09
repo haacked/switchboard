@@ -245,11 +245,16 @@ public final class Store {
     func optionalInt(_ i: Int32) -> Int? { sqlite3_column_type(statement, i) == SQLITE_NULL ? nil : Int(int(i)) }
   }
 
-  private func transaction(_ body: () throws -> Void) throws {
+  /// Runs `body` in one transaction, so that a crash keeps all of its
+  /// writes or none. It rolls them back and throws when `body` throws or the
+  /// commit fails. It throws before `body` runs when the transaction can't
+  /// start.
+  public func transaction<T>(_ body: () throws -> T) throws -> T {
     try exec("BEGIN IMMEDIATE")
     do {
-      try body()
+      let result = try body()
       try exec("COMMIT")
+      return result
     } catch {
       try? exec("ROLLBACK")
       throw error

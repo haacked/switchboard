@@ -32,6 +32,8 @@ struct DecisionCard: View {
       VStack(alignment: .leading, spacing: 8) {
         if let list {
           DecisionStepView(session: session, list: list, step: $step).id(list.ref)
+        } else if session.decisionsSent == true, session.decisionsDelivery == .unknown {
+          ResendDecisions(session: session)
         } else if session.decisionsSent == true {
           Text("Sent your answers. The session gets them as its next prompt.").foregroundStyle(.secondary)
         }
@@ -90,6 +92,31 @@ struct DecisionCard: View {
     // A Ready to merge card offers Acknowledge as one of its options.
     if session.state != .readyToMerge {
       AcknowledgeButton(session: session, primary: session.isInformational, boxed: true)
+    }
+  }
+}
+
+/// What a decisions card shows when sbd can't tell whether the session got the answers.
+struct ResendDecisions: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(
+        "sbd restarted while it was sending your answers, so it can't tell whether the session got them."
+      )
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+      if let error = model.decisionErrors[session.id] {
+        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      }
+      Button("Send again") { model.resendDecisions(session.id) }
+        .disabled(model.deciding.contains("\(session.id)/resend"))
+        .accessibilityLabel("Send the answers again")
+        .accessibilityHint("Sends the same answers once more. The session may get them twice.")
     }
   }
 }

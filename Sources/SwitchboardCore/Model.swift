@@ -211,6 +211,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when sbd sent the answers to the item's decisions and the item
   /// waits for the session's next prompt to replace it.
   public var decisionsSent: Bool?
+  /// Whether the last decisions submit reached the session, or nil before any submit.
+  public var decisionsDelivery: DecisionsDelivery?
   /// The Claude account's folder, or nil when the session never recorded one.
   public var account: String?
   /// Whether `sb cleanup` can remove the worktree of a finished PR, or did.

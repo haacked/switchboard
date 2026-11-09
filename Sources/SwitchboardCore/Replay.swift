@@ -5,8 +5,13 @@ import Foundation
 /// events after it.
 public struct SessionReplay: Codable, Equatable, Sendable {
   public var facts = SessionFacts()
-  /// Messages for a session whose turn runs or whose claude is starting.
+  /// Messages that sbd accepted and has not started to paste. sbd pastes
+  /// them after a restart.
   public var pending: [String] = []
+  /// Messages whose paste started without a `delivered` or a `requeued`
+  /// after it. The paste may or may not have reached claude, so sbd never
+  /// pastes them again on its own.
+  public var uncertain: [String] = []
   /// The id of the last event applied, or 0 before any.
   public var lastEvent: Int64 = 0
   /// How many events were applied.
@@ -28,10 +33,27 @@ public struct SessionReplay: Codable, Equatable, Sendable {
     Attention.track(session, &facts, now: event.t)
     let text = event.data["text"]?.string ?? ""
     switch event.kind {
-    case "sent" where event.data["delivery"]?.string == Delivery.queued.rawValue, "requeued":
+    case "sent" where Delivery.awaitsDelivered(event):
       pending.append(text)
+    case "pasting":
+      if let i = pending.firstIndex(of: text) { uncertain.append(pending.remove(at: i)) }
     case "delivered":
-      if let i = pending.firstIndex(of: text) { pending.remove(at: i) }
+      if let i = uncertain.firstIndex(of: text) {
+        uncertain.remove(at: i)
+      } else if let i = pending.firstIndex(of: text) {
+        pending.remove(at: i)
+      }
+    case "delivery_unknown":
+      if let i = uncertain.firstIndex(of: text) { uncertain.remove(at: i) }
+    case "requeued":
+      // A failed paste goes back to the front of the queue, as sbd puts it.
+      // A log from before `pasting` existed records `requeued` after a
+      // direct paste whose `sent` added nothing to `pending`.
+      if let i = uncertain.firstIndex(of: text) {
+        pending.insert(uncertain.remove(at: i), at: 0)
+      } else if !pending.contains(text) {
+        pending.append(text)
+      }
     default:
       break
     }
