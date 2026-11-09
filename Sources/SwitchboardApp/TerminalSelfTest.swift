@@ -239,7 +239,7 @@ enum TerminalSelfTest {
       await pause(1)
     }
     png(pane, to: "\(folder)/pane-end.png")
-    if let padded = pane.superview?.superview as? PaddedTerminalView {
+    if let padded = PaddedTerminalView.containing(pane) {
       png(padded, to: "\(folder)/pane-padded.png")
       // SwiftTerm's computeFontDimensions measures a cell the same way: the advance of the "W" glyph, rounded
       // to the backing pixel grid.

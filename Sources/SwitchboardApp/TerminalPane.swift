@@ -71,6 +71,11 @@ final class PaddedTerminalView: NSView {
 
   required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+  /// The padded view that holds `terminal`, or nil when the terminal is not in one.
+  static func containing(_ terminal: TerminalView) -> PaddedTerminalView? {
+    terminal.superview?.superview as? PaddedTerminalView
+  }
+
   override func resizeSubviews(withOldSize oldSize: NSSize) {
     placeTerminal()
   }

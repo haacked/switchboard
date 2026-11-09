@@ -2,7 +2,8 @@
 # Runs the app's TerminalSelfTest against a private sbd, and checks the bytes
 # that a stand-in for claude (Tests/GUI/received-bytes-stub) received from the
 # app's terminal, as `sb screen` shows them. It opens the app's window, so it
-# needs a logged-in macOS session with a display, and bin/test never runs it.
+# needs a logged-in macOS session with a display. bin/test never runs it. CI
+# runs it in its gui-test job.
 # It then quits the app, and separately kills it, and starts it again each
 # time. It checks through sb and tmux that the session and both its panes are
 # the same processes with the same screens.
@@ -357,11 +358,18 @@ check_shell() {
   is_open() { ! closed "$1"; }
   cmd_done() { [ ! -e "$shots/cmd" ]; }
   app() { # runs one ShellSelfTest command and prints its result
-    echo "$*" >"$shots/cmd"
+    # The app polls for cmd. The rename makes the whole command appear at once.
+    echo "$*" >"$shots/cmd.tmp"
+    mv "$shots/cmd.tmp" "$shots/cmd"
     wait_for 20 cmd_done || fail "the app did not run: $*"
     grep "^shelltest: " "$shots/app.log" | tail -n 1 | sed 's/.*-> //'
   }
   panes_are() { [ "$(app panes)" = "$1" ]; }
+  click() { # <close | open> <where>
+    local result
+    result=$(app click "$1")
+    [[ $result == "clicked at "* ]] || fail "the app could not click $1 on $2: $result"
+  }
   # A chat shows its messages until the test shows its terminals, so `attached` waits only when asked.
   start_app() { # <session> [attached]
     SB_SELECT="$1" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
@@ -383,7 +391,7 @@ check_shell() {
   start_app "$manager" attached
   wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the Manager's shell"
   remember_claude "$manager"
-  [ "$(app click close)" != "no pane" ] || fail "the window has no shell pane"
+  click close "the Manager"
   closes "$manager" "the close button"
   app snapshot "$shots/manager-closed.png" >/dev/null
   end_app
@@ -391,7 +399,7 @@ check_shell() {
   sleep 2
   shell_gone "$manager" && panes_are 1 || fail "a relaunch started the Manager's shell again"
   remember_claude "$manager"
-  app click open >/dev/null
+  click open "the Manager"
   wait_for 10 is_open "$manager" || fail "Open Shell did not open the Manager's shell"
   wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the opened shell"
   app type exit >/dev/null
@@ -429,11 +437,11 @@ check_shell() {
   app show-terminal >/dev/null
   wait_for 120 has_clients "$work-claude" || fail "the Inbox did not attach to the work session's Claude pane"
   remember_claude "$work"
-  [ "$(app click open)" != "no pane" ] || fail "the Inbox shows no terminal"
+  click open "the Inbox"
   wait_for 10 is_open "$work" || fail "the Inbox's Open Shell did not open the shell"
   wait_for 60 has_clients "$work-shell" || fail "the Inbox did not attach to the opened shell"
   wait_for 10 panes_are 2 || fail "the Inbox shows no shell pane"
-  app click close >/dev/null
+  click close "the Inbox"
   closes "$work" "the Inbox's close button"
   end_app
 
@@ -442,7 +450,7 @@ check_shell() {
   wait_for 120 has_clients "$chat-claude" || fail "the app did not attach to the chat's Claude pane"
   wait_for 60 has_clients "$chat-shell" || fail "the app did not attach to the chat's shell"
   remember_claude "$chat"
-  app click close >/dev/null
+  click close "the chat"
   closes "$chat" "the chat's close button"
   app snapshot "$shots/chat-closed.png" >/dev/null
   # Close acts on the key window. An app that a script starts may have none, so this checks only the binding.

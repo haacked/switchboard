@@ -104,6 +104,7 @@ struct SessionView: View {
 
   static let labelWidth: CGFloat = 44
   static let labelSpacing: CGFloat = 8
+  static let labelPadding: CGFloat = 8
 
   /// The shell pane's tmux client exits when sbd ends the shell's tmux session. A shell that closed and
   /// opened again between two refreshes leaves `shellClosed` unchanged, so the pane attaches again
@@ -250,7 +251,7 @@ struct SessionView: View {
       trailing().buttonStyle(.borderless).font(.caption).controlSize(.small)
       Spacer()
     }
-    .padding(.horizontal, 8)
+    .padding(.horizontal, SessionView.labelPadding)
     .padding(.vertical, 3)
     .background(.bar)
   }
