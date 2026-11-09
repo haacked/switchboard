@@ -15,6 +15,9 @@ struct CardView: View {
   @EnvironmentObject var model: BoardModel
   let card: Card
   @ObservedObject var draft: Draft
+  /// Leaves out the tool call and the group message's text and targets,
+  /// which the Inbox's Details section shows.
+  var compact = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -47,7 +50,7 @@ struct CardView: View {
       if let description = card.input["description"]?.string {
         Text(description).foregroundStyle(.secondary)
       }
-      textBox(card.details, maxHeight: 160)
+      if !compact { Self.textBox(card.details, maxHeight: 160) }
       HStack {
         Button("Allow") { model.answer(card, behavior: "allow") }
           .buttonStyle(.borderedProminent)
@@ -70,7 +73,7 @@ struct CardView: View {
   }
 
   /// The text verbatim, in a box that scrolls past `maxHeight`.
-  private func textBox(_ text: String, maxHeight: CGFloat) -> some View {
+  static func textBox(_ text: String, maxHeight: CGFloat) -> some View {
     ScrollView {
       Text(verbatim: text)
         .font(.body.monospaced())
@@ -94,16 +97,18 @@ struct CardView: View {
         // The Inbox lists other sessions' send cards in this session's pane.
         let asker = model.sessions.first { $0.id == card.session }?.name ?? card.session
         Text(verbatim: "\(asker) wants to send \(message.summary)").font(.headline)
-        VStack(alignment: .leading, spacing: 2) {
-          ForEach(message.targets, id: \.id) { target in
-            HStack(spacing: 6) {
-              Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary).accessibilityHidden(true)
-              Text(verbatim: target.name)
-              Text(verbatim: target.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+        if !compact {
+          VStack(alignment: .leading, spacing: 2) {
+            ForEach(message.targets, id: \.id) { target in
+              HStack(spacing: 6) {
+                Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(verbatim: target.name)
+                Text(verbatim: target.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+              }
             }
           }
+          Self.textBox(message.text, maxHeight: 200)
         }
-        textBox(message.text, maxHeight: 200)
         HStack {
           Button("Send") { model.answer(card, behavior: "allow") }
             .buttonStyle(.borderedProminent)

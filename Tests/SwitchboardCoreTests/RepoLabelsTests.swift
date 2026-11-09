@@ -5,13 +5,15 @@ import Testing
 private let other = "/Users/me/dev/acme/other"
 
 private func session(
-  _ id: String, repo: String? = nil, pr: String? = nil, followup: Followup? = nil, manager: Bool = false
+  _ id: String, repo: String? = nil, checkout: String? = nil, pr: String? = nil, followup: Followup? = nil,
+  manager: Bool = false
 ) -> SessionSummary {
   var s = SessionSummary(
     id: id, name: id, cwd: repo ?? "/tmp", repo: repo, branch: nil, claudeSessionId: id, state: .working,
     reason: "", since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [],
     notes: [], pr: pr.map(prSummary))
   s.followup = followup
+  s.checkout = checkout
   if manager {
     s.manager = true
     s.kind = .manager
@@ -354,5 +356,55 @@ private func followup(_ repository: String?) -> Followup {
     let labels = RepoLabels.labels(sessions)
 
     #expect(labels == ["a": "switchboard", "b": "switchboard", "o": "other"])
+  }
+
+  @Test func labelsAWorktreeThatSbdDidNotMakeWithItsMainCheckoutsName() {
+    let sessions = [
+      session("external", checkout: "/Users/me/dev/haacked/switchboard"), session("o", repo: other),
+    ]
+
+    #expect(RepoLabels.labels(sessions) == ["external": "switchboard", "o": "other"])
+  }
+
+  @Test func countsAnSbdWorktreeAndAnotherWorktreeOfItsCheckoutAsOneRepo() {
+    let sessions = [
+      session("sbd", repo: "/tmp/dev/switchboard", checkout: "/private/tmp/dev/switchboard"),
+      session("external", checkout: "/private/tmp/dev/switchboard"),
+    ]
+
+    #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true) == ["sbd": "switchboard", "external": "switchboard"])
+  }
+
+  @Test func givesNoLabelToAFolderOutsideGitAndDoesNotCountIt() {
+    let sessions = [session("plain"), session("external", checkout: "/Users/me/dev/haacked/switchboard")]
+
+    #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true) == ["external": "switchboard"])
+  }
+
+  @Test func givesNoLabelToTheManagerOrAChatInACheckout() {
+    var chat = session("chat", checkout: "/Users/me/dev/acme/chat")
+    chat.chat = "g1"
+    chat.kind = .chat
+    let sessions = [
+      session("manager", checkout: "/Users/me/dev/acme/manager", manager: true), chat,
+      session("a", checkout: "/Users/me/dev/a/alpha"), session("b", checkout: "/Users/me/dev/b/beta"),
+    ]
+
+    #expect(RepoLabels.labels(sessions) == ["a": "alpha", "b": "beta"])
+  }
+
+  @Test func takesThePRRepoOfAnotherSessionInTheSameCheckout() {
+    let checkout = "/Users/me/dev/haacked/switchboard"
+    let sessions = [
+      session("sbd", repo: checkout, checkout: checkout, pr: "haacked/switchboard"),
+      session("external", checkout: checkout), session("imported", pr: "haacked/switchboard"),
+    ]
+
+    #expect(RepoLabels.labels(sessions).isEmpty)
+    #expect(
+      RepoLabels.labels(sessions, evenForOneRepo: true)
+        == ["sbd": "switchboard", "external": "switchboard", "imported": "switchboard"])
   }
 }

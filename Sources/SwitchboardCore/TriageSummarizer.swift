@@ -25,14 +25,16 @@ public enum TriageSummarizer {
     does something outside the session), or info (nothing is asked). Use decision only when the reply names \
     two or more choices, or asks the user to make two or more decisions.
     - summary: plain lines separated by newlines, each under \(TriageCard.lineLength) characters. Use only facts that the reply \
-    states. Usually it has two to four lines. The first says what the session did. The last says what it needs \
-    from the user, or what is finished when it asks nothing. When the reply asks the user to make several \
-    decisions, such as a numbered list of questions, write one line per decision between the first and last \
-    lines, in the reply's order and with the reply's numbers when it has them. Each names the decision and the \
-    answer that the reply recommends, shortened to fit the line, such as "1. Move a due follow-up to Needs you? \
-    It recommends yes." When the reply recommends nothing for a decision, write only the decision. Write at most \
-    \(maxDecisions) decision lines, and when the reply has more, say in the last line that more remain. A list of work \
-    the session finished or of steps it took is not a list of decisions, so write it as ordinary summary lines.
+    states. Include a fact only if the user would misjudge or not understand an option without it. The full reply \
+    is in Details, so leave the rest out. Usually it has two to three lines. The first says what the session did. \
+    The last says what it needs from the user, or what is finished when it asks nothing. When the reply asks the \
+    user to make several decisions, such as a numbered list of questions, write one line per decision between the \
+    first and last lines, in the reply's order and with the reply's numbers when it has them. Each names the \
+    decision and the answer that the reply recommends, shortened to fit the line, such as "1. Move a due \
+    follow-up to Needs you? It recommends yes." When the reply recommends nothing for a decision, write only the \
+    decision. Write at most \(maxDecisions) decision lines, and when the reply has more, say in the last line that \
+    more remain. A list of work the session finished or of steps it took is not a list of decisions, so write it \
+    as ordinary summary lines.
     - options: at most \(TriageCard.maxOptions) buttons, and only choices that the reply offers or clearly asks for. Never add a \
     Cancel, Skip, or Other button, and never invent a step. Each has a short label, an optional detail, an \
     action, and recommended set to true only for the one option that the reply recommends. The action send \
@@ -137,7 +139,7 @@ public enum TriageSummarizer {
 
   public static func input(session: SessionSummary, reply: String) -> String {
     var lines = ["Session: \(session.name)"]
-    if let repo = session.repo { lines.append("Repo: \(repo)") }
+    if let repo = session.repoFolder { lines.append("Repo: \(repo)") }
     if let branch = session.branch { lines.append("Branch: \(branch)") }
     lines.append("State: \(session.state.title), because \(session.reason)")
     if let pr = session.pr { lines.append("Pull request: \(pr.repo)#\(pr.number) \(pr.title) (\(pr.state.rawValue))") }

@@ -7,6 +7,13 @@ public struct FolderUser: Sendable, Equatable {
   public var path: String
 }
 
+/// The path with every symlink resolved, or nil when the path doesn't exist.
+public func realPath(_ path: String) -> String? {
+  guard let resolved = realpath(path, nil) else { return nil }
+  defer { free(resolved) }
+  return String(cString: resolved)
+}
+
 extension Processes {
   /// The processes other than this one whose working folder, program, or an
   /// open file is `folder` or inside it. macOS lets a process read only its
@@ -14,9 +21,7 @@ extension Processes {
   /// left out. An empty list comes back when the folder doesn't exist,
   /// because its path can't be resolved.
   public static func using(_ folder: String) -> [FolderUser] {
-    guard let resolved = realpath(folder, nil) else { return [] }
-    let root = String(cString: resolved)
-    free(resolved)
+    guard let root = realPath(folder) else { return [] }
     let me = getpid()
     return allPids().filter { $0 != me }.compactMap { pid in
       firstPath(of: pid) { $0 == root || $0.hasPrefix(root + "/") }.map {

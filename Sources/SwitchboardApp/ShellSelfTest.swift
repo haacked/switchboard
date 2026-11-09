@@ -33,20 +33,10 @@ enum ShellSelfTest {
     let rest = words.count > 1 ? words[1] : ""
     switch words.first {
     case "click":
-      let (target, half): (TerminalView?, CGFloat) = rest == "close" ? (shellPane(), 6) : (panes().first, 25)
+      let (target, offset): (TerminalView?, CGFloat) = rest == "close" ? (shellPane(), 6) : (panes().first, 25)
       guard let window, let pane = target else { return "no pane" }
-      // The pane's label is a bar about 18 pt tall above the terminal. Its button follows the label's text.
-      let frame = pane.convert(pane.bounds, to: nil)
-      let buttonX = frame.minX + 8 + SessionView.labelWidth + SessionView.labelSpacing
-      let point = NSPoint(x: buttonX + half, y: frame.maxY + 9)
-      for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-        guard
-          let event = NSEvent.mouseEvent(
-            with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
-        else { return "no event" }
-        window.sendEvent(event)
-      }
+      guard let point = labelPoint(of: pane, offset: offset) else { return "no label" }
+      guard TerminalSelfTest.click(at: point, in: window) else { return "no event" }
       return "clicked at \(Int(point.x)),\(Int(point.y))"
     case "show-terminal":
       model.showingTerminal = true
@@ -96,6 +86,17 @@ enum ShellSelfTest {
     default:
       return "unknown command"
     }
+  }
+
+  /// The point `offset` pt into the button on the pane's label. The label is a bar about 18 pt tall above the
+  /// pane. Its button follows the label's text. The label starts at the padded view's edge, which is left of
+  /// the inset terminal. A terminal outside a padded view gives nil, because its own frame would put the click
+  /// beside the button.
+  static func labelPoint(of pane: TerminalView, offset: CGFloat) -> NSPoint? {
+    guard let column = PaddedTerminalView.containing(pane) else { return nil }
+    let frame = column.convert(column.bounds, to: nil)
+    let buttonX = frame.minX + SessionView.labelPadding + SessionView.labelWidth + SessionView.labelSpacing
+    return NSPoint(x: buttonX + offset, y: frame.maxY + 9)
   }
 
   private static var window: NSWindow? { TerminalSelfTest.window }

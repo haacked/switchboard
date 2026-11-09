@@ -167,7 +167,16 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var id: String
   public var name: String
   public var cwd: String
+  /// The folder that `new` made the worktree from. Only a session with one
+  /// can remove its worktree.
   public var repo: String?
+  /// The main checkout of the git repo that holds `cwd`, with symlinks
+  /// resolved, or nil when `cwd` is in no git repo. Unlike `repo`, it does
+  /// not mean that sbd made the worktree.
+  public var checkout: String?
+  /// The folder that names the session's repo. An sbd that predates
+  /// `checkout` sends only `repo`.
+  public var repoFolder: String? { checkout ?? repo }
   public var branch: String?
   public var claudeSessionId: String
   public var state: AttentionState

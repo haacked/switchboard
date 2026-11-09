@@ -72,3 +72,23 @@ jobs:
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
       - run: bin/test --shards 4
+
+  # bin/test-gui drives the real app, so it needs a logged-in session with a
+  # display. GitHub's macOS runners log in a user. The job leaves out the
+  # drops check. On the runner, that check's click on Send does not send the
+  # message. The same check passes on a developer's Mac.
+  gui-test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install tmux
+      - run: SB_GUI_SKIP=drops bin/test-gui
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-test
+          path: .build/gui-test
+          if-no-files-found: ignore
