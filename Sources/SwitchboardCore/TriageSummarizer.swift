@@ -137,7 +137,7 @@ public enum TriageSummarizer {
 
   public static func input(session: SessionSummary, reply: String) -> String {
     var lines = ["Session: \(session.name)"]
-    if let repo = session.repo { lines.append("Repo: \(repo)") }
+    if let repo = session.repoFolder { lines.append("Repo: \(repo)") }
     if let branch = session.branch { lines.append("Branch: \(branch)") }
     lines.append("State: \(session.state.title), because \(session.reason)")
     if let pr = session.pr { lines.append("Pull request: \(pr.repo)#\(pr.number) \(pr.title) (\(pr.state.rawValue))") }
