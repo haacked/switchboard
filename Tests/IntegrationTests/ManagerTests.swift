@@ -242,51 +242,44 @@ import Testing
     try waitForNotice(sbd, parent.id, after: 0, containing: "opened PR #18303")
 
     // A branch without a PR drops the kid's PR, and the kid needs you again.
-    var heard = try sbd.messagesFromSbd(parent.id).count
-    try sbd.git(kid.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
-    try sbd.poll()
-    try #require(try sbd.get(kid.id).pr == nil)
-    try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
+    try sbd.git(kid.cwd, "branch", "haacked/no-pr-yet")
+    func dropPR() throws {
+      let heard = try sbd.messagesFromSbd(parent.id).count
+      try sbd.git(kid.cwd, "checkout", "-q", "haacked/no-pr-yet")
+      try sbd.poll()
+      try #require(try sbd.get(kid.id).pr == nil)
+      try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
+    }
+    /// Brings the PR back as `number` and returns how many messages the parent had before.
+    func returnPR(as number: Int) throws -> Int {
+      let heard = try sbd.messagesFromSbd(parent.id).count
+      try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
+      try sbd.poll()
+      try sbd.waitFor(kid.id, "PR #\(number)") { $0.pr?.number == number }
+      return heard
+    }
+    // The PR's line comes before its state's line, in the same message or an earlier one.
+    func expectNoSecondAnnouncement(after heard: Int) throws {
+      let told = try waitForNotice(sbd, parent.id, after: heard, containing: "#18303 is ready to merge")
+      #expect(!told.contains { $0.contains("opened PR #18303") }, "\(told)")
+    }
 
-    // The PR returns while sbd runs.
-    heard = try sbd.messagesFromSbd(parent.id).count
-    try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
-    try sbd.poll()
-    try sbd.waitFor(kid.id, "the PR's first return") { $0.pr?.number == 18303 }
-    let inRun = try waitForNotice(sbd, parent.id, after: heard, containing: "#18303 is ready to merge")
-    #expect(!inRun.contains { $0.contains("opened PR #18303") }, "\(inRun)")
+    try dropPR()
+    try expectNoSecondAnnouncement(after: try returnPR(as: 18303))
 
-    // It drops out again before the restart.
-    heard = try sbd.messagesFromSbd(parent.id).count
-    try sbd.git(kid.cwd, "checkout", "-q", "haacked/no-pr-yet")
-    try sbd.poll()
-    try #require(try sbd.get(kid.id).pr == nil)
-    try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
+    try dropPR()
     try sbd.restart(setting: "tickSeconds", to: 0.2)
     try #require(try sbd.get(kid.id).pr == nil)
-
-    heard = try sbd.messagesFromSbd(parent.id).count
-    try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
-    try sbd.poll()
-    try sbd.waitFor(kid.id, "the PR's return") { $0.pr?.number == 18303 }
-    // The PR's line comes before its state's line, in the same message or an earlier one.
-    let afterReturn = try waitForNotice(sbd, parent.id, after: heard, containing: "#18303 is ready to merge")
-    #expect(!afterReturn.contains { $0.contains("opened PR #18303") }, "\(afterReturn)")
+    try expectNoSecondAnnouncement(after: try returnPR(as: 18303))
 
     // The same branch's PR comes back as one the parent never heard of.
-    heard = try sbd.messagesFromSbd(parent.id).count
-    try sbd.git(kid.cwd, "checkout", "-q", "haacked/no-pr-yet")
-    try sbd.poll()
-    try #require(try sbd.get(kid.id).pr == nil)
+    try dropPR()
     github.change(18303) {
       $0["number"] = 18304
       $0["url"] = "https://github.com/PostHog/charts/pull/18304"
     }
-    try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
-    try sbd.poll()
-    try sbd.waitFor(kid.id, "the new PR") { $0.pr?.number == 18304 }
     try waitForNotice(
-      sbd, parent.id, after: heard,
+      sbd, parent.id, after: try returnPR(as: 18304),
       containing: "kid (\(kid.id)) opened PR #18304: https://github.com/PostHog/charts/pull/18304")
   }
 
