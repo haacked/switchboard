@@ -163,7 +163,7 @@ extension Instance {
     try sbd.waitFor("the stub to read the resend") { sbd.stubInputCount(decisionsLead) >= 2 }
     try sbd.waitFor("the resend's delivered") { try !sbd.events(s.id, "delivered", text: message).isEmpty }
     #expect(sbd.settledStubInputCount(decisionsLead) == 2)
-    #expect(try sbd.decisionsDelivery(s.id) != "unknown")
+    #expect(try sbd.decisionsDelivery(s.id) == "delivered")
   }
 
   /// Each case refuses before anything was sent, so one `sent` event at most stays.
@@ -348,6 +348,23 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
 
     #expect(r.status != 0, "the send was accepted: \(r.stdout)")
     #expect(sbd.settledStubInputCount(text) == 0)
+    #expect(try sbd.events(s.id, "sent", text: text).isEmpty)
+  }
+
+  /// A stopped claude would start with the message as its prompt. sbd can't
+  /// store the `sent` event, so it refuses the send and starts nothing.
+  @Test func aSendToAStoppedClaudeThatCantStoreItsSentEventStartsNothing() throws {
+    let sbd = try Instance()
+    let s = try Path.direct.session(sbd)
+    try sbd.stopClaude(s.id)
+    let launches = sbd.stubArgs().count
+    let text = "resumed while the log is locked"
+
+    let r = try sbd.whileTheLogIsLocked { try sbd.run(["send", s.id, text]) }
+
+    #expect(r.status != 0, "the send was accepted: \(r.stdout)")
+    #expect(sbd.settledStubInputCount(text) == 0)
+    #expect(!sbd.stubArgs().dropFirst(launches).contains { $0.contains(text) }, "claude started with the message")
     #expect(try sbd.events(s.id, "sent", text: text).isEmpty)
   }
 

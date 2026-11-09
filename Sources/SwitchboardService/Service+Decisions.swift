@@ -131,6 +131,9 @@ extension Service {
         let facts = entries[id]!.facts
         switch (facts.decisionsDelivery, facts.submittedDecisionsMessage) {
         case (.unknown, let message?):
+          guard summary(id).decisionsSent == true else {
+            throw APIError("nothing to resend: \(name) has moved past those decisions")
+          }
           try refuseWhileSubmitting(id)
           submittingDecisions.insert(id)
           return (id, message)
@@ -145,14 +148,14 @@ extension Service {
     return sendDecisions(id, message) { _ in }
   }
 
-  /// Sends a decisions message as `send` does, and runs `sent` in the same
-  /// block of the state queue and the same store transaction as the send.
-  /// No other request comes between the send's `sent` event and what `sent`
-  /// records, and the log keeps both or neither. A stopped claude starts
+  /// Sends a decisions message as `send` does, and runs `alongside` in the
+  /// same block of the state queue and the same store transaction as the
+  /// send. No other request comes between the send's `sent` event and what
+  /// `alongside` records, and the log keeps both or neither. A stopped claude starts
   /// without the message as its prompt, so nothing reaches claude before the
   /// transaction commits. The session leaves `submittingDecisions` in that
   /// block too.
-  private func sendDecisions(_ id: String, _ message: String, sent: (Delivery) throws -> Void) -> Response {
+  private func sendDecisions(_ id: String, _ message: String, alongside: (Delivery) throws -> Void) -> Response {
     let request = Request(op: "send", args: ["session": .string(id), "text": .string(message)])
     do {
       return .success(
@@ -162,7 +165,7 @@ extension Service {
           do {
             return try store.transaction {
               let delivery = try send(id, message, launchesWithPrompt: false)
-              try sent(delivery)
+              try alongside(delivery)
               return ["delivery": .string(delivery.rawValue)]
             }
           } catch {
@@ -173,7 +176,6 @@ extension Service {
           }
         })
     } catch {
-      queue.sync { _ = submittingDecisions.remove(id) }
       return .failure("\(error)")
     }
   }

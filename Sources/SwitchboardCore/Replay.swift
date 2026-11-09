@@ -46,7 +46,7 @@ public struct SessionReplay: Codable, Equatable, Sendable {
     case "delivery_unknown":
       if let i = uncertain.firstIndex(of: text) { uncertain.remove(at: i) }
     case "requeued":
-      // A failed paste goes back to the front of the queue, as sbd puts it.
+      // A failed paste goes back to the front of the queue, where `Service.requeue` puts it.
       // A log from before `pasting` existed records `requeued` after a
       // direct paste whose `sent` added nothing to `pending`.
       if let i = uncertain.firstIndex(of: text) {

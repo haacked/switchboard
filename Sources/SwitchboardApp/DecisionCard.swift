@@ -118,6 +118,10 @@ struct ResendDecisions: View {
         .accessibilityLabel("Send the answers again")
         .accessibilityHint("Sends the same answers once more. The session may get them twice.")
     }
+    // A refused resend leaves the button as it was, so VoiceOver would say nothing.
+    .onChange(of: model.decisionErrors[session.id]) {
+      if let error = model.decisionErrors[session.id] { AccessibilityNotification.Announcement(error).post() }
+    }
   }
 }
 

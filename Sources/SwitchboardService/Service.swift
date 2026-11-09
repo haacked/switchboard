@@ -769,8 +769,10 @@ public final class Service {
     // a message with images waits for a paste.
     let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
     if launchesWithPrompt, claudeState(id) == .stopped, entries[id]!.pending.isEmpty, !attaches, hasRoom() {
-      try startClaude(id, prompt: text)
+      // A missing folder is the usual reason startClaude throws, so the check comes before `sent` is stored.
+      try requireFolder(entries[id]!.session)
       try recordSent(id, text, .resumed, byUser: byUser)
+      try startClaude(id, prompt: text)
       return .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
       let sent = try recordSent(id, text, .pasted, byUser: byUser)
