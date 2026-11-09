@@ -6,6 +6,8 @@ extension Service {
     switch op {
     case "decision-submit":
       return submitDecisions(args)
+    case "decision-resend":
+      return resendDecisions(args)
     case "decision-answer":
       return .success(try queue.sync { try answerDecision(args) })
     case "decision-discard":
@@ -109,13 +111,72 @@ extension Service {
     } catch {
       return .failure("\(error)")
     }
-    let response = handle(Request(op: "send", args: ["session": .string(id), "text": .string(message)]))
-    queue.sync {
-      submittingDecisions.remove(id)
-      if response.ok, entries[id]?.facts.decisionList != nil {
-        record(id, "decisions_submitted", ["message": .string(message), "ref": .string(ref)])
-      }
+    return sendDecisions(id, message) { delivery in
+      guard entries[id]?.facts.decisionList != nil else { return }
+      try recordStored(
+        id, "decisions_submitted",
+        ["message": .string(message), "ref": .string(ref), "delivery": .string(delivery.rawValue)])
     }
-    return response
+  }
+
+  /// Sends the last submit's message once more, only while sbd can't tell
+  /// whether the session got it.
+  private func resendDecisions(_ args: JSON) -> Response {
+    let id: String
+    let message: String
+    do {
+      (id, message) = try queue.sync {
+        let id = try lookup(args)
+        let name = entries[id]!.session.name
+        let facts = entries[id]!.facts
+        switch (facts.decisionsDelivery, facts.submittedDecisionsMessage) {
+        case (.unknown, let message?):
+          guard summary(id).decisionsSent == true else {
+            throw APIError("nothing to resend: \(name) has moved past those decisions")
+          }
+          try refuseWhileSubmitting(id)
+          submittingDecisions.insert(id)
+          return (id, message)
+        case (.sending, _): throw APIError("nothing to resend: sbd is still sending your answers to \(name)")
+        case (.delivered, _): throw APIError("nothing to resend: \(name) got your answers")
+        default: throw APIError("nothing to resend: \(name) has no submitted answers")
+        }
+      }
+    } catch {
+      return .failure("\(error)")
+    }
+    return sendDecisions(id, message) { _ in }
+  }
+
+  /// Sends a decisions message as `send` does, and runs `alongside` in the
+  /// same block of the state queue and the same store transaction as the
+  /// send. No other request comes between the send's `sent` event and what
+  /// `alongside` records, and the log keeps both or neither. A stopped claude starts
+  /// without the message as its prompt, so nothing reaches claude before the
+  /// transaction commits. The session leaves `submittingDecisions` in that
+  /// block too.
+  private func sendDecisions(_ id: String, _ message: String, alongside: (Delivery) throws -> Void) -> Response {
+    let request = Request(op: "send", args: ["session": .string(id), "text": .string(message)])
+    do {
+      return .success(
+        try prepared(request) {
+          defer { submittingDecisions.remove(id) }
+          let before = entries[id]
+          do {
+            return try store.transaction {
+              let delivery = try send(id, message, launchesWithPrompt: false)
+              try alongside(delivery)
+              return ["delivery": .string(delivery.rawValue)]
+            }
+          } catch {
+            // The log kept none of the writes, so the session's state goes back to match it.
+            // A paste that the send started finds no `sent` event, and drops the message.
+            entries[id] = before
+            throw error
+          }
+        })
+    } catch {
+      return .failure("\(error)")
+    }
   }
 }

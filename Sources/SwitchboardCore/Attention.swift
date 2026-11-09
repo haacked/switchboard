@@ -119,6 +119,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.
   public var submittedDecisionsRef: String?
+  /// The message that the last accepted submit sent.
+  public var submittedDecisionsMessage: String?
+  /// Whether the last accepted submit's message reached claude, or nil before any submit.
+  public var decisionsDelivery: DecisionsDelivery?
   /// When the PR entered its pipeline stage. `notePipeline` sets it.
   public var pipelineSince: Int64?
 

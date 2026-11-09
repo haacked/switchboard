@@ -419,3 +419,133 @@ private func recordedDecisionsAnswer() throws -> JSON {
     if let lacks = c.lacks { #expect(!line.contains(lacks), "\(line)") }
   }
 }
+
+// MARK: The delivery of a submit
+
+/// The message that the submit in `submitted` sends.
+private let submittedMessage = "My decisions on the 3 questions in your last reply:\n1. Postgres."
+
+/// One event about a message on its way, with the message's text.
+private func delivery(_ id: Int64, _ kind: String, _ text: String = submittedMessage) -> Event {
+  Event(id: id, session: "s1", t: 200 + id, kind: kind, data: ["text": .string(text)])
+}
+
+/// The events of an accepted submit: the `sent` of its send, then
+/// `decisions_submitted` with the send's delivery. sbd records both in one
+/// block, so `pasting` comes after them. The facts don't depend on that
+/// order, so `pastingFirst` puts `pasting` first.
+private func submitted(via sentDelivery: Delivery = .pasted, pastingFirst: Bool = false) -> [Event] {
+  let sent = Event(
+    id: 6, session: "s1", t: 230, kind: "sent",
+    data: ["text": .string(submittedMessage), "delivery": .string(sentDelivery.rawValue)])
+  let submit = Event(
+    id: 8, session: "s1", t: 240, kind: "decisions_submitted",
+    data: ["message": .string(submittedMessage), "ref": "summary:3", "delivery": .string(sentDelivery.rawValue)])
+  let pasting = delivery(7, "pasting")
+  let pasted = pastingFirst ? [pasting, submit] : [submit, pasting]
+  return decisionTurn() + [
+    decisionsOpened(4, ref: "summary:3"), decisionAnswered(5, 1, ["labels": ["Postgres"]]), sent,
+  ]
+    + (sentDelivery == .resumed ? [submit] : pasted)
+}
+
+private func summary() -> SessionSummary {
+  SessionSummary(
+    id: "s1", name: "s1", cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: "s1", state: .needsYou, reason: "",
+    since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+}
+
+/// `SessionFacts` follows the submitted message from `decisions_submitted`
+/// until claude got it or sbd can't tell.
+@Suite struct DecisionDeliveryTests {
+  @Test func factsKeepTheSubmittedMessageWithItsRef() {
+    let f = facts(submitted())
+
+    #expect(f.submittedDecisionsMessage == submittedMessage)
+    #expect(f.submittedDecisionsRef == "summary:3")
+  }
+
+  @Test func nothingSubmittedHasNoDelivery() {
+    let f = facts(decisionTurn() + [decisionsOpened(4, ref: "summary:3")])
+
+    #expect(f.decisionsDelivery == nil)
+  }
+
+  @Test(arguments: [false, true])
+  func anAcceptedSubmitIsSendingUntilDelivered(_ pastingFirst: Bool) {
+    let f = facts(submitted(pastingFirst: pastingFirst))
+
+    #expect(f.decisionsDelivery == .sending)
+  }
+
+  @Test(arguments: [Delivery.pasted, .queued])
+  func deliveredMakesTheSubmitDelivered(_ sentDelivery: Delivery) {
+    let f = facts(submitted(via: sentDelivery) + [delivery(9, "delivered")])
+
+    #expect(f.decisionsDelivery == .delivered)
+  }
+
+  /// A submit that resumed a stopped claude passed the message as its first
+  /// prompt. No paste follows, so no `delivered` ever comes.
+  @Test func aSubmitThatResumedClaudeIsDelivered() {
+    let f = facts(submitted(via: .resumed))
+
+    #expect(f.decisionsDelivery == .delivered)
+  }
+
+  @Test(arguments: [false, true])
+  func deliveryUnknownMakesTheSubmitUnknown(_ pastingFirst: Bool) {
+    let f = facts(submitted(pastingFirst: pastingFirst) + [delivery(9, "delivery_unknown")])
+
+    #expect(f.decisionsDelivery == .unknown)
+  }
+
+  /// A submit from an sbd that recorded no delivery with it, and no
+  /// `delivered` for a direct paste, counts as delivered.
+  @Test func anOldSubmitIsDelivered() {
+    let submit = Event(
+      id: 8, session: "s1", t: 240, kind: "decisions_submitted",
+      data: ["message": .string(submittedMessage), "ref": "summary:3"])
+
+    let f = facts(submitted().filter { $0.kind != "decisions_submitted" && $0.kind != "pasting" } + [submit])
+
+    #expect(f.decisionsDelivery == .delivered)
+  }
+
+  /// A resend sends the stored message again, which is on its way until its own `delivered`.
+  @Test func aResendAfterAnUnknownDeliveryIsSendingAgain() {
+    let resend = Event(
+      id: 10, session: "s1", t: 300, kind: "sent",
+      data: ["text": .string(submittedMessage), "delivery": .string(Delivery.pasted.rawValue)])
+
+    let f = facts(submitted() + [delivery(9, "delivery_unknown"), resend])
+
+    #expect(f.decisionsDelivery == .sending)
+  }
+
+  /// Only events about the submitted text change its delivery.
+  @Test(arguments: ["delivered", "delivery_unknown"])
+  func anotherMessagesEventLeavesTheDelivery(_ kind: String) {
+    let f = facts(submitted() + [delivery(9, kind, "an unrelated message")])
+
+    #expect(f.decisionsDelivery == .sending)
+  }
+
+  /// The app reads the delivery from the summary's JSON.
+  @Test(arguments: [(DecisionsDelivery.sending, "sending"), (.delivered, "delivered"), (.unknown, "unknown")])
+  func theSummaryCarriesTheDeliveryByName(_ state: DecisionsDelivery, _ name: String) throws {
+    var s = summary()
+    s.decisionsDelivery = state
+
+    let json = try JSON(encoding: s)
+
+    #expect(json["decisionsDelivery"]?.string == name)
+    #expect(try JSONCoding.convert(json, to: SessionSummary.self).decisionsDelivery == state)
+  }
+
+  @Test func theSummaryOmitsTheDeliveryWhenNothingWasSubmitted() throws {
+    let s = summary()
+
+    #expect(try JSON(encoding: s)["decisionsDelivery"] == nil)
+  }
+}

@@ -179,6 +179,52 @@ final class Instance {
     process = nil
   }
 
+  /// Ends sbd with SIGKILL, as a crash or a forced quit does. sbd runs no
+  /// handler, so it records nothing more and leaves its socket file behind.
+  func killSbd() {
+    guard let p = process else { return }
+    kill(p.processIdentifier, SIGKILL)
+    p.waitUntilExit()
+    process = nil
+  }
+
+  /// A gate file in the home. While `hold-paste` exists, sbd holds each paste
+  /// on the paste queue after it accepted the message and before it records
+  /// `pasting`. While `hold-delivered` exists, sbd holds each paste after
+  /// `host.paste` returned, Enter included, and before it records `delivered`.
+  /// Neither gate blocks the state queue.
+  func gate(_ name: String) -> String { "\(home.path)/\(name)" }
+
+  func hold(_ gate: String) {
+    FileManager.default.createFile(atPath: self.gate(gate), contents: nil)
+  }
+
+  func release(_ gate: String) throws {
+    try FileManager.default.removeItem(atPath: self.gate(gate))
+  }
+
+  /// The lines that the stub read from its terminal, oldest first, with the paste markers.
+  func stubInput() -> [String] {
+    let text = (try? String(contentsOfFile: "\(home.path)/stub-input.log", encoding: .utf8)) ?? ""
+    return text.split(separator: "\n").map(String.init)
+  }
+
+  /// How many lines that the stub read contain the text.
+  func stubInputCount(_ text: String) -> Int { stubInput().filter { $0.contains(text) }.count }
+
+  /// How many pastes reached the stub with their Enter. The stub reads the
+  /// line that holds a paste's end marker only once Enter's new line arrives.
+  func completePastes() -> Int { stubInputCount("\u{1B}[201~") }
+
+  /// Whether the session's transcript holds a line with the text.
+  func transcriptContains(_ s: SessionSummary, _ text: String) -> Bool {
+    let files = FileManager.default.enumerator(atPath: home.path)?.compactMap { $0 as? String } ?? []
+    return files.contains {
+      $0.hasSuffix("/\(s.claudeSessionId).jsonl")
+        && (try? String(contentsOfFile: "\(home.path)/\($0)", encoding: .utf8))?.contains(text) == true
+    }
+  }
+
   /// Runs sb and returns its output. It throws when sb fails.
   @discardableResult
   func sb(_ args: String..., env extra: [String: String] = [:]) throws -> String {

@@ -15,8 +15,9 @@ import Testing
     ["tool_name": .string(name), "tool_use_id": .string("t-\(command)"), "tool_input": ["command": .string(command)]]
   }
 
-  /// Events that leave an open card, a deferred card, queued messages, a PR
-  /// with comments, an sbd message, and a running turn.
+  /// Events that leave an open card, a deferred card, queued messages, a
+  /// message whose paste may not have arrived, a PR with comments, an sbd
+  /// message, and a running turn.
   func history(_ t: inout Int64) -> [Event] {
     func e(_ kind: String, _ data: JSON = [:]) -> Event {
       t += 1000
@@ -32,6 +33,11 @@ import Testing
       e("sent", ["text": "one", "delivery": "queued"]), e("sent", ["text": "two", "delivery": "queued"]),
       e("requeued", ["text": "three"]), e("delivered", ["text": "one"]),
       e("sent", ["text": "wake up", "delivery": "pasted", "by": "sbd"]),
+      e("sent", ["text": "four", "delivery": "pasted", "awaits_delivered": true]), e("pasting", ["text": "four"]),
+      e("sent", ["text": "five", "delivery": "pasted", "awaits_delivered": true]), e("pasting", ["text": "five"]),
+      e("delivered", ["text": "five"]),
+      e("sent", ["text": "six", "delivery": "queued"]), e("pasting", ["text": "six"]),
+      e("delivery_unknown", ["text": "six"]),
       e("PermissionRequest", tool("Bash", "touch x")),
       e("pr", ["pr": try! JSON(encoding: pr), "comments": try! JSON(encoding: comments)]),
       e("PostToolUse", tool("Bash", "touch x")), e("Stop", ["last_assistant_message": "Done. Want me to push?"]),
@@ -104,7 +110,10 @@ import Testing
     var t: Int64 = 0
     try append(history(&t), to: store)
     let replay = try Snapshots.refresh(store, session, build: "b1").snapshot.replay
+    // "wake up" is a direct paste from an sbd that recorded no `delivered` for it.
+    // "four" started its paste with no `delivered`.
     #expect(replay.pending == ["two", "three"])
+    #expect(replay.uncertain == ["four"])
     #expect(replay.facts.cards.map(\.input) == [["command": "rm -rf build"]])
     #expect(replay.facts.pr?.number == 7)
     #expect(replay.facts.prComments.map(\.id) == ["IC_1"])

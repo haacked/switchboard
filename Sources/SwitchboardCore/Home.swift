@@ -88,7 +88,10 @@ public struct Config: Codable, Equatable, Sendable {
   public var autoMode = true
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
-  /// Lets the `clock` request move sbd's clock forward. Only tests set it.
+  /// Lets the `clock` request move sbd's clock forward. While the home holds
+  /// `hold-paste`, each paste waits before it starts. While the home holds
+  /// `hold-delivered`, each paste waits before sbd records `delivered`. Only
+  /// tests set it.
   public var testClock = false
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
