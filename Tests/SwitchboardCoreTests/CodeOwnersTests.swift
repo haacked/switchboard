@@ -99,7 +99,8 @@ private let mobile = ".github/workflows/*mobile*.yml @o"
     ("apps/web/index.js", ["@octocat"]),
     ("apps/github/readme.md", ["@doctocat"]),
     ("foo/apps/github/x.c", ["@octocat"]),
-  ])
+    // Without the type, the Command Line Tools' Swift 6.4 cannot type-check the literal.
+  ] as [(String, [String])])
   func gitHubsExampleFileGivesTheLastMatchingLinesOwners(_ path: String, _ owners: [String]) throws {
     let file = try #require(CodeOwnersFile.parse(gitHubExampleFile))
 
@@ -176,7 +177,8 @@ private let mobile = ".github/workflows/*mobile*.yml @o"
     ("{a,b}.txt @o", "a.txt", none),
     ("{a,b}.txt @o", "{a,b}.txt", o),
     ("$tmp^ @o", "$tmp^", o),
-  ])
+    // Without the type, the Command Line Tools' Swift 6.4 cannot type-check the literal.
+  ] as [(String, String, [String])])
   func eachPatternFormMatchesAsGitHubDocumentsIt(_ text: String, _ path: String, _ owners: [String]) throws {
     let file = try #require(CodeOwnersFile.parse(text))
 
