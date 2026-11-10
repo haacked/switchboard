@@ -66,7 +66,8 @@ private func runHelper(
   env["DEVELOPER_DIR"] = developerDir
   if let pathPrefix { env["PATH"] = "\(pathPrefix):\(env["PATH"] ?? "/usr/bin:/bin")" }
   let options = errexit ? "set -euo pipefail" : "set -uo pipefail"
-  return try runCommand("/bin/bash", ["-c", "\(options)\nsource \(shellQuote(helper))\n\(body)"], env: env, timeout: 30)
+  return try runCommand(
+    "/bin/bash", ["-c", "\(options)\nsource \(shellQuote(helper))\n\(body)"], env: env, timeout: 30)
 }
 
 /// The `args` array that sourcing the helper sets, one element per line. The
@@ -141,18 +142,6 @@ private func requireSwiftTesting(developerDir: String, call: String) throws -> C
     #expect(args == [FakeDeveloperDir.Flag.plugin, .framework, .dylib].flatMap(dev.flags))
   }
 
-  /// DEVELOPER_DIR may name an Xcode app rather than its Contents/Developer
-  /// folder. xcode-select and swift accept both forms.
-  @Test func requireFindsTheFrameworkWhenDeveloperDirNamesTheApp() throws {
-    let app = try FakeDeveloperDir(folders: ["Contents/Developer/\(FakeDeveloperDir.xcodeFramework)"])
-
-    let r = try requireSwiftTesting(developerDir: app.path, call: "require_swift_testing || exit 4")
-
-    #expect(r.status == 0, "\(r.stderr)")
-    #expect(r.stdout == "sourced\nafter\n")
-    #expect(r.stderr == "")
-  }
-
   /// Each layout lacks both Testing.framework paths, though some hold the other
   /// files. The caller ignores the status, so only an `exit` stops the script.
   @Test(arguments: [
@@ -182,7 +171,12 @@ private func requireSwiftTesting(developerDir: String, call: String) throws -> C
     #expect(r.stderr.contains(dev.path), "\(r.stderr)")
   }
 
-  @Test(arguments: [FakeDeveloperDir.cltFramework, FakeDeveloperDir.xcodeFramework])
+  /// The last case names an Xcode app rather than its Contents/Developer
+  /// folder in DEVELOPER_DIR. xcode-select and swift accept both forms.
+  @Test(arguments: [
+    FakeDeveloperDir.cltFramework, FakeDeveloperDir.xcodeFramework,
+    "Contents/Developer/\(FakeDeveloperDir.xcodeFramework)",
+  ])
   func requireReturnsZeroAndPrintsNothingWithATestingFramework(_ framework: String) throws {
     let dev = try FakeDeveloperDir(folders: [framework])
 
