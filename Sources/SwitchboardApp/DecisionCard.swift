@@ -87,7 +87,7 @@ struct DecisionCard: View {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
-      // Every other card shows its whole tool call, which an approval needs to see.
+      // An approval needs to see the whole tool call. A card leaves it out only when the item's Details shows it.
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       ForEach(cards) {
