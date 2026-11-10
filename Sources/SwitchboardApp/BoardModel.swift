@@ -463,6 +463,24 @@ final class BoardModel: ObservableObject {
     }
     return true
   }
+  /// Moves a work session to a group, or to no group when `group` is nil.
+  /// The Board shows the card in its new lane before sbd answers. It sends
+  /// nothing for an id that names no work session on the Board, for a group
+  /// that sbd didn't list, or when the session is already in that lane. It
+  /// returns whether it sent the move.
+  @discardableResult
+  func moveToGroup(_ id: String, _ group: String?) -> Bool {
+    let known = Set(groups.map(\.id))
+    guard let session = workBoard.first(where: { $0.id == id }), group.map(known.contains) ?? true,
+      BoardRows.group(of: session, known: known) != group
+    else { return false }
+    for i in sessions.indices where sessions[i].id == id { sessions[i].group = group }
+    for i in followups.indices where followups[i].id == id { followups[i].group = group }
+    var args: [String: JSON] = ["sessions": [.string(id)]]
+    if let group { args["group"] = .string(group) } else { args["ungrouped"] = true }
+    perform("group-move", args)
+    return true
+  }
   func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
   func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
 

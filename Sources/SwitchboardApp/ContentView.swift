@@ -428,6 +428,8 @@ struct BoardView: View {
     let board = model.workBoard
     let done = board.filter(MergeBoard.isDone)
     let open = board.filter { !MergeBoard.isDone($0) }
+    // A repo lane has no group, like the Ungrouped lane, so a drop there would ungroup the card.
+    let drops = laneKind == .group
     if board.isEmpty {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -446,11 +448,14 @@ struct BoardView: View {
                   .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(MergeBoard.columns, id: \.self) { stage in
                   VStack(spacing: 8) {
-                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in BoardCard(session: s) }
+                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in
+                      if drops { BoardCard(session: s).draggable(s.id) } else { BoardCard(session: s) }
+                    }
                   }
                   .frame(width: Self.columnWidth, alignment: .top)
                 }
               }
+              .modifier(LaneDrop(enabled: drops, group: lane.group?.id))
               .accessibilityElement(children: .contain)
               .accessibilityLabel(lane.title)
               .accessibilityIdentifier("board-row-\(lane.id)")
@@ -486,6 +491,39 @@ struct BoardView: View {
           .background(.background)
         }
       }
+    }
+  }
+}
+
+/// Moves a card dropped on a group lane into `group`, or out of its group
+/// on the Ungrouped lane, where `group` is nil. The lane under the drag
+/// shows a tint. The drop area covers the whole lane, so an empty group's
+/// lane also takes cards.
+private struct LaneDrop: ViewModifier {
+  @EnvironmentObject var model: BoardModel
+  let enabled: Bool
+  let group: String?
+  @State private var targeted = false
+
+  func body(content: Content) -> some View {
+    if enabled {
+      content
+        .contentShape(Rectangle())
+        .background {
+          if targeted {
+            RoundedRectangle(cornerRadius: 8)
+              .fill(Color.accentColor.opacity(0.12))
+              .stroke(Color.accentColor.opacity(0.6))
+              .padding(-6)
+          }
+        }
+        .dropDestination(for: String.self) { ids, _ in
+          ids.map { model.moveToGroup($0, group) }.contains(true)
+        } isTargeted: {
+          targeted = $0
+        }
+    } else {
+      content
     }
   }
 }
