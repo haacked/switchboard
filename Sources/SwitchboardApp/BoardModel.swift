@@ -677,6 +677,11 @@ final class BoardModel: ObservableObject {
     decide(session, "decision-submit", args, key: "\(session)/submit")
   }
 
+  /// Sends the submitted answers again, which sbd allows only while it can't tell whether they arrived.
+  func resendDecisions(_ session: String) {
+    decide(session, "decision-resend", ["session": .string(session)], key: "\(session)/resend")
+  }
+
   func discardDecisions(_ session: String) {
     decide(session, "decision-discard", ["session": .string(session)], key: "\(session)/discard")
   }

@@ -215,6 +215,10 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// open, they are the list's copy.
   public var decisions: [PendingDecision]
   public var source: TriageSource
+  /// What the user can open after the Summary and the Action. The builder
+  /// fills in the card's parts. The service adds the session's fields,
+  /// because the builder sees only the session's facts.
+  public var details: TriageDetails
   /// Names what the item is about: its card, or the turn that its reply
   /// ended. `choose` refuses a ref that is no longer the session's, so a
   /// click never lands on an item the user did not see.
@@ -222,9 +226,11 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, decisions: [PendingDecision] = [], source: TriageSource, ref: String = ""
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], source: TriageSource, ref: String = "",
+    details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
+    self.details = details
     self.title = title
     self.kind = kind
     self.summary = summary
@@ -242,9 +248,16 @@ public struct TriageItem: Codable, Equatable, Sendable {
       ref: ref)
   }
 
-  /// An item that an older sbd wrote has no multiSelect or decisions.
+  private enum CodingKeys: String, CodingKey {
+    case title, kind, summary, options, callouts, multiSelect, decisions, source, ref, message
+  }
+
+  private struct Sections: Decodable { var details: TriageDetails? }
+
+  /// An item that an older sbd wrote has no multiSelect, decisions, or message.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    details = try c.decodeIfPresent(Sections.self, forKey: .message)?.details ?? TriageDetails()
     title = try c.decode(String.self, forKey: .title)
     kind = try c.decode(TriageKind.self, forKey: .kind)
     summary = try c.decode(String.self, forKey: .summary)
@@ -254,6 +267,20 @@ public struct TriageItem: Codable, Equatable, Sendable {
     decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
     source = try c.decode(TriageSource.self, forKey: .source)
     ref = try c.decode(String.self, forKey: .ref)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(title, forKey: .title)
+    try c.encode(kind, forKey: .kind)
+    try c.encode(summary, forKey: .summary)
+    try c.encode(options, forKey: .options)
+    try c.encode(callouts, forKey: .callouts)
+    try c.encode(multiSelect, forKey: .multiSelect)
+    try c.encode(decisions, forKey: .decisions)
+    try c.encode(source, forKey: .source)
+    try c.encode(ref, forKey: .ref)
+    try c.encode(message, forKey: .message)
   }
 
   /// Whether the user ticks the option rather than clicks it.
@@ -394,7 +421,7 @@ public enum Triage {
     var item: TriageItem
     if let card = facts.cards.first {
       item = cardItem(card)
-      item.ref = "card:\(card.id)"
+      item.ref = card.ref
     } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
       item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
       if verdict.source != .reply { addRule(verdict, to: &item) }
@@ -448,16 +475,21 @@ public enum Triage {
         options: [
           TriageOption(label: "Send", action: .allow),
           TriageOption(label: "Cancel", action: .deny),
-        ], source: .card)
+        ], source: .card,
+        details: TriageDetails(
+          openByDefault: true, toolInput: .init(tool: card.tool, text: message.text),
+          targets: message.targets.map { "\($0.name) (\($0.id))" }))
     }
     if card.kind == .permission {
       return TriageItem(
-        title: title(card.reason), kind: .approval, summary: "Claude asks to run \(card.summary).",
+        title: title(card.reason), kind: .approval, summary: permissionSummary(card),
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
         ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
-        source: .card)
+        source: .card,
+        details: TriageDetails(
+          openByDefault: !summaryShowsCall(card), toolInput: .init(tool: card.tool, text: card.details)))
     }
     // Several questions take more than a click or a set of ticks.
     let only = card.questions.count == 1 ? card.questions.first : nil
@@ -636,4 +668,9 @@ public struct TriageSettings: Codable, Equatable, Sendable {
     perHour = try c.decodeIfPresent(Int.self, forKey: .perHour) ?? d.perHour
     systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt) ?? d.systemPrompt
   }
+}
+
+extension Card {
+  /// The ref of the Inbox item that this card gives.
+  public var ref: String { "card:\(id)" }
 }

@@ -22,6 +22,15 @@ public struct CodeOwnersFile: Sendable {
 
   let lines: [Line]
 
+  /// Counts the patterns that `steps(_:)` compiles on the current task. A
+  /// test binds it to show that matching reuses the steps that `parse` built.
+  /// It is unchecked because only the task that binds it parses and matches.
+  final class Compilations: @unchecked Sendable {
+    var count = 0
+  }
+
+  @TaskLocal static var compilations: Compilations?
+
   /// nil when an active line uses syntax that GitHub does not support: a
   /// pattern that starts with `!`, holds `[`, `]`, or `\`, or is only
   /// slashes. sbd cannot predict how GitHub reads such a line.
@@ -52,6 +61,7 @@ public struct CodeOwnersFile: Sendable {
   /// its own level, as in GitHub's `docs/*` example. nil for a pattern that
   /// is only slashes.
   static func steps(_ pattern: String) -> [Step]? {
+    compilations?.count += 1
     var body = Substring(pattern)
     let rooted = body.hasPrefix("/")
     if rooted { body = body.dropFirst() }

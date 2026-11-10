@@ -257,6 +257,22 @@ public enum Transcript {
     return messages.reversed()
   }
 
+  /// Whether a user message of the main conversation that holds `text` starts
+  /// at byte `offset` or later. It is false when the file is shorter than
+  /// `offset`, because then it is not the file that `offset` measured.
+  public static func hasUserMessage(_ path: String, holding text: String, from offset: UInt64) -> Bool {
+    guard let file = FileHandle(forReadingAtPath: path) else { return false }
+    defer { try? file.close() }
+    guard let size = try? file.seekToEnd(), size >= offset, (try? file.seek(toOffset: offset)) != nil,
+      let data = try? file.readToEnd()
+    else { return false }
+    let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return data.split(separator: UInt8(ascii: "\n")).contains {
+      guard let m = message(Data($0)), m.role == .user else { return false }
+      return m.text.contains(wanted)
+    }
+  }
+
   /// Calls `body` with each non-empty line, last line first, until it returns
   /// true. Each read is twice the size of the one before, up to 4 MB, so a
   /// long line costs few reads.

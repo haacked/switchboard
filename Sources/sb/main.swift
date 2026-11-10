@@ -141,6 +141,9 @@ let usage = """
     decide <session> --submit [--stale] | --discard
                                   send every answer as one message, or drop the answers.
                                   After the session took another turn, --submit needs --stale
+    decide <session> --resend     send the submitted answers again, only when sbd
+                                  restarted while sending them and can't tell whether
+                                  the session got them
     reply <session>               the session's last reply, as Markdown
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID

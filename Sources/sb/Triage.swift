@@ -1,25 +1,39 @@
 import Foundation
 import SwitchboardCore
 
-/// Prints an item: its title, what the session says, and its options.
+/// Prints an item: its title, then its Summary, its Action, and a line that names what its Details hold.
 func printTriage(_ s: SessionSummary, position: Int? = nil) {
   guard let item = s.triage else { return }
   func out(_ line: String) { print(line.printable) }
   let number = position.map { "\($0). " } ?? ""
   out("\(number)\(item.title)  [\(item.kind.rawValue)]")
   out("   \(s.name) (\(s.id)), \(s.repoFolder.map { ($0 as NSString).lastPathComponent + ", " } ?? "")\(ago(s.since))")
-  if !item.summary.isEmpty { out("   \(oneLine(item.summary, max: 300))") }
+  out("   Summary:")
+  if !item.summary.isEmpty { out("      \(oneLine(item.summary, max: 300))") }
   for c in item.callouts {
-    out("   [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
+    out("      [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
+  out("   Action:")
   if item.hasTickable {
-    out("   pick any, as in: sb choose \(s.id) 1,3")
+    out("      pick any, as in: sb choose \(s.id) 1,3")
+  }
+  // The same condition that `sb decide` and the app's step view use.
+  let list = s.shownDecisions
+  if let list { out("      \(list.decisions.count) decisions, answered one at a time: sb decide \(s.id)") }
+  if item.options.isEmpty && list == nil {
+    // A held card with several questions has no options. `sb ack` would hide its blocked turn.
+    out(
+      item.source == .card
+        ? "      answer the questions: sb answer \(s.id) <answer>..."
+        : "      none, except Acknowledge: sb ack \(s.id)")
   }
   for (i, o) in item.options.enumerated() {
-    out(optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
+    out("   " + optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
     // Clicking sends this text as you, so you read it first.
-    out("      \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
+    out("         \(o.action == .reply ? "Sends what you give with --text" : o.effect(mergeMethod: s.pr?.mergeMethod))")
   }
+  let held = item.details.parts
+  out("   Details: \(held.isEmpty ? "none" : held.joined(separator: ", ")) (sb get --json \(s.id))")
 }
 
 /// An option as `sb triage` and `sb decide` list it, under its item.

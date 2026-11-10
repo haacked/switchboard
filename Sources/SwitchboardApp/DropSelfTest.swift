@@ -129,7 +129,7 @@ enum DropSelfTest {
     await step("send", typed: "look at these", [files(["a.png", "b.jpg", "c.gif"])])
     // The Send button follows the field in an HStack with the default spacing of 8 points.
     let frame = field.convert(field.bounds, to: nil)
-    if let window = field.window { click(at: NSPoint(x: frame.maxX + 28, y: frame.midY), in: window) }
+    if let window = field.window { TerminalSelfTest.click(at: NSPoint(x: frame.maxX + 28, y: frame.midY), in: window) }
     for _ in 0..<100 where !draft.images.isEmpty { try? await Task.sleep(for: .seconds(0.1)) }
     log("after send: chips \(chips(draft)) | text \(draft.text)")
   }
@@ -137,18 +137,7 @@ enum DropSelfTest {
   /// Sends a left click at the view's center through its window, as a click of the mouse arrives.
   private static func click(at view: NSView) {
     guard let window = view.window else { return }
-    click(at: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil), in: window)
-  }
-
-  private static func click(at point: NSPoint, in window: NSWindow) {
-    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-      guard
-        let event = NSEvent.mouseEvent(
-          with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-          windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
-      else { continue }
-      window.sendEvent(event)
-    }
+    TerminalSelfTest.click(at: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil), in: window)
   }
 
   private static func chips(_ draft: MessageField.Draft) -> String { draft.images.map(\.name).joined(separator: " ") }
