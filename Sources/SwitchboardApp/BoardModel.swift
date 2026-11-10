@@ -88,6 +88,10 @@ final class BoardModel: ObservableObject {
   @Published var followups: [SessionSummary] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
+  /// True while the Board's new group name field is open.
+  @Published var namingGroup = false
+  /// The group whose delete the Board's confirmation dialog asks about.
+  @Published var confirmingGroupDelete: GroupSummary?
   /// The group suggestions, read with the follow-ups.
   @Published var suggestions: [GroupSuggestion] = []
   /// The plan updates and new plan rows that wait for the user, read with the follow-ups.
