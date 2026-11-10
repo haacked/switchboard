@@ -34,6 +34,9 @@ struct SwitchboardApp: App {
         Button("Import Sessions…") { model.showingImport = true }
           .keyboardShortcut("i", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
+        Button("New Group") { model.startNewGroup() }
+          .keyboardShortcut("g", modifiers: [.command, .shift])
+          .disabled(model.presentingSheet)
       }
       CommandMenu("Session") {
         let acknowledgeTarget = model.acknowledgeTarget

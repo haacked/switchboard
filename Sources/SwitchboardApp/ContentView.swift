@@ -233,6 +233,18 @@ struct Sidebar: View {
     } message: { change in
       Text(accountSwitchMessage(change))
     }
+    .safeAreaInset(edge: .bottom) {
+      Button {
+        model.startNewGroup()
+      } label: {
+        Label("New Group", systemImage: "plus")
+      }
+      .buttonStyle(.borderless)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(8)
+      .help("Create an empty group on the Board (⇧⌘G)")
+      .accessibilityIdentifier("sidebar-new-group")
+    }
     .overlay {
       if model.sidebarIsEmpty {
         VStack(spacing: 8) {
@@ -393,6 +405,8 @@ struct ServiceBanner: View {
 enum BoardLanes: String, CaseIterable {
   case repo, group
 
+  static let storageKey = "boardLanes"
+
   var title: String { self == .repo ? "Repo" : "Group" }
 }
 
@@ -400,7 +414,7 @@ enum BoardLanes: String, CaseIterable {
 /// stage. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
-  @AppStorage("boardLanes") private var laneKind = BoardLanes.repo
+  @AppStorage(BoardLanes.storageKey) private var laneKind = BoardLanes.repo
   static let labelWidth: CGFloat = 140
   static let columnWidth: CGFloat = 200
 
@@ -428,7 +442,8 @@ struct BoardView: View {
     let board = model.workBoard
     let done = board.filter(MergeBoard.isDone)
     let open = board.filter { !MergeBoard.isDone($0) }
-    if board.isEmpty {
+    let shown = lanes(open, labelling: board)
+    if shown.isEmpty && done.isEmpty && !model.namingGroup {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
@@ -439,7 +454,7 @@ struct BoardView: View {
       ScrollView([.horizontal, .vertical]) {
         LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
           Section {
-            ForEach(lanes(open, labelling: board)) { lane in
+            ForEach(shown) { lane in
               Divider()
               HStack(alignment: .top, spacing: 12) {
                 LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
@@ -454,6 +469,10 @@ struct BoardView: View {
               .accessibilityElement(children: .contain)
               .accessibilityLabel(lane.title)
               .accessibilityIdentifier("board-row-\(lane.id)")
+            }
+            if laneKind == .group {
+              Divider()
+              NewGroupRow()
             }
             DoneFooter(sessions: done)
           } header: {
@@ -477,6 +496,7 @@ struct BoardView: View {
         .padding()
       }
       .defaultScrollAnchor(.topLeading)
+      .groupDeleteDialog(model)
       .safeAreaInset(edge: .top, spacing: 0) {
         if !model.suggestions.isEmpty {
           VStack(spacing: 0) {
@@ -505,15 +525,24 @@ private struct LaneLabel: View {
       Text(count == 1 ? "1 session" : "\(count) sessions")
         .font(.caption).foregroundStyle(.secondary)
       if let group {
-        Button("Chat") { model.openChat(group.id) }
-          .buttonStyle(.link).font(.caption)
-          .help(
-            model.chat(of: group.id) == nil
-              ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+        HStack {
+          Button("Chat") { model.openChat(group.id) }
+            .buttonStyle(.link).font(.caption)
+            .help(
+              model.chat(of: group.id) == nil
+                ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+          Button("Delete") { model.requestDeleteGroup(group) }
+            .buttonStyle(.link).font(.caption)
+            .help(group.sessions.isEmpty ? "Delete this group" : "Delete this group and move its sessions to Ungrouped")
+            .accessibilityLabel("Delete group \(group.name)")
+        }
       }
       let plans = group?.plans ?? []
       PlanFollowupList(plans: plans)
       PlanArtifactList(plans: plans)
+    }
+    .contextMenu {
+      if let group { Button("Delete Group…", role: .destructive) { model.requestDeleteGroup(group) } }
     }
   }
 }
