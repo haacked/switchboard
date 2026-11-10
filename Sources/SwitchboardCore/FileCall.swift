@@ -86,13 +86,19 @@ struct FileCall {
   private func names(_ shown: String, _ cwd: String?) -> Bool {
     if shown.hasPrefix("/") { return FileCall.normalized(shown) == path }
     guard !shown.isEmpty, let cwd, cwd.hasPrefix("/") else { return false }
-    return FileCall.normalized(URL(fileURLWithPath: cwd).appendingPathComponent(shown).path) == path
+    return FileCall.normalized(cwd + "/" + shown) == path
   }
 
-  /// The path with `.` and `..` resolved. Symbolic links stay as they are,
-  /// because Claude Code shows the path that it was given.
-  private static func normalized(_ path: String) -> String {
-    URL(fileURLWithPath: path).standardized.path
+  /// The absolute path with `.` and `..` resolved as POSIX does, so `..` at
+  /// the root stays at the root. Foundation's `standardized` keeps a leading
+  /// `/..` on some platforms. Symbolic links stay as they are, because Claude
+  /// Code shows the path that it was given.
+  static func normalized(_ path: String) -> String {
+    var parts: [Substring] = []
+    for part in path.split(separator: "/") where part != "." {
+      if part == ".." { _ = parts.popLast() } else { parts.append(part) }
+    }
+    return "/" + parts.joined(separator: "/")
   }
 
   /// Whether replacing `old` in the old side gives the new side. Every

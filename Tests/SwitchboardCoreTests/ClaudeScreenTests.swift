@@ -528,6 +528,19 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(!ClaudeScreen.shows(editCard(cwd: "/private/tmp/sbt.Cap173/other"), try dialog("edit-open")))
   }
 
+  @Test(arguments: [
+    ("/a/b/../c", "/a/c"), ("/a/./b/", "/a/b"), ("/a/../../../b", "/b"), ("//a//b", "/a/b"), ("/..", "/"),
+  ])
+  func aPathResolvesItsDotsAsPOSIXDoes(_ path: String, _ resolved: String) {
+    #expect(FileCall.normalized(path) == resolved)
+  }
+
+  /// More `..` steps than the cwd has folders stop at the root.
+  @Test func aRelativePathThatClimbsPastTheRootStopsThere() throws {
+    let outside = "/Users/someone/sbcap173.txt"
+    #expect(ClaudeScreen.shows(editCard(outside, old: "TWO", new: "2", cwd: "/private/tmp"), try dialog("edit-outside")))
+  }
+
   /// A path wider than the pane wraps onto a second row.
   @Test func aWrappedPathShowsItsCard() {
     let dialog = [
@@ -545,7 +558,8 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(ClaudeScreen.shows(editCard(outside, old: "TWO", new: "2"), try dialog("edit-outside")))
     #expect(
       !ClaudeScreen.shows(
-        editCard(outside, old: "TWO", new: "2", cwd: "/private/tmp/sbt.Cap173"), try dialog("edit-outside")))
+        editCard(outside, old: "TWO", new: "2", cwd: "/private/tmp/sbt.Cap173/work/sub"),
+        try dialog("edit-outside")))
     #expect(
       !ClaudeScreen.shows(editCard("/Users/other/sbcap173.txt", old: "TWO", new: "2"), try dialog("edit-outside")))
   }
