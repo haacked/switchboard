@@ -27,15 +27,30 @@ extension Service {
     return (ChildMark(state: verdict.state, pr: e.facts.pr?.number), verdict.reason)
   }
 
+  /// Records that the child's parent hears what the child shows now. It
+  /// returns the mark from before and the mark from now. The mark from now
+  /// keeps every PR number that the parent heard before.
+  private func hear(_ id: String, now: Int64) -> (before: ChildMark, after: ChildMark, reason: String) {
+    let (seen, reason) = mark(id, now: now)
+    let before = parentNotices.marks[id] ?? .fresh
+    let after = before.updated(to: seen)
+    parentNotices.marks[id] = after
+    return (before, after, reason)
+  }
+
   private func prURL(_ e: Entry) -> String? { e.facts.pr.flatMap { PRSummary($0).link?.absoluteString } }
 
   private func hearsNotices(_ parent: String) -> Bool { entries[parent]?.session.kind.hearsChildNotices ?? true }
 
-  /// Records what each child shows now, and the counts that each Manager and
-  /// chat would get now, so sbd tells no parent about what happened before
-  /// it started.
+  /// Records what each child shows now, every PR number it has had, and the
+  /// counts that each Manager and chat would get now, so sbd tells no parent
+  /// about what happened before it started.
   func seedParentMarks(now: Int64) {
-    for (id, e) in entries where parentOf(e.session) != nil { parentNotices.marks[id] = mark(id, now: now).mark }
+    for (id, e) in entries where parentOf(e.session) != nil {
+      var seeded = mark(id, now: now).mark
+      seeded.heardPRs.formUnion(e.facts.prNumbers)
+      parentNotices.marks[id] = seeded
+    }
     for id in entries.keys where !hearsNotices(id) { parentNotices.heardCounts[id] = otherCounts(id) }
   }
 
@@ -79,9 +94,7 @@ extension Service {
       guard let e = entries[id], let parent = parentOf(e.session) else { continue }
       children.insert(id)
       guard hearsNotices(parent) else { continue }
-      let (after, reason) = mark(id, now: now)
-      let before = parentNotices.marks[id] ?? .fresh
-      parentNotices.marks[id] = after
+      let (before, after, reason) = hear(id, now: now)
       guard after != before else { continue }
       parentNotices.unsent[parent, default: []] += ParentNotice.lines(
         name: e.session.name, id: id, before: before, after: after, reason: reason,
@@ -99,9 +112,7 @@ extension Service {
     var lines: [String] = []
     for id in entries.keys.sorted() {
       guard let e = entries[id], parentOf(e.session) == parent else { continue }
-      let (current, reason) = mark(id, now: now)
-      let heard = parentNotices.marks[id] ?? .fresh
-      parentNotices.marks[id] = current
+      let (heard, current, reason) = hear(id, now: now)
       if let line = ParentDigest.line(
         name: e.session.name, id: id, heard: heard, now: current, reason: reason, prURL: prURL(e))
       {
