@@ -83,6 +83,29 @@ private let override = [
     #expect(try sbd.get(s.id).lastActivity == activity)
   }
 
+  @Test func bodyEditAfterAPollChangesTheIssues() throws {
+    let github = try FakeGitHub()
+    body(github, "Fixes #174")
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: posthog, branch: dependentBranch)
+    try sbd.poll()
+    try #require(try sbd.issues(s.id) == [bodyIssues[0]])
+
+    body(github, "Fixes #200")
+    try sbd.poll(all: true)
+
+    #expect(
+      try sbd.issues(s.id) == [
+        SessionIssue(repo: posthog, number: 200, via: .body, url: "https://github.com/PostHog/posthog/issues/200")
+      ])
+
+    body(github, "No refs.")
+    try sbd.poll(all: true)
+
+    // dependentBranch has no leading issue number, so no branch issue shows.
+    #expect(try sbd.issues(s.id) == nil)
+  }
+
   @Test func overrideHidesTheBodysIssues() throws {
     let (sbd, s) = try sessionWithBodyIssues()
 

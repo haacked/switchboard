@@ -115,18 +115,25 @@ public enum Issues {
     return refs.isEmpty ? nil : refs
   }
 
-  /// The body without its fenced code blocks. A fence that never closes hides
-  /// the rest of the body.
+  /// The body without its fenced code blocks, by CommonMark's fence rules,
+  /// which GitHub follows. A fence that never closes hides the rest of the
+  /// body. A backtick fence's info string can't contain a backtick, so a line
+  /// that starts with inline code opens no fence. Only a run of the same
+  /// character, at least as long as the opening run and with nothing after
+  /// it, closes a fence.
   static func withoutCode(_ body: String) -> String {
-    var fence: String?
+    var fence: (char: Character, count: Int)?
     var kept: [Substring] = []
     for line in body.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
       let trimmed = line.drop(while: { $0 == " " })
-      let marker = ["```", "~~~"].first { trimmed.hasPrefix($0) }
+      let char = trimmed.first
+      let run = trimmed.prefix { $0 == char }
+      let rest = trimmed.dropFirst(run.count)
+      let marker = (char == "`" || char == "~") && run.count >= 3
       if let open = fence {
-        if trimmed.hasPrefix(open) { fence = nil }
-      } else if let marker {
-        fence = marker
+        if marker, char == open.char, run.count >= open.count, rest.allSatisfy(\.isWhitespace) { fence = nil }
+      } else if marker, let char, !(char == "`" && rest.contains("`")) {
+        fence = (char, run.count)
       } else {
         kept.append(line)
       }

@@ -192,6 +192,7 @@ private let badRepos = [
     "~~~\nFixes #1\n~~~",
     "```swift\nFixes #1\n```",
     "```\r\nFixes #1\r\n```",
+    "````\n```\nFixes #1\n```\n````",
   ])
   func refInACommentOrFenceGivesNothing(_ body: String) {
     #expect(closing(body) == nil)
@@ -204,6 +205,8 @@ private let badRepos = [
     "```\nFixes #1\n```\nFixes #2",
     "~~~\nFixes #1\n~~~\nFixes #2",
     "```\r\nFixes #1\r\n```\r\nFixes #2",
+    "```\ncode\n```swift\nFixes #1\n```\nFixes #2",
+    "```swift test``` runs them.\nFixes #2",
   ])
   func refAfterAClosedCommentOrFenceCounts(_ body: String) {
     #expect(closing(body) == [ref(2)])

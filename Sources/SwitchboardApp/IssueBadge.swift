@@ -33,7 +33,8 @@ struct IssueBadge: View {
       }
       .font(.caption)
       .foregroundStyle(.secondary)
-      .fixedSize()
+      .lineLimit(1)
+      .truncationMode(.middle)
       .help(Self.tooltip(for: issues, prRepo: prRepo))
       .accessibilityLabel("Issue \(label)")
     }
