@@ -46,10 +46,11 @@ public enum ClaudeScreen {
 
   /// The lines between the Bash dialog's two dashed rules, and the card's
   /// command. Every tool's dialog has the dashed rules, so the title must
-  /// be Bash's.
+  /// be Bash's. Claude Code adds a suffix to the title for a command that
+  /// runs outside the sandbox or on another machine.
   private static func commandBlock(_ card: Card, _ dialog: [String]) -> (ArraySlice<String>, String)? {
     guard card.findable, let command = card.input["command"]?.string, let block = dashedBlock(dialog),
-      block.head.first == "Bash command"
+      let title = block.head.first, title == "Bash command" || title.hasPrefix("Bash command (")
     else { return nil }
     return (block.rows, command)
   }
@@ -107,7 +108,8 @@ public enum ClaudeScreen {
 /// yet stays. A hook closes only after its dialog was drawn, so a card whose
 /// hook closed before any check saw its dialog still goes. The second check
 /// keeps a card through a redraw, such as when a terminal attaches and
-/// resizes the pane.
+/// resizes the pane. While the card's hook is open, a dialog whose top
+/// scrolled off the pane is not a miss, because it may still be the card's.
 public struct DialogWatch: Equatable, Sendable {
   struct Sighting: Equatable, Sendable {
     var seen = false
@@ -129,9 +131,10 @@ public struct DialogWatch: Equatable, Sendable {
     var left: [Int64] = []
     for card in open where DialogWatch.watches(card) {
       var s = sightings[card.id] ?? Sighting()
+      let topScrolledOff = !card.hookClosed && dialog?.first.map(ClaudeScreen.isRule) == false
       if let dialog, ClaudeScreen.mayShow(card, dialog) {
         s = Sighting(seen: true, misses: 0)
-      } else {
+      } else if !topScrolledOff {
         s.misses += 1
       }
       if s.misses >= 2 && (s.seen || card.hookClosed) {

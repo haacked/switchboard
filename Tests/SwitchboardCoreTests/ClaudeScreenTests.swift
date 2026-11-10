@@ -189,6 +189,22 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(ClaudeScreen.shows(bashCard(capturedCommand), try dialog("perm-open")))
   }
 
+  /// Claude Code 2.1.322 adds these suffixes to the title of a command that
+  /// bypasses the sandbox or runs on another machine.
+  @Test(arguments: [" Bash command (unsandboxed)", " Bash command (runs on build-box)"])
+  func aPermissionDialogWithASuffixedTitleShowsItsCard(_ title: String) throws {
+    let lines = try redrawnDialog("perm-open", " Bash command", [title])
+    #expect(ClaudeScreen.shows(bashCard(capturedCommand), lines))
+    #expect(ClaudeScreen.mayShow(bashCard(capturedCommand), lines))
+  }
+
+  @Test(arguments: [" Bash commander", " Edit file"])
+  func aPermissionDialogWithAnotherTitleIsNotShown(_ title: String) throws {
+    let lines = try redrawnDialog("perm-open", " Bash command", [title])
+    #expect(!ClaudeScreen.shows(bashCard(capturedCommand), lines))
+    #expect(!ClaudeScreen.mayShow(bashCard(capturedCommand), lines))
+  }
+
   @Test func theQuestionDialogShowsItsCard() throws {
     #expect(ClaudeScreen.shows(fruitCard(), try dialog("q-open")))
   }
@@ -427,6 +443,28 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(results(&watch, [card], screens) == [[], [card.id]])
   }
 
+  /// edit-open with every line through the dialog's first dashed rule
+  /// scrolled off the pane, so the title and path no longer show.
+  func editWithItsTopScrolledOff() throws -> String {
+    let lines = try screenFixture("edit-open").components(separatedBy: "\n")
+    let open = try #require(lines.firstIndex(where: ClaudeScreen.isDashedRule))
+    return lines[(open + 1)...].joined(separator: "\n")
+  }
+
+  @Test func aSeenEditDialogWhoseTopScrolledOffStaysWhileItsHookIsOpen() throws {
+    var watch = DialogWatch()
+    let screens = [try screenFixture("edit-open"), try editWithItsTopScrolledOff(), try editWithItsTopScrolledOff()]
+    #expect(results(&watch, [editCard()], screens) == [[], [], []])
+  }
+
+  @Test func aClosedHooksEditDialogWhoseTopScrolledOffHasLeft() throws {
+    var watch = DialogWatch()
+    var card = editCard()
+    card.hookClosed = true
+    let screens = [try screenFixture("edit-open"), try editWithItsTopScrolledOff(), try editWithItsTopScrolledOff()]
+    #expect(results(&watch, [card], screens) == [[], [], [card.id]])
+  }
+
   @Test func aReadCardStaysWhileItsDialogShows() throws {
     var watch = DialogWatch()
     var card = readCard()
@@ -525,6 +563,18 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   @Test(arguments: [("alpha", "ALPHA"), ("gamma", "GAMMA"), ("gamma", "BETA"), ("alpha", "BETA")])
   func anEditWhoseOldStringIsOnlyInTheContextIsNotShown(_ old: String, _ new: String) throws {
     #expect(!ClaudeScreen.shows(editCard(old: old, new: new), try dialog("edit-open")))
+  }
+
+  /// notes.txt holds beta, beta, and gamma, and the second beta becomes BETA.
+  @Test func anEditOfALaterOccurrenceShowsItsCard() throws {
+    #expect(ClaudeScreen.shows(editCard(), try redrawnDialog("edit-open", " 1  alpha", [" 1  beta"])))
+  }
+
+  /// The capture ends a blank line's row at its line number.
+  @Test(arguments: [" 1  alpha", " 3  gamma"])
+  func aBlankFileLineShowsTheCard(_ line: String) throws {
+    let blank = String(line.prefix(2))
+    #expect(ClaudeScreen.shows(editCard(), try redrawnDialog("edit-open", line, [blank])))
   }
 
   @Test(arguments: [60, 74, 76])

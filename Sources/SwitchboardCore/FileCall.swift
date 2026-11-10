@@ -128,11 +128,11 @@ struct FileCall {
   /// spaces, its line number, and a space, and every row's gutter has that
   /// width. A row that continues a wrapped row has spaces in place of the
   /// number. It is nil when a row doesn't fit, as when the block isn't
-  /// numbered.
+  /// numbered. The capture ends a blank line's row at its number.
   static func numbered(_ rows: ArraySlice<String>) -> [String]? {
-    guard let first = rows.first, let gutter = first.range(of: "^ *[0-9]+ ", options: .regularExpression) else {
-      return nil
-    }
+    guard let first = rows.first.map({ $0 + " " }),
+      let gutter = first.range(of: "^ *[0-9]+ ", options: .regularExpression)
+    else { return nil }
     let width = first.distance(from: first.startIndex, to: gutter.upperBound)
     var texts: [String] = []
     for row in rows {
