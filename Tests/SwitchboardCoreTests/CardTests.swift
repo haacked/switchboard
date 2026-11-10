@@ -42,6 +42,13 @@ func fetchTurn() -> [Event] {
   return promptTurn(tool("WebFetch", fetch, id: "f1"), tool("WebFetch", fetch))
 }
 
+let editInput: [String: JSON] = ["file_path": "/w/notes.txt", "old_string": "beta", "new_string": "BETA"]
+
+/// A turn whose Edit call opens a prompt from the folder /w.
+func editTurn() -> [Event] {
+  promptTurn(tool("Edit", editInput, id: "e1"), tool("Edit", editInput).merging(["cwd": "/w"]) { a, _ in a })
+}
+
 let turnEnds = [
   event("Stop", 4, ["last_assistant_message": "ok"]), event("StopFailure", 4), event("SessionEnd", 4),
   event("stopped", 4), event("exited", 4), event("Notification", 4, ["notification_type": "idle_prompt"]),
@@ -148,7 +155,7 @@ let turnEnds = [
     #expect(facts(permissionTurn()).cards.map(\.hookClosed) == [false])
   }
 
-  @Test(arguments: [permissionTurn(), questionTurn()])
+  @Test(arguments: [permissionTurn(), questionTurn(), editTurn()])
   func aClosedRequestKeepsAFindableCard(_ turn: [Event]) {
     #expect(facts(turn + [event("card_closed", 4, ["card": 3])]).cards.map(\.hookClosed) == [true])
   }

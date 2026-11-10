@@ -207,6 +207,32 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch u" }
   }
 
+  @Test func allowTypesYesIntoAnEditDialogAfterTheHookTimesOut() throws {
+    let sbd = try Instance()
+    try "alpha\nbeta\n".write(toFile: "\(sbd.work)/notes.txt", atomically: true, encoding: .utf8)
+    let s = try sbd.new(prompt: "edit notes.txt beta BETA")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    try sbd.type(s.id, "timeout")
+    try sbd.waitFor(s.id, "the closed hook") { $0.cards.first?.hookClosed == true }
+    let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
+    #expect(answer?["delivery"]?.string == "terminal")
+    try sbd.waitFor(s.id, "the edit's reply") { $0.lastReply?.hasPrefix("Edited") == true && $0.cards.isEmpty }
+    #expect(try String(contentsOfFile: "\(sbd.work)/notes.txt", encoding: .utf8) == "alpha\nBETA\n")
+  }
+
+  @Test func removesAnEditCardWhenEscapeRefusesInTheTerminal() throws {
+    let sbd = try Instance()
+    try "alpha\nbeta\n".write(toFile: "\(sbd.work)/notes.txt", atomically: true, encoding: .utf8)
+    let s = try sbd.new(prompt: "edit notes.txt beta BETA")
+    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    try sbd.waitFor("the Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }
+    try sbd.press(s.id, "Escape")
+    try sbd.waitFor(s.id, "the removed card") { $0.cards.isEmpty }
+    let events = try sbd.events(s.id)
+    #expect(events.contains { $0.kind == "card_closed" })
+    #expect(events.contains { $0.kind == "dialog_closed" && $0.data["allowed"] == nil })
+  }
+
   @Test func denyInterruptsAfterTheHookTimesOut() throws {
     let (sbd, s) = try timedOut("perm rm -rf build")
     let answer = try JSON.parse(sbd.sb("deny", "--json", s.id))
