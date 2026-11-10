@@ -196,6 +196,7 @@ struct SessionView: View {
             if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
           }
         }
+        IssueBadge(session: session)
         CleanupNote(session: session)
         Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
           .font(.caption)

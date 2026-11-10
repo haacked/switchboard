@@ -66,6 +66,10 @@ let usage = """
     note --resolved [--limit N]   list the resolved to-dos, newest first
                                   (default 50). The record outlives the session
     rename <session> <name>
+    issue <session> <ref>|--clear set the GitHub issue that the session's tile
+                                  shows: 123, #123, owner/name#123, or an issue
+                                  URL. It replaces the issue that sbd finds in
+                                  the PR body or the branch name
     rm <session> [--worktree [--delete-branch [--delete-remote-branch]]] [--resolve <id>]...
                                   remove the session, and its worktree with --worktree, which refuses
                                   uncommitted files, unpushed commits, and a folder sbd didn't make.
@@ -388,6 +392,10 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  for issue in s.issues ?? [] {
+    print(
+      "  issue:   \(issue.label(from: s.pr?.repo)) (\(issue.via.title))\(issue.url.map { "  \($0)" } ?? "")".printable)
+  }
   if let p = s.pipeline {
     print("  stage:   \(p.stage.title) \(ago(p.since))\(p.blocker.map { "; \($0)" } ?? "")".printable)
   }
@@ -650,6 +658,10 @@ case "shell":
 case "rename":
   guard a.positional.count >= 2 else { die("rename needs a session and a name") }
   sessionCommand("rename", a, extra: ["name": .string(a.positional.dropFirst().joined(separator: " "))])
+case "issue":
+  let clear = a.switches.contains("--clear")
+  guard a.positional.count == (clear ? 1 : 2) else { die("issue needs a session and an issue, or --clear") }
+  sessionCommand("issue", a, extra: clear ? ["clear": .bool(true)] : ["issue": .string(a.positional[1])])
 case "send" where a.values["--pending"] != nil:
   awaitGroupMessage(a, id: a.values["--pending"]!)
 case "send" where a.values["--group"] != nil:

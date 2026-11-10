@@ -339,6 +339,7 @@ struct SessionRow: View {
         HStack {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
+          IssueBadge(session: session)
           if let pr = session.pr, let url = pr.link {
             HStack(spacing: 3) {
               Link(destination: url) { Text(verbatim: "#\(pr.number)") }
@@ -710,6 +711,7 @@ struct BoardCard: View {
             }
             Text(s.name).fontWeight(.medium).lineLimit(1)
             Spacer()
+            IssueBadge(session: s, linked: false)
             if let pr = s.pr {
               HStack(spacing: 3) {
                 Text(verbatim: "#\(pr.number)")

@@ -306,7 +306,8 @@ public enum GitHub {
       trunkConfig: node["repository"]?["trunkConfig"].map { $0 != .null },
       reviewDecisionRead: node["reviewDecision"] == .null || reviewDecision != nil ? true : nil,
       mergeQueue: node["isMergeQueueEnabled"]?.bool, inMergeQueue: node["isInMergeQueue"]?.bool,
-      author: node["author"].map(login), codeOwnerRequests: node["reviewRequests"].flatMap(codeOwnerRequests))
+      author: node["author"].map(login), codeOwnerRequests: node["reviewRequests"].flatMap(codeOwnerRequests),
+      closesIssues: node["body"]?.string.flatMap { Issues.closingRefs(inBody: $0, repo: repo) })
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }
