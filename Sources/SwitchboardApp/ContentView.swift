@@ -579,7 +579,10 @@ private struct LaneLabel: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(title).fontWeight(.semibold).lineLimit(2)
-      if let group { GroupDescriptionView(group: group) }
+      if let group {
+        GroupDescriptionView(group: group)
+        GroupAccountMenu(group: group)
+      }
       Text(count == 1 ? "1 session" : "\(count) sessions")
         .font(.caption).foregroundStyle(.secondary)
       if let group {

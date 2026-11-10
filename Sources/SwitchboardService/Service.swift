@@ -275,7 +275,7 @@ public final class Service {
         return .success(try JSON(encoding: usageRequest(request.args)))
       case "send" where request.args["images"] != nil:
         return try sendWithImages(request, hookGone: hookGone)
-      case "account-use", "account-move":
+      case "account-use", "account-move", "group-account":
         try requireSignedIn(request.args)
       default:
         break
@@ -408,7 +408,8 @@ public final class Service {
       return try autoContinueRequest(args)
     case "live":
       return try liveRequest(args)
-    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-suggest",
+    case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
+      "group-suggest",
       "send-group",
       "send-pending":
       return try groupRequest(op, args)
@@ -659,8 +660,14 @@ public final class Service {
         prefix: config.branchPrefix, name: args.name,
         exists: { branchOrFolderTaken(repo, $0) })
     }
-    // An unknown group fails here, before prepareFolder makes a worktree.
-    if let group = args.group { _ = try queue.sync { try lookupGroup(["group": .string(group)]) } }
+    // An unknown group, an unknown account, or an account that differs from
+    // the group's fails here, before prepareFolder makes a worktree.
+    try queue.sync {
+      var probe = Session(id: "", name: "", cwd: "", branch: nil, claudeSessionId: "", model: nil, created: 0)
+      probe.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+      probe.group = try groupOfNew(args.group, parent: probe.parent)
+      _ = try accountForNew(named: args.account, parent: probe.parent, for: probe)
+    }
     let folder = try prepareFolder(args)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
@@ -679,9 +686,11 @@ public final class Service {
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
-    session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
     configure(&session)
+    // After `configure`, which sets a chat's group.
+    session.claudeConfigDir =
+      try accountForNew(named: args.account, parent: session.parent, for: session) ?? activeAccount
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
@@ -730,7 +739,9 @@ public final class Service {
   /// next launch. It ignores the live cap. Callers use `launch` unless they
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
-    let session = try requireStartable(id)
+    _ = try requireStartable(id)
+    moveToGroupAccount(id)
+    let session = entries[id]!.session
     let resume = hasTranscript(session)
     var args = [config.claude]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
