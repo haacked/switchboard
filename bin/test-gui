@@ -52,9 +52,7 @@ if [ "$(launchctl managername 2>/dev/null)" != Aqua ] && [ -z "${SB_GUI_ANY_SESS
   exit 2
 fi
 
-plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
-args=()
-if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
+source bin/lib/swift-testing.sh
 echo "Building…"
 build_output=$(swift build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
 bin_dir=$(swift build --show-bin-path)
