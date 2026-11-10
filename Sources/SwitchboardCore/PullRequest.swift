@@ -142,6 +142,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The PRs that the body's `Depends on` lines name. The poller keeps these
   /// and not the body. nil in events that an older sbd recorded.
   public var dependsOn: [PRRef]?
+  /// The issues that the body's closing keywords name. The poller keeps
+  /// these and not the body. nil when the body names none, and in events
+  /// that an older sbd recorded.
+  public var closesIssues: [IssueRef]?
   /// Whether the base repository's default branch has a `.trunk` folder,
   /// which a repository that merges through Trunk's queue keeps. nil when the
   /// poll did not read it, as in events that an older sbd recorded.
@@ -169,7 +173,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
     reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
     trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil,
-    author: String? = nil, codeOwnerRequests: [String]? = nil
+    author: String? = nil, codeOwnerRequests: [String]? = nil, closesIssues: [IssueRef]? = nil
   ) {
     self.id = id
     self.number = number
@@ -202,6 +206,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
     self.inMergeQueue = inMergeQueue
     self.author = author
     self.codeOwnerRequests = codeOwnerRequests
+    self.closesIssues = closesIssues
   }
 
   /// The PR's `git pr` words. The review decision picks them, or the
