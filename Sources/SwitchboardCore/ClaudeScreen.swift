@@ -22,12 +22,14 @@ public enum ClaudeScreen {
   /// between two dashed rules, and the command must equal the card's, so
   /// that Yes never approves a command that only starts the same. Claude Code
   /// wraps a long command, so the lines join with a space. Runs of white
-  /// space count as one. A question dialog is the card's when one of the
-  /// card's marks appears in it.
+  /// space count as one. A file tool's dialog must name the card's file and
+  /// show its change, as `FileCall` describes. A question dialog is the
+  /// card's when one of the card's marks appears in it.
   public static func shows(_ card: Card, _ dialog: [String]) -> Bool {
     guard card.kind == .permission else {
       return card.marks.contains { mark in dialog.contains { $0.contains(mark) } }
     }
+    if let call = FileCall(card) { return call.shows(dialog, cwd: card.cwd) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
     return words(shown.joined(separator: " ")) == words(command)
   }
@@ -35,22 +37,35 @@ public enum ClaudeScreen {
   /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
   /// this holds. Claude Code breaks a token that is wider than the pane in
   /// the middle, so this ignores white space. `shows` decides what sbd may
-  /// type.
+  /// type. A file tool's `shows` already ignores white space.
   public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
-    guard card.kind == .permission else { return shows(card, dialog) }
+    guard card.kind == .permission, FileCall(card) == nil else { return shows(card, dialog) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
-    return shown.joined().filter { !$0.isWhitespace } == command.filter { !$0.isWhitespace }
+    return squeezed(shown.joined()) == squeezed(command)
   }
 
   /// The lines between the Bash dialog's two dashed rules, and the card's
-  /// command.
+  /// command. Every tool's dialog has the dashed rules, so the title must
+  /// be Bash's.
   private static func commandBlock(_ card: Card, _ dialog: [String]) -> (ArraySlice<String>, String)? {
-    guard card.findable, let command = card.input["command"]?.string,
-      let open = dialog.firstIndex(where: isDashedRule),
+    guard card.findable, let command = card.input["command"]?.string, let block = dashedBlock(dialog),
+      block.head.first == "Bash command"
+    else { return nil }
+    return (block.rows, command)
+  }
+
+  /// The lines above a dialog's first dashed rule, without its leading rule
+  /// and blank lines, and the lines between its first two dashed rules.
+  static func dashedBlock(_ dialog: [String]) -> (head: [String], rows: ArraySlice<String>)? {
+    guard let open = dialog.firstIndex(where: isDashedRule),
       let close = dialog[(open + 1)...].firstIndex(where: isDashedRule)
     else { return nil }
-    return (dialog[(open + 1)..<close], command)
+    let head = dialog[..<open].map { $0.trimmingCharacters(in: .whitespaces) }.drop { $0.isEmpty || isRule($0) }
+    return (Array(head), dialog[(open + 1)..<close])
   }
+
+  /// The text without any white space.
+  static func squeezed(_ text: String) -> String { text.filter { !$0.isWhitespace } }
 
   private static func words(_ text: String) -> [Substring] {
     text.split(whereSeparator: \.isWhitespace)
