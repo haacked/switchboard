@@ -175,6 +175,12 @@ let usage = """
     group describe <group> <text> | --clear
                                   set or clear the group's description, at
                                   most \(SessionGroup.descriptionLimit) characters
+    group account <group> [<account> | --clear]
+                                  show, set, or clear the Claude account that the
+                                  group's sessions run under. A stopped session
+                                  moves to it at its next launch. New sessions in
+                                  the group use it, and a different --account is
+                                  refused
     group suggest [--accept <id> | --decline <id>]
                                   list groups suggested from dependencies, branch
                                   names, and PR titles, or accept or decline one.

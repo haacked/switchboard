@@ -44,6 +44,20 @@ extension Service {
       group.description = clear ? nil : try SessionGroup.cleanDescription(args["text"]?.string)
       try saveGroup(group)
       return try JSON(encoding: groupSummary(id))
+    case "group-account":
+      // Without an account or clear, it answers with the group unchanged.
+      let id = try lookupGroup(args)
+      var group = groups[id]!
+      if args["clear"]?.bool == true {
+        group.account = nil
+        try saveGroup(group)
+      } else if let ref = args["account"]?.string {
+        guard !ref.isEmpty else { throw APIError("name an account") }
+        group.account = try resolveAccount(ref)
+        try saveGroup(group)
+        logLine("the group \(id) runs its sessions under \(group.account!)")
+      }
+      return try JSON(encoding: groupSummary(id))
     case "group-suggest":
       let suggestions = try groupSuggestions()
       let accept = args["accept"]?.string

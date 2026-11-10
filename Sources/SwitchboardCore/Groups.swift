@@ -10,16 +10,22 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   public var notes: [Note]
   /// Milliseconds since the epoch.
   public var created: Int64
+  /// The normalized config folder of the Claude account that the group's
+  /// sessions run under, or nil when they use the account Switchboard picks.
+  public var account: String?
 
   /// The longest description, in characters.
   public static let descriptionLimit = 280
 
-  public init(id: String, name: String, description: String? = nil, notes: [Note] = [], created: Int64) {
+  public init(
+    id: String, name: String, description: String? = nil, notes: [Note] = [], created: Int64, account: String? = nil
+  ) {
     self.id = id
     self.name = name
     self.description = description
     self.notes = notes
     self.created = created
+    self.account = account
   }
 
   /// The text on one line, with each whitespace run, line breaks included, as one space.
@@ -42,7 +48,8 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   /// whose id this group already uses gets a new id. This group keeps its
   /// description. Without one, it takes `other`'s, or a line that names both
   /// groups when neither has one. When both have one, `other`'s becomes a
-  /// note at `now`, so no text is lost.
+  /// note at `now`, so no text is lost. This group keeps its account and
+  /// never takes `other`'s.
   public func absorbing(_ other: SessionGroup, now: Int64) -> SessionGroup {
     var kept = self
     for var note in other.notes {
@@ -69,6 +76,7 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var description: String?
   public var notes: [Note]
   public var created: Int64
+  public var account: String?
   public var sessions: [String]
   /// The plans attached to the group, or nil when it has none.
   public var plans: [PlanSummary]?
@@ -79,6 +87,7 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
     description = group.description
     notes = group.notes
     created = group.created
+    account = group.account
     self.sessions = sessions
   }
 }

@@ -85,7 +85,7 @@ private struct AccountList: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Text("New sessions use the selected account.")
+      Text("New sessions use the selected account, unless their group names one.")
         .font(.callout.weight(.medium))
         .padding(.horizontal, 12)
         .padding(.top, 10)
@@ -130,7 +130,7 @@ private struct AccountList: View {
         }
       }
       Text(
-        "A session that another session starts uses its parent's account. Choosing an account asks whether to move the sessions whose claude is stopped."
+        "A session that another session starts uses its parent's account. Choosing an account asks whether to move the sessions whose claude is stopped. A session whose group names an account stays on it."
       )
       .font(.caption)
       .foregroundStyle(.secondary)

@@ -463,6 +463,21 @@ final class BoardModel: ObservableObject {
     }
     return true
   }
+  /// Sets the account that the group's sessions run under, or clears it when
+  /// `folder` is nil.
+  func setGroupAccount(_ id: String, _ folder: String?) {
+    if let folder {
+      perform("group-account", ["group": .string(id), "account": .string(folder)])
+    } else {
+      perform("group-account", ["group": .string(id), "clear": true])
+    }
+  }
+
+  /// The group's work sessions that move to the account at their next launch.
+  /// A follow-up that hasn't started has no conversation to move.
+  func groupAccountMoves(group: String, folder: String) -> [SessionSummary] {
+    sessions.filter { $0.group == group && $0.kind == .work && !$0.cwd.isEmpty && $0.account != folder }
+  }
   func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
   func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
 

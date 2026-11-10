@@ -52,6 +52,19 @@ func group(_ a: Args) {
       die("group describe needs text, or --clear")
     }
     printGroup(call("group-describe", args), json: a.json)
+  case "account":
+    guard let ref = words.first else { die("group account needs a group, and an account or --clear") }
+    var args: [String: JSON] = ["group": .string(ref)]
+    if a.switches.contains("--clear") {
+      args["clear"] = true
+    } else if let account = words.dropFirst().first {
+      args["account"] = .string(account)
+    }
+    let result = call("group-account", args)
+    printGroup(result, json: a.json)
+    if !a.json && decode(result, as: GroupSummary.self).account == nil {
+      print("  no account: its sessions use the one Switchboard picks")
+    }
   case "suggest":
     if let id = a.values["--accept"] { return printGroup(call("group-suggest", ["accept": .string(id)]), json: a.json) }
     if let id = a.values["--decline"] {
@@ -68,7 +81,7 @@ func group(_ a: Args) {
     }
     print("\nAccept one with: sb group suggest --accept <id>, or decline it with --decline <id>")
   default:
-    die("usage: sb group ls|add|rm|move|note|describe|suggest")
+    die("usage: sb group ls|add|rm|move|note|describe|account|suggest")
   }
 }
 
@@ -77,7 +90,11 @@ private func printGroup(_ result: JSON, json: Bool) {
   let g = decode(result, as: GroupSummary.self)
   print("\(g.id)  \(g.name)  \(g.sessions.count == 1 ? "1 session" : "\(g.sessions.count) sessions")".printable)
   if let description = g.description { print("  \(description)".printable) }
+  if let account = g.account { print("  \(accountLine(account))".printable) }
 }
+
+/// Such as `account: personal (/Users/me/.claude-personal)`.
+private func accountLine(_ folder: String) -> String { "account: \(ClaudeAccount.name(folder)) (\(folder))" }
 
 private func printGroups(_ list: GroupList) {
   if list.groups.isEmpty && list.ungrouped.isEmpty {
@@ -86,6 +103,7 @@ private func printGroups(_ list: GroupList) {
   for g in list.groups {
     print("\(g.name)  (\(g.id))".printable)
     if let description = g.description { print("  \(description)".printable) }
+    if let account = g.account { print("  \(accountLine(account))".printable) }
     for note in g.notes { print("  note: \(oneLine(note.text, max: 200))".printable) }
     for p in g.plans ?? [] { printPlan(p, indent: "  ") }
     print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))

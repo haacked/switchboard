@@ -30,12 +30,36 @@ extension Service {
     try ClaudeAccount.resolve(ref, among: accounts)
   }
 
-  /// The account of a new session: the one named, else its parent's, else the
-  /// active one.
-  func accountForNew(named ref: String?, parent: String?) throws -> String {
-    if let ref, !ref.isEmpty { return try resolveAccount(ref) }
+  /// The account of a new session: its group's account, else the one named,
+  /// else its parent's, or nil when none of them applies. It refuses a named
+  /// account that differs from the group's, because the session's next launch
+  /// would move it to the group's account.
+  func accountForNew(named ref: String?, parent: String?, for session: Session) throws -> String? {
+    let named = try ref.flatMap { $0.isEmpty ? nil : try resolveAccount($0) }
+    if let group = accountGroupForNew(session), let bound = group.account {
+      if let named, named != bound {
+        throw APIError(
+          "the group \(group.name) runs its sessions under the account \(ClaudeAccount.name(bound)). Leave out the account, or pick another group"
+        )
+      }
+      return bound
+    }
+    if let named { return named }
     if let parent, entries[parent] != nil { return claudeAccount(of: parent) }
-    return activeAccount
+    return nil
+  }
+
+  /// The session's account group, while the group's folder still holds a
+  /// Claude account. A new session in a group whose account folder went away
+  /// uses the account it would use without the group.
+  func accountGroupForNew(_ session: Session) -> SessionGroup? {
+    accountGroup(of: session).flatMap { ClaudeAccount.holdsAccount($0.account!) ? $0 : nil }
+  }
+
+  /// The group whose account the session runs under, or nil when that group
+  /// names no account. A chat's group is the one it manages.
+  func accountGroup(of session: Session) -> SessionGroup? {
+    (session.chat ?? session.group).flatMap { groups[$0] }.flatMap { $0.account == nil ? nil : $0 }
   }
 
   func accountList() -> [AccountInfo] {
@@ -119,6 +143,9 @@ extension Service {
   /// sessions as a move.
   private func moveRefusal(_ id: String, to target: String) -> String? {
     guard let e = entries[id] else { return "no session \(id)" }
+    if let group = accountGroup(of: e.session), let bound = group.account, bound != target {
+      return "its group \(group.name) uses the account \(ClaudeAccount.name(bound))"
+    }
     if starting.contains(id) { return "it is starting" }
     if claudeState(id) != .stopped { return "its claude is running. Stop it first" }
     if !e.pending.isEmpty || e.inFlight != nil { return "a message is on its way to it" }
@@ -155,6 +182,36 @@ extension Service {
     }
     try update(id) { $0.claudeConfigDir = target }
     record(id, "account-moved", ["from": .string(from), "to": .string(target)])
+  }
+
+  /// Moves a stopped session to its group's account before claude launches.
+  /// The caller has checked that no claude runs for the session. A pending
+  /// message waits for this launch, so it does not stop the move. The move
+  /// fails when the account holds no login, when its last reading found it
+  /// signed out, or when the copy fails. The copy fails when the account holds
+  /// another transcript of the conversation. After a failure, the session stays
+  /// on its account, and an `account-move-skipped` event records why. Its next
+  /// launch tries again.
+  func moveToGroupAccount(_ id: String) {
+    guard let session = entries[id]?.session, let target = accountGroup(of: session)?.account else { return }
+    let from = claudeAccount(of: id)
+    guard from != target else { return }
+    let reason: String?
+    if !ClaudeAccount.holdsAccount(target) {
+      reason = "\(target) holds no Claude account"
+    } else if let refusal = Self.signedOutRefusal(usageReader?.latest(target)) {
+      reason = refusal
+    } else {
+      do {
+        try move(id, to: target)
+        reason = nil
+      } catch {
+        reason = "\(error)"
+      }
+    }
+    guard let reason else { return }
+    logLine("\(id) stays on the account \(from) instead of its group's \(target): \(reason)")
+    record(id, "account-move-skipped", ["from": .string(from), "to": .string(target), "reason": .string(reason)])
   }
 
   /// Puts the transcript at <to>/projects/<same folder>/<id>.jsonl, the

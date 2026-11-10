@@ -78,11 +78,7 @@ extension Service {
     session.group = try groupOfNew(group, parent: parent)
     // A follow-up added by a session stays in that session's account.
     // Without a parent, it takes the active account when it starts.
-    if let account {
-      session.claudeConfigDir = try resolveAccount(account)
-    } else if let parent {
-      session.claudeConfigDir = claudeAccount(of: parent)
-    }
+    session.claudeConfigDir = try accountForNew(named: account, parent: parent, for: session)
     session.followup = followup
     session.autoMode = autoMode ?? config.autoMode
     try save(session)
@@ -171,7 +167,7 @@ extension Service {
         s.branch = folder.branch
         s.repo = folder.repo
         s.model = s.model ?? config.model
-        s.claudeConfigDir = s.claudeConfigDir ?? activeAccount
+        s.claudeConfigDir = accountGroupForNew(s)?.account ?? s.claudeConfigDir ?? activeAccount
         s.done = false
         s.followup?.started = nowMs()
       }
