@@ -5,14 +5,27 @@ public struct ChildMark: Equatable, Sendable {
   public var state: AttentionState
   /// The number of the session's PR, or nil before it has one.
   public var pr: Int?
+  /// Every PR number of the child that its parent has heard about. A PR that
+  /// drops out and returns keeps its number here, so the parent does not
+  /// hear about it twice.
+  public var heardPRs: Set<Int>
 
   public init(state: AttentionState, pr: Int?) {
     self.state = state
     self.pr = pr
+    heardPRs = pr.map { [$0] } ?? []
   }
 
   /// What a child that sbd hasn't seen yet counts as having shown.
   public static let fresh = ChildMark(state: .working, pr: nil)
+
+  /// The mark after the parent hears `next`. It keeps the PR numbers that
+  /// the parent heard before.
+  public func updated(to next: ChildMark) -> ChildMark {
+    var mark = next
+    mark.heardPRs.formUnion(heardPRs)
+    return mark
+  }
 }
 
 /// The messages that a parent session gets about its children.
@@ -30,7 +43,7 @@ public enum ParentNotice {
 
     static func between(_ before: ChildMark, _ after: ChildMark, reason: String, prURL: String?) -> [Change] {
       var changes: [Change] = []
-      if let number = after.pr, number != before.pr { changes.append(.pr(number, url: prURL)) }
+      if let number = after.pr, !before.heardPRs.contains(number) { changes.append(.pr(number, url: prURL)) }
       if after.state != before.state {
         switch after.state {
         case .needsYou: changes.append(.needsYou(oneLine(reason)))
@@ -61,8 +74,13 @@ public enum ParentNotice {
     }
   }
 
-  /// One line for all the changes that a parent has not heard yet.
+  /// One line for all the changes that a parent has not heard yet. A child
+  /// that returns to a state before its parent hears it adds the same line
+  /// twice. The message keeps only the last copy, so each child's latest
+  /// line stays after its older ones.
   public static func message(_ lines: [String]) -> String {
+    var seen: Set<String> = []
+    let lines = Array(lines.reversed().filter { seen.insert($0).inserted }.reversed())
     let more = lines.count > maxLines ? ["and \(lines.count - maxLines) more"] : []
     return "Switchboard: sessions you started changed: "
       + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."
