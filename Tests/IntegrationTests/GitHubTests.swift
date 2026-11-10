@@ -29,7 +29,8 @@ extension Instance {
   /// session in it that has answered its first prompt. A `folder` lets two
   /// sessions work in the same GitHub repo. A session with a `parent` takes
   /// the parent's group, and it is not placed by hand.
-  func session(in repo: String, branch: String, folder: String? = nil, parent: String? = nil) throws
+  func session(in repo: String, branch: String, folder: String? = nil, parent: String? = nil, name: String? = nil)
+    throws
     -> SessionSummary
   {
     let path = "\(home.path)/\(folder ?? repo.replacingOccurrences(of: "/", with: "-"))"
@@ -42,6 +43,7 @@ extension Instance {
     try git(path, "checkout", "-q", "-b", branch)
     var args: [String: JSON] = ["path": .string(path), "prompt": "hello"]
     if let parent { args["parent"] = .string(parent) }
+    if let name { args["name"] = .string(name) }
     let s = try client.call("new", args, as: SessionSummary.self)
     return try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
   }
