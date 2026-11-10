@@ -162,21 +162,24 @@ import Testing
     try sbd.waitFor(parent.id, "the done message") { $0.lastReply?.hasSuffix("kid (\(kid.id)) is done.") == true }
   }
 
+  /// Waits for a message from sbd that contains `text` and comes after the first `after` messages. It returns the messages after the first `after`.
+  @discardableResult
+  func waitForNotice(_ sbd: Instance, _ id: String, after: Int, containing text: String, timeout: Double = 30) throws
+    -> [String]
+  {
+    let fetch = { Array(try sbd.messagesFromSbd(id).dropFirst(after)) }
+    return try sbd.waitFor("a message with \(text)", timeout: timeout, fetch: fetch) {
+      $0.contains { $0.contains(text) }
+    }
+  }
+
   @Test func aParentHearsWhenAChildOpensAPR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let parent = try idle(sbd, name: "p")
-    let path = "\(sbd.home.path)/charts"
-    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-    try sbd.git(path, "init", "-q", "-b", "main")
-    try sbd.git(
-      path, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty",
-      "-m", "first")
-    try sbd.git(path, "remote", "add", "origin", "https://github.com/PostHog/charts.git")
-    try sbd.git(path, "checkout", "-q", "-b", "haacked/cdp-dlq-runbook-lookup-step")
-    let kid = try sbd.client.call(
-      "new", ["path": .string(path), "prompt": "hello", "parent": .string(parent.id), "name": "kid"],
-      as: SessionSummary.self)
+    let kid = try sbd.session(
+      in: ReadyForReviewTests.charts, branch: ReadyForReviewTests.branch, folder: "charts", parent: parent.id,
+      name: "kid")
     try sbd.waitFor(parent.id, "the needs-you message", timeout: 30) { $0.lastReply?.contains("needs you") == true }
     try sbd.poll()
     let told = try sbd.waitFor(parent.id, "the PR message", timeout: 30) { $0.lastReply?.contains("opened PR") == true }
@@ -198,6 +201,86 @@ import Testing
     }
     for kid in [a, b, c] { #expect(told.lastReply?.contains("(\(kid.id)) needs you") == true) }
     #expect(try sbd.events(parent.id).filter { $0.kind == "sent" }.count == 1)
+  }
+
+  // Issue #157.
+  @Test func aBusyParentHearsAChildThatNeedsYouTwiceInOneLine() throws {
+    let sbd = try Instance()
+    let parent = try sbd.new(prompt: "slow 20", name: "p")
+    try sbd.waitFor(parent.id, "its turn") { $0.state == .working }
+    let kid = try child(sbd, of: parent.id, name: "kid")
+    let first = try sbd.waitFor(kid.id, "the first reply", timeout: 30) {
+      $0.lastReply == "Done: hello" && $0.state == .needsYou
+    }
+    // sbd ticks every 0.2 s. The wait lets a tick see the first Needs you.
+    sleep(2)
+    try sbd.sb("send", kid.id, "slow 3")
+    try sbd.waitFor(kid.id, "the second turn") { $0.state == .working }
+    let second = try sbd.waitFor(kid.id, "the second reply", timeout: 30) {
+      $0.lastReply == "Slept 3 s." && $0.state == .needsYou
+    }
+    try #require(second.reason == first.reason)
+    try #require(try sbd.get(parent.id).state == .working, "the parent's turn ended before the kid's second reply")
+    try #require(try sbd.messagesFromSbd(parent.id).isEmpty)
+
+    let told = try waitForNotice(sbd, parent.id, after: 0, containing: "(\(kid.id)) needs you", timeout: 45)
+
+    let lines = told.joined().components(separatedBy: "(\(kid.id)) needs you").count - 1
+    #expect(lines == 1, "\(told)")
+  }
+
+  // Issue #158.
+  @Test func aParentHearsOfAChildsPROnlyOnceAcrossARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let parent = try idle(sbd, name: "p")
+    let kid = try sbd.session(
+      in: ReadyForReviewTests.charts, branch: ReadyForReviewTests.branch, folder: "charts", parent: parent.id,
+      name: "kid")
+    try waitForNotice(sbd, parent.id, after: 0, containing: "needs you")
+    try sbd.poll()
+    try waitForNotice(sbd, parent.id, after: 0, containing: "opened PR #18303")
+
+    // A branch without a PR drops the kid's PR, and the kid needs you again.
+    try sbd.git(kid.cwd, "branch", "haacked/no-pr-yet")
+    func dropPR() throws {
+      let heard = try sbd.messagesFromSbd(parent.id).count
+      try sbd.git(kid.cwd, "checkout", "-q", "haacked/no-pr-yet")
+      try sbd.poll()
+      try #require(try sbd.get(kid.id).pr == nil)
+      try waitForNotice(sbd, parent.id, after: heard, containing: "(\(kid.id)) needs you")
+    }
+    /// Brings the PR back as `number` and returns how many messages the parent had before.
+    func returnPR(as number: Int) throws -> Int {
+      let heard = try sbd.messagesFromSbd(parent.id).count
+      try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
+      try sbd.poll()
+      try sbd.waitFor(kid.id, "PR #\(number)") { $0.pr?.number == number }
+      return heard
+    }
+    // The PR's line comes before its state's line, in the same message or an earlier one.
+    func expectNoSecondAnnouncement(after heard: Int) throws {
+      let told = try waitForNotice(sbd, parent.id, after: heard, containing: "#18303 is ready to merge")
+      #expect(!told.contains { $0.contains("opened PR #18303") }, "\(told)")
+    }
+
+    try dropPR()
+    try expectNoSecondAnnouncement(after: try returnPR(as: 18303))
+
+    try dropPR()
+    try sbd.restart(setting: "tickSeconds", to: 0.2)
+    try #require(try sbd.get(kid.id).pr == nil)
+    try expectNoSecondAnnouncement(after: try returnPR(as: 18303))
+
+    // The same branch's PR comes back as one the parent never heard of.
+    try dropPR()
+    github.change(18303) {
+      $0["number"] = 18304
+      $0["url"] = "https://github.com/PostHog/charts/pull/18304"
+    }
+    try waitForNotice(
+      sbd, parent.id, after: try returnPR(as: 18304),
+      containing: "kid (\(kid.id)) opened PR #18304: https://github.com/PostHog/charts/pull/18304")
   }
 
   @Test func aStoppedParentResumesWithTheMessage() throws {

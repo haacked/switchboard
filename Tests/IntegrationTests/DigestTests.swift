@@ -103,6 +103,35 @@ import Testing
     #expect(contexts(sbd, p).count == heard)
   }
 
+  // Issue #158.
+  @Test func aManagerHearsOfAChildsPROnlyOnce() throws {
+    let github = try FakeGitHub()
+    defer { withExtendedLifetime(github) {} }
+    let sbd = try Instance.withGitHub(github)
+    let p = try parent(sbd, .manager)
+    let kid = try sbd.session(
+      in: ReadyForReviewTests.charts, branch: ReadyForReviewTests.branch, folder: "charts", parent: p.id, name: "kid")
+    try sbd.poll()
+    try sbd.waitFor(kid.id, "PR #18303") { $0.pr?.number == 18303 }
+    try prompt(sbd, p, "first")
+    try #require(contexts(sbd, p).last?.contains("opened PR #18303") == true, "\(contexts(sbd, p))")
+
+    try sbd.git(kid.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.poll()
+    try sbd.waitFor(kid.id, "no PR") { $0.pr == nil }
+    try prompt(sbd, p, "second")
+
+    try sbd.git(kid.cwd, "checkout", "-q", ReadyForReviewTests.branch)
+    try sbd.poll()
+    try sbd.waitFor(kid.id, "PR #18303 again") { $0.pr?.number == 18303 }
+    let before = contexts(sbd, p).count
+    try prompt(sbd, p, "third")
+
+    let given = contexts(sbd, p).dropFirst(before).joined()
+    #expect(given.contains("#18303 is ready to merge"), "\(given)")
+    #expect(!given.contains("opened PR #18303"), "\(given)")
+  }
+
   @Test func theDigestStaysOutOfTheChatLog() throws {
     let sbd = try Instance()
     let p = try parent(sbd, .chat)
