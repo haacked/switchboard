@@ -35,7 +35,7 @@ extension BoardModel {
   }
 
   /// True when the group has a chat that is not done. `group-rm` marks that chat done.
-  func hasOpenChat(_ group: String) -> Bool { chat(of: group).map { !$0.markedDone } ?? false }
+  func hasOpenChat(_ group: String) -> Bool { chat(of: group)?.markedDone == false }
 
   /// Deletes the group. sbd moves its sessions to no group and leaves them running.
   func deleteGroup(_ id: String) {

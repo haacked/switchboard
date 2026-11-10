@@ -56,13 +56,10 @@ extension View {
 }
 
 enum GroupDeletion {
-  /// True when the group has sessions, plans, or a chat that is not done. Deleting it moves the
-  /// sessions, detaches the plans, and marks the chat done. sbd never lists the chat in `sessions`.
-  static func asks(_ group: GroupSummary, hasChat: Bool) -> Bool {
-    hasChat || !group.sessions.isEmpty || !(group.plans ?? []).isEmpty
-  }
+  /// True when deleting the group does more than remove it, so the app asks first.
+  static func asks(_ group: GroupSummary, hasChat: Bool) -> Bool { !message(group, hasChat: hasChat).isEmpty }
 
-  /// What deleting the group does to its sessions, its chat, and its plans.
+  /// What deleting the group does to its sessions, its open chat, and its plans. sbd never lists the chat in `sessions`.
   static func message(_ group: GroupSummary, hasChat: Bool) -> String {
     var lines: [String] = []
     switch group.sessions.count {

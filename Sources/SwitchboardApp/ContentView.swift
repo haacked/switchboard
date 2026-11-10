@@ -448,6 +448,7 @@ struct BoardView: View {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
         Button("New Session…") { model.showingNew = true }
+        Button("New Group") { model.startNewGroup() }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
