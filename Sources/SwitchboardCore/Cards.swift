@@ -34,6 +34,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// The session's permission mode when the PermissionRequest arrived, such
   /// as `default` or `auto`.
   public var permissionMode: String?
+  /// The session's cwd when the PermissionRequest arrived. A file tool's
+  /// dialog shows its path relative to it.
+  public var cwd: String?
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -57,6 +60,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     hookClosed = false
     send = nil
     permissionMode = event.data["permission_mode"]?.string
+    cwd = event.data["cwd"]?.string
   }
 
   /// Whether an allow can also switch the session to auto mode: a permission
@@ -90,13 +94,17 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     }
   }
 
-  /// Whether sbd can find the card's dialog on the screen: a question's, or
-  /// a Bash command's. Claude Code 2.1.317's dialogs for other tools weren't
-  /// captured.
+  /// Whether sbd can find the card's dialog on the screen: a question's, a
+  /// Bash command's, or an Edit, Write, or Read call's that `FileCall` can
+  /// match. Claude Code 2.1.322's dialogs for other tools weren't captured.
   public var findable: Bool {
-    kind == .question
-      ? !marks.isEmpty
-      : tool == "Bash" && input["command"]?.string?.contains(where: { !$0.isWhitespace }) == true
+    switch kind {
+    case .question: !marks.isEmpty
+    case .permission:
+      FileCall(self) != nil
+        || tool == "Bash" && input["command"]?.string?.contains(where: { !$0.isWhitespace }) == true
+    case .send: false
+    }
   }
 
   /// The texts that identify a question card's dialog on the screen, each cut
@@ -222,7 +230,9 @@ public enum Decision: Equatable, Sendable {
       decision = ["behavior": "allow"]
       if let input { decision["updatedInput"] = input }
       if autoMode {
-        decision["updatedPermissions"] = [["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]]
+        decision["updatedPermissions"] = [
+          ["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]
+        ]
       }
     case .deny(let message?):
       decision = ["behavior": "deny", "message": .string(message)]

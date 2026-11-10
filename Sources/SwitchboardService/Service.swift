@@ -365,6 +365,23 @@ public final class Service {
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
       try update(id) { $0.name = name }
       return try JSON(encoding: summary(id))
+    case "issue":
+      let id = try lookup(args)
+      let session = entries[id]!.session
+      guard session.kind == .work, session.runsClaude else {
+        throw APIError("sb issue works only on a work session that has started")
+      }
+      let clear = args["clear"]?.bool == true
+      let text = args["issue"]?.string
+      guard clear != (text != nil) else { throw APIError("issue needs an issue or clear, not both") }
+      let issue = try text.map { text in
+        guard let ref = IssueRef(parsing: text) else {
+          throw APIError("can't read \"\(text)\" as an issue. Use 123, #123, owner/name#123, or an issue URL.")
+        }
+        return ref
+      }
+      try update(id) { $0.issue = issue }
+      return try JSON(encoding: summary(id))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
       let sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
@@ -1659,7 +1676,10 @@ public final class Service {
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
     out.shellClosed = s.shellClosed
-    if s.kind == .work && s.docket == nil { out.pipeline = Pipeline(e.facts, created: s.created) }
+    if s.kind == .work && s.docket == nil {
+      out.pipeline = Pipeline(e.facts, created: s.created)
+      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+    }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }

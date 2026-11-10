@@ -256,6 +256,48 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(GitHub.parsePR(.object(withoutNumber)) == nil)
   }
 
+  @Test func bodyWithClosingRefsFillsClosesIssuesInTheBodysOrder() throws {
+    let node = try editedNode(122896, ["body": "Fixes #174\r\nCloses PostHog/charts#9\r\n<!-- Fixes #1 -->"])
+
+    let pr = try #require(GitHub.parsePR(node)).pr
+
+    #expect(
+      pr.closesIssues == [
+        IssueRef(repo: "PostHog/posthog", number: 174), IssueRef(repo: "PostHog/charts", number: 9),
+      ])
+  }
+
+  /// `#N` resolves to the repo of the PR whose body names it.
+  @Test func shortIssueRefTakesThePRsRepo() throws {
+    let node = try editedNode(18303, ["body": "Resolves #12"])
+
+    #expect(try #require(GitHub.parsePR(node)).pr.closesIssues == [IssueRef(repo: "PostHog/charts", number: 12)])
+  }
+
+  @Test func bodyKeepsItsDependsOnBesideItsClosesIssues() throws {
+    let node = try editedNode(122896, ["body": "Depends on #122953\nFixes #174"])
+
+    let pr = try #require(GitHub.parsePR(node)).pr
+
+    #expect(pr.dependsOn == [PRRef(repo: "PostHog/posthog", number: 122953, deploy: false)])
+    #expect(pr.closesIssues == [IssueRef(repo: "PostHog/posthog", number: 174)])
+  }
+
+  @Test(arguments: ["", "Moves the flags.", "Depends on #122953", "See #174", "<!-- Fixes #1 -->"])
+  func bodyWithoutClosingRefsLeavesClosesIssuesNil(_ body: String) throws {
+    let node = try editedNode(122896, ["body": .string(body)])
+
+    #expect(try #require(GitHub.parsePR(node)).pr.closesIssues == nil)
+  }
+
+  /// The recorded nodes have no `body` key.
+  @Test(arguments: [nil, JSON.null] as [JSON?])
+  func nodeWithoutABodyLeavesClosesIssuesNil(_ body: JSON?) throws {
+    let node = try editedNode(122896, ["body": body])
+
+    #expect(try #require(GitHub.parsePR(node)).pr.closesIssues == nil)
+  }
+
   @Test(arguments: GitHubFixtures.bodyNodes)
   func bodyResponseCommentMatchesTheStatusCommentWithItsBody(_ node: JSON) throws {
     let id = try #require(node["id"]?.string)

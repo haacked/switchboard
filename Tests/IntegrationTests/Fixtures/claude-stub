@@ -29,11 +29,14 @@
 #                    exists, every prompt waits as lag held does
 #   onterm <file>    writes <file> in its folder first when SIGTERM arrives
 #   perm <command>   asks permission to run a Bash command
+#   edit <file> <old> <new>
+#                    asks permission to replace <old> with <new> in <file>
+#                    with the Edit tool, and replaces it after an allow
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
 #   pick colors      asks only the multi-select question
 #   pick fruit       asks only the single-choice question
-#   For perm and pick, the PermissionRequest hook runs while a stand-in for
+#   For perm, edit, and pick, the PermissionRequest hook runs while a stand-in for
 #   Claude Code's dialog shows on the terminal and reads keys: Enter on the
 #   first item or y allows, and Escape, Enter on No, or esc refuses and kills
 #   the hook, as Claude Code closes the request. timeout kills the hook and
@@ -43,7 +46,7 @@
 #   auto mode", as Claude Code 2.1.318 does. Picking it, or a hook's allow
 #   with a setMode, switches the mode. Each payload carries the mode, from
 #   --permission-mode or `default`.
-#   perm and pick build their tool payloads by hand. The stub does not play
+#   perm, edit, and pick build their tool payloads by hand. The stub does not play
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
@@ -273,6 +276,14 @@ dialog() {
       "$(jq -r '.tool_input.questions[0].question' <<<"$1")")
     items=()
     while IFS= read -r line; do items+=("$line"); done < <(jq -r '.tool_input.questions[0].options | to_entries[] | "\(.key + 1). \(.value.label)"' <<<"$1")
+  elif [ "$tool" = Edit ]; then
+    local file shown
+    file=$(jq -r .tool_input.file_path <<<"$1")
+    shown=${file#"$PWD/"}
+    echo "⏺ Update($shown)" >&2
+    head=(" Edit file" " $shown" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " 1 -$(jq -r .tool_input.old_string <<<"$1")"
+      " 1 +$(jq -r .tool_input.new_string <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " Do you want to make this edit to ${file##*/}?")
+    items=("1. Yes" "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)" "3. No")
   else
     echo "⏺ $tool($(jq -r .tool_input.command <<<"$1"))" >&2
     head=(" Bash command" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " $(jq -r .tool_input.command <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌"
@@ -284,7 +295,7 @@ dialog() {
     fi
   fi
   stty -icanon -echo <&3
-  payload PermissionRequest "$1" | sh -c "exec $request_cmd" >"$out" &
+  payload PermissionRequest "$(jq -c --arg c "$PWD" '. + {cwd: $c}' <<<"$1")" | sh -c "exec $request_cmd" >"$out" &
   hook_pid=$!
   echo "$hook_pid" >"$SB_HOME/held-hook.pid"
   keys 0 &
@@ -421,6 +432,14 @@ answered() {
   hook PostToolUse "$(jq -nc --arg t "$tool" --argjson i "$input" '{tool_name: $t, tool_use_id: "c1", tool_input: $i}')"
   if [ "$tool" = AskUserQuestion ]; then
     echo "Picked: $(jq -cS .answers <<<"$input")"
+  elif [ "$tool" = Edit ]; then
+    local file old new text
+    file=$(jq -r .file_path <<<"$input") old=$(jq -r .old_string <<<"$input") new=$(jq -r .new_string <<<"$input")
+    text=$(<"$file")
+    # bash 3.2 keeps the quotes of a quoted replacement.
+    text=${text/"$old"/$new}
+    printf '%s\n' "$text" >"$file"
+    echo "Edited $file"
   else
     echo "Ran $(jq -r .command <<<"$input")"
   fi
@@ -613,6 +632,13 @@ turn() {
     ;;
   perm*)
     asks "$p" Bash "$(jq -nc --arg c "${p#perm }" '{command: $c}')"
+    return
+    ;;
+  edit\ *)
+    local args
+    read -r -a args <<<"${p#edit }"
+    asks "$p" Edit "$(jq -nc --arg f "$(absolute "${args[0]}")" --arg o "${args[1]}" --arg n "${args[2]}" \
+      '{file_path: $f, old_string: $o, new_string: $n}')"
     return
     ;;
   "pick colors" | "pick fruit")

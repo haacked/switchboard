@@ -22,12 +22,14 @@ public enum ClaudeScreen {
   /// between two dashed rules, and the command must equal the card's, so
   /// that Yes never approves a command that only starts the same. Claude Code
   /// wraps a long command, so the lines join with a space. Runs of white
-  /// space count as one. A question dialog is the card's when one of the
-  /// card's marks appears in it.
+  /// space count as one. A file tool's dialog must name the card's file and
+  /// show its change, as `FileCall` describes. A question dialog is the
+  /// card's when one of the card's marks appears in it.
   public static func shows(_ card: Card, _ dialog: [String]) -> Bool {
     guard card.kind == .permission else {
       return card.marks.contains { mark in dialog.contains { $0.contains(mark) } }
     }
+    if let call = FileCall(card) { return call.shows(dialog, cwd: card.cwd) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
     return words(shown.joined(separator: " ")) == words(command)
   }
@@ -35,22 +37,36 @@ public enum ClaudeScreen {
   /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
   /// this holds. Claude Code breaks a token that is wider than the pane in
   /// the middle, so this ignores white space. `shows` decides what sbd may
-  /// type.
+  /// type. A file tool's `shows` already ignores white space.
   public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
-    guard card.kind == .permission else { return shows(card, dialog) }
+    guard card.kind == .permission, FileCall(card) == nil else { return shows(card, dialog) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
-    return shown.joined().filter { !$0.isWhitespace } == command.filter { !$0.isWhitespace }
+    return squeezed(shown.joined()) == squeezed(command)
   }
 
   /// The lines between the Bash dialog's two dashed rules, and the card's
-  /// command.
+  /// command. Every tool's dialog has the dashed rules, so the title must
+  /// be Bash's. Claude Code adds a suffix to the title for a command that
+  /// runs outside the sandbox or on another machine.
   private static func commandBlock(_ card: Card, _ dialog: [String]) -> (ArraySlice<String>, String)? {
-    guard card.findable, let command = card.input["command"]?.string,
-      let open = dialog.firstIndex(where: isDashedRule),
+    guard card.findable, let command = card.input["command"]?.string, let block = dashedBlock(dialog),
+      let title = block.head.first, title == "Bash command" || title.hasPrefix("Bash command (")
+    else { return nil }
+    return (block.rows, command)
+  }
+
+  /// The lines above a dialog's first dashed rule, without its leading rule
+  /// and blank lines, and the lines between its first two dashed rules.
+  static func dashedBlock(_ dialog: [String]) -> (head: [String], rows: ArraySlice<String>)? {
+    guard let open = dialog.firstIndex(where: isDashedRule),
       let close = dialog[(open + 1)...].firstIndex(where: isDashedRule)
     else { return nil }
-    return (dialog[(open + 1)..<close], command)
+    let head = dialog[..<open].map { $0.trimmingCharacters(in: .whitespaces) }.drop { $0.isEmpty || isRule($0) }
+    return (Array(head), dialog[(open + 1)..<close])
   }
+
+  /// The text without any white space.
+  static func squeezed(_ text: String) -> String { text.filter { !$0.isWhitespace } }
 
   private static func words(_ text: String) -> [Substring] {
     text.split(whereSeparator: \.isWhitespace)
@@ -92,7 +108,8 @@ public enum ClaudeScreen {
 /// yet stays. A hook closes only after its dialog was drawn, so a card whose
 /// hook closed before any check saw its dialog still goes. The second check
 /// keeps a card through a redraw, such as when a terminal attaches and
-/// resizes the pane.
+/// resizes the pane. While the card's hook is open, a dialog whose top
+/// scrolled off the pane is not a miss, because it may still be the card's.
 public struct DialogWatch: Equatable, Sendable {
   struct Sighting: Equatable, Sendable {
     var seen = false
@@ -114,9 +131,10 @@ public struct DialogWatch: Equatable, Sendable {
     var left: [Int64] = []
     for card in open where DialogWatch.watches(card) {
       var s = sightings[card.id] ?? Sighting()
+      let topScrolledOff = !card.hookClosed && dialog?.first.map(ClaudeScreen.isRule) == false
       if let dialog, ClaudeScreen.mayShow(card, dialog) {
         s = Sighting(seen: true, misses: 0)
-      } else {
+      } else if !topScrolledOff {
         s.misses += 1
       }
       if s.misses >= 2 && (s.seen || card.hookClosed) {

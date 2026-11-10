@@ -1,0 +1,50 @@
+               
+
+⏺ Fetch(https://example.com)
+  ⎿  Received 257 bytes                                                                                                                                                                                 
+
+⏺ Example Domain                                                                                                                                                                                 
+
+✻ Crunched for 5s · done 10:15 AM
+
+❯ Use the WebFetch tool to fetch https://www.rfc-editor.org/rfc/rfc2606.txt and tell me its title. Reply with the title only.                                                                           
+
+⏺ Fetch(https://www.rfc-editor.org/rfc/rfc2606.txt)
+  ⎿  Received 28 bytes                                                                                                                                                                                  
+
+⏺ Reserved Top Level DNS Names                     
+
+✻ Baked for 4s · done 10:15 AM
+
+❯ Use the WebFetch tool to fetch https://www.rfc-editor.org/rfc/rfc2607.txt and tell me its title. Reply with the title only.                                                                           
+
+⏺ Fetch(https://www.rfc-editor.org/rfc/rfc2607.txt)
+  ⎿  Interrupted · What should Claude do instead?                                                                                                                                                       
+
+⏺ The fetch was interrupted before it returned, so I don't have a title for RFC 2607 yet. Do you want me to try again?
+
+✻ Cogitated for 3s · done 10:16 AM
+
+❯ Call the WebFetch tool yourself (no subagent, no Agent tool) on https://www.rfc-editor.org/rfc/rfc2608.txt with the prompt "title?". Reply with the title only.                                       
+
+⏺ I can't. WebFetch isn't among the tools available in this session, and a search for it returned nothing, so I have no title for RFC 2608. The only route I have is the web-fetch subagent, which
+  you've asked me not to use. Do you want me to use it anyway, or would you rather enable WebFetch in this session first?                                                                               
+
+✻ Sautéed for 1s · done 10:16 AM                                                                                                                                                                  
+                                                                                                                                                                                                        
+❯ Use the Read tool to read /etc/hosts and reply with its line count only.                                                                                                                              
+
+  Reading /etc/hosts
+  ⎿  /etc/hosts                                                                                                                                                                                         
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Read file                                                                                                                                                                                              
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Read(/etc/hosts)                                   
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?                                                                                                                                                                                
+ ❯ 1. Yes                                                                                                                                                                                               
+   2. Yes, allow reading from /etc and /private/etc during this session                                                                                          
+   3. No                                                                                                                                                                                                
+                                                                                                                                                                                          
+ Esc to cancel · Tab to amend                                                                                                                                                                         

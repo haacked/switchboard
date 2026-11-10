@@ -96,6 +96,9 @@ public struct Session: Codable, Equatable, Sendable {
   /// True after the shell pane's shell exited or the user closed the pane.
   /// sbd then starts no shell for the session until the user opens one.
   public var shellClosed: Bool?
+  /// Set by `sb issue`. It replaces the issues that sbd finds in the PR body
+  /// and the branch name.
+  public var issue: IssueRef?
 
   public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
@@ -251,6 +254,10 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// The PR's stage on the merge board. Nil for the Manager, a group chat,
   /// and a docket row.
   public var pipeline: Pipeline?
+  /// The GitHub issues that the session works on, first the one the tile
+  /// shows. nil when no source names one, for every session that has no
+  /// `pipeline`, and for a follow-up that hasn't started.
+  public var issues: [SessionIssue]?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

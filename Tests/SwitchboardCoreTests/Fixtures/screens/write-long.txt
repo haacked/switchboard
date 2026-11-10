@@ -1,0 +1,50 @@
+  38 line 38
+  39 line 39                   
+  40 line 40                      
+  41 line 41                                                                                                                                                         
+  42 line 42
+  43 line 43
+  44 line 44                                                                                                                                                                                            
+  45 line 45
+  46 line 46       
+  47 line 47
+  48 line 48       
+  49 line 49                          
+  50 line 50  
+  51 line 51                                                                                                                                                                                     
+  52 line 52                                                                                                                                                                                     
+  53 line 53  
+  54 line 54
+  55 line 55                      
+  56 line 56
+  57 line 57                                                                                                                                                                                            
+  58 line 58
+  59 line 59                                
+  60 line 60                           
+  61 line 61                                                                                                                                                                                            
+  62 line 62
+  63 line 63
+  64 line 64                                                                                                                                                                                            
+  65 line 65
+  66 line 66                                                                                                                                                                                            
+  67 line 67
+  68 line 68                   
+  69 line 69
+  70 line 70                                                                                                         
+  71 line 71
+  72 line 72
+  73 line 73                 
+  74 line 74
+  75 line 75
+  76 line 76
+  77 line 77
+  78 line 78
+  79 line 79
+  80 line 80                                                                  
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create long.txt?                                                                                                                                                                      
+ ❯ 1. Yes                                                                                                                                                                                               
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)     
+   3. No                                                                                                                                                                                                
+                                                                                                                                                                                          
+ Esc to cancel · Tab to amend    

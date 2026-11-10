@@ -56,6 +56,18 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     #expect(f.pr == nil)
   }
 
+  @Test func prEventsKeepEveryNumberTheSessionHasHad() throws {
+    var first = samplePR()
+    first.number = 26
+    var second = samplePR()
+    second.number = 28
+    let f = facts([
+      try prEvent(1, first), event("pr", 2, ["pr": .null]), try prEvent(3, second), event("pr", 4, ["pr": .null]),
+    ])
+
+    #expect(f.prNumbers == [26, 28])
+  }
+
   @Test func prEventWithoutCommentsKeepsTheComments() throws {
     let f = facts([
       try prEvent(1, samplePR(), comments: [trunkComment()]),

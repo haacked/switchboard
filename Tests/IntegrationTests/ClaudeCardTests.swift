@@ -33,6 +33,22 @@ extension ClaudeTests {
     #expect(FileManager.default.fileExists(atPath: "\(c.sbd.work)/\(c.nonce).txt"))
   }
 
+  @Test func typesYesIntoAnEditDialogAfterTheHookCloses() throws {
+    let c = try ClaudeInstance()
+    let file = "\(c.sbd.work)/notes.txt"
+    try "alpha\nbeta\ngamma\n".write(toFile: file, atomically: true, encoding: .utf8)
+    let s = try c.sbd.new(
+      prompt: "Use the Edit tool to replace the line \"beta\" with \"\(c.nonce)\" in notes.txt.\n"
+        + "Then reply with DONE and nothing else.")
+    try c.waitFor(s.id, "the card") { $0.cards.first?.tool == "Edit" }
+    try c.sbd.waitFor("the dialog") { try c.screen(s.id).contains("Do you want to make this edit") }
+    try killHook(c, s.id)
+    try c.waitFor(s.id, "the closed hook") { $0.cards.first?.hookClosed == true }
+    #expect(try JSON.parse(c.sbd.sb("allow", "--json", s.id))?["delivery"]?.string == "terminal")
+    try c.waitFor(s.id, "the reply after the approval") { $0.lastReply != nil }
+    #expect(try String(contentsOfFile: file, encoding: .utf8).contains(c.nonce))
+  }
+
   @Test func answersAQuestionAfterTheHookClosesByCancellingTheDialog() throws {
     let c = try ClaudeInstance()
     let prompt =

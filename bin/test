@@ -3,12 +3,12 @@
 # tests that drive the installed claude with Haiku, which take minutes and use
 # some of your Claude quota. With --shards N, it splits the integration tests
 # across N swift test processes and runs the other tests in one more, all at
-# once, then runs MeasureTests alone. The Command Line Tools' build system can leave out the folder that
-# holds Swift Testing's macro plugin. This script passes that folder to the
-# compiler when it exists.
+# once, then runs MeasureTests alone. bin/lib/swift-testing.sh sets the flags
+# that swift needs to find Swift Testing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+source bin/lib/swift-testing.sh
+require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such
 # as runCommand or starting sbd and tmux, holds one of the threads in Swift's
 # cooperative pool, which has one per CPU. CI runners have 3 CPUs. A test with
@@ -21,8 +21,6 @@ plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
 # (Tests/IntegrationTests/Blocking.swift). An existing value of the variable
 # wins.
 export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-2}"
-args=()
-if [ -d "$plugins" ]; then args=(-Xswiftc -plugin-path -Xswiftc "$plugins"); fi
 
 # Each process caps how many tests run at once, so N processes run N times as
 # many integration tests at once. Each process holds SwiftPM's lock on its

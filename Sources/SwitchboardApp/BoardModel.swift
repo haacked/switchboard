@@ -88,6 +88,10 @@ final class BoardModel: ObservableObject {
   @Published var followups: [SessionSummary] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
+  /// True while the Board's new group name field is open.
+  @Published var namingGroup = false
+  /// The group whose delete the Board's confirmation dialog asks about.
+  @Published var confirmingGroupDelete: GroupSummary?
   /// The group suggestions, read with the follow-ups.
   @Published var suggestions: [GroupSuggestion] = []
   /// The plan updates and new plan rows that wait for the user, read with the follow-ups.
@@ -461,6 +465,24 @@ final class BoardModel: ObservableObject {
     } else {
       perform("group-describe", ["group": .string(id), "clear": true])
     }
+    return true
+  }
+  /// Moves a work session to a group, or to no group when `group` is nil.
+  /// The Board shows the card in its new lane before sbd answers. It sends
+  /// nothing for an id that names no work session on the Board, for a group
+  /// that sbd didn't list, or when the session is already in that lane. It
+  /// returns whether it sent the move.
+  @discardableResult
+  func moveToGroup(_ id: String, _ group: String?) -> Bool {
+    let known = Set(groups.map(\.id))
+    guard let session = workBoard.first(where: { $0.id == id }), group.map(known.contains) ?? true,
+      BoardRows.group(of: session, known: known) != group
+    else { return false }
+    for i in sessions.indices where sessions[i].id == id { sessions[i].group = group }
+    for i in followups.indices where followups[i].id == id { followups[i].group = group }
+    var args: [String: JSON] = ["sessions": [.string(id)]]
+    if let group { args["group"] = .string(group) } else { args["ungrouped"] = true }
+    perform("group-move", args)
     return true
   }
   /// Sets the account that the group's sessions run under, or clears it when

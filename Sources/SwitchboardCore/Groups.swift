@@ -418,8 +418,14 @@ public enum BoardRows {
   public static func make(sessions: [SessionSummary], groups: [GroupSummary]) -> [Row] {
     let known = Set(groups.map(\.id))
     var rows = groups.map { g in Row(title: g.name, group: g.id, sessions: sessions.filter { $0.group == g.id }) }
-    let ungrouped = sessions.filter { $0.group.map { !known.contains($0) } ?? true }
+    let ungrouped = sessions.filter { group(of: $0, known: known) == nil }
     if !ungrouped.isEmpty { rows.append(Row(title: ungroupedTitle, group: nil, sessions: ungrouped)) }
     return rows
+  }
+
+  /// The group of the session's row, or nil for the Ungrouped row. A group
+  /// that is not in `known` counts as no group.
+  public static func group(of session: SessionSummary, known: Set<String>) -> String? {
+    session.group.flatMap { known.contains($0) ? $0 : nil }
   }
 }

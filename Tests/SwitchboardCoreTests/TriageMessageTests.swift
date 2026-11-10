@@ -67,6 +67,17 @@ private func longCommandTurn() -> [Event] {
     #expect(m.details.openByDefault)
   }
 
+  @Test func anEditCardWhoseHookClosedOpensDetailsWithTheWholeEdit() throws {
+    let f = facts(editTurn() + [event("card_closed", 4, ["card": 3])])
+    #expect(f.cards.map(\.hookClosed) == [true])
+    let m = try #require(message(f))
+
+    #expect(m.details.toolInput?.tool == "Edit")
+    #expect(m.details.toolInput?.text.contains("\"old_string\" : \"beta\"") == true)
+    #expect(m.details.toolInput?.text.contains("\"new_string\" : \"BETA\"") == true)
+    #expect(m.details.openByDefault)
+  }
+
   @Test func aShortCommandWithALineBreakOpensDetails() throws {
     let command = "cd build\nrm -rf out"
     let call = tool("Bash", ["command": .string(command)], id: "b1")

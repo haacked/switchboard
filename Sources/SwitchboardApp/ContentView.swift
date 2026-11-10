@@ -233,6 +233,18 @@ struct Sidebar: View {
     } message: { change in
       Text(accountSwitchMessage(change))
     }
+    .safeAreaInset(edge: .bottom) {
+      Button {
+        model.startNewGroup()
+      } label: {
+        Label("New Group", systemImage: "plus")
+      }
+      .buttonStyle(.borderless)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(8)
+      .help("Create an empty group on the Board (⇧⌘G)")
+      .accessibilityIdentifier("sidebar-new-group")
+    }
     .overlay {
       if model.sidebarIsEmpty {
         VStack(spacing: 8) {
@@ -339,6 +351,7 @@ struct SessionRow: View {
         HStack {
           Text(session.name).fontWeight(.medium).lineLimit(1)
           Spacer()
+          IssueBadge(session: session)
           if let pr = session.pr, let url = pr.link {
             HStack(spacing: 3) {
               Link(destination: url) { Text(verbatim: "#\(pr.number)") }
@@ -393,6 +406,8 @@ struct ServiceBanner: View {
 enum BoardLanes: String, CaseIterable {
   case repo, group
 
+  static let storageKey = "boardLanes"
+
   var title: String { self == .repo ? "Repo" : "Group" }
 }
 
@@ -400,7 +415,7 @@ enum BoardLanes: String, CaseIterable {
 /// stage. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
-  @AppStorage("boardLanes") private var laneKind = BoardLanes.repo
+  @AppStorage(BoardLanes.storageKey) private var laneKind = BoardLanes.repo
   static let labelWidth: CGFloat = 140
   static let columnWidth: CGFloat = 200
 
@@ -424,33 +439,58 @@ struct BoardView: View {
     }
   }
 
+  /// Makes the same moves as a drag, because keyboard and VoiceOver users
+  /// can't start a drag. It also offers Ungrouped when the Board hides the
+  /// Ungrouped lane.
+  private func moveMenu(_ id: String, from current: String?) -> some View {
+    Menu("Move to Group") {
+      ForEach(model.groups, id: \.id) { g in
+        Button(g.name) { model.moveToGroup(id, g.id) }.disabled(g.id == current)
+      }
+      Divider()
+      Button(BoardRows.ungroupedTitle) { model.moveToGroup(id, nil) }.disabled(current == nil)
+    }
+  }
+
   var body: some View {
     let board = model.workBoard
     let done = board.filter(MergeBoard.isDone)
     let open = board.filter { !MergeBoard.isDone($0) }
-    if board.isEmpty {
+    // A repo lane has no group, like the Ungrouped lane, so a drop there would ungroup the card.
+    let drops = laneKind == .group
+    let shown = lanes(open, labelling: board)
+    if shown.isEmpty && done.isEmpty && !(model.namingGroup && laneKind == .group) {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
         Button("New Session…") { model.showingNew = true }
+        Button("New Group") { model.startNewGroup() }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       ScrollView([.horizontal, .vertical]) {
         LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
           Section {
-            ForEach(lanes(open, labelling: board)) { lane in
+            ForEach(shown) { lane in
               Divider()
               HStack(alignment: .top, spacing: 12) {
                 LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
                   .frame(width: Self.labelWidth, alignment: .leading)
                 ForEach(MergeBoard.columns, id: \.self) { stage in
                   VStack(spacing: 8) {
-                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in BoardCard(session: s) }
+                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in
+                      if drops {
+                        BoardCard(session: s).draggable(s.id)
+                          .contextMenu { moveMenu(s.id, from: lane.group?.id) }
+                      } else {
+                        BoardCard(session: s)
+                      }
+                    }
                   }
                   .frame(width: Self.columnWidth, alignment: .top)
                 }
               }
+              .modifier(LaneDrop(enabled: drops, group: lane.group?.id))
               .accessibilityElement(children: .contain)
               .accessibilityLabel(lane.title)
               .accessibilityIdentifier("board-row-\(lane.id)")
@@ -458,13 +498,17 @@ struct BoardView: View {
             DoneFooter(sessions: done)
           } header: {
             HStack(alignment: .center, spacing: 12) {
-              Picker("Lanes", selection: $laneKind) {
-                ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+              VStack(alignment: .leading, spacing: 4) {
+                Picker("Lanes", selection: $laneKind) {
+                  ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Show a lane per repo or per group")
+                // The header stays pinned, so the name field shows without a scroll.
+                if laneKind == .group { NewGroupRow() }
               }
-              .pickerStyle(.segmented)
-              .labelsHidden()
               .frame(width: Self.labelWidth)
-              .help("Show a lane per repo or per group")
               ForEach(MergeBoard.columns, id: \.self) { stage in
                 Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
                   .frame(width: Self.columnWidth, alignment: .leading)
@@ -477,6 +521,7 @@ struct BoardView: View {
         .padding()
       }
       .defaultScrollAnchor(.topLeading)
+      .groupDeleteDialog(model)
       .safeAreaInset(edge: .top, spacing: 0) {
         if !model.suggestions.isEmpty {
           VStack(spacing: 0) {
@@ -486,6 +531,39 @@ struct BoardView: View {
           .background(.background)
         }
       }
+    }
+  }
+}
+
+/// Moves a card dropped on a group lane into `group`, or out of its group
+/// on the Ungrouped lane, where `group` is nil. The lane under the drag
+/// shows a tint. The drop area covers the whole lane, so an empty group's
+/// lane also takes cards.
+private struct LaneDrop: ViewModifier {
+  @EnvironmentObject var model: BoardModel
+  let enabled: Bool
+  let group: String?
+  @State private var targeted = false
+
+  func body(content: Content) -> some View {
+    if enabled {
+      content
+        .contentShape(Rectangle())
+        .background {
+          if targeted {
+            RoundedRectangle(cornerRadius: 8)
+              .fill(Color.accentColor.opacity(0.12))
+              .stroke(Color.accentColor.opacity(0.6))
+              .padding(-6)
+          }
+        }
+        .dropDestination(for: String.self) { ids, _ in
+          ids.map { model.moveToGroup($0, group) }.contains(true)
+        } isTargeted: {
+          targeted = $0
+        }
+    } else {
+      content
     }
   }
 }
@@ -508,15 +586,24 @@ private struct LaneLabel: View {
       Text(count == 1 ? "1 session" : "\(count) sessions")
         .font(.caption).foregroundStyle(.secondary)
       if let group {
-        Button("Chat") { model.openChat(group.id) }
-          .buttonStyle(.link).font(.caption)
-          .help(
-            model.chat(of: group.id) == nil
-              ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+        HStack {
+          Button("Chat") { model.openChat(group.id) }
+            .buttonStyle(.link).font(.caption)
+            .help(
+              model.chat(of: group.id) == nil
+                ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+          Button("Delete") { model.requestDeleteGroup(group) }
+            .buttonStyle(.link).font(.caption)
+            .help(group.sessions.isEmpty ? "Delete this group" : "Delete this group and move its sessions to Ungrouped")
+            .accessibilityLabel("Delete group \(group.name)")
+        }
       }
       let plans = group?.plans ?? []
       PlanFollowupList(plans: plans)
       PlanArtifactList(plans: plans)
+    }
+    .contextMenu {
+      if let group { Button("Delete Group…", role: .destructive) { model.requestDeleteGroup(group) } }
     }
   }
 }
@@ -713,6 +800,7 @@ struct BoardCard: View {
             }
             Text(s.name).fontWeight(.medium).lineLimit(1)
             Spacer()
+            IssueBadge(session: s, linked: false)
             if let pr = s.pr {
               HStack(spacing: 3) {
                 Text(verbatim: "#\(pr.number)")

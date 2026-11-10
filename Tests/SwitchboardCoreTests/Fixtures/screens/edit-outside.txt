@@ -1,0 +1,50 @@
+
+✻ Crunched for 2s · done 10:24 AM                                                                                       
+                                                                                                                        
+❯ Use the Edit tool to change "two" to "TWO" in ~/sbcap173.txt. Then reply DONE.                                        
+
+  Read 1 file                                                                                                           
+
+⏺ Update(~/sbcap173.txt)                                                                                         
+  ⎿  Added 1 line, removed 1 line
+      1  one                                                                                                     
+      2 -two                                                                                                            
+      2 +TWO                                                                                                     
+  ⎿  Allowed by auto mode                                                                                               
+                                                                                                                 
+⏺ DONE                                                                                                           
+
+✻ Crunched for 4s · done 10:24 AM                                                                                       
+                                                                                                                        
+❯ Use the Edit tool on .git/description to replace "Unnamed repository" with "Cap repository". Then reply DONE.         
+
+  Read 1 file                                                                                                           
+
+⏺ Update(.git/description)                                                                                       
+  ⎿  Added 1 line, removed 1 line
+      1 -Unnamed repository; edit this file 'description' to name the repository.                                
+      1 +Cap repository; edit this file 'description' to name the repository.                                           
+  ⎿  Allowed by auto mode                                                                                        
+                                                                                                                        
+⏺ DONE                   
+
+✻ Brewed for 3s · done 10:25 AM  
+                                                                                                                        
+❯ Use the Edit tool to change "TWO" to "2" in ~/sbcap173.txt. Then reply DONE.                                          
+
+⏺ Update(~/sbcap173.txt)                                                                                                
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ ../../../../Users/someone/sbcap173.txt                                                                     
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 1  one                                            
+ 2 -TWO                                                                                                                 
+ 2 +2                                                                                                                   
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to sbcap173.txt?                                                                       
+ ❯ 1. Yes                                                                                                               
+   2. Yes, and always allow access to /Users/someone for this session (shift+tab)                              
+   3. No                                                                                                                
+                                                                                                                      
+ Esc to cancel · Tab to amend                        
