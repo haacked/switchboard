@@ -55,19 +55,24 @@ import Testing
     }
   }
 
-  /// Drops `session` on `target`. It returns the request and the card's
-  /// group right after the call. A refresh after sbd answers can replace the
-  /// sessions, so the group is read before the test awaits.
+  /// Drops `session` on `target`. It returns the request, the card's group
+  /// right after the call, and whether every other card kept its group. A
+  /// refresh after sbd answers can replace the sessions, so the groups are
+  /// read before the test awaits.
   func drop(_ model: BoardModel, _ session: String, on target: String?) async
-    -> (request: (op: String, args: [String: JSON])?, shown: String??)
+    -> (request: (op: String, args: [String: JSON])?, shown: String??, othersKept: Bool)
   {
+    let others = { model.board.filter { $0.id != session }.map(\.group) }
+    let before = others()
     var shown: String??
+    var othersKept = false
     let request = await firstSent(model) {
       let moved = model.moveToGroup(session, target)
       shown = group(model, session)
+      othersKept = others() == before
       return moved
     }
-    return (request, shown)
+    return (request, shown, othersKept)
   }
 
   @Test(
@@ -83,19 +88,21 @@ import Testing
       ("echo", "grp-flags"),
     ])
   func dropOnAnotherGroupSendsTheMoveAndMovesTheCard(session: String, target: String) async {
-    let (request, shown) = await drop(model(), session, on: target)
+    let (request, shown, othersKept) = await drop(model(), session, on: target)
 
     #expect(request?.op == "group-move")
     #expect(request?.args == ["sessions": [.string(session)], "group": .string(target)])
     #expect(shown == .some(target))
+    #expect(othersKept)
   }
 
   @Test func dropOnUngroupedSendsUngroupedAndMovesTheCard() async {
-    let (request, shown) = await drop(model(), "alpha", on: nil)
+    let (request, shown, othersKept) = await drop(model(), "alpha", on: nil)
 
     #expect(request?.op == "group-move")
     #expect(request?.args == ["sessions": ["alpha"], "ungrouped": true])
     #expect(shown == .some(nil))
+    #expect(othersKept)
   }
 
   /// The drop is refused: it returns false, the card stays, and the first

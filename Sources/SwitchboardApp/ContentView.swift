@@ -424,6 +424,19 @@ struct BoardView: View {
     }
   }
 
+  /// Makes the same moves as a drag, because keyboard and VoiceOver users
+  /// can't start a drag. It also offers Ungrouped when the Board hides the
+  /// Ungrouped lane.
+  private func moveMenu(_ id: String, from current: String?) -> some View {
+    Menu("Move to Group") {
+      ForEach(model.groups, id: \.id) { g in
+        Button(g.name) { model.moveToGroup(id, g.id) }.disabled(g.id == current)
+      }
+      Divider()
+      Button(BoardRows.ungroupedTitle) { model.moveToGroup(id, nil) }.disabled(current == nil)
+    }
+  }
+
   var body: some View {
     let board = model.workBoard
     let done = board.filter(MergeBoard.isDone)
@@ -449,7 +462,12 @@ struct BoardView: View {
                 ForEach(MergeBoard.columns, id: \.self) { stage in
                   VStack(spacing: 8) {
                     ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in
-                      if drops { BoardCard(session: s).draggable(s.id) } else { BoardCard(session: s) }
+                      if drops {
+                        BoardCard(session: s).draggable(s.id)
+                          .contextMenu { moveMenu(s.id, from: lane.group?.id) }
+                      } else {
+                        BoardCard(session: s)
+                      }
                     }
                   }
                   .frame(width: Self.columnWidth, alignment: .top)
