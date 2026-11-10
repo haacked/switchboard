@@ -715,4 +715,68 @@ import Testing
     #expect(try sent(sbd, a.id).isEmpty)
     #expect(try sent(sbd, b.id).isEmpty)
   }
+
+  // MARK: Empty groups
+
+  @Test func anEmptyGroupSurvivesARestartOfSbd() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    _ = try add(sbd, "Billing", a.id)
+    let empty = try add(sbd, "Flags")
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    let flags = try #require(try list(sbd).groups.first { $0.id == empty.id })
+    #expect(flags.name == "Flags")
+    #expect(flags.sessions.isEmpty)
+  }
+
+  @Test func anEmptyGroupStaysListedAfterSuggestAndAccept() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    let empty = try add(sbd, "Billing")
+    _ = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    _ = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+
+    let found = try suggestions(sbd)
+    let afterSuggest = try list(sbd).groups.first { $0.id == empty.id }
+    let suggestion = try #require(found.first { $0.group == nil })
+    let accepted = try decode(GroupSummary.self, sbd.sb("group", "suggest", "--json", "--accept", suggestion.id))
+    let afterAccept = try list(sbd).groups
+
+    #expect(afterSuggest?.sessions.isEmpty == true)
+    #expect(Set(afterAccept.map(\.id)) == [empty.id, accepted.id])
+    #expect(afterAccept.first { $0.id == empty.id }?.sessions.isEmpty == true)
+  }
+
+  // MARK: rm leaves members running
+
+  /// A stop is asynchronous, so the test reads the member for a second
+  /// after `group rm` instead of once.
+  @Test func rmLeavesALiveMemberRunningAndMarksOnlyTheChatDone() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    _ = try add(sbd, "Flags", a.id)
+    let c = try decode(SessionSummary.self, sbd.sb("chat", "Flags", "--json"))
+    let before = try sbd.waitFor(a.id, "claude's pid") { $0.claudePid != nil && $0.live }
+    let pid = try #require(before.claudePid)
+
+    try sbd.sb("group", "rm", "Flags")
+
+    let deadline = Date().addingTimeInterval(1)
+    var after = try sbd.get(a.id)
+    while Date() < deadline, after.claudePid == pid, after.live, !after.markedDone, after.state != .done {
+      usleep(100_000)
+      after = try sbd.get(a.id)
+    }
+    #expect(after.claudePid == pid)
+    #expect(after.live)
+    #expect(kill(pid_t(pid), 0) == 0)
+    #expect(try !sbd.events(a.id).contains { $0.kind == "stopped" })
+    #expect(!after.markedDone)
+    #expect(after.state != .done)
+    #expect(after.group == nil)
+    #expect(try sbd.get(c.id).markedDone)
+  }
 }
