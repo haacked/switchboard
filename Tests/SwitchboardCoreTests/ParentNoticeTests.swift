@@ -2,7 +2,7 @@ import Testing
 
 @testable import SwitchboardCore
 
-/// The marks that a parent records as it hears a child show each PR number in turn.
+/// The marks a parent records, starting from `.fresh`, as its child shows each PR number in turn.
 private func heard(_ prs: [Int?]) -> [ChildMark] {
   var marks = [ChildMark.fresh]
   for pr in prs { marks.append(marks.last!.updated(to: ChildMark(state: .working, pr: pr))) }
