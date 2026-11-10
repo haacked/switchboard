@@ -1,7 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The row after the Board's group lanes. A "New Group" button opens a name
+/// The New Group control in the Board's header. A "New Group" button opens a name
 /// field. Return creates the group, and Escape or Return on a blank name
 /// closes the field. A name that sbd refuses keeps the field open.
 struct NewGroupRow: View {
@@ -50,14 +50,17 @@ extension View {
     ) { group in
       Button("Delete Group", role: .destructive) { model.deleteGroup(group.id) }
     } message: { group in
-      Text(GroupDeletion.message(group, hasChat: model.chat(of: group.id) != nil))
+      Text(GroupDeletion.message(group, hasChat: model.hasOpenChat(group.id)))
     }
   }
 }
 
 enum GroupDeletion {
-  /// True when the group has sessions or plans. Deleting it moves the sessions and detaches the plans.
-  static func asks(_ group: GroupSummary) -> Bool { !group.sessions.isEmpty || !(group.plans ?? []).isEmpty }
+  /// True when the group has sessions, plans, or a chat that is not done. Deleting it moves the
+  /// sessions, detaches the plans, and marks the chat done. sbd never lists the chat in `sessions`.
+  static func asks(_ group: GroupSummary, hasChat: Bool) -> Bool {
+    hasChat || !group.sessions.isEmpty || !(group.plans ?? []).isEmpty
+  }
 
   /// What deleting the group does to its sessions, its chat, and its plans.
   static func message(_ group: GroupSummary, hasChat: Bool) -> String {

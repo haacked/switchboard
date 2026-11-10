@@ -443,7 +443,7 @@ struct BoardView: View {
     let done = board.filter(MergeBoard.isDone)
     let open = board.filter { !MergeBoard.isDone($0) }
     let shown = lanes(open, labelling: board)
-    if shown.isEmpty && done.isEmpty && !model.namingGroup {
+    if shown.isEmpty && done.isEmpty && !(model.namingGroup && laneKind == .group) {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
@@ -470,20 +470,20 @@ struct BoardView: View {
               .accessibilityLabel(lane.title)
               .accessibilityIdentifier("board-row-\(lane.id)")
             }
-            if laneKind == .group {
-              Divider()
-              NewGroupRow()
-            }
             DoneFooter(sessions: done)
           } header: {
             HStack(alignment: .center, spacing: 12) {
-              Picker("Lanes", selection: $laneKind) {
-                ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+              VStack(alignment: .leading, spacing: 4) {
+                Picker("Lanes", selection: $laneKind) {
+                  ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Show a lane per repo or per group")
+                // The header stays pinned, so the name field shows without a scroll.
+                if laneKind == .group { NewGroupRow() }
               }
-              .pickerStyle(.segmented)
-              .labelsHidden()
               .frame(width: Self.labelWidth)
-              .help("Show a lane per repo or per group")
               ForEach(MergeBoard.columns, id: \.self) { stage in
                 Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
                   .frame(width: Self.columnWidth, alignment: .leading)

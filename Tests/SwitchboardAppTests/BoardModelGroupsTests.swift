@@ -35,16 +35,18 @@ import Testing
 
   // MARK: startNewGroup
 
-  @Test func startNewGroupShowsTheBoardAndOpensTheNameField() {
+  @Test func startNewGroupShowsTheBoardInGroupLanesAndOpensTheNameField() {
     let model = model()
     model.mainView = .inbox
     model.selection = "s1"
+    UserDefaults.standard.set(BoardLanes.repo.rawValue, forKey: BoardLanes.storageKey)
 
     model.startNewGroup()
 
     #expect(model.mainView == .board)
     #expect(model.selection == nil)
     #expect(model.namingGroup)
+    #expect(UserDefaults.standard.string(forKey: BoardLanes.storageKey) == BoardLanes.group.rawValue)
   }
 
   // MARK: createGroup
@@ -78,6 +80,23 @@ import Testing
 
     #expect(model.namingGroup)
     #expect(model.actionError?.contains("a group named Flags exists") == true)
+  }
+
+  /// A create that succeeds after a refused one clears the refusal from the banner.
+  @Test func createGroupClearsTheRefusalWhenARetrySucceeds() async {
+    let model = model(group("g1", "Flags"))
+    model.namingGroup = true
+    model.send = { op, args in
+      if op == "group-add" && args["name"] == "Flags" { throw APIError("a group named Flags exists") }
+      return .null
+    }
+
+    model.createGroup("Flags")
+    await settle { model.actionError != nil }
+    model.createGroup("Flagz")
+    await settle { !model.namingGroup }
+
+    #expect(model.actionError == nil)
   }
 
   // MARK: requestDeleteGroup
@@ -178,6 +197,40 @@ import Testing
 
     #expect(op == "stop")
     #expect(model.confirmingGroupDelete == flags)
+  }
+
+  func chat(_ id: String, of group: String, done: Bool = false) -> SessionSummary {
+    var s = needsItem(id)
+    s.kind = .chat
+    s.chat = group
+    s.markedDone = done
+    return s
+  }
+
+  /// `group-rm` marks the group's chat done, so a group whose only dependent is an open chat asks.
+  @Test func requestDeleteGroupAsksBeforeDeletingAnEmptyGroupWithAnOpenChat() async {
+    let flags = group("g1", "Flags")
+    let model = appliedModel([chat("c1", of: "g1")])
+    model.groups = [flags]
+    var confirming: GroupSummary?
+
+    let (op, _) = await firstSent(model) {
+      model.requestDeleteGroup(flags)
+      confirming = model.confirmingGroupDelete
+    }
+
+    #expect(confirming == flags)
+    #expect(op == "stop")
+  }
+
+  @Test func requestDeleteGroupDeletesAnEmptyGroupWhoseChatIsDoneAtOnce() async {
+    let flags = group("g1", "Flags")
+    let model = appliedModel([chat("c1", of: "g1", done: true)])
+    model.groups = [flags]
+
+    let (op, _) = await firstSent(model) { model.requestDeleteGroup(flags) }
+
+    #expect(op == "group-rm")
   }
 
   @Test func deletionMessageSaysWhatHappensToSessionsChatAndPlans() {
