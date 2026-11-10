@@ -76,8 +76,8 @@ extension Service {
       model: model, created: nowMs())
     session.parent = parent
     session.group = try groupOfNew(group, parent: parent)
-    // A follow-up added by a session stays in that session's account.
-    // Without a parent, it takes the active account when it starts.
+    // Without a group account, a named account, or a parent, the follow-up
+    // takes the active account when it starts.
     session.claudeConfigDir = try accountForNew(named: account, parent: parent, for: session)
     session.followup = followup
     session.autoMode = autoMode ?? config.autoMode

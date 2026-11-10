@@ -103,7 +103,7 @@ import Testing
     #expect(try listed(sbd, g.id).account == sbd.account("B"))
   }
 
-  /// D3: sbd stores the normalized folder, whichever way the request names it.
+  /// sbd stores the normalized folder, whichever way the request names it.
   @Test func setFindsTheAccountHoweverItIsNamed() throws {
     let sbd = try instance()
     let g = try addGroup(sbd)
@@ -119,7 +119,7 @@ import Testing
     }
   }
 
-  /// Rule 7: the group keeps the active account it names when the active account changes.
+  /// The group keeps the active account it names when the active account changes.
   @Test func aGroupSetToTheActiveAccountKeepsItWhenTheActiveAccountChanges() throws {
     let sbd = try instance()
     let g = try addGroup(sbd)
@@ -187,7 +187,7 @@ import Testing
     #expect(try listed(sbd, g.id).account == nil)
   }
 
-  /// D5: `sb group ls` prints the account under the group, and `sb group
+  /// `sb group ls` prints the account under the group, and `sb group
   /// account <group>` prints it without changing it.
   @Test func theTextOutputShowsTheAccount() throws {
     let sbd = try instance()
@@ -204,7 +204,7 @@ import Testing
 
   // MARK: New sessions in the group
 
-  /// Risk 4: the account that a new session records is the one its first
+  /// The account that a new session records is the one its first
   /// launch uses, so the launch moves nothing.
   @Test func aNewSessionInTheGroupRunsUnderItsAccountAndRecordsNoMove() throws {
     let sbd = try instance()
@@ -221,7 +221,7 @@ import Testing
     #expect(try events(sbd, s, "account-move-skipped").isEmpty)
   }
 
-  /// D13: the group's account wins over the parent's. The parent runs on A,
+  /// The group's account wins over the parent's. The parent runs on A,
   /// because it was running when the group's account was set.
   @Test func sessionsStartedInsideAMemberTakeTheGroupsAccountOverTheParents() throws {
     let repos = try Repos()
@@ -268,12 +268,12 @@ import Testing
     #expect(try events(sbd, f, "account-moved").isEmpty)
   }
 
-  /// D2: every path that creates a session refuses a named account that
+  /// Every path that creates a session refuses a named account that
   /// differs from the group's, names the group, and creates nothing. A refusal
   /// changes nothing, so one sbd serves every path.
   @Test func aNamedAccountThatDiffersFromTheGroupsIsRefused() throws {
     let repos = try Repos()
-    try repos.make("acme/widgets")
+    let checkout = try repos.make("acme/widgets")
     let sbd = try instance(["repoRoots": [.string(repos.root)]])
     let member = try sbd.new(name: "member")
     _ = try addGroup(sbd, "Flags", member.id)
@@ -294,9 +294,10 @@ import Testing
 
     #expect(Set(try sbd.client.sessions().map(\.id)) == before)
     #expect(try sbd.client.call("followup-ls", as: [SessionSummary].self).isEmpty)
+    #expect(try !SpawnTests().branchExists(checkout, "kid"))
   }
 
-  /// D2: a name or folder that resolves to the group's own account is accepted.
+  /// A name or folder that resolves to the group's own account is accepted.
   @Test func aNamedAccountThatIsTheGroupsIsAccepted() throws {
     let sbd = try instance()
     let member = try sbd.new(name: "member")
@@ -314,7 +315,7 @@ import Testing
     }
   }
 
-  /// D8: the group's chat runs under the group's account.
+  /// The group's chat runs under the group's account.
   @Test func theGroupsChatRunsUnderItsAccount() throws {
     let sbd = try instance()
     _ = try addGroup(sbd)
@@ -325,9 +326,10 @@ import Testing
     #expect(chat.account == sbd.account("B"))
     try sbd.waitFor(chat.id, "the chat's claude") { $0.live }
     #expect(lastLaunch(sbd, chat)?.account == sbd.account("B"))
+    #expect(try events(sbd, chat, "account-moved").isEmpty)
   }
 
-  /// Rule 8: a new session uses the account it would use without the group,
+  /// A new session uses the account it would use without the group,
   /// and the group keeps the stored folder for when the login comes back.
   @Test func aNewSessionFallsBackWhenTheGroupsAccountLostItsLogin() throws {
     let sbd = try instance()
@@ -344,7 +346,7 @@ import Testing
 
   // MARK: Global moves
 
-  /// Rule 6 and D11: `account move` leaves a session that its group binds to
+  /// `account move` leaves a session that its group binds to
   /// another account, and the dry run lists the same sessions as the move.
   /// A group whose folder lost its login still binds its sessions.
   @Test(arguments: [false, true]) func accountMoveLeavesABoundSessionAndTheDryRunAgrees(loginGone: Bool) throws {
@@ -436,8 +438,8 @@ import Testing
     #expect(lastLaunch(sbd, s)?.account == sbd.account("B"))
   }
 
-  /// The id is in `starting` while `followup-start` launches it, which
-  /// `account move` refuses. The launch-time move does not.
+  /// `followup-start` gives the follow-up its group's account before it
+  /// launches, so the launch moves nothing.
   @Test func aFollowupMovedIntoTheGroupStartsUnderItsAccount() throws {
     let sbd = try instance()
     let repo = try sbd.makeRepo()
@@ -454,6 +456,7 @@ import Testing
     #expect(try sbd.get(f.id).account == sbd.account("B"))
     #expect(lastLaunch(sbd, f)?.account == sbd.account("B"))
     #expect(try events(sbd, f, "account-move-skipped").isEmpty)
+    #expect(try events(sbd, f, "account-moved").isEmpty)
   }
 
   /// A session stopped before its first prompt has no transcript, so the
@@ -480,7 +483,7 @@ import Testing
 
   enum Leaving: String, CaseIterable { case moveOut, clear, removeGroup }
 
-  /// Rule 5: a session that leaves its group, or whose group's account goes,
+  /// A session that leaves its group, or whose group's account goes,
   /// stays on the account it last ran under, not the active one.
   @Test(arguments: Leaving.allCases) func aSessionThatLeavesTheGroupStaysOnItsAccount(_ how: Leaving) throws {
     let sbd = try instance()
@@ -506,7 +509,7 @@ import Testing
 
   // MARK: Moves that sbd skips
 
-  /// Rule 4 and D6: the session launches under its own account, its
+  /// The session launches under its own account, its
   /// conversation goes on, and an `account-move-skipped` event names the
   /// group's account and holds `cause` in its reason.
   func expectSkipped(_ sbd: Instance, _ s: SessionSummary, cause: String) throws {

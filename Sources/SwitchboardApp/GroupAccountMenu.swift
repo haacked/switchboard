@@ -36,11 +36,11 @@ struct GroupAccountMenu: View {
           Button("Use the Account for New Sessions") { model.setGroupAccount(group.id, nil) }
         }
       } label: {
-        Text(Self.label(group.account, accounts: model.accounts))
+        Text(Self.label(group.account, accounts: model.accounts, usage: model.usage))
       }
       .menuStyle(.borderlessButton)
-      .fixedSize()
-      .font(.caption)
+      .controlSize(.small)
+      .fixedSize(horizontal: false, vertical: true)
       .help("The Claude account that this group's sessions run under")
       .accessibilityIdentifier("group-account-\(group.id)")
       .confirmationDialog(
@@ -67,10 +67,14 @@ struct GroupAccountMenu: View {
 
   /// Such as `Account: personal`, or `Account: for new sessions` when the
   /// group names none. A folder that sbd no longer lists reads as missing.
-  static func label(_ folder: String?, accounts: [AccountInfo]) -> String {
+  /// An account whose last reading is signed out reads as not signed in,
+  /// because sbd moves no session to it.
+  static func label(_ folder: String?, accounts: [AccountInfo], usage: [AccountUsage]) -> String {
     guard let folder else { return "Account: for new sessions" }
     let name = ClaudeAccount.name(folder)
-    return accounts.contains { $0.folder == folder } ? "Account: \(name)" : "Account: \(name) (missing)"
+    if !accounts.contains(where: { $0.folder == folder }) { return "Account: \(name) (missing)" }
+    if usage.first(where: { $0.folder == folder })?.signedOut == true { return "Account: \(name) (not signed in)" }
+    return "Account: \(name)"
   }
 
   static func moveMessage(_ moves: [SessionSummary]) -> String {

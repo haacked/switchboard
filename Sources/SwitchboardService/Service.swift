@@ -643,8 +643,14 @@ public final class Service {
         prefix: config.branchPrefix, name: args.name,
         exists: { branchOrFolderTaken(repo, $0) })
     }
-    // An unknown group fails here, before prepareFolder makes a worktree.
-    if let group = args.group { _ = try queue.sync { try lookupGroup(["group": .string(group)]) } }
+    // An unknown group, an unknown account, or an account that differs from
+    // the group's fails here, before prepareFolder makes a worktree.
+    try queue.sync {
+      var probe = Session(id: "", name: "", cwd: "", branch: nil, claudeSessionId: "", model: nil, created: 0)
+      probe.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+      probe.group = try groupOfNew(args.group, parent: probe.parent)
+      _ = try accountForNew(named: args.account, parent: probe.parent, for: probe)
+    }
     let folder = try prepareFolder(args)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
@@ -666,7 +672,8 @@ public final class Service {
     session.autoMode = args.autoMode ?? config.autoMode
     configure(&session)
     // After `configure`, which sets a chat's group.
-    session.claudeConfigDir = try accountForNew(named: args.account, parent: session.parent, for: session) ?? activeAccount
+    session.claudeConfigDir =
+      try accountForNew(named: args.account, parent: session.parent, for: session) ?? activeAccount
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])

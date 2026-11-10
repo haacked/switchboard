@@ -126,4 +126,28 @@ import Testing
 
     #expect(moves.isEmpty)
   }
+
+  // MARK: The text
+
+  @Test func theLabelNamesTheAccountOrSaysItIsForNewSessions() {
+    let accounts = [AccountInfo(name: "work", folder: Self.work, active: true, sessions: 1)]
+
+    #expect(GroupAccountMenu.label(nil, accounts: accounts, usage: []) == "Account: for new sessions")
+    #expect(GroupAccountMenu.label(Self.work, accounts: accounts, usage: []) == "Account: work")
+    #expect(GroupAccountMenu.label(Self.personal, accounts: accounts, usage: []) == "Account: personal (missing)")
+  }
+
+  @Test func theLabelSaysASignedOutAccountIsNotSignedIn() {
+    let accounts = [AccountInfo(name: "work", folder: Self.work, active: true, sessions: 1)]
+    let usage = [AccountUsage(name: "work", folder: Self.work, signedOut: true)]
+
+    #expect(GroupAccountMenu.label(Self.work, accounts: accounts, usage: usage) == "Account: work (not signed in)")
+  }
+
+  @Test func theMoveMessageCountsAndNamesTheSessions() {
+    #expect(GroupAccountMenu.moveMessage([session("a")]).hasPrefix("1 session moves to it at the next launch: a."))
+    #expect(
+      GroupAccountMenu.moveMessage([session("a"), session("b")]).hasPrefix(
+        "2 sessions move to it at the next launch: a, b."))
+  }
 }
