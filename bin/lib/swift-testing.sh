@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sets `args` to the flags that swift needs to find Swift Testing in the
 # active developer directory. bin/test and bin/test-gui source it.
 #
@@ -10,7 +11,9 @@
 # <dev>/Library/Developer/usr/lib. The rpaths in Testing.framework do not
 # reach that folder.
 
-dev="${DEVELOPER_DIR:-$(xcode-select -p)}"
+# xcode-select -p reads DEVELOPER_DIR. It resolves an Xcode app path to the
+# app's Contents/Developer folder, as swift does.
+dev="$(xcode-select -p)"
 plugins="$dev/usr/lib/swift/host/plugins/testing"
 clt_frameworks="$dev/Library/Developer/Frameworks"
 clt_framework="$clt_frameworks/Testing.framework"

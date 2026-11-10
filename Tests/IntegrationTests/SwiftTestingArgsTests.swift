@@ -57,10 +57,14 @@ private struct Layout: Sendable, CustomTestStringConvertible {
 
 /// Runs a bash script that sources bin/lib/swift-testing.sh.
 /// `developerDir` sets DEVELOPER_DIR, and nil removes it from the environment.
-private func runHelper(_ body: String, developerDir: String?, errexit: Bool = true) throws -> CommandResult {
+/// `pathPrefix` puts a folder at the front of PATH.
+private func runHelper(
+  _ body: String, developerDir: String?, errexit: Bool = true, pathPrefix: String? = nil
+) throws -> CommandResult {
   let helper = Instance.root.appendingPathComponent("bin/lib/swift-testing.sh").path
   var env = ProcessInfo.processInfo.environment
   env["DEVELOPER_DIR"] = developerDir
+  if let pathPrefix { env["PATH"] = "\(pathPrefix):\(env["PATH"] ?? "/usr/bin:/bin")" }
   let options = errexit ? "set -euo pipefail" : "set -uo pipefail"
   return try runCommand("/bin/bash", ["-c", "\(options)\nsource \(shellQuote(helper))\n\(body)"], env: env, timeout: 30)
 }
@@ -68,12 +72,14 @@ private func runHelper(_ body: String, developerDir: String?, errexit: Bool = tr
 /// The `args` array that sourcing the helper sets, one element per line. The
 /// script fails when `args` is not an array, so an unset `args` can't pass
 /// as an empty one.
-private func sourcedArgs(developerDir: String?) throws -> (result: CommandResult, args: [String]) {
+private func sourcedArgs(
+  developerDir: String?, pathPrefix: String? = nil
+) throws -> (result: CommandResult, args: [String]) {
   let body = """
     [[ "$(declare -p args 2>/dev/null)" == "declare -a"* ]] || { echo "args is not an array" >&2; exit 3; }
     printf "%s\\n" ${args[@]+"${args[@]}"}
     """
-  let r = try runHelper(body, developerDir: developerDir)
+  let r = try runHelper(body, developerDir: developerDir, pathPrefix: pathPrefix)
   return (r, r.stdout.split(separator: "\n").map(String.init))
 }
 
@@ -117,18 +123,34 @@ private func requireSwiftTesting(developerDir: String, call: String) throws -> C
     #expect(args == layout.expected.flatMap(dev.flags))
   }
 
-  @Test func unsetDeveloperDirMatchesDeveloperDirSetToXcodeSelectPath() throws {
-    var env = ProcessInfo.processInfo.environment
-    env["DEVELOPER_DIR"] = nil
-    let selected = try runCommand("/usr/bin/xcode-select", ["-p"], env: env)
-    try #require(selected.status == 0, "\(selected.stderr)")
-    let path = selected.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  /// A stub xcode-select on PATH prints the fake folder, so the test does not
+  /// depend on which developer folder the host has selected.
+  @Test func unsetDeveloperDirUsesTheFolderXcodeSelectPrints() throws {
+    let dev = try FakeDeveloperDir(
+      folders: [FakeDeveloperDir.plugins, FakeDeveloperDir.cltFramework], files: [FakeDeveloperDir.interopDylib])
+    let bin = "\(dev.root)/bin"
+    try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
+    let stub = "#!/bin/sh\nprintf '%s\\n' \(shellQuote(dev.path))\n"
+    try #require(
+      FileManager.default.createFile(
+        atPath: "\(bin)/xcode-select", contents: Data(stub.utf8), attributes: [.posixPermissions: 0o755]))
 
-    let unset = try sourcedArgs(developerDir: nil)
-    let set = try sourcedArgs(developerDir: path)
+    let (r, args) = try sourcedArgs(developerDir: nil, pathPrefix: bin)
 
-    #expect(unset.result.status == 0, "\(unset.result.stderr)")
-    #expect(unset.args == set.args)
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(args == [FakeDeveloperDir.Flag.plugin, .framework, .dylib].flatMap(dev.flags))
+  }
+
+  /// DEVELOPER_DIR may name an Xcode app rather than its Contents/Developer
+  /// folder. xcode-select and swift accept both forms.
+  @Test func requireFindsTheFrameworkWhenDeveloperDirNamesTheApp() throws {
+    let app = try FakeDeveloperDir(folders: ["Contents/Developer/\(FakeDeveloperDir.xcodeFramework)"])
+
+    let r = try requireSwiftTesting(developerDir: app.path, call: "require_swift_testing || exit 4")
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout == "sourced\nafter\n")
+    #expect(r.stderr == "")
   }
 
   /// Each layout lacks both Testing.framework paths, though some hold the other
