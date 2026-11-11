@@ -463,7 +463,7 @@ func replyFixture(_ name: String) throws -> String {
       "title": "Pick a database", "kind": "decision", "summary": "It asks which one. Postgres is in use.",
       "options": [postgres, ["label": "SQLite", "message": "Use SQLite."]],
     ]
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
     #expect(summary.title == "Pick a database")
     #expect(summary.kind == .decision)
     #expect(summary.options.count == 2)
@@ -473,7 +473,7 @@ func replyFixture(_ name: String) throws -> String {
 
   @Test func readsTheResultTextWhenThereIsNoStructuredOutput() throws {
     let text = "```json\n{\"title\":\"Push\",\"kind\":\"approval\",\"summary\":\"Ready.\",\"options\":[]}\n```"
-    let summary = try TriageSummarizer.parse(JSON.object(["result": .string(text)]).text)
+    let summary = try TriageSummarizer.parse(JSON.object(["result": .string(text)]).text, reply: "")
     #expect(summary.title == "Push")
   }
 
@@ -482,7 +482,7 @@ func replyFixture(_ name: String) throws -> String {
       "title": .string(String(repeating: "x", count: 100)), "kind": "nonsense", "summary": " Ready. ",
       "options": [["label": "Push"], ["label": ""], ["message": "no label"]],
     ]
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
     #expect(summary.title.count <= Triage.titleLength)
     #expect(summary.kind == .info)
     #expect(summary.summary == "Ready.")
@@ -490,10 +490,12 @@ func replyFixture(_ name: String) throws -> String {
   }
 
   @Test func refusesAnswersWithoutASummary() {
-    #expect(throws: APIError.self) { try TriageSummarizer.parse("not json") }
-    #expect(throws: APIError.self) { try TriageSummarizer.parse(#"{"is_error":true,"result":"rate limited"}"#) }
-    #expect(throws: APIError.self) { try TriageSummarizer.parse(envelope(["title": "", "summary": "x"])) }
-    #expect(throws: APIError.self) { try TriageSummarizer.parse(envelope(["title": "x", "summary": ""])) }
+    #expect(throws: APIError.self) { try TriageSummarizer.parse("not json", reply: "") }
+    #expect(throws: APIError.self) {
+      try TriageSummarizer.parse(#"{"is_error":true,"result":"rate limited"}"#, reply: "")
+    }
+    #expect(throws: APIError.self) { try TriageSummarizer.parse(envelope(["title": "", "summary": "x"]), reply: "") }
+    #expect(throws: APIError.self) { try TriageSummarizer.parse(envelope(["title": "x", "summary": ""]), reply: "") }
   }
 
   @Test func theInputMarksTheReplyAsDataAndKeepsItsEnd() {
@@ -526,7 +528,7 @@ func replyFixture(_ name: String) throws -> String {
   @Test func keepsASummaryWithOneLinePerDecision() throws {
     let payload: JSON = ["title": "Decide six things", "kind": "info", "summary": .string(Self.eightLines)]
 
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
 
     #expect(summary.summary == Self.eightLines)
   }
@@ -538,7 +540,7 @@ func replyFixture(_ name: String) throws -> String {
       ]
     let payload: JSON = ["title": "Decide", "kind": "decision", "summary": .string(lines.joined(separator: "\n"))]
 
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
 
     #expect(summary.summary == lines.dropLast().joined(separator: "\n"))
     #expect(!summary.summary.contains("extra"))

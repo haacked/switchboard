@@ -1,9 +1,10 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The Inbox message of a session, in three sections that never change their
+/// The Inbox message of a session, in sections that never change their
 /// order: the Summary (what it did and needs, and what to read before
-/// deciding), the Action (the buttons), and the Details (behind a disclosure).
+/// deciding), the Drafts when the session wrote a message for the user to
+/// send, the Action (the buttons), and the Details (behind a disclosure).
 /// An item with decisions shows them one step at a time in its Action. Its
 /// Summary shrinks to its first line, and its callouts move into Details.
 /// The step view owns ⌘⇧Return.
@@ -33,6 +34,7 @@ struct DecisionCard: View {
           if !item.callouts.isEmpty { callouts }
         }
       }
+      if !item.drafts.isEmpty { DraftsSection(drafts: item.drafts) }
       VStack(alignment: .leading, spacing: 8) {
         SectionTitle(text: "Action")
         if let list {
