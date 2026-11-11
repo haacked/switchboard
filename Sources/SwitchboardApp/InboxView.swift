@@ -2,6 +2,9 @@ import SwiftUI
 import SwitchboardCore
 
 struct InboxView: View {
+  /// The narrowest the pane that holds an item's session view gets.
+  static let detailMinWidth: CGFloat = 340
+
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
@@ -28,7 +31,7 @@ struct InboxView: View {
           .frame(minWidth: 200, idealWidth: 280, maxWidth: 420)
         if let id = model.currentInboxItem, let session = model.sessions.first(where: { $0.id == id }) {
           TriageDetail(session: session).id(session.id)
-            .frame(minWidth: 340, maxWidth: .infinity)
+            .frame(minWidth: Self.detailMinWidth, maxWidth: .infinity)
         } else {
           Text("Pick an item").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         }

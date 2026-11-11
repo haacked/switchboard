@@ -120,8 +120,14 @@ struct NotesButton: View {
   }
 }
 
-/// A session's open to-dos, plain notes, and resolved to-dos, and a field that adds a note.
 struct NotesPopover: View {
+  let session: SessionSummary
+
+  var body: some View { NotesList(session: session).padding(12).frame(width: 340) }
+}
+
+/// A session's open to-dos, plain notes, and resolved to-dos, and a field that adds a note.
+struct NotesList: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   @State private var text = ""
@@ -158,8 +164,6 @@ struct NotesPopover: View {
           .help("A to-do is a task for you. Deleting the session asks you to resolve it first.")
       }
     }
-    .padding(12)
-    .frame(width: 340)
   }
 
   private func row(_ note: Note) -> some View {

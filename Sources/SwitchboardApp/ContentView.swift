@@ -53,6 +53,9 @@ func ago(_ ms: Int64) -> String {
 }
 
 struct ContentView: View {
+  static let windowMinWidth: CGFloat = 900
+  static let sidebarMinWidth: CGFloat = 240
+
   @EnvironmentObject var model: BoardModel
 
   private var viewChoice: Binding<MainView?> {
@@ -80,7 +83,7 @@ struct ContentView: View {
   var body: some View {
     NavigationSplitView {
       Sidebar()
-        .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
+        .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: 300, max: 420)
     } detail: {
       VStack(spacing: 0) {
         if let problem = model.unreachable {
