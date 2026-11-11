@@ -24,7 +24,7 @@ struct GroupDescriptionView: View {
         // A vertical field would otherwise insert a line break on Return. A description is one line, so every Return saves.
         .onKeyPress(.return) {
           // An input method that is composing text takes Return to confirm the composition.
-          if ReturnKey.editorIsComposing { return .ignored }
+          if TextInput.isComposing { return .ignored }
           save()
           return .handled
         }

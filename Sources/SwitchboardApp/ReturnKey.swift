@@ -18,25 +18,17 @@ struct ReturnKey: ViewModifier {
       // The handler also takes key repeats. A held Shift+Return would otherwise reach onSubmit and send.
       .onKeyPress(.return, phases: [.down, .repeat]) { press in
         // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
-        switch Self.action(modifiers: press.modifiers, composing: Self.editorIsComposing) {
+        switch Self.action(modifiers: press.modifiers, composing: TextInput.isComposing) {
         case .send:
           send()
         case .newline:
-          Self.editor?.insertNewlineIgnoringFieldEditor(nil)
+          TextInput.editor?.insertNewlineIgnoringFieldEditor(nil)
         case nil:
           return .ignored
         }
         return .handled
       }
   }
-
-  /// The field editor of the window that the key went to. An app that is not active has no key window.
-  private static var editor: NSTextView? {
-    (NSApp.currentEvent?.window ?? NSApp.keyWindow)?.firstResponder as? NSTextView
-  }
-
-  /// Whether an input method holds marked text in the focused field.
-  static var editorIsComposing: Bool { editor?.hasMarkedText() == true }
 
   enum Action { case send, newline }
 

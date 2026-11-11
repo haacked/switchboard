@@ -469,10 +469,13 @@ check_shell() {
   [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
   # A focused terminal keeps every key but the menu's, so these must reach their own menu items. Without a
   # key window, SwiftUI does not refresh the menu's enabled states. Move Focus to Terminal then keeps its
-  # state from launch, disabled, and the result names the item that owns ⌘T instead.
+  # state from launch, disabled, and the result names the item that owns ⌘T instead. ⌘K goes last, because
+  # it opens the search sheet.
   nav=$(app nav-keys)
   keys="} ran Next Session; { ran Previous Session; l ran Move Focus to List; t ran"
-  [ "$nav" = "$keys Move Focus to Terminal" ] || [ "$nav" = "$keys none (Move Focus to Terminal is disabled)" ] ||
+  search="; k ran Search Sessions…"
+  [ "$nav" = "$keys Move Focus to Terminal$search" ] ||
+    [ "$nav" = "$keys none (Move Focus to Terminal is disabled)$search" ] ||
     fail "the navigation shortcuts did not run their menu items: $nav"
   end_app
   save_shots

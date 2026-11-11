@@ -72,7 +72,7 @@ enum KeySelfTest {
       "x", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
     let composing = Composing()
     let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { _ in
-      MainActor.assumeIsolated { composing.seen = ReturnKey.editorIsComposing }
+      MainActor.assumeIsolated { composing.seen = TextInput.isComposing }
       return nil
     }
     press(editor, modifiers: [])

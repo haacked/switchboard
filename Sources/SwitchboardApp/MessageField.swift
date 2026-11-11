@@ -252,7 +252,7 @@ struct MessageField: View {
           draft.disarmEscape()
           return .ignored
         }
-        return !ReturnKey.editorIsComposing && draft.escape(at: Date()) ? .handled : .ignored
+        return !TextInput.isComposing && draft.escape(at: Date()) ? .handled : .ignored
       }
       .overlay {
         if dropTargeted {
