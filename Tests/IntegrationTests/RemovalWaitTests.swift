@@ -26,14 +26,6 @@ extension Instance {
   }
 
   fileprivate func cleanupCount(_ id: String) throws -> Int { try events(id).filter { $0.kind == "cleanup" }.count }
-
-  /// Types the text into the session's shell pane and presses Enter.
-  fileprivate func typeInShell(_ t: Terminals, _ text: String) throws {
-    for keys in [["-l", text], ["Enter"]] {
-      let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.shell):"] + keys)
-      guard r.status == 0 else { throw TestError(description: "tmux send-keys: \(r.stderr)") }
-    }
-  }
 }
 
 private func paneExists(_ t: Terminals, _ target: String) throws -> Bool {
@@ -474,5 +466,62 @@ private final class Strays {
     #expect(try sbd.client.sessions().map(\.id).contains(s.id))
     #expect(try sbd.isOpenTodo(s.id, todo.id))
     #expect(try sbd.resolvedTodos().isEmpty)
+  }
+
+  // MARK: removal from inside the session
+
+  /// Runs the script that `writeScript` wrote from the pane. In the Claude pane, sb is a grandchild of the stub
+  /// through the tool call's `sh`. In the shell pane, sb is a grandchild of the pane's shell through `sh`.
+  private func runFrom(_ pane: Pane, _ sbd: Instance, _ id: String, _ t: Terminals, _ name: String) throws
+    -> CommandResult
+  {
+    switch pane {
+    case .claude: try sbd.sb("send", id, "run \(name)")
+    case .shell: try sbd.typeInShell(t, "sh \"$SB_HOME/\(name).sh\"")
+    }
+    return try sbd.scriptResult(name)
+  }
+
+  /// A stop would close the shell pane and send SIGTERM to claude, then wait for the sb that sent the request,
+  /// which waits for sbd. The refusal must come before anything stops. claude can run `sb cleanup` as a background
+  /// command after its turn ends, so the turn check does not cover it. The shell pane runs it with no turn
+  /// running, which leaves the guard as the only refusal.
+  @Test(arguments: [
+    (Pane.claude, "sb rm --worktree"), (.shell, "sb rm --worktree"), (.shell, "sb cleanup"),
+  ])
+  func refusesAStopFromInsideTheSession(_ pane: Pane, _ command: String) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    let terminals = try sbd.client.terminals(s.id)
+    let claude = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    let args = command == "sb cleanup" ? ["cleanup", s.id, "--json"] : ["rm", s.id, "--worktree", "--json"]
+    try sbd.writeSbScript("self-stop", args)
+
+    let r = try runFrom(pane, sbd, s.id, terminals, "self-stop")
+
+    #expect(r.status != 0, Comment(rawValue: r.stdout))
+    #expect(r.stderr.contains(insideRefusal(command, s.id)), Comment(rawValue: r.stderr))
+    #expect(try paneExists(terminals, terminals.claude))
+    #expect(try paneExists(terminals, terminals.shell))
+    #expect(Processes.exists(claude), "sbd ended claude")
+    #expect(try sbd.get(s.id).claudePid == claude)
+    try expectKept(sbd, repo, s)
+  }
+
+  /// `rm` without `--worktree` stops no pane before it forgets the session, so the guard does not apply. nohup
+  /// keeps sb running when forgetting the session closes the shell pane.
+  @Test func rmWithoutWorktreeWorksFromTheShellPane() throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github)
+    let terminals = try sbd.client.terminals(s.id)
+    try sbd.writeSbScript("self-rm", ["rm", s.id, "--json"])
+
+    try sbd.typeInShell(terminals, "nohup sh \"$SB_HOME/self-rm.sh\" >/dev/null 2>&1 &")
+
+    let r = try sbd.scriptResult("self-rm")
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try !sbd.client.sessions().map(\.id).contains(s.id))
+    #expect(FileManager.default.fileExists(atPath: s.cwd))
+    #expect(try sbd.localBranchExists(repo, mergedBranch))
   }
 }

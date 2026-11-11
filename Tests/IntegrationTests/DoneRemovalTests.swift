@@ -632,6 +632,83 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(try sbd.isOpenTodo(held.id, todo.id))
     #expect(try sbd.resolvedTodos().isEmpty)
   }
+
+  // MARK: Removal from inside a session
+
+  /// sb runs below a's shell pane, so removing a's worktree would stop sb's own parents. The preview skips a with
+  /// rm's refusal, and the confirmed run removes b and leaves a and its claude running.
+  @Test func rmDoneSkipsTheCallersOwnSession() throws {
+    let s = try Setup()
+    let a = try s.finished(.breaker, state: "MERGED")
+    let b = try s.finished(.groups, state: "MERGED")
+    // The shell pane starts before a is Done, so it can't change a's state.
+    let terminals = try s.sbd.client.terminals(a.id)
+    let claude = try #require(try s.sbd.waitFor(a.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    try s.pollUntilDone(a, b)
+    // The preview reads the installed snapshot. A tick installs one that holds the shell pane's pid.
+    try s.sbd.advanceClock(1)
+    try s.sbd.writeSbScript("preview", ["rm", "--done", "--worktree", "--json"])
+    try s.sbd.writeSbScript("confirmed", ["rm", "--done", "--worktree", "--yes", "--json"])
+    let refusal = insideRefusal("sb rm --worktree", a.id)
+
+    try s.sbd.typeInShell(terminals, "sh \"$SB_HOME/preview.sh\"")
+    let preview = try s.sbd.scriptResult("preview")
+    try s.sbd.typeInShell(terminals, "sh \"$SB_HOME/confirmed.sh\"")
+    let confirmed = try s.sbd.scriptResult("confirmed")
+
+    #expect(preview.status == 0, Comment(rawValue: preview.stderr))
+    let plan = try parse(preview)
+    #expect(planned(plan) == [b.id])
+    let planReason = try #require(skip(plan["skip"], a.id)?["reason"]?.string, Comment(rawValue: plan.text))
+    #expect(planReason.contains(refusal), Comment(rawValue: planReason))
+    let result = try parse(confirmed)
+    #expect(removed(result) == [b.id])
+    let reason = try #require(skip(result["skipped"], a.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains(refusal), Comment(rawValue: reason))
+    #expect(try s.sbd.sessionIds() == [a.id])
+    #expect(FileManager.default.fileExists(atPath: a.cwd))
+    #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
+    #expect(Processes.exists(claude), "sbd ended a's claude")
+    #expect(!FileManager.default.fileExists(atPath: b.cwd))
+    #expect(try !s.sbd.branchExists(s.repo, RecordedPR.groups.branch))
+  }
+
+  /// sb sends only the preview's `remove` as targets, so a perl client in a's shell pane sends the confirmed op
+  /// with a as a target. The confirmed op must skip a with the refusal that the preview gives.
+  @Test func confirmedRmDoneFromInsideASessionSkipsThatSessionAsATarget() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let a = try sbd.worktreeSession(repo, branch: "haacked/inside")
+    let terminals = try sbd.client.terminals(a.id)
+    let claude = try #require(try sbd.waitFor(a.id, "claude's pid") { $0.claudePid != nil }.claudePid)
+    try sbd.markDone(a.id)
+    // A tick installs a snapshot that holds the shell pane's pid, so `doneTarget` skips a before `rm` runs.
+    try sbd.advanceClock(1)
+    let request: JSON = [
+      "op": "rm-done", "args": ["worktree": true, "confirmed": true, "targets": .array([.string(a.id)])],
+    ]
+    let client = [
+      #"$s = IO::Socket::UNIX->new(Peer => $ARGV[0]) or die "connect: $!\n";"#,
+      #"print $s "$ARGV[1]\n";"#,
+      "print scalar <$s>",
+    ].joined(separator: " ")
+    try sbd.writeScript(
+      "confirmed",
+      "perl -MIO::Socket::UNIX -e \(shellQuote(client)) \"$SB_HOME/sbd.sock\" \(shellQuote(request.text))")
+
+    try sbd.typeInShell(terminals, "sh \"$SB_HOME/confirmed.sh\"")
+    let r = try sbd.scriptResult("confirmed")
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    let response = try #require(JSON.parse(r.stdout), Comment(rawValue: "stdout: \(r.stdout)\nstderr: \(r.stderr)"))
+    let result = try #require(response["result"], Comment(rawValue: response.text))
+    #expect(removed(result).isEmpty)
+    let reason = try #require(skip(result["skipped"], a.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains(insideRefusal("sb rm --worktree", a.id)), Comment(rawValue: reason))
+    #expect(try sbd.intact(a))
+    #expect(try sbd.branchExists(repo, "haacked/inside"))
+    #expect(Processes.exists(claude), "sbd ended a's claude")
+  }
 }
 
 // MARK: - Worktrees that Supacode locked

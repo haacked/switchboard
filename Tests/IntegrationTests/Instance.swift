@@ -521,3 +521,48 @@ extension Instance {
     return pid
   }
 }
+
+/// Commands in a session's panes.
+extension Instance {
+  /// Types the text into the session's shell pane and presses Enter.
+  func typeInShell(_ t: Terminals, _ text: String) throws {
+    for keys in [["-l", text], ["Enter"]] {
+      let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.shell):"] + keys)
+      guard r.status == 0 else { throw TestError(description: "tmux send-keys: \(r.stderr)") }
+    }
+  }
+
+  /// Writes `$SB_HOME/<name>.sh`, which runs sb with the arguments.
+  func writeSbScript(_ name: String, _ args: [String]) throws {
+    try writeScript(name, ([shellQuote("\(Instance.bin)/sb")] + args.map(shellQuote)).joined(separator: " "))
+  }
+
+  /// Writes `$SB_HOME/<name>.sh`, which runs the command and writes its stdout, stderr, and exit status to
+  /// `<name>.out`, `<name>.err`, and `<name>.status` in SB_HOME. A pane runs it with the stub's `run <name>` or with
+  /// `sh` in the shell, so that the command descends from that pane.
+  func writeScript(_ name: String, _ command: String) throws {
+    let script =
+      "\(command) >\"$SB_HOME/\(name).out\" 2>\"$SB_HOME/\(name).err\"\necho $? >\"$SB_HOME/\(name).status\"\n"
+    try script.write(toFile: "\(home.path)/\(name).sh", atomically: true, encoding: .utf8)
+  }
+
+  /// Waits until the script that `writeScript` wrote has recorded its command's exit status, and returns the
+  /// command's result.
+  func scriptResult(_ name: String, timeout: Double = 30) throws -> CommandResult {
+    let file = { (suffix: String) in "\(self.home.path)/\(name).\(suffix)" }
+    let status = try waitFor(
+      "\(name).sh to record its exit status", timeout: timeout,
+      fetch: { () -> Int32? in
+        guard let text = try? String(contentsOfFile: file("status"), encoding: .utf8) else { return nil }
+        return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
+      }, until: { _ in true })
+    return CommandResult(
+      status: status, stdout: (try? String(contentsOfFile: file("out"), encoding: .utf8)) ?? "",
+      stderr: (try? String(contentsOfFile: file("err"), encoding: .utf8)) ?? "")
+  }
+}
+
+/// The refusal that sbd sends when the process that sent `command` descends from one of the session's panes.
+func insideRefusal(_ command: String, _ id: String) -> String {
+  "`\(command)` runs inside \(id), so it would stop itself. Run it from a terminal outside the session."
+}

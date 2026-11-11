@@ -135,6 +135,29 @@ public enum Processes {
     return kill(pid_t(pid), 0) == 0 || errno == EPERM
   }
 
+  /// The pid and each of its parents up to launchd, read live from the kernel.
+  /// It is nil when the pid is not valid or names no process. The walk stops
+  /// at a parent that the kernel can't read, which happens when that parent
+  /// exits between two reads.
+  public static func ancestors(of pid: Int) -> Set<Int>? {
+    guard isValidPid(pid), let first = parent(of: pid) else { return nil }
+    var found: Set<Int> = [pid]
+    var next = first
+    while next > 0, found.insert(next).inserted, let up = parent(of: next) {
+      next = up
+    }
+    return found
+  }
+
+  /// The parent pid from sysctl, which reads processes of every user, as `ps` does.
+  private static func parent(of pid: Int) -> Int? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+    guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    return Int(info.kp_eproc.e_ppid)
+  }
+
   /// Waits up to `seconds` for every pid to exit. Returns the pids that still exist.
   public static func waitForExit(_ pids: Set<Int>, seconds: TimeInterval) -> Set<Int> {
     let deadline = Date().addingTimeInterval(seconds)

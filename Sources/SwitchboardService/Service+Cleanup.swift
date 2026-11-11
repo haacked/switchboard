@@ -11,8 +11,11 @@ extension Service {
   /// branch.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
-  /// keeps the branch and throws.
-  func cleanup(_ args: JSON) throws -> JSON {
+  /// keeps the branch and throws. A caller inside the session is refused
+  /// before anything stops, as `beginPaneStop` describes.
+  func cleanup(_ args: JSON, caller: Caller) throws -> JSON {
+    let command = "sb cleanup"
+    let ancestry = try caller.ancestry(command: command)
     let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
       let id = try lookup(args)
       guard !starting.contains(id) else { throw APIError("\(id) is starting") }
@@ -30,9 +33,9 @@ extension Service {
       }
       try requireNoTurn(e)
       install(fresh)
-      return beginPaneStop(session.id)
+      return try beginPaneStop(session.id, caller: ancestry, command: command)
     }
-    try finishPaneStop(session, stop, command: "sb cleanup")
+    try finishPaneStop(session, stop, command: command)
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
     let machine = self.machine(for: session)
     try removeWorktree(repo, session.cwd, on: machine)
