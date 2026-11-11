@@ -1,27 +1,137 @@
 #!/usr/bin/env bash
-# Measures sbd with many sessions, for the done criteria in the plan's
-# Phases. It builds sb and sbd in release mode and starts a private sbd under
-# a temporary SB_HOME, with the stub claude from the integration tests, which
-# stays idle at its prompt. For each count, it adds sessions until that many
-# exist. It then reports the resident memory of sbd, of the terminals (the tmux
-# server and the panes' shells), of the stub claudes, and of all of them
-# together, and the median wall time of `sb ls` and `sb ls --json`. sbd's
-# live cap (config.json's liveCap, 10 by default) limits how many stubs run.
-# The stub stands in for claude, so its memory says nothing about claude's.
-# The panes run your login shell, as the installed sbd's do.
-#   bin/measure              measures 25 and then 50 sessions
+# Measures sbd's memory, for the done criteria in the plan's Phases.
+#
+#   bin/measure              measures 25 and then 50 stub sessions
 #   bin/measure 10 25 100    measures each count in turn
+#   bin/measure --cap 10 25  holds the live stubs to 10
+#   bin/measure --running    measures the sbd that runs now, with real claude
+#   bin/measure --running --json
+#
+# Without --running, it builds sb and sbd in release mode and starts a private
+# sbd under a temporary SB_HOME, with the stub claude from the integration
+# tests, which stays idle at its prompt. For each count, it adds sessions until
+# that many exist. It then reports the memory of sbd, of the terminals (the
+# tmux server and the panes' shells), and of the stub claudes, and the median
+# wall time of `sb ls` and `sb ls --json`. The live cap is unlimited unless
+# --cap sets it. The stub stands in for claude, so its memory says nothing
+# about claude's. The panes run your login shell, as the installed sbd's do.
+#
+# With --running, it starts and stops nothing. It reads the sbd at SB_HOME
+# (~/.sb by default) through the sb on your PATH, or the one in SB_BIN_DIR, and
+# reports the memory of sbd, of the terminals and the shared MCP servers, of
+# the live claude processes, of the processes that claude started (tools and
+# hooks), and of the app.
+#
+# Memory is physical footprint, which is what Activity Monitor shows: the pages
+# that the process alone holds, compressed ones included. Resident size counts
+# the pages of a shared file in every process that maps it, and each claude
+# maps about 230 MB of its binary, so a sum of resident sizes counts that
+# binary once per process.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
-counts=("$@")
+running=false
+json=false
+cap=
+counts=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --running) running=true ;;
+    --json) json=true ;;
+    --cap)
+      cap=${2:-}
+      shift
+      ;;
+    *) counts+=("$1") ;;
+  esac
+  shift
+done
 if [ ${#counts[@]} -eq 0 ]; then counts=(25 50); fi
 runs=5
+# The pids of the apps that show the sbd at $SB_HOME. An app shows the home in
+# its SB_HOME, or ~/.sb when its environment has none.
+app_pids() {
+  local pid home
+  ps -axo pid=,comm= | awk '/\/Contents\/MacOS\/Switchboard$/ { print $1 }' | while read -r pid; do
+    home=$(ps -Eww -o command= -p "$pid" 2>/dev/null | tr ' ' '\n' | sed -n 's/^SB_HOME=//p' | tail -1)
+    if [ "${home:-$HOME/.sb}" = "$SB_HOME" ]; then echo "$pid"; fi
+  done
+}
+
+# Prints "group processes footprintKB residentKB" for each group of the sbd at
+# $SB_HOME, and then for their total. $1 is the output of `sb live --json`.
+# sbd is the service. claude is each live claude process that $1 names, and
+# tools is every process under one. terminals is the tmux server and the
+# clients on the home's socket, and every other process under them. app is the
+# app and its other children. This script's own processes count nowhere.
+memory() {
+  local sbd live apps terminals pids socket=$SB_HOME/tmux.sock
+  sbd=$("$sb" ping --json | jq .pid)
+  live=$(jq -r '.live[].pid | select(.)' <<<"$1")
+  apps=$(app_pids)
+  # tmux fails when the home has no server yet.
+  terminals=$(tmux -S "$socket" display-message -p '#{pid}' 2>/dev/null && tmux -S "$socket" list-clients -F '#{client_pid}') || true
+  # An awk variable can't hold a newline, so each list goes in on one line.
+  pids=$(ps -axo pid=,ppid=,rss= | awk -v sbd="$sbd" -v live="${live//$'\n'/ }" -v apps="${apps//$'\n'/ }" \
+    -v terminals="${terminals//$'\n'/ }" -v self="$$" '
+    function put(list, name,    n, i, p) { n = split(list, p, " "); for (i = 1; i <= n; i++) group[p[i]] = name }
+    { pid[NR] = $1; ppid[NR] = $2; rss[$1] = $3 }
+    END {
+      put(terminals, "terminals"); put(apps, "app"); put(sbd, "sbd"); put(live, "claude"); put(self, "self")
+      do {
+        added = 0
+        for (i = 1; i <= NR; i++) if (!(pid[i] in group) && (ppid[i] in group)) {
+          parent = group[ppid[i]]; group[pid[i]] = parent == "claude" ? "tools" : parent; added = 1
+        }
+      } while (added)
+      for (p in group) if (group[p] != "self") print p, group[p], rss[p] + 0
+    }')
+  [ -n "$pids" ] || { echo "bin/measure found no process of the sbd at $SB_HOME" >&2; return 1; }
+  # footprint prints "name [pid]: 64-bit    Footprint: 3064288 B (16384 bytes
+  # per page)" for each process, and fails for one that has exited.
+  {
+    awk '{ print $1 }' <<<"$pids" | xargs footprint -f bytes 2>/dev/null |
+      awk 'match($0, /\[[0-9]+\]: .*Footprint: [0-9]+ B/) {
+        n = split(substr($0, RSTART + 1, RLENGTH - 1), f, " "); printf "%d %d\n", f[1], f[n - 1] / 1024 }' || true
+    echo "$pids"
+  } | awk '
+    NF == 2 { footprint[$1] = $2; next }
+    { count[$2]++; resident[$2] += $3; physical[$2] += footprint[$1]; count["total"]++; resident["total"] += $3; physical["total"] += footprint[$1] }
+    END { n = split("sbd terminals claude tools app total", g, " "); for (i = 1; i <= n; i++) print g[i], count[g[i]] + 0, physical[g[i]] + 0, resident[g[i]] + 0 }'
+}
+
+mb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1024 }'; }
+load() { uptime | sed 's/.*load averages*: //'; }
+command -v footprint >/dev/null || { echo "bin/measure needs macOS's footprint command" >&2; exit 1; }
+
+if $running; then
+  export SB_HOME=${SB_HOME:-$HOME/.sb}
+  sb=${SB_BIN_DIR:+$SB_BIN_DIR/}sb
+  sessions=$("$sb" ls --json | jq length)
+  status=$("$sb" live --json)
+  rows=$(memory "$status")
+  if $json; then
+    jq -n --arg home "$SB_HOME" --argjson sessions "$sessions" --argjson status "$status" --arg rows "$rows" '
+      ($rows | split("\n") | map(split(" ") | {key: .[0], value: {processes: (.[1] | tonumber), footprintKB: (.[2] | tonumber), residentKB: (.[3] | tonumber)}}) | from_entries) as $groups
+      | {home: $home, sessions: $sessions, live: ([$status.live[] | select(.pid)] | length), cap: $status.cap,
+         groups: ($groups | del(.total)), total: $groups.total}'
+    exit
+  fi
+  echo "$sessions sessions, $(jq -r '"\([.live[] | select(.pid)] | length) live claude processes, cap \(.cap // "unlimited")"' <<<"$status")"
+  row='%-10s %-10s %-13s %-12s\n'
+  printf "$row" group processes "footprint MB" "resident MB"
+  while read -r name processes footprint resident; do
+    printf "$row" "$name" "$processes" "$(mb "$footprint")" "$(mb "$resident")"
+  done <<<"$rows"
+  echo "The resident sizes count claude's binary once per claude process. Load: $(load)"
+  exit
+fi
 
 echo "Building sb and sbd in release mode…"
 swift build -c release --product sb >/dev/null
 swift build -c release --product sbd >/dev/null
 bin=$(swift build -c release --show-bin-path)
+sb=$bin/sb
 
 # Fixtures/reap ends a home's processes only for a path of this shape. A
 # Unix socket path can't exceed 103 bytes, so the home stays short.
@@ -31,26 +141,22 @@ cleanup() { "$root/Tests/IntegrationTests/Fixtures/reap" || true; }
 trap cleanup EXIT
 mkdir -p "$home/work" "$home/account"
 echo $$ >"$home/owner.pid"
-cat >"$home/config.json" <<EOF
-{
-  "claude": "$root/Tests/IntegrationTests/Fixtures/claude-stub",
-  "worktreeRoot": "$home/worktrees",
-  "claudeConfigDirs": [],
-  "github": {"pollSeconds": 0},
-  "depot": {"enabled": false},
-  "usage": {"pollSeconds": 0, "keychain": false},
-  "trunk": {"path": "$home/trunk"}
-}
-EOF
+jq -n --arg root "$root" --arg home "$home" --arg cap "$cap" '{
+  claude: "\($root)/Tests/IntegrationTests/Fixtures/claude-stub",
+  worktreeRoot: "\($home)/worktrees",
+  claudeConfigDirs: [],
+  github: {pollSeconds: 0},
+  depot: {enabled: false},
+  usage: {pollSeconds: 0, keychain: false},
+  trunk: {path: "\($home)/trunk"}
+} + (if $cap == "" then {} else {liveCap: ($cap | tonumber)} end)' >"$home/config.json"
 # The stub writes its transcripts into this account, never into yours.
 CLAUDE_CONFIG_DIR="$home/account" "$bin/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
-sbd=$!
-sb() { "$bin/sb" "$@"; }
 for _ in $(seq 100); do
-  if sb ping >/dev/null 2>&1; then break; fi
+  if "$sb" ping >/dev/null 2>&1; then break; fi
   sleep 0.1
 done
-sb ping >/dev/null
+"$sb" ping >/dev/null
 
 # The median wall time of a command over $runs runs, in milliseconds. One perl
 # times every run, so starting the timer is not part of any run.
@@ -62,45 +168,30 @@ median_ms() {
     open(STDOUT, ">&", $out); @t = sort { $a <=> $b } @t; printf "%d\n", $t[int($runs / 2)]' "$runs" "$@"
 }
 
-# Prints the resident memory in KB of sbd, of the terminals, and of the stub
-# claudes, which are sbd, the tmux server, and every process under them. tmux
-# runs as a daemon, so it is not sbd's child, but its socket is in the home.
-# A stub's arguments, and its subshells', hold --settings.
-memory_kb() {
-  ps -axo pid=,ppid=,rss=,command= | awk -v sbd="$sbd" -v home="$home/" '
-    { pid[NR] = $1; ppid[NR] = $2; rss[NR] = $3; cmd = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ /, "", cmd); command[NR] = cmd
-      if ($1 == sbd || (cmd ~ /^[^ ]*tmux / && index(cmd, home))) keep[$1] = 1 }
-    END {
-      do { added = 0; for (i = 1; i <= NR; i++) if (!(pid[i] in keep) && (ppid[i] in keep)) { keep[pid[i]] = 1; added = 1 } } while (added)
-      for (i = 1; i <= NR; i++) if (pid[i] in keep) {
-        if (pid[i] == sbd) s += rss[i]; else if (command[i] ~ / --settings /) c += rss[i]; else t += rss[i]
-      }
-      print s + 0, t + 0, c + 0 }'
-}
-
-mb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1024 }'; }
-
 started=0
-row='%-9s %-8s %-10s %-10s %-10s %-10s %-8s %-10s\n'
-printf "$row" sessions live "sbd MB" "terms MB" "stubs MB" "total MB" "ls ms" "json ms"
+row='%-9s %-6s %-8s %-10s %-10s %-10s %-12s %-7s %-8s\n'
+printf "$row" sessions live "sbd MB" "terms MB" "stubs MB" "total MB" "resident MB" "ls ms" "json ms"
 for count in "${counts[@]}"; do
   while [ "$started" -lt "$count" ]; do
-    sb new "$home/work" --name "m$started" >/dev/null
+    "$sb" new "$home/work" --name "m$started" >/dev/null
     started=$((started + 1))
   done
   # The live cap stops idle sessions to start the rest, so at most the cap's
   # count of stubs run once every start has left the queue.
   for _ in $(seq 300); do
-    status=$(sb live --json)
+    status=$("$sb" live --json)
     live=$(jq '[.live[] | select(.pid)] | length' <<<"$status")
-    want=$(jq --argjson count "$count" '[$count, .cap] | min' <<<"$status")
+    want=$(jq --argjson count "$count" '[$count, .cap // $count] | min' <<<"$status")
     if [ "$(jq '.queued | length' <<<"$status")" -eq 0 ] && [ "$live" -ge "$want" ]; then break; fi
     sleep 0.1
   done
   # Shells read their startup files after the pane starts, so memory settles later.
   sleep 2
-  read -r sbd_kb term_kb stub_kb <<<"$(memory_kb)"
-  printf "$row" "$count" "$live" "$(mb "$sbd_kb")" "$(mb "$term_kb")" \
-    "$(mb "$stub_kb")" "$(mb $((sbd_kb + term_kb + stub_kb)))" "$(median_ms "$bin/sb" ls)" "$(median_ms "$bin/sb" ls --json)"
+  # A stub is a shell script, so its subshells count as its tools.
+  read -r sbd_kb term_kb stub_kb resident_kb <<<"$(memory "$status" | awk '
+    { footprint[$1] = $3; resident[$1] = $4 }
+    END { print footprint["sbd"], footprint["terminals"], footprint["claude"] + footprint["tools"], resident["total"] }')"
+  printf "$row" "$count" "$live" "$(mb "$sbd_kb")" "$(mb "$term_kb")" "$(mb "$stub_kb")" \
+    "$(mb $((sbd_kb + term_kb + stub_kb)))" "$(mb "$resident_kb")" "$(median_ms "$sb" ls)" "$(median_ms "$sb" ls --json)"
 done
-echo "Memory is resident set size. Times are the median of $runs runs. Load: $(uptime | sed 's/.*load averages*: //')"
+echo "The MB columns are physical footprint, and resident MB is the sum of resident sizes. Times are the median of $runs runs. Load: $(load)"

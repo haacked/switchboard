@@ -439,6 +439,7 @@ bin/test --claude   # also the tests that run the installed claude with Haiku, i
 bin/test-gui        # runs the app in a hidden window, checks the bytes its terminal sends, that sessions survive an app relaunch, message drafts, and drops on the message field; needs a logged-in Mac session
 bin/test-gui drops  # runs only the named checks: terminal, relaunch, drafts, drops
 bin/measure         # starts 25 and then 50 stub sessions on a private sbd and prints memory and `sb ls` times
+bin/measure --running  # prints the memory of the sbd that runs now, with its real claude processes; starts and stops nothing
 bin/fmt             # formats Sources, Tests and Package.swift with swift format; --check lists files that differ and exits 1
 bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
@@ -452,7 +453,13 @@ The app draws its terminals with SwiftTerm.
 
 A launch that sets `SB_SNAPSHOT`, `SB_TERMINAL_TEST`, `SB_DRAFT_TEST`, `SB_SHELL_TEST`, `SB_DROP_TEST`, or `SB_QUIT_FILE` runs the app in the background, and every launch in `bin/test-gui` sets one of them. The app then has no Dock icon and never becomes the active app. Its windows and sheets are fully transparent, and clicks pass through them to the windows below. A test run therefore never takes your keyboard focus or covers your windows. AppKit still lays out and draws the windows at their usual size, so the checks and the PNGs match those of a visible run, except that `pane-preedit.png` draws the marked text on row 2 instead of the cursor row. The test app's menu bar item still appears while it runs. To watch a run, for example to debug a failing check, set `SB_TEST_VISIBLE=1`: `SB_TEST_VISIBLE=1 bin/test-gui` shows the window and brings the app to the front, as a normal launch does.
 
-`bin/measure 10 25 100` measures each count in turn. It builds `sb` and `sbd` in release mode, runs the panes in your login shell, and reports the resident memory of `sbd`, of the terminals, and of the stub claudes, with the median of 5 runs of `sb ls` and `sb ls --json`. The stub stands in for claude, so the numbers leave out claude's own memory. `MeasureTests` in `bin/test` checks that `sb ls` answers in under 1 s with 25 sessions, and skips the timing when the load average is above the core count.
+`bin/measure 10 25 100` measures each count in turn. It builds `sb` and `sbd` in release mode, runs the panes in your login shell, and reports the memory of `sbd`, of the terminals, and of the stub claudes, with the median of 5 runs of `sb ls` and `sb ls --json`. `--cap N` sets the live cap, which is unlimited otherwise. The stub stands in for claude, so the numbers leave out claude's own memory.
+
+`bin/measure --running` measures the `sbd` at `SB_HOME` (`~/.sb` by default) as it runs, through the `sb` on your `PATH` or the one in `SB_BIN_DIR`. It prints the session count, the live claude processes, and the memory of five groups: `sbd`, the terminals and shared MCP servers, the live claude processes, the processes that claude started (tools and hooks), and the app. `--json` prints the same as JSON.
+
+Both modes report physical footprint, which is the number Activity Monitor shows, and the sum of resident sizes beside it. Each claude process maps about 230 MB of its binary, and those pages are in memory once however many processes map them. A sum of resident sizes counts them once per process, so it overstates the total by about 230 MB for each live claude after the first.
+
+`MeasureTests` in `bin/test` checks that `sb ls` answers in under 1 s with 25 sessions, and skips the timing when the load average is above the core count. `MeasureRunningTests` checks `bin/measure --running --json` on a private `sbd`.
 
 The stub plays the hook payloads that `bin/test --claude` records in `Tests/IntegrationTests/Fixtures/claude/`. After a Claude Code update, run `bin/test --claude` and read `git diff` on that folder to see what the new version sends.
 
