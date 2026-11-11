@@ -444,7 +444,7 @@ struct BoardView: View {
   private func lanes(_ open: [SessionSummary], labelling board: [SessionSummary]) -> [Lane] {
     switch laneKind {
     case .repo:
-      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true)).map {
+      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true, fullName: true)).map {
         Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
       }
     case .group:

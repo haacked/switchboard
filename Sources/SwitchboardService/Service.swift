@@ -93,6 +93,12 @@ public final class Service {
   var checkouts: [String: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<String> = []
+  /// The owner/name that the origin remote of each checkout names on GitHub,
+  /// or nil when it names none, with the time of the lookup. sbd reads a
+  /// checkout without one again after `checkoutRetryMs`.
+  var repositories: [String: (repository: String?, readMs: Int64)] = [:]
+  /// The checkouts whose origin a lookup off the queue is reading.
+  var repositoryLookups: Set<String> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   let triageJobs: OperationQueue = {
@@ -628,6 +634,28 @@ public final class Service {
         queue.async { [self] in
           checkouts[cwd] = (main, nowMs())
           checkoutLookups.remove(cwd)
+        }
+      }
+    }
+    return nil
+  }
+
+  /// The owner/name that the origin remote of `checkout` names on GitHub.
+  /// This returns nil until a lookup off the queue has read it.
+  func repository(_ checkout: String, of s: Session) -> String? {
+    if let known = repositories[checkout],
+      known.repository != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
+    {
+      return known.repository
+    }
+    if repositoryLookups.insert(checkout).inserted {
+      let machine = machine(for: s)
+      DispatchQueue.global().async { [self] in
+        let url = try? gitOutput(checkout, ["config", "--get", "remote.origin.url"], on: machine)
+        let repository = url.flatMap(GitHub.repo(remoteURL:))
+        queue.async { [self] in
+          repositories[checkout] = (repository, nowMs())
+          repositoryLookups.remove(checkout)
         }
       }
     }
@@ -1719,7 +1747,10 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
-    if s.kind == .work { out.checkout = checkout(s) }
+    if s.kind == .work {
+      out.checkout = checkout(s)
+      out.repository = out.checkout.flatMap { repository($0, of: s) }
+    }
     out.parent = s.parent
     out.manager = s.manager
     out.kind = s.kind
