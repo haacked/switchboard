@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import SwiftUI
 
 /// A scripted check of the shell pane, run by `bin/test-gui`. SB_SHELL_TEST=<folder> makes the app run each
 /// command that a script writes to <folder>/cmd, one at a time. When the command is done, the app appends
@@ -10,8 +11,9 @@ import SwiftTerm
 /// `menu <menu> <item>` runs a menu item. `show-terminal` shows the terminals of a chat or an Inbox item,
 /// as their Terminal toggle does. `select <session>` selects a session. `type <text>` types the text and
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
-/// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `snapshot <path>` draws
-/// the window as SB_SNAPSHOT does.
+/// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
+/// `NavShortcuts` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
+/// `snapshot <path>` draws the window as SB_SNAPSHOT does.
 @MainActor
 enum ShellSelfTest {
   static func start(_ model: BoardModel) {
@@ -80,12 +82,41 @@ enum ShellSelfTest {
         $0.keyEquivalent == "w" && $0.keyEquivalentModifierMask == .command
       }
       return "handled \(handled) by \(owner?.title ?? "no item")"
+    case "nav-keys":
+      guard let window else { return "no window" }
+      return NavShortcuts.all.map { menuItem(running: $0, in: window) }.joined(separator: "; ")
     case "snapshot":
       Snapshot.write(to: rest)
       return "wrote"
     default:
       return "unknown command"
     }
+  }
+
+  /// Reports the menu item that `shortcut` runs. When none runs, it reports the item that owns the key and
+  /// whether that item is enabled. The event has ⇧ when the character is a shifted one, such as "}", because
+  /// a keyboard sends ⇧⌘] that way.
+  private static func menuItem(running shortcut: KeyboardShortcut, in window: NSWindow) -> String {
+    let char = String(shortcut.key.character)
+    let (code, shift) = TerminalSelfTest.keystroke(for: char)
+    let flags: NSEvent.ModifierFlags = shift ? [.command, .shift] : .command
+    guard
+      let event = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, characters: char, charactersIgnoringModifiers: char,
+        isARepeat: false, keyCode: code)
+    else { return "\(char) no event" }
+    var ran: String?
+    let observer = NotificationCenter.default.addObserver(
+      forName: NSMenu.didSendActionNotification, object: nil, queue: nil
+    ) {
+      ran = ($0.userInfo?["MenuItem"] as? NSMenuItem)?.title
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
+    if let ran { return "\(char) ran \(ran)" }
+    let owner = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == char }
+    return "\(char) ran none" + (owner.map { " (\($0.title) is \($0.isEnabled ? "enabled" : "disabled"))" } ?? "")
   }
 
   /// The point `offset` pt into the button on the pane's label. The label is a bar about 18 pt tall above the

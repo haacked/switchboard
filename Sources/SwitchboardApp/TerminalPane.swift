@@ -8,6 +8,9 @@ struct TerminalPane: NSViewRepresentable {
   let command: [String]
   /// Runs on the main thread after the tmux client exits.
   var onExit: (() -> Void)? = nil
+  /// The terminal takes keyboard focus once it is in a window, then calls `onFocus`.
+  var takesFocus = false
+  var onFocus: (() -> Void)? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator(onExit: onExit) }
 
@@ -23,10 +26,14 @@ struct TerminalPane: NSViewRepresentable {
       if let value = env[key] { childEnv.append("\(key)=\(value)") }
     }
     view.startProcess(executable: command[0], args: Array(command.dropFirst()), environment: childEnv)
+    updateNSView(padded, context: context)
     return padded
   }
 
-  func updateNSView(_ view: PaddedTerminalView, context: Context) {}
+  func updateNSView(_ view: PaddedTerminalView, context: Context) {
+    view.onFocus = onFocus
+    view.focusWhenInWindow = takesFocus
+  }
 
   static func dismantleNSView(_ view: PaddedTerminalView, coordinator: Coordinator) {
     view.terminal.terminate()
@@ -70,6 +77,24 @@ final class PaddedTerminalView: NSView {
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+  var onFocus: (() -> Void)?
+  /// While true, the terminal takes keyboard focus as soon as this view is in a window.
+  var focusWhenInWindow = false {
+    didSet { focusIfAsked() }
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    focusIfAsked()
+  }
+
+  private func focusIfAsked() {
+    guard focusWhenInWindow, let window, window.makeFirstResponder(terminal) else { return }
+    focusWhenInWindow = false
+    // SwiftUI forbids a state change while it updates the view, and this can run in that update.
+    DispatchQueue.main.async { [onFocus] in onFocus?() }
+  }
 
   /// The padded view that holds `terminal`, or nil when the terminal is not in one.
   static func containing(_ terminal: TerminalView) -> PaddedTerminalView? {

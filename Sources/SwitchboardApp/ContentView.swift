@@ -173,6 +173,7 @@ struct ContentView: View {
 
 struct Sidebar: View {
   @EnvironmentObject var model: BoardModel
+  @FocusState private var focused: Bool
 
   var body: some View {
     let repos = model.repoLabels
@@ -217,6 +218,15 @@ struct Sidebar: View {
         }
       }
     }
+    .focused($focused)
+    .onKeyPress(keys: [.return]) { press in
+      guard NavKey.action(press.key, modifiers: press.modifiers) == .open, model.selection != nil else {
+        return .ignored
+      }
+      model.focusTerminal()
+      return .handled
+    }
+    .takesListFocus(.sidebar, $focused, model: model)
     .confirmationDialog(
       accountSwitchTitle, isPresented: isSwitchingAccount, presenting: model.switchingAccount
     ) { change in
@@ -416,6 +426,7 @@ enum BoardLanes: String, CaseIterable {
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
   @AppStorage(BoardLanes.storageKey) private var laneKind = BoardLanes.repo
+  @FocusState private var focused: Bool
   static let labelWidth: CGFloat = 140
   static let columnWidth: CGFloat = 200
 
@@ -459,6 +470,16 @@ struct BoardView: View {
     // A repo lane has no group, like the Ungrouped lane, so a drop there would ungroup the card.
     let drops = laneKind == .group
     let shown = lanes(open, labelling: board)
+    // The arrow keys' grid and the drawn cards both come from this one value, so they always agree.
+    let cells = shown.map { lane in MergeBoard.columns.map { MergeBoard.cards(lane.sessions, in: $0) } }
+    let grid = BoardGrid(lanes: cells.map { $0.map { $0.map(\.id) } })
+    cards(shown: shown, cells: cells, done: done, drops: drops)
+      .onChange(of: grid, initial: true) { model.boardGrid = grid }
+  }
+
+  @ViewBuilder
+  private func cards(shown: [Lane], cells: [[[SessionSummary]]], done: [SessionSummary], drops: Bool) -> some View {
+    let ring = focused ? model.currentBoardCard : nil
     if shown.isEmpty && done.isEmpty && !(model.namingGroup && laneKind == .group) {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
@@ -468,59 +489,83 @@ struct BoardView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
-      ScrollView([.horizontal, .vertical]) {
-        LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
-          Section {
-            ForEach(shown) { lane in
-              Divider()
-              HStack(alignment: .top, spacing: 12) {
-                LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
-                  .frame(width: Self.labelWidth, alignment: .leading)
-                ForEach(MergeBoard.columns, id: \.self) { stage in
-                  VStack(spacing: 8) {
-                    ForEach(MergeBoard.cards(lane.sessions, in: stage)) { s in
-                      if drops {
-                        BoardCard(session: s).draggable(s.id)
-                          .contextMenu { moveMenu(s.id, from: lane.group?.id) }
-                      } else {
-                        BoardCard(session: s)
+      ScrollViewReader { proxy in
+        ScrollView([.horizontal, .vertical]) {
+          LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
+            Section {
+              ForEach(Array(zip(shown, cells)), id: \.0.id) { lane, laneCells in
+                Divider()
+                HStack(alignment: .top, spacing: 12) {
+                  LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
+                    .frame(width: Self.labelWidth, alignment: .leading)
+                  ForEach(Array(zip(MergeBoard.columns, laneCells)), id: \.0) { _, stack in
+                    VStack(spacing: 8) {
+                      ForEach(stack) { s in
+                        Group {
+                          if drops {
+                            BoardCard(session: s, keyboardFocused: s.id == ring).draggable(s.id)
+                              .contextMenu { moveMenu(s.id, from: lane.group?.id) }
+                          } else {
+                            BoardCard(session: s, keyboardFocused: s.id == ring)
+                          }
+                        }
+                        .id(s.id)
                       }
                     }
+                    .frame(width: Self.columnWidth, alignment: .top)
                   }
-                  .frame(width: Self.columnWidth, alignment: .top)
+                }
+                .modifier(LaneDrop(enabled: drops, group: lane.group?.id))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(lane.title)
+                .accessibilityIdentifier("board-row-\(lane.id)")
+              }
+              DoneFooter(sessions: done)
+            } header: {
+              HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                  Picker("Lanes", selection: $laneKind) {
+                    ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
+                  }
+                  .pickerStyle(.segmented)
+                  .labelsHidden()
+                  .help("Show a lane per repo or per group")
+                  // The header stays pinned, so the name field shows without a scroll.
+                  if laneKind == .group { NewGroupRow() }
+                }
+                .frame(width: Self.labelWidth)
+                ForEach(MergeBoard.columns, id: \.self) { stage in
+                  Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
+                    .frame(width: Self.columnWidth, alignment: .leading)
                 }
               }
-              .modifier(LaneDrop(enabled: drops, group: lane.group?.id))
-              .accessibilityElement(children: .contain)
-              .accessibilityLabel(lane.title)
-              .accessibilityIdentifier("board-row-\(lane.id)")
+              .padding(.vertical, 4)
+              .background(.background)
             }
-            DoneFooter(sessions: done)
-          } header: {
-            HStack(alignment: .center, spacing: 12) {
-              VStack(alignment: .leading, spacing: 4) {
-                Picker("Lanes", selection: $laneKind) {
-                  ForEach(BoardLanes.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Show a lane per repo or per group")
-                // The header stays pinned, so the name field shows without a scroll.
-                if laneKind == .group { NewGroupRow() }
-              }
-              .frame(width: Self.labelWidth)
-              ForEach(MergeBoard.columns, id: \.self) { stage in
-                Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
-                  .frame(width: Self.columnWidth, alignment: .leading)
-              }
-            }
-            .padding(.vertical, 4)
-            .background(.background)
           }
+          .padding()
         }
-        .padding()
+        .defaultScrollAnchor(.topLeading)
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return], phases: [.down, .repeat]) { press in
+          switch NavKey.action(press.key, modifiers: press.modifiers) {
+          case .move(let direction): model.moveBoardFocus(direction)
+          case .open:
+            guard let id = model.currentBoardCard else { return .ignored }
+            model.openFromBoard(id)
+          case nil: return .ignored
+          }
+          return .handled
+        }
+        .takesListFocus(.board, $focused, model: model)
+        // ⇧⌘G shows the Board with the new group's name field, which closes when it loses focus while empty.
+        .onAppear { if !model.namingGroup { focused = true } }
+        .onChange(of: model.boardFocus) {
+          if let id = model.boardFocus { withAnimation { proxy.scrollTo(id) } }
+        }
       }
-      .defaultScrollAnchor(.topLeading)
       .groupDeleteDialog(model)
       .safeAreaInset(edge: .top, spacing: 0) {
         if !model.suggestions.isEmpty {
@@ -772,6 +817,8 @@ struct GroupSuggestionList: View {
 struct BoardCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  /// The Board has keyboard focus on this card, so it draws a ring.
+  var keyboardFocused = false
 
   /// A card without a stage shows its state's time instead. A blocked card
   /// names its state, because the blocker replaces the reason and the tint
@@ -825,9 +872,13 @@ struct BoardCard: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(s.state.color.opacity(0.08)))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(s.state.color.opacity(0.3)))
+        .overlay {
+          if keyboardFocused { RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor, lineWidth: 2) }
+        }
       }
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
+      .accessibilityAddTraits(keyboardFocused ? .isSelected : [])
       HStack(spacing: 4) {
         NotesButton(session: s)
         if s.canMerge { MergeButton(session: s) }
