@@ -59,9 +59,9 @@ struct CardView: View {
             .help(PermissionMode.autoModeNote)
         }
         Button("Deny", action: deny)
-        TextField("Message for Claude (optional)", text: $draft.message)
+        TextField("Message for Claude (optional)", text: $draft.message, axis: .vertical)
           .textFieldStyle(.roundedBorder)
-          .onSubmit { if !draft.message.isEmpty { deny() } }
+          .sendsOnReturn { if !denyMessage.isEmpty { deny() } }
       }
       Text("Deny without a message stops the turn. With a message, Claude reads it and goes on.")
         .font(.caption)
@@ -86,7 +86,9 @@ struct CardView: View {
     .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
   }
 
-  private func deny() { model.answer(card, behavior: "deny", message: draft.message) }
+  private var denyMessage: String { ReplyOption.trimmed(draft.message) }
+
+  private func deny() { model.answer(card, behavior: "deny", message: denyMessage) }
 
   /// Claude wrote the text. It can quote PR comments or logs, so it shows
   /// verbatim and is never read as Markdown.
@@ -170,11 +172,12 @@ struct CardView: View {
           HStack {
             TextField(
               "Or type an answer",
-              text: Binding(get: { draft.typed[i] ?? "" }, set: { draft.typed[i] = $0 })
+              text: Binding(get: { draft.typed[i] ?? "" }, set: { draft.typed[i] = $0 }),
+              axis: .vertical
             )
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: 360)
-            .onSubmit { if oneClick { submit(answers) } }
+            .sendsOnReturn { if oneClick { submit(answers) } }
             // A click on a box answers this question, so only typed text needs a button.
             if oneClick { Button("Send") { submit(answers) }.disabled(answers[0].isEmpty) }
           }
@@ -222,7 +225,7 @@ struct CardView: View {
   /// One answer per question: its typed text, or its picks in the options' order.
   private var answers: [String] {
     card.questions.enumerated().map { i, q in
-      let typed = (draft.typed[i] ?? "").trimmingCharacters(in: .whitespaces)
+      let typed = ReplyOption.trimmed(draft.typed[i] ?? "")
       if !typed.isEmpty { return typed }
       let picked = draft.picks[i] ?? []
       return q.options.map(\.label).filter(picked.contains).joined(separator: ", ")

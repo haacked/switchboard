@@ -19,14 +19,21 @@
 # Last it drops sets of files on the message field of a session, the Inbox, and
 # a group chat through the app's DropSelfTest, and checks the chips, the
 # errors, and the images that sbd received from the field's send.
-# Arguments name the checks to run (terminal, relaunch, drafts, shell, drops). With
+# The keys check types into every field whose text goes to Claude through the
+# app's KeySelfTest: the message field of a session, the Inbox, a group chat,
+# and the Manager, a reply option, a decision's own answer, a permission
+# card's message, a question card's answer, and the new-session prompt. In each
+# it checks that Return sees an input method's marked text, then presses
+# Shift+Return and Return, and checks that Claude got one message with the new
+# line in it.
+# Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys). With
 # none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
-# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, SB_SHELL_TEST, or
-# SB_DROP_TEST, so the app runs hidden and never takes focus. SB_TEST_VISIBLE=1
+# Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, SB_SHELL_TEST,
+# SB_DROP_TEST, or SB_KEY_TEST, so the app runs hidden and never takes focus. SB_TEST_VISIBLE=1
 # shows the app as a normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,9 +42,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops) ;;
+  terminal | relaunch | drafts | shell | drops | keys) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, and drops." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, and keys." >&2
     exit 2
     ;;
   esac
@@ -545,3 +552,97 @@ check_drops() {
 }
 
 if wants drops; then check_drops; fi
+
+# Each field logs its text after each key, and sbd or the held hook shows what Claude got.
+check_keys() {
+  check=keys
+  local shots="$home/shots/keys" inbox chat manager reply decide deny ask view got
+  local typed='"onex\ntwo"'
+  mkdir "$shots"
+  echo "Checking Return and Shift+Return in the fields that send to Claude…"
+  new_session keys-chat-member
+  sb group add keys "$session" >/dev/null
+  chat=$(sb chat keys --json | jq -r '.id')
+  [ -n "$chat" ] && [ "$chat" != null ] || fail "sb chat returned no session id"
+  manager=$(sb manager --json | jq -r '.id')
+  [ -n "$manager" ] && [ "$manager" != null ] || fail "sb manager returned no session id"
+  new_session keys-reply
+  reply=$session
+  SB_SESSION_ID="$reply" sb summary set >/dev/null <<'CARD' || fail "sb summary set refused the reply card"
+{"summary": "It needs a call.", "options": [{"label": "Go on", "action": "send"},
+ {"label": "Something else", "action": "reply", "placeholder": "What else?"}]}
+CARD
+  new_session keys-decide
+  decide=$session
+  SB_SESSION_ID="$decide" sb summary set >/dev/null <<'CARD' || fail "sb summary set refused the decisions"
+{"title": "Two decisions", "summary": "It needs two decisions.", "decisions": [
+ {"number": 1, "header": "Name", "question": "What name?", "options": [{"label": "to-do"}, {"label": "note"}]},
+ {"number": 2, "header": "Ship", "question": "Ship it?", "options": [{"label": "Yes"}, {"label": "No"}]}]}
+CARD
+  # A hook that sbd holds until its card gets an answer, as claude's PermissionRequest hook does.
+  held_hook() { # <session> <tool> <input> <out>
+    jq -nc --arg t "$home/$1.jsonl" --arg tool "$2" --argjson input "$3" \
+      '{hook_event_name: "PermissionRequest", session_id: "stub", transcript_path: $t,
+        permission_mode: "default", tool_name: $tool, tool_input: $input, cwd: "/tmp"}' |
+      SB_SESSION_ID="$1" "$bin_dir/sb" hook >"$4" 2>&1 &
+  }
+  new_session keys-deny
+  deny=$session
+  held_hook "$deny" Bash '{"command": "make clean"}' "$shots/deny.out"
+  new_session keys-ask
+  ask=$session
+  held_hook "$ask" AskUserQuestion \
+    '{"questions": [{"question": "Which fruit?", "header": "Fruit", "multiSelect": false,
+      "options": [{"label": "apple", "description": "red"}, {"label": "pear", "description": "green"}]}]}' \
+    "$shots/ask.out"
+  has_card() { sb get --json "$1" | jq -e '.cards | length > 0' >/dev/null; }
+  wait_for 20 has_card "$deny" || fail "the permission hook made no card"
+  wait_for 20 has_card "$ask" || fail "the question hook made no card"
+  new_session keys-inbox
+  inbox=$session
+  new_session keys
+  key_logged() { grep -qxF "keytest: $2" "$shots/$1.log" || fail "the $1 field did not log: $2"; }
+
+  for view in session inbox chat manager reply decision deny answer prompt; do
+    local target=() field="Message Claude…"
+    case $view in
+    session) target=(SB_SELECT="$session") ;;
+    inbox) target=(SB_INBOX="$inbox") ;;
+    chat) target=(SB_SELECT="$chat") ;;
+    manager) target=(SB_SELECT="$manager") ;;
+    reply) target=(SB_INBOX="$reply") field="What else?" ;;
+    decision) target=(SB_INBOX="$decide") field="Type your own answer" ;;
+    deny) target=(SB_SELECT="$deny") field="Message for Claude (optional)" ;;
+    answer) target=(SB_SELECT="$ask") field="Or type an answer" ;;
+    prompt) target=(SB_SHEET=new) field=prompt ;;
+    esac
+    env "${target[@]}" SB_KEY_TEST="$field" "$bin_dir/Switchboard" >"$shots/$view.log" 2>&1 &
+    app_pid=$!
+    wait_for 120 app_gone || fail "the app did not finish the keys in the $view"
+    end_app
+    if [ "$view" = prompt ]; then
+      key_logged "$view" 'shift-return: "one\ntwo"'
+      key_logged "$view" "sheet open: true"
+    else
+      key_logged "$view" "composing at return: true"
+      key_logged "$view" "shift-return: $typed"
+    fi
+    key_logged "$view" done
+  done
+
+  sent_texts() { sb events --session "$1" --json | jq -c -s '[.[] | select(.kind == "sent") | .data.text]'; }
+  for view in session inbox chat manager reply; do
+    got=$(sent_texts "${!view}")
+    [ "$got" = "[$typed]" ] || fail "the $view sent $got, not [$typed]"
+  done
+  got=$(sb decide --json "$decide" | jq -c '[.answers[] | select(.number == 1) | .. | strings]')
+  [[ "$got" == *"$typed"* ]] || fail "the decision's answer is $got"
+  got=$(jq -c '[.. | .message? // empty]' "$shots/deny.out")
+  [ "$got" = "[$typed]" ] || fail "the permission hook got the message $got: $(cat "$shots/deny.out")"
+  got=$(jq -c '[.. | .answers? // empty | .["Which fruit?"]]' "$shots/ask.out")
+  [ "$got" = "[$typed]" ] || fail "the question hook got the answer $got: $(cat "$shots/ask.out")"
+  save_shots
+  echo "ok: keys (session, Inbox, chat, Manager, reply, decision, deny, answer, prompt)"
+}
+
+if wants keys; then check_keys; fi
