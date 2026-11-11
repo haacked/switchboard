@@ -37,8 +37,8 @@ public enum TriageDrafts {
   /// lines of its own. The copy must start and end on line breaks of the
   /// reply. This drops a copy that the model cut in the middle of a line.
   public static func verbatim(_ drafts: [TriageDraft], in reply: String) -> (kept: [TriageDraft], dropped: [String]) {
-    let plain = "\n" + normalize(reply, unquote: false) + "\n"
-    let unquoted = "\n" + normalize(reply, unquote: true) + "\n"
+    let plain = lines(normalize(reply, unquote: false))
+    let unquoted = lines(normalize(reply, unquote: true))
     var kept: [TriageDraft] = []
     var dropped: [String] = []
     for (i, draft) in drafts.enumerated() {
@@ -46,9 +46,9 @@ public enum TriageDrafts {
         let asIs = trimBlankLines(normalize(draft.text, unquote: false))
         let bare = trimBlankLines(normalize(draft.text, unquote: true))
         let text: String
-        if !quoted(asIs), plain.contains("\n" + asIs + "\n") {
+        if !quoted(asIs), plain.contains(lines(asIs)) {
           text = asIs
-        } else if unquoted.contains("\n" + bare + "\n") {
+        } else if unquoted.contains(lines(bare)) {
           text = bare
         } else {
           throw APIError("its text is not in the reply")
@@ -60,6 +60,9 @@ public enum TriageDrafts {
     }
     return (kept, dropped)
   }
+
+  /// The text between line breaks, so that `contains` matches only whole lines.
+  private static func lines(_ text: String) -> String { "\n" + text + "\n" }
 
   private static func checked(_ draft: TriageDraft) throws -> TriageDraft {
     guard !draft.text.isEmpty else { throw APIError("it has no text") }
