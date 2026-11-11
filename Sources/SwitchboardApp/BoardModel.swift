@@ -353,6 +353,9 @@ final class BoardModel: ObservableObject {
   /// The account that new sessions without a parent use.
   var activeAccount: AccountInfo? { accounts.first(where: \.active) }
 
+  /// The active account's folder. It is the default folder until the accounts load.
+  var activeAccountFolder: String { activeAccount?.folder ?? ClaudeAccount.defaultFolder }
+
   /// Closes the account menu and makes new sessions run under the account.
   /// When sessions on other accounts could move to it, this asks first.
   func useAccount(_ folder: String) {

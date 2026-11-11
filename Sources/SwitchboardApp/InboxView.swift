@@ -137,6 +137,7 @@ struct TriageRow: View {
     .background(RoundedRectangle(cornerRadius: 8).fill(current ? Color.accentColor.opacity(0.14) : Color.clear))
     .padding(.horizontal, 6)
     .contentShape(Rectangle())
+    .help(session.tooltip(now: nowMs(), activeAccount: model.activeAccountFolder))
     .onTapGesture { model.inboxFocus = session.id }
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(current ? .isSelected : [])
