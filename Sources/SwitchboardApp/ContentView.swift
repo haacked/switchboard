@@ -800,8 +800,9 @@ struct GroupSuggestionButton: View {
       .popover(isPresented: $showing, arrowEdge: .bottom) {
         GroupSuggestionList().frame(width: 420)
       }
-      // This view stays when the last suggestion goes, so without the reset
-      // the popover would open by itself when the next suggestion arrives.
+      // GroupSuggestionButton keeps `showing` after the last suggestion
+      // removes this button. Without the reset, the popover would open by
+      // itself when the next suggestion arrives.
       .onDisappear { showing = false }
     }
   }
