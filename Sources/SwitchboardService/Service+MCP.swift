@@ -119,7 +119,9 @@ extension Service {
     if let request {
       // A follow-up that waits to start and a docket row refuse every request that starts claude.
       let id: String? = queue.sync {
-        guard mcpStarting(now: nowMs()), let id = try? lookup(request.args), entries[id]!.session.runsClaude
+        // A session on a host gets no shared server, and its pane is not on this Mac.
+        guard mcpStarting(now: nowMs()), let id = try? lookup(request.args), entries[id]!.session.runsClaude,
+          entries[id]!.session.host == nil
         else { return nil }
         return id
       }

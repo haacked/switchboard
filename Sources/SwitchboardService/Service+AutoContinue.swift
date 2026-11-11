@@ -66,7 +66,7 @@ extension Service {
       .map { ($0.session.id, Attention.evaluate($0.session, $0.facts, now: now)) }
   }
 
-  private func autoContinueBlocker(_ id: String, _ verdict: Verdict, live: Int, now: Int64) -> String? {
+  func autoContinueBlocker(_ id: String, _ verdict: Verdict, live: Int, now: Int64) -> String? {
     let e = entries[id]!
     var input = AutoContinueInput(session: e.session, facts: e.facts, verdict: verdict, now: now)
     input.settings = config.autoContinue
@@ -75,12 +75,20 @@ extension Service {
     case .running: input.process = .running
     case .starting: input.process = .starting
     case .stopped: input.process = .stopped
+    case .unknown: return "\(e.session.host ?? "its host") is not connected"
     }
     input.busy = e.messageWaiting(now: now)
     input.onScreen = attached(id)
     input.lastOnScreen = e.lastOnScreen
     input.live = live
     input.account = claudeAccount(of: id)
+    if let host = e.session.host {
+      // A session on a host uses the quota of the account that the host names.
+      guard let account = config.hosts[host]?.account.flatMap({ try? resolveAccount($0) }) else {
+        return "\(host) names no account in config.json, so its quota can't be checked"
+      }
+      input.account = account
+    }
     input.hasBudget = quota.hasBudget(account: input.account)
     return AutoContinue.blocker(input)
   }

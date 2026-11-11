@@ -43,9 +43,9 @@ extension Service {
     let terminals = try site(for: session).terminals()
     switch paneRow(id, .shell) {
     case nil:
-      try terminals.create(name, cwd: session.cwd, env: paneEnv(id))
+      try terminals.create(name, cwd: session.cwd, env: newPaneEnv(id))
     case let row? where row.dead:
-      try terminals.respawn(name, cwd: session.cwd, env: paneEnv(id), command: nil)
+      try terminals.respawn(name, cwd: session.cwd, env: newPaneEnv(id), command: nil)
     default:
       return
     }

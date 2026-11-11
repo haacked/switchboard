@@ -114,7 +114,12 @@ public enum Processes {
   /// Every process on the machine, grouped by parent pid.
   public static func byParent(on machine: any Machine) -> [Int: [ProcessRow]] {
     guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
-    let rows = r.stdout.split(separator: "\n").compactMap { line -> ProcessRow? in
+    return parse(r.stdout)
+  }
+
+  /// The rows of `ps` output whose columns are pid, ppid, pgid, and the command, grouped by parent pid.
+  public static func parse(_ output: String) -> [Int: [ProcessRow]] {
+    let rows = output.split(separator: "\n").compactMap { line -> ProcessRow? in
       let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
       guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
         return nil

@@ -425,8 +425,11 @@ final class Instance {
   /// Each run of the stub claude, oldest first: its CLAUDE_CONFIG_DIR, its
   /// SSH_AUTH_SOCK, and its arguments. A variable that was unset reads as
   /// empty.
-  func stubCalls() -> [(account: String, agent: String, args: String)] {
-    let text = (try? String(contentsOfFile: "\(home.path)/stub-calls.log", encoding: .utf8)) ?? ""
+  func stubCalls() -> [(account: String, agent: String, args: String)] { stubCalls(in: home.path) }
+
+  /// The runs that the stub logged in the folder, which was its SB_HOME.
+  func stubCalls(in folder: String) -> [(account: String, agent: String, args: String)] {
+    let text = (try? String(contentsOfFile: "\(folder)/stub-calls.log", encoding: .utf8)) ?? ""
     // The text after the last NUL is empty, or a record that the stub is writing.
     return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().map { record in
       let fields = record.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
@@ -574,5 +577,166 @@ extension Instance {
   /// Waits for a logged call that matches, and returns it.
   func waitForMachineCall(_ what: String, _ match: (MachineCall) -> Bool) throws -> MachineCall {
     try waitFor(what, fetch: { try machineCalls().first(where: match) }, until: { _ in true })
+  }
+}
+
+/// The box of a remote host. Fixtures/ssh-stub runs every remote command on this Mac with HOME set to a folder in
+/// the test's home, so that folder stands in for the host's home.
+extension Instance {
+  static let boxDestination = "haacked@mini.local"
+
+  /// The HOME of every command that the stub runs.
+  var boxHome: String { "\(sshStubFolder)/home" }
+
+  /// The folder that Switchboard keeps on the host, which is the SB_HOME of a remote pane.
+  var boxSB: String { "\(boxHome)/.sb" }
+
+  /// The same file as `machineLog`, under the name that the remote tests use.
+  var macMachineLog: String { machineLog }
+
+  /// A config.json `hosts` entry for an ssh host whose claude is the claude stub and whose panes run /bin/sh.
+  static func remoteHost(_ destination: String = boxDestination, _ extra: [String: JSON] = [:]) -> JSON {
+    let host: [String: JSON] = [
+      "kind": "ssh", "destination": .string(destination), "claude": .string(stub), "shell": "/bin/sh",
+    ]
+    return .object(host.merging(extra) { $1 })
+  }
+
+  /// A sbd with the host `mini`, the stub as its ssh, and the Mac's machine log on. `mini` takes the extra host
+  /// keys, and config.json takes the extra settings. With `boxBin`, the box's shell finds the programs of
+  /// `boxBin` before any other, because the stub's remote shell inherits sbd's PATH.
+  static func remote(
+    host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
+    boxBin: Bool = false
+  ) throws -> Instance {
+    let hosts = ["mini": remoteHost(boxDestination, extra)].merging(more) { $1 }
+    let sbd = try Instance(config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 })
+    try sbd.prepareBox()
+    if boxBin {
+      try FileManager.default.createDirectory(atPath: sbd.boxBin, withIntermediateDirectories: true)
+      let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+      sbd.stopSbd()
+      sbd.sbdEnvironment["PATH"] = "\(sbd.boxBin):\(path)"
+      try sbd.startSbd()
+    }
+    return sbd
+  }
+
+  /// Creates the box's home. The claude stub keeps its transcripts in `$SB_HOME/claude` when CLAUDE_CONFIG_DIR is
+  /// unset, which is `<box home>/.sb/claude` for a remote pane. sbd looks for a remote transcript under
+  /// `<box home>/.claude`, so that name links to the stub's folder.
+  func prepareBox() throws {
+    try FileManager.default.createDirectory(atPath: boxHome, withIntermediateDirectories: true)
+    if (try? FileManager.default.destinationOfSymbolicLink(atPath: "\(boxHome)/.claude")) == nil {
+      try FileManager.default.createSymbolicLink(atPath: "\(boxHome)/.claude", withDestinationPath: ".sb/claude")
+    }
+  }
+
+  /// A folder under the box's home, which a test names as `~/<name>` in `sb new --host`.
+  @discardableResult
+  func makeBoxFolder(_ name: String = "sb-box-repo") throws -> String {
+    let path = "\(boxHome)/\(name)"
+    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+    return path
+  }
+
+  /// A git repo that exists only under the box's home, on branch main with one empty commit.
+  @discardableResult
+  func makeBoxRepo(_ name: String = "sb-box-repo") throws -> String { try Repos.create("\(boxHome)/\(name)") }
+
+  /// Runs `sb new <folder> --host <host> --json` and returns what it printed as JSON. sb gets the folder as typed.
+  func newOnHost(_ folder: String = "~/sb-box-repo", host: String = "mini", _ more: String...) throws -> JSON {
+    try #require(JSON.parse(try sb(["new", folder, "--host", host, "--json"] + more)))
+  }
+
+  /// The id of the session in a summary that `newOnHost` returned.
+  func id(of summary: JSON) throws -> String { try #require(summary["id"]?.string) }
+
+  /// The session's summary as JSON, which holds the keys that `SessionSummary` may not decode yet.
+  func summaryJSON(_ id: String) throws -> JSON { try #require(JSON.parse(try sb("get", id, "--json"))) }
+
+  /// Runs tmux against the box's tmux server, whatever its exit status.
+  func boxTmux(_ args: String...) throws -> CommandResult {
+    let tmux = try #require(findExecutable("tmux"))
+    return try runCommand(tmux, ["-S", "\(boxSB)/tmux.sock"] + args)
+  }
+
+  /// The names of the tmux sessions on the box's tmux server, or none when no server runs there.
+  func boxTmuxSessions() throws -> [String] {
+    let r = try boxTmux("list-sessions", "-F", "#{session_name}")
+    return r.status == 0 ? r.stdout.split(separator: "\n").map(String.init).sorted() : []
+  }
+
+  /// Each run of the stub claude on the box, oldest first. A remote pane's SB_HOME is the box's `.sb`.
+  func boxStubCalls() -> [(account: String, agent: String, args: String)] { stubCalls(in: boxSB) }
+
+  /// The arguments of each run of the stub claude in a pane on the box, without its `agents` runs.
+  func boxStubArgs() -> [String] { boxStubCalls().map(\.args).filter { !$0.hasPrefix("agents") } }
+
+  /// The session's transcript files under the box's home.
+  func boxTranscripts(_ claudeSessionId: String) -> [String] {
+    let files = FileManager.default.enumerator(atPath: boxSB)?.compactMap { $0 as? String } ?? []
+    return files.filter { $0.hasSuffix("/\(claudeSessionId).jsonl") }.map { "\(boxSB)/\($0)" }
+  }
+
+  /// The lines of the Mac's machine log that hold any of the texts, at any depth and inside any word.
+  func macCalls(holding texts: [String]) throws -> [MachineCall] {
+    try machineCalls().filter { call in texts.contains { !$0.isEmpty && call.json.text.contains($0) } }
+  }
+
+  /// The texts that name a remote session: its id, its pane names, its folder, and the box's home, each as typed
+  /// and with its symlinks resolved.
+  func namesOfRemoteSession(_ id: String, cwd: String) -> [String] {
+    Array(Set([id, "\(id)-claude", "\(id)-shell", cwd, real(cwd), boxHome, real(boxHome)]))
+  }
+
+  // MARK: The box's programs
+
+  /// A folder of programs that the box's shell finds first. Only a sbd from `remote(boxBin: true)` uses it.
+  var boxBin: String { "\(home.path)/box-bin" }
+
+  /// Puts a `ps` on the box that waits before it lists every process. While the home's `ps-gate` exists, a `ps -A`
+  /// creates `ps-waiting` and waits for `ps-gate` to go. Every other `ps` runs at once.
+  func installBoxPsGate() throws {
+    let script = """
+      #!/bin/sh
+      case " $* " in
+      *" -A "*)
+        if [ -e '\(gate("ps-gate"))' ]; then
+          : >'\(gate("ps-waiting"))'
+          while [ -e '\(gate("ps-gate"))' ]; do sleep 0.05; done
+        fi
+        ;;
+      esac
+      exec /bin/ps "$@"
+
+      """
+    try script.write(toFile: "\(boxBin)/ps", atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/ps")
+  }
+
+  // MARK: The link
+
+  /// Drops the host's link and keeps it down: the stub refuses every new master with the text.
+  func dropLinkAndRefuse(_ refusal: String, host name: String = "mini") throws {
+    try setSSHStub("refuse", refusal + "\n")
+    try dropLink(name)
+    try waitForHost(name, "\(name)'s link to be unreachable with the refusal") {
+      $0.link == .unreachable && $0.error == refusal
+    }
+  }
+
+  /// Lets the stub connect again and waits for the link.
+  func restoreLink(_ name: String = "mini") throws {
+    try clearSSHStub("refuse")
+    try sb("host", "connect", name)
+    try waitForLink(name, .connected)
+  }
+
+  /// Whether the process runs. A process that its parent has not waited for yet does not count.
+  func runs(_ pid: Int) -> Bool {
+    guard kill(pid_t(pid), 0) == 0 else { return false }
+    let state = (try? runCommand("/bin/ps", ["-o", "stat=", "-p", String(pid)]).stdout) ?? ""
+    return !state.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Z")
   }
 }

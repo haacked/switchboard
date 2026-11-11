@@ -60,6 +60,8 @@ extension Service {
     var due: [TurnChecks] = []
     for id in entries.keys.sorted() {
       guard let e = entries[id], e.facts.live, e.facts.turnRunning, case .running = claudeState(id) else { continue }
+      // `claude agents` would run this Mac's claude path on the host.
+      guard e.session.host == nil else { continue }
       let activity = e.facts.lastActivity
       guard entries[id]?.turnProbe.check(activity: activity, now: now) == true else { continue }
       let site = self.site(for: e.session)
@@ -78,7 +80,10 @@ extension Service {
   /// names the transcript, <account>/projects/<folder>/<id>.jsonl, in the
   /// account that claude uses, which a shell profile or a wrapper can pick.
   /// Before a SessionStart, the account is the one that the pane sets.
+  /// A session on a host runs under that host's login, which is no account of this Mac. Its answer names the
+  /// host and is no folder.
   func claudeAccount(of id: String) -> String {
+    if let host = entries[id]?.session.host { return "\(host):~/.claude" }
     if let e = entries[id], let path = e.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(e.session.claudeSessionId).jsonl"
     {

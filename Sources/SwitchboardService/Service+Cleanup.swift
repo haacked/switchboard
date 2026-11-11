@@ -93,6 +93,8 @@ extension Service {
     guard session.repo != nil else {
       throw APIError("sbd didn't make the worktree of \(session.id) at \(session.cwd), so cleanup leaves it alone.")
     }
+    // The checks below read git and the folder with no proof that the host answered.
+    if let host = session.host { throw APIError("sbd can't clean up a worktree on \(host) yet.") }
     guard site(for: session).machine.exists(session.cwd) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
     }
@@ -103,10 +105,12 @@ extension Service {
 
   /// Throws for a follow-up that hasn't started, and for a session whose
   /// folder is gone. tmux starts a pane whose folder is missing in the home
-  /// folder.
+  /// folder. For a session on a host, it throws `HostUnread` unless the host answered the check, so a folder
+  /// is reported gone only when the host said so.
   func requireFolder(_ session: Session) throws {
     try refuseNotStarted(session)
-    guard !site(for: session).machine.exists(session.cwd) else { return }
+    let exists = try site(for: session).confirmed("the folder of \(session.id)") { $0.exists(session.cwd) }
+    guard !exists else { return }
     if entries[session.id]?.facts.cleanedUp != nil {
       throw APIError("\(session.id) was cleaned up, and its worktree is gone.")
     }

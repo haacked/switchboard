@@ -7,14 +7,16 @@ let usage = """
   Sessions:
     ls                            list sessions by state
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--no-auto]
+        [--model M] [--account A] [--no-auto] [--host H]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
                                   --name. It runs under the account A, else its
                                   parent's, else the active account. It starts
                                   in auto mode unless --no-auto or the autoMode
-                                  setting is false
+                                  setting is false. --host runs it on the
+                                  remote host H of config.json, in a folder
+                                  there that is absolute or starts with ~
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
         [--base REF] [--model M] [--account A] [--no-auto]
                                   start a session on a new branch B in a new
@@ -287,7 +289,7 @@ struct Args {
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
-      "--since",
+      "--since", "--host",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
@@ -484,6 +486,10 @@ func hook() -> Never {
 func attach(_ a: Args) -> Never {
   let id = a.session("attach")
   let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
+  // The tmux server of a session on a host is on that host, so this terminal can't attach to its socket.
+  if let host = summary(call("get", ["session": .string(id)])).host {
+    die("\(id) runs on \(host), and the app attaches to a session on a host from stage 5")
+  }
   _ = call("open", ["session": .string(id)])
   if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let terminals: Terminals
@@ -629,13 +635,15 @@ case "ls", "list":
   if a.json { printJSON(result) } else { printSessionList(decode(result, as: [SessionSummary].self)) }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
-  let folder = URL(fileURLWithPath: path.expandingTilde).path
+  // With --host, the folder is on the host, which resolves its ~. sb passes it as typed.
+  let host = a.values["--host"]
+  let folder = host == nil ? URL(fileURLWithPath: path.expandingTilde).path : path
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
     worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
-    account: a.values["--account"], autoMode: a.switches.contains("--no-auto") ? false : nil)
+    account: a.values["--account"], autoMode: a.switches.contains("--no-auto") ? false : nil, host: host)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":

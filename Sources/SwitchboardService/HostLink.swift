@@ -21,6 +21,8 @@ final class HostLink: @unchecked Sendable {
     var failures: Int
     var retryAt: Int64?
     var error: String?
+    /// How many times the link has become `connected`. It names one connection.
+    var connection = 0
   }
 
   /// An attempt fails when this long passes before the handshake and the control socket check.
@@ -56,6 +58,8 @@ final class HostLink: @unchecked Sendable {
   /// writes them.
   private var started: RemoteShell?
   private var controlPath: String?
+  /// The control path of the current connection. The lock guards it.
+  private var connectedControlPath: String?
 
   init(config: HostConfig, destination: String, ssh: String, home: Home, now: @escaping @Sendable () -> Int64) {
     self.config = config
@@ -71,6 +75,15 @@ final class HostLink: @unchecked Sendable {
 
   /// The host's machine. Its commands fail at once while the link is not `connected`.
   var machine: SSHMachine { SSHMachine { [self] in try shell() } }
+
+  /// The host's machine with a local deadline `slack` seconds after each command's timeout. It reports each
+  /// command that got no answer to `check`.
+  func machine(slack: Double, check: AnswerCheck?) -> SSHMachine {
+    SSHMachine(shell: { [self] in try shell() }, deadlineSlack: slack, check: check)
+  }
+
+  /// The ControlPath of the current connection's ssh master, or nil while the link is not `connected`.
+  var resolvedControlPath: String? { lock.withLock { current.state == .connected ? connectedControlPath : nil } }
 
   /// The open shell. It throws unless the link is `connected`.
   func shell() throws -> RemoteShell {
@@ -100,7 +113,7 @@ final class HostLink: @unchecked Sendable {
     let shell: RemoteShell? = lock.withLock {
       guard current.state != .disconnected else { return nil }
       generation += 1
-      current = Status(state: .disconnected, since: now(), failures: 0)
+      current = Status(state: .disconnected, since: now(), failures: 0, connection: current.connection)
       defer { open = nil }
       return open
     }
@@ -218,6 +231,8 @@ final class HostLink: @unchecked Sendable {
       guard attempt == generation, current.state == .connecting else { return }
       current.state = .connected
       current.since = now()
+      current.connection += 1
+      connectedControlPath = controlPath
     }
   }
 

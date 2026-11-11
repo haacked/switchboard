@@ -16,6 +16,7 @@ extension Service {
   /// The session, when its folder exists and its claude is stopped.
   func requireStartable(_ id: String) throws -> Session {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    try requireRead(id)
     try requireFolder(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
     return session

@@ -173,7 +173,7 @@ final class GitHubPoller {
       service.entries.map { id, e in
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
-          configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde,
+          configDir: service.transcriptAccount(e.session),
           site: service.site(for: e.session), branch: e.branch, facts: e.facts)
       }
     }
@@ -228,18 +228,32 @@ final class GitHubPoller {
   // MARK: Local facts
 
   /// What one poll reads once for every session: each config dir's project
-  /// folders, and each repo's git config.
-  private struct Shared {
-    var projects: [String: [String]] = [:]
-    var configs: [String: [String: String]] = [:]
+  /// folders, and each repo's git config. A host can hold the paths that this Mac
+  /// holds, so each read belongs to the path and its site.
+  struct Shared {
+    var projects: [SitePath: [String]] = [:]
+    var configs: [SitePath: [String: String]] = [:]
   }
 
-  /// Reads the session's branch and the new lines of its transcript.
-  private func refreshLocal(_ s: Watched, all: Bool, now: Int64, shared: inout Shared) {
+  /// Reads the session's branch and the new lines of its transcript. For a session on a host, it keeps the
+  /// last values unless the host answered every read.
+  func refreshLocal(_ s: Watched, all: Bool, now: Int64, shared: inout Shared) {
+    guard s.site.hostName != nil else { return refreshLocal(s, at: s.site, all: all, now: now, shared: &shared) }
+    let before = (tracked[s.id], shared)
+    do {
+      try s.site.confirmed("the poll of \(s.id)") { machine in
+        refreshLocal(s, at: CheckedSite(s.site, machine: machine), all: all, now: now, shared: &shared)
+      }
+    } catch {
+      (tracked[s.id], shared) = before
+    }
+  }
+
+  private func refreshLocal(_ s: Watched, at site: any SessionSite, all: Bool, now: Int64, shared: inout Shared) {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
-    refreshBranch(&t.branch, cwd: s.cwd, at: s.site, all: all, now: now, configs: &shared.configs)
+    refreshBranch(&t.branch, cwd: s.cwd, at: site, all: all, now: now, configs: &shared.configs)
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
     // another.
@@ -255,7 +269,7 @@ final class GitHubPoller {
       t.transcript.folder = nil
       t.transcript.path = nil
     }
-    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, on: s.site.machine, projects: &shared.projects)
+    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, at: site, projects: &shared.projects)
     tracked[s.id] = t
   }
 
@@ -264,7 +278,7 @@ final class GitHubPoller {
   /// git is checked again once per idle interval.
   private func refreshBranch(
     _ b: inout Branch, cwd: String, at site: any SessionSite, all: Bool, now: Int64,
-    configs: inout [String: [String: String]]
+    configs: inout [SitePath: [String: String]]
   ) {
     let machine = site.machine
     let read = machine.text
@@ -288,11 +302,12 @@ final class GitHubPoller {
     if let branch { b.name = branch }
     if let branch, let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
-      if configs[common] == nil {
+      let repo = SitePath(common, at: site)
+      if configs[repo] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
-        configs[common] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern], at: site) ?? "")
+        configs[repo] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern], at: site) ?? "")
       }
-      key = GitHub.branchKey(branch: branch, config: configs[common]!) { remote in
+      key = GitHub.branchKey(branch: branch, config: configs[repo]!) { remote in
         // A remote's HEAD is a symbolic ref, which git never packs.
         read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
           GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
@@ -306,6 +321,31 @@ final class GitHubPoller {
     }
   }
 
+  /// The folder's count of uncommitted files, or nil when git can't count them, and whether the folder is
+  /// gone. For a session on a host, it is nil unless the host answered both reads, so the session keeps its
+  /// last `worktree` facts.
+  func worktreeCount(_ s: Watched) -> (dirty: Int?, gone: Bool)? {
+    // Without the optional index lock, the count can't make a git commit
+    // in the session fail.
+    let count = { (site: any SessionSite) in
+      self.git(s.cwd, ["--no-optional-locks", "status", "--porcelain"], at: site)
+        .map { $0.split(separator: "\n").count }
+    }
+    guard s.site.hostName != nil else {
+      let dirty = count(s.site)
+      // A folder that the site can't read is not gone, which stays unsafe.
+      return (dirty, dirty == nil && (try? s.site.folderGone(s.cwd)) == true)
+    }
+    do {
+      let dirty = try s.site.confirmed("the count of \(s.id)'s uncommitted files") { machine in
+        count(CheckedSite(s.site, machine: machine))
+      }
+      return (dirty, try dirty == nil && s.site.folderGone(s.cwd))
+    } catch {
+      return nil
+    }
+  }
+
   private func git(_ cwd: String, _ args: [String], at site: any SessionSite) -> String? {
     try? service.gitOutput(cwd, args, at: site)
   }
@@ -314,15 +354,17 @@ final class GitHubPoller {
   /// the session's project folder, it searches every project folder. Then it
   /// looks only in the cwd's folder and that one.
   private func readTranscript(
-    _ t: inout Transcript, configDir: String, cwd: String, on machine: any Machine,
-    projects: inout [String: [String]]
+    _ t: inout Transcript, configDir: String, cwd: String, at site: any SessionSite,
+    projects: inout [SitePath: [String]]
   ) {
+    let machine = site.machine
     if t.path == nil {
       let known = t.folder
       t.path = SwitchboardCore.Transcript.find(t.claudeSessionId, account: configDir, cwd: cwd, on: machine) { root in
         if let known { return [known] }
-        if projects[root] == nil { projects[root] = machine.list(root) }
-        return projects[root]!
+        let folder = SitePath(root, at: site)
+        if projects[folder] == nil { projects[folder] = machine.list(root) }
+        return projects[folder]!
       }
       if let path = t.path { t.folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent }
     }
@@ -562,15 +604,9 @@ final class GitHubPoller {
     if let name = t.branch.name, name != s.branch { event(s.id, "branch", ["branch": .string(name)]) }
     if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open,
       s.facts.cleanedUp == nil,
-      shouldCount(t, s, pr.id, all, now)
+      shouldCount(t, s, pr.id, all, now), let (dirty, gone) = worktreeCount(s)
     {
-      // Without the optional index lock, the count can't make a git commit
-      // in the session fail.
-      let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"], at: s.site)
-        .map { $0.split(separator: "\n").count }
       t.counted = (now, s.facts.lastActivity, pr.id)
-      // A folder that the site can't read is not gone, which stays unsafe.
-      let gone = dirty == nil && (try? s.site.folderGone(s.cwd)) == true
       // The checks run 8 git commands. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
       let checked: CleanupStatus? =
         dirty != 0 || pr.state != .merged

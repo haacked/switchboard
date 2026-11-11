@@ -6,9 +6,9 @@ import SwitchboardCore
 protocol SessionSite: AnyObject {
   /// nil for this Mac.
   var hostName: String? { get }
-  /// Runs commands and reads files at the site.
+  /// Runs commands and reads files at the site. A remote site's machine gives every `run` a timeout.
   var machine: any Machine { get }
-  /// The site's tmux server.
+  /// The site's tmux server. A remote site throws `HostUnread` until its link is connected and set up.
   func terminals() throws -> TerminalHost
   /// The git program at the site.
   func git() throws -> String
@@ -16,7 +16,9 @@ protocol SessionSite: AnyObject {
   func worktreeRoot() throws -> String
   /// A session's launcher folder at the site.
   func sessionFolder(_ id: String) throws -> String
-  /// Runs `body` with the site's machine. On this Mac it runs `body`.
+  /// Runs `body` with the site's machine. On a remote site it returns `body`'s result only when the link was
+  /// connected and every command that `body` sent got an answer from the host. It throws `HostUnread`
+  /// otherwise. On this Mac it runs `body`.
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T
   /// The panes and the processes, from one read. It throws when tmux can't list the panes.
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot
@@ -31,6 +33,19 @@ protocol SessionSite: AnyObject {
   func folderGone(_ path: String) throws -> Bool
   /// Sends SIGTERM to the session's claude, which runs below the pane's process.
   func stopClaude(_ pid: Int, below pane: Int, program: String) throws
+}
+
+/// A path at one site. A host can hold the same path as this Mac, so what sbd remembers about a path belongs
+/// to the path and its site.
+struct SitePath: Hashable {
+  /// nil for this Mac.
+  var host: String?
+  var path: String
+
+  init(_ path: String, at site: any SessionSite) {
+    self.host = site.hostName
+    self.path = path
+  }
 }
 
 /// A remote host could not be read: its link is not connected, or a command got no answer.
@@ -85,11 +100,7 @@ final class MacSite: SessionSite {
     s.taken = nowMs()
     s.panes = try tmuxServer.checkedPanes()
     s.children = Processes.byParent(on: machine)
-    for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
-      if let pid = Service.findClaude(below: pane.pid, program: claudeProgram, in: s.children) {
-        s.claudePids[String(name.dropLast("-claude".count))] = pid
-      }
-    }
+    s.findClaudes(program: claudeProgram)
     return s
   }
 
@@ -134,5 +145,95 @@ final class MacSite: SessionSite {
     log?.append(
       "stopClaude", ["pid": .number(Double(pid)), "pane": .number(Double(pane)), "program": .string(program)])
     machine.signal(pid, SIGTERM)
+  }
+}
+
+extension Service.Snapshot {
+  /// Sets the claude of each session whose Claude pane is alive, from the panes and the processes.
+  mutating func findClaudes(program: String) {
+    for (name, pane) in panes where name.hasSuffix("-claude") && !pane.dead {
+      if let pid = Service.findClaude(below: pane.pid, program: program, in: children) {
+        claudePids[String(name.dropLast("-claude".count))] = pid
+      }
+    }
+  }
+}
+
+extension RemoteSite {
+  /// The path with every symlink resolved, or nil when the host answered that the path doesn't exist.
+  func realPath(_ path: String) throws -> String? { try resolvedPath(path) }
+}
+
+/// The site of a session whose host config.json no longer lists, or lists without a link. Every member throws
+/// `HostUnread` and its machine runs nothing, so none of the session's work runs on this Mac.
+final class UnlistedSite: SessionSite {
+  /// A machine that answers nothing.
+  private struct NoMachine: Machine {
+    var failure: HostUnread
+
+    func run(
+      _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
+    ) throws -> CommandResult { throw failure }
+    func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { nil }
+    func size(_ path: String) -> UInt64? { nil }
+    func exists(_ path: String) -> Bool { false }
+    func isFolder(_ path: String) -> Bool { false }
+    func modified(_ path: String) -> Date? { nil }
+    func list(_ folder: String) -> [String] { [] }
+    func createFolder(_ path: String) throws { throw failure }
+    func signal(_ pid: Int, _ signal: Int32) {}
+  }
+
+  let hostName: String?
+  let machine: any Machine
+  private let failure: HostUnread
+
+  init(hostName: String, why: String) {
+    self.hostName = hostName
+    failure = HostUnread(hostName: hostName, why: why)
+    machine = NoMachine(failure: failure)
+  }
+
+  func terminals() throws -> TerminalHost { throw failure }
+  func git() throws -> String { throw failure }
+  func worktreeRoot() throws -> String { throw failure }
+  func sessionFolder(_ id: String) throws -> String { throw failure }
+  func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { throw failure }
+  func readSnapshot(claudeProgram: String) throws -> Service.Snapshot { throw failure }
+  func alive(_ pids: Set<Int>) throws -> Set<Int> { throw failure }
+  func folderUsers(_ folder: String) throws -> [FolderUser] { throw failure }
+  func samePath(_ a: String, _ b: String) throws -> Bool { throw failure }
+  func realPath(_ path: String) throws -> String? { throw failure }
+  func folderGone(_ path: String) throws -> Bool { throw failure }
+  func stopClaude(_ pid: Int, below pane: Int, program: String) throws { throw failure }
+}
+
+/// A site whose `machine` is the one that a `confirmed` body got, so code that takes a site reports each
+/// unanswered command to that call. Every other member is the base site's.
+final class CheckedSite: SessionSite {
+  private let base: any SessionSite
+  let machine: any Machine
+
+  init(_ base: any SessionSite, machine: any Machine) {
+    self.base = base
+    self.machine = machine
+  }
+
+  var hostName: String? { base.hostName }
+  func terminals() throws -> TerminalHost { try base.terminals() }
+  func git() throws -> String { try base.git() }
+  func worktreeRoot() throws -> String { try base.worktreeRoot() }
+  func sessionFolder(_ id: String) throws -> String { try base.sessionFolder(id) }
+  func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { try base.confirmed(what, body) }
+  func readSnapshot(claudeProgram: String) throws -> Service.Snapshot {
+    try base.readSnapshot(claudeProgram: claudeProgram)
+  }
+  func alive(_ pids: Set<Int>) throws -> Set<Int> { try base.alive(pids) }
+  func folderUsers(_ folder: String) throws -> [FolderUser] { try base.folderUsers(folder) }
+  func samePath(_ a: String, _ b: String) throws -> Bool { try base.samePath(a, b) }
+  func realPath(_ path: String) throws -> String? { try base.realPath(path) }
+  func folderGone(_ path: String) throws -> Bool { try base.folderGone(path) }
+  func stopClaude(_ pid: Int, below pane: Int, program: String) throws {
+    try base.stopClaude(pid, below: pane, program: program)
   }
 }

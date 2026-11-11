@@ -89,9 +89,9 @@ public final class Service {
   /// a folder in no git repo, with the time of the lookup. A folder stays in
   /// its repo, and sbd keeps a checkout that it found. A folder outside git
   /// can become a repo. sbd reads such a folder again after `checkoutRetryMs`.
-  var checkouts: [String: (path: String?, readMs: Int64)] = [:]
+  var checkouts: [SitePath: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
-  var checkoutLookups: Set<String> = []
+  var checkoutLookups: Set<SitePath> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   let triageJobs: OperationQueue = {
@@ -103,6 +103,14 @@ public final class Service {
   var mcp: [SharedServer] = []
   /// The ssh link of each remote host that has one, by host name.
   let hostLinks: [String: HostLink]
+  /// The site of each remote host that has a link, by host name.
+  let remoteSites: [String: RemoteSite]
+  /// The last answered snapshot of each host. A session reads it only on the connection that answered it.
+  var remoteSnapshots: [String: Snapshot] = [:]
+  /// When sbd last started or killed a pane on each host. An older snapshot can't replace the host's.
+  var remotePaneChanges: [String: Int64] = [:]
+  /// The hosts whose setup or snapshot read runs off the state queue.
+  var siteReads: Set<String> = []
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
@@ -138,6 +146,8 @@ public final class Service {
     var claudePids: [String: Int] = [:]
     var children: [Int: [ProcessRow]] = [:]
     var taken: Int64 = 0
+    /// The connection of the host's link that answered the read. Nil for this Mac.
+    var connection: Int?
   }
 
   /// Where a session's claude is, from the snapshot.
@@ -148,6 +158,9 @@ public final class Service {
     case starting
     /// The Claude pane is dead or missing.
     case stopped
+    /// A session on a remote host whose host has answered no snapshot on the link's current connection.
+    /// It equals no other state, so nothing launches, stops, or records an exit from it.
+    case unknown
   }
 
   public init(home: Home, sbPath: String) throws {
@@ -158,7 +171,10 @@ public final class Service {
     self.sbPath = sbPath
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
-    self.hostLinks = Service.makeHostLinks(config: config, home: home)
+    let links = Service.makeHostLinks(config: config, home: home)
+    self.hostLinks = links
+    let config = self.config
+    self.remoteSites = links.mapValues { RemoteSite(link: $0, config: $0.config, home: home, settings: config) }
   }
 
   public var tickSeconds: Double { config.tickSeconds }
@@ -206,6 +222,7 @@ public final class Service {
       for id in entries.keys {
         if case .running = claudeState(id) { deliverPending(id, after: 0) }
       }
+      superviseSites(now: nowMs())
     }
   }
 
@@ -216,6 +233,8 @@ public final class Service {
     "dependency-resolved",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  /// The requests that wait for the host of the session they name, and read its panes and processes first.
+  static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
 
   /// `hookGone` reports whether the client closed its connection, which a
   /// held PermissionRequest checks while it waits.
@@ -296,6 +315,7 @@ public final class Service {
   /// Takes the steps that `request` needs before it acts, then runs `body`
   /// on the state queue.
   func prepared(_ request: Request, _ body: () throws -> JSON) throws -> JSON {
+    let hostRead = try readHost(for: request)
     if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
       settle(id)
     }
@@ -315,7 +335,30 @@ public final class Service {
     let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
     return try queue.sync {
       if let fresh { install(fresh) }
+      if let hostRead { install(hostRead.snapshot, onHost: hostRead.host) }
       return try body()
+    }
+  }
+
+  /// For a request that acts on a session on a host: waits for the host, then reads its panes and processes.
+  /// It throws the reason when the host is not ready or the read got no answer. A `send` does not fail then,
+  /// because it queues its message: its snapshot is nil, so the session reads `.unknown`. It returns nil for
+  /// any other request. It runs off the state queue.
+  private func readHost(for request: Request) throws -> (host: String, snapshot: Snapshot?)? {
+    guard Service.needsHost.contains(request.op) else { return nil }
+    let found: (host: String, site: any SessionSite)? = queue.sync {
+      guard let id = try? lookup(request.args), let session = entries[id]?.session, let host = session.host else {
+        return nil
+      }
+      return (host, site(for: session))
+    }
+    guard let found else { return nil }
+    do {
+      try awaitSite(found.site)
+      return (found.host, try readSnapshot(onHost: found.host))
+    } catch {
+      guard request.op == "send" else { throw error }
+      return (found.host, nil)
     }
   }
 
@@ -548,7 +591,8 @@ public final class Service {
   func prepareFolder(
     _ args: NewSession, at site: any SessionSite
   ) throws -> (cwd: String, branch: String?, repo: String?) {
-    let path = (args.path as NSString).standardizingPath
+    // `standardizingPath` reads this Mac's folders. A path on a host stays as `newSession` resolved it there.
+    let path = site.hostName == nil ? (args.path as NSString).standardizingPath : args.path
     guard site.machine.isFolder(path) else { throw APIError("no folder \(path)") }
     guard let branch = args.branch, !branch.isEmpty else {
       let current = try? gitOutput(path, ["branch", "--show-current"], at: site)
@@ -610,22 +654,23 @@ public final class Service {
   /// other folder, this returns nil until a lookup off the queue has read it.
   func checkout(_ s: Session) -> String? {
     let site = self.site(for: s)
-    if let repo = s.repo { return (try? site.realPath(repo)) ?? repo }
+    // Resolving a path on a host is a round trip, and this runs on the state queue for every summary.
+    if let repo = s.repo { return site.hostName == nil ? (try? site.realPath(repo)) ?? repo : repo }
     // A follow-up that hasn't started has no folder. `git -C ""` would read sbd's own folder.
     guard !s.cwd.isEmpty else { return nil }
-    if let known = checkouts[s.cwd],
+    let folder = SitePath(s.cwd, at: site)
+    if let known = checkouts[folder],
       known.path != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
     {
       return known.path
     }
-    let cwd = s.cwd
-    if checkoutLookups.insert(cwd).inserted {
+    if checkoutLookups.insert(folder).inserted {
       DispatchQueue.global().async { [self] in
         // The first worktree that git lists is the main checkout.
-        let main = (try? worktreeEntries(cwd, at: site))?.first.flatMap { try? site.realPath($0.path) }
+        let main = (try? worktreeEntries(folder.path, at: site))?.first.flatMap { try? site.realPath($0.path) }
         queue.async { [self] in
-          checkouts[cwd] = (main, nowMs())
-          checkoutLookups.remove(cwd)
+          checkouts[folder] = (main, nowMs())
+          checkoutLookups.remove(folder)
         }
       }
     }
@@ -663,6 +708,7 @@ public final class Service {
 
   /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
   func newSession(_ args: NewSession) throws -> SessionSummary {
+    if let host = args.host { return try newSession(args, onHost: host) }
     var args = args
     if args.worktree == true, (args.branch ?? "").isEmpty {
       let repo = (args.path as NSString).standardizingPath
@@ -683,6 +729,45 @@ public final class Service {
     return try queue.sync { try create(args, folder) }
   }
 
+  /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
+  /// It waits for the host, makes the folder and worktree there off the state queue, and reads the host's
+  /// panes and processes before it creates the session.
+  private func newSession(_ args: NewSession, onHost host: String) throws -> SessionSummary {
+    let site = try remoteSite(host)
+    if args.account?.isEmpty == false {
+      throw APIError("a session on \(host) takes no account: it runs under the Claude login of \(host)")
+    }
+    try queue.sync {
+      let parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+      _ = try groupOfNew(args.group, parent: parent)
+    }
+    try awaitSite(site)
+    var args = args
+    args.path = try site.expand(args.path)
+    guard args.path.hasPrefix("/") else {
+      throw APIError("a folder on \(host) is an absolute path or starts with ~, and \(args.path) is neither")
+    }
+    if args.worktree == true, (args.branch ?? "").isEmpty {
+      let repo = args.path
+      args.branch = NewSession.freeAutoBranch(
+        prefix: config.branchPrefix, name: args.name,
+        exists: { branchOrFolderTaken(repo, $0, at: site) })
+    }
+    let folder: (cwd: String, branch: String?, repo: String?)
+    do {
+      folder = try prepareFolder(args, at: site)
+    } catch {
+      // A check that got no answer reads as a missing folder. The host's own reason replaces that.
+      try site.confirmed("the folder of the new session") { _ in }
+      throw error
+    }
+    let read = try readSnapshot(onHost: host)
+    return try queue.sync {
+      install(read, onHost: host)
+      return try create(args, folder)
+    }
+  }
+
   /// `configure` changes the session before its first launch.
   func create(
     _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?),
@@ -697,14 +782,21 @@ public final class Service {
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
+    session.host = args.host
     configure(&session)
-    // After `configure`, which sets a chat's group.
-    session.claudeConfigDir =
-      try accountForNew(named: args.account, parent: session.parent, for: session) ?? activeAccount
+    if let host = session.host {
+      guard session.kind == .work else { throw APIError("the Manager and a chat run on this Mac, not on \(host)") }
+      // The host's site is ready before the record is saved, so a host that dropped leaves no session behind.
+      _ = try site(for: session).terminals()
+    } else {
+      // After `configure`, which sets a chat's group.
+      session.claudeConfigDir =
+        try accountForNew(named: args.account, parent: session.parent, for: session) ?? activeAccount
+    }
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
-    try site(for: session).terminals().create(paneName(id, .shell), cwd: folder.cwd, env: paneEnv(id))
+    try site(for: session).terminals().create(paneName(id, .shell), cwd: folder.cwd, env: newPaneEnv(id))
     try launch(id, prompt: args.prompt)
     return summary(id)
   }
@@ -718,7 +810,25 @@ public final class Service {
 
   func paneName(_ id: String, _ pane: Pane) -> String { "\(id)-\(pane.rawValue)" }
 
+  /// The home folder on the host of a remote session. It throws `HostUnread` while the host's site is not ready.
+  func boxHome(_ session: Session) throws -> String {
+    // The launcher folder is <home>/.sb/sessions/<id>.
+    var path = try site(for: session).sessionFolder(session.id) as NSString
+    for _ in 0..<3 { path = path.deletingLastPathComponent as NSString }
+    return path as String
+  }
+
+  /// The environment of a pane that sbd is about to start. A pane on a host gets the session's id and the
+  /// box's folder, and nothing of this Mac. It throws `HostUnread` while the host's site is not ready.
+  func newPaneEnv(_ id: String) throws -> [String: String] {
+    guard let session = entries[id]?.session, session.host != nil else { return paneEnv(id) }
+    return ["SB_SESSION_ID": id, "SB_HOME": "\(try boxHome(session))/.sb"]
+  }
+
   func paneEnv(_ id: String) -> [String: String] {
+    if let session = entries[id]?.session, session.host != nil {
+      return (try? newPaneEnv(id)) ?? ["SB_SESSION_ID": id]
+    }
     var env = ["SB_SESSION_ID": id, "SB_HOME": home.path]
     // CLAUDE_CONFIG_DIR picks the Claude account. A session runs under the
     // account it recorded. A session without one, stored by an older sbd,
@@ -734,13 +844,15 @@ public final class Service {
   /// whose shell exited. It leaves a dead Claude pane dead.
   private func terminals(_ id: String) throws -> Terminals {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    try requireRead(id)
     try requireFolder(session)
     let shell = paneName(id, .shell)
     if paneRow(id, .shell)?.dead == true { try closeShell(id) }
     if entries[id]?.session.shellClosed != true { try startShell(id) }
     if paneRow(id, .claude) == nil { try launch(id, prompt: nil) }
     let terminals = try site(for: session).terminals()
-    return Terminals(tmux: terminals.tmux, socket: terminals.socket, claude: paneName(id, .claude), shell: shell)
+    return Terminals(
+      tmux: terminals.tmux, socket: terminals.socket, claude: paneName(id, .claude), shell: shell, host: session.host)
   }
 
   /// Starts claude in the session's Claude pane. A launch resumes the
@@ -750,28 +862,36 @@ public final class Service {
   /// next launch. It ignores the live cap. Callers use `launch` unless they
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
-    _ = try requireStartable(id)
-    moveToGroupAccount(id)
+    // A session on a host runs under the host's Claude login, with no hook settings, shared MCP servers,
+    // `claudeArgs`, or triage nudge of this Mac.
+    let local = try requireStartable(id).host == nil
+    if local { moveToGroupAccount(id) }
     let session = entries[id]!.session
-    let resume = hasTranscript(session)
-    var args = [config.claude]
+    let resume = try hasTranscript(session)
+    var args = [claudeCommand(for: session)]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
-    args += ["--settings", home.claudeSettings]
-    args += mcpArgs
-    if session.kind != .work {
-      args += [
-        "--mcp-config", MCPToolServer.launchConfig(sb: sbPath, home: home.path, session: id, group: session.chat).text,
-      ]
+    if local {
+      args += ["--settings", home.claudeSettings]
+      args += mcpArgs
+      if session.kind != .work {
+        args += [
+          "--mcp-config",
+          MCPToolServer.launchConfig(sb: sbPath, home: home.path, session: id, group: session.chat).text,
+        ]
+      }
     }
     if let model = session.model { args += ["--model", model] }
-    args += config.claudeArgs
+    if local { args += config.claudeArgs }
     // After claudeArgs, so that the session's mode wins over a global one.
     if session.autoMode == true { args += ["--permission-mode", PermissionMode.auto] }
-    if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }
+    if local, !config.triage.systemPrompt.isEmpty {
+      args += ["--append-system-prompt", config.triage.systemPrompt]
+    }
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
     let site = self.site(for: session)
     let terminals = try site.terminals()
+    let env = try newPaneEnv(id)
     try writeLauncher(
       "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
         + args.map(shellQuote).joined(separator: " ") + "\n",
@@ -781,9 +901,9 @@ public final class Service {
     let command = "\(terminals.shell) -l -i -c 'source \"$SB_HOME/sessions/$SB_SESSION_ID/claude.sh\"'"
     let name = paneName(id, .claude)
     if paneRow(id, .claude) != nil {
-      try terminals.respawn(name, cwd: session.cwd, env: paneEnv(id), command: command)
+      try terminals.respawn(name, cwd: session.cwd, env: env, command: command)
     } else {
-      try terminals.create(name, cwd: session.cwd, env: paneEnv(id), command: command)
+      try terminals.create(name, cwd: session.cwd, env: env, command: command)
       try terminals.setDeadMessage(
         name, "Claude stopped. Switchboard resumes it when you open the session or send it a message.")
     }
@@ -795,7 +915,7 @@ public final class Service {
     record(
       id, resume ? "resumed" : "started",
       [
-        "prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening,
+        "prompt": prompt.map(JSON.string) ?? .null, "mcp": local ? mcpListening : [],
         "permission_mode": session.autoMode == true ? .string(PermissionMode.auto) : .null,
       ])
   }
@@ -808,19 +928,30 @@ public final class Service {
   /// that account. Before a SessionStart for the conversation, as for an
   /// imported one, this looks in the account that the pane sets. A session
   /// that sbd never started claude for has none.
-  private func hasTranscript(_ session: Session) -> Bool { transcriptFile(session) != nil }
+  /// For a session on a host, it throws `HostUnread` unless the host answered every read of the lookup, so a
+  /// lookup that got no answer never starts the conversation again.
+  func hasTranscript(_ session: Session) throws -> Bool {
+    try site(for: session).confirmed("the transcript lookup of \(session.id)") {
+      try transcriptFile(session, on: $0) != nil
+    }
+  }
 
-  /// The session's transcript file, by the rules of `hasTranscript`.
+  /// The session's transcript file, by the rules of `hasTranscript`. It is nil when the session's host is not
+  /// ready, and a read that got no answer reads as a missing file.
   func transcriptFile(_ session: Session) -> String? {
+    (try? transcriptFile(session, on: site(for: session).machine)) ?? nil
+  }
+
+  /// A session on a host keeps its transcripts under `~/.claude` there.
+  private func transcriptFile(_ session: Session, on machine: any Machine) throws -> String? {
     guard session.started else { return nil }
     if let path = entries[session.id]?.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
     {
-      return site(for: session).machine.exists(path) ? path : nil
+      return machine.exists(path) ? path : nil
     }
-    let account = claudeAccount(of: session.id)
-    return Transcript.find(
-      session.claudeSessionId, account: account, cwd: session.cwd, on: site(for: session).machine)
+    let account = session.host == nil ? claudeAccount(of: session.id) : "\(try boxHome(session))/.claude"
+    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd, on: machine)
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
@@ -1019,6 +1150,7 @@ public final class Service {
 
   /// Defers the session's held questions first, so that their cards stay.
   func stop(_ id: String, reason: String) throws {
+    try requireRead(id)
     guard case .running(let pid) = claudeState(id) else { throw APIError("\(id) is not running") }
     deferQuestions(id)
     try stopClaude(id, pid)
@@ -1198,6 +1330,10 @@ public final class Service {
     _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool
   ) throws -> (repo: String?, branch: (name: String, tip: String)?, supacode: Bool) {
     guard worktree else { return (nil, nil, false) }
+    // The checks below read git and the folder with no proof that the host answered.
+    if let host = session.host {
+      throw APIError("sbd can't remove a worktree on \(host) yet. Remove \(session.id) without the worktree.")
+    }
     let merged = pr?.state == .merged
     if folderGone {
       let repo = try checkGoneWorktree(session, mergedPR: merged)
@@ -1389,9 +1525,11 @@ public final class Service {
     _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"], at: site)
   }
 
-  /// Another session that runs in the session's folder.
+  /// Another session that runs in the session's folder at the session's site.
   func sharedSession(_ session: Session) -> String? {
-    entries.values.first { $0.session.id != session.id && $0.session.cwd == session.cwd }?.session.id
+    entries.values.first {
+      $0.session.id != session.id && $0.session.cwd == session.cwd && $0.session.host == session.host
+    }?.session.id
   }
 
   /// Returns the session's repo and whether Supacode locked the worktree, or
@@ -1539,6 +1677,7 @@ public final class Service {
   }
 
   func claudeState(_ id: String) -> ClaudeState {
+    if isUnread(id) { return .unknown }
     guard let pane = paneRow(id, .claude), !pane.dead else { return .stopped }
     return claudePid(id).map(ClaudeState.running) ?? .starting
   }
@@ -1576,6 +1715,7 @@ public final class Service {
       let now = nowMs()
       superviseMCPServers(now: now)
       superviseHosts(now: now)
+      superviseSites(now: now)
       closeExitedShells()
       for id in entries.keys.sorted() {
         let live = entries[id]?.facts.live ?? false
@@ -1613,6 +1753,8 @@ public final class Service {
           }
         case .starting:
           entries[id]?.unreportedSince = nil
+        case .unknown:
+          break
         }
         if var e = entries[id] {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
@@ -1710,6 +1852,11 @@ public final class Service {
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
+    if let host = s.host {
+      out.host = host
+      out.link = hostLinks[host]?.status.state
+      if let error = remoteSites[host]?.setupError { out.reason = error }
+    }
     out.shellClosed = s.shellClosed
     if s.kind == .work && s.docket == nil {
       out.pipeline = Pipeline(e.facts, created: s.created)

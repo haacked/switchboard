@@ -34,18 +34,26 @@ extension Service {
     let status = link.status
     return HostStatus(
       name: host.name, kind: host.kind.rawValue, destination: link.destination, link: status.state,
-      since: status.since, failures: status.failures, retryAt: status.retryAt, error: status.error)
+      since: status.since, failures: status.failures, retryAt: status.retryAt,
+      error: status.error ?? remoteSites[host.name]?.setupError)
   }
 
   /// The host's link. It throws for a name that config.json does not list, for an invalid
   /// host, and for a hogli host with the perSession layout.
-  private func hostLink(_ name: String) throws -> HostLink {
+  func hostLink(_ name: String) throws -> HostLink {
     if let host = config.invalidHosts[name] { throw APIError("\(name) is not usable: \(host.problem)") }
     guard config.hosts[name] != nil else { throw APIError("no host named \(name) in \(home.config)") }
     guard let link = hostLinks[name] else {
       throw APIError("\(name) uses the perSession layout, which this version can't connect to")
     }
     return link
+  }
+
+  /// The site of the host with the name. It throws as `hostLink` does.
+  func remoteSite(_ name: String) throws -> RemoteSite {
+    _ = try hostLink(name)
+    guard let site = remoteSites[name] else { throw APIError("no host named \(name) in \(home.config)") }
+    return site
   }
 
   /// The machine of the host with the name. It never falls back to this Mac: it throws for a

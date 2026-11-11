@@ -143,6 +143,7 @@ extension Service {
   /// sessions as a move.
   private func moveRefusal(_ id: String, to target: String) -> String? {
     guard let e = entries[id] else { return "no session \(id)" }
+    if let host = e.session.host { return "it runs under the Claude login of \(host)" }
     if let group = accountGroup(of: e.session), let bound = group.account, bound != target {
       return "its group \(group.name) uses the account \(ClaudeAccount.name(bound))"
     }

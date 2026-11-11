@@ -36,6 +36,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// When claude last ended, stopped, or exited.
+  public var lastExit: Int64?
   /// Background jobs that run under claude, as the last `job` event counted
   /// them. A job sends no hooks, so sbd's tick finds it in the process list.
   public var jobs = 0
@@ -187,6 +189,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       jobs = count
     case "SessionEnd", "stopped", "exited":
       live = false
+      lastExit = event.t
       jobs = 0
       endTurn()
       subagents = []

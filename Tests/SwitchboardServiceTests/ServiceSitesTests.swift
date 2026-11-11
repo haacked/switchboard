@@ -46,15 +46,13 @@ import Testing
     }
   }
 
+  /// The write for a site that names a host runs through the site's `confirmed`, which this site refuses.
   @Test(.timeLimit(.minutes(1)))
-  func theLauncherWriteRefusesASiteThatNamesAHost() throws {
+  func theLauncherWriteForASiteThatNamesAHostWritesNothingOnThisMac() throws {
     try withService { service, home in
       let site = HostSite(folder: "\(home.path)/host")
-      do {
+      #expect(throws: Unused.self) {
         try service.queue.sync { try service.writeLauncher("claude\n", for: "s1", at: site) }
-        Issue.record("the launcher was written")
-      } catch {
-        #expect("\(error)" == "can't start claude on mini: sbd writes claude.sh on this Mac only", "\(error)")
       }
       #expect(!FileManager.default.fileExists(atPath: site.folder))
     }
