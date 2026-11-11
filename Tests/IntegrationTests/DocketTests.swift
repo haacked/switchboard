@@ -281,6 +281,27 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     #expect(try told(2, "is done") == ["\(prefix) is done."])
   }
 
+  @Test func aRestartedSbdDoesNotRepeatTheNeedThatTheParentHeard() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config)
+    let parent = try ManagerTests().idle(sbd, name: "p")
+    let s = try startDocket(sbd, "--parent", parent.id, "--name", "review", "o/r#9")
+    try docket.setReviews([listed("o/r#9", "drafted", prState: "OPEN")])
+    try poll(sbd, s.id, "the draft") { $0.docket?.review?.state == "drafted" }
+    try ManagerTests().waitForNotice(sbd, parent.id, after: 0, containing: "draft ready")
+    let heard = try sbd.messagesFromSbd(parent.id)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    try docket.setReviews([listed("o/r#9", "submitted")])
+    try poll(sbd, s.id, "the submitted review") { $0.state == .done }
+    try ManagerTests().waitForNotice(sbd, parent.id, after: heard.count, containing: "is done")
+    #expect(
+      try sbd.messagesFromSbd(parent.id)
+        == heard + ["Switchboard: sessions you started changed: review (\(s.id)) is done."])
+  }
+
   @Test func aBrokenDocketPutsTheRowInNeedsYouUntilAPollSucceeds() throws {
     let docket = try DocketHome()
     let sbd = try Instance(config: docket.config)
