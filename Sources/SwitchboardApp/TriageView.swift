@@ -74,7 +74,7 @@ struct TriageDetail: View {
       if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
       if let link = Self.prLink(for: session) {
         HStack(spacing: 4) {
-          Link(link.label, destination: link.url).font(.caption)
+          PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link)
           if let owners = link.owners { CodeOwnerShield(status: owners) }
         }
       }
