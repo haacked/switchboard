@@ -238,6 +238,10 @@ public final class Service {
         return try .success(JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self))))
       case "spawn":
         return try .success(JSON(encoding: spawn(request.args)))
+      case "repos":
+        return try .success(JSON(encoding: knownRepos()))
+      case "repo-add":
+        return try .success(JSON(encoding: addRepo(request.args)))
       case "manager":
         return managerRequest()
       case "chat":
@@ -731,7 +735,9 @@ public final class Service {
     }
     let folder = try prepareFolder(args)
     awaitMCPServers()
-    return try queue.sync { try create(args, folder) }
+    let summary = try queue.sync { try create(args, folder) }
+    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
+    return summary
   }
 
   /// `configure` changes the session before its first launch.
