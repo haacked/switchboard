@@ -254,6 +254,25 @@ extension GroupTests {
     #expect(try suggestions(sbd).isEmpty)
   }
 
+  @Test func aSessionWhosePRMergedGetsNoDependencyJoin() throws {
+    let (github, sbd) = try stackedInstance()
+    defer { withExtendedLifetime(github) {} }
+    let base = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
+    let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")
+    let flags = try add(sbd, "Flags", top.id)
+    try sbd.pollTwice()
+    try #require(try suggestions(sbd).map(\.id) == ["dependency:\(base.id):\(flags.id)"])
+
+    // An uncommitted file keeps the merged session out of Done, so only its
+    // merged stage marks it finished.
+    try "x".write(toFile: "\(base.cwd)/notes.txt", atomically: true, encoding: .utf8)
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.pollTwice()
+
+    #expect(try sbd.get(base.id).state == .needsYou)
+    #expect(try suggestions(sbd).isEmpty)
+  }
+
   // MARK: Sessions placed by hand
 
   @Test func aSessionPlacedByHandStaysInItsGroupWhichSurvivesTheMerge() throws {

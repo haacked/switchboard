@@ -12,9 +12,10 @@ public enum DeclinedSuggestions {
     case prefix(group: String?)
     case scope
 
-    /// Nil for a plan row's id and for any other shape. A `prefix` id needs
-    /// a slug, which never holds the `/` and `#` of a plan row's link, so a
-    /// plan whose id is `prefix` is not read as one.
+    /// Nil for a plan row's id and for any other shape. A plan's id is `p`
+    /// and five characters, so `prefix` is the only kind name it can equal.
+    /// A `prefix` id needs a slug, which never holds the `/` and `#` of a
+    /// plan row's link, so that plan's rows are not read as one.
     init?(_ id: String) {
       let f = id.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
       switch (f.first, f.count) {

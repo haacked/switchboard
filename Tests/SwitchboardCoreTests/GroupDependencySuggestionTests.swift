@@ -26,12 +26,11 @@ private let posthog = "PostHog/posthog"
     SessionGroup(id: id, name: name, notes: [], created: created)
   }
 
-  /// The suggestions under the default cap, or under `limit` when given.
   func suggest(
-    _ candidates: [Candidate], groups: [SessionGroup] = [], declined: Set<String> = [], limit: Int? = nil
+    _ candidates: [Candidate], groups: [SessionGroup] = [], declined: Set<String> = [],
+    limit: Int = GroupSuggestions.defaultLimit
   ) -> [GroupSuggestion] {
-    guard let limit else { return GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined) }
-    return GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined, limit: limit)
+    GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined, limit: limit)
   }
 
   /// Flags is older than Cache.
