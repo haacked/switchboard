@@ -30,14 +30,30 @@ private let hogqlParagraphs = """
     let sbd = try Instance()
     let s = try sbd.endedSession()
 
-    try sbd.setSummary(s.id, draftCard)
+    let result = try sbd.setSummary(s.id, draftCard)
 
+    #expect(result.stdout.contains("1 draft"), "\(result.stdout)")
     try sbd.waitFor(s.id, "the session's card") { $0.triage?.source == .session }
     let row = try #require(JSON.parse(try sbd.sb("get", s.id, "--json")))
     let drafts = try #require(row["triage"]?["message"]?["summary"]?["drafts"]?.array)
     #expect(drafts.count == 1)
     #expect(drafts.first?["text"]?.string == "Could someone review #1?")
     #expect(drafts.first?["label"]?.string == "Review request")
+  }
+
+  /// `sb triage` prints the draft between the Summary and the Action.
+  @Test func theTextListingPrintsTheDraftBeforeTheAction() throws {
+    let sbd = try Instance()
+    let s = try sbd.endedSession()
+    try sbd.setSummary(s.id, draftCard)
+    try sbd.waitFor(s.id, "the session's card") { $0.triage?.source == .session }
+
+    let text = try sbd.sb("triage")
+
+    #expect(text.contains("> Could someone review #1?"), "\(text)")
+    let headings = ["Summary:", "Draft: Review request:", "Action:"].map { text.range(of: $0)?.lowerBound }
+    #expect(headings.allSatisfy { $0 != nil }, "\(text)")
+    #expect(headings.compactMap { $0 } == headings.compactMap { $0 }.sorted())
   }
 
   /// The model's answer names a quoted copy and a paraphrase. Only the copy

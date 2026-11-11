@@ -34,10 +34,11 @@ public enum TriageDrafts {
   /// the reply in any character, so the Inbox never shows a paraphrase as
   /// the session's draft. A draft that the reply quotes matches without its
   /// quote markers. A draft that the reply doesn't quote keeps any `>`
-  /// lines of its own.
+  /// lines of its own. The copy must start and end on line breaks of the
+  /// reply. This drops a copy that the model cut in the middle of a line.
   public static func verbatim(_ drafts: [TriageDraft], in reply: String) -> (kept: [TriageDraft], dropped: [String]) {
-    let plain = normalize(reply, unquote: false)
-    let unquoted = normalize(reply, unquote: true)
+    let plain = "\n" + normalize(reply, unquote: false) + "\n"
+    let unquoted = "\n" + normalize(reply, unquote: true) + "\n"
     var kept: [TriageDraft] = []
     var dropped: [String] = []
     for (i, draft) in drafts.enumerated() {
@@ -45,9 +46,9 @@ public enum TriageDrafts {
         let asIs = trimBlankLines(normalize(draft.text, unquote: false))
         let bare = trimBlankLines(normalize(draft.text, unquote: true))
         let text: String
-        if !quoted(asIs), plain.contains(asIs) {
+        if !quoted(asIs), plain.contains("\n" + asIs + "\n") {
           text = asIs
-        } else if unquoted.contains(bare) {
+        } else if unquoted.contains("\n" + bare + "\n") {
           text = bare
         } else {
           throw APIError("its text is not in the reply")

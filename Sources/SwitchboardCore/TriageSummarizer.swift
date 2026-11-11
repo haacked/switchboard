@@ -171,8 +171,9 @@ public enum TriageSummarizer {
     return lines.joined(separator: "\n")
   }
 
-  /// Reads the output of `claude -p --output-format json`. It keeps only the
-  /// drafts whose text appears in `reply`, the whole reply that the session wrote.
+  /// Reads the output of `claude -p --output-format json`. `reply` is the
+  /// whole reply that the session wrote. It keeps only the drafts whose text
+  /// appears in the part of `reply` that `input` showed the model.
   public static func parse(_ output: String, reply: String) throws -> TriageSummary {
     let payload = JSON.object(try Headless.answer(output))
     guard !(payload["title"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -180,7 +181,16 @@ public enum TriageSummarizer {
     }
     let kind = TriageKind(rawValue: payload["kind"]?.string ?? "") ?? .info
     var card = try TriageCard.clean(payload, actions: actions, kind: kind, lines: summaryLines).card
-    card.drafts = TriageDrafts.verbatim(card.drafts, in: reply).kept
+    card.drafts = TriageDrafts.verbatim(card.drafts, in: String(shown(reply))).kept
     return card
+  }
+
+  /// The complete lines of the reply that `input` sends the model. A cut
+  /// reply loses its first shown line, because the model may see only the
+  /// end of that line. A copy of a draft that starts before the cut does not match.
+  static func shown(_ reply: String) -> Substring {
+    let window = reply.suffix(replyCharacters)
+    guard window.startIndex > reply.startIndex else { return window }
+    return window.drop { !$0.isNewline }
   }
 }

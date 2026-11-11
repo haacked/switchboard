@@ -84,7 +84,7 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
 
     #expect(result.kept.isEmpty)
     #expect(result.dropped.count == 1)
-    #expect(result.dropped.first?.isEmpty == false)
+    #expect(result.dropped.first?.contains("its text is not in the reply") == true)
   }
 
   @Test func keepsADraftFromAFencedBlock() {
@@ -137,8 +137,12 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
 
   /// Each draft differs from the reply in a way that normalization must not
   /// hide: a second marker, a marker indented four spaces (a code block),
-  /// inner whitespace, one character, or a line break that the reply lacks.
+  /// inner whitespace, one character, a line break that the reply lacks, or
+  /// a copy that starts or ends in the middle of a line.
   @Test(arguments: [
+    ("Could someone from HogQL review", hogqlReply),
+    ("It needs a code-owner approval", hogqlReply),
+    ("review #1", "Could someone review #12?"),
     ("> > nested quote", "nested quote"),
     ("    > hello world", "hello world"),
     ("Could  someone review #1?", "Could someone review #1?"),
@@ -287,6 +291,41 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
     let summary = try TriageSummarizer.parse(output, reply: "\(long)\n\nShort one.")
 
     #expect(summary.drafts.map(\.text) == ["Short one."])
+  }
+
+  /// The model sees only the end of a long reply. A draft that starts before
+  /// that cut reaches the model without its start.
+  @Test func dropsTheTailOfADraftThatStartsBeforeTheCut() throws {
+    let draft = "Could someone review #1? \(String(repeating: "a", count: 100))\nThanks."
+    let after = "\n\n" + String(repeating: "z", count: TriageSummarizer.replyCharacters - 50)
+    let reply = "Here:\n\n\(draft)\(after)"
+    let seen = String(reply.suffix(TriageSummarizer.replyCharacters))
+    let copy = String(seen.dropLast(after.count))
+    try #require(copy != draft && draft.hasSuffix(copy))
+
+    let summary = try TriageSummarizer.parse(modelOutput([["text": .string(copy)]]), reply: reply)
+
+    #expect(summary.drafts.isEmpty)
+  }
+
+  /// The cut falls on a line break, so the model sees whole lines of the draft but not its first line.
+  @Test func dropsTheTailOfADraftWhenTheCutFallsOnALineBreak() throws {
+    let after = "\n\n" + String(repeating: "z", count: TriageSummarizer.replyCharacters - "Second line.".count - 2)
+    let reply = "Here:\n\nFirst line of the request.\nSecond line.\(after)"
+    try #require(reply.suffix(TriageSummarizer.replyCharacters).hasPrefix("Second line."))
+
+    let summary = try TriageSummarizer.parse(modelOutput([["text": "Second line."]]), reply: reply)
+
+    #expect(summary.drafts.isEmpty)
+  }
+
+  /// Swift reads CRLF as one character, so the cut line must end at that character too.
+  @Test func keepsADraftAfterTheCutOfALongCRLFReply() throws {
+    let reply = String(repeating: "filler line\r\n", count: 2_000) + "Could someone review #1?\r\n"
+
+    let summary = try TriageSummarizer.parse(modelOutput([["text": "Could someone review #1?"]]), reply: reply)
+
+    #expect(summary.drafts.map(\.text) == ["Could someone review #1?"])
   }
 
   @Test func theSchemaHasDrafts() throws {
@@ -456,12 +495,6 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
 
     #expect(decoded.drafts.isEmpty)
     #expect(decoded.message.summary.drafts.isEmpty)
-  }
-
-  @Test func aMessageSummaryWithoutTheKeyDecodesWithNone() throws {
-    let decoded = try JSONCoding.decode(TriageMessage.Summary.self, from: #"{"text":"s","callouts":[]}"#)
-
-    #expect(decoded.drafts.isEmpty)
   }
 
   @Test func aDraftWithoutALabelDecodesWithNone() throws {
