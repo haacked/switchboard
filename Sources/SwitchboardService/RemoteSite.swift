@@ -115,6 +115,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   let link: HostLink
   let config: HostConfig
   private let name: String
+  private let home: Home
   private let tap: ((any Machine) -> any Machine)?
 
   private struct Ready {
@@ -127,6 +128,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   private var ready: Ready?
   /// Why setup failed, and the connection it failed on.
   private var failed: (epoch: Int, text: String)?
+  private var listenerFailure: String?
+  private var lastClockOffsetMs: Int64?
   /// One setup runs at a time.
   private let setup = NSLock()
 
@@ -138,6 +141,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     self.config = config
     self.name = config.name
     self.hostName = config.name
+    self.home = home
     self.tap = tap
     self.machine = RemoteSite.timed(link, check: nil, tap: tap)
   }
@@ -160,6 +164,16 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     guard status.state == .connected else { return nil }
     return lock.withLock { failed.flatMap { $0.epoch == status.connection ? $0.text : nil } }
   }
+
+  /// Why sbd does not listen on the host's socket on this Mac, or nil when it does. Setup fails with it,
+  /// because the host's hooks could not reach sbd.
+  var listenerProblem: String? {
+    get { lock.withLock { listenerFailure } }
+    set { lock.withLock { listenerFailure = newValue } }
+  }
+
+  /// This Mac's clock minus the host's, as the last setup measured it on any connection.
+  var clockOffsetMs: Int64? { lock.withLock { lastClockOffsetMs } }
 
   private func unread(_ why: String) -> HostUnread { HostUnread(hostName: name, why: why) }
 
@@ -269,6 +283,42 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     fi
     """#
 
+  /// Writes the shim and the hook settings when their text differs, then removes a socket file that an
+  /// earlier forward left at `sbd.sock`. `$1` is the box's folder, `$2` the shim, and `$3` the settings. It
+  /// exits 4, and removes nothing, when `sbd.sock` exists and is not a socket.
+  private static let hookScript = #"""
+    umask 077
+    put() {
+      if [ -f "$1" ] && [ ! -L "$1" ] && [ "$(cat "$1"; printf x)" = "${2}x" ]; then return 0; fi
+      rm -f "$1.new" && printf %s "$2" >"$1.new" && chmod "$3" "$1.new" && mv -f "$1.new" "$1"
+    }
+    put "$1/bin/sb-shim" "$2" 700 || exit 1
+    put "$1/claude-settings.json" "$3" 600 || exit 1
+    s=$1/sbd.sock
+    if [ -L "$s" ] || { [ -e "$s" ] && [ ! -S "$s" ]; }; then
+      printf '%s exists and is not a socket, so Switchboard did not replace it with its forward\n' "$s" >&2
+      exit 4
+    fi
+    if [ -S "$s" ]; then rm -f "$s" || exit 1; fi
+    """#
+
+  /// Writes the shim and the hook settings on the host, then forwards the host's `~/.sb/sbd.sock` to the
+  /// host's socket on this Mac. The forward can't start with the master, because its path needs the host's
+  /// home.
+  private func setUpHooks(_ facts: BoxFacts) throws {
+    if let listenerProblem { throw APIError(listenerProblem) }
+    let r: CommandResult
+    do {
+      r = try machine.run(
+        "/bin/sh", ["-c", Self.hookScript, "sb", facts.folder, BoxShim.source, BoxShim.settings(for: facts)],
+        env: nil, input: nil, timeout: Self.setupSeconds)
+    } catch {
+      throw unread("setup got no answer: \(error)")
+    }
+    guard r.status == 0 else { throw APIError("setup on \(name) failed: \(Self.problem(r))") }
+    try link.forward(remote: BoxShim.socketPath(for: facts), local: home.hostSocket(name))
+  }
+
   private func runSetup(epoch: Int) throws -> BoxFacts {
     let r: CommandResult
     do {
@@ -279,7 +329,10 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
       throw unread("setup got no answer: \(error)")
     }
     guard r.status == 0 else { throw APIError("setup on \(name) failed: \(Self.problem(r))") }
-    return try BoxFacts.parse(Data(r.stdout.utf8), epoch: epoch, host: config, now: nowMs())
+    let facts = try BoxFacts.parse(Data(r.stdout.utf8), epoch: epoch, host: config, now: nowMs())
+    lock.withLock { lastClockOffsetMs = facts.clockOffsetMs }
+    try setUpHooks(facts)
+    return facts
   }
 
   private static func problem(_ r: CommandResult) -> String {

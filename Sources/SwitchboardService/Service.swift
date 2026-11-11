@@ -94,6 +94,10 @@ public final class Service {
   var checkoutLookups: Set<SitePath> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
+  /// The hook events of each session on a host that wait for their turn in id order, by session id.
+  var hostEvents: [String: HostEventBuffer] = [:]
+  /// When sbd last pruned the recorded ids of the hosts' events.
+  var hostEventsPruned: Int64 = 0
   let triageJobs: OperationQueue = {
     let jobs = OperationQueue()
     jobs.name = "sbd.triage"
@@ -236,10 +240,18 @@ public final class Service {
   /// The requests that wait for the host of the session they name, and read its panes and processes first.
   static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
 
-  /// `hookGone` reports whether the client closed its connection, which a
-  /// held PermissionRequest checks while it waits.
-  public func handle(_ request: Request, hookGone: @escaping () -> Bool = { false }) -> Response {
+  /// `origin` is the socket that the request arrived on. `hookGone` reports whether the client closed its
+  /// connection, which a held PermissionRequest checks while it waits.
+  public func handle(
+    _ request: Request, origin: RequestOrigin = .mac, hookGone: @escaping () -> Bool = { false }
+  ) -> Response {
     do {
+      // A request from a host's socket ends here. It reaches no code below, so it can only be a hook, and
+      // `handleHostHook` takes it only for a session that sbd holds on that host.
+      if case .remote(let host) = origin {
+        guard request.op == "hook" else { throw APIError("a request from \(host) can only be a hook") }
+        return try handleHostHook(request.args, from: host, hookGone: hookGone)
+      }
       switch request.op {
       case "hook":
         return try handleHook(request.args, hookGone: hookGone)
@@ -447,7 +459,7 @@ public final class Service {
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
-      return .string(try site(of: id).terminals().screen(paneName(id, pane), colors: args["colors"]?.bool == true))
+      return .string(try site(of: id).screen(paneName(id, pane), colors: args["colors"]?.bool == true))
     case "accounts", "account-use", "account-move":
       return try accountRequest(op, args)
     case "mcp":
@@ -487,18 +499,34 @@ public final class Service {
   /// Records a hook event and returns it with what the hook prints, or nil
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
   /// the digest of its children, which sbd records as a `digest` event.
-  func hook(_ args: JSON) throws -> (event: Event, answer: JSON)? {
+  /// `stamp` is set for an event that a host's shim made. Such an event is recorded with its id and its own
+  /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
+  /// records nothing, when the store can't keep the event.
+  func hook(_ args: JSON, stamp: HostEventStamp? = nil) throws -> (event: Event, answer: JSON)? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
       return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
+    if let stamp, try store.hasHostEvent(stamp.id) { return nil }
     // A job starts inside a turn, and the tick skips a running turn. The count
     // is recorded before the Stop, so the session never shows Needs you
     // between the Stop and the next tick.
     if kind == "Stop", case .running(let pid) = claudeState(id) {
-      recordJobs(id, backgroundJobs(pid, in: Processes.byParent(on: site(for: session).machine)))
+      // A session on a host counts from the host's last answered read. A process read here would hold the
+      // state queue for a round trip, and a read with no answer would count no jobs.
+      let children =
+        session.host == nil ? Processes.byParent(on: site(for: session).machine) : processChildren(of: id)
+      recordJobs(id, backgroundJobs(pid, in: children))
     }
-    let event = record(id, kind, payload)
+    let event: Event
+    if let stamp {
+      let stored = try store.append(
+        Event(session: id, t: stamp.t, kind: kind, data: payload), hostEvent: stamp.id, host: stamp.host)
+      guard let stored else { return nil }
+      event = fold(stored)
+    } else {
+      event = record(id, kind, payload)
+    }
     var answer: JSON = [:]
     switch kind {
     case "SessionStart":
@@ -862,8 +890,8 @@ public final class Service {
   /// next launch. It ignores the live cap. Callers use `launch` unless they
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
-    // A session on a host runs under the host's Claude login, with no hook settings, shared MCP servers,
-    // `claudeArgs`, or triage nudge of this Mac.
+    // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
+    // MCP servers, `claudeArgs`, or triage nudge of this Mac.
     let local = try requireStartable(id).host == nil
     if local { moveToGroupAccount(id) }
     let session = entries[id]!.session
@@ -879,6 +907,8 @@ public final class Service {
           MCPToolServer.launchConfig(sb: sbPath, home: home.path, session: id, group: session.chat).text,
         ]
       }
+    } else {
+      args += ["--settings", "\(try boxHome(session))/.sb/claude-settings.json"]
     }
     if let model = session.model { args += ["--model", model] }
     if local { args += config.claudeArgs }
@@ -1069,10 +1099,11 @@ public final class Service {
     let name = paneName(id, .claude)
     let parts = Attachments.split(text, folder: home.attachmentsFolder(id))
     entries[id]?.inFlight = nowMs()
-    let terminals = try? site(of: id).terminals()
+    let site = try? site(of: id)
+    let terminals = try? site?.terminals()
     pasteQueue.async { [self] in
       waitAtGate("hold-paste")
-      guard let terminals, (try? terminals.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true
+      guard let site, let terminals, (try? site.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true
       else {
         queue.async { [self] in
           if entries[id]?.heldText != text {
@@ -1112,17 +1143,24 @@ public final class Service {
   /// can give the event's id to a later row, so the check also compares the
   /// session, the time, the kind, and the text. It returns false and drops
   /// the message when the log lacks the `sent` event. It returns false and
-  /// requeues the message when the store fails.
-  private func startPaste(_ id: String, _ message: QueuedMessage) -> Bool {
+  /// requeues the message when the store fails, or when the session's host
+  /// did not answer the read of the transcript's size.
+  func startPaste(_ id: String, _ message: QueuedMessage) -> Bool {
     entries[id]?.heldText = nil
     var data: [String: JSON] = ["text": .string(message.text)]
-    if let session = entries[id]?.session, let path = transcriptFile(session),
-      let size = site(for: session).machine.size(path)
-    {
-      data["transcript"] = .string(path)
-      data["transcript_bytes"] = .number(Double(size))
-    }
     do {
+      if let session = entries[id]?.session {
+        // A restart looks for the message after this size, so a size that a host did not answer must not
+        // read as a missing transcript.
+        let found: (path: String, size: UInt64)? = try site(for: session).confirmed("the transcript size of \(id)") {
+          guard let path = (try? transcriptFile(session, on: $0)) ?? nil, let size = $0.size(path) else { return nil }
+          return (path, size)
+        }
+        if let found {
+          data["transcript"] = .string(found.path)
+          data["transcript_bytes"] = .number(Double(found.size))
+        }
+      }
       if let sent = message.sent {
         guard let row = try store.event(id: sent.id), row.session == id, row.t == sent.t, row.kind == "sent",
           row.data["text"] == sent.data["text"]
@@ -1772,6 +1810,7 @@ public final class Service {
       notifyParents(now: now)
       autoContinueSessions(now: now)
       compactSnapshots()
+      pruneHostEvents(now: now)
     }
     endIdleTurns()
     closeGoneDialogs()
@@ -1874,14 +1913,19 @@ public final class Service {
   /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
   /// with no output when sbd is down, so the session shows no hook errors.
   private func writeClaudeSettings() throws {
+    let text = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
+    try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
+  }
+
+  /// The text of a settings file that runs `command` for every hook that sbd reads.
+  static func hookSettings(command: String) -> String {
     var hooks: [String: JSON] = [:]
     for event in SessionFacts.hookKinds {
       let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
-      let handler: JSON = ["type": "command", "command": .string("\(shellQuote(sbPath)) hook"), "timeout": timeout]
+      let handler: JSON = ["type": "command", "command": .string(command), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]
     }
-    let text = JSON.object(["hooks": .object(hooks)]).text
-    try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
+    return JSON.object(["hooks": .object(hooks)]).text
   }
 }
 

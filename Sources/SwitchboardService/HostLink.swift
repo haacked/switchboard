@@ -85,6 +85,23 @@ final class HostLink: @unchecked Sendable {
   /// The ControlPath of the current connection's ssh master, or nil while the link is not `connected`.
   var resolvedControlPath: String? { lock.withLock { current.state == .connected ? connectedControlPath : nil } }
 
+  /// Asks the current connection's ssh master to forward the socket at `remote` on the host to the socket at
+  /// `local` on this Mac. The forward lasts as long as the connection. It throws ssh's text when the master
+  /// or the host refuses, and for a path that holds a colon, which ssh reads as the end of the path.
+  func forward(remote: String, local: String) throws {
+    guard let path = resolvedControlPath else {
+      throw APIError("\(config.name) is not connected, so sbd can't forward its socket")
+    }
+    for end in [remote, local] where end.contains(":") || !end.hasPrefix("/") {
+      throw APIError("ssh can't forward the socket \(end): its path must be absolute and hold no colon")
+    }
+    let r = try runCommand(
+      ssh,
+      ["-T", "-O", "forward", "-R", "\(remote):\(local)", "-o", Self.controlPathOption(path), "--", destination],
+      timeout: Self.helperSeconds)
+    guard r.status == 0 else { throw Self.failure("the socket forward to \(config.name)", r) }
+  }
+
   /// The open shell. It throws unless the link is `connected`.
   func shell() throws -> RemoteShell {
     try lock.withLock {

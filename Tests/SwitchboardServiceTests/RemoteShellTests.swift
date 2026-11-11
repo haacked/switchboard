@@ -413,6 +413,20 @@ private let everyByte = Data((0...255).map { UInt8($0) })
     #expect(t.events.closes.isEmpty)
   }
 
+  /// A tmux client exits 0 when a signal ends it. Its answer must not read as a command that succeeded.
+  @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
+  func aProgramThatExitsZeroWhenItsTimeoutEndsItAnswersWithStatus143(program: String) throws {
+    let t = try TestShell.start(program)
+    defer { t.shell.close() }
+
+    let r = try t.run(["/bin/sh", "-c", "trap 'exit 0' TERM; /bin/sleep 30 & wait"], timeout: 0.3, deadline: 30)
+    let next = try t.run(["/bin/sh", "-c", "exit 0"], timeout: 20, deadline: 30)
+
+    #expect(r.status == 143)
+    #expect(next.status == 0, "the mark of one command's timeout reached the next command")
+    #expect(try t.text(["/bin/echo", "next"]) == "next\n")
+  }
+
   @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
   func aProgramThatIgnoresSIGTERMEndsWithStatus137(program: String) throws {
     let t = try TestShell.start(program)

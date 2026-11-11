@@ -528,3 +528,290 @@ private func withReadyService(
     }
   }
 }
+
+// MARK: The screen and the paste
+
+/// The ways a `/bin/sh -c` command can come back with no answer from the host.
+private func makeUnanswered(_ shape: String, _ b: SiteBench, _ service: Service) throws {
+  switch shape {
+  case "a timeout":
+    try b.set("script-hangs", "")
+    try b.set("short-timeouts", "")
+  case "a dropped link":
+    service.hostLinks["mini"]?.disconnect()
+  default:
+    try b.set("script-status", String(shape.split(separator: " ")[1]))
+  }
+}
+
+/// A tmux that prints `screen` for `capture-pane`, or fails with `refusal` when that is set. While the folder
+/// that `body` gets holds a file named `hang`, a capture runs until its timeout ends it.
+private func withScreenTmux(
+  _ screen: String, refusal: String? = nil, _ body: (SiteBench, Service, String) throws -> Void
+) throws {
+  let folder = try makeShortTempFolder()
+  defer { try? FileManager.default.removeItem(atPath: folder) }
+  try Data(screen.utf8).write(to: URL(fileURLWithPath: "\(folder)/screen"))
+  let prints = refusal.map { "printf '%s\\n' \(shellQuote($0)) >&2; exit 1" } ?? "cat \(shellQuote("\(folder)/screen"))"
+  let script = """
+    #!/bin/sh
+    case " $* " in
+    *" capture-pane "*)
+      if [ -f \(shellQuote("\(folder)/hang")) ]; then exec /bin/sleep 20; fi
+      \(prints)
+      ;;
+    esac
+    exit 0
+
+    """
+  try Data(script.utf8).write(to: URL(fileURLWithPath: "\(folder)/tmux"))
+  chmod("\(folder)/tmux", 0o755)
+  try withReadyService(host: ["tmux": .string("\(folder)/tmux")]) { b, service, _ in try body(b, service, folder) }
+}
+
+/// A machine that answers every command with one result.
+private struct CannedMachine: Machine {
+  var result: CommandResult
+
+  func run(
+    _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
+  ) throws -> CommandResult { result }
+  func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { nil }
+  func size(_ path: String) -> UInt64? { nil }
+  func exists(_ path: String) -> Bool { false }
+  func isFolder(_ path: String) -> Bool { false }
+  func modified(_ path: String) -> Date? { nil }
+  func list(_ folder: String) -> [String] { [] }
+  func createFolder(_ path: String) throws {}
+  func signal(_ pid: Int, _ signal: Int32) {}
+}
+
+/// A screen of a pane on a host decides whether a dialog closed and whether the prompt box is empty. A tmux
+/// command that its timeout ends exits 0 with no output, which must not read as an empty screen.
+@Suite struct RemoteScreenGuardTests {
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: ["one line", "two\nlines\n", "ends in blank lines\n\n\n", "", "\n", "x", "  spaces  \n", "ünï ✓\n"])
+  func theScreenIsTheTextThatTheHostsTmuxPrinted(screen: String) throws {
+    try withScreenTmux(screen) { _, service, _ in
+      let site = try #require(service.remoteSites["mini"])
+
+      #expect(try site.screen("s1-claude") == screen)
+      #expect(try site.screen("s1-claude", colors: true) == screen)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["a capture that its timeout ends", "a dropped link"])
+  func aScreenReadThatGotNoAnswerThrowsHostUnread(shape: String) throws {
+    try withScreenTmux("a screen\n") { b, service, folder in
+      let site = try #require(service.remoteSites["mini"])
+      if shape == "a dropped link" {
+        service.hostLinks["mini"]?.disconnect()
+      } else {
+        try Data().write(to: URL(fileURLWithPath: "\(folder)/hang"))
+        try b.set("short-timeouts", "")
+      }
+
+      #expect { try site.screen("s1-claude") } throws: { isUnread($0) }
+    }
+  }
+
+  /// The first is what a tmux command gives when its timeout ends it: status 0 and no output.
+  @Test(arguments: ["", "0", "0\0", "0\0a screen", "0\0a screen\0", "0\0a screenx", "\0\0", "a screenx\0", "0\0\0"])
+  func outputThatIsNotInTheAnsweredFormNeverReadsAsAScreen(output: String) throws {
+    let terminals = TerminalHost(
+      tmux: "/usr/bin/tmux", socket: "/tmp/s", conf: "/tmp/c", shell: "/bin/sh", baseEnv: [:], timeout: 5,
+      machine: CannedMachine(result: CommandResult(status: 0, stdout: "", stderr: "")))
+    let machine = CannedMachine(result: CommandResult(status: 0, stdout: output, stderr: ""))
+
+    #expect(throws: (any Error).self) { try terminals.answeredScreen("s1-claude", on: machine) }
+  }
+
+  @Test(arguments: [(Int32(0), "0\0a screen\nx\0", "a screen\n"), (0, "0\0x\0", "")])
+  func outputInTheAnsweredFormIsTheScreen(status: Int32, output: String, screen: String) throws {
+    let machine = CannedMachine(result: CommandResult(status: status, stdout: output, stderr: ""))
+    let terminals = TerminalHost(
+      tmux: "/usr/bin/tmux", socket: "/tmp/s", conf: "/tmp/c", shell: "/bin/sh", baseEnv: [:], timeout: 5,
+      machine: machine)
+
+    #expect(try terminals.answeredScreen("s1-claude", on: machine) == screen)
+  }
+
+  @Test(arguments: [(Int32(143), "0\0a screenx\0"), (1, "0\0a screenx\0"), (0, "1\0no serverx\0")])
+  func aFailedCaptureThrows(status: Int32, output: String) throws {
+    let machine = CannedMachine(result: CommandResult(status: status, stdout: output, stderr: ""))
+    let terminals = TerminalHost(
+      tmux: "/usr/bin/tmux", socket: "/tmp/s", conf: "/tmp/c", shell: "/bin/sh", baseEnv: [:], timeout: 5,
+      machine: machine)
+
+    #expect(throws: (any Error).self) { try terminals.answeredScreen("s1-claude", on: machine) }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCaptureThatTmuxRefusesThrowsTmuxsText() throws {
+    try withScreenTmux("", refusal: "can't find session: s1-claude") { _, service, _ in
+      let site = try #require(service.remoteSites["mini"])
+
+      #expect {
+        try site.screen("s1-claude")
+      } throws: { "\($0)".contains("can't find session: s1-claude") }
+    }
+  }
+
+  /// `dialogClosed` lets a paste follow an Escape. A screen that got no answer shows no dialog, and must not
+  /// count as a closed one.
+  @Test(.timeLimit(.minutes(1)))
+  func aDialogDoesNotCountAsClosedFromAScreenThatGotNoAnswer() throws {
+    try withScreenTmux("no dialog here\n") { b, service, folder in
+      service.queue.sync { service.entries["s1"] = Service.Entry(session: remoteSession("s1")) }
+      let card = Card(
+        Event(
+          id: 1, session: "s1", t: 0, kind: "PermissionRequest",
+          data: ["tool_name": "Bash", "tool_input": ["command": "touch x"]]))
+
+      let answered = service.queue.sync { service.dialogClosed(card) }
+      try Data().write(to: URL(fileURLWithPath: "\(folder)/hang"))
+      try b.set("short-timeouts", "")
+      let unanswered = service.queue.sync { service.dialogClosed(card) }
+
+      #expect(answered)
+      #expect(!unanswered)
+    }
+  }
+}
+
+/// A paste records the transcript's size first, and a restart looks for the message after that size.
+@Suite struct RemotePasteGuardTests {
+  private func addSession(_ service: Service, _ facts: BoxFacts) throws {
+    let cwd = "\(facts.home)/work"
+    let folder = "\(facts.home)/.claude/projects/elsewhere"
+    try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    try Data("{}\n".utf8).write(to: URL(fileURLWithPath: "\(folder)/u-s1.jsonl"))
+    service.queue.sync { service.entries["s1"] = Service.Entry(session: remoteSession("s1", cwd: cwd)) }
+  }
+
+  private func pastings(_ service: Service) throws -> [Event] {
+    try service.queue.sync { try service.store.events(session: "s1").filter { $0.kind == "pasting" } }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aPasteRecordsTheTranscriptsPathAndSizeThatTheHostAnswered() throws {
+    try withReadyService { _, service, facts in
+      try addSession(service, facts)
+
+      let started = service.queue.sync { service.startPaste("s1", Service.QueuedMessage(text: "hello")) }
+
+      #expect(started)
+      let pasting = try #require(try pastings(service).first)
+      #expect(pasting.data["text"] == "hello")
+      #expect(pasting.data["transcript"]?.string?.hasSuffix("/u-s1.jsonl") == true)
+      #expect(pasting.data["transcript_bytes"] == 3)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["script-status 143", "script-status 127", "a timeout", "a dropped link"])
+  func aPasteWhoseTranscriptSizeGotNoAnswerDoesNotStartAndRequeuesItsMessage(shape: String) throws {
+    try withReadyService { b, service, facts in
+      try addSession(service, facts)
+      try makeUnanswered(shape, b, service)
+
+      let started = service.queue.sync { service.startPaste("s1", Service.QueuedMessage(text: "hello")) }
+
+      #expect(!started)
+      #expect(try pastings(service).isEmpty, "a paste started with a transcript size that the host did not answer")
+      #expect(service.queue.sync { service.entries["s1"]?.pending.map(\.text) } == ["hello"])
+    }
+  }
+}
+
+// MARK: Setup of the hooks
+
+/// What setup leaves on the host for the hooks of its claudes, and the forward that it asks ssh for.
+@Suite struct BoxShimSetupTests {
+  private func inode(_ path: String) -> UInt64? {
+    var info = stat()
+    return lstat(path, &info) == 0 ? UInt64(info.st_ino) : nil
+  }
+
+  private func mode(_ path: String) -> Int? {
+    (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue
+  }
+
+  /// Drops the link, connects it again, and runs setup on the new connection.
+  private func reconnect(_ service: Service) throws -> BoxFacts {
+    let link = try #require(service.hostLinks["mini"])
+    let before = link.status.connection
+    link.disconnect()
+    link.connect()
+    #expect(waitUntil(seconds: 10) { link.status.state == .connected && link.status.connection > before })
+    return try #require(service.remoteSites["mini"]).prepare()
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func setupWritesTheShimAndTheSettingsForTheUserOnly() throws {
+    try withReadyService { _, service, facts in
+      let shim = "\(facts.home)/.sb/bin/sb-shim"
+      let settings = "\(facts.home)/.sb/claude-settings.json"
+
+      let shimText = try String(contentsOfFile: shim, encoding: .utf8)
+      let settingsText = try String(contentsOfFile: settings, encoding: .utf8)
+      #expect(shimText == BoxShim.source)
+      #expect(settingsText == BoxShim.settings(for: facts))
+      #expect(mode(shim) == 0o700)
+      #expect(mode(settings) == 0o600)
+      let command = JSON.parse(BoxShim.settings(for: facts))?["hooks"]?["Stop"]?.array?.first?["hooks"]?.array?.first?[
+        "command"]?.string
+      #expect(command == "\(shellQuote(facts.python)) \(shellQuote(shim)) hook")
+      var info = stat()
+      #expect(lstat("\(facts.home)/.sb/sbd.sock", &info) == 0 && info.st_mode & S_IFMT == S_IFSOCK)
+    }
+  }
+
+  /// Setup writes a file only when its text differs.
+  @Test(.timeLimit(.minutes(1)))
+  func theNextConnectionKeepsAFileWhoseTextIsTheSameAndReplacesOneThatDiffers() throws {
+    try withReadyService { _, service, facts in
+      let shim = "\(facts.home)/.sb/bin/sb-shim"
+      let settings = "\(facts.home)/.sb/claude-settings.json"
+      try "# an older shim\n".write(toFile: shim, atomically: false, encoding: .utf8)
+      let (oldShim, oldSettings) = (inode(shim), inode(settings))
+
+      _ = try reconnect(service)
+
+      #expect(try String(contentsOfFile: shim, encoding: .utf8) == BoxShim.source)
+      #expect(inode(shim) != oldShim)
+      #expect(mode(shim) == 0o700)
+      #expect(inode(settings) == oldSettings, "setup wrote a settings file whose text was the same")
+      var info = stat()
+      #expect(lstat("\(facts.home)/.sb/sbd.sock", &info) == 0 && info.st_mode & S_IFMT == S_IFSOCK)
+    }
+  }
+
+  /// ssh reads a colon as the end of a path, so a forward of such a path would bind another one.
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      ("/tmp/a:b/sbd.sock", "/tmp/x.sock"), ("/tmp/a.sock", "/tmp/x:y.sock"),
+      ("relative/a.sock", "/tmp/x.sock"), ("/tmp/a.sock", "x.sock"), ("", "/tmp/x.sock"),
+    ])
+  func aForwardOfAPathThatSshWouldMisreadIsRefusedBeforeSshRuns(remote: String, local: String) throws {
+    try withReadyService { b, service, _ in
+      let link = try #require(service.hostLinks["mini"])
+      let before = b.bench.logText
+
+      #expect(throws: (any Error).self) { try link.forward(remote: remote, local: local) }
+
+      #expect(b.bench.logText == before, "sbd ran ssh for a forward that it refused")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aForwardOnALinkThatIsNotConnectedThrows() throws {
+    try withHostService { service, _ in
+      let link = try #require(service.hostLinks["mini"])
+
+      #expect(throws: (any Error).self) { try link.forward(remote: "/tmp/a.sock", local: "/tmp/b.sock") }
+    }
+  }
+}

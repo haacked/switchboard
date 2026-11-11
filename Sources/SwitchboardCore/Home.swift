@@ -49,6 +49,12 @@ public struct Home: Sendable {
   /// session removes its session folder, and these with it.
   public func attachmentsFolder(_ id: String) -> String { "\(sessionFolder(id))/attachments" }
 
+  /// The folder of the sockets that sbd listens on for its remote hosts.
+  public var hostsFolder: String { "\(path)/hosts" }
+  /// The socket that sbd listens on for the requests of a remote host. An ssh forward connects the host's
+  /// `~/.sb/sbd.sock` to it.
+  public func hostSocket(_ host: String) -> String { "\(hostsFolder)/\(host)/sbd.sock" }
+
   public func create() throws {
     try FileManager.default.createDirectory(
       atPath: path, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

@@ -1,6 +1,18 @@
 import Foundation
 import SwitchboardCore
 
+extension SessionSite {
+  /// The visible screen of the pane, as `TerminalHost.screen` gives it. A site that names a host returns only
+  /// a screen that the host's tmux answered with. It throws when the capture got no answer or its output is
+  /// not in the answered form, so the empty output of a command that its timeout ended never reads as an empty
+  /// screen.
+  func screen(_ pane: String, colors: Bool = false) throws -> String {
+    let terminals = try terminals()
+    guard hostName != nil else { return try terminals.screen(pane, colors: colors) }
+    return try confirmed("the screen read of \(pane)") { try terminals.answeredScreen(pane, colors: colors, on: $0) }
+  }
+}
+
 /// Where a session's claude, shell, folder, and transcript are: this Mac or a remote host.
 /// Session code reaches tmux, git, ps, kill, and files only through the session's site.
 protocol SessionSite: AnyObject {

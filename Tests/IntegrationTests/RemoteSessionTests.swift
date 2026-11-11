@@ -15,8 +15,8 @@ private struct Lifecycle {
 }
 
 /// A session on a remote host, which the ssh stub stands in for. Its claude and shell run in the tmux server of the
-/// box, at `<box home>/.sb/tmux.sock`. A remote claude gets no hook settings in this stage, so these tests read
-/// `claudePid`, the stub's argument log on the box, and the pane's screen, and never a reply.
+/// box, at `<box home>/.sb/tmux.sock`. These tests read `claudePid`, the stub's argument log on the box, and the
+/// pane's screen. `RemoteHookTests` covers the hooks of a remote claude.
 @Suite(.blocking(timeLimit: .seconds(180))) struct RemoteSessionTests {
   /// Starts a session on mini in `~/sb-box-repo` with a first prompt and waits for its claude and for its transcript,
   /// which the stub writes when it answers the prompt.
@@ -478,8 +478,9 @@ private struct Lifecycle {
 
   // MARK: Parity
 
-  /// A remote launch leaves out `--settings`, the shared MCP config, `claudeArgs`, and the triage nudge, and its
-  /// pane has no CLAUDE_CONFIG_DIR. Everything else matches a local launch with the same arguments.
+  /// A remote launch names the box's hook settings in place of this Mac's, leaves out the shared MCP config,
+  /// `claudeArgs`, and the triage nudge, and its pane has no CLAUDE_CONFIG_DIR. Everything else matches a local
+  /// launch with the same arguments.
   @Test func aRemoteLaunchGetsTheArgumentsOfALocalOneExceptTheListedDifferences() throws {
     let sbd = try Instance.remote(config: ["claudeArgs": ["--verbose"], "triage": ["systemPrompt": "nudge"]])
     try sbd.makeBoxFolder()
@@ -495,11 +496,17 @@ private struct Lifecycle {
 
     var expected = localCall.args.replacingOccurrences(of: localId, with: remoteId).split(separator: " ").map(
       String.init)
-    for (flag, values) in [("--settings", 1), ("--mcp-config", 1), ("--verbose", 0), ("--append-system-prompt", 1)] {
+    for (flag, values) in [("--mcp-config", 1), ("--verbose", 0), ("--append-system-prompt", 1)] {
       if let at = expected.firstIndex(of: flag) { expected.removeSubrange(at...(at + values)) }
     }
-    #expect(remoteCall.args.split(separator: " ").map(String.init) == expected)
-    #expect(remoteCall.args == "--session-id \(remoteId) --model opus -- hello")
+    let remoteArgs = remoteCall.args.split(separator: " ").map(String.init)
+    let settings = try #require(expected.firstIndex(of: "--settings")) + 1
+    try #require(remoteArgs.count > settings, "\(remoteArgs)")
+    #expect(real(remoteArgs[settings]) == real(sbd.boxSettings))
+    #expect(expected[settings] == sbd.home.claudeSettings)
+    expected[settings] = remoteArgs[settings]
+    #expect(remoteArgs == expected)
+    #expect(remoteCall.args == "--session-id \(remoteId) --settings \(remoteArgs[settings]) --model opus -- hello")
     #expect(localCall.args.contains("--verbose") && localCall.args.contains("--append-system-prompt nudge"))
     #expect(!localCall.account.isEmpty)
     #expect(remoteCall.account.isEmpty)
@@ -521,7 +528,10 @@ private struct Lifecycle {
     try sbd.waitFor(local.id, "the local claude to run again") { $0.claudePid != nil }
 
     #expect(sbd.stubArgs().last == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings)")
-    #expect(sbd.boxStubArgs().last == "--resume \(remote.claudeSessionId)")
+    let resumed = (sbd.boxStubArgs().last ?? "").split(separator: " ").map(String.init)
+    try #require(resumed.count == 4, "\(resumed)")
+    #expect(Array(resumed.prefix(3)) == ["--resume", remote.claudeSessionId, "--settings"])
+    #expect(real(resumed[3]) == real(sbd.boxSettings))
   }
 
   // MARK: The fixtures

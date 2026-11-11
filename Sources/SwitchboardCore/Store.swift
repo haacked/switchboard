@@ -26,6 +26,7 @@ public final class Store {
     try exec(
       "CREATE TABLE IF NOT EXISTS resolved_todos (id INTEGER PRIMARY KEY, session TEXT, name TEXT, repo TEXT, branch TEXT, pr INTEGER, note TEXT, text TEXT, by TEXT, added INTEGER, resolved INTEGER, how TEXT)"
     )
+    try exec("CREATE TABLE IF NOT EXISTS host_events (id TEXT PRIMARY KEY, host TEXT, session TEXT)")
   }
 
   deinit { sqlite3_close(db) }
@@ -185,6 +186,45 @@ public final class Store {
     var stored = event
     stored.id = sqlite3_last_insert_rowid(db)
     return stored
+  }
+
+  /// Appends a hook event that a host's shim made, and records its id for the host, in one transaction. It
+  /// returns nil, and stores nothing, when the id is already recorded, whatever host or session recorded it.
+  public func append(_ event: Event, hostEvent id: HostEventID, host: String) throws -> Event? {
+    try transaction {
+      guard try !hasHostEvent(id) else { return nil }
+      try run("INSERT INTO host_events (id, host, session) VALUES (?, ?, ?)", [id.text, host, event.session])
+      return try append(event)
+    }
+  }
+
+  public func hasHostEvent(_ id: HostEventID) throws -> Bool {
+    !(try query("SELECT 1 FROM host_events WHERE id = ?", [id.text]) { $0.int(0) }).isEmpty
+  }
+
+  /// How far behind a host's newest id a recorded id is kept. It is far past the longest time an event can be
+  /// in flight after its spool line is cut.
+  public static let hostEventKeepNs: UInt64 = 24 * 3_600 * 1_000_000_000
+
+  /// Removes the host's recorded ids whose clock is more than `hostEventKeepNs` behind the host's newest id.
+  /// It also keeps every id whose clock is within that time of `nowNs`, so one id with a clock far ahead
+  /// removes nothing that is recent.
+  public func pruneHostEvents(host: String, nowNs: UInt64) throws {
+    let newest = try query("SELECT id FROM host_events WHERE host = ? ORDER BY id DESC LIMIT 1", [host]) {
+      HostEventID($0.text(0))?.ns
+    }.first
+    guard let newest = newest ?? nil else { return }
+    let end = min(newest, nowNs)
+    guard end > Store.hostEventKeepNs else { return }
+    // Ids start with their clock as 20 digits, so ids below this text are the ids with an earlier clock.
+    let digits = String(end - Store.hostEventKeepNs)
+    let cutoff = String(repeating: "0", count: 20 - digits.count) + digits
+    try run("DELETE FROM host_events WHERE host = ? AND id < ?", [host, cutoff])
+  }
+
+  /// The time of the session's last event, or nil for a session with none.
+  public func lastEventTime(session: String) throws -> Int64? {
+    try query("SELECT t FROM events WHERE session = ? ORDER BY id DESC LIMIT 1", [session]) { $0.int(0) }.first
   }
 
   /// Events with an id above `since`, oldest first, for one session or for

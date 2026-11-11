@@ -17,16 +17,16 @@ extension Service {
   /// request marks the event `allowed`. It captures the screens off the state
   /// queue.
   func closeGoneDialogs() {
-    let due: [(id: String, pane: String, terminals: TerminalHost)] = queue.sync {
+    let due: [(id: String, pane: String, site: any SessionSite)] = queue.sync {
       entries.keys.sorted().compactMap { id in
         guard entries[id]?.facts.cards.contains(where: DialogWatch.watches) == true, case .running = claudeState(id)
         else { return nil }
-        guard let terminals = try? site(of: id).terminals() else { return nil }
-        return (id, paneName(id, .claude), terminals)
+        guard let site = try? site(of: id) else { return nil }
+        return (id, paneName(id, .claude), site)
       }
     }
     guard !due.isEmpty else { return }
-    let screens = due.map { ($0.id, try? $0.terminals.screen($0.pane)) }
+    let screens = due.map { ($0.id, try? $0.site.screen($0.pane)) }
     queue.sync {
       for case (let id, let screen?) in screens {
         guard let cards = entries[id]?.facts.cards, let left = entries[id]?.dialogs.check(cards, screen: screen)
@@ -58,10 +58,10 @@ extension Service {
   /// dialog that still shows. This runs on the state queue.
   func dialogClosed(_ card: Card) -> Bool {
     let pane = paneName(card.session, .claude)
-    guard let terminals = try? site(of: card.session).terminals() else { return false }
+    guard let site = try? site(of: card.session) else { return false }
     let deadline = Date() + 3
     while true {
-      if let screen = try? terminals.screen(pane), ClaudeScreen.dialog(screen) == nil { return true }
+      if let screen = try? site.screen(pane), ClaudeScreen.dialog(screen) == nil { return true }
       if Date() >= deadline { return false }
       usleep(100_000)
     }
@@ -89,7 +89,7 @@ extension Service {
 
   /// The lines of the card's dialog, or nil when the screen doesn't show it.
   private func cardDialog(_ card: Card, _ pane: String) -> [String]? {
-    guard let screen = try? site(of: card.session).terminals().screen(pane), let dialog = ClaudeScreen.dialog(screen),
+    guard let screen = try? site(of: card.session).screen(pane), let dialog = ClaudeScreen.dialog(screen),
       ClaudeScreen.shows(card, dialog)
     else { return nil }
     return dialog

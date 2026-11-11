@@ -740,3 +740,213 @@ extension Instance {
     return !state.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("Z")
   }
 }
+
+/// The hooks of a remote host. A remote claude's hooks reach sbd through the socket that sbd listens on for the
+/// host, `$SB_HOME/hosts/<host>/sbd.sock`. A test sends raw lines to that socket, as a program on the host can.
+extension Instance {
+  /// The socket that sbd listens on for the host's requests.
+  func hostSocket(_ host: String = "mini") -> String { "\(home.path)/hosts/\(host)/sbd.sock" }
+
+  /// The far end of the forward, which the shim on the box connects to.
+  var boxSocket: String { "\(boxSB)/sbd.sock" }
+
+  var boxSpool: String { "\(boxSB)/spool.jsonl" }
+
+  var boxShim: String { "\(boxSB)/bin/sb-shim" }
+
+  var boxSettings: String { "\(boxSB)/claude-settings.json" }
+
+  /// A hook event id as the shim makes it: the clock in ns as 20 digits, a pid, and 4 hex digits.
+  static func eventId(ns: UInt64, pid: Int = Int(getpid()), suffix: String? = nil) -> String {
+    let digits = String(ns)
+    let clock = String(repeating: "0", count: max(0, 20 - digits.count)) + digits
+    return "\(clock)-\(pid)-\(suffix ?? String(format: "%04x", UInt32.random(in: 0...0xffff)))"
+  }
+
+  /// This Mac's clock in ns, which is also the box's clock, because the stub runs the box here.
+  static func clockNs() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1_000_000_000) }
+
+  /// A payload that sbd records and that changes no turn: a Notification that names the marker in `probe`.
+  static func probePayload(_ marker: String, kind: String = "Notification", claudeSessionId: String = "probe") -> JSON {
+    var payload: [String: JSON] = [
+      "hook_event_name": .string(kind), "session_id": .string(claudeSessionId), "permission_mode": "default",
+      "probe": .string(marker),
+    ]
+    switch kind {
+    case "Notification": payload["notification_type"] = "sb_test"
+    case "PermissionRequest", "PreToolUse", "PostToolUse":
+      payload["tool_name"] = "Bash"
+      payload["tool_input"] = ["command": .string("touch \(marker)")]
+    default: break
+    }
+    return .object(payload)
+  }
+
+  /// The line of a `hook` request, as the shim sends it. Nil leaves the key out.
+  static func hookLine(session: JSON?, payload: JSON?, id: String?, extra: [String: JSON] = [:]) -> String {
+    var args = extra
+    if let session { args["session"] = session }
+    if let payload { args["payload"] = payload }
+    if let id { args["id"] = .string(id) }
+    return JSON.object(["op": "hook", "args": .object(args)]).text
+  }
+
+  static func requestLine(_ op: String, _ args: [String: JSON] = [:]) -> String {
+    JSON.object(["op": .string(op), "args": .object(args)]).text
+  }
+
+  /// Sends each line on one connection and returns the answer to each. An answer is nil when sbd closed the
+  /// connection or sent a line that is not JSON. It throws when sbd sends nothing within the timeout.
+  func sendLines(_ lines: [Data], to socket: String, timeout: TimeInterval = 5) throws -> [JSON?] {
+    let fd = try UnixSocket.connect(path: socket, timeout: timeout)
+    defer { close(fd) }
+    var reader = UnixSocket.LineReader(fd: fd)
+    var answers: [JSON?] = []
+    for line in lines {
+      guard (try? UnixSocket.write(fd, line + Data("\n".utf8))) != nil else {
+        answers.append(nil)
+        continue
+      }
+      let reply = try reader.next()
+      answers.append(reply.flatMap { String(data: $0, encoding: .utf8) }.flatMap(JSON.parse))
+    }
+    return answers
+  }
+
+  func sendLine(_ line: String, to socket: String, timeout: TimeInterval = 5) throws -> JSON? {
+    try sendLines([Data(line.utf8)], to: socket, timeout: timeout)[0]
+  }
+
+  /// Sends a probe hook for the session to the host's socket and returns sbd's answer.
+  @discardableResult
+  func sendProbe(
+    _ marker: String, session: String, id: String = Instance.eventId(ns: Instance.clockNs()), host: String = "mini",
+    kind: String = "Notification"
+  ) throws -> JSON? {
+    try sendLine(
+      Instance.hookLine(session: .string(session), payload: Instance.probePayload(marker, kind: kind), id: id),
+      to: hostSocket(host))
+  }
+
+  /// Every event in the log, of every session, oldest first.
+  func allEvents() throws -> [Event] {
+    try client.call("events", ["since": 0, "limit": 1_000_000], as: [Event].self)
+  }
+
+  /// The events whose payload names the marker, oldest first.
+  func probes(_ marker: String) throws -> [Event] { try allEvents().filter { $0.data["probe"] == .string(marker) } }
+
+  /// Waits until the log has held the same events for a second, and returns them. A hook that sbd holds for its
+  /// order window, and a hook that a starting claude still sends, are then in the log.
+  func settledEvents() throws -> [Event] {
+    var last = try allEvents()
+    var since = Date()
+    try waitFor("the event log to stop growing", timeout: 30) {
+      let now = try allEvents()
+      if now != last {
+        last = now
+        since = Date()
+      }
+      return Date().timeIntervalSince(since) >= 1
+    }
+    return last
+  }
+
+  /// The lines that the stub claude on the box read from its terminal, oldest first.
+  func boxStubInput() -> [String] {
+    let text = (try? String(contentsOfFile: "\(boxSB)/stub-input.log", encoding: .utf8)) ?? ""
+    return text.split(separator: "\n").map(String.init)
+  }
+
+  /// The whole lines of the box's spool as JSON, oldest first. A line that is not JSON reads as null.
+  func boxSpoolLines() -> [JSON] {
+    let text = (try? String(contentsOfFile: boxSpool, encoding: .utf8)) ?? ""
+    return text.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map {
+      JSON.parse(String($0)) ?? .null
+    }
+  }
+
+  /// The arguments of each `-O forward` run of the ssh stub, oldest first.
+  func sshStubForwards() -> [[String]] {
+    sshStubLog.split(separator: "\n").compactMap { line in
+      guard let argv = JSON.parse(String(line))?["argv"]?.array?.compactMap(\.string),
+        let at = argv.firstIndex(of: "-O"), argv.indices.contains(at + 1), argv[at + 1] == "forward"
+      else { return nil }
+      return argv
+    }
+  }
+
+  /// Whether the PermissionRequest hook that the stub claude on the box ran last still runs.
+  func boxHeldHookRuns() -> Bool {
+    guard let pid = stubPid("ssh-stub/home/.sb/held-hook.pid") else { return false }
+    return runs(Int(pid))
+  }
+
+  /// A session on the host whose claude reported its SessionStart through the forward. With a prompt, it does not
+  /// wait for the turn.
+  func startOnHost(_ folder: String = "sb-box-repo", host: String = "mini", prompt: String? = nil) throws -> (
+    id: String, claudeSessionId: String, cwd: String, pid: Int
+  ) {
+    try makeBoxFolder(folder)
+    let summary = try #require(
+      JSON.parse(try sb(["new", "~/\(folder)", "--host", host, "--json"] + (prompt.map { ["--prompt", $0] } ?? []))))
+    let id = try self.id(of: summary)
+    let live = try waitFor(id, "the SessionStart of the claude on the box") { $0.live && $0.claudePid != nil }
+    return (
+      id, try #require(summary["claudeSessionId"]?.string), try #require(summary["cwd"]?.string),
+      try #require(live.claudePid)
+    )
+  }
+}
+
+/// A request that a test sends on a thread of its own, because sbd holds its answer.
+final class HeldLine: @unchecked Sendable {
+  private let lock = NSLock()
+  private var fd: Int32 = -1
+  private var answer: JSON??
+  private let done = DispatchSemaphore(value: 0)
+
+  /// Connects and sends the line. The answer arrives on another thread.
+  init(_ line: String, to socket: String, timeout: TimeInterval = 120) throws {
+    let fd = try UnixSocket.connect(path: socket, timeout: timeout)
+    self.fd = fd
+    try UnixSocket.write(fd, Data((line + "\n").utf8))
+    Thread.detachNewThread { [self] in
+      var reader = UnixSocket.LineReader(fd: fd)
+      let reply = (try? reader.next()).flatMap { $0 }
+      lock.lock()
+      answer = .some(reply.flatMap { String(data: $0, encoding: .utf8) }.flatMap(JSON.parse))
+      lock.unlock()
+      done.signal()
+    }
+  }
+
+  deinit { close() }
+
+  /// The answer, or nil when none arrived within the seconds or sbd closed the connection.
+  func wait(_ seconds: Double) -> JSON? {
+    guard done.wait(timeout: .now() + seconds * Instance.timeoutScale) == .success else { return nil }
+    done.signal()
+    lock.lock()
+    defer { lock.unlock() }
+    return answer ?? nil
+  }
+
+  /// Whether sbd has answered or closed the connection.
+  var answered: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return answer != nil
+  }
+
+  /// Closes the connection, as a hook that Claude Code ended does.
+  func close() {
+    lock.lock()
+    defer { lock.unlock() }
+    if fd >= 0 {
+      Darwin.shutdown(fd, SHUT_RDWR)
+      Darwin.close(fd)
+      fd = -1
+    }
+  }
+}

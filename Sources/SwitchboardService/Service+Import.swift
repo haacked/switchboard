@@ -94,7 +94,7 @@ extension Service {
     let accounts = self.accounts
     let listed = try listAgents(accounts, now: now)
     return queue.sync {
-      let owned = Set(entries.values.map(\.session.claudeSessionId))
+      let owned = Set(macConversations.map(\.claudeSessionId))
       let ids = Set(listed.map(\.id))
       remember(listed, owned: owned, ids: ids, now: now)
       return listed + exitedSessions(owned: owned, ids: ids, accounts: Set(accounts))
@@ -312,13 +312,17 @@ extension Service {
     return .success(c)
   }
 
+  /// The sessions whose conversation is one of this Mac's. A session on a host names a conversation of that
+  /// host, and the host's SessionStart hook chooses the id. It owns no conversation that import lists.
+  private var macConversations: [Session] { entries.values.map(\.session).filter { $0.host == nil } }
+
   /// A Switchboard session whose conversation `id` names. `id` is a Claude
   /// session id, or a prefix that only one conversation has. A `/clear` or
   /// `/resume` in a pane can switch a session to another session's
   /// conversation. Two sessions can then hold one conversation, and this
   /// returns either of them.
   private func owner(of id: String) -> String? {
-    let owners = entries.values.map(\.session).filter { $0.claudeSessionId.hasPrefix(id) }
+    let owners = macConversations.filter { $0.claudeSessionId.hasPrefix(id) }
     return Set(owners.map(\.claudeSessionId)).count == 1 ? owners.first?.id : nil
   }
 

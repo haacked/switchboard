@@ -89,6 +89,7 @@ extension Service {
   func forgetSession(_ id: String, resolving: Set<String>) throws {
     try store.delete(session: id, resolving: checkTodos(id, resolving: resolving))
     entries[id] = nil
+    hostEvents[id] = nil
   }
 
   /// Resolves an open to-do as the user, and records it in `resolved_todos`.

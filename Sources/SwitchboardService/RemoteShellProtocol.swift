@@ -43,7 +43,9 @@ enum RemoteShellProtocol {
   /// ends in time. A `sleep` that the subshell ran itself would run on for the whole timeout
   /// after every command, because ending a subshell does not end its child. The `sleep` sends
   /// stderr to /dev/null before it opens the FIFO, because bash reports an open that a signal
-  /// interrupts.
+  /// interrupts. The subshell creates `$sb_d/t` before it ends the program. A program that
+  /// exits 0 on the signal, as a tmux client does, then still answers with 143, so a command
+  /// that its timeout ended never reads as one that succeeded.
   ///
   /// `sb_emit` runs one `wc` on both files from inside `$sb_d`, so the words of its output are
   /// `<stdout bytes> o <stderr bytes> e <sum> total` whatever the folder's name holds.
@@ -71,12 +73,16 @@ enum RemoteShellProtocol {
       sb_w=
       if [ -n "$sb_t" ]; then
         sleep "$sb_t" 2>/dev/null >"$sb_d/f" & sb_k=$!
-        ( read sb_z <"$sb_d/f"; kill -TERM "$sb_c"; sleep 2; kill -KILL "$sb_c" ) >/dev/null 2>&1 & sb_w=$!
+        ( read sb_z <"$sb_d/f"; : >"$sb_d/t"; kill -TERM "$sb_c"; sleep 2; kill -KILL "$sb_c" ) >/dev/null 2>&1 & sb_w=$!
       fi
       wait "$sb_c" 2>/dev/null; sb_x=$?
       if [ -n "$sb_w" ]; then
         kill "$sb_w" 2>/dev/null; wait "$sb_w" 2>/dev/null
         kill "$sb_k" 2>/dev/null; wait "$sb_k" 2>/dev/null
+        if [ -e "$sb_d/t" ]; then
+          rm -f "$sb_d/t" || exit 97
+          [ "$sb_x" -ne 0 ] || sb_x=143
+        fi
       fi
       sb_emit "$sb_n" "$sb_x"
       rm -f "$sb_d/i" "$sb_d/o" "$sb_d/e" || exit 97

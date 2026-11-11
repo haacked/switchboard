@@ -306,6 +306,28 @@ final class TerminalHost {
         + ["-t", "=\(name):"])
   }
 
+  /// Prints the exit status of the command in `$@` and its output, with a NUL after each. An `x` ends the
+  /// output, so the shell keeps the newlines at the end of a screen.
+  private static let answeredScript = #"out=$("$@" 2>&1; s=$?; printf x; exit $s); printf '%s\0%s\0' "$?" "$out""#
+
+  /// The visible screen, read through `machine` in a form that shows tmux answered: tmux's exit status and
+  /// the screen, each ended by a NUL. It throws for any other output, which a capture that its timeout ended
+  /// gives, and for a capture that tmux refused.
+  func answeredScreen(_ name: String, colors: Bool = false, on machine: any Machine) throws -> String {
+    let capture =
+      ["-S", socket, "-f", conf, "capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + ["-t", "=\(name):"]
+    let r = try machine.run(
+      "/bin/sh", ["-c", Self.answeredScript, "sb", tmux] + capture, env: baseEnv, input: nil, timeout: timeout)
+    guard r.status == 0 else { throw APIError("the screen read of \(name) exited with status \(r.status)") }
+    let f = try RemoteSite.fields(Data(r.stdout.utf8), count: 2, of: "the screen read of \(name)")
+    guard f[1].hasSuffix("x") else { throw APIError("the screen read of \(name) is cut short") }
+    let output = String(f[1].dropLast())
+    guard f[0] == "0" else {
+      throw APIError("tmux capture-pane: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
+    }
+    return output
+  }
+
   /// The last `count` lines that the pane's program printed, without the
   /// line that tmux adds when the program exits.
   func lastLines(_ name: String, _ count: Int) -> [String]? {
