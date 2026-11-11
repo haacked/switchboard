@@ -21,6 +21,8 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
+  /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
+  @Published var knownRepos: [KnownRepo]?
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
   @Published var confirmingDelete: SessionSummary?
@@ -930,6 +932,27 @@ final class BoardModel: ObservableObject {
     perform("new", json) { value in
       if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
+  }
+
+  func loadRepos() {
+    perform(
+      "repos", [:],
+      then: { self.knownRepos = (try? JSONCoding.convert($0, to: [KnownRepo].self)) ?? [] },
+      failed: { _ in self.knownRepos = self.knownRepos ?? [] })
+  }
+
+  /// Asks sbd to add the repository that holds `path` and puts it first in `knownRepos`.
+  func addRepo(_ path: String, then: @escaping (Result<KnownRepo, Error>) -> Void) {
+    perform(
+      "repo-add", ["path": .string(path.expandingTilde)],
+      then: { value in
+        let result = Result { try JSONCoding.convert(value, to: KnownRepo.self) }
+        if let repo = try? result.get() {
+          self.knownRepos = [repo] + (self.knownRepos ?? []).filter { $0.path != repo.path }
+        }
+        then(result)
+      },
+      failed: { then(.failure($0)) })
   }
 
   /// Asks sbd for the session's tmux targets. It blocks, so it runs off the

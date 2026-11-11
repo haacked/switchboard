@@ -135,6 +135,32 @@ func tempFolder() throws -> String {
     try store.delete(claudeSession: "u2")
     #expect(try store.claudeSessions() == [one])
   }
+
+  @Test func rememberKeepsTheLaterUseOfARepo() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try store.remember(repo: "/dev/alpha", used: 5)
+      try store.remember(repo: "/dev/beta", used: 6)
+      try store.remember(repo: "/dev/alpha", used: 9)
+      try store.remember(repo: "/dev/alpha", used: 7)
+    }
+
+    let rows = try Store(path: "\(dir)/sb.db").knownRepos()
+
+    #expect(Dictionary(uniqueKeysWithValues: rows.map { ($0.path, $0.used) }) == ["/dev/alpha": 9, "/dev/beta": 6])
+    #expect(rows.count == 2)
+  }
+
+  @Test func knownReposAreEmptyInANewDatabase() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.knownRepos().isEmpty)
+  }
 }
 
 @Suite struct ConfigTests {

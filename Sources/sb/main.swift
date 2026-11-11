@@ -252,6 +252,10 @@ let usage = """
     host connect <host>           open the host's ssh link and keep it open. An
                                   open link keeps a devbox running
     host disconnect <host>        close the host's ssh link
+    repo [ls]                     list the repositories that the New Session
+                                  sheet offers, most recently used first
+    repo add <path>               add the repository that holds the folder. A
+                                  worktree adds its main checkout
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -758,6 +762,8 @@ case "mcp-server":
   mcpServer(a)
 case "host":
   host(a)
+case "repo", "repos":
+  repo(a)
 case "autocontinue":
   autoContinue(a)
 case "live":
