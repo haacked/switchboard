@@ -18,16 +18,26 @@ extension Service {
     var activity: Int64
   }
 
+  /// The checks that one `claude agents` run answers: those of one account at one site.
+  private struct TurnChecks {
+    var site: any SessionSite
+    var account: String
+    var checks: [TurnCheck]
+  }
+
   /// Ends the turns of the sessions that `claude agents` reports idle. It
   /// runs claude off the state queue.
   func endIdleTurns() {
     let due = queue.sync { dueTurnChecks(now: nowMs()) }
     guard !due.isEmpty else { return }
     guard let claude = findExecutable(config.claude) else { return }
-    let answers = concurrentMap(Array(due)) { account, checks in
+    let answers = concurrentMap(due) { group in
       (
-        account, checks,
-        Result { try agentRows(claude, account: account, seen: nowMs(), timeout: Service.turnCheckTimeout) }
+        group.account, group.checks,
+        Result {
+          try agentRows(
+            claude, account: group.account, seen: nowMs(), timeout: Service.turnCheckTimeout, on: group.site.machine)
+        }
       )
     }
     queue.sync {
@@ -45,15 +55,21 @@ extension Service {
     }
   }
 
-  /// The sessions whose turn has gone quiet, by account.
-  private func dueTurnChecks(now: Int64) -> [String: [TurnCheck]] {
-    var due: [String: [TurnCheck]] = [:]
+  /// The sessions whose turn has gone quiet, by site and account.
+  private func dueTurnChecks(now: Int64) -> [TurnChecks] {
+    var due: [TurnChecks] = []
     for id in entries.keys.sorted() {
       guard let e = entries[id], e.facts.live, e.facts.turnRunning, case .running = claudeState(id) else { continue }
       let activity = e.facts.lastActivity
       guard entries[id]?.turnProbe.check(activity: activity, now: now) == true else { continue }
-      due[claudeAccount(of: id), default: []].append(
-        TurnCheck(id: id, claudeSessionId: e.session.claudeSessionId, activity: activity))
+      let site = self.site(for: e.session)
+      let account = claudeAccount(of: id)
+      let check = TurnCheck(id: id, claudeSessionId: e.session.claudeSessionId, activity: activity)
+      if let i = due.firstIndex(where: { $0.site === site && $0.account == account }) {
+        due[i].checks.append(check)
+      } else {
+        due.append(TurnChecks(site: site, account: account, checks: [check]))
+      }
     }
     return due
   }

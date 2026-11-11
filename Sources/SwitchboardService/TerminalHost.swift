@@ -38,7 +38,7 @@ final class TerminalHost {
   /// base environment still come from this Mac.
   private let machine: any Machine
 
-  init(home: Home, config: Config, machine: any Machine = LocalMachine()) throws {
+  init(home: Home, config: Config, machine: any Machine) throws {
     self.machine = machine
     guard let tmux = findExecutable(config.tmux ?? "tmux") else {
       throw APIError("can't find tmux. Install it with `brew install tmux`, or set \"tmux\" in \(home.config)")

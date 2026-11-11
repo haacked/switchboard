@@ -99,7 +99,7 @@ extension Service {
     let (id, findTranscript, machine, hooked) = try queue.sync {
       () -> (String, () -> String?, any Machine, String?) in
       let id = try lookup(args)
-      return (id, transcriptFinder(id), self.machine(of: id), entries[id]!.facts.lastReply)
+      return (id, transcriptFinder(id), try site(of: id).machine, entries[id]!.facts.lastReply)
     }
     let text = findTranscript().flatMap { Transcript.tail($0, on: machine).lastReply }
     guard let reply = text ?? hooked else { throw APIError("\(id) has no reply yet") }
@@ -113,7 +113,7 @@ extension Service {
     let account = paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
     let session = e.session
     let known = e.facts.transcriptPath
-    let machine = self.machine(for: session)
+    let machine = site(for: session).machine
     return {
       if let known, machine.exists(known) { return known }
       return session.started

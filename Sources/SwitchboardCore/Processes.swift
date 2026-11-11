@@ -112,7 +112,7 @@ public struct ProcessRow: Sendable {
 
 public enum Processes {
   /// Every process on the machine, grouped by parent pid.
-  public static func byParent(on machine: any Machine = LocalMachine()) -> [Int: [ProcessRow]] {
+  public static func byParent(on machine: any Machine) -> [Int: [ProcessRow]] {
     guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
     let rows = r.stdout.split(separator: "\n").compactMap { line -> ProcessRow? in
       let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)

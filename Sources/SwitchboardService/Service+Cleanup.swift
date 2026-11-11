@@ -30,17 +30,17 @@ extension Service {
       }
       try requireNoTurn(e)
       install(fresh)
-      return beginPaneStop(session.id)
+      return try beginPaneStop(session.id)
     }
     try finishPaneStop(session, stop, command: "sb cleanup")
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
-    let machine = self.machine(for: session)
-    try removeWorktree(repo, session.cwd, on: machine)
+    let site = self.site(for: session)
+    try removeWorktree(repo, session.cwd, at: site)
     var branchRemoved = false
     var branchError: Error?
     if let branch {
       do {
-        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, on: machine)
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, at: site)
       } catch {
         branchError = error
       }
@@ -93,7 +93,7 @@ extension Service {
     guard session.repo != nil else {
       throw APIError("sbd didn't make the worktree of \(session.id) at \(session.cwd), so cleanup leaves it alone.")
     }
-    guard machine(for: session).exists(session.cwd) else {
+    guard site(for: session).machine.exists(session.cwd) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
@@ -106,7 +106,7 @@ extension Service {
   /// folder.
   func requireFolder(_ session: Session) throws {
     try refuseNotStarted(session)
-    guard !machine(for: session).exists(session.cwd) else { return }
+    guard !site(for: session).machine.exists(session.cwd) else { return }
     if entries[session.id]?.facts.cleanedUp != nil {
       throw APIError("\(session.id) was cleaned up, and its worktree is gone.")
     }

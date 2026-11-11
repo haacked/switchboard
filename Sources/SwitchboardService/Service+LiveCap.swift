@@ -104,7 +104,7 @@ extension Service {
     let now = nowMs()
     let live = liveEntries().map { e in
       LiveStatus.LiveSession(
-        session: e.session.id, name: e.session.name, pid: snapshot.claudePids[e.session.id],
+        session: e.session.id, name: e.session.name, pid: claudePid(e.session.id),
         state: Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state)
     }.sorted { ($0.name, $0.session) < ($1.name, $1.session) }
     let queued = queuedStarts().map {

@@ -521,3 +521,58 @@ extension Instance {
     return pid
   }
 }
+
+/// The calls on this Mac's machine and site, which sbd writes to a file when `machineLog` is on.
+extension Instance {
+  /// The config.json key that turns the log on.
+  static let machineLogConfig: [String: JSON] = ["machineLog": true]
+
+  /// One line of the log.
+  struct MachineCall: CustomStringConvertible {
+    var json: JSON
+    /// Every key, string, and whole number of the line at any depth, which hold the member's name and its arguments.
+    var words: [String]
+    var description: String { json.text }
+
+    init(_ json: JSON) {
+      self.json = json
+      words = MachineCall.words(json)
+    }
+
+    private static func words(_ value: JSON) -> [String] {
+      switch value {
+      case .string(let text): [text]
+      case .number: value.int.map { [String($0)] } ?? []
+      case .array(let items): items.flatMap(words)
+      case .object(let fields): fields.flatMap { [$0.key] + words($0.value) }
+      case .null, .bool: []
+      }
+    }
+
+    func has(_ word: String) -> Bool { words.contains(word) }
+
+    /// Whether the call ran the program, whatever folder holds it.
+    func runs(_ program: String) -> Bool {
+      has("run") && words.contains { ($0 as NSString).lastPathComponent == program }
+    }
+  }
+
+  var machineLog: String { "\(home.path)/mac-machine.log" }
+
+  /// The log's whole lines, oldest first. It throws for a line that is not one JSON object. It leaves out the text
+  /// after the last newline, which sbd may still be writing.
+  func machineCalls() throws -> [MachineCall] {
+    guard let text = try? String(contentsOfFile: machineLog, encoding: .utf8) else { return [] }
+    return try text.split(separator: "\n", omittingEmptySubsequences: false).dropLast().map { line in
+      guard let json = JSON.parse(String(line)), json.object != nil else {
+        throw TestError(description: "\(machineLog) holds a line that is not a JSON object: \(line)")
+      }
+      return MachineCall(json)
+    }
+  }
+
+  /// Waits for a logged call that matches, and returns it.
+  func waitForMachineCall(_ what: String, _ match: (MachineCall) -> Bool) throws -> MachineCall {
+    try waitFor(what, fetch: { try machineCalls().first(where: match) }, until: { _ in true })
+  }
+}

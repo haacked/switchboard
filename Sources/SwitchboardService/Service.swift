@@ -9,9 +9,9 @@ public final class Service {
   public let home: Home
   let config: Config
   let store: Store
-  let host: TerminalHost
+  /// This Mac's site. Sessionless work, such as the shared MCP servers and import, runs here.
+  let mac: MacSite
   let sbPath: String
-  let git: String
   let queue = DispatchQueue(label: "sbd.state")
   /// Each paste waits 300 ms before its Enter, so pastes run here, in order.
   let pasteQueue = DispatchQueue(label: "sbd.paste")
@@ -85,7 +85,6 @@ public final class Service {
   var requestingReview: Set<String> = []
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
-  var snapshot = Snapshot()
   /// The main checkout of each session folder that a lookup read, or nil for
   /// a folder in no git repo, with the time of the lookup. A folder stays in
   /// its repo, and sbd keeps a checkout that it found. A folder outside git
@@ -155,13 +154,11 @@ public final class Service {
     self.home = home
     self.config = home.loadConfig()
     self.store = try Store(path: home.database)
-    self.host = try TerminalHost(home: home, config: config)
+    self.mac = try MacSite(home: home, config: config)
     self.sbPath = sbPath
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.hostLinks = Service.makeHostLinks(config: config, home: home)
-    guard let git = findExecutable("git") else { throw APIError("can't find git") }
-    self.git = git
   }
 
   public var tickSeconds: Double { config.tickSeconds }
@@ -190,7 +187,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
-    snapshot = buildSnapshot() ?? Snapshot()
+    mac.snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain { try settleUncertain(id, texts) }
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
@@ -407,7 +404,7 @@ public final class Service {
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
-      return .string(try host.screen(paneName(id, pane), colors: args["colors"]?.bool == true))
+      return .string(try site(of: id).terminals().screen(paneName(id, pane), colors: args["colors"]?.bool == true))
     case "accounts", "account-use", "account-move":
       return try accountRequest(op, args)
     case "mcp":
@@ -456,7 +453,7 @@ public final class Service {
     // is recorded before the Stop, so the session never shows Needs you
     // between the Stop and the next tick.
     if kind == "Stop", case .running(let pid) = claudeState(id) {
-      recordJobs(id, backgroundJobs(pid, in: Processes.byParent()))
+      recordJobs(id, backgroundJobs(pid, in: Processes.byParent(on: site(for: session).machine)))
     }
     let event = record(id, kind, payload)
     var answer: JSON = [:]
@@ -528,18 +525,18 @@ public final class Service {
   /// The main checkout of the repo at `path` and the folder that a worktree of
   /// it on `branch` gets.
   func worktreeLocation(
-    _ path: String, _ branch: String, on machine: any Machine
+    _ path: String, _ branch: String, at site: any SessionSite
   ) throws -> (main: String, dir: String) {
     // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreeEntries(path, on: machine).first?.path ?? path
-    return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
+    let main = try worktreeEntries(path, at: site).first?.path ?? path
+    return (main, "\(try site.worktreeRoot())/\((main as NSString).lastPathComponent)/\(branch)")
   }
 
   /// Whether `branch` exists in the repo at `path`, or the folder for a worktree on it does.
-  func branchOrFolderTaken(_ path: String, _ branch: String, on machine: any Machine = LocalMachine()) -> Bool {
-    if branchExists(path, branch, on: machine) { return true }
-    guard let location = try? worktreeLocation(path, branch, on: machine) else { return false }
-    return machine.exists(location.dir)
+  func branchOrFolderTaken(_ path: String, _ branch: String, at site: any SessionSite) -> Bool {
+    if branchExists(path, branch, at: site) { return true }
+    guard let location = try? worktreeLocation(path, branch, at: site) else { return false }
+    return site.machine.exists(location.dir)
   }
 
   /// The folder a new session runs in, its branch, and its repo. With a branch, the
@@ -547,34 +544,34 @@ public final class Service {
   /// which this creates unless it exists. An existing one must have the
   /// branch checked out. The repo is the main checkout, or the passed path when that
   /// is the main checkout. It is nil without a branch.
-  /// The folders and the repo are on `machine`.
+  /// The folders and the repo are at `site`.
   func prepareFolder(
-    _ args: NewSession, on machine: any Machine = LocalMachine()
+    _ args: NewSession, at site: any SessionSite
   ) throws -> (cwd: String, branch: String?, repo: String?) {
     let path = (args.path as NSString).standardizingPath
-    guard machine.isFolder(path) else { throw APIError("no folder \(path)") }
+    guard site.machine.isFolder(path) else { throw APIError("no folder \(path)") }
     guard let branch = args.branch, !branch.isEmpty else {
-      let current = try? gitOutput(path, ["branch", "--show-current"], on: machine)
+      let current = try? gitOutput(path, ["branch", "--show-current"], at: site)
       return (path, current?.isEmpty == false ? current : nil, nil)
     }
-    let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"], on: machine)
-    let (main, dir) = try worktreeLocation(path, branch, on: machine)
+    let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"], at: site)
+    let (main, dir) = try worktreeLocation(path, branch, at: site)
     // The path can be a linked worktree, which goes away. The main checkout stays.
-    let repo = samePath(main, path) ? path : main
-    if machine.exists(dir) {
-      let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"], on: machine)
+    let repo = try site.samePath(main, path) ? path : main
+    if site.machine.exists(dir) {
+      let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"], at: site)
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
-      let current = (try? gitOutput(dir, ["branch", "--show-current"], on: machine)) ?? ""
+      let current = (try? gitOutput(dir, ["branch", "--show-current"], at: site)) ?? ""
       guard current == branch else {
         throw APIError("\(dir) has \(current.isEmpty ? "no branch" : current) checked out, not \(branch)")
       }
       return (dir, branch, repo)
     }
-    let exists = branchExists(path, branch, on: machine)
-    try machine.createFolder((dir as NSString).deletingLastPathComponent)
+    let exists = branchExists(path, branch, at: site)
+    try site.machine.createFolder((dir as NSString).deletingLastPathComponent)
     _ = try gitOutput(
       path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"],
-      on: machine)
+      at: site)
     return (dir, branch, repo)
   }
 
@@ -588,9 +585,9 @@ public final class Service {
     var lockedBySupacode = false
   }
 
-  func worktreeEntries(_ repo: String, on machine: any Machine = LocalMachine()) throws -> [WorktreeEntry] {
+  func worktreeEntries(_ repo: String, at site: any SessionSite) throws -> [WorktreeEntry] {
     var entries: [WorktreeEntry] = []
-    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"], on: machine).split(
+    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"], at: site).split(
       separator: "\0", omittingEmptySubsequences: true)
     {
       if line.hasPrefix("worktree ") {
@@ -612,7 +609,8 @@ public final class Service {
   /// The repo that `new` made the worktree from is that checkout. For any
   /// other folder, this returns nil until a lookup off the queue has read it.
   func checkout(_ s: Session) -> String? {
-    if let repo = s.repo { return realPath(repo) ?? repo }
+    let site = self.site(for: s)
+    if let repo = s.repo { return (try? site.realPath(repo)) ?? repo }
     // A follow-up that hasn't started has no folder. `git -C ""` would read sbd's own folder.
     guard !s.cwd.isEmpty else { return nil }
     if let known = checkouts[s.cwd],
@@ -624,7 +622,7 @@ public final class Service {
     if checkoutLookups.insert(cwd).inserted {
       DispatchQueue.global().async { [self] in
         // The first worktree that git lists is the main checkout.
-        let main = (try? worktreeEntries(cwd))?.first.flatMap { realPath($0.path) }
+        let main = (try? worktreeEntries(cwd, at: site))?.first.flatMap { try? site.realPath($0.path) }
         queue.async { [self] in
           checkouts[cwd] = (main, nowMs())
           checkoutLookups.remove(cwd)
@@ -634,49 +632,29 @@ public final class Service {
     return nil
   }
 
-  func worktreeEntry(
-    _ repo: String, at path: String, on machine: any Machine
-  ) throws -> WorktreeEntry? {
-    try worktreeEntries(repo, on: machine).first { samePath($0.path, path) }
-  }
-
-  func samePath(_ a: String, _ b: String) -> Bool {
-    // A gone worktree may have lost its parent folders too, so the deepest folder that exists is resolved.
-    let real = { (path: String) -> String in
-      var url = URL(fileURLWithPath: path).standardizedFileURL
-      var gone: [String] = []
-      while !FileManager.default.fileExists(atPath: url.path), url.path != "/" {
-        gone.insert(url.lastPathComponent, at: 0)
-        url.deleteLastPathComponent()
-      }
-      return gone.reduce(url.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }.path
-    }
-    return real(a) == real(b)
+  /// The worktree of the repo that git lists at `path`.
+  func worktreeEntry(_ repo: String, holding path: String, at site: any SessionSite) throws -> WorktreeEntry? {
+    try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }
   }
 
   func lockedError(_ path: String) -> APIError {
     APIError("\(path) is a locked worktree, so git won't remove it. Unlock it with `git worktree unlock` first.")
   }
 
-  /// The machine that the session runs on. Every session runs on this Mac.
-  func machine(for session: Session) -> any Machine { LocalMachine() }
-
-  /// The machine of the session with the id, or this Mac when sbd has no such session. It runs on the state queue.
-  func machine(of id: String) -> any Machine { entries[id].map { machine(for: $0.session) } ?? LocalMachine() }
-
-  func branchExists(_ repo: String, _ branch: String, on machine: any Machine = LocalMachine()) -> Bool {
-    (try? machine.run(git, ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?.status == 0
+  func branchExists(_ repo: String, _ branch: String, at site: any SessionSite) -> Bool {
+    (try? site.machine.run(site.git(), ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?
+      .status == 0
   }
 
   /// Whether `commit` is in origin/main of the repo that `dir` belongs to.
-  func isInMain(_ dir: String, _ commit: String, on machine: any Machine) -> Bool {
-    (try? machine.run(git, ["-C", dir, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"]))?.status
-      == 0
+  func isInMain(_ dir: String, _ commit: String, at site: any SessionSite) -> Bool {
+    (try? site.machine.run(
+      site.git(), ["-C", dir, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"]))?.status == 0
   }
 
-  /// The trimmed output of git in `cwd` on the machine, or throws what git printed when it fails.
-  func gitOutput(_ cwd: String, _ args: [String], on machine: any Machine = LocalMachine()) throws -> String {
-    let r = try machine.run(git, ["-C", cwd] + args)
+  /// The trimmed output of git in `cwd` at the site, or throws what git printed when it fails.
+  func gitOutput(_ cwd: String, _ args: [String], at site: any SessionSite) throws -> String {
+    let r = try site.machine.run(site.git(), ["-C", cwd] + args)
     guard r.status == 0 else {
       throw APIError("git \(args.joined(separator: " ")): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
@@ -690,7 +668,7 @@ public final class Service {
       let repo = (args.path as NSString).standardizingPath
       args.branch = NewSession.freeAutoBranch(
         prefix: config.branchPrefix, name: args.name,
-        exists: { branchOrFolderTaken(repo, $0) })
+        exists: { branchOrFolderTaken(repo, $0, at: mac) })
     }
     // An unknown group, an unknown account, or an account that differs from
     // the group's fails here, before prepareFolder makes a worktree.
@@ -700,7 +678,7 @@ public final class Service {
       probe.group = try groupOfNew(args.group, parent: probe.parent)
       _ = try accountForNew(named: args.account, parent: probe.parent, for: probe)
     }
-    let folder = try prepareFolder(args)
+    let folder = try prepareFolder(args, at: mac)
     awaitMCPServers()
     return try queue.sync { try create(args, folder) }
   }
@@ -726,7 +704,7 @@ public final class Service {
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
-    try host.create(paneName(id, .shell), cwd: folder.cwd, env: paneEnv(id))
+    try site(for: session).terminals().create(paneName(id, .shell), cwd: folder.cwd, env: paneEnv(id))
     try launch(id, prompt: args.prompt)
     return summary(id)
   }
@@ -758,10 +736,11 @@ public final class Service {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try requireFolder(session)
     let shell = paneName(id, .shell)
-    if snapshot.panes[shell]?.dead == true { try closeShell(id) }
+    if paneRow(id, .shell)?.dead == true { try closeShell(id) }
     if entries[id]?.session.shellClosed != true { try startShell(id) }
-    if snapshot.panes[paneName(id, .claude)] == nil { try launch(id, prompt: nil) }
-    return Terminals(tmux: host.tmux, socket: host.socket, claude: paneName(id, .claude), shell: shell)
+    if paneRow(id, .claude) == nil { try launch(id, prompt: nil) }
+    let terminals = try site(for: session).terminals()
+    return Terminals(tmux: terminals.tmux, socket: terminals.socket, claude: paneName(id, .claude), shell: shell)
   }
 
   /// Starts claude in the session's Claude pane. A launch resumes the
@@ -791,26 +770,26 @@ public final class Service {
     if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
-    let dir = home.sessionFolder(id)
-    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    let script =
+    let site = self.site(for: session)
+    let terminals = try site.terminals()
+    try writeLauncher(
       "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
-      + args.map(shellQuote).joined(separator: " ") + "\n"
-    try script.write(toFile: "\(dir)/claude.sh", atomically: true, encoding: .utf8)
+        + args.map(shellQuote).joined(separator: " ") + "\n",
+      for: id, at: site)
     // An interactive login shell gives claude the user's PATH and shell
     // functions.
-    let command = "\(host.shell) -l -i -c 'source \"$SB_HOME/sessions/$SB_SESSION_ID/claude.sh\"'"
+    let command = "\(terminals.shell) -l -i -c 'source \"$SB_HOME/sessions/$SB_SESSION_ID/claude.sh\"'"
     let name = paneName(id, .claude)
-    if snapshot.panes[name] != nil {
-      try host.respawn(name, cwd: session.cwd, env: paneEnv(id), command: command)
+    if paneRow(id, .claude) != nil {
+      try terminals.respawn(name, cwd: session.cwd, env: paneEnv(id), command: command)
     } else {
-      try host.create(name, cwd: session.cwd, env: paneEnv(id), command: command)
-      try host.setDeadMessage(
+      try terminals.create(name, cwd: session.cwd, env: paneEnv(id), command: command)
+      try terminals.setDeadMessage(
         name, "Claude stopped. Switchboard resumes it when you open the session or send it a message.")
     }
     markStarting(name)
     if !session.started { try update(id) { $0.started = true } }
-    snapshot.claudePids[id] = nil
+    forgetClaudePid(id)
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
     record(
@@ -837,10 +816,11 @@ public final class Service {
     if let path = entries[session.id]?.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
     {
-      return machine(for: session).exists(path) ? path : nil
+      return site(for: session).machine.exists(path) ? path : nil
     }
     let account = claudeAccount(of: session.id)
-    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd, on: machine(for: session))
+    return Transcript.find(
+      session.claudeSessionId, account: account, cwd: session.cwd, on: site(for: session).machine)
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
@@ -937,7 +917,7 @@ public final class Service {
       let path = pasting?.data["transcript"]?.string ?? entries[id].flatMap { transcriptFile($0.session) }
       let offset = UInt64(pasting?.data["transcript_bytes"]?.int ?? 0)
       let pasted = Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text
-      let machine = self.machine(of: id)
+      let machine = try site(of: id).machine
       let landed =
         pasting != nil
         && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset, on: machine) } == true
@@ -958,9 +938,11 @@ public final class Service {
     let name = paneName(id, .claude)
     let parts = Attachments.split(text, folder: home.attachmentsFolder(id))
     entries[id]?.inFlight = nowMs()
+    let terminals = try? site(of: id).terminals()
     pasteQueue.async { [self] in
       waitAtGate("hold-paste")
-      guard (try? host.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true else {
+      guard let terminals, (try? terminals.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true
+      else {
         queue.async { [self] in
           if entries[id]?.heldText != text {
             logLine("holds a message for \(id) until claude's prompt box shows empty")
@@ -972,7 +954,7 @@ public final class Service {
       }
       guard queue.sync(execute: { startPaste(id, message) }) else { return }
       do {
-        try host.paste(name, parts?.text ?? text, attachments: parts?.paths)
+        try terminals.paste(name, parts?.text ?? text, attachments: parts?.paths)
         waitAtGate("hold-delivered")
         queue.async { self.record(id, "delivered", ["text": .string(text)]) }
       } catch {
@@ -1004,7 +986,7 @@ public final class Service {
     entries[id]?.heldText = nil
     var data: [String: JSON] = ["text": .string(message.text)]
     if let session = entries[id]?.session, let path = transcriptFile(session),
-      let size = machine(for: session).size(path)
+      let size = site(for: session).machine.size(path)
     {
       data["transcript"] = .string(path)
       data["transcript_bytes"] = .number(Double(size))
@@ -1039,7 +1021,7 @@ public final class Service {
   func stop(_ id: String, reason: String) throws {
     guard case .running(let pid) = claudeState(id) else { throw APIError("\(id) is not running") }
     deferQuestions(id)
-    machine(of: id).signal(pid, SIGTERM)
+    try stopClaude(id, pid)
     record(id, "stopped", ["reason": .string(reason), "pid": .number(Double(pid))])
   }
 
@@ -1093,8 +1075,8 @@ public final class Service {
         let entry = entries[id]!
         return (entry.session, entry.facts.pr, sharedSession(entry.session))
       }
-      let machine = self.machine(for: session)
-      let folderGone = !machine.exists(session.cwd)
+      let site = self.site(for: session)
+      let folderGone = !site.machine.exists(session.cwd)
       var (repo, branch, supacode) = try checkRemoval(
         session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
         branch: removesBranch)
@@ -1102,7 +1084,7 @@ public final class Service {
       // A local branch that is already gone still has its remote branch checked.
       let remoteTarget: (repo: String, remote: String, branch: String)? = {
         guard removesRemoteBranch, let repo, let name = branch?.name ?? session.branch else { return nil }
-        return (repo, trackedRemote(repo, name, on: machine), name)
+        return (repo, trackedRemote(repo, name, at: site), name)
       }()
       let fresh = buildSnapshot()
       let stop: PaneStop? = try queue.sync {
@@ -1114,8 +1096,8 @@ public final class Service {
         // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
         try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
         install(fresh)
-        if removesWorktree { return beginPaneStop(session.id) }
-        if case .running(let pid) = claudeState(session.id) { machine.signal(pid, SIGTERM) }
+        if removesWorktree { return try beginPaneStop(session.id) }
+        if case .running(let pid) = claudeState(session.id) { try stopClaude(session.id, pid) }
         return nil
       }
       if let stop {
@@ -1127,25 +1109,25 @@ public final class Service {
       // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
       // folder's path through a symlink, so it gets the path that it lists for the worktree.
       if let repo {
-        let listed = folderGone ? try worktreeEntry(repo, at: session.cwd, on: machine)?.path : session.cwd
-        if let listed { try removeWorktree(repo, listed, on: machine) }
+        let listed = folderGone ? try worktreeEntry(repo, holding: session.cwd, at: site)?.path : session.cwd
+        if let listed { try removeWorktree(repo, listed, at: site) }
       }
       var branchRemoved = false
       var branchError: Error?
       if let repo, let branch {
         do {
-          branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, on: machine)
+          branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, at: site)
         } catch {
           branchError = error
         }
       }
       var remoteRemoved = false
       var remoteError: Error?
-      if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch, on: machine),
+      if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch, at: site),
         let pr = mergedPR(pr, of: target.branch)
       {
         do {
-          remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr, on: machine)
+          remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr, at: site)
         } catch {
           remoteError = error
         }
@@ -1171,6 +1153,7 @@ public final class Service {
         } else if let remoteError {
           stayed = " It kept the remote branch: \(remoteError)"
         }
+        let terminals = try site.terminals()
         do {
           try forgetSession(session.id, resolving: resolving)
         } catch var error as OpenTodoError {
@@ -1180,11 +1163,14 @@ public final class Service {
         } catch let error where !removed.isEmpty {
           throw APIError("\(kept): \(error)\(stayed)")
         }
-        host.kill(paneName(session.id, .claude))
-        host.kill(paneName(session.id, .shell))
+        terminals.kill(paneName(session.id, .claude))
+        terminals.kill(paneName(session.id, .shell))
         try detachPlans { $0.session == session.id }
       }
-      try? FileManager.default.removeItem(atPath: home.sessionFolder(session.id))
+      // FileManager deletes on this Mac, so only this Mac's site names a folder for it.
+      if site.hostName == nil, let folder = try? site.sessionFolder(session.id) {
+        try? FileManager.default.removeItem(atPath: folder)
+      }
       if let branchError, let branch {
         let remote = removesRemoteBranch ? " It also kept the remote branch." : ""
         throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
@@ -1232,15 +1218,16 @@ public final class Service {
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
-    let machine = self.machine(for: session)
-    if machine.isFolder(repo) { return repo }
+    let site = self.site(for: session)
+    if site.machine.isFolder(repo) { return repo }
     let folders = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
     var mains: [String] = []
     var seen: [String] = []
-    for folder in folders where machine.isFolder(folder) && !seen.contains(where: { samePath($0, folder) }) {
-      guard let listed = try? worktreeEntries(folder, on: machine), let main = listed.first?.path else { continue }
+    for folder in folders
+    where try site.machine.isFolder(folder) && !seen.contains(where: { try site.samePath($0, folder) }) {
+      guard let listed = try? worktreeEntries(folder, at: site), let main = listed.first?.path else { continue }
       seen += listed.map(\.path)
-      if listed.contains(where: { samePath($0.path, session.cwd) }) { mains.append(main) }
+      if try listed.contains(where: { try site.samePath($0.path, session.cwd) }) { mains.append(main) }
     }
     if mains.count == 1 { return mains[0] }
     if mains.count > 1 {
@@ -1257,8 +1244,8 @@ public final class Service {
   /// no pushed branch. Removing the worktree's record drops the only ref to such commits.
   private func checkGoneWorktree(_ session: Session, mergedPR: Bool) throws -> String {
     let repo = try worktreeRepo(session)
-    let machine = self.machine(for: session)
-    guard let entry = try worktreeEntry(repo, at: session.cwd, on: machine) else { return repo }
+    let site = self.site(for: session)
+    guard let entry = try worktreeEntry(repo, holding: session.cwd, at: site) else { return repo }
     if entry.locked { throw lockedError(session.cwd) }
     // git lists the zero OID when the worktree's HEAD names a ref that no longer exists. Commits made there
     // survive only in the worktree's reflog, which goes with its record, so they can't be checked.
@@ -1267,17 +1254,17 @@ public final class Service {
         "git lists no commit at the HEAD of the gone worktree \(session.cwd), so its commits can't be checked.")
     }
     try requireNoUnpushedCommits(
-      in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD", on: machine)
+      in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD", at: site)
     return repo
   }
 
   /// Throws when `rev` has commits on no remote branch. With a merged PR, local branches count too, because a
   /// squash merge leaves the commits on no remote branch and `worktree remove` keeps the branch.
   private func requireNoUnpushedCommits(
-    in dir: String, at rev: String, mergedPR: Bool, subject: String, on machine: any Machine
+    in dir: String, at rev: String, mergedPR: Bool, subject: String, at site: any SessionSite
   ) throws {
     let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
-    let unpushed = try gitOutput(dir, ["rev-list", "--count", rev, "--not"] + kept, on: machine)
+    let unpushed = try gitOutput(dir, ["rev-list", "--count", rev, "--not"] + kept, at: site)
     guard unpushed == "0" else {
       throw APIError(
         "\(subject) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
@@ -1290,16 +1277,16 @@ public final class Service {
   private func checkGoneBranchIsMerged(_ repo: String, _ session: Session, pr: PullRequest?) throws -> (
     name: String, tip: String
   )? {
-    let machine = self.machine(for: session)
-    guard let name = session.branch, branchExists(repo, name, on: machine) else { return nil }
-    let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"], on: machine))
-    try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd, on: machine)
+    let site = self.site(for: session)
+    guard let name = session.branch, branchExists(repo, name, at: site) else { return nil }
+    let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"], at: site))
+    try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd, at: site)
     return branch
   }
 
   /// The remote that the branch tracks, or origin.
-  private func trackedRemote(_ repo: String, _ branch: String, on machine: any Machine) -> String {
-    let tracked = try? gitOutput(repo, ["config", "branch.\(branch).remote"], on: machine)
+  private func trackedRemote(_ repo: String, _ branch: String, at site: any SessionSite) -> String {
+    let tracked = try? gitOutput(repo, ["config", "branch.\(branch).remote"], at: site)
     return tracked.flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
   }
 
@@ -1307,9 +1294,9 @@ public final class Service {
   /// head of the merged PR. Returns false when the remote has no such branch. The push names the
   /// tip it expects, so git refuses when the branch moved after the check.
   private func deleteRemoteBranch(
-    _ repo: String, _ remote: String, _ branch: String, pr: PullRequest, on machine: any Machine
+    _ repo: String, _ remote: String, _ branch: String, pr: PullRequest, at site: any SessionSite
   ) throws -> Bool {
-    let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"], on: machine)
+    let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"], at: site)
     guard let tip = listed.split(whereSeparator: \.isWhitespace).first.map(String.init) else { return false }
     guard tip == pr.headSha else {
       throw APIError(
@@ -1317,7 +1304,7 @@ public final class Service {
       )
     }
     _ = try gitOutput(
-      repo, ["push", remote, "--delete", "--force-with-lease=refs/heads/\(branch):\(tip)", branch], on: machine)
+      repo, ["push", remote, "--delete", "--force-with-lease=refs/heads/\(branch):\(tip)", branch], at: site)
     return true
   }
 
@@ -1335,13 +1322,13 @@ public final class Service {
 
   /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
   func checkedOutBranch(_ session: Session) throws -> (name: String, tip: String) {
-    let machine = self.machine(for: session)
+    let site = self.site(for: session)
     guard let branch = session.branch,
-      try gitOutput(session.cwd, ["branch", "--show-current"], on: machine) == branch
+      try gitOutput(session.cwd, ["branch", "--show-current"], at: site) == branch
     else {
       throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
     }
-    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"], on: machine))
+    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"], at: site))
   }
 
   /// The PR when it merged `branch`, or nil.
@@ -1362,24 +1349,24 @@ public final class Service {
   /// A worktree at `path` does not count as having the branch checked out.
   func recheckBranch(
     _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil,
-    on machine: any Machine
+    at site: any SessionSite
   ) throws {
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    guard branchExists(repo, branch, on: machine) else { throw APIError("\(branch) no longer exists.") }
+    guard branchExists(repo, branch, at: site) else { throw APIError("\(branch) no longer exists.") }
     try requireTip(
-      try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"], on: machine), of: branch, inMerged: pr)
-    try requireNotCheckedOut(repo, branch, ignoring: path, on: machine)
+      try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"], at: site), of: branch, inMerged: pr)
+    try requireNotCheckedOut(repo, branch, ignoring: path, at: site)
   }
 
   /// Throws when a worktree other than the one at `path` has the branch checked out.
   /// Deleting the ref of a checked-out branch breaks that worktree.
   func requireNotCheckedOut(
-    _ repo: String, _ branch: String, ignoring path: String? = nil, on machine: any Machine
+    _ repo: String, _ branch: String, ignoring path: String? = nil, at site: any SessionSite
   ) throws {
-    let checkedOut = try worktreeEntries(repo, on: machine).contains { entry in
-      entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)
+    let checkedOut = try worktreeEntries(repo, at: site).contains { entry in
+      try entry.branch == branch && !(path.map { try site.samePath(entry.path, $0) } ?? false)
     }
     guard !checkedOut else { throw APIError("\(branch) is checked out in a worktree.") }
   }
@@ -1389,17 +1376,17 @@ public final class Service {
   /// Passing the checked tip makes git refuse when a commit landed after the
   /// check.
   func deleteMergedBranch(
-    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, on machine: any Machine
+    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, at site: any SessionSite
   ) throws {
-    try recheckBranch(repo, branch.name, pr: pr, on: machine)
-    try deleteBranchRef(repo, branch, on: machine)
+    try recheckBranch(repo, branch.name, pr: pr, at: site)
+    try deleteBranchRef(repo, branch, at: site)
   }
 
   /// Deletes the branch's ref at the checked tip, so git refuses when a commit landed after the check.
-  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String), on machine: any Machine) throws {
-    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip], on: machine)
+  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String), at site: any SessionSite) throws {
+    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip], at: site)
     // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
-    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"], on: machine)
+    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"], at: site)
   }
 
   /// Another session that runs in the session's folder.
@@ -1427,29 +1414,31 @@ public final class Service {
         "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."
       )
     }
-    let machine = self.machine(for: session)
+    let site = self.site(for: session)
     guard
-      let entry = try worktreeEntries(repo, on: machine).dropFirst().first(where: { samePath($0.path, session.cwd) })
+      let entry = try worktreeEntries(repo, at: site).dropFirst().first(where: {
+        try site.samePath($0.path, session.cwd)
+      })
     else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     if entry.locked && !entry.lockedBySupacode { throw lockedError(session.cwd) }
-    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored, on: machine)
+    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored, at: site)
     guard status.changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
     }
-    try requireNoHiddenChanges(session.cwd, on: machine)
+    try requireNoHiddenChanges(session.cwd, at: site)
     if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(
-      in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd, on: machine)
+      in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd, at: site)
     if entry.lockedBySupacode { _ = try supacodeExecutable() }
     return (repo, entry.lockedBySupacode)
   }
 
   /// Throws when a tracked file has git's assume-unchanged or skip-worktree
   /// flag, because `git status` doesn't list a change to such a file.
-  private func requireNoHiddenChanges(_ cwd: String, on machine: any Machine) throws {
-    let listed = try gitOutput(cwd, ["ls-files", "-v", "-z"], on: machine)
+  private func requireNoHiddenChanges(_ cwd: String, at site: any SessionSite) throws {
+    let listed = try gitOutput(cwd, ["ls-files", "-v", "-z"], at: site)
     let hidden = listed.split(separator: "\0").filter { $0.first.map { $0.isLowercase || $0 == "S" } ?? false }
       .map { String($0.dropFirst(2)) }
     guard hidden.isEmpty else {
@@ -1466,11 +1455,11 @@ public final class Service {
   /// A rename or copy entry is followed by its source path, which has no
   /// status of its own.
   private func readStatus(
-    _ cwd: String, listingIgnored: Bool, on machine: any Machine
+    _ cwd: String, listingIgnored: Bool, at site: any SessionSite
   ) throws -> (changed: Int, ignored: [String]) {
     // The flag keeps status from taking the index lock while claude commits.
     let args = ["--no-optional-locks", "status", "--porcelain", "-z"] + (listingIgnored ? ["--ignored=matching"] : [])
-    var fields = try gitOutput(cwd, args, on: machine).split(separator: "\0").makeIterator()
+    var fields = try gitOutput(cwd, args, at: site).split(separator: "\0").makeIterator()
     var changed = 0
     var ignored: [String] = []
     while let field = fields.next() {
@@ -1506,25 +1495,7 @@ public final class Service {
   /// Reads the panes and the processes. It reads no Service state, so it runs
   /// off the state queue. It returns nil when tmux can't list the panes. An
   /// empty list would make sbd start the panes that it already has.
-  func buildSnapshot() -> Snapshot? { try? buildSnapshot(reading: host.checkedPanes) }
-
-  /// The snapshot of the panes that `readPanes` returns and a new process
-  /// list. It throws what `readPanes` throws.
-  func buildSnapshot(reading readPanes: () throws -> [String: PaneRow]) rethrows -> Snapshot {
-    var s = Snapshot()
-    // A snapshot is as old as its first read. `install` uses this to drop
-    // one that began before a launch.
-    s.taken = nowMs()
-    s.panes = try readPanes()
-    s.children = Processes.byParent()
-    let program = (config.claude as NSString).lastPathComponent
-    for (name, pane) in s.panes where name.hasSuffix("-claude") && !pane.dead {
-      if let pid = Service.findClaude(below: pane.pid, program: program, in: s.children) {
-        s.claudePids[String(name.dropLast("-claude".count))] = pid
-      }
-    }
-    return s
-  }
+  func buildSnapshot() -> Snapshot? { try? mac.readSnapshot(claudeProgram: claudeProgram) }
 
   /// The process nearest the pane's shell whose command names the claude
   /// command. A forked child of claude keeps its command line, so the nearest
@@ -1558,19 +1529,6 @@ public final class Service {
     return first == program || (interpreters.contains(first) && words.dropFirst().first == program)
   }
 
-  /// Marks a pane that sbd just started as alive until the next snapshot, so
-  /// a second request can't start it again. A snapshot that began before
-  /// this can no longer replace it.
-  func markStarting(_ name: String) {
-    snapshot.panes[name] = PaneRow(pid: 0, dead: false, clients: snapshot.panes[name]?.clients ?? 0)
-    snapshot.taken = nowMs()
-  }
-
-  /// Takes a newer snapshot, keeping what `markStarting` set since it was read.
-  func install(_ s: Snapshot?) {
-    if let s, s.taken >= snapshot.taken { snapshot = s }
-  }
-
   /// Takes a snapshot off the state queue and installs it, without making
   /// the caller wait.
   private func refreshSoon() {
@@ -1581,26 +1539,27 @@ public final class Service {
   }
 
   func claudeState(_ id: String) -> ClaudeState {
-    guard let pane = snapshot.panes[paneName(id, .claude)], !pane.dead else { return .stopped }
-    return snapshot.claudePids[id].map(ClaudeState.running) ?? .starting
+    guard let pane = paneRow(id, .claude), !pane.dead else { return .stopped }
+    return claudePid(id).map(ClaudeState.running) ?? .starting
   }
 
   /// Returns once the session's claude is live, or its Claude pane is dead
   /// or missing, or after 5 s. It checks one pane, without a snapshot.
   private func settle(_ id: String) {
     let name = paneName(id, .claude)
+    guard let terminals = queue.sync(execute: { try? site(of: id).terminals() }) else { return }
     let deadline = Date().addingTimeInterval(5)
     while Date() < deadline {
       if queue.sync(execute: { entries[id]?.facts.live ?? true }) { return }
-      guard let dead = host.isDead(name), !dead else { return }
+      guard let dead = terminals.isDead(name), !dead else { return }
       usleep(50_000)
     }
   }
 
   /// The number of background jobs. A job is a child of claude that leads its
   /// own process group, as a background Bash job does.
-  func backgroundJobs(_ pid: Int, in children: [Int: [ProcessRow]]? = nil) -> Int {
-    ((children ?? snapshot.children)[pid] ?? []).filter { $0.pgid == $0.pid }.count
+  func backgroundJobs(_ pid: Int, in children: [Int: [ProcessRow]]) -> Int {
+    (children[pid] ?? []).filter { $0.pgid == $0.pid }.count
   }
 
   /// Records the job count when it differs from the one in the session's facts.
@@ -1636,7 +1595,7 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          let jobs = backgroundJobs(pid)
+          let jobs = backgroundJobs(pid, in: processChildren(of: id))
           if jobs > 0 { entries[id]?.lastJobSeen = now }
           // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
@@ -1694,7 +1653,7 @@ public final class Service {
     guard let e = entries[id] else { return false }
     let f = e.facts
     return f.live && !f.turnRunning && f.openPermission == nil && f.openQuestion == nil
-      && !e.messageWaiting(now: now) && !attached(id) && backgroundJobs(pid) == 0
+      && !e.messageWaiting(now: now) && !attached(id) && backgroundJobs(pid, in: processChildren(of: id)) == 0
   }
 
   // MARK: Summaries
@@ -1714,7 +1673,7 @@ public final class Service {
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: e.branch,
       claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: e.facts.stateSince,
       lastActivity: e.facts.lastActivity,
-      live: e.facts.live, claudePid: snapshot.claudePids[id],
+      live: e.facts.live, claudePid: claudePid(id),
       attached: attached(id), lastReply: e.facts.lastReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),

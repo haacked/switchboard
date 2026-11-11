@@ -59,7 +59,7 @@ extension Service {
       guard let id = chatID(group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
       }
-      return (transcriptFinder(id), self.machine(of: id))
+      return (transcriptFinder(id), try site(of: id).machine)
     }
     let limit = args["limit"]?.int ?? 50
     return try JSON(encoding: findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? [])

@@ -173,7 +173,7 @@ extension Service {
 
   /// Whether a terminal shows the session's Claude pane.
   func attached(_ id: String) -> Bool {
-    (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0
+    (paneRow(id, .claude)?.clients ?? 0) > 0
   }
 
   /// Defers the session's held questions at once, so that its claude can

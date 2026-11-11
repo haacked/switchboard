@@ -63,7 +63,7 @@ extension Service {
         do {
           let checked = try checkRemoval(
             t.session, pr: t.pr, sharedWith: t.sharedWith,
-            folderGone: !machine(for: t.session).exists(t.session.cwd), worktree: t.worktree,
+            folderGone: !site(for: t.session).machine.exists(t.session.cwd), worktree: t.worktree,
             branch: t.branch)
           return .success(
             .init(

@@ -66,7 +66,10 @@ extension Service {
     chosen.removeAll { stuck[$0.session.id] != nil }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
-      Transcript.find(s.id, account: s.account, cwd: s.cwd).map { Transcript.tail($0) } ?? TranscriptTail()
+      Transcript.find(s.id, account: s.account, cwd: s.cwd, on: mac.machine).map {
+        Transcript.tail($0, on: mac.machine)
+      }
+        ?? TranscriptTail()
     }
     var imported: [SessionSummary] = []
     try queue.sync {
@@ -115,7 +118,7 @@ extension Service {
           throw APIError(
             "\(account) holds no Claude account (no .claude.json). Check claudeConfigDirs in \(home.config)")
         }
-        return try agentRows(claude, account: account, seen: now)
+        return try agentRows(claude, account: account, seen: now, on: mac.machine)
       }
     }
     var byId: [String: ClaudeSession] = [:]
@@ -137,7 +140,7 @@ extension Service {
   /// a claude that hangs fails the call.
   /// claude and the account's folder are on `machine`.
   func agentRows(
-    _ claude: String, account: String, seen: Int64, timeout: Double? = nil, on machine: any Machine = LocalMachine()
+    _ claude: String, account: String, seen: Int64, timeout: Double? = nil, on machine: any Machine
   ) throws -> [ClaudeSession] {
     var env = ProcessInfo.processInfo.environment
     ClaudeAccount.apply(account, to: &env)
@@ -193,7 +196,7 @@ extension Service {
     guard !running.isEmpty else { return [:] }
     let snapshot: Snapshot
     do {
-      snapshot = try buildSnapshot(reading: host.checkedPanes)
+      snapshot = try mac.readSnapshot(claudeProgram: claudeProgram)
     } catch {
       return Dictionary(
         uniqueKeysWithValues: running.map {
@@ -363,7 +366,7 @@ extension Service {
   /// none of them.
   private func gitFacts(_ cwd: String) -> (repo: String?, branch: String?, worktree: Bool) {
     let args = ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD"]
-    let lines = (try? gitOutput(cwd, args))?.split(separator: "\n").map(String.init) ?? []
+    let lines = (try? gitOutput(cwd, args, at: mac))?.split(separator: "\n").map(String.init) ?? []
     guard lines.count == 3 else { return (nil, nil, false) }
     let (gitDir, commonDir, head) = (lines[0], lines[1], lines[2])
     return (Service.repoName(commonDir: commonDir), head == "HEAD" ? nil : head, gitDir != commonDir)

@@ -43,6 +43,8 @@ public struct Home: Sendable {
 
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
+  /// The calls on this Mac's machine and site, which sbd writes when config.json sets `machineLog`.
+  public var machineLog: String { "\(path)/mac-machine.log" }
   /// Where sbd keeps copies of the images sent to a session. Removing the
   /// session removes its session folder, and these with it.
   public func attachmentsFolder(_ id: String) -> String { "\(sessionFolder(id))/attachments" }
@@ -95,6 +97,8 @@ public struct Config: Codable, Equatable, Sendable {
   /// `hold-delivered`, each paste waits before sbd records `delivered`. Only
   /// tests set it.
   public var testClock = false
+  /// Makes sbd append every call on this Mac's machine and site to `Home.machineLog`. Only tests set it.
+  public var machineLog = false
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
   public var mcpServers: [String: MCPServer] = [:]
@@ -137,7 +141,8 @@ public struct Config: Codable, Equatable, Sendable {
 
   enum CodingKeys: String, CodingKey {
     case claude, idleStopSeconds, liveCap, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs, autoMode, env
-    case testClock, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile, cleanupDeletes, supacode
+    case testClock, machineLog, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile, cleanupDeletes,
+      supacode
     case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
   }
 
@@ -156,6 +161,7 @@ public struct Config: Codable, Equatable, Sendable {
     autoMode = try c.decodeIfPresent(Bool.self, forKey: .autoMode) ?? d.autoMode
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
+    machineLog = try c.decodeIfPresent(Bool.self, forKey: .machineLog) ?? d.machineLog
     // This skips a server that doesn't decode, such as a stdio one copied from
     // a Claude config. Throwing would make sbd ignore all of config.json.
     for (name, value) in try c.decodeIfPresent([String: JSON].self, forKey: .mcpServers) ?? [:] {
