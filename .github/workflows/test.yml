@@ -73,8 +73,8 @@ jobs:
       - run: sysctl -n hw.ncpu hw.memsize && uptime
       # Runs bin/test's build command with its flags, so bin/test finds the
       # build up to date. A warning in Sources fails the job. The test targets
-      # still have warnings, so the check leaves them out. Dependency
-      # checkouts sit under .build.
+      # still have warnings, so the check leaves them out. The check also
+      # skips dependency checkouts, which sit under .build.
       - name: Build without warnings in Sources
         shell: bash
         run: |
