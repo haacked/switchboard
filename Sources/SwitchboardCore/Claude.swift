@@ -229,38 +229,42 @@ public enum Transcript {
   /// Claude names the folder after the session's cwd, with each character
   /// other than an ASCII letter or digit replaced by "-". Claude shortens a
   /// long path in a way that this doesn't reproduce. A symlink can also change
-  /// the cwd. So when that folder lacks the transcript, this looks in the
-  /// folders that `folders` names, which by default are every folder in
-  /// <account>/projects. `folders` gets that path and returns folder names,
-  /// not paths. It runs only when the cwd's folder lacks the transcript.
+  /// the cwd. So when that folder lacks the transcript, this looks in every
+  /// folder in <account>/projects.
+  /// The account, the cwd, and the transcript are on `machine`.
   public static func find(
-    _ sessionId: String, account: String, cwd: String, folders: (String) -> [String] = projectFolders
+    _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine()
+  ) -> String? {
+    find(sessionId, account: account, cwd: cwd, on: machine, folders: machine.list)
+  }
+
+  /// As `find` above, but when the cwd's folder lacks the transcript, this
+  /// looks in the folders that `folders` names. `folders` gets the path of
+  /// <account>/projects and returns folder names, not paths. It runs only
+  /// when the cwd's folder lacks the transcript.
+  public static func find(
+    _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine(),
+    folders: (String) -> [String]
   ) -> String? {
     let projects = "\(account)/projects"
     let folder = String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
     let named = "\(projects)/\(folder)/\(sessionId).jsonl"
-    if FileManager.default.fileExists(atPath: named) { return named }
-    return folders(projects).map { "\(projects)/\($0)/\(sessionId).jsonl" }.first {
-      FileManager.default.fileExists(atPath: $0)
-    }
-  }
-
-  /// The names of the folders in `projects`, or none when it can't be read.
-  public static func projectFolders(_ projects: String) -> [String] {
-    (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
+    if machine.exists(named) { return named }
+    return folders(projects).map { "\(projects)/\($0)/\(sessionId).jsonl" }.first(
+      where: machine.exists)
   }
 
   /// Reads the transcript from the end, because transcripts reach 24 MB.
-  public static func tail(_ path: String) -> TranscriptTail {
+  public static func tail(_ path: String, on machine: any Machine = LocalMachine()) -> TranscriptTail {
     var tail = TranscriptTail()
-    eachLineFromEnd(path) { fold($0, into: &tail) }
+    eachLineFromEnd(path, on: machine) { fold($0, into: &tail) }
     return tail
   }
 
   /// The main conversation's last `limit` messages that have text, oldest first.
-  public static func messages(_ path: String, limit: Int) -> [ChatMessage] {
+  public static func messages(_ path: String, limit: Int, on machine: any Machine = LocalMachine()) -> [ChatMessage] {
     var messages: [ChatMessage] = []
-    eachLineFromEnd(path) { line in
+    eachLineFromEnd(path, on: machine) { line in
       if let message = message(line) { messages.append(message) }
       return messages.count >= limit
     }
@@ -270,12 +274,10 @@ public enum Transcript {
   /// Whether a user message of the main conversation that holds `text` starts
   /// at byte `offset` or later. It is false when the file is shorter than
   /// `offset`, because then it is not the file that `offset` measured.
-  public static func hasUserMessage(_ path: String, holding text: String, from offset: UInt64) -> Bool {
-    guard let file = FileHandle(forReadingAtPath: path) else { return false }
-    defer { try? file.close() }
-    guard let size = try? file.seekToEnd(), size >= offset, (try? file.seek(toOffset: offset)) != nil,
-      let data = try? file.readToEnd()
-    else { return false }
+  public static func hasUserMessage(
+    _ path: String, holding text: String, from offset: UInt64, on machine: any Machine = LocalMachine()
+  ) -> Bool {
+    guard let data = machine.read(path, from: offset, count: nil) else { return false }
     let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
     return data.split(separator: UInt8(ascii: "\n")).contains {
       guard let m = message(Data($0)), m.role == .user else { return false }
@@ -286,9 +288,8 @@ public enum Transcript {
   /// Calls `body` with each non-empty line, last line first, until it returns
   /// true. Each read is twice the size of the one before, up to 4 MB, so a
   /// long line costs few reads.
-  static func eachLineFromEnd(_ path: String, _ body: (Data) -> Bool) {
-    guard let file = FileHandle(forReadingAtPath: path), var offset = try? file.seekToEnd() else { return }
-    defer { try? file.close() }
+  static func eachLineFromEnd(_ path: String, on machine: any Machine = LocalMachine(), _ body: (Data) -> Bool) {
+    guard var offset = machine.size(path) else { return }
     var size: UInt64 = 1 << 16
     // The start of the chunk after the current one, up to its first newline.
     // It ends a line that starts in the current chunk. It is empty when that
@@ -298,7 +299,7 @@ public enum Transcript {
       let count = min(size, offset)
       offset -= count
       size = min(size * 2, 1 << 22)
-      guard (try? file.seek(toOffset: offset)) != nil, let chunk = try? file.read(upToCount: Int(count)) else { return }
+      guard let chunk = machine.read(path, from: offset, count: Int(count)) else { return }
       var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
       for line in lines.reversed() where !line.isEmpty {

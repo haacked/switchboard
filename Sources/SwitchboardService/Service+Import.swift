@@ -66,7 +66,7 @@ extension Service {
     chosen.removeAll { stuck[$0.session.id] != nil }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
-      Transcript.find(s.id, account: s.account, cwd: s.cwd).map(Transcript.tail) ?? TranscriptTail()
+      Transcript.find(s.id, account: s.account, cwd: s.cwd).map { Transcript.tail($0) } ?? TranscriptTail()
     }
     var imported: [SessionSummary] = []
     try queue.sync {
@@ -135,10 +135,13 @@ extension Service {
 
   /// The rows of `claude agents --json` under one account. With `timeout`,
   /// a claude that hangs fails the call.
-  func agentRows(_ claude: String, account: String, seen: Int64, timeout: Double? = nil) throws -> [ClaudeSession] {
+  /// claude and the account's folder are on `machine`.
+  func agentRows(
+    _ claude: String, account: String, seen: Int64, timeout: Double? = nil, on machine: any Machine = LocalMachine()
+  ) throws -> [ClaudeSession] {
     var env = ProcessInfo.processInfo.environment
     ClaudeAccount.apply(account, to: &env)
-    let r = try runCommand(claude, ["agents", "--json"], env: env, timeout: timeout)
+    let r = try machine.run(claude, ["agents", "--json"], env: env, input: nil, timeout: timeout)
     guard r.status == 0 else {
       throw APIError("claude agents failed for \(account): \(oneLine(r.stderr, max: 200))")
     }

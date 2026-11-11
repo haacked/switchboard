@@ -34,12 +34,13 @@ extension Service {
     }
     try finishPaneStop(session, stop, command: "sb cleanup")
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)
-    try removeWorktree(repo, session.cwd)
+    let machine = self.machine(for: session)
+    try removeWorktree(repo, session.cwd, on: machine)
     var branchRemoved = false
     var branchError: Error?
     if let branch {
       do {
-        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
+        branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, on: machine)
       } catch {
         branchError = error
       }
@@ -92,7 +93,7 @@ extension Service {
     guard session.repo != nil else {
       throw APIError("sbd didn't make the worktree of \(session.id) at \(session.cwd), so cleanup leaves it alone.")
     }
-    guard FileManager.default.fileExists(atPath: session.cwd) else {
+    guard machine(for: session).exists(session.cwd) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
@@ -105,7 +106,7 @@ extension Service {
   /// folder.
   func requireFolder(_ session: Session) throws {
     try refuseNotStarted(session)
-    guard !FileManager.default.fileExists(atPath: session.cwd) else { return }
+    guard !machine(for: session).exists(session.cwd) else { return }
     if entries[session.id]?.facts.cleanedUp != nil {
       throw APIError("\(session.id) was cleaned up, and its worktree is gone.")
     }
