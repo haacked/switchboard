@@ -572,6 +572,21 @@ public enum GitHub {
     return values
   }
 
+  /// The lowercased owner/name of every GitHub remote in `config`, which
+  /// holds the git config values by key, and of gh's default repo.
+  /// `gh repo set-default` can name a fork's parent, which no remote's URL
+  /// names. gh then stores the parent's owner/name in `gh-resolved` and
+  /// opens PRs there.
+  public static func repositories(config: [String: String]) -> Set<String> {
+    Set(
+      config.compactMap { key, value in
+        guard key.hasPrefix("remote.") else { return nil }
+        if key.hasSuffix(".url") { return repo(remoteURL: value)?.lowercased() }
+        if key.hasSuffix(".gh-resolved"), Followup.isRepository(value) { return value.lowercased() }
+        return nil
+      })
+  }
+
   /// The key of the branch's PR, as `git pr` finds it: the PR from the
   /// branch's upstream name in gh's base repo, whose head repository belongs
   /// to the owner of the branch's push remote. `config` holds the git config
@@ -662,10 +677,13 @@ public enum GitHub {
 
   static let prLinkMarker = Data(#""pr-link""#.utf8)
 
-  /// The PR of the last `pr-link` line among the complete lines of `data`,
-  /// and the number of bytes up to the end of the last complete line. A
-  /// reader that keeps an offset reads the rest again once the line ends.
-  public static func lastPRLink(in data: Data) -> (key: PRKey?, consumed: Int) {
+  /// The PR of the last `pr-link` line among the complete lines of `data`
+  /// whose repo `accepting` allows, and the number of bytes up to the end of
+  /// the last complete line. A reader that keeps an offset reads the rest
+  /// again once the line ends.
+  public static func lastPRLink(in data: Data, accepting: (String) -> Bool = { _ in true }) -> (
+    key: PRKey?, consumed: Int
+  ) {
     guard let end = data.lastIndex(of: 0x0A) else { return (nil, 0) }
     let complete = data[data.startIndex...end]
     // A transcript reaches 24 MB, so the search runs backwards from its end
@@ -675,7 +693,8 @@ public enum GitHub {
       let start = complete[..<marker.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? complete.startIndex
       let stop = complete[marker.upperBound...].firstIndex(of: 0x0A) ?? complete.endIndex
       if let json = try? JSONCoding.decoder.decode(JSON.self, from: Data(complete[start..<stop])),
-        json["type"]?.string == "pr-link", let repo = json["prRepository"]?.string, let number = json["prNumber"]?.int
+        json["type"]?.string == "pr-link", let repo = json["prRepository"]?.string, let number = json["prNumber"]?.int,
+        accepting(repo)
       {
         return (.number(repo: repo, number: number), complete.count)
       }

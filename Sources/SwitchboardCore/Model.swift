@@ -177,6 +177,10 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// resolved, or nil when `cwd` is in no git repo. Unlike `repo`, it does
   /// not mean that sbd made the worktree.
   public var checkout: String?
+  /// The owner/name that the `origin` remote of `checkout` names on GitHub,
+  /// or nil when that remote is missing or isn't on GitHub. An sbd that
+  /// predates it sends nil.
+  public var repository: String?
   /// The folder that names the session's repo. An sbd that predates
   /// `checkout` sends only `repo`.
   public var repoFolder: String? { checkout ?? repo }
