@@ -61,7 +61,7 @@ struct CardView: View {
         Button("Deny", action: deny)
         TextField("Message for Claude (optional)", text: $draft.message, axis: .vertical)
           .textFieldStyle(.roundedBorder)
-          .sendsOnReturn { if !denyMessage.isEmpty { deny() } }
+          .sendsOnReturn { if Self.deniesOnReturn(draft.message) { deny() } }
       }
       Text("Deny without a message stops the turn. With a message, Claude reads it and goes on.")
         .font(.caption)
@@ -85,6 +85,10 @@ struct CardView: View {
     .padding(8)
     .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
   }
+
+  /// Whether Return in the deny message denies. A blank message does not, because a deny without a
+  /// message stops Claude's turn.
+  static func deniesOnReturn(_ message: String) -> Bool { !ReplyOption.trimmed(message).isEmpty }
 
   private var denyMessage: String { ReplyOption.trimmed(draft.message) }
 
