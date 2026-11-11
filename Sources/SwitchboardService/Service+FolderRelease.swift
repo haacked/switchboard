@@ -51,7 +51,7 @@ extension Service {
   /// of a fresh snapshot, because it reads the panes' processes from it.
   /// It first throws `insideRefusal` for a caller inside the session, so a
   /// refusal stops nothing.
-  func beginPaneStop(_ id: String, caller ancestry: Set<Int>?, command: String) throws -> PaneStop {
+  func beginPaneStop(_ id: String, ancestry: Set<Int>?, command: String) throws -> PaneStop {
     if let refusal = insideRefusal(id, ancestry, command: command) { throw refusal }
     let processes = Processes.descendants(of: livePanePids(id), in: snapshot.children)
     host.kill(paneName(id, .shell))

@@ -45,7 +45,7 @@ private func dead(_ pid: Int) -> PaneRow { PaneRow(pid: pid, dead: true, clients
   func beginPaneStopRefusesACallerBelowALivePane(ancestry: Set<Int>, command: String) throws {
     try withPanes(claude: live(claudePane), shell: live(shellPane)) { service in
       do {
-        _ = try service.queue.sync { try service.beginPaneStop(session, caller: ancestry, command: command) }
+        _ = try service.queue.sync { try service.beginPaneStop(session, ancestry: ancestry, command: command) }
         Issue.record("beginPaneStop accepted the ancestry \(ancestry)")
       } catch {
         #expect("\(error)" == refusal(command))
@@ -53,8 +53,8 @@ private func dead(_ pid: Int) -> PaneRow { PaneRow(pid: pid, dead: true, clients
     }
   }
 
-  /// A dead pane keeps its last pid in tmux, and that pid no longer runs. `.inProcess` callers, such as sbd's
-  /// automatic cleanup, have no ancestry to check.
+  /// A dead pane keeps its last pid in tmux, and that pid no longer runs. An `.inProcess` caller has no ancestry
+  /// to check.
   @Test(
     .timeLimit(.minutes(1)),
     arguments: [
@@ -63,7 +63,9 @@ private func dead(_ pid: Int) -> PaneRow { PaneRow(pid: pid, dead: true, clients
   func beginPaneStopAcceptsACallerOutsideTheSession(shellDead: Bool, ancestry: Set<Int>?) throws {
     try withPanes(claude: live(claudePane), shell: shellDead ? dead(shellPane) : live(shellPane)) { service in
       #expect(throws: Never.self) {
-        _ = try service.queue.sync { try service.beginPaneStop(session, caller: ancestry, command: "sb rm --worktree") }
+        _ = try service.queue.sync {
+          try service.beginPaneStop(session, ancestry: ancestry, command: "sb rm --worktree")
+        }
       }
     }
   }

@@ -33,7 +33,7 @@ extension Service {
       }
       try requireNoTurn(e)
       install(fresh)
-      return try beginPaneStop(session.id, caller: ancestry, command: command)
+      return try beginPaneStop(session.id, ancestry: ancestry, command: command)
     }
     try finishPaneStop(session, stop, command: command)
     _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith)

@@ -1121,7 +1121,7 @@ public final class Service {
         // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
         try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
         install(fresh)
-        if removesWorktree { return try beginPaneStop(session.id, caller: ancestry, command: command) }
+        if removesWorktree { return try beginPaneStop(session.id, ancestry: ancestry, command: command) }
         if case .running(let pid) = claudeState(session.id) { machine.signal(pid, SIGTERM) }
         return nil
       }
