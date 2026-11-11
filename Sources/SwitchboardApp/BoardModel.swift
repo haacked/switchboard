@@ -23,6 +23,7 @@ final class BoardModel: ObservableObject {
   @Published var showingImport = false
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
   @Published var knownRepos: [KnownRepo]?
+  @Published var showingSearch = false
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
   @Published var confirmingDelete: SessionSummary?
@@ -34,7 +35,7 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { showingNew || showingImport || doneRemoval != nil }
+  var presentingSheet: Bool { showingNew || showingImport || showingSearch || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox
   /// The Inbox item that the user last moved to.
@@ -269,8 +270,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event and the views never show. Publishing for it redraws the views
-  /// and restarts a tooltip's hover delay.
+  /// hook event. Publishing for it redraws the views and restarts a tooltip's
+  /// hover delay. The session tooltip shows `lastActivity`, so its "Last
+  /// activity" line can lag until another shown field changes.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
@@ -354,6 +356,9 @@ final class BoardModel: ObservableObject {
 
   /// The account that new sessions without a parent use.
   var activeAccount: AccountInfo? { accounts.first(where: \.active) }
+
+  /// The active account's folder. It is the default folder until the accounts load.
+  var activeAccountFolder: String { activeAccount?.folder ?? ClaudeAccount.defaultFolder }
 
   /// Closes the account menu and makes new sessions run under the account.
   /// When sessions on other accounts could move to it, this asks first.

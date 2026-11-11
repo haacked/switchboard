@@ -44,8 +44,8 @@ struct StateBadge: View {
   }
 }
 
-func ago(_ ms: Int64) -> String {
-  let s = max(0, (nowMs() - ms) / 1000)
+func ago(_ ms: Int64, now: Int64 = nowMs()) -> String {
+  let s = max(0, (now - ms) / 1000)
   if s < 60 { return "\(s)s" }
   if s < 3600 { return "\(s / 60)m" }
   if s < 86400 { return "\(s / 3600)h" }
@@ -168,6 +168,9 @@ struct ContentView: View {
     .sheet(isPresented: $model.showingImport) {
       ImportView().environmentObject(model)
     }
+    .sheet(isPresented: $model.showingSearch) {
+      SessionSearchView().environmentObject(model)
+    }
     .sheet(isPresented: isShowingDoneRemoval) {
       if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
     }
@@ -180,10 +183,11 @@ struct Sidebar: View {
 
   var body: some View {
     let repos = model.repoLabels
+    let activeAccount = model.activeAccountFolder
     List(selection: $model.selection) {
       if let manager = model.manager {
         Section {
-          SessionRow(session: manager).tag(manager.id)
+          SessionRow(session: manager, activeAccount: activeAccount).tag(manager.id)
         } header: {
           Text("Manager")
         }
@@ -193,7 +197,7 @@ struct Sidebar: View {
         Section(isExpanded: expanded(state)) {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
-              SessionRow(session: row.session, repo: repos[row.id])
+              SessionRow(session: row.session, activeAccount: activeAccount, repo: repos[row.id])
               NotesButton(session: row.session)
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if row.session.isRemovableDone { DeleteButton(session: row.session) }
@@ -245,6 +249,31 @@ struct Sidebar: View {
       }
     } message: { change in
       Text(accountSwitchMessage(change))
+    }
+    // A sixth toolbar item pushes New Session into the overflow menu at the minimum window width, so search
+    // sits here. It looks like a search field, and the panel holds the real one.
+    .safeAreaInset(edge: .top) {
+      Button {
+        model.showingSearch = true
+      } label: {
+        HStack(spacing: 4) {
+          Image(systemName: "magnifyingglass")
+          Text("Search Sessions")
+          Spacer(minLength: 4)
+          Text("⌘K")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(.horizontal, 8)
+      .padding(.top, 4)
+      .help("Find a session by name, repo, branch, PR, issue, group, reason, or note (⌘K)")
+      .accessibilityLabel("Search Sessions")
+      .accessibilityIdentifier("sidebar-search")
     }
     .safeAreaInset(edge: .bottom) {
       Button {
@@ -342,11 +371,13 @@ struct ManagerButton: View {
 
 extension PRSummary {
   var numberLabel: String { "#\(number)" }
-  var tooltip: String { "\(status.rawValue) · \(repo): \(title)" }
+  var tooltip: String { "\(status.rawValue)\(queuePhrase.map { ", \($0)" } ?? "") · \(repo): \(title)" }
 }
 
 struct SessionRow: View {
   let session: SessionSummary
+  /// The active account's folder. The tooltip names the session's account only when it differs.
+  let activeAccount: String
   var repo: String? = nil
   @Environment(\.backgroundProminence) private var prominence
 
@@ -370,6 +401,7 @@ struct SessionRow: View {
             HStack(spacing: 3) {
               PRLink(text: pr.numberLabel, url: url)
                 .font(.caption)
+                .fixedSize()
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
@@ -378,11 +410,16 @@ struct SessionRow: View {
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
-        subtitle
+        // The sidebar can be too narrow for the badge beside the PR number.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          if let pr = session.pr { QueueBadge(pr: pr) }
+          subtitle
+        }
         CleanupNote(session: session)
       }
     }
     .padding(.vertical, 2)
+    .help(session.tooltip(activeAccount: activeAccount))
   }
 
   /// Text truncates at its end. The reason therefore truncates before the repo does.
@@ -843,6 +880,7 @@ struct BoardCard: View {
 
   var body: some View {
     let s = session
+    let tooltip = s.tooltip(activeAccount: model.activeAccountFolder)
     ZStack(alignment: .bottomTrailing) {
       Button {
         model.openFromBoard(s.id)
@@ -879,8 +917,12 @@ struct BoardCard: View {
           }
           CleanupNote(session: s)
           MergeNote(session: s)
-          Text(statusLine)
-            .font(.caption2).foregroundStyle(.tertiary)
+          // A Board column is too narrow for the badge beside the PR number.
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let pr = s.pr { QueueBadge(pr: pr) }
+            Text(statusLine)
+              .font(.caption2).foregroundStyle(.tertiary)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -891,6 +933,8 @@ struct BoardCard: View {
         }
       }
       .buttonStyle(.plain)
+      .help(tooltip)
+      .modifier(SnapshotHover(id: s.id, text: tooltip))
       .accessibilityValue(s.state.title)
       .accessibilityAddTraits(keyboardFocused ? .isSelected : [])
       .overlayPreferenceValue(PRLinkBounds.self) { bounds in

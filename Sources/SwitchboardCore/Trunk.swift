@@ -31,6 +31,21 @@ public enum TrunkQueueState: String, Codable, Sendable {
     }
   }
 
+  /// The state in a short form of the words that `git pr` uses. It is nil
+  /// for merged and unknown, which no tile shows.
+  public var word: String? {
+    switch self {
+    case .submitted: "Submitted"
+    case .pending: "Waiting"
+    case .testing: "Testing"
+    case .passed: "Passed"
+    case .failing: "Failing"
+    case .queued: "Queued"
+    case .removed: "Removed"
+    case .merged, .unknown: nil
+    }
+  }
+
   /// Whether Trunk holds the PR: submitted, or added to the queue. Trunk can
   /// still drop a submitted PR, and `trunk merge status` reports it.
   public var isHeld: Bool { self == .submitted || isQueued }
