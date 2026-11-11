@@ -604,19 +604,42 @@ enum HTML {
 }
 
 extension MarkdownText {
-  /// The text with a backslash before each ASCII punctuation character, so
-  /// that Markdown shows it as it is and makes no link, image, or HTML of it.
+  /// The text with a backslash before each character that could start
+  /// Markdown syntax, so that Markdown shows it as it is and makes no link,
+  /// image, emphasis, list, or HTML of it. Other punctuation stays bare, so
+  /// that `sb --json` shows readable text.
   /// cmark-gfm finds email addresses after it resolves the backslashes, so a
   /// word joiner, which draws nothing, goes before each `@`.
   public static func escaped(_ text: String) -> String {
     var out = ""
-    for c in text {
+    let chars = Array(text)
+    var word = ""
+    var lineStart = true
+    var number = false
+    for (i, c) in chars.enumerated() {
+      let next = i + 1 < chars.count ? chars[i + 1] : nil
+      var escape = alwaysEscaped.contains(c)
+      // A list marker, a heading underline, or an ordered list number at the start of a line.
+      if lineStart, "-+=".contains(c) { escape = true }
+      if number, ".)".contains(c) { escape = true }
+      // GFM turns `scheme://`, `mailto:`, `xmpp:`, and `www.` into links.
+      if c == ":", next == "/" || ["mailto", "xmpp"].contains(word.lowercased()) { escape = true }
+      if c == ".", word.lowercased() == "www" { escape = true }
       if c == "@" { out.append("\u{2060}") }
-      if c.isASCII, c.isPunctuation || c.isSymbol { out.append("\\") }
+      if escape { out.append("\\") }
       out.append(c)
+      number = (lineStart || number) && c.isASCII && c.isNumber
+      if c.isNewline {
+        lineStart = true
+      } else if !c.isWhitespace {
+        lineStart = false
+      }
+      word = c.isLetter ? word + String(c) : ""
     }
     return out
   }
+
+  static let alwaysEscaped = Set("\\`*_[]<>!#|~&")
 }
 
 extension MarkdownBlock {

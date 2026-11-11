@@ -938,6 +938,24 @@ extension MergeAttentionTests {
       #expect(paragraphText(MarkdownText.escaped(gist)) == gist)
     }
 
+    /// `sb --json` shows the escaped text, so ordinary punctuation stays bare.
+    @Test(arguments: [
+      "Not run: the database-backed suites.", "4 files, +315 -208. Approved by stamphog. Checks passed.",
+      "OR(X, T) matches; it's (mostly) fine?",
+    ])
+    func ordinaryPunctuationIsNotEscaped(_ text: String) {
+      #expect(MarkdownText.escaped(text) == text)
+    }
+
+    @Test(arguments: [
+      "- a list", "+ a list", "1. a list", "12) a list", "=== heading", "see https://evil.example",
+      "mailto:a@b.example", "www.evil.example",
+    ])
+    func syntaxAtTheStartOrALinkIsEscaped(_ text: String) {
+      #expect(paragraphText(MarkdownText.escaped(text))?.replacingOccurrences(of: "\u{2060}", with: "") == text)
+      #expect(!rendersALinkOrImage(MarkdownText.escaped(text)))
+    }
+
     @Test(arguments: hostileText.filter { !$0.contains("\n") })
     func escapedTextRendersNoLinkOrImage(_ text: String) {
       #expect(!rendersALinkOrImage(MarkdownText.escaped(text)))
