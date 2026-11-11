@@ -96,8 +96,8 @@ final class GitHubPoller {
   /// The session's transcript and the PR of its last pr-link line.
   struct Transcript {
     var claudeSessionId: String
-    /// The project folder of the session's transcripts. A conversation that
-    /// `/clear` starts writes its transcript there too.
+    /// The name of the project folder of the session's transcripts. A
+    /// conversation that `/clear` starts writes its transcript there too.
     var folder: String?
     var path: String?
     /// The account whose folder `path` is in.
@@ -253,7 +253,7 @@ final class GitHubPoller {
       t.transcript.folder = nil
       t.transcript.path = nil
     }
-    readTranscript(&t.transcript, configDir: s.configDir, projects: &shared.projects)
+    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, projects: &shared.projects)
     tracked[s.id] = t
   }
 
@@ -308,20 +308,20 @@ final class GitHubPoller {
     try? service.gitOutput(cwd, args)
   }
 
-  /// Reads the transcript's lines since the last read. Claude Code keeps a
-  /// transcript at <config dir>/projects/<folder>/<claude session id>.jsonl.
-  /// The poller searches every project folder until it knows the session's
-  /// folder, and then looks only there.
-  private func readTranscript(_ t: inout Transcript, configDir: String, projects: inout [String: [String]]) {
-    let root = "\(configDir)/projects"
-    let name = "\(t.claudeSessionId).jsonl"
+  /// Reads the transcript's lines since the last read. Until the poller knows
+  /// the session's project folder, it searches every project folder. Then it
+  /// looks only in the cwd's folder and that one.
+  private func readTranscript(
+    _ t: inout Transcript, configDir: String, cwd: String, projects: inout [String: [String]]
+  ) {
     if t.path == nil {
-      if projects[root] == nil { projects[root] = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [] }
-      let folders = t.folder.map { [$0] } ?? projects[root]!.map { "\(root)/\($0)" }
-      if let folder = folders.first(where: { FileManager.default.fileExists(atPath: "\($0)/\(name)") }) {
-        t.folder = folder
-        t.path = "\(folder)/\(name)"
+      let known = t.folder
+      t.path = SwitchboardCore.Transcript.find(t.claudeSessionId, account: configDir, cwd: cwd) { root in
+        if let known { return [known] }
+        if projects[root] == nil { projects[root] = SwitchboardCore.Transcript.projectFolders(root) }
+        return projects[root]!
       }
+      if let path = t.path { t.folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent }
     }
     guard let path = t.path, let file = FileHandle(forReadingAtPath: path) else { return }
     defer { try? file.close() }

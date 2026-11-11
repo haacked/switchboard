@@ -229,15 +229,25 @@ public enum Transcript {
   /// Claude names the folder after the session's cwd, with each character
   /// other than an ASCII letter or digit replaced by "-". Claude shortens a
   /// long path in a way that this doesn't reproduce. A symlink can also change
-  /// the cwd. So when that folder lacks the transcript, this looks in every
-  /// folder.
-  public static func find(_ sessionId: String, account: String, cwd: String) -> String? {
+  /// the cwd. So when that folder lacks the transcript, this looks in the
+  /// folders that `folders` names, which by default are every folder in
+  /// <account>/projects. `folders` gets that path and returns folder names,
+  /// not paths. It runs only when the cwd's folder lacks the transcript.
+  public static func find(
+    _ sessionId: String, account: String, cwd: String, folders: (String) -> [String] = projectFolders
+  ) -> String? {
     let projects = "\(account)/projects"
     let folder = String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
     let named = "\(projects)/\(folder)/\(sessionId).jsonl"
     if FileManager.default.fileExists(atPath: named) { return named }
-    let folders = (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
-    return folders.map { "\(projects)/\($0)/\(sessionId).jsonl" }.first { FileManager.default.fileExists(atPath: $0) }
+    return folders(projects).map { "\(projects)/\($0)/\(sessionId).jsonl" }.first {
+      FileManager.default.fileExists(atPath: $0)
+    }
+  }
+
+  /// The names of the folders in `projects`, or none when it can't be read.
+  public static func projectFolders(_ projects: String) -> [String] {
+    (try? FileManager.default.contentsOfDirectory(atPath: projects)) ?? []
   }
 
   /// Reads the transcript from the end, because transcripts reach 24 MB.
