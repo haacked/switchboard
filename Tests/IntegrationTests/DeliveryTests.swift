@@ -414,4 +414,63 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.waitFor("delivery_unknown") { try sbd.events(s.id, "delivery_unknown", text: text).count == 1 }
     #expect(try sbd.events(s.id, "delivered", text: text).count == deliveredBefore)
   }
+
+  static let draft = "half a thought"
+
+  /// A session whose prompt box shows a typed draft, and a message sent to
+  /// it. The send waits for the draft's echo, so sbd can't capture the box
+  /// before the draft shows.
+  func sendBehindADraft(_ sbd: Instance, _ text: String) throws -> SessionSummary {
+    let s = try Path.direct.session(sbd)
+    try sbd.waitFor("the stub's empty box") { try sbd.promptIsEmpty(s.id) }
+    try sbd.typeDraft(s.id, Self.draft)
+    try sbd.waitFor("the draft in the box") { try !sbd.promptIsEmpty(s.id) }
+    try #require(try sbd.sb("send", s.id, text) == "pasted\n")
+    return s
+  }
+
+  func expectHeld(_ sbd: Instance, _ s: SessionSummary, _ text: String) throws {
+    usleep(3_000_000)
+    #expect(sbd.stubInputCount(text) == 0, "sbd pasted over the draft")
+    #expect(try sbd.events(s.id, "pasting", text: text).isEmpty)
+  }
+
+  func clearDraftAndExpectOneDelivery(_ sbd: Instance, _ s: SessionSummary, _ text: String) throws {
+    try sbd.press(s.id, "C-u")
+    try sbd.waitFor("the cleared box") { try sbd.promptIsEmpty(s.id) }
+    try sbd.waitFor("delivered", timeout: 20) { try sbd.events(s.id, "delivered", text: text).count == 1 }
+    #expect(sbd.settledStubInputCount(text) == 1)
+    #expect(sbd.stubInputCount(Self.draft) == 0, "the draft was submitted")
+  }
+
+  /// A paste submits whatever the box holds, so sbd holds the message
+  /// without an event until the user clears the draft.
+  @Test func aDraftInThePromptBoxHoldsAPasteUntilItIsCleared() throws {
+    let sbd = try Instance()
+    let text = "sent behind a draft"
+    let s = try sendBehindADraft(sbd, text)
+
+    try expectHeld(sbd, s, text)
+    #expect(try sbd.events(s.id, "requeued", text: text).isEmpty)
+    let log = (try? String(contentsOfFile: sbd.home.log, encoding: .utf8)) ?? ""
+    #expect(log.components(separatedBy: "holds a message for \(s.id)").count == 2, "sbd should log the hold once")
+
+    try clearDraftAndExpectOneDelivery(sbd, s, text)
+  }
+
+  /// A held message has no `pasting` event, so the restarted sbd treats it
+  /// as pending and still holds it behind the draft.
+  @Test func aMessageHeldByADraftIsDeliveredOnceAfterARestart() throws {
+    let sbd = try Instance()
+    let text = "held across a restart"
+    let s = try sendBehindADraft(sbd, text)
+    usleep(1_500_000)
+    try #require(try sbd.events(s.id, "pasting", text: text).isEmpty, "sbd pasted over the draft")
+    sbd.killSbd()
+    try sbd.startSbd()
+
+    try expectHeld(sbd, s, text)
+
+    try clearDraftAndExpectOneDelivery(sbd, s, text)
+  }
 }

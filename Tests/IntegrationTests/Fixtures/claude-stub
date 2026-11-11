@@ -203,13 +203,15 @@ hook() {
   payload "$@" | sh -c "$hook_cmd" >/dev/null
 }
 
+rule=────────────────────────────────────────
+
 # draw <cursor>: prints the dialog with ❯ on item <cursor>, as Claude Code
 # draws it: a rule, the head lines, the menu, and a footer that offers Esc.
 # It goes to stderr, because a caller captures stdout.
 draw() {
   local i=0 item
   {
-    printf '%s\n' "────────────────────────────────────────" "${head[@]}"
+    printf '%s\n' "$rule" "${head[@]}"
     for item in "${items[@]}"; do
       [ "$i" = "$1" ] && printf ' ❯ %s\n' "$item" || printf '   %s\n' "$item"
       i=$((i + 1))
@@ -681,6 +683,14 @@ printf '\033[?2004h'
 play "$source"
 echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"
+# box: draws Claude Code's prompt box between two rules and moves the cursor
+# after its ❯ and no-break space, so the tty echoes typed text into the box.
+# sbd pastes only while the box shows empty. Each line that read returns
+# moves the cursor down one line, so unbox moves up one more than the lines
+# read since box drew it, and clears the box before the turn prints.
+box() { printf '%s\n❯\xc2\xa0\n%s\033[1A\033[3G' "$rule" "$rule"; boxed=0; }
+unbox() { printf '\033[%dA\r\033[J' $((boxed + 1)); }
+box
 # tmux turns each LF of a paste into CR. The tty in cooked mode turns CR back
 # into LF. A pasted message therefore reaches read as several lines. A line
 # that ends inside a paste adds a new line to the prompt instead of
@@ -688,6 +698,7 @@ echo "claude-stub $session ($source)"
 # sends, put the first paste's end and the second paste on one line.
 start=$'\e[200~' end=$'\e[201~' typed='' pasting=''
 while IFS= read -r line; do
+  boxed=$((boxed + 1))
   printf '%s\n' "$line" >>"$SB_HOME/stub-input.log"
   last=${line##*"$start"}
   if [[ $line == *"$start"* && $last != *"$end"* ]]; then pasting=1; elif [[ $line == *"$end"* ]]; then pasting=''; fi
@@ -697,6 +708,8 @@ while IFS= read -r line; do
     continue
   fi
   typed+=$line
+  unbox
   [ -n "$typed" ] && turn "$typed"
   typed=''
+  box
 done

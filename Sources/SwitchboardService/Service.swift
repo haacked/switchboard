@@ -28,6 +28,9 @@ public final class Service {
     /// that prompt's UserPromptSubmit arrives, the session counts as busy, so
     /// a second message waits instead of landing in the first one's turn.
     var inFlight: Int64?
+    /// The text of the last message that a draft in claude's prompt box
+    /// held. The log names each held message once.
+    var heldText: String?
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
     var lastJobSeen: Int64 = 0
@@ -397,7 +400,7 @@ public final class Service {
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
-      return .string(try host.screen(paneName(id, pane)))
+      return .string(try host.screen(paneName(id, pane), colors: args["colors"]?.bool == true))
     case "accounts", "account-use", "account-move":
       return try accountRequest(op, args)
     case "mcp":
@@ -912,7 +915,10 @@ public final class Service {
   /// UserPromptSubmit. `pasting` reaches the log before the paste starts, so
   /// a restart never pastes a message that may have arrived. `delivered`
   /// follows only a paste that succeeded. A failed paste records `requeued`
-  /// and puts the message back at the front of the session's queue.
+  /// and puts the message back at the front of the session's queue. A paste
+  /// also submits text that the user left in claude's prompt box, so a
+  /// message waits at the front of the queue, with no event, until the box
+  /// shows empty.
   private func paste(_ id: String, _ message: QueuedMessage) {
     let text = message.text
     let name = paneName(id, .claude)
@@ -920,6 +926,16 @@ public final class Service {
     entries[id]?.inFlight = nowMs()
     pasteQueue.async { [self] in
       waitAtGate("hold-paste")
+      guard (try? host.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true else {
+        queue.async { [self] in
+          if entries[id]?.heldText != text {
+            logLine("holds a message for \(id) until claude's prompt box shows empty")
+            entries[id]?.heldText = text
+          }
+          requeue(id, message, after: 2)
+        }
+        return
+      }
       guard queue.sync(execute: { startPaste(id, message) }) else { return }
       do {
         try host.paste(name, parts?.text ?? text, attachments: parts?.paths)
@@ -935,11 +951,11 @@ public final class Service {
     }
   }
 
-  /// Puts the message back at the front of the session's queue and tries again after a second.
-  private func requeue(_ id: String, _ message: QueuedMessage) {
+  /// Puts the message back at the front of the session's queue and tries again after `delay` seconds.
+  private func requeue(_ id: String, _ message: QueuedMessage, after delay: Double = 1) {
     entries[id]?.inFlight = nil
     entries[id]?.pending.insert(message, at: 0)
-    deliverPending(id, after: 1)
+    deliverPending(id, after: delay)
   }
 
   /// Checks that the log holds the message's `sent` event, then records
@@ -951,6 +967,7 @@ public final class Service {
   /// the message when the log lacks the `sent` event. It returns false and
   /// requeues the message when the store fails.
   private func startPaste(_ id: String, _ message: QueuedMessage) -> Bool {
+    entries[id]?.heldText = nil
     var data: [String: JSON] = ["text": .string(message.text)]
     if let session = entries[id]?.session, let path = transcriptFile(session),
       let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber

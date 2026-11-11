@@ -10,8 +10,7 @@ extension Instance {
   /// Types a line into the session's Claude pane, where the stub's dialog
   /// reads the terminal's answer.
   func type(_ id: String, _ line: String) throws {
-    let t = try client.terminals(id)
-    #expect(try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", "-l", line]).status == 0)
+    try typeDraft(id, line)
     try press(id, "Enter")
   }
 

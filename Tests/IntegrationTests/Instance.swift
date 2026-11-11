@@ -353,10 +353,21 @@ final class Instance {
 
   /// Presses one key in the session's Claude pane, by its tmux key name,
   /// such as Down or Escape.
-  func press(_ id: String, _ key: String) throws {
+  func press(_ id: String, _ key: String) throws { try sendKeys(id, [key]) }
+
+  /// Types the text into the session's Claude pane without Enter, so it stays in the prompt box.
+  func typeDraft(_ id: String, _ text: String) throws { try sendKeys(id, ["-l", text]) }
+
+  private func sendKeys(_ id: String, _ keys: [String]) throws {
     let t = try client.terminals(id)
-    let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):", key])
-    guard r.status == 0 else { throw TestError(description: "tmux send-keys \(key): \(r.stderr)") }
+    let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):"] + keys)
+    guard r.status == 0 else { throw TestError(description: "tmux send-keys \(keys): \(r.stderr)") }
+  }
+
+  /// Whether the session's prompt box shows no typed text, read from the
+  /// colored screen that sbd checks before a paste.
+  func promptIsEmpty(_ id: String) throws -> Bool {
+    ClaudeScreen.promptIsEmpty(try client.call("screen", ["session": .string(id), "colors": true]).string ?? "")
   }
 
   /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.
