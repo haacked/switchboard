@@ -35,6 +35,7 @@ extension Service {
       guard let name = entry.branch, let tip = entry.head else { return nil }
       return (name, tip, try branchConfig(repo, name, on: machine))
     }()
+    // Supacode runs on this Mac, not on `machine`.
     let result = try runCommand(
       try supacodeExecutable(), ["worktree", "delete", "--worktree", Self.supacodeID(entry.path), "--background"],
       timeout: 200)

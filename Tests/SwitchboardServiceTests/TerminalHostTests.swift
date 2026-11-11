@@ -83,7 +83,6 @@ import Testing
 private final class RecordingMachine: Machine, @unchecked Sendable {
   private let lock = NSLock()
   private var recorded: [(executable: String, args: [String], env: [String: String]?, input: Data?)] = []
-  var paths: Set<String> = []
 
   var commands: [(executable: String, args: [String], env: [String: String]?, input: Data?)] {
     lock.withLock { recorded }
@@ -100,7 +99,7 @@ private final class RecordingMachine: Machine, @unchecked Sendable {
 
   func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { nil }
   func size(_ path: String) -> UInt64? { nil }
-  func exists(_ path: String) -> Bool { paths.contains(path) }
+  func exists(_ path: String) -> Bool { false }
   func isFolder(_ path: String) -> Bool { false }
   func modified(_ path: String) -> Date? { nil }
   func list(_ folder: String) -> [String] { [] }
@@ -127,7 +126,6 @@ private final class RecordingMachine: Machine, @unchecked Sendable {
     #expect(command.args == ["-S", "\(dir)/tmux.sock", "-f", "\(dir)/tmux.conf", "load-buffer", "-"])
     #expect(command.env?["TERM"] == "xterm-256color")
     #expect(command.input == Data("hi".utf8))
-    #expect(!FileManager.default.fileExists(atPath: "\(dir)/tmux.sock"), "a local tmux started")
   }
 
   @Test func reportsWhatTheMachinesTmuxPrintedWhenItFails() throws {

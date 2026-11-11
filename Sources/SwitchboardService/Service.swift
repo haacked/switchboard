@@ -523,7 +523,7 @@ public final class Service {
   /// The main checkout of the repo at `path` and the folder that a worktree of
   /// it on `branch` gets.
   func worktreeLocation(
-    _ path: String, _ branch: String, on machine: any Machine = LocalMachine()
+    _ path: String, _ branch: String, on machine: any Machine
   ) throws -> (main: String, dir: String) {
     // The first worktree names the main checkout, whose folder name names the repo.
     let main = try worktreeEntries(path, on: machine).first?.path ?? path
@@ -630,7 +630,7 @@ public final class Service {
   }
 
   func worktreeEntry(
-    _ repo: String, at path: String, on machine: any Machine = LocalMachine()
+    _ repo: String, at path: String, on machine: any Machine
   ) throws -> WorktreeEntry? {
     try worktreeEntries(repo, on: machine).first { samePath($0.path, path) }
   }
@@ -664,7 +664,7 @@ public final class Service {
   }
 
   /// Whether `commit` is in origin/main of the repo that `dir` belongs to.
-  func isInMain(_ dir: String, _ commit: String, on machine: any Machine = LocalMachine()) -> Bool {
+  func isInMain(_ dir: String, _ commit: String, on machine: any Machine) -> Bool {
     (try? machine.run(git, ["-C", dir, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"]))?.status
       == 0
   }
@@ -1357,7 +1357,7 @@ public final class Service {
   /// A worktree at `path` does not count as having the branch checked out.
   func recheckBranch(
     _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil,
-    on machine: any Machine = LocalMachine()
+    on machine: any Machine
   ) throws {
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
@@ -1371,7 +1371,7 @@ public final class Service {
   /// Throws when a worktree other than the one at `path` has the branch checked out.
   /// Deleting the ref of a checked-out branch breaks that worktree.
   func requireNotCheckedOut(
-    _ repo: String, _ branch: String, ignoring path: String? = nil, on machine: any Machine = LocalMachine()
+    _ repo: String, _ branch: String, ignoring path: String? = nil, on machine: any Machine
   ) throws {
     let checkedOut = try worktreeEntries(repo, on: machine).contains { entry in
       entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)

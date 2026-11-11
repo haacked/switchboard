@@ -229,10 +229,8 @@ public enum Transcript {
   /// Claude names the folder after the session's cwd, with each character
   /// other than an ASCII letter or digit replaced by "-". Claude shortens a
   /// long path in a way that this doesn't reproduce. A symlink can also change
-  /// the cwd. So when that folder lacks the transcript, this looks in the
-  /// folders that `folders` names, which by default are every folder in
-  /// <account>/projects. `folders` gets that path and returns folder names,
-  /// not paths. It runs only when the cwd's folder lacks the transcript.
+  /// the cwd. So when that folder lacks the transcript, this looks in every
+  /// folder in <account>/projects.
   /// The account, the cwd, and the transcript are on `machine`.
   public static func find(
     _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine()
@@ -240,6 +238,10 @@ public enum Transcript {
     find(sessionId, account: account, cwd: cwd, on: machine, folders: machine.list)
   }
 
+  /// As `find` above, but when the cwd's folder lacks the transcript, this
+  /// looks in the folders that `folders` names. `folders` gets the path of
+  /// <account>/projects and returns folder names, not paths. It runs only
+  /// when the cwd's folder lacks the transcript.
   public static func find(
     _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine(),
     folders: (String) -> [String]
@@ -275,8 +277,7 @@ public enum Transcript {
   public static func hasUserMessage(
     _ path: String, holding text: String, from offset: UInt64, on machine: any Machine = LocalMachine()
   ) -> Bool {
-    guard let size = machine.size(path), size >= offset, let data = machine.read(path, from: offset, count: nil)
-    else { return false }
+    guard let data = machine.read(path, from: offset, count: nil) else { return false }
     let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
     return data.split(separator: UInt8(ascii: "\n")).contains {
       guard let m = message(Data($0)), m.role == .user else { return false }

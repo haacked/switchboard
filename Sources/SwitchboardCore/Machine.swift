@@ -32,8 +32,8 @@ public protocol Machine: Sendable {
   func createFolder(_ path: String) throws
 
   /// Sends the signal to the process. It sends nothing for a number that
-  /// `Processes.isValidPid` refuses, because such a number names a process group or
-  /// every process.
+  /// `Processes.isValidPid` refuses. `kill` reads 0 and a negative number as a process
+  /// group or every process. `pid_t` can't hold a number above `Int32.max`.
   func signal(_ pid: Int, _ signal: Int32)
 }
 

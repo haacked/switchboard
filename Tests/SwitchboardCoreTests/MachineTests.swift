@@ -216,14 +216,14 @@ import Testing
     }
   }
 
-  @Test(.timeLimit(.minutes(1)), arguments: [0, -1, -2, Int(Int32.min), Int.min])
-  func signalSendsNothingForAPidBelowOne(pid: Int) throws {
-    try withSleepingChild { child in
-      machine.signal(pid, SIGTERM)
-      Thread.sleep(forTimeInterval: 0.2)
+  @Test(arguments: [0, -1, -2, Int(Int32.min), Int.min, Int(Int32.max) + 1, Int.max])
+  func isValidPidRefusesANumberThatIsNotOneProcess(pid: Int) {
+    #expect(!Processes.isValidPid(pid))
+  }
 
-      #expect(child.isRunning)
-    }
+  @Test(arguments: [1, Int(Int32.max)])
+  func isValidPidAcceptsTheEnds(pid: Int) {
+    #expect(Processes.isValidPid(pid))
   }
 
   @Test(.timeLimit(.minutes(1))) func signalSendsNothingForTheNegatedPidOfAChild() throws {
