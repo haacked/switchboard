@@ -91,7 +91,7 @@ public struct MCPServer: Codable, Equatable, Sendable {
   /// exit restarts at once. Each further one doubles the wait from 1 s up to
   /// 60 s.
   public static func restartDelayMs(exitsInARow: Int) -> Int64 {
-    exitsInARow <= 1 ? 0 : min(60_000, 1000 << min(exitsInARow - 2, 6))
+    retryDelayMs(failuresInARow: exitsInARow)
   }
 
   /// A port for each server: its fixed port, else its port in `previous`

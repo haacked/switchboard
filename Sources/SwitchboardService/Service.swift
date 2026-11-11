@@ -102,6 +102,8 @@ public final class Service {
     return jobs
   }()
   var mcp: [SharedServer] = []
+  /// The ssh link of each remote host that has one, by host name.
+  let hostLinks: [String: HostLink]
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
@@ -157,6 +159,7 @@ public final class Service {
     self.sbPath = sbPath
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
+    self.hostLinks = Service.makeHostLinks(config: config, home: home)
     guard let git = findExecutable("git") else { throw APIError("can't find git") }
     self.git = git
   }
@@ -409,6 +412,8 @@ public final class Service {
       return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())
+    case "hosts", "host-connect", "host-disconnect":
+      return try hostRequest(op, args)
     case "snapshots":
       return try snapshotRequest(args)
     case "autocontinue":
@@ -1611,6 +1616,7 @@ public final class Service {
       install(fresh)
       let now = nowMs()
       superviseMCPServers(now: now)
+      superviseHosts(now: now)
       closeExitedShells()
       for id in entries.keys.sorted() {
         let live = entries[id]?.facts.live ?? false

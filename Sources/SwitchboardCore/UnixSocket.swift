@@ -104,7 +104,8 @@ public enum UnixSocket {
     }
   }
 
-  private static func withAddress(_ path: String, _ body: (UnsafePointer<sockaddr>, socklen_t) -> Int32) throws -> Int32
+  /// Calls `body` with the socket address of `path`. It throws for a path that is too long for one.
+  public static func withAddress(_ path: String, _ body: (UnsafePointer<sockaddr>, socklen_t) -> Int32) throws -> Int32
   {
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)

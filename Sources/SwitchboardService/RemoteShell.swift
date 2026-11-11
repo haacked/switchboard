@@ -90,6 +90,9 @@ final class RemoteShell: @unchecked Sendable {
 
   var pid: Int32 { process.processIdentifier }
 
+  /// Whether the process has not exited yet. While it is true, `pid` still names this process.
+  var isRunning: Bool { process.isRunning }
+
   /// What the shell answered in the handshake, or nil before the handshake.
   var ready: RemoteShellProtocol.Ready? { state.withLock { handshake } }
 
