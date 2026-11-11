@@ -7,8 +7,16 @@ public struct DocketSettings: Codable, Equatable, Sendable {
   public var path: String = "docket"
   /// How often sbd asks docket about the open reviews, on sbd's clock. 0 turns the poll off.
   public var pollSeconds: Double = 30
-  /// How long one `docket mcp` run may take. `list_reviews` asks claude and GitHub first.
+  /// How long one poll's `docket mcp` run may take. `list_reviews` asks claude and GitHub first.
   public var timeoutSeconds: Double = 120
+  /// How long the `docket mcp` run that starts a review may take. docket
+  /// records the review before it fetches the PR and provisions the clone.
+  /// A start that times out leaves a record that only docket's dashboard
+  /// clears. The default stays below `startWaitSeconds`. A limit above it
+  /// makes `sb docket` fail. sbd still adds the row when docket answers.
+  public var startTimeoutSeconds: Double = 240
+  /// How long `sb docket` waits for sbd's answer.
+  public static let startWaitSeconds: Double = 300
 
   public init() {}
 
@@ -18,6 +26,9 @@ public struct DocketSettings: Codable, Equatable, Sendable {
     path = try c.decodeIfPresent(String.self, forKey: .path) ?? d.path
     pollSeconds = try c.decodeIfPresent(Double.self, forKey: .pollSeconds) ?? d.pollSeconds
     timeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .timeoutSeconds) ?? d.timeoutSeconds
+    // A config that raised timeoutSeconds above the default start limit keeps that limit for starts.
+    startTimeoutSeconds =
+      try c.decodeIfPresent(Double.self, forKey: .startTimeoutSeconds) ?? max(d.startTimeoutSeconds, timeoutSeconds)
   }
 
   /// The docket that `path` names. launchd's PATH has neither GOBIN nor ~/go/bin.

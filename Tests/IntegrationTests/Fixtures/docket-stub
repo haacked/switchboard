@@ -16,6 +16,8 @@ test never touches the user's docket:
   The stub appends a call after it reads stub-reviews.json, so a test that
   sees the call knows which reviews the call read.
 - stub-start-error: when it exists, `start_review` fails with its text.
+- stub-start-delay: when it exists, `start_review` waits that many seconds
+  after it logs the call, before it answers.
 - stub-broken: when it exists, the stub exits 1 at startup.
 - stub-list-delay: when it exists, `list_reviews` waits that many seconds
   after it reads the reviews and logs the call, before it answers.
@@ -103,20 +105,25 @@ def error_result(text):
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-def list_reviews(arguments):
-    reviews = read_reviews()
-    log_call("list_reviews", arguments)
+def delay(name):
     try:
-        with open(os.path.join(home, "stub-list-delay")) as f:
+        with open(os.path.join(home, name)) as f:
             time.sleep(float(f.read().strip()))
     except FileNotFoundError:
         pass
+
+
+def list_reviews(arguments):
+    reviews = read_reviews()
+    log_call("list_reviews", arguments)
+    delay("stub-list-delay")
     return text_result({"reviews": reviews})
 
 
 def start_review(arguments):
     reviews = read_reviews()
     log_call("start_review", arguments)
+    delay("stub-start-delay")
     if os.path.exists(start_error_file):
         with open(start_error_file) as f:
             return error_result(f.read().strip())
