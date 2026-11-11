@@ -66,7 +66,8 @@ extension BoardModel {
           var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
           let shown = self.shownIDs
           let removable = self.removableIDs
-          let unread = plan.remove.filter { shown.contains($0.id) && !removable.contains($0.id) }
+          let unreadIDs = shown.subtracting(removable)
+          let unread = plan.remove.filter { unreadIDs.contains($0.id) }
           plan.remove.removeAll { !removable.contains($0.id) }
           plan.skip.removeAll { !shown.contains($0.id) }
           plan.skip += unread.map { .init(id: $0.id, name: $0.name, reason: Self.unreadOrgReason) }
