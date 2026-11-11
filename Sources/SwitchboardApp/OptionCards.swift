@@ -311,9 +311,9 @@ struct ReplyOption: View {
         // The text field reads the whole label.
         OptionCardLabel(mark: .none, title: option.label, description: option.detail).accessibilityHidden(true)
         HStack {
-          TextField(option.placeholder ?? option.label, text: $text)
+          TextField(option.placeholder ?? option.label, text: $text, axis: .vertical)
             .textFieldStyle(.roundedBorder)
-            .onSubmit(send)
+            .sendsOnReturn(send)
             .accessibilityLabel(option.label)
             .accessibilityHint(option.detail ?? "")
           Button("Send", action: send)

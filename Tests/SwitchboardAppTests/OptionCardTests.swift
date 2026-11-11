@@ -188,6 +188,17 @@ private let checks = TriageOption(label: "Fix the checks", action: .send)
   }
 }
 
+@Suite struct DenyMessageReturn {
+  @Test(arguments: ["", "  ", "\n", " \n\t"])
+  func returnInABlankDenyMessageDoesNotDeny(_ message: String) {
+    #expect(!CardView.deniesOnReturn(message))
+  }
+
+  @Test func returnInADenyMessageDenies() {
+    #expect(CardView.deniesOnReturn("\nUse make test\n"))
+  }
+}
+
 @Suite struct AcknowledgeCardText {
   /// Acknowledge sits among options that send text, so it says that it sends nothing.
   @Test func acknowledgeSaysThatItSendsNothing() {

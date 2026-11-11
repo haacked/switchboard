@@ -11,7 +11,7 @@ import Testing
   static let repos = [switchboard, posthog, dotfiles]
 
   /// Every combination of Shift, Command, Option, and Control that has Command, Option, or Control.
-  static let withCommandOptionOrControl = MessageKeyTests.allModifiers.filter {
+  static let withCommandOptionOrControl = ReturnKeyTests.allModifiers.filter {
     !$0.isDisjoint(with: [.command, .option, .control])
   }
 

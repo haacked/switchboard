@@ -10,7 +10,7 @@ import Testing
   ]
 
   /// Every combination of Command, Option, Control, and Shift that has at least one of them.
-  static let anyOfTheFour = MessageKeyTests.allModifiers.filter { !$0.isEmpty }
+  static let anyOfTheFour = ReturnKeyTests.allModifiers.filter { !$0.isEmpty }
 
   @Test(arguments: mapped)
   func aPlainKeyDoesItsAction(_ key: KeyEquivalent, _ expected: SearchPanelKeys.Action) {

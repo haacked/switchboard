@@ -427,10 +427,10 @@ struct OtherAnswer: View {
         OptionCardLabel(mark: .none, title: "Other answer", note: answered.map { "Your answer: \($0)" })
           .accessibilityHidden(true)
         HStack {
-          TextField("Type your own answer", text: $draft.text)
+          TextField("Type your own answer", text: $draft.text, axis: .vertical)
             .textFieldStyle(.roundedBorder)
             .focused(focus, equals: .other)
-            .onSubmit(send)
+            .sendsOnReturn(send)
             .onExitCommand { focus.wrappedValue = .steps }
             .accessibilityLabel("Other answer to decision \(decision)")
             .accessibilityHint(answered.map { "Your answer: \($0)" } ?? "")
