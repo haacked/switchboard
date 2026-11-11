@@ -42,6 +42,9 @@ struct SessionView: View {
         }
         .onChange(of: fits, initial: true) { if ui.sidePanelFits != fits { ui.sidePanelFits = fits } }
       }
+      // A GeometryReader accepts any width. Without this, the layout above gives the terminals less than
+      // their minimum widths, and the shell pane is laid out past the trailing edge.
+      .frame(minWidth: SessionView.terminalsMinWidth(session))
       Divider()
       MessageField(
         session: session.id, draft: model.messageDraft(for: session),
