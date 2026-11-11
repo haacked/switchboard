@@ -24,6 +24,8 @@ struct HostedElement {
   @discardableResult func press() -> Bool {
     (object as AnyObject).accessibilityPerformPress?() ?? false
   }
+
+  var frame: CGRect? { (object.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue }
 }
 
 /// A SwiftUI view in a window that is never shown, with its accessibility elements.
@@ -179,9 +181,25 @@ private func recording<V: View>(_ view: V, model: BoardModel, into opened: Opene
     #expect(model.mainView == mainView)
   }
 
+  @Test(arguments: CardPR.linked, [false, true])
+  func linkCoversThePRNumberOnTheCard(_ pr: CardPR, draggable: Bool) throws {
+    let hosted = host(pr, draggable: draggable)
+    let link = try #require(hosted.prLinks.first?.frame)
+    let card = try #require(hosted.buttons(naming: sessionID).first?.frame)
+
+    #expect(card.contains(link))
+    #expect(link.minX > card.midX)
+  }
+
   @Test(arguments: CardPR.unlinked, [false, true])
   func cardWithoutAnHttpsPRExposesNoLink(_ pr: CardPR, draggable: Bool) {
     #expect(host(pr, draggable: draggable).prLinks.isEmpty)
+  }
+
+  @Test(arguments: [false, true])
+  func cardWithANonHttpsPRShowsTheNumberAsText(draggable: Bool) throws {
+    let card = try #require(host(.notHttps, draggable: draggable).buttons(naming: sessionID).first)
+    #expect(card.label.contains("#\(prNumber)"))
   }
 
   @Test(arguments: CardPR.allCases, [false, true])
