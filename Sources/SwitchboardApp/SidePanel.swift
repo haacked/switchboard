@@ -20,8 +20,6 @@ struct SidePanel {
   static let noWaits = "No open waits."
   static let noNotes = "No notes."
 
-  /// The open waits, oldest first, which is the order sbd gives them in.
-  let waits: [Wait]
   let waitsTitle: String
   let hasNotes: Bool
   let notesTitle: String
@@ -29,7 +27,6 @@ struct SidePanel {
   let doneCaption: String?
 
   init(_ s: SessionSummary) {
-    waits = s.waits
     waitsTitle = Self.title("Waits", s.waits.count)
     hasNotes = !s.notes.isEmpty
     notesTitle = Self.title("Notes", s.notes.count)
@@ -52,8 +49,8 @@ struct SidePanelView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 10) {
         title(panel.waitsTitle)
-        if panel.waits.isEmpty { Text(SidePanel.noWaits).foregroundStyle(.secondary) }
-        ForEach(panel.waits, id: \.id) { wait in
+        if session.waits.isEmpty { Text(SidePanel.noWaits).foregroundStyle(.secondary) }
+        ForEach(session.waits, id: \.id) { wait in
           VStack(alignment: .leading, spacing: 2) {
             Text(wait.line).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Text(wait.caption(age: ago(wait.created))).font(.caption).foregroundStyle(.secondary)

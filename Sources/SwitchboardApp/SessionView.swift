@@ -40,7 +40,7 @@ struct SessionView: View {
             SidePanelView(session: session)
           }
         }
-        .onChange(of: fits, initial: true) { ui.sidePanelFits = fits }
+        .onChange(of: fits, initial: true) { if ui.sidePanelFits != fits { ui.sidePanelFits = fits } }
       }
       Divider()
       MessageField(

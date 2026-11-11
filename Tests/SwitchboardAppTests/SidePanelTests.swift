@@ -21,18 +21,6 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
 }
 
 @Suite struct SidePanelWaits {
-  @Test func listsTheWaitsInTheSummarysOrder() {
-    let waits = [
-      waitFixture("w3", .merge, pr: 1190, created: 300),
-      waitFixture("w1", .ci, pr: 1204, created: 100),
-      waitFixture("w2", .manual, note: "ask Alex", created: 200),
-    ]
-
-    let panel = SidePanel(waitingSession(waits))
-
-    #expect(panel.waits.map(\.id) == ["w3", "w1", "w2"])
-  }
-
   @Test(arguments: [
     (Wait.Kind.ci, Author.claude, Wait.Then.resume, "5m", "ci · claude · 5m ago · resumes claude"),
     (.ci, .you, .resume, "5m", "ci · you · 5m ago · resumes claude"),
@@ -72,18 +60,12 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
 }
 
 @Suite struct SidePanelEmptyState {
-  @Test func hasNoWaitRowsForASessionWithOnlyNotes() {
-    let panel = SidePanel(notedSession([noteFixture("p1", "plain")]))
-
-    #expect(panel.waits.isEmpty)
-    #expect(panel.hasNotes)
+  @Test func hasNotesForASessionWithANote() {
+    #expect(SidePanel(notedSession([noteFixture("p1", "plain")])).hasNotes)
   }
 
   @Test func hasNoNotesForASessionWithOnlyWaits() {
-    let panel = SidePanel(waitingSession([waitFixture("w1")]))
-
-    #expect(!panel.waits.isEmpty)
-    #expect(!panel.hasNotes)
+    #expect(!SidePanel(waitingSession([waitFixture("w1")])).hasNotes)
   }
 }
 
