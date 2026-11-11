@@ -169,6 +169,9 @@ struct ContentView: View {
     .sheet(isPresented: $model.showingImport) {
       ImportView().environmentObject(model)
     }
+    .sheet(isPresented: $model.showingSearch) {
+      SessionSearchView().environmentObject(model)
+    }
     .sheet(isPresented: isShowingDoneRemoval) {
       if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
     }
@@ -246,6 +249,31 @@ struct Sidebar: View {
       }
     } message: { change in
       Text(accountSwitchMessage(change))
+    }
+    // A sixth toolbar item pushes New Session into the overflow menu at the minimum window width, so search
+    // sits here. It looks like a search field, and the panel holds the real one.
+    .safeAreaInset(edge: .top) {
+      Button {
+        model.showingSearch = true
+      } label: {
+        HStack(spacing: 4) {
+          Image(systemName: "magnifyingglass")
+          Text("Search Sessions")
+          Spacer(minLength: 4)
+          Text("⌘K")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(.horizontal, 8)
+      .padding(.top, 4)
+      .help("Find a session by name, repo, branch, PR, issue, group, reason, or note (⌘K)")
+      .accessibilityLabel("Search Sessions")
+      .accessibilityIdentifier("sidebar-search")
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       VStack(spacing: 0) {

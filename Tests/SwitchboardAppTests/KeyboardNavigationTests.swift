@@ -400,7 +400,8 @@ import Testing
       init(_ shortcut: KeyboardShortcut) { self.init(shortcut.key.character, shortcut.modifiers) }
     }
 
-    /// The app's other shortcuts, and the standard menu items every Mac app has.
+    /// The app's other shortcuts, and the standard menu items every Mac app has. ⌘P is the macOS Print key,
+    /// which SwiftUI may add to the default File menu.
     static let taken: [Press] = [
       Press("1"), Press("2"), Press("j"), Press("n"), Press("i", [.command, .shift]), Press("g", [.command, .shift]),
       Press("m", [.command, .shift]), Press("."), Press("r", [.command, .shift]), Press("d", [.command, .shift]),
@@ -408,7 +409,7 @@ import Testing
       Press(KeyEquivalent.return.character, [.command, .shift]), Press("r"),
       Press("q"), Press("w"), Press("h"), Press("h", [.command, .option]), Press("m"), Press(","), Press("c"),
       Press("v"), Press("x"), Press("a"), Press("z"), Press("z", [.command, .shift]), Press("f", [.command, .control]),
-      Self.filterByOrg,
+      Press("p"), Self.filterByOrg,
     ]
 
     /// Session > Filter by Org….
@@ -443,6 +444,7 @@ import Testing
       #expect(Press(NavShortcuts.previousSession) == Press("[", [.command, .shift]))
       #expect(Press(NavShortcuts.focusList) == Press("l"))
       #expect(Press(NavShortcuts.focusTerminal) == Press("t"))
+      #expect(Press(NavShortcuts.searchSessions) == Press("k"))
     }
   }
 }

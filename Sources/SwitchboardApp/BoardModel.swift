@@ -39,6 +39,7 @@ final class BoardModel: ObservableObject {
   }
   @Published var showingNew = false
   @Published var showingImport = false
+  @Published var showingSearch = false
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
   @Published var confirmingDelete: SessionSummary?
@@ -50,7 +51,7 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { showingNew || showingImport || doneRemoval != nil }
+  var presentingSheet: Bool { showingNew || showingImport || showingSearch || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox
   /// The Inbox item that the user last moved to.

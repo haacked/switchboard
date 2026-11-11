@@ -3,7 +3,7 @@ import Foundation
 import SwitchboardCore
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_DETAILS opens each card's Details, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -18,6 +18,7 @@ import SwitchboardCore
 enum Snapshot {
   static let opensDetails = ProcessInfo.processInfo.environment["SB_DETAILS"] != nil
   static let orgFilter = OrgFilter(list: ProcessInfo.processInfo.environment["SB_ORG_FILTER"] ?? "")
+  static let searchQuery = ProcessInfo.processInfo.environment["SB_SEARCH"]
 
   static func start(_ model: BoardModel) {
     let env = ProcessInfo.processInfo.environment
@@ -31,6 +32,7 @@ enum Snapshot {
       }
     }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
+    if env["SB_SHEET"] == "search" { openSearch(model) }
     if env["SB_ACCOUNTS"] == "open" {
       openAccounts(
         model, choose: env["SB_ACCOUNTS_CHOOSE"], move: env["SB_ACCOUNTS_MOVE"] != nil,
@@ -71,6 +73,17 @@ enum Snapshot {
         // AppKit saves the main window's frame on every change. Restoring it keeps the next launch at the user's last size.
         if let window, let frame { window.setFrame(frame, display: false) }
         if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
+      }
+    }
+  }
+
+  /// The panel ranks the sessions it sees when it opens, so the hook waits for the first list.
+  private static func openSearch(_ model: BoardModel) {
+    Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
+      MainActor.assumeIsolated {
+        guard !model.sessions.isEmpty else { return }
+        timer.invalidate()
+        model.showingSearch = true
       }
     }
   }
