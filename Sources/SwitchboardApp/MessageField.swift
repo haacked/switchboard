@@ -253,7 +253,7 @@ struct MessageField: View {
           draft.disarmEscape()
           return .ignored
         }
-        return !Self.editorIsComposing && draft.escape(at: Date()) ? .handled : .ignored
+        return !TextInput.isComposing && draft.escape(at: Date()) ? .handled : .ignored
       }
       .overlay {
         if dropTargeted {
@@ -272,7 +272,7 @@ struct MessageField: View {
       // The handler also takes key repeats. A held Shift+Return would otherwise reach onSubmit and send.
       .onKeyPress(.return, phases: [.down, .repeat]) { press in
         // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
-        switch Self.keyAction(modifiers: press.modifiers, composing: Self.editorIsComposing) {
+        switch Self.keyAction(modifiers: press.modifiers, composing: TextInput.isComposing) {
         case .send:
           send()
         case .newline:
@@ -329,9 +329,6 @@ struct MessageField: View {
   final class Focus { var held = false }
 
   private static var editor: NSTextView? { NSApp.keyWindow?.firstResponder as? NSTextView }
-
-  /// Whether an input method holds marked text in the focused field.
-  private static var editorIsComposing: Bool { editor?.hasMarkedText() == true }
 
   enum KeyAction { case send, newline }
 

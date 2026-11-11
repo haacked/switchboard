@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The shortcuts that move between the app's lists and terminals. The Session menu lists them.
+/// The shortcuts that find sessions and move between the app's lists and terminals. The Session menu lists them.
 ///
 /// Each one carries ⌘, because a focused terminal keeps every other key. SwiftTerm offers a ⌘ key to the
 /// menu bar before the terminal's program, as long as `shouldSendCommandKeyToTerminal` stays nil.
@@ -12,8 +12,10 @@ enum NavShortcuts {
   static let previousSession = KeyboardShortcut("{", modifiers: .command)
   static let focusList = KeyboardShortcut("l", modifiers: .command)
   static let focusTerminal = KeyboardShortcut("t", modifiers: .command)
+  static let searchSessions = KeyboardShortcut("k", modifiers: .command)
 
-  static let all = [nextSession, previousSession, focusList, focusTerminal]
+  /// `bin/test-gui shell` sends these in order. Search Sessions is last, because it opens a sheet.
+  static let all = [nextSession, previousSession, focusList, focusTerminal, searchSessions]
 }
 
 enum BoardDirection: Equatable {
@@ -30,7 +32,7 @@ enum NavKey {
   /// shortcuts and text selection keep it. SwiftUI adds the function and numeric pad flags to arrow keys,
   /// so only those four modifiers count.
   static func action(_ key: KeyEquivalent, modifiers: EventModifiers) -> NavAction? {
-    guard modifiers.isDisjoint(with: [.command, .option, .control, .shift]) else { return nil }
+    guard isPlain(modifiers) else { return nil }
     switch key {
     case .upArrow: return .move(.up)
     case .downArrow: return .move(.down)
@@ -40,6 +42,15 @@ enum NavKey {
     default: return nil
     }
   }
+
+  static func isPlain(_ modifiers: EventModifiers) -> Bool {
+    modifiers.isDisjoint(with: [.command, .option, .control, .shift])
+  }
+}
+
+enum TextInput {
+  /// Whether an input method holds marked text in the key window's focused text view.
+  static var isComposing: Bool { (NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() == true }
 }
 
 /// The list that ⌘L focuses.
