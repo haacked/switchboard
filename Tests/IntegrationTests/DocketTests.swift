@@ -21,11 +21,14 @@ final class DocketHome {
   deinit { try? FileManager.default.removeItem(atPath: path) }
 
   /// The config that points sbd at the stub, with this folder as the stub's DOCKET_HOME.
-  var config: [String: JSON] {
-    [
-      "docket": ["path": .string(Instance.docketStub), "pollSeconds": .number(Double(DocketHome.pollMs / 1000))],
-      "env": ["DOCKET_HOME": .string(path)],
+  var config: [String: JSON] { config(docket: [:]) }
+
+  /// The config, with `extra` added to its `docket` settings.
+  func config(docket extra: [String: JSON]) -> [String: JSON] {
+    let docket: [String: JSON] = [
+      "path": .string(Instance.docketStub), "pollSeconds": .number(Double(DocketHome.pollMs / 1000)),
     ]
+    return ["docket": .object(docket.merging(extra) { $1 }), "env": ["DOCKET_HOME": .string(path)]]
   }
 
   /// The reviews that the stub's `list_reviews` returns from now on.
@@ -353,9 +356,7 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
 
   @Test func aPollSecondsOfZeroNeverPolls() throws {
     let docket = try DocketHome()
-    var config = docket.config
-    config["docket"] = ["path": .string(Instance.docketStub), "pollSeconds": 0]
-    let sbd = try Instance(config: config)
+    let sbd = try Instance(config: docket.config(docket: ["pollSeconds": 0]))
     _ = try startDocket(sbd, "o/r#1")
     let calls = docket.calls().count
 
@@ -368,12 +369,7 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
 
   @Test func aDocketThatHangsTimesOutAndTheRowRecovers() throws {
     let docket = try DocketHome()
-    var config = docket.config
-    config["docket"] = [
-      "path": .string(Instance.docketStub), "pollSeconds": .number(Double(DocketHome.pollMs / 1000)),
-      "timeoutSeconds": 1,
-    ]
-    let sbd = try Instance(config: config)
+    let sbd = try Instance(config: docket.config(docket: ["timeoutSeconds": 1]))
     let s = try startDocket(sbd, "o/r#12")
     try docket.write("stub-list-delay", "5")
 
@@ -383,6 +379,30 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     try docket.remove("stub-list-delay")
     let restored = try poll(sbd, s.id, "a good poll") { $0.state == .working }
     #expect(restored.reason == "preparing the review")
+  }
+
+  @Test func aStartGetsItsOwnLimitAndThePollKeepsTheShortOne() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config(docket: ["timeoutSeconds": 1, "startTimeoutSeconds": 20]))
+    try docket.write("stub-start-delay", "2")
+
+    let s = try startDocket(sbd, "o/r#13")
+    #expect(s.docket?.review?.state == "preparing")
+
+    try docket.write("stub-list-delay", "3")
+    let hung = try poll(sbd, s.id, "the poll to time out") { $0.state == .needsYou }
+    #expect(hung.reason.hasPrefix("can't read docket"))
+  }
+
+  @Test func aStartThatOutlastsItsLimitFails() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config(docket: ["timeoutSeconds": 20, "startTimeoutSeconds": 1]))
+    try docket.write("stub-start-delay", "3")
+
+    let refused = try sbd.run(["docket", "--json", "o/r#14"])
+    #expect(refused.status != 0)
+    #expect(docket.calls("start_review").count == 1)
+    #expect(try docketRows(sbd).isEmpty)
   }
 
   @Test func aPollThatStartedBeforeARowWasAddedLeavesThatRowOpen() throws {
