@@ -14,6 +14,8 @@ final class SessionViewState: ObservableObject {
   @Published var removal: TodoDeletion?
   /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
   @Published var shellAttach = 0
+  /// False while the view is too narrow to hold the side panel beside the terminals.
+  @Published var sidePanelFits = true
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -30,15 +32,15 @@ struct SessionView: View {
       Divider()
       CardList(cards: session.cards)
       GeometryReader { geometry in
+        let fits = SidePanel.fits(width: geometry.size.width, beside: SessionView.terminalsMinWidth(session))
         HStack(spacing: 0) {
           terminalArea
-          if showsSidePanel
-            && SidePanel.fits(width: geometry.size.width, beside: SessionView.terminalsMinWidth(session))
-          {
+          if showsSidePanel && fits {
             Divider()
             SidePanelView(session: session)
           }
         }
+        .onChange(of: fits, initial: true) { ui.sidePanelFits = fits }
       }
       Divider()
       MessageField(
@@ -255,8 +257,9 @@ struct SessionView: View {
           Image(systemName: "sidebar.right")
         }
         .accessibilityLabel(showsSidePanel ? "Hide Waits and Notes" : "Show Waits and Notes")
+        .disabled(!ui.sidePanelFits)
         .help(
-          "Show or hide the session's waits and notes beside the terminals. The panel hides itself when the window is too narrow for it."
+          "Show or hide the session's waits and notes beside the terminals. The panel hides itself, and this button is off, while the view is too narrow for it."
         )
         if CleanupOffer.canCleanUp(session) {
           Button("Clean Up…") { model.confirmingCleanup = session.id }

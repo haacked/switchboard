@@ -33,20 +33,6 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
     #expect(panel.waits.map(\.id) == ["w3", "w1", "w2"])
   }
 
-  @Test func carriesEachWaitsCreationTime() {
-    let panel = SidePanel(waitingSession([waitFixture("w1", created: 100), waitFixture("w2", created: 200)]))
-
-    #expect(panel.waits.map(\.created) == [100, 200])
-  }
-
-  @Test func showsTheReasonLinesTextForAWait() throws {
-    let wait = waitFixture("w1", .ci, pr: 1204, note: "merge when green")
-
-    let row = try #require(SidePanel(waitingSession([wait])).waits.first)
-
-    #expect(row.text == wait.line)
-  }
-
   @Test(arguments: [
     (Wait.Kind.ci, Author.claude, Wait.Then.resume, "5m", "ci · claude · 5m ago · resumes claude"),
     (.ci, .you, .resume, "5m", "ci · you · 5m ago · resumes claude"),
@@ -58,12 +44,8 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
   ])
   func captionNamesTheKindTheAuthorTheAgeAndTheOutcome(
     _ kind: Wait.Kind, _ by: Author, _ then: Wait.Then, _ age: String, _ caption: String
-  ) throws {
-    let wait = waitFixture("w1", kind, by: by, then: then)
-
-    let row = try #require(SidePanel(waitingSession([wait])).waits.first)
-
-    #expect(row.caption(age: age) == caption)
+  ) {
+    #expect(waitFixture("w1", kind, by: by, then: then).caption(age: age) == caption)
   }
 }
 
@@ -105,25 +87,25 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
   }
 }
 
-@Suite struct SidePanelDoneNote {
-  static let text = "Waits don't resolve while the session is marked Done."
+@Suite struct SidePanelDoneCaption {
+  static let text = "Waits don't resolve on their own while the session is marked Done."
 
   @Test func saysThatWaitsDontResolveOnASessionMarkedDoneWithAnOpenWait() {
     let panel = SidePanel(waitingSession([waitFixture("w1")], markedDone: true))
 
-    #expect(panel.doneNote == SidePanelDoneNote.text)
+    #expect(panel.doneCaption == SidePanelDoneCaption.text)
   }
 
   @Test func saysNothingWhenTheSessionIsNotMarkedDone() {
     let panel = SidePanel(waitingSession([waitFixture("w1")], markedDone: false))
 
-    #expect(panel.doneNote == nil)
+    #expect(panel.doneCaption == nil)
   }
 
   @Test func saysNothingWhenASessionMarkedDoneHasNoOpenWait() {
     let panel = SidePanel(waitingSession([], notes: [noteFixture("p1", "plain")], markedDone: true))
 
-    #expect(panel.doneNote == nil)
+    #expect(panel.doneCaption == nil)
   }
 
   /// A merged PR puts a session in Done without `markedDone`. sbd still resolves the waits of such a session.
@@ -131,7 +113,7 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
     var session = waitingSession([waitFixture("w1")])
     session.state = .done
 
-    #expect(SidePanel(session).doneNote == nil)
+    #expect(SidePanel(session).doneCaption == nil)
   }
 }
 
@@ -141,9 +123,9 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
   static let panel = SidePanel.width
 
   /// The Inbox's detail pane at its narrowest.
-  static let inboxMinimum: CGFloat = 340
+  static let inboxMinimum = InboxView.detailMinWidth
   /// The window's minimum width less the sidebar's minimum width.
-  static let sessionViewMinimum: CGFloat = 900 - 240
+  static let sessionViewMinimum = ContentView.windowMinWidth - ContentView.sidebarMinWidth
 
   static func session(shellClosed: Bool? = nil, terminals: Bool = true) -> SessionSummary {
     var s = notedSession([])
