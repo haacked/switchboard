@@ -32,7 +32,7 @@ extension Service {
     // A bare number that sbd can't complete skips both checks. docket's start_review then names the PR.
     let wanted = DocketRef(input, defaultRepo: DocketRef.defaultRepo(docketHome: docketHome()))
     if let wanted, let tracked = queue.sync(execute: { trackedDocketRow(wanted) }) { return summary(tracked) }
-    let review = try withDocket { client in
+    let review = try withDocket(timeout: config.docket.startTimeoutSeconds) { client in
       let listed = try client.listReviews().first { !$0.restartable && wanted?.names($0.pullRequest) == true }
       return try listed ?? client.startReview(input, existing: existing)
     }
@@ -71,7 +71,7 @@ extension Service {
     docketPoll.running = true
     docketPoll.last = now
     Service.docketQueue.async { [self] in
-      let result = Result { try withDocket { try $0.listReviews() } }
+      let result = Result { try withDocket(timeout: config.docket.timeoutSeconds) { try $0.listReviews() } }
       queue.sync {
         docketPoll.running = false
         applyDocketPoll(result, to: rows)
@@ -122,13 +122,13 @@ extension Service {
     openDocketRows().first { entries[$0]?.session.docket.map { pullRequest.names($0.pullRequest) } == true }
   }
 
-  /// Runs `docket mcp` and passes the client to `body`.
-  private func withDocket<T>(_ body: (DocketClient) throws -> T) throws -> T {
+  /// Runs `docket mcp` for at most `timeout` seconds and passes the client to `body`.
+  private func withDocket<T>(timeout: Double, _ body: (DocketClient) throws -> T) throws -> T {
     let env = docketEnvironment()
     guard let docket = config.docket.executable(environment: env) else {
       throw APIError("can't find docket. Set docket.path in \(home.path)/config.json")
     }
-    return try DocketClient.run(docket: docket, env: env, timeout: config.docket.timeoutSeconds, body)
+    return try DocketClient.run(docket: docket, env: env, timeout: timeout, body)
   }
 
   /// The folder docket keeps its state and config.toml in, as docket resolves it.

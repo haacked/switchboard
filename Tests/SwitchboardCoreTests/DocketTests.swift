@@ -275,6 +275,31 @@ struct DocketVerdictCase: Sendable, CustomTestStringConvertible {
   }
 }
 
+@Suite struct DocketTimeouts {
+  @Test func aStartGetsALongerLimitThanAPoll() throws {
+    let c = try JSONCoding.decode(Config.self, from: "{}")
+    #expect(c.docket.timeoutSeconds == 120)
+    #expect(c.docket.startTimeoutSeconds == 240)
+    #expect(DocketSettings().startTimeoutSeconds < DocketSettings.startWaitSeconds)
+  }
+
+  @Test func aStartKeepsAPollLimitAboveTheDefault() throws {
+    let c = try JSONCoding.decode(Config.self, from: #"{"docket": {"timeoutSeconds": 400}}"#)
+    #expect(c.docket.startTimeoutSeconds == 400)
+  }
+
+  @Test func aStartKeepsTheDefaultOverAShorterPollLimit() throws {
+    let c = try JSONCoding.decode(Config.self, from: #"{"docket": {"timeoutSeconds": 60}}"#)
+    #expect(c.docket.startTimeoutSeconds == 240)
+  }
+
+  @Test func aStartLimitThatIsSetWins() throws {
+    let c = try JSONCoding.decode(Config.self, from: #"{"docket": {"timeoutSeconds": 400, "startTimeoutSeconds": 30}}"#)
+    #expect(c.docket.timeoutSeconds == 400)
+    #expect(c.docket.startTimeoutSeconds == 30)
+  }
+}
+
 @Suite struct DocketReviewDecoding {
   /// A Review as docket's list_reviews sends it, with keys that DocketReview leaves out.
   static let docketJSON = #"""

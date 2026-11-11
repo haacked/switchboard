@@ -52,6 +52,14 @@ private func runsSleep(_ pid: pid_t) -> Bool {
   return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("sleep")
 }
 
+/// Copies /bin/sleep to the path. macOS kills a copy of a system program that keeps Apple's signature, so the copy
+/// gets an ad hoc signature.
+private func copySleep(to path: String) throws {
+  try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
+  let r = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
+  guard r.status == 0 else { throw TestError(description: "codesign: \(r.stderr)") }
+}
+
 /// The processes that a test starts. Fixtures/reap finds a process only by a home path in its arguments, and
 /// `sleep 100` has none, so a test calls `killAll` in a `defer`.
 private final class Strays {
@@ -127,7 +135,8 @@ private final class Strays {
   /// The removal must refuse, name each pid, leave the session, the folder, and the branch, and send no signal to
   /// the processes. Once the test kills them, a retry must remove the worktree.
   private func expectRefusalUntilTheyExit(
-    _ how: WorktreeRemoval, _ start: (Instance, SessionSummary, Terminals, Strays) throws -> Void
+    _ how: WorktreeRemoval, naming use: String? = nil, startedBySession: Bool = false,
+    _ start: (Instance, SessionSummary, Terminals, Strays) throws -> Void
   ) throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try finishedSession(github)
@@ -144,7 +153,15 @@ private final class Strays {
     try #require(r.status != 0, Comment(rawValue: r.stderr))
     for pid in pids {
       #expect(names(r.stderr, pid), Comment(rawValue: "\(pid) is not in: \(r.stderr)"))
+      if startedBySession {
+        #expect(
+          r.stderr.contains(try Regex("\\b\(pid) \\([^)]*, started by the session\\)")),
+          Comment(rawValue: r.stderr))
+      }
       #expect(Processes.exists(Int(pid)), "sbd ended \(pid)")
+    }
+    if let use, let folder = realPath(s.cwd) {
+      #expect(r.stderr.contains(", \(use) \(folder)"), Comment(rawValue: r.stderr))
     }
     try expectKept(sbd, repo, s)
 
@@ -155,6 +172,27 @@ private final class Strays {
 
     #expect(retry.status == 0, Comment(rawValue: retry.stderr))
     try expectRemoved(how, sbd, s)
+  }
+
+  /// Runs `start`, which starts processes, registers them with the strays, and returns the check that tells when
+  /// each has reached the state the test needs. The removal must succeed and leave each process running.
+  private func expectRemovalWhileTheyRun(
+    _ how: WorktreeRemoval, _ start: (SessionSummary, Strays) throws -> (pid_t) -> Bool
+  ) throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let ready = try start(s, strays)
+    let pids = try sbd.waitFor("the started processes to start", fetch: strays.pids) {
+      !$0.isEmpty && $0.allSatisfy(ready)
+    }
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(how, sbd, s)
+    for pid in pids { #expect(Processes.exists(Int(pid)), "sbd ended \(pid)") }
   }
 
   // MARK: claude that has not exited
@@ -244,7 +282,7 @@ private final class Strays {
   /// child with the pid that `$!` names.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAShellPaneProcessOutsideTheFolderExits(_ how: WorktreeRemoval) throws {
-    try expectRefusalUntilTheyExit(how) { sbd, _, terminals, strays in
+    try expectRefusalUntilTheyExit(how, startedBySession: true) { sbd, _, terminals, strays in
       strays.pidFiles = ["root.pid"]
       try sbd.typeInShell(
         terminals,
@@ -255,7 +293,7 @@ private final class Strays {
   /// The process descends from no pane, so only its working folder in the worktree finds it.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAProcessWorkingInTheFolderExits(_ how: WorktreeRemoval) throws {
-    try expectRefusalUntilTheyExit(how) { _, s, _, strays in
+    try expectRefusalUntilTheyExit(how, naming: "cwd") { _, s, _, strays in
       try strays.spawn("/bin/sleep", ["100"], cwd: s.cwd)
     }
   }
@@ -264,8 +302,54 @@ private final class Strays {
   /// uncommitted-file check passes.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAProcessWithAFileOpenInTheFolderExits(_ how: WorktreeRemoval) throws {
-    try expectRefusalUntilTheyExit(how) { _, s, _, strays in
+    try expectRefusalUntilTheyExit(how, naming: "open file") { _, s, _, strays in
       try strays.spawn("/bin/sh", ["-c", "exec 3<\"$1\"; exec /bin/sleep 100", "sh", "\(s.cwd)/a.txt"], cwd: "/")
+    }
+  }
+
+  /// The process descends from no pane and runs, in /, a copy of sleep in the worktree's .build, so only its
+  /// program finds it. Git ignores .build through info/exclude, and cleanup counts it as a build's output, so the
+  /// file checks pass.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func refusesUntilAProcessWhoseProgramIsInTheFolderExits(_ how: WorktreeRemoval) throws {
+    try expectRefusalUntilTheyExit(how, naming: "program") { sbd, s, _, strays in
+      let exclude = try sbd.git(s.cwd, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+      try FileManager.default.createDirectory(
+        atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+      try ".build/\n".write(toFile: exclude, atomically: true, encoding: .utf8)
+      try FileManager.default.createDirectory(atPath: "\(s.cwd)/.build", withIntermediateDirectories: true)
+      try copySleep(to: "\(s.cwd)/.build/sleep")
+      try strays.spawn("\(s.cwd)/.build/sleep", ["100"], cwd: "/")
+    }
+  }
+
+  // MARK: Processes that use the folder without blocking
+
+  /// A file watcher such as Supacode holds the worktree open as a directory for as long as it runs. The process
+  /// runs in / and holds only that directory handle, so the removal goes ahead and sends it no signal.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func removesWhileAProcessHoldsOnlyTheFolderOpenAsADirectory(_ how: WorktreeRemoval) throws {
+    try expectRemovalWhileTheyRun(how) { s, strays in
+      try strays.spawn("/bin/sh", ["-c", "exec 3<\"$1\"; exec /bin/sleep 100", "sh", s.cwd], cwd: "/")
+      return runsSleep
+    }
+  }
+
+  /// `git push` over ssh with ControlPersist leaves a master process that keeps the worktree as its working
+  /// folder and renames itself `ssh: <socket> [mux]`. The fake is a copy of sleep named ssh, outside the worktree,
+  /// that bash execs under that name.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func removesWhileAnSSHMultiplexerWorksInTheFolder(_ how: WorktreeRemoval) throws {
+    try expectRemovalWhileTheyRun(how) { s, strays in
+      let bin = "\(strays.sbd.home.path)/fake-ssh"
+      try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
+      try copySleep(to: "\(bin)/ssh")
+      try strays.spawn(
+        "/bin/bash", ["-c", "exec -a \"ssh: $0/sock [mux]\" \"$0/ssh\" 100", bin], cwd: s.cwd)
+      return { pid in
+        guard let r = try? runCommand("/bin/ps", ["-ww", "-o", "args=", "-p", String(pid)]) else { return false }
+        return r.stdout.hasPrefix("ssh: ")
+      }
     }
   }
 

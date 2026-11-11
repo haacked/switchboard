@@ -318,6 +318,46 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
     #expect(Transcript.find(String(id.prefix(8)), account: dir, cwd: "/Users/me/a") == nil)
     #expect(Transcript.find(id, account: "\(dir)/missing", cwd: "/Users/me/a") == nil)
   }
+
+  @Test func findListsNoFoldersWhenTheCwdsFolderHoldsTheSession() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let projects = "\(dir)/projects"
+    let id = UUID().uuidString.lowercased()
+    try FileManager.default.createDirectory(atPath: "\(projects)/-Users-me-a", withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: "\(projects)/-Users-me-a/\(id).jsonl", contents: nil)
+
+    var listed: [String] = []
+    let found = Transcript.find(id, account: dir, cwd: "/Users/me/a") {
+      listed.append($0)
+      return []
+    }
+
+    #expect(found == "\(projects)/-Users-me-a/\(id).jsonl")
+    #expect(listed.isEmpty)
+  }
+
+  @Test func findLooksOnlyInTheFoldersThatItIsGiven() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let projects = "\(dir)/projects"
+    let id = UUID().uuidString.lowercased()
+    for folder in ["-Users-me-b", "-Users-me-c"] {
+      try FileManager.default.createDirectory(atPath: "\(projects)/\(folder)", withIntermediateDirectories: true)
+    }
+    FileManager.default.createFile(atPath: "\(projects)/-Users-me-b/\(id).jsonl", contents: nil)
+
+    var listed: [String] = []
+    #expect(
+      Transcript.find(id, account: dir, cwd: "/Users/me/a") {
+        listed.append($0)
+        return ["-Users-me-c"]
+      } == nil)
+    #expect(listed == [projects])
+    #expect(
+      Transcript.find(id, account: dir, cwd: "/Users/me/a") { _ in ["-Users-me-b"] }
+        == "\(projects)/-Users-me-b/\(id).jsonl")
+  }
 }
 
 private let userHome = NSHomeDirectory()

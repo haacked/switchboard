@@ -11,7 +11,7 @@ func docket(_ a: Args) {
   if let parent = a.values["--parent"] ?? ProcessInfo.processInfo.environment["SB_SESSION_ID"] {
     args["parent"] = .string(parent)
   }
-  let result = call("docket-start", args, timeout: 300)
+  let result = call("docket-start", args, timeout: DocketSettings.startWaitSeconds)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 }
 

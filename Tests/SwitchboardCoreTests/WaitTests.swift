@@ -6,6 +6,8 @@ import Testing
 let utc = TimeZone(identifier: "UTC")!
 let losAngeles = TimeZone(identifier: "America/Los_Angeles")!
 let kolkata = TimeZone(identifier: "Asia/Kolkata")!
+let lordHowe = TimeZone(identifier: "Australia/Lord_Howe")!
+let santiago = TimeZone(identifier: "America/Santiago")!
 /// Years away from the real clock, so a test catches code that reads the clock in place of `now`.
 let fixedNow = epochMs(2030, 6, 15, 12, 0, zone: utc)
 let farFuture = epochMs(2090, 1, 1, zone: utc)
@@ -283,6 +285,30 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   ])
   func refusesWhatIsNotATime(_ text: String) {
     #expect(Wait.parseTime(text, now: fixedNow, zone: utc) == nil)
+  }
+
+  /// Los Angeles skips 02:00 to 03:00 on 2026-03-08. Lord Howe skips 02:00 to
+  /// 02:30 on 2026-10-04. Santiago skips midnight to 01:00 on 2026-09-06.
+  @Test(arguments: [
+    ("2026-03-08 02:30", losAngeles, epochMs(2026, 3, 8, 10, 30, zone: utc)),
+    ("2026-03-08T02:30", losAngeles, epochMs(2026, 3, 8, 10, 30, zone: utc)),
+    ("2026-03-08T02:30:30", losAngeles, epochMs(2026, 3, 8, 10, 30, 30, zone: utc)),
+    ("2026-10-04 02:10", lordHowe, epochMs(2026, 10, 3, 15, 40, zone: utc)),
+    ("2026-09-06", santiago, epochMs(2026, 9, 6, 4, 0, zone: utc)),
+  ])
+  func timeTheZoneSkipsMovesForwardByTheSkip(_ text: String, _ zone: TimeZone, _ ms: Int64) {
+    #expect(Wait.parseTime(text, now: fixedNow, zone: zone) == ms)
+  }
+
+  @Test(arguments: ["2026-03-08 25:00", "2026-02-30 02:30", "2026-03-08T02:60"])
+  func refusesWhatIsNotATimeInAZoneWithASkip(_ text: String) {
+    #expect(Wait.parseTime(text, now: fixedNow, zone: losAngeles) == nil)
+  }
+
+  /// Los Angeles reads 01:00 to 02:00 twice on 2026-11-01.
+  @Test func repeatedTimeIsTheLaterOne() {
+    #expect(
+      Wait.parseTime("2026-11-01 01:30", now: fixedNow, zone: losAngeles) == epochMs(2026, 11, 1, 9, 30, zone: utc))
   }
 
   @Test(
