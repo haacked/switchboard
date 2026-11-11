@@ -109,6 +109,8 @@ private func runningSessions(_ sbd: Instance, _ count: Int) throws -> [String] {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "background 100 held")
     try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+    // The reply comes from a hook. The pid comes from sbd's next process snapshot.
+    try sbd.waitFor(s.id, "claude's pid", timeout: 30) { $0.claudePid != nil }
 
     let report = try measure(sbd)
 
