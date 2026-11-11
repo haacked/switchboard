@@ -256,16 +256,12 @@ private func withBothMachines(
       for machine: any Machine in [local, ssh] {
         var statuses: [Int32] = []
         for signal in [SIGTERM, SIGKILL, SIGUSR1] {
-          let child = Process()
-          child.executableURL = URL(fileURLWithPath: "/bin/sleep")
-          child.arguments = ["30"]
-          try child.run()
-          defer { if child.isRunning { kill(child.processIdentifier, SIGKILL) } }
+          try withSleepingChild { child in
+            machine.signal(Int(child.processIdentifier), signal)
+            child.waitUntilExit()
 
-          machine.signal(Int(child.processIdentifier), signal)
-          child.waitUntilExit()
-
-          statuses.append(child.terminationReason == .uncaughtSignal ? child.terminationStatus : -1)
+            statuses.append(child.terminationReason == .uncaughtSignal ? child.terminationStatus : -1)
+          }
         }
         results.append(statuses)
       }

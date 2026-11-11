@@ -44,6 +44,9 @@ enum RemoteShellProtocol {
   /// after every command, because ending a subshell does not end its child. The `sleep` sends
   /// stderr to /dev/null before it opens the FIFO, because bash reports an open that a signal
   /// interrupts.
+  ///
+  /// `sb_emit` runs one `wc` on both files from inside `$sb_d`, so the words of its output are
+  /// `<stdout bytes> o <stderr bytes> e <sum> total` whatever the folder's name holds.
   static func bootScript(token: String) -> String {
     #"""
     sb_d=$(mktemp -d "${TMPDIR:-/tmp}/sb-sh.XXXXXX") || exit 97
@@ -54,8 +57,10 @@ enum RemoteShellProtocol {
     else sb_s=none; sb_p='0 0'; fi
     [ "$(printf aGk= | base64 -d 2>/dev/null)" = hi ] || sb_s=none
     sb_emit() {
-      sb_o=$(wc -c <"$sb_d/o"); sb_e=$(wc -c <"$sb_d/e"); sb_o=$((sb_o)); sb_e=$((sb_e))
-      printf 'SB1 %s %s %s %s\n' "$1" "$2" "$sb_o" "$sb_e"
+      sb_n=$1; sb_x=$2
+      set -- $(cd -- "$sb_d" >/dev/null && wc -c o e)
+      sb_o=$((${1:-0})); sb_e=$((${3:-0}))
+      printf 'SB1 %s %s %s %s\n' "$sb_n" "$sb_x" "$sb_o" "$sb_e"
       [ "$sb_o" -gt 0 ] && head -c "$sb_o" "$sb_d/o"
       [ "$sb_e" -gt 0 ] && head -c "$sb_e" "$sb_d/e"
       :
@@ -77,20 +82,7 @@ enum RemoteShellProtocol {
       rm -f "$sb_d/i" "$sb_d/o" "$sb_d/e" || exit 97
     }
 
-    """# + "printf 'SB1 ready %s %s %s\\n' \(quote(token)) \"$sb_s\" \"$sb_p\"\n"
-  }
-
-  /// The word in single quotes, for the host's shell. It is correct for every byte but NUL.
-  /// `shellQuote` leaves a `'` bare when a combining character follows it, because it searches
-  /// by character and not by byte.
-  static func quote(_ word: String) -> String {
-    var quoted = String.UnicodeScalarView()
-    quoted.append("'")
-    for scalar in word.unicodeScalars {
-      if scalar == "'" { quoted.append(contentsOf: "'\\''".unicodeScalars) } else { quoted.append(scalar) }
-    }
-    quoted.append("'")
-    return String(quoted)
+    """# + "printf 'SB1 ready %s %s %s\\n' \(shellQuote(token)) \"$sb_s\" \"$sb_p\"\n"
   }
 
   private static func isEnvironmentName(_ name: String) -> Bool {
@@ -128,7 +120,7 @@ enum RemoteShellProtocol {
       guard timeout.isFinite, timeout > 0 else { throw APIError("a timeout must be a number of seconds above 0") }
       seconds = String(format: "%.3f", max(1, (timeout * 1000).rounded()) / 1000)
     }
-    let run = "sb_run \(seq) '\(seconds)' " + words.map(quote).joined(separator: " ") + "\n"
+    let run = "sb_run \(seq) '\(seconds)' " + words.map(shellQuote).joined(separator: " ") + "\n"
     guard let input, !input.isEmpty else { return Data((": >\"$sb_d/i\"\n" + run).utf8) }
     let base64 = input.base64EncodedString(options: [.lineLength76Characters, .endLineWithLineFeed])
     return Data(
@@ -191,7 +183,7 @@ enum RemoteShellProtocol {
   }
 
   private static func statArguments(_ format: StatFormat) -> String {
-    format.arguments.map(quote).joined(separator: " ")
+    format.arguments.map(shellQuote).joined(separator: " ")
   }
 
   /// It refuses anything but a regular file before it opens it, so a FIFO can't block the shell.

@@ -102,12 +102,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var ssh = "ssh"
   /// The valid remote hosts, by name.
   public var hosts: [String: HostConfig] = [:]
-  /// Why each invalid entry of `hosts` in config.json is invalid, by name. It is not read from
-  /// or written to JSON.
-  public var hostProblems: [String: String] = [:]
-  /// The kind of each invalid host whose `kind` is a known one, by name, for `sb host ls`. It
-  /// is not read from or written to JSON.
-  public var invalidHostKinds: [String: HostKind] = [:]
+  /// The invalid entries of `hosts` in config.json, by name. It is not read from or written to
+  /// JSON.
+  public var invalidHosts: [String: InvalidHost] = [:]
   /// Local checkouts by `owner/name`, for repositories outside `repoRoots`.
   public var repos: [String: String] = [:]
   /// Folders that hold checkouts at <root>/<owner>/<name>.
@@ -169,14 +166,13 @@ public struct Config: Codable, Equatable, Sendable {
       }
     }
     ssh = try c.decodeIfPresent(String.self, forKey: .ssh) ?? d.ssh
-    // An invalid host is left out and listed in `hostProblems`. Throwing would make sbd ignore
+    // An invalid host is left out and listed in `invalidHosts`. Throwing would make sbd ignore
     // all of config.json.
     switch try c.decodeIfPresent(JSON.self, forKey: .hosts) {
     case .object(let entries):
-      (hosts, hostProblems) = HostConfig.parse(entries)
-      for (name, problem) in hostProblems.sorted(by: { $0.key < $1.key }) {
-        logLine("skipping host \(name): \(problem)")
-        invalidHostKinds[name] = entries[name].flatMap(HostConfig.kind(of:))
+      (hosts, invalidHosts) = HostConfig.parse(entries)
+      for (name, host) in invalidHosts.sorted(by: { $0.key < $1.key }) {
+        logLine("skipping host \(name): \(host.problem)")
       }
     case nil, .null:
       break

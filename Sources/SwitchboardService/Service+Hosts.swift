@@ -22,25 +22,25 @@ extension Service {
 
   /// One row for each host in config.json, valid or not, sorted by name.
   func hostStatuses() -> [HostStatus] {
-    (Array(config.hosts.keys) + Array(config.hostProblems.keys)).sorted().compactMap(hostStatus)
+    let valid = config.hosts.values.map { hostStatus($0, link: hostLinks[$0.name]) }
+    let invalid = config.invalidHosts.map {
+      HostStatus(name: $0.key, kind: $0.value.kind?.rawValue, problem: $0.value.problem)
+    }
+    return (valid + invalid).sorted { $0.name < $1.name }
   }
 
-  private func hostStatus(_ name: String) -> HostStatus? {
-    if let problem = config.hostProblems[name] {
-      return HostStatus(name: name, kind: config.invalidHostKinds[name]?.rawValue, problem: problem)
-    }
-    guard let host = config.hosts[name] else { return nil }
-    guard let link = hostLinks[name] else { return HostStatus(name: name, kind: host.kind.rawValue) }
+  private func hostStatus(_ host: HostConfig, link: HostLink?) -> HostStatus {
+    guard let link else { return HostStatus(name: host.name, kind: host.kind.rawValue) }
     let status = link.status
     return HostStatus(
-      name: name, kind: host.kind.rawValue, destination: link.destination, link: status.state, since: status.since,
-      failures: status.failures, retryAt: status.retryAt, error: status.error)
+      name: host.name, kind: host.kind.rawValue, destination: link.destination, link: status.state,
+      since: status.since, failures: status.failures, retryAt: status.retryAt, error: status.error)
   }
 
   /// The host's link. It throws for a name that config.json does not list, for an invalid
   /// host, and for a host with a link per box.
   private func hostLink(_ name: String) throws -> HostLink {
-    if let problem = config.hostProblems[name] { throw APIError("\(name) is not usable: \(problem)") }
+    if let host = config.invalidHosts[name] { throw APIError("\(name) is not usable: \(host.problem)") }
     guard config.hosts[name] != nil else { throw APIError("no host named \(name) in \(home.config)") }
     guard let link = hostLinks[name] else {
       throw APIError("\(name) has a link per box, which this version does not open")
@@ -57,6 +57,6 @@ extension Service {
     guard let name = args["host"]?.string else { throw APIError("\(op) needs a host") }
     let link = try hostLink(name)
     if op == "host-connect" { link.connect() } else { link.disconnect() }
-    return try JSON(encoding: hostStatus(name))
+    return try JSON(encoding: hostStatus(link.config, link: link))
   }
 }

@@ -3,8 +3,8 @@
 
 Usage:
   ssh-stub -M -T [-o K=V]... -- <destination> <command>...
-  ssh-stub -G [-o K=V]... -- <destination>
-  ssh-stub -O check|exit [-o K=V]... -- <destination>
+  ssh-stub [-T] -G [-o K=V]... -- <destination>
+  ssh-stub [-T] -O check|exit [-o K=V]... -- <destination>
 
 It keeps its files in <ControlPath's folder>/../ssh-stub, which is
 $SB_HOME/ssh-stub when sbd passes ControlPath=$SB_HOME/ssh/%C:

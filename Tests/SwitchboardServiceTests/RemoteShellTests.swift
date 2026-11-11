@@ -7,6 +7,38 @@ import Testing
 /// The shells that every framing test runs on.
 let remoteShellPrograms = ["/bin/sh", "/bin/bash", "/bin/dash"]
 
+/// Checks `done` every 10 ms. It returns false when `seconds` pass before `done` is true.
+func waitUntil(seconds: Double, _ done: () -> Bool) -> Bool {
+  let deadline = Date().addingTimeInterval(seconds)
+  while !done() {
+    if Date() > deadline { return false }
+    Thread.sleep(forTimeInterval: 0.01)
+  }
+  return true
+}
+
+/// A new folder under /tmp, because a Unix socket path can't exceed 103 bytes. The caller
+/// removes it.
+func makeShortTempFolder() throws -> String {
+  var template = Array("/tmp/sbt.XXXXXX".utf8CString)
+  guard let folder = mkdtemp(&template) else { throw APIError("mkdtemp failed") }
+  return String(cString: folder)
+}
+
+func withSleepingChild(_ body: (Process) throws -> Void) throws {
+  let child = Process()
+  child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+  child.arguments = ["30"]
+  try child.run()
+  defer {
+    if child.isRunning {
+      kill(child.processIdentifier, SIGKILL)
+      child.waitUntilExit()
+    }
+  }
+  try body(child)
+}
+
 /// What a `RemoteShell` reported through `onReady` and `onClose`.
 final class ShellEvents: @unchecked Sendable {
   private let lock = NSLock()
@@ -19,16 +51,7 @@ final class ShellEvents: @unchecked Sendable {
   var readies: Int { lock.withLock { readyCount } }
   var closes: [String] { lock.withLock { closeReasons } }
 
-  func wait(seconds: Double, until done: () -> Bool) -> Bool {
-    let deadline = Date().addingTimeInterval(seconds)
-    while !done() {
-      if Date() > deadline { return false }
-      Thread.sleep(forTimeInterval: 0.01)
-    }
-    return true
-  }
-
-  func waitForClose(seconds: Double = 5) -> Bool { wait(seconds: seconds) { !self.closes.isEmpty } }
+  func waitForClose(seconds: Double = 5) -> Bool { waitUntil(seconds: seconds) { !self.closes.isEmpty } }
 }
 
 struct TestShell {
@@ -43,7 +66,7 @@ struct TestShell {
     let shell = try RemoteShell(
       executable: executable, arguments: arguments, environment: environment,
       onReady: { _ in events.ready() }, onClose: { events.closed($0) })
-    _ = events.wait(seconds: 30) { events.readies > 0 || !events.closes.isEmpty }
+    _ = waitUntil(seconds: 30) { events.readies > 0 || !events.closes.isEmpty }
     return TestShell(shell: shell, events: events)
   }
 
@@ -93,8 +116,7 @@ enum FakeShell {
 }
 
 func withRemoteShellTempFolder(_ body: (String) throws -> Void) throws {
-  let folder = NSTemporaryDirectory() + "sb-remote-shell-tests-" + UUID().uuidString
-  try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+  let folder = try makeShortTempFolder()
   defer {
     _ = try? runCommand("/bin/chmod", ["-R", "u+rwx", folder])
     try? FileManager.default.removeItem(atPath: folder)
@@ -135,7 +157,7 @@ private let everyByte = Data((0...255).map { UInt8($0) })
       "a b", "'", "it's", "\"", "`id`", "`touch /tmp/sb-injected`", "$HOME", "$(id)", ";", "a; exit 9",
       "line\nbreak", "-n", "--", "", "héllo ✓ 日本", "\\", "a\\nb", "*", "~", "_SB_", "\n_SB_\n", "#x", "!", "\t",
       " ", "a=b", "&", "|", ">", "<", "'\\''", "\r",
-      // `shellQuote` leaves a quote bare when a combining character follows it.
+      // A quote and the combining character after it are one character.
       "'\u{301}; exit 9; '\u{301}", "'\u{FE0F}x", "e\u{301}'",
     ]
     let t = try TestShell.start(program)
@@ -550,7 +572,7 @@ private let everyByte = Data((0...255).map { UInt8($0) })
 
       // The shell removes a command's files after it prints the answer.
       #expect(
-        t.events.wait(seconds: 5) { (try? FileManager.default.contentsOfDirectory(atPath: shellFolder)) == ["f"] })
+        waitUntil(seconds: 5) { (try? FileManager.default.contentsOfDirectory(atPath: shellFolder)) == ["f"] })
       t.shell.close()
       #expect(Processes.waitForExit([pid], seconds: 5).isEmpty)
       #expect(try FileManager.default.contentsOfDirectory(atPath: folder) == [])

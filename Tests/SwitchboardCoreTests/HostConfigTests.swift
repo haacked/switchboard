@@ -22,7 +22,7 @@ private func with(_ base: [String: JSON], _ changes: [String: JSON]) -> JSON {
 /// The host as `parse` reads it alone, under a valid name.
 private func parsed(_ value: JSON, name: String = "h") -> (host: HostConfig?, problem: String?) {
   let result = HostConfig.parse([name: value])
-  return (result.valid[name], result.problems[name])
+  return (result.valid[name], result.invalid[name]?.problem)
 }
 
 /// A case of a rule: the base host and the keys that break the rule.
@@ -61,7 +61,7 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
 
     let devbox = try #require(c.hosts["devbox"])
 
-    #expect(c.hostProblems.isEmpty)
+    #expect(c.invalidHosts.isEmpty)
     #expect(Array(c.hosts.keys) == ["devbox"])
     #expect(devbox.name == "devbox")
     #expect(devbox.kind == .hogli)
@@ -356,7 +356,8 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     ])
 
     #expect(Set(r.valid.keys) == ["a", "c"])
-    #expect(r.problems == ["b": "its destination coder.devbox-haacked is also the destination of a"])
+    #expect(
+      r.invalid.mapValues(\.problem) == ["b": "its destination coder.devbox-haacked is also the destination of a"])
   }
 
   @Test func rule12OrdersHostsByNameNotByTheirOrderInTheFile() {
@@ -365,8 +366,8 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     ])
 
     #expect(Array(r.valid.keys) == ["alpha"])
-    #expect(Set(r.problems.keys) == ["mid", "zeta"])
-    #expect(r.problems["mid"] == "its destination haacked@mini.local is also the destination of alpha")
+    #expect(Set(r.invalid.keys) == ["mid", "zeta"])
+    #expect(r.invalid["mid"]?.problem == "its destination haacked@mini.local is also the destination of alpha")
   }
 
   @Test func rule12LetsAValidHostTakeTheDestinationOfAnInvalidHost() {
@@ -377,15 +378,15 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     ])
 
     #expect(Array(r.valid.keys) == ["b"])
-    #expect(r.problems["a"] == "an ssh host can't have a workspace")
-    #expect(r.problems["c"] == "its destination haacked@mini.local is also the destination of b")
+    #expect(r.invalid["a"]?.problem == "an ssh host can't have a workspace")
+    #expect(r.invalid["c"]?.problem == "its destination haacked@mini.local is also the destination of b")
   }
 
   @Test func rule12LeavesPerSessionHostsAlone() {
     let r = HostConfig.parse(["boxes": perSessionHost.jsonObject, "more-boxes": perSessionHost.jsonObject])
 
     #expect(Set(r.valid.keys) == ["boxes", "more-boxes"])
-    #expect(r.problems.isEmpty)
+    #expect(r.invalid.isEmpty)
   }
 
   @Test func parseReturnsEveryHostOnExactlyOneSide() {
@@ -395,8 +396,8 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     ])
 
     #expect(Set(r.valid.keys) == ["mini", "devbox", "boxes"])
-    #expect(Set(r.problems.keys) == ["typo", "Bad", "text"])
-    #expect(r.problems["typo"] == workspaceMessage)
+    #expect(Set(r.invalid.keys) == ["typo", "Bad", "text"])
+    #expect(r.invalid["typo"]?.problem == workspaceMessage)
     #expect(r.valid.allSatisfy { $0.key == $0.value.name })
   }
 
@@ -407,7 +408,7 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
 
     #expect(c.ssh == "ssh")
     #expect(c.hosts.isEmpty)
-    #expect(c.hostProblems.isEmpty)
+    #expect(c.invalidHosts.isEmpty)
     #expect(Config().ssh == "ssh")
     #expect(Config().hosts.isEmpty)
   }
@@ -436,8 +437,8 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     #expect(c.ssh == "/tmp/ssh-stub")
     #expect(Array(c.mcpServers.keys) == ["db"])
     #expect(Set(c.hosts.keys) == ["mini", "boxes"])
-    #expect(Set(c.hostProblems.keys) == ["typo", "text"])
-    #expect(c.hostProblems["typo"] == workspaceMessage)
+    #expect(Set(c.invalidHosts.keys) == ["typo", "text"])
+    #expect(c.invalidHosts["typo"]?.problem == workspaceMessage)
     #expect(c.hosts["boxes"]?.region == "eu-central-1")
   }
 
@@ -446,19 +447,19 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
     let c = try JSONCoding.decode(Config.self, from: #"{"env": {"A": "b"}, "liveCap": 3, "hosts": \#(hosts)}"#)
 
     #expect(c.hosts.isEmpty)
-    #expect(c.hostProblems.isEmpty)
+    #expect(c.invalidHosts.isEmpty)
     #expect(c.env == ["A": "b"])
     #expect(c.liveCap == 3)
   }
 
-  @Test func hostProblemsIsNotAKeyOfTheEncodedConfig() throws {
+  @Test func invalidHostsIsNotAKeyOfTheEncodedConfig() throws {
     let c = try JSONCoding.decode(
       Config.self, from: #"{"hosts": {"mini": {"kind": "ssh", "destination": "m"}, "typo": {"kind": "hogli"}}}"#)
 
     let encoded = try #require(JSON.parse(try JSONCoding.encode(c))?.object)
 
-    #expect(c.hostProblems.count == 1)
-    #expect(encoded["hostProblems"] == nil)
+    #expect(c.invalidHosts.count == 1)
+    #expect(encoded["invalidHosts"] == nil)
     #expect(encoded["hosts"]?["mini"]?["destination"] == "m")
     #expect(encoded["ssh"] == "ssh")
   }
@@ -469,9 +470,7 @@ private func broken(_ label: String, _ base: [String: JSON], _ changes: [String:
       from: #"{"hosts": {"typo": {"kind": "hogli"}, "odd": {"kind": "docker"}, "text": "ssh", "Bad": {"kind": "ssh"}}}"#
     )
 
-    #expect(c.invalidHostKinds == ["typo": .hogli, "Bad": .ssh])
-    #expect(Set(c.hostProblems.keys) == ["typo", "odd", "text", "Bad"])
-    #expect(JSON.parse(try JSONCoding.encode(c))?["invalidHostKinds"] == nil)
+    #expect(c.invalidHosts.mapValues(\.kind) == ["typo": .hogli, "odd": nil, "text": nil, "Bad": .ssh])
   }
 
   @Test func homeKeepsControlSocketsInItsSshFolder() {

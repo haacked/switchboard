@@ -138,7 +138,7 @@ final class HostLink: @unchecked Sendable {
   }
 
   /// Moves the link to `unreachable` and returns the shell to close. The caller holds the lock
-  /// and closes the shell after it lets the lock go, because `close()` reports back to the link.
+  /// and closes the shell after it unlocks, because `close()` reports back to the link.
   private func failed(_ reason: String, at time: Int64) -> RemoteShell? {
     let stayedUp = current.state == .connected && time - current.since >= Self.stableMs
     current.failures = stayedUp ? 1 : current.failures + 1
@@ -207,7 +207,8 @@ final class HostLink: @unchecked Sendable {
     guard isCurrent(attempt), let controlPath else { return }
     do {
       let r = try runCommand(
-        ssh, ["-O", "check", "-o", Self.controlPathOption(controlPath), "--", destination], timeout: Self.helperSeconds)
+        ssh, ["-T", "-O", "check", "-o", Self.controlPathOption(controlPath), "--", destination],
+        timeout: Self.helperSeconds)
       guard r.status == 0 else { throw Self.failure("the control socket check", r) }
     } catch {
       fail(attempt, "\(error)")
@@ -252,7 +253,7 @@ final class HostLink: @unchecked Sendable {
   private func resolveControlPath(inFolder descriptor: Int32) throws -> String {
     let folder = home.sshFolder
     let r = try runCommand(
-      ssh, ["-G", "-o", Self.controlPathOption("\(folder)/%C"), "--", destination], timeout: Self.helperSeconds)
+      ssh, ["-T", "-G", "-o", Self.controlPathOption("\(folder)/%C"), "--", destination], timeout: Self.helperSeconds)
     guard r.status == 0 else { throw Self.failure("ssh -G", r) }
     return try Self.controlSocketName(inConfig: r.stdout, sshFolder: folder) { parent in
       var opened = stat()
@@ -275,11 +276,10 @@ final class HostLink: @unchecked Sendable {
   /// The file name of the control path that `ssh -G` printed. It throws unless the output has
   /// one `controlpath` line, with no `%` left in it, that names a direct child of the ssh
   /// folder. `isSshFolder` says whether a path names that folder. ssh prints the folder in
-  /// decomposed Unicode, so the link compares the folders themselves. Without `isSshFolder`,
-  /// the folder's bytes must equal those of `sshFolder`. The split is on the `/` byte, because
-  /// a `/` before a combining mark is not the character `/`.
+  /// decomposed Unicode, so the link compares the folders themselves. The split is on the `/`
+  /// byte, because a `/` before a combining mark is not the character `/`.
   static func controlSocketName(
-    inConfig output: String, sshFolder: String, isSshFolder: ((String) -> Bool)? = nil
+    inConfig output: String, sshFolder: String, isSshFolder: (String) -> Bool
   ) throws -> String {
     let key = Array("controlpath ".utf8)
     let lines = output.utf8.split(separator: UInt8(ascii: "\n")).filter { $0.starts(with: key) }
@@ -294,7 +294,7 @@ final class HostLink: @unchecked Sendable {
     let parent = path[..<slash]
     let name = path[path.index(after: slash)...]
     guard !name.isEmpty, !name.elementsEqual(".".utf8), !name.elementsEqual("..".utf8),
-      isSshFolder?(String(decoding: parent, as: UTF8.self)) ?? parent.elementsEqual(sshFolder.utf8)
+      isSshFolder(String(decoding: parent, as: UTF8.self))
     else {
       throw APIError("the control path \(text) is not a file in \(sshFolder)")
     }
@@ -340,7 +340,7 @@ final class HostLink: @unchecked Sendable {
   /// A connect takes a path and no folder descriptor. So the thread's working folder becomes
   /// the open folder for the length of the connect, and the connect names the file alone.
   static func hasOpenSocket(_ name: String, inFolder folder: Int32) -> Bool? {
-    guard !name.isEmpty, !name.utf8.contains(UInt8(ascii: "/")), let setThreadFolder else { return nil }
+    guard !name.utf8.contains(UInt8(ascii: "/")), let setThreadFolder else { return nil }
     let descriptor = socket(AF_UNIX, SOCK_DGRAM, 0)
     guard descriptor >= 0 else { return nil }
     defer { close(descriptor) }
@@ -358,9 +358,7 @@ final class HostLink: @unchecked Sendable {
   }
 
   private static func failure(_ what: String, _ r: CommandResult) -> APIError {
-    // ssh -G can print this line before its error, because sbd gives it no terminal.
-    let text = r.stderr.split(separator: "\n").filter { !$0.hasPrefix("Pseudo-terminal will not be allocated") }
-      .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
     return APIError(text.isEmpty ? "\(what) exited with status \(r.status)" : "\(what) failed: \(text)")
   }
 }

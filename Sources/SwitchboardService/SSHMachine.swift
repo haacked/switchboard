@@ -42,17 +42,14 @@ struct SSHMachine: Machine {
       stderr: String(decoding: r.stderr, as: UTF8.self))
   }
 
-  private func fileCommand(_ command: (RemoteShellProtocol.StatFormat) -> [String]) throws -> RemoteResult {
-    let shell = try shell()
-    guard let ready = shell.ready else { throw APIError("the host's shell has not answered the handshake") }
-    return try shell.run(
-      command(ready.stat), env: nil, input: nil, timeout: Self.fileTimeout,
-      deadline: Self.fileTimeout + Self.deadlineSlack)
+  private func fileCommand(_ command: [String]) throws -> RemoteResult {
+    try shell().run(
+      command, env: nil, input: nil, timeout: Self.fileTimeout, deadline: Self.fileTimeout + Self.deadlineSlack)
   }
 
   /// The command's stdout when it exits 0. It is nil for any other status and when the host
   /// is not connected, which it logs.
-  private func output(_ what: String, _ command: (RemoteShellProtocol.StatFormat) -> [String]) -> Data? {
+  private func output(_ what: String, _ command: [String]) -> Data? {
     do {
       let r = try fileCommand(command)
       return r.status == 0 ? r.stdout : nil
@@ -65,13 +62,15 @@ struct SSHMachine: Machine {
   private func stat(_ what: String, _ command: (RemoteShellProtocol.StatFormat) -> [String]) -> (
     size: UInt64, modified: Date
   )? {
-    output(what, command).flatMap { RemoteShellProtocol.parseStat(String(decoding: $0, as: UTF8.self)) }
+    // Before the handshake the format is unknown, and `run` then throws for every command.
+    let format = (try? shell())?.ready?.stat ?? .bsd
+    return output(what, command(format)).flatMap { RemoteShellProtocol.parseStat(String(decoding: $0, as: UTF8.self)) }
   }
 
   func read(_ path: String, from offset: UInt64, count: Int?) -> Data? {
     // GNU `head -c -N` prints all but the last N bytes.
     if let count, count < 0 { return nil }
-    return output("read") { _ in RemoteShellProtocol.read(path, from: offset, count: count) }
+    return output("read", RemoteShellProtocol.read(path, from: offset, count: count))
   }
 
   func size(_ path: String) -> UInt64? {
@@ -79,11 +78,11 @@ struct SSHMachine: Machine {
   }
 
   func exists(_ path: String) -> Bool {
-    output("exists") { _ in RemoteShellProtocol.exists(path) } != nil
+    output("exists", RemoteShellProtocol.exists(path)) != nil
   }
 
   func isFolder(_ path: String) -> Bool {
-    output("isFolder") { _ in RemoteShellProtocol.isFolder(path) } != nil
+    output("isFolder", RemoteShellProtocol.isFolder(path)) != nil
   }
 
   func modified(_ path: String) -> Date? {
@@ -91,12 +90,12 @@ struct SSHMachine: Machine {
   }
 
   func list(_ folder: String) -> [String] {
-    (output("list") { _ in RemoteShellProtocol.list(folder) } ?? Data())
+    (output("list", RemoteShellProtocol.list(folder)) ?? Data())
       .split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
   }
 
   func createFolder(_ path: String) throws {
-    let r = try fileCommand { _ in RemoteShellProtocol.createFolder(path) }
+    let r = try fileCommand(RemoteShellProtocol.createFolder(path))
     guard r.status == 0 else {
       let text = String(decoding: r.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
       throw APIError(text.isEmpty ? "mkdir on the host exited with status \(r.status)" : text)
@@ -109,6 +108,6 @@ struct SSHMachine: Machine {
       logLine("host: signal \(signal) has no name that a host knows, so pid \(pid) got nothing")
       return
     }
-    _ = output("signal") { _ in RemoteShellProtocol.signal(name: name, pid: pid) }
+    _ = output("signal", RemoteShellProtocol.signal(name: name, pid: pid))
   }
 }

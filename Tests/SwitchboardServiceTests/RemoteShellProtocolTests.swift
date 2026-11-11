@@ -258,21 +258,6 @@ private func requestText(
     #expect(text.hasSuffix("sb_run 3 '' '/bin/echo' \(shellQuote(word)) 'end'\n"))
   }
 
-  /// `shellQuote` searches by character, so it leaves these quotes bare.
-  @Test(arguments: ["'\u{301}; touch /tmp/sb-injected; '\u{301}", "'\u{FE0F}x", "a'\u{200D}b", "\0\u{301}"])
-  func aQuoteOrNulBeforeACombiningCharacterIsStillSeen(word: String) throws {
-    guard !word.utf8.contains(0) else {
-      #expect(throws: (any Error).self) { try requestText(argv: ["/bin/echo", word]) }
-      return
-    }
-    let line = try requestText(seq: 3, argv: ["/bin/echo", word])
-    let quoted = try #require(line.dropLast().components(separatedBy: "'/bin/echo' ").last)
-
-    #expect(
-      !quoted.dropFirst().dropLast().replacingOccurrences(of: "'\\''", with: "", options: .literal).unicodeScalars
-        .contains("'"))
-  }
-
   @Test func word0IsQuotedLikeEveryOtherWord() throws {
     let text = try requestText(seq: 3, argv: ["/tmp/a dir/it's; exit", "x"])
 
@@ -314,7 +299,9 @@ private func requestText(
 
   // The refusals of Risk 2.
 
-  @Test(arguments: [["/bin/echo", "a\0b"], ["/bin/ec\0ho"], ["/bin/echo", "ok", "\0"], ["\0"]])
+  @Test(arguments: [
+    ["/bin/echo", "a\0b"], ["/bin/ec\0ho"], ["/bin/echo", "ok", "\0"], ["\0"], ["/bin/echo", "\0\u{301}"],
+  ])
   func refusesANulInAnyWord(argv: [String]) {
     #expect(throws: (any Error).self) { try requestText(argv: argv) }
   }

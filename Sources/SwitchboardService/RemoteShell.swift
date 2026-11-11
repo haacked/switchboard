@@ -77,7 +77,7 @@ final class RemoteShell: @unchecked Sendable {
     }
     DispatchQueue(label: "RemoteShell.stderr").async { [self] in
       Self.drain(stderrPipe.fileHandleForReading.fileDescriptor) { chunk in
-        state.withLock { stderrTail = (stderrTail + chunk).suffix(Self.stderrTailBytes) }
+        state.withLock { stderrTail = (stderrTail + Data(chunk)).suffix(Self.stderrTailBytes) }
       }
       stderrEnded.signal()
     }
@@ -174,14 +174,17 @@ final class RemoteShell: @unchecked Sendable {
     onClose(lines.isEmpty ? "the connection closed" : lines.joined(separator: "\n"))
   }
 
-  private static func drain(_ descriptor: Int32, _ body: (Data) -> Void) {
+  /// The bytes that `body` gets are valid only until it returns.
+  private static func drain(_ descriptor: Int32, _ body: (UnsafeRawBufferPointer) -> Void) {
     var chunk = [UInt8](repeating: 0, count: 64 * 1024)
-    while true {
-      let count = read(descriptor, &chunk, chunk.count)
-      if count > 0 {
-        body(Data(chunk[0..<count]))
-      } else if count == 0 || errno != EINTR {
-        return
+    chunk.withUnsafeMutableBytes { buffer in
+      while true {
+        let count = read(descriptor, buffer.baseAddress, buffer.count)
+        if count > 0 {
+          body(UnsafeRawBufferPointer(rebasing: buffer[..<count]))
+        } else if count == 0 || errno != EINTR {
+          return
+        }
       }
     }
   }
@@ -189,7 +192,7 @@ final class RemoteShell: @unchecked Sendable {
   /// Takes stdout bytes as they arrive. Before the handshake it looks for the ready line and
   /// drops what comes before it. After the handshake, bytes that no command waits for break
   /// the framing.
-  private func received(_ chunk: Data) {
+  private func received(_ chunk: UnsafeRawBufferPointer) {
     var announce: RemoteShellProtocol.Ready?
     var failure: String?
     state.lock()
@@ -197,7 +200,7 @@ final class RemoteShell: @unchecked Sendable {
       state.unlock()
       return
     }
-    unread.append(chunk)
+    unread.append(chunk.bindMemory(to: UInt8.self))
     if handshake == nil {
       if let marker = unread.range(of: readyMarker) {
         let rest = unread[marker.upperBound...]
@@ -233,8 +236,9 @@ final class RemoteShell: @unchecked Sendable {
     defer { state.unlock() }
     while true {
       if let count = try length(unread) {
-        let taken = Data(unread.prefix(count))
-        unread = Data(unread.dropFirst(count))
+        let whole = count == unread.count
+        let taken = whole ? unread : Data(unread.prefix(count))
+        unread = whole ? Data() : Data(unread.dropFirst(count))
         return taken
       }
       if closed { throw Broken(reason: Self.closedMidway) }

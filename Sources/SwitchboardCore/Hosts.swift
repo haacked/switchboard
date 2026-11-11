@@ -3,6 +3,13 @@ import Foundation
 public enum HostKind: String, Codable, Sendable { case hogli, ssh }
 public enum HostLayout: String, Codable, Sendable { case shared, perSession }
 
+/// An entry of `hosts` in config.json that breaks a rule.
+public struct InvalidHost: Equatable, Sendable {
+  /// The entry's kind when its `kind` names one.
+  public var kind: HostKind?
+  public var problem: String
+}
+
 /// A remote machine from `hosts` in config.json.
 public struct HostConfig: Codable, Equatable, Sendable {
   public var name: String
@@ -30,20 +37,20 @@ public struct HostConfig: Codable, Equatable, Sendable {
     }
   }
 
-  /// The host's kind when the value names one, also for a host that is otherwise invalid.
-  public static func kind(of value: JSON) -> HostKind? {
+  private static func kind(of value: JSON) -> HostKind? {
     value["kind"]?.string.flatMap(HostKind.init(rawValue:))
   }
 
-  /// The valid hosts and, for each invalid one, why. Pure.
-  public static func parse(_ hosts: [String: JSON]) -> (valid: [String: HostConfig], problems: [String: String]) {
+  /// The valid hosts and the invalid ones, by name. Pure.
+  public static func parse(_ hosts: [String: JSON]) -> (valid: [String: HostConfig], invalid: [String: InvalidHost]) {
     var valid: [String: HostConfig] = [:]
-    var problems: [String: String] = [:]
+    var invalid: [String: InvalidHost] = [:]
     // An invalid host has no link, so it does not hold its destination against a later host.
     var owners: [String: String] = [:]
     for name in hosts.keys.sorted() {
+      let value = hosts[name] ?? .null
       do {
-        let host = try HostConfig(name: name, value: hosts[name] ?? .null)
+        let host = try HostConfig(name: name, value: value)
         if let destination = host.sshDestination {
           if let owner = owners[destination] {
             throw Problem("its destination \(destination) is also the destination of \(owner)")
@@ -52,10 +59,10 @@ public struct HostConfig: Codable, Equatable, Sendable {
         }
         valid[name] = host
       } catch {
-        problems[name] = "\(error)"
+        invalid[name] = InvalidHost(kind: kind(of: value), problem: "\(error)")
       }
     }
-    return (valid, problems)
+    return (valid, invalid)
   }
 
   private struct Problem: Error, CustomStringConvertible {
@@ -73,21 +80,14 @@ public struct HostConfig: Codable, Equatable, Sendable {
     guard let object = value.object else { throw Problem("its value must be an object") }
     guard let kind = Self.kind(of: value) else { throw Problem("its kind must be hogli or ssh") }
 
-    func string(_ key: String) throws -> String? {
+    func read<T>(_ key: String, _ reader: (JSON) -> T?, _ expected: String) throws -> T? {
       guard let value = object[key], value != .null else { return nil }
-      guard let text = value.string else { throw Problem("its \(key) must be a string") }
-      return text
+      guard let read = reader(value) else { throw Problem("its \(key) must be \(expected)") }
+      return read
     }
-    func int(_ key: String) throws -> Int? {
-      guard let value = object[key], value != .null else { return nil }
-      guard let number = value.int else { throw Problem("its \(key) must be a whole number") }
-      return number
-    }
-    func bool(_ key: String) throws -> Bool? {
-      guard let value = object[key], value != .null else { return nil }
-      guard let flag = value.bool else { throw Problem("its \(key) must be true or false") }
-      return flag
-    }
+    func string(_ key: String) throws -> String? { try read(key, \.string, "a string") }
+    func int(_ key: String) throws -> Int? { try read(key, \.int, "a whole number") }
+    func bool(_ key: String) throws -> Bool? { try read(key, \.bool, "true or false") }
 
     let layoutText = try string("layout")
     let workspace = try string("workspace")

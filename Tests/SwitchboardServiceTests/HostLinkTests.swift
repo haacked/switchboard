@@ -52,8 +52,7 @@ final class Flight: @unchecked Sendable {
 
   /// The outcome, or nil when the command still runs after `seconds`.
   func wait(seconds: Double = 10) -> Result<CommandResult, Error>? {
-    let deadline = Date().addingTimeInterval(seconds)
-    while result == nil, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+    _ = waitUntil(seconds: seconds) { result != nil }
     return result
   }
 }
@@ -84,15 +83,12 @@ final class LinkBench {
   var stubFolder: String { "\(home.path)/ssh-stub" }
   var controlPath: String { layout.controlPath }
 
-  /// The home is under /tmp, because a Unix socket path can't exceed 103 bytes. With `folder`,
-  /// the home is the folder of that name in the temporary folder. With `ssh`, the link runs
-  /// that `/bin/sh` script in place of the stub.
+  /// With `folder`, the home is the folder of that name in the temporary folder. With `ssh`,
+  /// the link runs that `/bin/sh` script in place of the stub.
   init(folder: String? = nil, ssh script: ((Layout) throws -> String)? = nil) throws {
     let parsed = HostConfig.parse(["mini": ["kind": "ssh", "destination": .string(LinkBench.destination)]])
-    let config = try #require(parsed.valid["mini"], "\(parsed.problems)")
-    var template = Array("/tmp/sbl.XXXXXX".utf8CString)
-    guard let dir = mkdtemp(&template) else { throw APIError("mkdtemp failed") }
-    let root = String(cString: dir)
+    let config = try #require(parsed.valid["mini"], "\(parsed.invalid)")
+    let root = try makeShortTempFolder()
     self.root = root
     home = Home(path: folder.map { "\(root)/\($0)" } ?? root)
     let digest = Insecure.SHA1.hash(data: Data(LinkBench.destination.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -157,12 +153,8 @@ final class LinkBench {
   // MARK: Waiting
 
   func wait(_ what: String, seconds: Double = 15, until done: () -> Bool) throws {
-    let deadline = Date().addingTimeInterval(seconds)
-    while !done() {
-      if Date() > deadline {
-        throw APIError("timed out waiting for \(what). link: \(link.status)\nstub log:\n\(logText)")
-      }
-      Thread.sleep(forTimeInterval: 0.01)
+    guard waitUntil(seconds: seconds, done) else {
+      throw APIError("timed out waiting for \(what). link: \(link.status)\nstub log:\n\(logText)")
     }
   }
 
@@ -254,21 +246,15 @@ func makeStaleSocket(at path: String) throws {
 func bindSocket(at path: String, type: Int32 = SOCK_STREAM) throws -> Int32 {
   let fd = socket(AF_UNIX, type, 0)
   guard fd >= 0 else { throw APIError("socket failed") }
-  var addr = sockaddr_un()
-  addr.sun_family = sa_family_t(AF_UNIX)
-  let bytes = Array(path.utf8)
-  let capacity = MemoryLayout.size(ofValue: addr.sun_path)
-  guard bytes.count < capacity else { throw APIError("\(path) is too long for a socket") }
-  withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: bytes) }
-  let bound = withUnsafePointer(to: &addr) {
-    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-  }
-  guard bound == 0 else {
-    let reason = String(cString: strerror(errno))
+  do {
+    guard try UnixSocket.withAddress(path, { bind(fd, $0, $1) }) == 0 else {
+      throw APIError("bind \(path): \(UnixSocket.errnoText())")
+    }
+    return fd
+  } catch {
     close(fd)
-    throw APIError("bind \(path): \(reason)")
+    throw error
   }
-  return fd
 }
 
 /// A stream connect to the path that does not wait. It returns the descriptor, or nil with
@@ -340,11 +326,11 @@ func sshWrapper(_ layout: LinkBench.Layout, onG: String? = nil, beforeMaster: St
       set -- "$@" "$a"
       if [ $seen -eq 1 ]; then seen=2; elif [ "$a" = -- ]; then seen=1; fi
     done
-    exec "$stub" "$@" \(RemoteShellProtocol.quote(command ?? ""))
+    exec "$stub" "$@" \(shellQuote(command ?? ""))
     """
   return """
     #!/bin/sh
-    stub=\(RemoteShellProtocol.quote(layout.stub))
+    stub=\(shellQuote(layout.stub))
     case " $* " in
     *" -G "*)
       \(onG ?? #"exec "$stub" "$@""#)
@@ -365,14 +351,14 @@ private func hostCommand(withStat script: String, in layout: LinkBench.Layout) t
   try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
   try Data("#!/bin/sh\n\(script)\n".utf8).write(to: URL(fileURLWithPath: "\(bin)/stat"))
   chmod("\(bin)/stat", 0o755)
-  return "PATH=\(RemoteShellProtocol.quote(bin)):/usr/bin:/bin exec /bin/sh"
+  return "PATH=\(shellQuote(bin)):/usr/bin:/bin exec /bin/sh"
 }
 
 /// A master that runs a fake host shell: it answers the handshake, then runs `then`.
 private func fakeHost(then: String, in layout: LinkBench.Layout) throws -> String {
   let script = "\(layout.home)/fake-host.sh"
   try Data(FakeShell.script(then: then).utf8).write(to: URL(fileURLWithPath: script))
-  return sshWrapper(layout, command: "exec /bin/sh \(RemoteShellProtocol.quote(script))")
+  return sshWrapper(layout, command: "exec /bin/sh \(shellQuote(script))")
 }
 
 @Suite struct HostLinkTests {
@@ -445,9 +431,9 @@ private func fakeHost(then: String, in layout: LinkBench.Layout) throws -> Strin
     let check = try #require(runs.firstIndex { $0.argv.contains("-O") })
     #expect(resolve < master)
     #expect(master < check)
-    #expect(runs[resolve].argv == ["-G", "-o", pattern, "--", LinkBench.destination])
+    #expect(runs[resolve].argv == ["-T", "-G", "-o", pattern, "--", LinkBench.destination])
     #expect(
-      runs[check].argv == ["-O", "check", "-o", "ControlPath=\(bench.controlPath)", "--", LinkBench.destination])
+      runs[check].argv == ["-T", "-O", "check", "-o", "ControlPath=\(bench.controlPath)", "--", LinkBench.destination])
     #expect(Array(runs[master].argv.prefix(2)) == ["-M", "-T"])
     var options = runs[master].options
     let controlPath = options.removeValue(forKey: "ControlPath")
@@ -972,7 +958,7 @@ private func fakeHost(then: String, in layout: LinkBench.Layout) throws -> Strin
   @Test(.timeLimit(.minutes(1)))
   func anAttemptFailsWhileTheLastSshProcessStillRuns() throws {
     let bench = try LinkBench { layout in
-      let starts = RemoteShellProtocol.quote("\(layout.home)/starts")
+      let starts = shellQuote("\(layout.home)/starts")
       return sshWrapper(layout, beforeMaster: "echo start >>\(starts); trap '' TERM; exec sleep 9")
     }
     defer { bench.close() }
@@ -1091,20 +1077,6 @@ private func fakeHost(then: String, in layout: LinkBench.Layout) throws -> Strin
     #expect(try FileManager.default.contentsOfDirectory(atPath: bench.home.sshFolder).count == 1)
   }
 
-  @Test(.timeLimit(.minutes(1)))
-  func aFailedResolveLeavesOutTheLineAboutThePseudoTerminal() throws {
-    let bench = try LinkBench { layout in
-      let notice = "Pseudo-terminal will not be allocated because stdin is not a terminal."
-      return sshWrapper(layout, onG: "echo '\(notice)' >&2; echo 'ssh: no route' >&2; exit 255")
-    }
-    defer { bench.close() }
-
-    bench.link.connect()
-    let status = try bench.waitFor(.unreachable)
-
-    #expect(status.error == "ssh -G failed: ssh: no route")
-  }
-
   @Test func theControlPathOptionQuotesAnythingButAPlainPath() {
     #expect(HostLink.controlPathOption("/tmp/sb.x_Y-1/ssh/%C") == "ControlPath=/tmp/sb.x_Y-1/ssh/%C")
     #expect(HostLink.controlPathOption("/a b/%C") == #"ControlPath="/a b/%C""#)
@@ -1194,17 +1166,21 @@ enum UntrustedControlPath: String, CaseIterable {
   /// The script that answers `ssh -G`.
   func onG(_ layout: LinkBench.Layout) -> String {
     if self == .resolveFails { return "echo 'ssh: Could not resolve hostname mini.local' >&2; exit 255" }
-    let line = path(layout).map { "printf 'controlpath %s\\n' \(RemoteShellProtocol.quote($0))" } ?? ":"
+    let line = path(layout).map { "printf 'controlpath %s\\n' \(shellQuote($0))" } ?? ":"
     return "echo 'hostname mini.local'; echo 'controlmaster false'; \(line); echo 'controlpersist no'"
   }
 }
 
 @Suite struct HostLinkControlPathTests {
+  private func controlSocketName(_ output: String) throws -> String {
+    try HostLink.controlSocketName(inConfig: output, sshFolder: "/h/ssh") { Array($0.utf8) == Array("/h/ssh".utf8) }
+  }
+
   @Test func theControlSocketNameIsTheLastPartOfTheOneControlPathLine() throws {
     let output = "hostname mini.local\ncontrolmaster false\ncontrolpath /h/ssh/0a1b\ncontrolpersist no\n"
 
-    #expect(try HostLink.controlSocketName(inConfig: output, sshFolder: "/h/ssh") == "0a1b")
-    #expect(try HostLink.controlSocketName(inConfig: "controlpath /h/ssh/a b ", sshFolder: "/h/ssh") == "a b ")
+    #expect(try controlSocketName(output) == "0a1b")
+    #expect(try controlSocketName("controlpath /h/ssh/a b ") == "a b ")
   }
 
   @Test(arguments: [
@@ -1216,7 +1192,7 @@ enum UntrustedControlPath: String, CaseIterable {
     "controlpath /h/ssh/a\ncontrolpath /h/ssh/b\n", "controlpath /h/ssh/a\ncontrolpath /h/ssh/a\n",
   ])
   func aControlPathAnswerOutsideTheRuleIsRefused(output: String) {
-    #expect(throws: (any Error).self) { try HostLink.controlSocketName(inConfig: output, sshFolder: "/h/ssh") }
+    #expect(throws: (any Error).self) { try controlSocketName(output) }
   }
 
   @Test(.timeLimit(.minutes(1)))
@@ -1566,7 +1542,7 @@ enum UntrustedControlPath: String, CaseIterable {
   /// Another process takes the control path between the link's `lstat` and the start of ssh.
   @Test(.timeLimit(.minutes(1)))
   func aMasterThatDisabledMultiplexingFailsTheCheckAndNeverConnects() throws {
-    let bench = try LinkBench { sshWrapper($0, beforeMaster: ": >\(RemoteShellProtocol.quote($0.controlPath))") }
+    let bench = try LinkBench { sshWrapper($0, beforeMaster: ": >\(shellQuote($0.controlPath))") }
     defer { bench.close() }
     var states: Set<LinkState> = []
 
@@ -1590,9 +1566,7 @@ enum UntrustedControlPath: String, CaseIterable {
 /// A `Service` in a temporary home whose config.json names the stub as ssh and lists a valid
 /// ssh host, a host with a link per box, and an invalid host.
 private func withHostService(_ body: (Service, Home) throws -> Void) throws {
-  var template = Array("/tmp/sbs.XXXXXX".utf8CString)
-  guard let dir = mkdtemp(&template) else { throw APIError("mkdtemp failed") }
-  let home = Home(path: String(cString: dir))
+  let home = Home(path: try makeShortTempFolder())
   defer { try? FileManager.default.removeItem(atPath: home.path) }
   let config: JSON = [
     "ssh": .string(LinkBench.stub),
@@ -1658,11 +1632,7 @@ private func withHostService(_ body: (Service, Home) throws -> Void) throws {
       let machine = try service.machine(onHost: "mini")
       let link = try #require(service.hostLinks["mini"])
       link.connect()
-      let deadline = Date().addingTimeInterval(15)
-      while link.status.state != .connected {
-        if Date() > deadline { throw APIError("the link is \(link.status)") }
-        Thread.sleep(forTimeInterval: 0.01)
-      }
+      try #require(waitUntil(seconds: 15) { link.status.state == .connected }, "the link is \(link.status)")
 
       let r = try machine.run("/bin/sh", ["-c", #"printf %s "$HOME""#])
 

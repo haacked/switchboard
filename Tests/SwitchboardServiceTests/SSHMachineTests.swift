@@ -8,20 +8,6 @@ private func write(_ text: String, to path: String) throws {
   try Data(text.utf8).write(to: URL(fileURLWithPath: path))
 }
 
-private func withSleepingChild(_ body: (Process) throws -> Void) throws {
-  let child = Process()
-  child.executableURL = URL(fileURLWithPath: "/bin/sleep")
-  child.arguments = ["30"]
-  try child.run()
-  defer {
-    if child.isRunning {
-      kill(child.processIdentifier, SIGKILL)
-      child.waitUntilExit()
-    }
-  }
-  try body(child)
-}
-
 private final class CurrentShell: @unchecked Sendable {
   private let lock = NSLock()
   private var value: RemoteShell

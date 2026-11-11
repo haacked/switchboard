@@ -57,9 +57,17 @@ public func runCommand(
     stderr: String(decoding: errData, as: UTF8.self))
 }
 
-/// The text in single quotes, for a command that a POSIX shell runs.
+/// The text in single quotes, for a command that a POSIX shell runs. It is correct for every
+/// byte but NUL. It works on Unicode scalars, because a `'` and a combining mark after it are
+/// one character, which a search for the character `'` does not find.
 public func shellQuote(_ text: String) -> String {
-  "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  var quoted = String.UnicodeScalarView()
+  quoted.append("'")
+  for scalar in text.unicodeScalars {
+    if scalar == "'" { quoted.append(contentsOf: "'\\''".unicodeScalars) } else { quoted.append(scalar) }
+  }
+  quoted.append("'")
+  return String(quoted)
 }
 
 /// The text as one shell word: bare when it holds only letters, digits,
