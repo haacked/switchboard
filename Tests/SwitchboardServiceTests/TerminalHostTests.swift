@@ -78,3 +78,67 @@ import Testing
     #expect((try? host.checkedPanes())?["a"]?.dead == false)
   }
 }
+
+/// Records each command instead of running it. A command with the argument `failing` exits 1.
+private final class RecordingMachine: Machine, @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [(executable: String, args: [String], env: [String: String]?, input: Data?)] = []
+  var paths: Set<String> = []
+
+  var commands: [(executable: String, args: [String], env: [String: String]?, input: Data?)] {
+    lock.withLock { recorded }
+  }
+
+  func run(
+    _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
+  ) throws -> CommandResult {
+    lock.withLock { recorded.append((executable, args, env, input)) }
+    return args.contains("failing")
+      ? CommandResult(status: 1, stdout: "", stderr: "no such command\n")
+      : CommandResult(status: 0, stdout: "out", stderr: "")
+  }
+
+  func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { nil }
+  func size(_ path: String) -> UInt64? { nil }
+  func exists(_ path: String) -> Bool { paths.contains(path) }
+  func isFolder(_ path: String) -> Bool { false }
+  func modified(_ path: String) -> Date? { nil }
+  func list(_ folder: String) -> [String] { [] }
+  func createFolder(_ path: String) throws {}
+  func signal(_ pid: Int, _ signal: Int32) {}
+}
+
+@Suite struct TerminalHostMachineTests {
+  @Test func runsEveryTmuxCommandOnItsMachine() throws {
+    var template = Array("/tmp/sbh.XXXXXX".utf8CString)
+    let dir = String(cString: try #require(mkdtemp(&template)))
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    var config = Config()
+    config.tmux = "/bin/sh"
+    let machine = RecordingMachine()
+    let host = try TerminalHost(home: Home(path: dir), config: config, machine: machine)
+    let before = machine.commands.count
+
+    #expect(try host.run(["load-buffer", "-"], input: Data("hi".utf8)) == "out")
+
+    let command = try #require(machine.commands.last)
+    #expect(machine.commands.count == before + 1)
+    #expect(command.executable == "/bin/sh")
+    #expect(command.args == ["-S", "\(dir)/tmux.sock", "-f", "\(dir)/tmux.conf", "load-buffer", "-"])
+    #expect(command.env?["TERM"] == "xterm-256color")
+    #expect(command.input == Data("hi".utf8))
+    #expect(!FileManager.default.fileExists(atPath: "\(dir)/tmux.sock"), "a local tmux started")
+  }
+
+  @Test func reportsWhatTheMachinesTmuxPrintedWhenItFails() throws {
+    var template = Array("/tmp/sbh.XXXXXX".utf8CString)
+    let dir = String(cString: try #require(mkdtemp(&template)))
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    var config = Config()
+    config.tmux = "/bin/sh"
+    let host = try TerminalHost(home: Home(path: dir), config: config, machine: RecordingMachine())
+
+    let error = #expect(throws: APIError.self) { try host.run(["failing"]) }
+    #expect(error?.description == "tmux failing: no such command")
+  }
+}

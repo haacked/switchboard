@@ -522,17 +522,19 @@ public final class Service {
 
   /// The main checkout of the repo at `path` and the folder that a worktree of
   /// it on `branch` gets.
-  func worktreeLocation(_ path: String, _ branch: String) throws -> (main: String, dir: String) {
+  func worktreeLocation(
+    _ path: String, _ branch: String, on machine: any Machine = LocalMachine()
+  ) throws -> (main: String, dir: String) {
     // The first worktree names the main checkout, whose folder name names the repo.
-    let main = try worktreeEntries(path).first?.path ?? path
+    let main = try worktreeEntries(path, on: machine).first?.path ?? path
     return (main, "\(config.worktreeRoot.expandingTilde)/\((main as NSString).lastPathComponent)/\(branch)")
   }
 
   /// Whether `branch` exists in the repo at `path`, or the folder for a worktree on it does.
-  func branchOrFolderTaken(_ path: String, _ branch: String) -> Bool {
-    if branchExists(path, branch) { return true }
-    guard let location = try? worktreeLocation(path, branch) else { return false }
-    return FileManager.default.fileExists(atPath: location.dir)
+  func branchOrFolderTaken(_ path: String, _ branch: String, on machine: any Machine = LocalMachine()) -> Bool {
+    if branchExists(path, branch, on: machine) { return true }
+    guard let location = try? worktreeLocation(path, branch, on: machine) else { return false }
+    return machine.exists(location.dir)
   }
 
   /// The folder a new session runs in, its branch, and its repo. With a branch, the
@@ -540,31 +542,34 @@ public final class Service {
   /// which this creates unless it exists. An existing one must have the
   /// branch checked out. The repo is the main checkout, or the passed path when that
   /// is the main checkout. It is nil without a branch.
-  func prepareFolder(_ args: NewSession) throws -> (cwd: String, branch: String?, repo: String?) {
+  /// The folders and the repo are on `machine`.
+  func prepareFolder(
+    _ args: NewSession, on machine: any Machine = LocalMachine()
+  ) throws -> (cwd: String, branch: String?, repo: String?) {
     let path = (args.path as NSString).standardizingPath
-    guard isDirectory(path) else { throw APIError("no folder \(path)") }
+    guard machine.isFolder(path) else { throw APIError("no folder \(path)") }
     guard let branch = args.branch, !branch.isEmpty else {
-      let current = try? gitOutput(path, ["branch", "--show-current"])
+      let current = try? gitOutput(path, ["branch", "--show-current"], on: machine)
       return (path, current?.isEmpty == false ? current : nil, nil)
     }
-    let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-    let (main, dir) = try worktreeLocation(path, branch)
+    let common = try gitOutput(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"], on: machine)
+    let (main, dir) = try worktreeLocation(path, branch, on: machine)
     // The path can be a linked worktree, which goes away. The main checkout stays.
     let repo = samePath(main, path) ? path : main
-    if FileManager.default.fileExists(atPath: dir) {
-      let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    if machine.exists(dir) {
+      let other = try? gitOutput(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"], on: machine)
       guard other == common else { throw APIError("\(dir) exists and is not a worktree of \(main)") }
-      let current = (try? gitOutput(dir, ["branch", "--show-current"])) ?? ""
+      let current = (try? gitOutput(dir, ["branch", "--show-current"], on: machine)) ?? ""
       guard current == branch else {
         throw APIError("\(dir) has \(current.isEmpty ? "no branch" : current) checked out, not \(branch)")
       }
       return (dir, branch, repo)
     }
-    let exists = branchExists(path, branch)
-    try FileManager.default.createDirectory(
-      atPath: (dir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    let exists = branchExists(path, branch, on: machine)
+    try machine.createFolder((dir as NSString).deletingLastPathComponent)
     _ = try gitOutput(
-      path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"])
+      path, exists ? ["worktree", "add", dir, branch] : ["worktree", "add", "-b", branch, dir, args.base ?? "HEAD"],
+      on: machine)
     return (dir, branch, repo)
   }
 
@@ -578,9 +583,9 @@ public final class Service {
     var lockedBySupacode = false
   }
 
-  func worktreeEntries(_ repo: String) throws -> [WorktreeEntry] {
+  func worktreeEntries(_ repo: String, on machine: any Machine = LocalMachine()) throws -> [WorktreeEntry] {
     var entries: [WorktreeEntry] = []
-    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"]).split(
+    for line in try gitOutput(repo, ["worktree", "list", "--porcelain", "-z"], on: machine).split(
       separator: "\0", omittingEmptySubsequences: true)
     {
       if line.hasPrefix("worktree ") {
@@ -624,8 +629,10 @@ public final class Service {
     return nil
   }
 
-  func worktreeEntry(_ repo: String, at path: String) throws -> WorktreeEntry? {
-    try worktreeEntries(repo).first { samePath($0.path, path) }
+  func worktreeEntry(
+    _ repo: String, at path: String, on machine: any Machine = LocalMachine()
+  ) throws -> WorktreeEntry? {
+    try worktreeEntries(repo, on: machine).first { samePath($0.path, path) }
   }
 
   func samePath(_ a: String, _ b: String) -> Bool {
@@ -646,12 +653,25 @@ public final class Service {
     APIError("\(path) is a locked worktree, so git won't remove it. Unlock it with `git worktree unlock` first.")
   }
 
-  func branchExists(_ repo: String, _ branch: String) -> Bool {
-    (try? runCommand(git, ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?.status == 0
+  /// The machine that the session runs on. Every session runs on this Mac.
+  func machine(for session: Session) -> any Machine { LocalMachine() }
+
+  /// The machine of the session with the id, or this Mac when sbd has no such session. It runs on the state queue.
+  func machine(of id: String) -> any Machine { entries[id].map { machine(for: $0.session) } ?? LocalMachine() }
+
+  func branchExists(_ repo: String, _ branch: String, on machine: any Machine = LocalMachine()) -> Bool {
+    (try? machine.run(git, ["-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"]))?.status == 0
   }
 
-  func gitOutput(_ cwd: String, _ args: [String]) throws -> String {
-    let r = try runCommand(git, ["-C", cwd] + args)
+  /// Whether `commit` is in origin/main of the repo that `dir` belongs to.
+  func isInMain(_ dir: String, _ commit: String, on machine: any Machine = LocalMachine()) -> Bool {
+    (try? machine.run(git, ["-C", dir, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"]))?.status
+      == 0
+  }
+
+  /// The trimmed output of git in `cwd` on the machine, or throws what git printed when it fails.
+  func gitOutput(_ cwd: String, _ args: [String], on machine: any Machine = LocalMachine()) throws -> String {
+    let r = try machine.run(git, ["-C", cwd] + args)
     guard r.status == 0 else {
       throw APIError("git \(args.joined(separator: " ")): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
@@ -812,10 +832,10 @@ public final class Service {
     if let path = entries[session.id]?.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
     {
-      return FileManager.default.fileExists(atPath: path) ? path : nil
+      return machine(for: session).exists(path) ? path : nil
     }
     let account = claudeAccount(of: session.id)
-    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd)
+    return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd, on: machine(for: session))
   }
 
   /// Whether claude sits at its prompt, ready for a paste: this launch's
@@ -912,7 +932,10 @@ public final class Service {
       let path = pasting?.data["transcript"]?.string ?? entries[id].flatMap { transcriptFile($0.session) }
       let offset = UInt64(pasting?.data["transcript_bytes"]?.int ?? 0)
       let pasted = Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text
-      let landed = pasting != nil && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset) } == true
+      let machine = self.machine(of: id)
+      let landed =
+        pasting != nil
+        && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset, on: machine) } == true
       record(id, landed ? "delivered" : "delivery_unknown", ["text": .string(text)])
     }
   }
@@ -976,10 +999,10 @@ public final class Service {
     entries[id]?.heldText = nil
     var data: [String: JSON] = ["text": .string(message.text)]
     if let session = entries[id]?.session, let path = transcriptFile(session),
-      let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber
+      let size = machine(for: session).size(path)
     {
       data["transcript"] = .string(path)
-      data["transcript_bytes"] = .number(size.doubleValue)
+      data["transcript_bytes"] = .number(Double(size))
     }
     do {
       if let sent = message.sent {
@@ -1011,7 +1034,7 @@ public final class Service {
   func stop(_ id: String, reason: String) throws {
     guard case .running(let pid) = claudeState(id) else { throw APIError("\(id) is not running") }
     deferQuestions(id)
-    kill(pid_t(pid), SIGTERM)
+    machine(of: id).signal(pid, SIGTERM)
     record(id, "stopped", ["reason": .string(reason), "pid": .number(Double(pid))])
   }
 
@@ -1065,7 +1088,8 @@ public final class Service {
         let entry = entries[id]!
         return (entry.session, entry.facts.pr, sharedSession(entry.session))
       }
-      let folderGone = !FileManager.default.fileExists(atPath: session.cwd)
+      let machine = self.machine(for: session)
+      let folderGone = !machine.exists(session.cwd)
       var (repo, branch, supacode) = try checkRemoval(
         session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
         branch: removesBranch)
@@ -1073,7 +1097,7 @@ public final class Service {
       // A local branch that is already gone still has its remote branch checked.
       let remoteTarget: (repo: String, remote: String, branch: String)? = {
         guard removesRemoteBranch, let repo, let name = branch?.name ?? session.branch else { return nil }
-        return (repo, trackedRemote(repo, name), name)
+        return (repo, trackedRemote(repo, name, on: machine), name)
       }()
       let fresh = buildSnapshot()
       let stop: PaneStop? = try queue.sync {
@@ -1086,7 +1110,7 @@ public final class Service {
         try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
         install(fresh)
         if removesWorktree { return beginPaneStop(session.id) }
-        if case .running(let pid) = claudeState(session.id) { kill(pid_t(pid), SIGTERM) }
+        if case .running(let pid) = claudeState(session.id) { machine.signal(pid, SIGTERM) }
         return nil
       }
       if let stop {
@@ -1098,25 +1122,25 @@ public final class Service {
       // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
       // folder's path through a symlink, so it gets the path that it lists for the worktree.
       if let repo {
-        let listed = folderGone ? try worktreeEntry(repo, at: session.cwd)?.path : session.cwd
-        if let listed { try removeWorktree(repo, listed) }
+        let listed = folderGone ? try worktreeEntry(repo, at: session.cwd, on: machine)?.path : session.cwd
+        if let listed { try removeWorktree(repo, listed, on: machine) }
       }
       var branchRemoved = false
       var branchError: Error?
       if let repo, let branch {
         do {
-          branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode)
+          branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, on: machine)
         } catch {
           branchError = error
         }
       }
       var remoteRemoved = false
       var remoteError: Error?
-      if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch),
+      if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch, on: machine),
         let pr = mergedPR(pr, of: target.branch)
       {
         do {
-          remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr)
+          remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr, on: machine)
         } catch {
           remoteError = error
         }
@@ -1203,12 +1227,13 @@ public final class Service {
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
-    if isDirectory(repo) { return repo }
+    let machine = self.machine(for: session)
+    if machine.isFolder(repo) { return repo }
     let folders = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
     var mains: [String] = []
     var seen: [String] = []
-    for folder in folders where isDirectory(folder) && !seen.contains(where: { samePath($0, folder) }) {
-      guard let listed = try? worktreeEntries(folder), let main = listed.first?.path else { continue }
+    for folder in folders where machine.isFolder(folder) && !seen.contains(where: { samePath($0, folder) }) {
+      guard let listed = try? worktreeEntries(folder, on: machine), let main = listed.first?.path else { continue }
       seen += listed.map(\.path)
       if listed.contains(where: { samePath($0.path, session.cwd) }) { mains.append(main) }
     }
@@ -1227,7 +1252,8 @@ public final class Service {
   /// no pushed branch. Removing the worktree's record drops the only ref to such commits.
   private func checkGoneWorktree(_ session: Session, mergedPR: Bool) throws -> String {
     let repo = try worktreeRepo(session)
-    guard let entry = try worktreeEntry(repo, at: session.cwd) else { return repo }
+    let machine = self.machine(for: session)
+    guard let entry = try worktreeEntry(repo, at: session.cwd, on: machine) else { return repo }
     if entry.locked { throw lockedError(session.cwd) }
     // git lists the zero OID when the worktree's HEAD names a ref that no longer exists. Commits made there
     // survive only in the worktree's reflog, which goes with its record, so they can't be checked.
@@ -1236,15 +1262,17 @@ public final class Service {
         "git lists no commit at the HEAD of the gone worktree \(session.cwd), so its commits can't be checked.")
     }
     try requireNoUnpushedCommits(
-      in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD")
+      in: repo, at: head, mergedPR: mergedPR, subject: "\(session.cwd) is gone, and its HEAD", on: machine)
     return repo
   }
 
   /// Throws when `rev` has commits on no remote branch. With a merged PR, local branches count too, because a
   /// squash merge leaves the commits on no remote branch and `worktree remove` keeps the branch.
-  private func requireNoUnpushedCommits(in dir: String, at rev: String, mergedPR: Bool, subject: String) throws {
+  private func requireNoUnpushedCommits(
+    in dir: String, at rev: String, mergedPR: Bool, subject: String, on machine: any Machine
+  ) throws {
     let kept = mergedPR ? ["--remotes", "--branches"] : ["--remotes"]
-    let unpushed = try gitOutput(dir, ["rev-list", "--count", rev, "--not"] + kept)
+    let unpushed = try gitOutput(dir, ["rev-list", "--count", rev, "--not"] + kept, on: machine)
     guard unpushed == "0" else {
       throw APIError(
         "\(subject) has commits that are not on a pushed branch and not in a merged PR (\(unpushed)). Push them first."
@@ -1257,30 +1285,34 @@ public final class Service {
   private func checkGoneBranchIsMerged(_ repo: String, _ session: Session, pr: PullRequest?) throws -> (
     name: String, tip: String
   )? {
-    guard let name = session.branch, branchExists(repo, name) else { return nil }
-    let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"]))
-    try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd)
+    let machine = self.machine(for: session)
+    guard let name = session.branch, branchExists(repo, name, on: machine) else { return nil }
+    let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"], on: machine))
+    try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd, on: machine)
     return branch
   }
 
   /// The remote that the branch tracks, or origin.
-  private func trackedRemote(_ repo: String, _ branch: String) -> String {
-    let tracked = try? gitOutput(repo, ["config", "branch.\(branch).remote"])
+  private func trackedRemote(_ repo: String, _ branch: String, on machine: any Machine) -> String {
+    let tracked = try? gitOutput(repo, ["config", "branch.\(branch).remote"], on: machine)
     return tracked.flatMap { $0.isEmpty ? nil : $0 } ?? "origin"
   }
 
   /// Deletes the branch from `remote` when the remote's tip is the
   /// head of the merged PR. Returns false when the remote has no such branch. The push names the
   /// tip it expects, so git refuses when the branch moved after the check.
-  private func deleteRemoteBranch(_ repo: String, _ remote: String, _ branch: String, pr: PullRequest) throws -> Bool {
-    let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"])
+  private func deleteRemoteBranch(
+    _ repo: String, _ remote: String, _ branch: String, pr: PullRequest, on machine: any Machine
+  ) throws -> Bool {
+    let listed = try gitOutput(repo, ["ls-remote", "--heads", remote, "refs/heads/\(branch)"], on: machine)
     guard let tip = listed.split(whereSeparator: \.isWhitespace).first.map(String.init) else { return false }
     guard tip == pr.headSha else {
       throw APIError(
         "\(remote)/\(branch) is at \(tip.prefix(8)), not the merged PR's head \(pr.headSha.prefix(8)). Keep the remote branch."
       )
     }
-    _ = try gitOutput(repo, ["push", remote, "--delete", "--force-with-lease=refs/heads/\(branch):\(tip)", branch])
+    _ = try gitOutput(
+      repo, ["push", remote, "--delete", "--force-with-lease=refs/heads/\(branch):\(tip)", branch], on: machine)
     return true
   }
 
@@ -1298,10 +1330,13 @@ public final class Service {
 
   /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
   func checkedOutBranch(_ session: Session) throws -> (name: String, tip: String) {
-    guard let branch = session.branch, try gitOutput(session.cwd, ["branch", "--show-current"]) == branch else {
+    let machine = self.machine(for: session)
+    guard let branch = session.branch,
+      try gitOutput(session.cwd, ["branch", "--show-current"], on: machine) == branch
+    else {
       throw APIError("\(session.cwd) doesn't have the branch of \(session.id) checked out.")
     }
-    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"]))
+    return (branch, try gitOutput(session.cwd, ["rev-parse", "HEAD"], on: machine))
   }
 
   /// The PR when it merged `branch`, or nil.
@@ -1321,20 +1356,24 @@ public final class Service {
   /// Deleting the ref of a checked-out branch breaks that worktree.
   /// A worktree at `path` does not count as having the branch checked out.
   func recheckBranch(
-    _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil
+    _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil,
+    on machine: any Machine = LocalMachine()
   ) throws {
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    guard branchExists(repo, branch) else { throw APIError("\(branch) no longer exists.") }
-    try requireTip(try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"]), of: branch, inMerged: pr)
-    try requireNotCheckedOut(repo, branch, ignoring: path)
+    guard branchExists(repo, branch, on: machine) else { throw APIError("\(branch) no longer exists.") }
+    try requireTip(
+      try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"], on: machine), of: branch, inMerged: pr)
+    try requireNotCheckedOut(repo, branch, ignoring: path, on: machine)
   }
 
   /// Throws when a worktree other than the one at `path` has the branch checked out.
   /// Deleting the ref of a checked-out branch breaks that worktree.
-  func requireNotCheckedOut(_ repo: String, _ branch: String, ignoring path: String? = nil) throws {
-    let checkedOut = try worktreeEntries(repo).contains { entry in
+  func requireNotCheckedOut(
+    _ repo: String, _ branch: String, ignoring path: String? = nil, on machine: any Machine = LocalMachine()
+  ) throws {
+    let checkedOut = try worktreeEntries(repo, on: machine).contains { entry in
       entry.branch == branch && !(path.map { samePath(entry.path, $0) } ?? false)
     }
     guard !checkedOut else { throw APIError("\(branch) is checked out in a worktree.") }
@@ -1344,16 +1383,18 @@ public final class Service {
   /// the branch's commits outside the base branch, so `branch -d` refuses.
   /// Passing the checked tip makes git refuse when a commit landed after the
   /// check.
-  func deleteMergedBranch(_ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?) throws {
-    try recheckBranch(repo, branch.name, pr: pr)
-    try deleteBranchRef(repo, branch)
+  func deleteMergedBranch(
+    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, on machine: any Machine
+  ) throws {
+    try recheckBranch(repo, branch.name, pr: pr, on: machine)
+    try deleteBranchRef(repo, branch, on: machine)
   }
 
   /// Deletes the branch's ref at the checked tip, so git refuses when a commit landed after the check.
-  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String)) throws {
-    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip])
+  func deleteBranchRef(_ repo: String, _ branch: (name: String, tip: String), on machine: any Machine) throws {
+    _ = try gitOutput(repo, ["update-ref", "-d", "refs/heads/\(branch.name)", branch.tip], on: machine)
     // `update-ref` leaves the upstream settings that `branch -D` removes. A later branch of the same name would track the old one.
-    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"])
+    _ = try? gitOutput(repo, ["config", "--remove-section", "branch.\(branch.name)"], on: machine)
   }
 
   /// Another session that runs in the session's folder.
@@ -1381,25 +1422,29 @@ public final class Service {
         "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."
       )
     }
-    guard let entry = try worktreeEntries(repo).dropFirst().first(where: { samePath($0.path, session.cwd) }) else {
+    let machine = self.machine(for: session)
+    guard
+      let entry = try worktreeEntries(repo, on: machine).dropFirst().first(where: { samePath($0.path, session.cwd) })
+    else {
       throw APIError("\(session.cwd) is not a worktree of \(repo)")
     }
     if entry.locked && !entry.lockedBySupacode { throw lockedError(session.cwd) }
-    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored)
+    let status = try readStatus(session.cwd, listingIgnored: onlyBuildOutputIgnored, on: machine)
     guard status.changed == 0 else {
       throw APIError("\(session.cwd) has uncommitted files (\(status.changed)). Commit or discard them first.")
     }
-    try requireNoHiddenChanges(session.cwd)
+    try requireNoHiddenChanges(session.cwd, on: machine)
     if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
-    try requireNoUnpushedCommits(in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd)
+    try requireNoUnpushedCommits(
+      in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd, on: machine)
     if entry.lockedBySupacode { _ = try supacodeExecutable() }
     return (repo, entry.lockedBySupacode)
   }
 
   /// Throws when a tracked file has git's assume-unchanged or skip-worktree
   /// flag, because `git status` doesn't list a change to such a file.
-  private func requireNoHiddenChanges(_ cwd: String) throws {
-    let listed = try gitOutput(cwd, ["ls-files", "-v", "-z"])
+  private func requireNoHiddenChanges(_ cwd: String, on machine: any Machine) throws {
+    let listed = try gitOutput(cwd, ["ls-files", "-v", "-z"], on: machine)
     let hidden = listed.split(separator: "\0").filter { $0.first.map { $0.isLowercase || $0 == "S" } ?? false }
       .map { String($0.dropFirst(2)) }
     guard hidden.isEmpty else {
@@ -1415,10 +1460,12 @@ public final class Service {
   /// ignored path without what is inside it, and `-z` leaves names unquoted.
   /// A rename or copy entry is followed by its source path, which has no
   /// status of its own.
-  private func readStatus(_ cwd: String, listingIgnored: Bool) throws -> (changed: Int, ignored: [String]) {
+  private func readStatus(
+    _ cwd: String, listingIgnored: Bool, on machine: any Machine
+  ) throws -> (changed: Int, ignored: [String]) {
     // The flag keeps status from taking the index lock while claude commits.
     let args = ["--no-optional-locks", "status", "--porcelain", "-z"] + (listingIgnored ? ["--ignored=matching"] : [])
-    var fields = try gitOutput(cwd, args).split(separator: "\0").makeIterator()
+    var fields = try gitOutput(cwd, args, on: machine).split(separator: "\0").makeIterator()
     var changed = 0
     var ignored: [String] = []
     while let field = fields.next() {
