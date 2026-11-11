@@ -21,10 +21,12 @@ extension Service {
 
   private func mark(_ id: String, now: Int64) -> (mark: ChildMark, reason: String) {
     let e = entries[id]!
-    // Until its first prompt, a child waits for the prompt that started it.
-    if e.facts.prompts == 0, e.facts.lastReply == nil { return (.fresh, "") }
+    let isDocket = e.session.docket != nil
+    // Until its first prompt, a child waits for the prompt that started it. A docket row never gets a prompt.
+    if !isDocket, e.facts.prompts == 0, e.facts.lastReply == nil { return (.fresh, "") }
     let verdict = Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState)
-    return (ChildMark(state: verdict.state, pr: e.facts.pr?.number), verdict.reason)
+    let needs = isDocket && verdict.state == .needsYou ? verdict.reason : nil
+    return (ChildMark(state: verdict.state, pr: e.facts.pr?.number, needs: needs), verdict.reason)
   }
 
   /// Records that the child's parent hears what the child shows now. It

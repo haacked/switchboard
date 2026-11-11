@@ -254,6 +254,54 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     #expect(sbd.stubArgs().isEmpty)
   }
 
+  @Test func theParentHearsEachNeedOfTheReviewAndWhenItIsDone() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config)
+    let parent = try ManagerTests().idle(sbd, name: "p")
+    let s = try startDocket(sbd, "--parent", parent.id, "--name", "review", "o/r#9")
+    #expect(s.parent == parent.id)
+    let told = { (after: Int, text: String) in
+      try ManagerTests().waitForNotice(sbd, parent.id, after: after, containing: text)
+    }
+    let prefix = "Switchboard: sessions you started changed: review (\(s.id))"
+
+    try poll(sbd, s.id, "the first poll") { $0.docket?.review?.state == "preparing" }
+    let asking: JSON = ["detail": "reading", "waiting": true, "needs": "approve git push"]
+    try docket.setReviews([listed("o/r#9", "reviewing", progress: asking)])
+    try poll(sbd, s.id, "the review to wait on the user") { $0.state == .needsYou }
+    #expect(try told(0, "approve git push") == ["\(prefix) needs you: review needs you: approve git push."])
+
+    // The row stays in Needs you from the question to the draft.
+    try docket.setReviews([listed("o/r#9", "drafted", prState: "OPEN")])
+    try poll(sbd, s.id, "the draft") { $0.docket?.review?.state == "drafted" }
+    #expect(try told(1, "draft ready") == ["\(prefix) needs you: draft ready to submit."])
+
+    try docket.setReviews([listed("o/r#9", "submitted")])
+    try poll(sbd, s.id, "the submitted review") { $0.state == .done }
+    #expect(try told(2, "is done") == ["\(prefix) is done."])
+  }
+
+  @Test func aRestartedSbdDoesNotRepeatTheNeedThatTheParentHeard() throws {
+    let docket = try DocketHome()
+    let sbd = try Instance(config: docket.config)
+    let parent = try ManagerTests().idle(sbd, name: "p")
+    let s = try startDocket(sbd, "--parent", parent.id, "--name", "review", "o/r#9")
+    try docket.setReviews([listed("o/r#9", "drafted", prState: "OPEN")])
+    try poll(sbd, s.id, "the draft") { $0.docket?.review?.state == "drafted" }
+    try ManagerTests().waitForNotice(sbd, parent.id, after: 0, containing: "draft ready")
+    let heard = try sbd.messagesFromSbd(parent.id)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    try docket.setReviews([listed("o/r#9", "submitted")])
+    try poll(sbd, s.id, "the submitted review") { $0.state == .done }
+    try ManagerTests().waitForNotice(sbd, parent.id, after: heard.count, containing: "is done")
+    #expect(
+      try sbd.messagesFromSbd(parent.id)
+        == heard + ["Switchboard: sessions you started changed: review (\(s.id)) is done."])
+  }
+
   @Test func aBrokenDocketPutsTheRowInNeedsYouUntilAPollSucceeds() throws {
     let docket = try DocketHome()
     let sbd = try Instance(config: docket.config)
