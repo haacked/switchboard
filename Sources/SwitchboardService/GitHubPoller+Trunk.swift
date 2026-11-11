@@ -28,7 +28,7 @@ extension GitHubPoller {
       guard let state = fromComments.queue, state.isHeld || state == .unknown else { continue }
       let inRepo = sessions.filter { s in
         guard case .branch(let repo, _, _)? = tracked[s.id]?.branch.key else { return false }
-        return Dependencies.sameRepo(repo, read.pr.repo) && FileManager.default.fileExists(atPath: s.cwd)
+        return Dependencies.sameRepo(repo, read.pr.repo) && s.machine.exists(s.cwd)
       }
       guard let checkout = inRepo.first(where: { tracked[$0.id]?.prId == id }) ?? inRepo.first else { continue }
       candidates.append(

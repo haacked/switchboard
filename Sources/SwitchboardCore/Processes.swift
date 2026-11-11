@@ -4,6 +4,12 @@ public struct CommandResult: Sendable {
   public var status: Int32
   public var stdout: String
   public var stderr: String
+
+  public init(status: Int32, stdout: String, stderr: String) {
+    self.status = status
+    self.stdout = stdout
+    self.stderr = stderr
+  }
 }
 
 /// Runs a program and waits for it. `env` replaces the environment when set.
@@ -97,9 +103,9 @@ public struct ProcessRow: Sendable {
 }
 
 public enum Processes {
-  /// Every process, grouped by parent pid.
-  public static func byParent() -> [Int: [ProcessRow]] {
-    guard let r = try? runCommand("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
+  /// Every process on the machine, grouped by parent pid.
+  public static func byParent(on machine: any Machine = LocalMachine()) -> [Int: [ProcessRow]] {
+    guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
     let rows = r.stdout.split(separator: "\n").compactMap { line -> ProcessRow? in
       let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
       guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {

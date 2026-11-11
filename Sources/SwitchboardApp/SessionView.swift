@@ -14,6 +14,8 @@ final class SessionViewState: ObservableObject {
   @Published var removal: TodoDeletion?
   /// Changes each time the shell pane attaches again, which makes SwiftUI create a new terminal.
   @Published var shellAttach = 0
+  /// False while the view is too narrow to hold the side panel beside the terminals.
+  @Published var sidePanelFits = true
 }
 
 /// One session: its state and actions, the Claude terminal and the shell side
@@ -22,55 +24,27 @@ struct SessionView: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   @StateObject private var ui = SessionViewState()
+  @AppStorage("sessionSidePanel") private var showsSidePanel = true
 
   var body: some View {
     VStack(spacing: 0) {
       header
       Divider()
       CardList(cards: session.cards)
-      if !session.hasTerminals {
-        Text("Cleanup removed this session's worktree, so it has no terminals.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else if let terminals = ui.terminals {
-        HSplitView {
-          VStack(spacing: 0) {
-            paneLabel("Claude") {
-              if session.shellClosed == true {
-                Button("Open Shell") { model.setShellOpen(session.id, true) }
-                  .help("Start a shell in the session's folder beside the Claude terminal")
-              }
-            }
-            TerminalPane(
-              command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
-              onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) })
-          }
-          .frame(minWidth: 320, idealWidth: 760)
-          if session.shellClosed != true {
-            VStack(spacing: 0) {
-              paneLabel("Shell") {
-                Button {
-                  model.setShellOpen(session.id, false)
-                } label: {
-                  Image(systemName: "xmark")
-                }
-                .accessibilityLabel("Close Shell")
-                .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
-              }
-              TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
-            }
-            .id(ui.shellAttach)
-            .frame(minWidth: 200, idealWidth: 360)
+      GeometryReader { geometry in
+        let fits = SidePanel.fits(width: geometry.size.width, beside: SessionView.terminalsMinWidth(session))
+        HStack(spacing: 0) {
+          terminalArea
+          if showsSidePanel && fits {
+            Divider()
+            SidePanelView(session: session)
           }
         }
-      } else if let error = ui.terminalsError {
-        Text("Can't open the terminals: \(error)")
-          .foregroundStyle(.secondary)
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
-        ProgressView("Opening terminals…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: fits, initial: true) { if ui.sidePanelFits != fits { ui.sidePanelFits = fits } }
       }
+      // A GeometryReader accepts any width. Without this, the layout above gives the terminals less than
+      // their minimum widths, and the shell pane is laid out past the trailing edge.
+      .frame(minWidth: SessionView.terminalsMinWidth(session))
       Divider()
       MessageField(
         session: session.id, draft: model.messageDraft(for: session),
@@ -104,6 +78,62 @@ struct SessionView: View {
       }
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
+  }
+
+  /// The Claude terminal and the shell, or the text that stands in for them.
+  @ViewBuilder private var terminalArea: some View {
+    if !session.hasTerminals {
+      Text("Cleanup removed this session's worktree, so it has no terminals.")
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if let terminals = ui.terminals {
+      HSplitView {
+        VStack(spacing: 0) {
+          paneLabel("Claude") {
+            if session.shellClosed == true {
+              Button("Open Shell") { model.setShellOpen(session.id, true) }
+                .help("Start a shell in the session's folder beside the Claude terminal")
+            }
+          }
+          TerminalPane(
+            command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
+            onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) })
+        }
+        .frame(minWidth: SessionView.claudeMinWidth, idealWidth: 760)
+        if session.shellClosed != true {
+          VStack(spacing: 0) {
+            paneLabel("Shell") {
+              Button {
+                model.setShellOpen(session.id, false)
+              } label: {
+                Image(systemName: "xmark")
+              }
+              .accessibilityLabel("Close Shell")
+              .help("Close the shell. Typing exit or pressing Ctrl-D in it closes it too.")
+            }
+            TerminalPane(command: terminals.attachCommand(.shell), onExit: reattachShell)
+          }
+          .id(ui.shellAttach)
+          .frame(minWidth: SessionView.shellMinWidth, idealWidth: 360)
+        }
+      }
+    } else if let error = ui.terminalsError {
+      Text("Can't open the terminals: \(error)")
+        .foregroundStyle(.secondary)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else {
+      ProgressView("Opening terminals…").frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  static let claudeMinWidth: CGFloat = 320
+  static let shellMinWidth: CGFloat = 200
+
+  /// The sum of the minimum widths of the terminal panes that `terminalArea` shows for `session`.
+  static func terminalsMinWidth(_ session: SessionSummary) -> CGFloat {
+    guard session.hasTerminals else { return 0 }
+    return claudeMinWidth + (session.shellClosed == true ? 0 : shellMinWidth)
   }
 
   static let labelWidth: CGFloat = 44
@@ -224,6 +254,16 @@ struct SessionView: View {
               ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
               : "Mark the session done. It leaves the Inbox and moves to Done on the board.")
         NotesButton(session: session, always: true)
+        Button {
+          showsSidePanel.toggle()
+        } label: {
+          Image(systemName: "sidebar.right")
+        }
+        .accessibilityLabel(showsSidePanel ? "Hide Waits and Notes" : "Show Waits and Notes")
+        .disabled(!ui.sidePanelFits)
+        .help(
+          "Show or hide the session's waits and notes beside the terminals. The panel hides itself, and this button is off, while the view is too narrow for it."
+        )
         if CleanupOffer.canCleanUp(session) {
           Button("Clean Up…") { model.confirmingCleanup = session.id }
             .disabled(model.cleaningUp.contains(session.id))

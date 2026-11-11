@@ -21,7 +21,7 @@ struct SwitchboardApp: App {
           model.start()
           Snapshot.start(model)
         }
-        .frame(minWidth: 900, minHeight: 560)
+        .frame(minWidth: ContentView.windowMinWidth, minHeight: 560)
     }
     .defaultSize(width: 1400, height: 900)
     .commands {

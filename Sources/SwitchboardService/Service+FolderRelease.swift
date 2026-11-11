@@ -19,7 +19,7 @@ extension Service {
     host.kill(paneName(id, .shell))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {
-      kill(pid_t(pid), SIGTERM)
+      machine(of: id).signal(pid, SIGTERM)
       claudePid = pid
     }
     return PaneStop(claudePid: claudePid, processes: processes)

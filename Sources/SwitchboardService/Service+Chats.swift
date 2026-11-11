@@ -54,15 +54,15 @@ extension Service {
   /// The `chat-log` request: the last messages of the group's chat, oldest
   /// first. It reads the transcript off the state queue.
   func chatLog(_ args: JSON) throws -> JSON {
-    let findTranscript = try queue.sync { () -> () -> String? in
+    let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
       let group = try lookupGroup(args)
       guard let id = chatID(group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
       }
-      return transcriptFinder(id)
+      return (transcriptFinder(id), self.machine(of: id))
     }
     let limit = args["limit"]?.int ?? 50
-    return try JSON(encoding: findTranscript().map { Transcript.messages($0, limit: limit) } ?? [])
+    return try JSON(encoding: findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? [])
   }
 
   func chatID(_ group: String) -> String? {

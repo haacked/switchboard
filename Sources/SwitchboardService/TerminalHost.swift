@@ -34,8 +34,12 @@ final class TerminalHost {
   let shell: String
   private let conf: String
   private let baseEnv: [String: String]
+  /// The machine that the tmux server and its panes run on. The tmux program's path, tmux.conf, and the panes'
+  /// base environment still come from this Mac.
+  private let machine: any Machine
 
-  init(home: Home, config: Config) throws {
+  init(home: Home, config: Config, machine: any Machine = LocalMachine()) throws {
+    self.machine = machine
     guard let tmux = findExecutable(config.tmux ?? "tmux") else {
       throw APIError("can't find tmux. Install it with `brew install tmux`, or set \"tmux\" in \(home.config)")
     }
@@ -101,7 +105,7 @@ final class TerminalHost {
 
   @discardableResult
   func run(_ args: [String], input: Data? = nil) throws -> String {
-    let r = try runCommand(tmux, ["-S", socket, "-f", conf] + args, env: baseEnv, input: input)
+    let r = try machine.run(tmux, ["-S", socket, "-f", conf] + args, env: baseEnv, input: input, timeout: nil)
     guard r.status == 0 else {
       throw APIError("tmux \(args.first ?? ""): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
@@ -220,7 +224,7 @@ final class TerminalHost {
     guard key == "SSH_AUTH_SOCK" else { return false }
     var path = Array(held.utf8.dropFirst(key.utf8.count + 1))
     if path.last == UInt8(ascii: "\n") { path.removeLast() }
-    return !FileManager.default.fileExists(atPath: String(decoding: path, as: UTF8.self))
+    return !machine.exists(String(decoding: path, as: UTF8.self))
   }
 
   /// The variables that tmux copies from each terminal that attaches.

@@ -121,6 +121,8 @@ final class GitHubPoller {
     var cwd: String
     var claudeSessionId: String
     var configDir: String
+    /// The machine that holds the session's folder and transcript.
+    var machine: any Machine
     /// The branch that sbd shows for the session.
     var branch: String?
     var facts: SessionFacts
@@ -172,7 +174,7 @@ final class GitHubPoller {
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
           configDir: (service.paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde,
-          branch: e.branch, facts: e.facts)
+          machine: service.machine(for: e.session), branch: e.branch, facts: e.facts)
       }
     }
     let now = nowMs()
@@ -237,7 +239,7 @@ final class GitHubPoller {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
-    refreshBranch(&t.branch, cwd: s.cwd, all: all, now: now, configs: &shared.configs)
+    refreshBranch(&t.branch, cwd: s.cwd, on: s.machine, all: all, now: now, configs: &shared.configs)
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
     // another.
@@ -253,7 +255,7 @@ final class GitHubPoller {
       t.transcript.folder = nil
       t.transcript.path = nil
     }
-    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, projects: &shared.projects)
+    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, on: s.machine, projects: &shared.projects)
     tracked[s.id] = t
   }
 
@@ -261,21 +263,20 @@ final class GitHubPoller {
   /// than running git, so git runs only when either changed. A folder outside
   /// git is checked again once per idle interval.
   private func refreshBranch(
-    _ b: inout Branch, cwd: String, all: Bool, now: Int64, configs: inout [String: [String: String]]
+    _ b: inout Branch, cwd: String, on machine: any Machine, all: Bool, now: Int64,
+    configs: inout [String: [String: String]]
   ) {
-    let read = { (path: String) in try? String(contentsOfFile: path, encoding: .utf8) }
+    let read = machine.text
     var head = b.gitDir.flatMap { read("\($0)/HEAD") }
     if head == nil && (all || GitHub.elapsed(since: b.gitDirRead, settings.idleMs, now: now)) {
-      let dirs = git(cwd, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])?
+      let dirs = git(cwd, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], on: machine)?
         .split(separator: "\n").map(String.init)
       b.gitDir = dirs?.first
       b.commonDir = dirs?.last
       b.gitDirRead = now
       head = b.gitDir.flatMap { read("\($0)/HEAD") }
     }
-    let stamp = b.commonDir.flatMap {
-      (try? FileManager.default.attributesOfItem(atPath: "\($0)/config"))?[.modificationDate] as? Date
-    }
+    let stamp = b.commonDir.flatMap { machine.modified("\($0)/config") }
     guard all || head != b.head || stamp != b.configStamp else { return }
     b.head = head
     b.configStamp = stamp
@@ -288,7 +289,7 @@ final class GitHubPoller {
       // The worktrees of a repo share its config, so git reads it once per poll.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
-        configs[common] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern]) ?? "")
+        configs[common] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern], on: machine) ?? "")
       }
       key = GitHub.branchKey(branch: branch, config: configs[common]!) { remote in
         // A remote's HEAD is a symbolic ref, which git never packs.
@@ -304,31 +305,29 @@ final class GitHubPoller {
     }
   }
 
-  private func git(_ cwd: String, _ args: [String]) -> String? {
-    try? service.gitOutput(cwd, args)
+  private func git(_ cwd: String, _ args: [String], on machine: any Machine) -> String? {
+    try? service.gitOutput(cwd, args, on: machine)
   }
 
   /// Reads the transcript's lines since the last read. Until the poller knows
   /// the session's project folder, it searches every project folder. Then it
   /// looks only in the cwd's folder and that one.
   private func readTranscript(
-    _ t: inout Transcript, configDir: String, cwd: String, projects: inout [String: [String]]
+    _ t: inout Transcript, configDir: String, cwd: String, on machine: any Machine,
+    projects: inout [String: [String]]
   ) {
     if t.path == nil {
       let known = t.folder
-      t.path = SwitchboardCore.Transcript.find(t.claudeSessionId, account: configDir, cwd: cwd) { root in
+      t.path = SwitchboardCore.Transcript.find(t.claudeSessionId, account: configDir, cwd: cwd, on: machine) { root in
         if let known { return [known] }
-        if projects[root] == nil { projects[root] = SwitchboardCore.Transcript.projectFolders(root) }
+        if projects[root] == nil { projects[root] = machine.list(root) }
         return projects[root]!
       }
       if let path = t.path { t.folder = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent }
     }
-    guard let path = t.path, let file = FileHandle(forReadingAtPath: path) else { return }
-    defer { try? file.close() }
-    guard let size = try? file.seekToEnd() else { return }
+    guard let path = t.path, let size = machine.size(path), size != UInt64(t.offset) else { return }
     if size < UInt64(t.offset) { t.offset = 0 }
-    try? file.seek(toOffset: UInt64(t.offset))
-    guard let data = try? file.readToEnd(), !data.isEmpty else { return }
+    guard let data = machine.read(path, from: UInt64(t.offset), count: nil), !data.isEmpty else { return }
     let (link, consumed) = GitHub.lastPRLink(in: data)
     t.offset += consumed
     if let link, link != t.link {
@@ -566,7 +565,8 @@ final class GitHubPoller {
     {
       // Without the optional index lock, the count can't make a git commit
       // in the session fail.
-      let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"]).map { $0.split(separator: "\n").count }
+      let dirty = git(s.cwd, ["--no-optional-locks", "status", "--porcelain"], on: s.machine)
+        .map { $0.split(separator: "\n").count }
       t.counted = (now, s.facts.lastActivity, pr.id)
       // Only ENOENT counts as gone. A permission error or a hung mount leaves
       // the folder unread, which stays unsafe.
