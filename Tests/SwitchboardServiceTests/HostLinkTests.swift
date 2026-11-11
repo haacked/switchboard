@@ -1404,15 +1404,20 @@ enum UntrustedControlPath: String, CaseIterable {
     try makeStaleSocket(at: "\(bench.home.path)/s")
     let folder = open(bench.home.path, O_RDONLY | O_DIRECTORY)
     defer { close(folder) }
-    let closed = dup(folder)
-    close(closed)
+    // A closed descriptor's number can go to a file that another test opens, so the descriptor
+    // that fails the folder change is an open one that names a file.
+    let file = "\(bench.home.path)/file"
+    try Data().write(to: URL(fileURLWithPath: file))
+    let notAFolder = open(file, O_RDONLY)
+    #expect(notAFolder >= 0)
+    defer { close(notAFolder) }
     let setThreadFolder = unsafeBitCast(
       dlsym(UnsafeMutableRawPointer(bitPattern: -2), "pthread_fchdir_np"), to: (@convention(c) (Int32) -> Int32).self)
     let answer = ProbeResult<Bool?>(true)
     let done = DispatchSemaphore(value: 0)
     Thread.detachNewThread {
       _ = setThreadFolder(folder)
-      answer.value = HostLink.hasOpenSocket("s", inFolder: closed)
+      answer.value = HostLink.hasOpenSocket("s", inFolder: notAFolder)
       _ = setThreadFolder(-1)
       done.signal()
     }
@@ -1564,7 +1569,7 @@ enum UntrustedControlPath: String, CaseIterable {
 }
 
 /// A `Service` in a temporary home whose config.json names the stub as ssh and lists a valid
-/// ssh host, a host with a link per box, and an invalid host.
+/// ssh host, a hogli host with the perSession layout, and an invalid host.
 private func withHostService(_ body: (Service, Home) throws -> Void) throws {
   let home = Home(path: try makeShortTempFolder())
   defer { try? FileManager.default.removeItem(atPath: home.path) }
@@ -1588,7 +1593,7 @@ private func withHostService(_ body: (Service, Home) throws -> Void) throws {
     arguments: [
       ("nohost", "no host named nohost"),
       ("typo", "typo is not usable: a hogli host with the shared layout needs a workspace"),
-      ("boxes", "boxes has a link per box, which this version does not open"),
+      ("boxes", "boxes uses the perSession layout, which this version can't connect to"),
       ("local", "no host named local"),
     ])
   func theMachineOfAHostWithNoLinkThrows(name: String, message: String) throws {

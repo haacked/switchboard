@@ -36,7 +36,7 @@ private func printHosts(_ hosts: [HostStatus]) {
   func pad(_ text: String, _ length: Int) -> String { text.padding(toLength: length, withPad: " ", startingAt: 0) }
   for h in hosts {
     let state = h.problem != nil ? "invalid" : h.link?.rawValue ?? "-"
-    let detail = h.problem ?? h.destination ?? "a box per session"
+    let detail = h.problem ?? h.destination ?? "perSession layout"
     // The widths of the longest kind, hogli, and the longest state, disconnected.
     print("\(pad(h.name, width))  \(pad(h.kind ?? "-", 5))  \(pad(state, 12))  \(detail)")
     for line in h.error?.split(whereSeparator: \.isNewline) ?? [] { print("    \(line)") }

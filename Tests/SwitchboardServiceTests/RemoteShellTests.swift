@@ -866,6 +866,35 @@ private let everyByte = Data((0...255).map { UInt8($0) })
     #expect(throws: (any Error).self) { try t.run(["/bin/echo", "hi"]) }
   }
 
+  @Test(.timeLimit(.minutes(1))) func aReadyLineOver256BytesClosesTheShell() throws {
+    let t = try FakeShell.open(ready: "bsd 736 " + String(repeating: "1", count: 300), then: "cat >/dev/null")
+    defer { t.shell.close() }
+
+    #expect(t.events.readies == 0)
+    #expect(t.events.waitForClose())
+    #expect(t.events.closes.first?.contains("too long") == true)
+  }
+
+  /// `close()` closes the stdin FileHandle, and reading its descriptor after that raises an
+  /// exception that ends the test process.
+  @Test(.timeLimit(.minutes(2))) func aCloseWhileACommandStartsNeverEndsTheProcess() throws {
+    for _ in 0..<200 {
+      let t = try TestShell.start("/bin/sh")
+      let started = DispatchSemaphore(value: 0)
+      let finished = DispatchSemaphore(value: 0)
+      // A block on the global queue starts seconds late while other tests block its threads.
+      Thread.detachNewThread {
+        _ = try? t.run(["/usr/bin/true"])
+        started.signal()
+        for _ in 0..<50 { _ = try? t.run(["/usr/bin/true"]) }
+        finished.signal()
+      }
+      started.wait()
+      t.shell.close()
+      #expect(finished.wait(timeout: .now() + 30) == .success)
+    }
+  }
+
   @Test(.timeLimit(.minutes(1))) func aCommandBeforeTheHandshakeThrowsAndLeavesTheShellOpen() throws {
     let events = ShellEvents()
     let shell = try RemoteShell(

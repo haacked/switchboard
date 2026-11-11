@@ -21,7 +21,10 @@ final class RemoteShell: @unchecked Sendable {
   private static let stderrTailBytes = 16 * 1024
 
   private let process = Process()
-  private let stdinPipe = Pipe()
+  private let stdinPipe: Pipe
+  /// The write end of stdin. `fileDescriptor` raises on a closed FileHandle, so `send` reads
+  /// this copy.
+  private let writer: Int32
   private let stdoutPipe = Pipe()
   private let stderrPipe = Pipe()
   private let onReady: @Sendable (RemoteShellProtocol.Ready) -> Void
@@ -57,13 +60,15 @@ final class RemoteShell: @unchecked Sendable {
     self.onClose = onClose
     let token = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     readyMarker = Data(RemoteShellProtocol.readyPrefix(token: token).utf8)
+    let stdin = Pipe()
+    stdinPipe = stdin
+    writer = stdin.fileHandleForWriting.fileDescriptor
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = arguments
     if let environment { process.environment = environment }
     process.standardInput = stdinPipe
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
-    let writer = stdinPipe.fileHandleForWriting.fileDescriptor
     // A write to a pipe whose reader ended would otherwise raise SIGPIPE and end sbd.
     _ = fcntl(writer, F_SETNOSIGPIPE, 1)
     // A write must be able to stop at a deadline, so it never blocks.
@@ -252,7 +257,7 @@ final class RemoteShell: @unchecked Sendable {
   }
 
   private func send(_ data: Data, until limit: Date?) throws {
-    let descriptor = stdinPipe.fileHandleForWriting.fileDescriptor
+    let descriptor = writer
     var sent = 0
     while sent < data.count {
       if let limit, Date() >= limit { throw Broken(reason: "the host did not take the command before the deadline") }

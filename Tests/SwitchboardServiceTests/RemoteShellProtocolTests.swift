@@ -217,12 +217,7 @@ private func requestText(
   @Test func aRequestWithEmptyInputGivesTheProgramAnEmptyFile() throws {
     let text = try requestText(seq: 7, argv: ["/bin/cat"], input: Data())
 
-    #expect(text.contains("sb_run 7 '' '/bin/cat'\n"))
-    if let lines = heredocLines(text) {
-      #expect(lines.joined().isEmpty)
-    } else {
-      #expect(text.hasPrefix(": >\"$sb_d/i\"\n"))
-    }
+    #expect(text == ": >\"$sb_d/i\"\nsb_run 7 '' '/bin/cat'\n")
   }
 
   @Test func aRequestWithBinaryInputCarriesItAsBase64InAHeredoc() throws {

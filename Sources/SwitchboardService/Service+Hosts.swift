@@ -38,12 +38,12 @@ extension Service {
   }
 
   /// The host's link. It throws for a name that config.json does not list, for an invalid
-  /// host, and for a host with a link per box.
+  /// host, and for a hogli host with the perSession layout.
   private func hostLink(_ name: String) throws -> HostLink {
     if let host = config.invalidHosts[name] { throw APIError("\(name) is not usable: \(host.problem)") }
     guard config.hosts[name] != nil else { throw APIError("no host named \(name) in \(home.config)") }
     guard let link = hostLinks[name] else {
-      throw APIError("\(name) has a link per box, which this version does not open")
+      throw APIError("\(name) uses the perSession layout, which this version can't connect to")
     }
     return link
   }

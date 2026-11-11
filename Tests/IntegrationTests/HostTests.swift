@@ -98,7 +98,7 @@ private func withoutSince(_ value: JSON) -> JSON {
     let rows = Dictionary(lines.map { (fields($0).first ?? "", $0) }) { first, _ in first }
     #expect(bare == text)
     #expect(lines.count == 4)
-    #expect(rows["boxes"].map(fields) == ["boxes", "hogli", "-", "a", "box", "per", "session"])
+    #expect(rows["boxes"].map(fields) == ["boxes", "hogli", "-", "perSession", "layout"])
     #expect(rows["devbox"].map(fields) == ["devbox", "hogli", "disconnected", "coder.devbox-haacked"])
     #expect(rows["mini"].map(fields) == ["mini", "ssh", "disconnected", miniDestination])
     #expect(
@@ -315,7 +315,7 @@ private func withoutSince(_ value: JSON) -> JSON {
     #expect(invalid.status == 1)
     #expect(invalid.stderr.contains("typo is not usable: \(workspaceProblem)"))
     #expect(perSession.status == 1)
-    #expect(perSession.stderr.contains("boxes has a link per box, which this version does not open"))
+    #expect(perSession.stderr.contains("boxes uses the perSession layout, which this version can't connect to"))
     #expect(noName.status != 0)
     #expect(sbd.sshStubLog.isEmpty)
     #expect(try sbd.hosts().compactMap(\.link) == [.disconnected, .disconnected])

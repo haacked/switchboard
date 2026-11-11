@@ -53,7 +53,7 @@ public struct HostConfig: Codable, Equatable, Sendable {
         let host = try HostConfig(name: name, value: value)
         if let destination = host.sshDestination {
           if let owner = owners[destination] {
-            throw Problem("its destination \(destination) is also the destination of \(owner)")
+            throw APIError("its destination \(destination) is also the destination of \(owner)")
           }
           owners[destination] = name
         }
@@ -65,24 +65,19 @@ public struct HostConfig: Codable, Equatable, Sendable {
     return (valid, invalid)
   }
 
-  private struct Problem: Error, CustomStringConvertible {
-    var description: String
-    init(_ description: String) { self.description = description }
-  }
-
-  /// The host that the value describes. It throws a `Problem` for the first of rules 1 to 11
-  /// that the value breaks.
+  /// The host that the value describes. It throws for the first rule that the value breaks, in
+  /// the order of the checks below.
   private init(name: String, value: JSON) throws {
     guard Self.isName(name, first: Self.lowercaseAndDigits, rest: Self.lowercaseAndDigits + "_-"), name != "local"
     else {
-      throw Problem("its name may hold only lowercase letters, digits, _ and -, at most 32, and can't be local")
+      throw APIError("its name may hold only lowercase letters, digits, _ and -, at most 32, and can't be local")
     }
-    guard let object = value.object else { throw Problem("its value must be an object") }
-    guard let kind = Self.kind(of: value) else { throw Problem("its kind must be hogli or ssh") }
+    guard let object = value.object else { throw APIError("its value must be an object") }
+    guard let kind = Self.kind(of: value) else { throw APIError("its kind must be hogli or ssh") }
 
     func read<T>(_ key: String, _ reader: (JSON) -> T?, _ expected: String) throws -> T? {
       guard let value = object[key], value != .null else { return nil }
-      guard let read = reader(value) else { throw Problem("its \(key) must be \(expected)") }
+      guard let read = reader(value) else { throw APIError("its \(key) must be \(expected)") }
       return read
     }
     func string(_ key: String) throws -> String? { try read(key, \.string, "a string") }
@@ -100,9 +95,9 @@ public struct HostConfig: Codable, Equatable, Sendable {
     let autoStart = try bool("autoStart")
     var repos: [String: String] = [:]
     if let value = object["repos"], value != .null {
-      guard let entries = value.object else { throw Problem("its repos must be an object") }
+      guard let entries = value.object else { throw APIError("its repos must be an object") }
       for (repo, checkout) in entries {
-        guard let path = checkout.string else { throw Problem("its repos value for \(repo) must be a string") }
+        guard let path = checkout.string else { throw APIError("its repos value for \(repo) must be a string") }
         repos[repo] = path
       }
     }
@@ -110,49 +105,49 @@ public struct HostConfig: Codable, Equatable, Sendable {
     var layout = HostLayout.shared
     if let layoutText {
       guard let named = HostLayout(rawValue: layoutText) else {
-        throw Problem("its layout must be shared or perSession")
+        throw APIError("its layout must be shared or perSession")
       }
       layout = named
     }
 
     switch (kind, layout) {
     case (.ssh, _):
-      guard let destination, !destination.isEmpty else { throw Problem("an ssh host needs a destination") }
+      guard let destination, !destination.isEmpty else { throw APIError("an ssh host needs a destination") }
       let unsafe = destination.unicodeScalars.contains {
         $0.properties.isWhitespace || $0.properties.generalCategory == .control
       }
       if destination.hasPrefix("-") || unsafe {
-        throw Problem("its destination can't start with - or hold whitespace or a control character")
+        throw APIError("its destination can't start with - or hold whitespace or a control character")
       }
-      if layout == .perSession { throw Problem("an ssh host can't have the perSession layout") }
-      if workspace != nil { throw Problem("an ssh host can't have a workspace") }
-      if region != nil { throw Problem("an ssh host can't have a region") }
+      if layout == .perSession { throw APIError("an ssh host can't have the perSession layout") }
+      if workspace != nil { throw APIError("an ssh host can't have a workspace") }
+      if region != nil { throw APIError("an ssh host can't have a region") }
     case (.hogli, .shared):
-      guard let workspace else { throw Problem("a hogli host with the shared layout needs a workspace") }
+      guard let workspace else { throw APIError("a hogli host with the shared layout needs a workspace") }
       guard Self.isName(workspace, first: Self.lettersAndDigits, rest: Self.lettersAndDigits + "-") else {
-        throw Problem("its workspace may hold only letters, digits, and -, at most 32, and can't start with -")
+        throw APIError("its workspace may hold only letters, digits, and -, at most 32, and can't start with -")
       }
-      if destination != nil { throw Problem("a hogli host can't have a destination") }
-      if region != nil { throw Problem("only a hogli host with the perSession layout can have a region") }
+      if destination != nil { throw APIError("a hogli host can't have a destination") }
+      if region != nil { throw APIError("only a hogli host with the perSession layout can have a region") }
     case (.hogli, .perSession):
-      if workspace != nil { throw Problem("a hogli host with the perSession layout can't have a workspace") }
-      if worktreeRoot != nil { throw Problem("a hogli host with the perSession layout can't have a worktreeRoot") }
-      if destination != nil { throw Problem("a hogli host can't have a destination") }
+      if workspace != nil { throw APIError("a hogli host with the perSession layout can't have a workspace") }
+      if worktreeRoot != nil { throw APIError("a hogli host with the perSession layout can't have a worktreeRoot") }
+      if destination != nil { throw APIError("a hogli host can't have a destination") }
       if let region, !Self.regions.contains(region) {
-        throw Problem("its region must be \(Self.regions.joined(separator: " or "))")
+        throw APIError("its region must be \(Self.regions.joined(separator: " or "))")
       }
     }
 
     for repo in repos.keys.sorted() {
       let parts = repo.split(separator: "/", omittingEmptySubsequences: false)
       guard parts.count == 2, parts.allSatisfy({ !$0.isEmpty }) else {
-        throw Problem("its repos key \(repo) is not owner/name")
+        throw APIError("its repos key \(repo) is not owner/name")
       }
-      if repos[repo]?.isEmpty == true { throw Problem("its repos value for \(repo) is empty") }
+      if repos[repo]?.isEmpty == true { throw APIError("its repos value for \(repo) is empty") }
     }
-    if let liveCap, liveCap < 1 { throw Problem("its liveCap must be at least 1") }
-    if let linkIdleSeconds, linkIdleSeconds < 1 { throw Problem("its linkIdleSeconds must be at least 1") }
-    if account?.isEmpty == true { throw Problem("its account can't be empty") }
+    if let liveCap, liveCap < 1 { throw APIError("its liveCap must be at least 1") }
+    if let linkIdleSeconds, linkIdleSeconds < 1 { throw APIError("its linkIdleSeconds must be at least 1") }
+    if account?.isEmpty == true { throw APIError("its account can't be empty") }
 
     self.name = name
     self.kind = kind
