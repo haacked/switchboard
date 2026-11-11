@@ -270,7 +270,7 @@ final class SentArgs: @unchecked Sendable {
     #expect(confirmedTargets(sent) == ["ph"])
     #expect(result.removed == ["ph"])
     #expect(result.skipped.map(\.id) == ["hk", "lo"])
-    #expect(result.skipped.allSatisfy { $0.reason == "hidden by the org filter" })
+    #expect(result.skipped.allSatisfy { $0.reason == BoardModel.hiddenOrgReason })
   }
 
   @Test func aFilterChangeBetweenTwoSendsSkipsTheSecondId() async throws {
@@ -285,7 +285,7 @@ final class SentArgs: @unchecked Sendable {
 
     #expect(confirmedTargets(sent) == ["ph"])
     #expect(result.skipped.map(\.id) == ["hk"])
-    #expect(result.skipped.first?.reason == "hidden by the org filter")
+    #expect(result.skipped.first?.reason == BoardModel.hiddenOrgReason)
   }
 
   @Test func aSessionWhoseOrgBecomesKnownAndHiddenWhileTheSheetIsOpenIsSkipped() async throws {
@@ -328,6 +328,7 @@ final class SentArgs: @unchecked Sendable {
 
     #expect(confirmedTargets(sent) == ["ph"])
     #expect(result.skipped.map(\.id) == ["ghost"])
+    #expect(result.skipped.first?.reason == BoardModel.unlistedReason)
   }
 
   @Test func underAllOrgsTheRequestsMatchTheUnfilteredOnes() async throws {

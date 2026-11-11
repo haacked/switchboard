@@ -666,7 +666,7 @@ public final class Service {
   /// checkout's origin remote.
   func repositoryRead(_ s: Session, checkout: String?) -> Bool {
     if let checkout { return repositories[checkout] != nil }
-    return !s.cwd.isEmpty && s.repo == nil && checkouts[s.cwd] != nil
+    return checkouts[s.cwd] != nil
   }
 
   func worktreeEntry(

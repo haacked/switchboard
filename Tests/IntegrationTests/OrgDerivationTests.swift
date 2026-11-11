@@ -83,6 +83,7 @@ import Testing
       (["--local"], ["gitlab", "plain", "upstream-only"]),
       (["--org", "posthog", "--local"], ["posthog", "ssh-443", "gitlab", "plain", "upstream-only"]),
       (["--org", "posthog,haacked", "--local"], Set(Self.names)),
+      (["--org", "posthog", "--org", "haacked"], ["posthog", "ssh-443", "fork"]),
       (["--org", OrgFilter.localKey, "--local"], ["gitlab", "plain", "upstream-only"]),
       (["--org", "acme"], []),
     ]

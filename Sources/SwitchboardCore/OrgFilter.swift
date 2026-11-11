@@ -32,10 +32,12 @@ public struct OrgFilter: Equatable, Sendable {
   private static func title(_ key: String, seen: String) -> String { key == localKey ? localTitle : seen }
 
   /// The org with the casing that GitHub uses, such as "PostHog", or `localKey`.
+  /// A PR names the org only of a session with no folder, as in `RepoLabels`,
+  /// because a session can link a PR from another repo.
   static func owner(of s: SessionSummary) -> String? {
     guard s.kind == .work else { return nil }
     if let docket = s.docket { return DocketRef(docket.pullRequest)?.org ?? localKey }
-    if let repo = s.repository ?? s.pr?.repo ?? s.followup?.repository {
+    if let repo = s.repository ?? (s.repoFolder == nil ? s.pr?.repo : nil) ?? s.followup?.repository {
       let owner = GitHub.ownerAndName(repo).owner
       if !owner.isEmpty { return owner }
     }

@@ -41,11 +41,14 @@ extension BoardModel {
   nonisolated static let doneRemovalArgs: [String: JSON] = ["worktree": true, "remote_branch": true]
 
   nonisolated static let unreadOrgReason = "sbd hasn't read its org yet"
+  nonisolated static let hiddenOrgReason = "hidden by the org filter"
+  nonisolated static let unlistedReason = "no longer listed"
 
   /// Why Delete All may not remove the session now, or nil when it may.
   func removalRefusal(_ id: String) -> String? {
     if removableIDs.contains(id) { return nil }
-    return shownIDs.contains(id) ? Self.unreadOrgReason : "hidden by the org filter"
+    if shownIDs.contains(id) { return Self.unreadOrgReason }
+    return allBoard.contains { $0.id == id } ? Self.hiddenOrgReason : Self.unlistedReason
   }
 
   /// Asks sbd which Done sessions it would remove and which it would skip.
@@ -62,8 +65,9 @@ extension BoardModel {
         do {
           var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
           let shown = self.shownIDs
-          let unread = plan.remove.filter { self.removalRefusal($0.id) == Self.unreadOrgReason }
-          plan.remove.removeAll { self.removalRefusal($0.id) != nil }
+          let removable = self.removableIDs
+          let unread = plan.remove.filter { shown.contains($0.id) && !removable.contains($0.id) }
+          plan.remove.removeAll { !removable.contains($0.id) }
           plan.skip.removeAll { !shown.contains($0.id) }
           plan.skip += unread.map { .init(id: $0.id, name: $0.name, reason: Self.unreadOrgReason) }
           self.doneRemoval = .confirming(plan)

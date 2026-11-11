@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwitchboardCore
 import Testing
 
@@ -36,10 +37,24 @@ func orgFilterModel(_ filter: OrgFilter = OrgFilter(), store: UserDefaults? = ni
 
 let posthogOnly = OrgFilter(keys: ["posthog"])
 
+/// A filter and the ids of `BoardModelOrgFilterTests.list` and `.followups` that it shows.
+struct FilterShape: Sendable, CustomTestStringConvertible {
+  var filter: OrgFilter
+  var sessions: Set<String>
+  var followups: [String]
+  var testDescription: String { filter.isAll ? "All Orgs" : filter.keys.sorted().joined(separator: ",") }
+}
+
 /// All Orgs, one org, Local, an org with Local, another org, and an org with no sessions.
 let everyFilterShape = [
-  OrgFilter(), posthogOnly, OrgFilter(keys: [OrgFilter.localKey]), OrgFilter(keys: ["posthog", OrgFilter.localKey]),
-  OrgFilter(keys: ["haacked"]), OrgFilter(keys: ["acme"]),
+  FilterShape(filter: OrgFilter(), sessions: ["ph1", "ph2", "hk", "lo", "un", "m", "c"], followups: ["fph", "fhk"]),
+  FilterShape(filter: posthogOnly, sessions: ["ph1", "ph2", "un", "m", "c"], followups: ["fph"]),
+  FilterShape(filter: OrgFilter(keys: [OrgFilter.localKey]), sessions: ["lo", "un", "m", "c"], followups: []),
+  FilterShape(
+    filter: OrgFilter(keys: ["posthog", OrgFilter.localKey]), sessions: ["ph1", "ph2", "lo", "un", "m", "c"],
+    followups: ["fph"]),
+  FilterShape(filter: OrgFilter(keys: ["haacked"]), sessions: ["hk", "un", "m", "c"], followups: ["fhk"]),
+  FilterShape(filter: OrgFilter(keys: ["acme"]), sessions: ["un", "m", "c"], followups: []),
 ]
 
 @MainActor
@@ -123,24 +138,24 @@ let everyFilterShape = [
     #expect(model.allFollowups == Self.followups)
   }
 
-  // MARK: Parity between the filtered and the unfiltered lists
+  // MARK: What each filter shape shows
 
   @Test(arguments: everyFilterShape)
-  func theShownListsAreTheFullListsThroughTheFilterAfterARefresh(_ filter: OrgFilter) {
-    let model = model(filter)
+  func eachFilterShowsItsSessionsAfterARefresh(_ shape: FilterShape) {
+    let model = model(shape.filter)
 
-    #expect(model.sessions == model.allSessions.filter(filter.shows))
-    #expect(model.followups == model.allFollowups.filter(filter.shows))
+    #expect(Set(model.sessions.map(\.id)) == shape.sessions)
+    #expect(model.followups.map(\.id) == shape.followups)
   }
 
   @Test(arguments: everyFilterShape)
-  func theShownListsAreTheFullListsThroughTheFilterAfterAFilterChange(_ filter: OrgFilter) {
+  func eachFilterShowsItsSessionsAfterAFilterChange(_ shape: FilterShape) {
     let model = model(OrgFilter(keys: ["haacked"]))
 
-    model.orgFilter = filter
+    model.orgFilter = shape.filter
 
-    #expect(model.sessions == model.allSessions.filter(filter.shows))
-    #expect(model.followups == model.allFollowups.filter(filter.shows))
+    #expect(Set(model.sessions.map(\.id)) == shape.sessions)
+    #expect(model.followups.map(\.id) == shape.followups)
   }
 
   @Test func changingTheFilterFiltersAgainWithoutARefresh() {
@@ -291,6 +306,19 @@ let everyFilterShape = [
 
     #expect(model.orgFilter == posthogOnly)
     #expect(model.selection == "ph1")
+  }
+
+  /// A publish restarts every tooltip's hover delay.
+  @Test func aRefreshWithTheSameListUnderAFilterWithASelectionDoesNotPublish() {
+    let model = model(posthogOnly)
+    model.selection = "ph1"
+    var published = 0
+    let subscription = model.objectWillChange.sink { published += 1 }
+    defer { subscription.cancel() }
+
+    model.apply(.success(Self.list), followups: Self.followups)
+
+    #expect(published == 0)
   }
 
   // MARK: The sidebar bar and the popover

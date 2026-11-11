@@ -27,6 +27,12 @@ private func session(
   return s
 }
 
+private func inFolder(_ s: SessionSummary) -> SessionSummary {
+  var s = s
+  s.checkout = s.cwd
+  return s
+}
+
 private func started(_ f: Followup) -> Followup {
   var f = f
   f.started = 1
@@ -60,6 +66,10 @@ private let chat = session("c", kind: .chat)
     KeyCase(name: "not read, with a PR", session: session("s", pr: "PostHog/x"), key: "posthog"),
     KeyCase(name: "read, no repository, with a PR", session: session("s", read: true, pr: "PostHog/x"), key: "posthog"),
     KeyCase(
+      name: "in a folder with no GitHub origin, with a PR",
+      session: inFolder(session("s", read: true, pr: "PostHog/x")), key: OrgFilter.localKey),
+    KeyCase(name: "in a folder, not read, with a PR", session: inFolder(session("s", pr: "PostHog/x")), key: nil),
+    KeyCase(
       name: "repository wins over a different PR repo",
       session: session("s", repository: "haacked/fork", read: true, pr: "PostHog/fork"), key: "haacked"),
     KeyCase(
@@ -89,6 +99,10 @@ private let chat = session("c", kind: .chat)
   ])
   func keyOfASessionFollowsTheDerivationOrder(_ c: KeyCase) {
     #expect(OrgFilter.key(of: c.session) == c.key)
+  }
+
+  @Test func aListDropsSpacesAndEmptyItems() {
+    #expect(OrgFilter(list: " PostHog, haacked,, ").keys == ["posthog", "haacked"])
   }
 
   @Test func theLocalKeyIsNotAGitHubLogin() {
