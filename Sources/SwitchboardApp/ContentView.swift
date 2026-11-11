@@ -135,6 +135,7 @@ struct ContentView: View {
         .labelsHidden()
         .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
+      ToolbarItem(placement: .navigation) { OrgFilterMenu() }
       ToolbarItem { ManagerButton() }
       ToolbarItem { AccountMenu() }
       ToolbarItem {
@@ -246,17 +247,20 @@ struct Sidebar: View {
     } message: { change in
       Text(accountSwitchMessage(change))
     }
-    .safeAreaInset(edge: .bottom) {
-      Button {
-        model.startNewGroup()
-      } label: {
-        Label("New Group", systemImage: "plus")
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      VStack(spacing: 0) {
+        OrgFilterBar()
+        Button {
+          model.startNewGroup()
+        } label: {
+          Label("New Group", systemImage: "plus")
+        }
+        .buttonStyle(.borderless)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .help("Create an empty group on the Board (⇧⌘G)")
+        .accessibilityIdentifier("sidebar-new-group")
       }
-      .buttonStyle(.borderless)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
-      .help("Create an empty group on the Board (⇧⌘G)")
-      .accessibilityIdentifier("sidebar-new-group")
     }
     .overlay {
       if model.sidebarIsEmpty {
@@ -448,7 +452,7 @@ struct BoardView: View {
         Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
       }
     case .group:
-      return BoardRows.make(sessions: open, groups: model.groups).map { row in
+      return BoardRows.make(sessions: open, groups: model.shownGroups).map { row in
         Lane(id: row.id, title: row.title, group: model.groups.first { $0.id == row.group }, sessions: row.sessions)
       }
     }
@@ -575,7 +579,7 @@ struct BoardView: View {
       }
       .groupDeleteDialog(model)
       .safeAreaInset(edge: .top, spacing: 0) {
-        if !model.suggestions.isEmpty {
+        if !model.shownSuggestions.isEmpty {
           VStack(spacing: 0) {
             GroupSuggestionList()
             Divider()
@@ -788,11 +792,11 @@ struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    let names = Dictionary(model.board.map { ($0.id, $0.name) }) { first, _ in first }
+    let names = Dictionary(model.allBoard.map { ($0.id, $0.name) }) { first, _ in first }
     let name = { (id: String) in names[id] ?? id }
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
-        ForEach(model.suggestions) { s in
+        ForEach(model.shownSuggestions) { s in
           let action = Triage.capitalized(s.action)
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "lightbulb").foregroundStyle(.secondary)

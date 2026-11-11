@@ -11,7 +11,9 @@ extension NSApplication {
 @main
 struct SwitchboardApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-  @StateObject private var model = BoardModel(client: Client(), draftsFolder: Home().drafts)
+  @StateObject private var model = BoardModel(
+    client: Client(), draftsFolder: Home().drafts,
+    orgFilterStore: Bundle.main.bundleIdentifier != nil ? .standard : nil, orgFilter: Snapshot.orgFilter)
 
   var body: some Scene {
     Window("Switchboard", id: "main") {
@@ -48,6 +50,9 @@ struct SwitchboardApp: App {
           .keyboardShortcut("1")
         Button("Show Board") { model.show(.board) }
           .keyboardShortcut("2")
+        Button("Filter by Org…") { model.showingOrgFilter.toggle() }
+          .keyboardShortcut("o", modifiers: [.command, .shift])
+          .disabled(model.presentingSheet)
         Divider()
         Group {
           Button("Next Session") { model.selectAdjacentSession(by: 1) }

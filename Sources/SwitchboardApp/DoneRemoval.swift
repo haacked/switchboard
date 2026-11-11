@@ -41,6 +41,7 @@ extension BoardModel {
   nonisolated static let doneRemovalArgs: [String: JSON] = ["worktree": true, "remote_branch": true]
 
   /// Asks sbd which Done sessions it would remove and which it would skip.
+  /// The plan leaves out the sessions that the org filter hides.
   func checkDoneRemoval() {
     guard doneRemoval == nil else { return }
     doneRemoval = .checking
@@ -49,7 +50,11 @@ extension BoardModel {
       then: { value in
         guard self.doneRemoval == .checking else { return }
         do {
-          self.doneRemoval = .confirming(try JSONCoding.convert(value, to: DoneRemovalPlan.self))
+          var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
+          let shown = self.shownIDs
+          plan.remove.removeAll { !shown.contains($0.id) }
+          plan.skip.removeAll { !shown.contains($0.id) }
+          self.doneRemoval = .confirming(plan)
         } catch {
           self.actionError = "rm-done: \(error)"
         }
@@ -67,6 +72,12 @@ extension BoardModel {
     Task.detached {
       var result = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
       for (n, item) in plan.remove.enumerated() {
+        // A filter change after the plan can hide a session. The loop checks each one just before its send.
+        guard await MainActor.run(body: { self.shownIDs.contains(item.id) }) else {
+          result.skipped.append(.init(id: item.id, name: item.name, reason: "hidden by the org filter"))
+          await MainActor.run { self.doneRemoval = .removing(plan, done: n + 1) }
+          continue
+        }
         var args = Self.doneRemovalArgs
         args["confirmed"] = true
         args["targets"] = [.string(item.id)]

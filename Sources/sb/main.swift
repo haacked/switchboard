@@ -5,7 +5,8 @@ let usage = """
   Usage: sb <command> [arguments] [--json]
 
   Sessions:
-    ls                            list sessions by state
+    ls [--org O1,O2] [--local]    list sessions by state, or only those in the
+                                  GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
         [--model M] [--account A] [--no-auto]
                                   start a session in the folder, or in a new
@@ -291,7 +292,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--set", "--description", "--artifact", "--kind", "--version", "--limit",
+      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -626,7 +627,17 @@ case "hook":
   hook()
 case "ls", "list":
   let result = call("ls")
-  if a.json { printJSON(result) } else { printSessionList(decode(result, as: [SessionSummary].self)) }
+  var filter = OrgFilter(list: a.values["--org"] ?? "")
+  if a.switches.contains("--local") { filter.toggle(OrgFilter.localKey) }
+  let shown = decode(result, as: [SessionSummary].self).filter(filter.shows)
+  if !a.json {
+    printSessionList(shown)
+  } else if filter.isAll {
+    printJSON(result)
+  } else {
+    let ids = Set(shown.map(\.id))
+    printJSON(.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false }))
+  }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
   let folder = URL(fileURLWithPath: path.expandingTilde).path
