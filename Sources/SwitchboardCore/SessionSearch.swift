@@ -163,9 +163,8 @@ public enum SessionSearch {
     for (i, issue) in (s.issues ?? []).enumerated() { add(.issue, String(issue.number), shown: i == 0) }
     if let repo { add(.repo, repo, shown: RepoLabels.capped(repo) == repo) }
     if let pr = s.pr {
-      // The row shows the folder's label, not the PR's owner/name. When the two are equal, the label comes first
-      // and wins the tie.
-      add(.repo, pr.repo, shown: false)
+      // The row shows the folder's label, not the PR's owner/name.
+      if pr.repo != repo { add(.repo, pr.repo, shown: false) }
       add(.prTitle, pr.title)
     }
     if let group = s.groupName { add(.group, group) }
