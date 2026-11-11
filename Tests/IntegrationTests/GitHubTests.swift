@@ -910,6 +910,21 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 189)
   }
 
+  /// git exits 1 when the checkout has no remote left. The remotes then become unknown.
+  @Test func acceptsARefusedLinkOnceTheCheckoutHasNoRemote() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.link(s, "haacked/review-code", 189)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+
+    try sbd.git(s.cwd, "remote", "remove", "origin")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
   /// A refused line after an accepted one, whether one read finds both or
   /// the refused line arrives in a later read.
   @Test(arguments: [false, true])

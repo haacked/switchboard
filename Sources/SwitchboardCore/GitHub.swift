@@ -582,10 +582,7 @@ public enum GitHub {
       config.compactMap { key, value in
         guard key.hasPrefix("remote.") else { return nil }
         if key.hasSuffix(".url") { return repo(remoteURL: value)?.lowercased() }
-        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
-        if key.hasSuffix(".gh-resolved"), parts.count == 2, !parts.contains(where: \.isEmpty) {
-          return value.lowercased()
-        }
+        if key.hasSuffix(".gh-resolved"), Followup.isRepository(value) { return value.lowercased() }
         return nil
       })
   }
