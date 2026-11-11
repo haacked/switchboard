@@ -34,6 +34,14 @@ public enum UnixSocket {
     }
   }
 
+  /// The pid of the process that connected the socket, as the kernel recorded it at connect.
+  public static func peerPid(_ fd: Int32) -> Int? {
+    var pid: pid_t = 0
+    var length = socklen_t(MemoryLayout<pid_t>.size)
+    guard getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0 else { return nil }
+    return Int(pid)
+  }
+
   /// Sets the read and write timeout, and makes a write to a closed peer
   /// fail with EPIPE instead of raising SIGPIPE.
   public static func configure(_ fd: Int32, timeout: TimeInterval) {

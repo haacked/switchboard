@@ -9,6 +9,9 @@
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
 #   slow <n>         runs a Bash tool call of n seconds
+#   run <name>       runs sh $SB_HOME/<name>.sh as a Bash tool call, a child
+#                    of the stub, and replies "Ran <name>.". Without that
+#                    file, it replies as to anything else
 #   background <n> [held] [two]
 #                    starts a background job of n seconds and ends the turn.
 #                    With two, it starts a second job, whose pid goes to
@@ -578,6 +581,14 @@ turn() {
     n=${p#slow }
     status busy
     step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
+    ;;
+  run\ *)
+    n=${p#run }
+    if [ -f "$SB_HOME/$n.sh" ]; then
+      step=tool reply="Ran $n." cmd="sh $SB_HOME/$n.sh" marker='"hook_event_name":"PostToolUse"' before="sh '$SB_HOME/$n.sh' </dev/null"
+    else
+      reply="Done: $p"
+    fi
     ;;
   background*)
     read -r n held two <<<"${p#background }"

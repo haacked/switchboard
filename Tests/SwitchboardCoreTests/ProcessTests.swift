@@ -29,6 +29,50 @@ import Testing
   @Test func leavesACommandThatFinishesInTimeAlone() throws {
     #expect(try runCommand("/bin/echo", ["hi"], timeout: 30).stdout == "hi\n")
   }
+
+  // MARK: ancestors(of:)
+
+  @Test func ancestorsOfThisProcessHoldItselfItsParentAndLaunchd() throws {
+    let ancestry = try #require(Processes.ancestors(of: Int(getpid())))
+
+    #expect(ancestry.isSuperset(of: [Int(getpid()), Int(getppid()), 1]), "\(ancestry)")
+  }
+
+  /// `Int32.max` passes `Processes.isValidPid` and names no process. `Int32.max + 1` fails it.
+  @Test(arguments: [0, -1, Int(Int32.max), Int(Int32.max) + 1])
+  func ancestorsOfAPidThatNamesNoProcessIsNil(pid: Int) {
+    #expect(Processes.ancestors(of: pid) == nil)
+  }
+
+  /// A script that runs sb makes sb a grandchild of the pane's process.
+  @Test(.timeLimit(.minutes(1))) func ancestorsOfAGrandchildHoldItsParentAndThisProcess() throws {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: "/bin/sh")
+    child.arguments = ["-c", "/bin/sleep 30 >/dev/null & echo $!; wait"]
+    let output = Pipe()
+    child.standardOutput = output
+    try child.run()
+    let line = String(decoding: output.fileHandleForReading.availableData, as: UTF8.self)
+    let grandchild = try #require(Int(line.trimmingCharacters(in: .whitespacesAndNewlines)), "\(line)")
+    defer {
+      kill(pid_t(grandchild), SIGKILL)
+      kill(child.processIdentifier, SIGKILL)
+      child.waitUntilExit()
+    }
+
+    let ancestry = try #require(Processes.ancestors(of: grandchild))
+
+    #expect(ancestry.isSuperset(of: [grandchild, Int(child.processIdentifier), Int(getpid()), 1]), "\(ancestry)")
+  }
+
+  /// The kernel moves the children of a process that exits to launchd.
+  @Test(.timeLimit(.minutes(1))) func ancestorsOfAnOrphanAreItAndLaunchd() throws {
+    let r = try runCommand("/bin/sh", ["-c", "/bin/sleep 30 </dev/null >/dev/null 2>&1 & echo $!"], timeout: 30)
+    let orphan = try #require(Int(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)), "\(r.stdout)")
+    defer { kill(pid_t(orphan), SIGKILL) }
+
+    #expect(Processes.ancestors(of: orphan) == [orphan, 1])
+  }
 }
 
 @Suite struct ShellQuoteTests {

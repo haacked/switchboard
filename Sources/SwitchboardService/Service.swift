@@ -228,8 +228,11 @@ public final class Service {
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
 
   /// `hookGone` reports whether the client closed its connection, which a
-  /// held PermissionRequest checks while it waits.
-  public func handle(_ request: Request, hookGone: @escaping () -> Bool = { false }) -> Response {
+  /// held PermissionRequest checks while it waits. `caller` lets a request
+  /// that stops a session's panes refuse a client inside that session.
+  public func handle(_ request: Request, caller: Caller = .inProcess, hookGone: @escaping () -> Bool = { false })
+    -> Response
+  {
     do {
       switch request.op {
       case "hook":
@@ -249,11 +252,11 @@ public final class Service {
       case "chat-log":
         return .success(try chatLog(request.args))
       case "rm":
-        return .success(try remove(request.args))
+        return .success(try remove(request.args, caller: caller))
       case "cleanup":
-        return .success(try cleanup(request.args))
+        return .success(try cleanup(request.args, caller: caller))
       case "rm-done":
-        return .success(try removeDone(request.args))
+        return .success(try removeDone(request.args, caller: caller))
       case "merge":
         return .success(try mergeRequest(request.args))
       case "review":
@@ -1104,7 +1107,9 @@ public final class Service {
   /// left alone and the call succeeds. The call refuses a session with an open to-do
   /// before anything stops, unless `resolve` names each open to-do. A to-do
   /// that arrives later keeps the session, even after its worktree is gone.
-  func remove(_ args: JSON) throws -> JSON {
+  /// A removal of the worktree refuses a caller inside the session before
+  /// anything stops, as `beginPaneStop` describes.
+  func remove(_ args: JSON, caller: Caller) throws -> JSON {
     let resolving = try resolveArgument(args)
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
@@ -1118,6 +1123,8 @@ public final class Service {
     let flags =
       (removesWorktree ? ["--worktree"] : []) + (removesBranch ? ["--delete-branch"] : [])
       + (removesRemoteBranch ? ["--delete-remote-branch"] : [])
+    let command = "sb rm --worktree"
+    let ancestry = removesWorktree ? try caller.ancestry(command: command) : nil
     do {
       let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
         let id = try lookup(args)
@@ -1149,12 +1156,12 @@ public final class Service {
         // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
         try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
         install(fresh)
-        if removesWorktree { return beginPaneStop(session.id) }
+        if removesWorktree { return try beginPaneStop(session.id, ancestry: ancestry, command: command) }
         if case .running(let pid) = claudeState(session.id) { machine.signal(pid, SIGTERM) }
         return nil
       }
       if let stop {
-        try finishPaneStop(session, stop, command: "sb rm --worktree")
+        try finishPaneStop(session, stop, command: command)
         (repo, branch, supacode) = try checkRemoval(
           session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
           branch: removesBranch)
