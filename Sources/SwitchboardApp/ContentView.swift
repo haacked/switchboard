@@ -370,6 +370,7 @@ struct SessionRow: View {
             HStack(spacing: 3) {
               PRLink(text: pr.numberLabel, url: url)
                 .font(.caption)
+                .fixedSize()
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
