@@ -162,6 +162,53 @@ func tempFolder() throws -> String {
     #expect(try store.declinedSuggestions().isEmpty)
   }
 
+  @Test func removeDeclinedDeletesOnlyTheNamedRows() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let kept = ["merge:g1:g2", "pab2cd:posthog/posthog#12", "prefix:posthog/posthog#12", "word:eachother", "word"]
+    let removed = ["word:each", "dependency:s1:g1", "scope:it's a \"scope\"; --:g1", "prefix:flag-evaluations:g1"]
+    for id in kept + removed { try store.decline(suggestion: id) }
+
+    try store.removeDeclined(Set(removed))
+
+    #expect(try Store(path: "\(dir)/sb.db").declinedSuggestions() == Set(kept))
+  }
+
+  @Test func removeDeclinedIgnoresAnIdThatIsNotDeclined() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+
+    try store.removeDeclined(["merge:g1:g3", "merge:g1", "merge:g1:g2:g3", "%", "merge:g1:g_"])
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
+  }
+
+  @Test func removeDeclinedWithNoIdsDeletesNothing() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+
+    try store.removeDeclined([])
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
+  }
+
+  @Test func aRemovedDeclineCanBeDeclinedAgain() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+    try store.removeDeclined(["merge:g1:g2"])
+
+    try store.decline(suggestion: "merge:g1:g2")
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
+  }
+
   @Test func missingFieldsKeepTheirDefaults() throws {
     let c = try JSONCoding.decode(
       Config.self, from: #"{"idleStopSeconds": 30, "env": {"CLAUDE_CONFIG_DIR": "~/.claude-personal"}}"#)
