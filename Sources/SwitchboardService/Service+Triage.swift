@@ -27,6 +27,7 @@ extension Service {
       "options": .number(Double(cleaned.card.options.count)),
       "callouts": .number(Double(cleaned.card.callouts.count)),
       "decisions": .number(Double(cleaned.card.decisions.count)),
+      "drafts": .number(Double(cleaned.card.drafts.count)),
       "dropped": .array(cleaned.dropped.map(JSON.string)),
     ]
   }
@@ -142,14 +143,16 @@ extension Service {
     }
     let session = summary(id)
     guard Triage.mayHaveItem(session) else { return }
-    let input = TriageSummarizer.input(session: session, reply: e.facts.lastReply ?? "")
+    let reply = e.facts.lastReply ?? ""
+    let input = TriageSummarizer.input(session: session, reply: reply)
     let env = headlessEnv(session: id, account: config.triage.account)
     triageJobs.addOperation { [self] in
       let result = Result {
         try TriageSummarizer.parse(
           runHeadless(
             TriageSummarizer.arguments(model: config.triage.model), input: input, env: env, folder: home.path,
-            timeout: config.triage.timeoutSeconds))
+            timeout: config.triage.timeoutSeconds),
+          reply: reply)
       }
       queue.async { self.finishSummary(id, stop: stop, result) }
     }

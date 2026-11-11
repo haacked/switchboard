@@ -94,7 +94,7 @@ private struct MarkdownBlocksView: View {
       .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     case .quote(let blocks):
       HStack(spacing: 8) {
-        Rectangle().fill(.secondary.opacity(0.5)).frame(width: 3)
+        QuoteBar()
         MarkdownBlocksView(blocks: blocks).foregroundStyle(.secondary)
       }
       .fixedSize(horizontal: false, vertical: true)
@@ -335,4 +335,9 @@ extension MarkdownBlock.Alignment {
     case .trailing: .trailing
     }
   }
+}
+
+/// The bar at the left edge of a Markdown quote.
+struct QuoteBar: View {
+  var body: some View { Rectangle().fill(.secondary.opacity(0.5)).frame(width: 3) }
 }

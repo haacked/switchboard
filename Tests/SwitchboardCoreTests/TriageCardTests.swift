@@ -873,7 +873,7 @@ let sessionCard = TriageSummary(
       "callouts": [["kind": "info", "title": "SQLite is faster here", "body": "For one writer."]],
     ]
 
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
 
     #expect(summary.options.map(\.action) == [.send, .reply])
     #expect(summary.options.last?.placeholder == "Which one?")
@@ -892,7 +892,7 @@ let sessionCard = TriageSummary(
       "options": [.object(option), ["label": "Fine", "action": "send", "message": "Fine."]],
     ]
 
-    let summary = try TriageSummarizer.parse(envelope(payload))
+    let summary = try TriageSummarizer.parse(envelope(payload), reply: "")
 
     #expect(summary.options.map(\.label) == ["Fine"])
   }
@@ -915,7 +915,7 @@ let sessionCard = TriageSummary(
       "callouts": [["kind": "info", "title": "null", "body": "x \"y\""], ["kind": "nope", "title": "z"]],
     ]
 
-    let parsed = try TriageSummarizer.parse(envelope(payload))
+    let parsed = try TriageSummarizer.parse(envelope(payload), reply: "")
     let card = try TriageCard.clean(payload, actions: TriageSummarizer.actions).card
 
     #expect(parsed.options == card.options)
@@ -934,6 +934,6 @@ let sessionCard = TriageSummary(
     let structured = JSON.object(["is_error": false, "structured_output": payload]).text
     let fenced = JSON.object(["is_error": false, "result": .string("```json\n\(payload.text)\n```")]).text
 
-    #expect(try TriageSummarizer.parse(structured) == TriageSummarizer.parse(fenced))
+    #expect(try TriageSummarizer.parse(structured, reply: "") == TriageSummarizer.parse(fenced, reply: ""))
   }
 }

@@ -69,6 +69,18 @@ public enum TriageSummarizer {
     recommend yes." has these decisions: [{"number": 1, "header": "Name", "question": "Hub or Switchboard?", \
     "options": [{"label": "Switchboard", "recommended": true}, {"label": "Hub"}]}, {"number": 2, "header": "CLI", \
     "question": "Ship the CLI now?", "options": [{"label": "Yes", "recommended": true}, {"label": "No"}]}]
+    - drafts: fill it only when the reply contains the finished text of a message that the user will send to \
+    another person, such as a review request, a Slack message, a PR comment, or an email. Otherwise leave it \
+    empty. Code, commands, commit messages or PR titles that the session will use itself, a plan, an outline of \
+    what a message could say, and the session's own explanation are not drafts. Give one entry per message, at \
+    most \(TriageDrafts.maxDrafts), in the reply's order. Each has a label of a few words that names the message, \
+    such as "Review request to HogQL", and the text. The text starts at the message's first character and ends \
+    at its last, so it leaves out the sentence that introduces the message ("Here's a draft:") and any note \
+    after it. Copy the text from the reply one character at a time: keep the reply's wording, spelling, \
+    punctuation, line breaks, blank lines, emoji, links, and Markdown, even where you would write it \
+    differently. Leave out only the blockquote markers (">") and the code fences around the message. When the \
+    message is long, copy all of it, because a text that is shortened or reworded is discarded. The summary says \
+    that a draft is ready and does not restate it.
     """
 
   public static let schema: JSON = [
@@ -98,6 +110,15 @@ public enum TriageSummarizer {
             "title": ["type": "string"], "body": ["type": "string"],
           ],
           "required": ["kind", "title", "body"],
+        ],
+      ],
+      "drafts": [
+        "type": "array",
+        "maxItems": .number(Double(TriageDrafts.maxDrafts)),
+        "items": [
+          "type": "object",
+          "properties": ["label": ["type": "string"], "text": ["type": "string"]],
+          "required": ["label", "text"],
         ],
       ],
       "decisions": [
@@ -150,13 +171,16 @@ public enum TriageSummarizer {
     return lines.joined(separator: "\n")
   }
 
-  /// Reads the output of `claude -p --output-format json`.
-  public static func parse(_ output: String) throws -> TriageSummary {
+  /// Reads the output of `claude -p --output-format json`. It keeps only the
+  /// drafts whose text appears in `reply`, the whole reply that the session wrote.
+  public static func parse(_ output: String, reply: String) throws -> TriageSummary {
     let payload = JSON.object(try Headless.answer(output))
     guard !(payload["title"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw APIError("claude's summary has no title or text")
     }
     let kind = TriageKind(rawValue: payload["kind"]?.string ?? "") ?? .info
-    return try TriageCard.clean(payload, actions: actions, kind: kind, lines: summaryLines).card
+    var card = try TriageCard.clean(payload, actions: actions, kind: kind, lines: summaryLines).card
+    card.drafts = TriageDrafts.verbatim(card.drafts, in: reply).kept
+    return card
   }
 }

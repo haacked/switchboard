@@ -100,6 +100,21 @@ public struct TriageMessage: Codable, Equatable, Sendable {
   public struct Summary: Codable, Equatable, Sendable {
     public var text: String
     public var callouts: [Callout]
+    public var drafts: [TriageDraft]
+
+    public init(text: String, callouts: [Callout], drafts: [TriageDraft] = []) {
+      self.text = text
+      self.callouts = callouts
+      self.drafts = drafts
+    }
+
+    public init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      text = try c.decode(String.self, forKey: .text)
+      callouts = try c.decode([Callout].self, forKey: .callouts)
+      drafts = try c.decodeIfPresent([TriageDraft].self, forKey: .drafts) ?? []
+    }
+
   }
 
   /// The buttons, and the decisions that `sb decide` answers one at a time.
@@ -129,7 +144,7 @@ public struct TriageMessage: Codable, Equatable, Sendable {
 extension TriageItem {
   public var message: TriageMessage {
     TriageMessage(
-      summary: .init(text: summary, callouts: callouts),
+      summary: .init(text: summary, callouts: callouts, drafts: drafts),
       action: .init(options: options, multiSelect: multiSelect, primary: primaryIndex, decisions: decisions),
       details: details)
   }

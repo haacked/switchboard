@@ -13,6 +13,10 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
   for c in item.callouts {
     out("      [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
+  for draft in item.drafts {
+    out("   Draft\(draft.label.map { ": \($0)" } ?? ""):")
+    for line in draft.text.split(separator: "\n", omittingEmptySubsequences: false) { out("      > \(line)") }
+  }
   out("   Action:")
   if item.hasTickable {
     out("      pick any, as in: sb choose \(s.id) 1,3")
@@ -133,9 +137,11 @@ func summaryCommand(_ a: Args) {
     let options = result["options"]?.int ?? 0
     let callouts = result["callouts"]?.int ?? 0
     let decisions = result["decisions"]?.int ?? 0
+    let drafts = result["drafts"]?.int ?? 0
     let counts = [
       "\(options) option\(options == 1 ? "" : "s")", "\(callouts) callout\(callouts == 1 ? "" : "s")",
       decisions == 0 ? nil : "\(decisions) decision\(decisions == 1 ? "" : "s")",
+      drafts == 0 ? nil : "\(drafts) draft\(drafts == 1 ? "" : "s")",
     ]
     print("Recorded the summary with \(englishList(counts.compactMap { $0 })).")
     for line in result["dropped"]?.array ?? [] { print("Dropped \(line.string ?? "")".printable) }
