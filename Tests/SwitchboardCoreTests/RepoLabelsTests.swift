@@ -5,8 +5,8 @@ import Testing
 private let other = "/Users/me/dev/acme/other"
 
 private func session(
-  _ id: String, repo: String? = nil, checkout: String? = nil, pr: String? = nil, followup: Followup? = nil,
-  manager: Bool = false
+  _ id: String, repo: String? = nil, checkout: String? = nil, repository: String? = nil, pr: String? = nil,
+  followup: Followup? = nil, manager: Bool = false
 ) -> SessionSummary {
   var s = SessionSummary(
     id: id, name: id, cwd: repo ?? "/tmp", repo: repo, branch: nil, claudeSessionId: id, state: .working,
@@ -14,6 +14,7 @@ private func session(
     notes: [], pr: pr.map(prSummary))
   s.followup = followup
   s.checkout = checkout
+  s.repository = repository
   if manager {
     s.manager = true
     s.kind = .manager
@@ -132,7 +133,8 @@ private func followup(_ repository: String?) -> Followup {
   @Test func countsAFolderItsPRAndSessionsWithOnlyThatPRAsOneRepo() {
     let folder = "/Users/me/dev/haacked/switchboard"
     let sessions = [
-      session("withPR", repo: folder, pr: "haacked/switchboard"), session("sameFolder", repo: folder),
+      session("withPR", repo: folder, repository: "haacked/switchboard", pr: "haacked/switchboard"),
+      session("sameFolder", repo: folder, repository: "haacked/switchboard"),
       session("imported", pr: "haacked/switchboard"), session("followup", followup: followup("haacked/switchboard")),
     ]
 
@@ -142,7 +144,8 @@ private func followup(_ repository: String?) -> Followup {
   @Test func labelsAFolderAndSessionsWithOnlyItsPRTheSameWhenASecondRepoIsPresent() {
     let folder = "/Users/me/dev/haacked/switchboard"
     let sessions = [
-      session("withPR", repo: folder, pr: "haacked/switchboard"), session("sameFolder", repo: folder),
+      session("withPR", repo: folder, repository: "haacked/switchboard", pr: "haacked/switchboard"),
+      session("sameFolder", repo: folder, repository: "haacked/switchboard"),
       session("imported", pr: "haacked/switchboard"), session("o", repo: other),
     ]
 
@@ -165,8 +168,8 @@ private func followup(_ repository: String?) -> Followup {
   @Test func matchesAFolderToItsPRRepoWithoutCase() {
     let folder = "/Users/me/dev/PostHog/posthog"
     let sessions = [
-      session("withPR", repo: folder, pr: "PostHog/posthog"), session("sameFolder", repo: folder),
-      session("imported", pr: "posthog/posthog"),
+      session("withPR", repo: folder, repository: "PostHog/posthog", pr: "PostHog/posthog"),
+      session("sameFolder", repo: folder, repository: "PostHog/posthog"), session("imported", pr: "posthog/posthog"),
     ]
 
     #expect(RepoLabels.labels(sessions).isEmpty)
@@ -174,7 +177,8 @@ private func followup(_ repository: String?) -> Followup {
 
   @Test func doesNotTreatADifferenceOfCaseAsAFork() {
     let sessions = [
-      session("a", pr: "PostHog/posthog"), session("b", pr: "posthog/posthog"), session("o", repo: other),
+      session("a", repo: "/Users/me/dev/a/posthog", repository: "PostHog/posthog"),
+      session("b", repo: "/Users/me/dev/b/posthog", repository: "posthog/posthog"), session("o", repo: other),
     ]
 
     let labels = RepoLabels.labels(sessions)
@@ -184,8 +188,8 @@ private func followup(_ repository: String?) -> Followup {
 
   @Test func showsOwnerAndNameForForksWithPRs() {
     let sessions = [
-      session("fork", repo: "/Users/me/dev/haacked/posthog", pr: "haacked/posthog"),
-      session("upstream", repo: "/Users/me/dev/PostHog/posthog", pr: "PostHog/posthog"),
+      session("fork", repo: "/Users/me/dev/haacked/posthog", repository: "haacked/posthog", pr: "haacked/posthog"),
+      session("upstream", repo: "/Users/me/dev/PostHog/posthog", repository: "PostHog/posthog", pr: "PostHog/posthog"),
     ]
 
     let labels = RepoLabels.labels(sessions)
@@ -213,10 +217,10 @@ private func followup(_ repository: String?) -> Followup {
   }
 
   @Test func showsOwnerAndNameOnASessionInAForkFolderWithoutAPR() {
-    let folder = "/Users/me/dev/haacked/posthog"
+    let folder = "/Users/me/dev/fork/posthog"
     let sessions = [
-      session("withPR", repo: folder, pr: "haacked/posthog"), session("sameFolder", repo: folder),
-      session("upstream", pr: "PostHog/posthog"),
+      session("withPR", repo: folder, repository: "haacked/posthog", pr: "haacked/posthog"),
+      session("sameFolder", repo: folder, repository: "haacked/posthog"), session("upstream", pr: "PostHog/posthog"),
     ]
 
     let labels = RepoLabels.labels(sessions)
@@ -326,10 +330,10 @@ private func followup(_ repository: String?) -> Followup {
     #expect(labels == ["a": "a/…jklmnopqrstuvwxyz0123456789", "b": "b/…jklmnopqrstuvwxyz0123456789"])
   }
 
-  @Test func namesAFolderByItsLastComponentEvenWhenItsPRNamesItDifferently() {
+  @Test func namesAFolderByItsLastComponentEvenWhenItsRepositoryNamesItDifferently() {
     let sessions = [
-      session("a", repo: "/Users/me/dev/ph", pr: "PostHog/posthog"), session("b", pr: "PostHog/posthog"),
-      session("o", repo: other),
+      session("a", repo: "/Users/me/dev/ph", repository: "PostHog/posthog", pr: "PostHog/posthog"),
+      session("b", pr: "PostHog/posthog"), session("o", repo: other),
     ]
 
     let labels = RepoLabels.labels(sessions)
@@ -337,9 +341,9 @@ private func followup(_ repository: String?) -> Followup {
     #expect(labels == ["a": "ph", "b": "ph", "o": "other"])
   }
 
-  /// Nothing ties a folder without a PR to an owner/name. The folder counts as
-  /// a second repo. Its label grows until it differs from owner/name.
-  @Test func keepsAFolderWithoutAPRApartFromAPRRepoOfTheSameName() {
+  /// Nothing ties a folder without a repository to an owner/name. The folder
+  /// counts as a second repo. Its label grows until it differs from owner/name.
+  @Test func keepsAFolderWithoutARepositoryApartFromAPRRepoOfTheSameName() {
     let sessions = [session("f", repo: "/x/haacked/switchboard"), session("p", pr: "haacked/switchboard")]
 
     let labels = RepoLabels.labels(sessions)
@@ -395,16 +399,165 @@ private func followup(_ repository: String?) -> Followup {
     #expect(RepoLabels.labels(sessions) == ["a": "alpha", "b": "beta"])
   }
 
-  @Test func takesThePRRepoOfAnotherSessionInTheSameCheckout() {
+  /// sbd fills `repository` after the first summary, so one session of a
+  /// checkout can have it before another does.
+  @Test func takesTheRepositoryOfAnotherSessionInTheSameCheckout() {
     let checkout = "/Users/me/dev/haacked/switchboard"
     let sessions = [
-      session("sbd", repo: checkout, checkout: checkout, pr: "haacked/switchboard"),
-      session("external", checkout: checkout), session("imported", pr: "haacked/switchboard"),
+      session("external", checkout: checkout),
+      session("sbd", repo: checkout, checkout: checkout, repository: "haacked/switchboard", pr: "haacked/switchboard"),
+      session("imported", pr: "haacked/switchboard"),
     ]
 
     #expect(RepoLabels.labels(sessions).isEmpty)
     #expect(
       RepoLabels.labels(sessions, evenForOneRepo: true)
         == ["sbd": "switchboard", "external": "switchboard", "imported": "switchboard"])
+  }
+
+  // MARK: Board lanes
+
+  /// A session in the posthog checkout whose transcript linked a switchboard
+  /// PR. The folder's other sessions and the switchboard checkout surround it.
+  static func sessionsWithAForeignPR(foreignFirst: Bool) -> [SessionSummary] {
+    let posthog = "/Users/me/dev/posthog/posthog"
+    let foreign = session("foreign", checkout: posthog, repository: "PostHog/posthog", pr: "haacked/switchboard")
+    let rest = [
+      session("withPR", checkout: posthog, repository: "PostHog/posthog", pr: "PostHog/posthog"),
+      session("noPR", checkout: posthog, repository: "PostHog/posthog"),
+      session(
+        "switchboard", repo: "/Users/me/dev/haacked/switchboard", repository: "haacked/switchboard",
+        pr: "haacked/switchboard"),
+    ]
+    return foreignFirst ? [foreign] + rest : rest + [foreign]
+  }
+
+  @Test(arguments: [true, false])
+  func keepsAFoldersRepositoryWhenOneSessionsPRIsFromAnotherRepo(foreignFirst: Bool) {
+    let sessions = Self.sessionsWithAForeignPR(foreignFirst: foreignFirst)
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(
+      labels == [
+        "foreign": "PostHog/posthog", "withPR": "PostHog/posthog", "noPR": "PostHog/posthog",
+        "switchboard": "haacked/switchboard",
+      ])
+  }
+
+  @Test(arguments: [true, false])
+  func keepsAFoldersShortLabelWhenOneSessionsPRIsFromAnotherRepo(foreignFirst: Bool) {
+    let sessions = Self.sessionsWithAForeignPR(foreignFirst: foreignFirst)
+
+    let labels = RepoLabels.labels(sessions)
+
+    #expect(labels == ["foreign": "posthog", "withPR": "posthog", "noPR": "posthog", "switchboard": "switchboard"])
+  }
+
+  @Test func labelsALaneWithOwnerAndNameWhenFullNameIsOn() {
+    let sessions = [
+      session("folder", repo: "/Users/me/dev/sb", repository: "haacked/switchboard"),
+      session("imported", pr: "PostHog/posthog"), session("waiting", followup: followup("acme/widgets")),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["folder": "haacked/switchboard", "imported": "PostHog/posthog", "waiting": "acme/widgets"])
+  }
+
+  @Test func labelsOneRepoWithOwnerAndNameWhenFullNameIsOn() {
+    let sessions = [session("folder", repo: "/Users/me/dev/sb", repository: "haacked/switchboard")]
+
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true) == ["folder": "haacked/switchboard"])
+  }
+
+  @Test func capsAnOwnerAndNameLaneLabelAtThirtyCharacters() {
+    let sessions = [session("a", repo: "/Users/me/dev/p", repository: "haacked-long-owner/posthog-repo")]
+
+    #expect(RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true) == ["a": "haacked-long-o…/posthog-repo"])
+  }
+
+  @Test func labelsAFolderWithoutARepositoryByItsFolderNameNotItsPR() {
+    let sessions = [
+      session("folder", repo: "/Users/me/dev/work/ph", pr: "PostHog/posthog"),
+      session("imported", pr: "PostHog/posthog"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["folder": "ph", "imported": "PostHog/posthog"])
+  }
+
+  /// An sbd older than `repository` sends summaries without it.
+  @Test func fallsBackToFolderFormsForASummaryWithoutRepository() {
+    let sessions = [
+      session("a", checkout: "/Users/me/a/switchboard"), session("b", checkout: "/Users/me/b/switchboard"),
+      session("c", checkout: "/Users/me/dev/charts"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["a": "a/switchboard", "b": "b/switchboard", "c": "charts"])
+  }
+
+  @Test func keepsThePRRepoForASessionWithNoFolder() {
+    let sessions = [
+      session("folder", repo: "/Users/me/dev/posthog", repository: "PostHog/posthog"),
+      session("imported", pr: "PostHog/posthog"), session("waiting", followup: followup("PostHog/posthog")),
+      session("other", pr: "haacked/switchboard"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(
+      labels == [
+        "folder": "PostHog/posthog", "imported": "PostHog/posthog", "waiting": "PostHog/posthog",
+        "other": "haacked/switchboard",
+      ])
+  }
+
+  @Test func labelsTwoClonesOfOneRepoTheSame() {
+    let sessions = [
+      session("a", repo: "/Users/me/dev/posthog", repository: "PostHog/posthog"),
+      session("b", checkout: "/Users/me/old/posthog-clone", repository: "PostHog/posthog"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["a": "PostHog/posthog", "b": "PostHog/posthog"])
+  }
+
+  @Test func labelsAForkCheckoutByItsOriginWhenItsPRIsUpstream() {
+    let sessions = [
+      session("fork", repo: "/Users/me/dev/fork/posthog", repository: "haacked/posthog", pr: "PostHog/posthog"),
+      session("upstream", repo: "/Users/me/dev/PostHog/posthog", repository: "PostHog/posthog"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["fork": "haacked/posthog", "upstream": "PostHog/posthog"])
+  }
+
+  @Test func prefersASessionsRepositoryToAStartedFollowupsRepository() {
+    let folder = "/Users/me/dev/widgets"
+    let sessions = [
+      session("started", repo: folder, followup: followup("acme/gadgets")),
+      session("plain", repo: folder, repository: "acme/widgets"),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["started": "acme/widgets", "plain": "acme/widgets"])
+  }
+
+  @Test func takesAStartedFollowupsRepositoryWhenNoSessionInTheFolderHasOne() {
+    let folder = "/Users/me/dev/widgets"
+    let sessions = [
+      session("plain", repo: folder), session("started", repo: folder, followup: followup("acme/widgets")),
+    ]
+
+    let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+    #expect(labels == ["plain": "acme/widgets", "started": "acme/widgets"])
   }
 }

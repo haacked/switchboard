@@ -259,6 +259,25 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(resume.account == sbd.account("A"))
   }
 
+  @Test func importsAWorktreeSessionWithItsCheckoutAndRepositoryAndNoRepo() throws {
+    let sbd = try Instance(accounts: ["A"])
+    let repo = try sbd.makeRepo("docket", origin: "git@github.com:acme/docket.git")
+    let tree = try sbd.addWorktree(repo, "haacked/parser")
+    let id = newId()
+    try sbd.writeAgents("A", [agent(id, cwd: tree, name: "parser-work", job: "0badf00d")])
+    let imported = try #require(try sbd.client.importSessions([id]).imported.first)
+
+    let s = try sbd.waitFor(imported.id, "the checkout and repository") { $0.checkout != nil && $0.repository != nil }
+
+    #expect(s.checkout == real(repo))
+    #expect(s.repository == "acme/docket")
+    #expect(s.repo == nil)
+    let removal = try sbd.run(["rm", s.id, "--worktree"])
+    #expect(removal.status != 0)
+    #expect(removal.stderr.contains("sbd didn't make a worktree for it"))
+    #expect(FileManager.default.fileExists(atPath: tree))
+  }
+
   @Test func startsAnImportedSessionThatHasNoTranscriptWithItsId() throws {
     let sbd = try Instance(accounts: ["A"])
     let id = newId()
