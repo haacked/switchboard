@@ -541,6 +541,22 @@ extension Instance {
     #expect(try sbd.get(s.id).pr?.number == 189)
   }
 
+  /// The conversation that `/clear` starts writes its transcript in the old
+  /// one's folder, which the cwd doesn't name.
+  @Test func findsThePRLinkOfTheConversationThatClearStarts() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLink()
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    let next = UUID().uuidString.lowercased()
+    try sbd.sb("send", s.id, "clear \(next)")
+    let cleared = try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
+    try sbd.link(cleared, "PostHog/charts", 18303)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
   @Test(arguments: [
     (200, "API rate limit exceeded", #"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#),
     (403, "secondary rate limit", #"{"message":"You have exceeded a secondary rate limit."}"#),
