@@ -93,6 +93,19 @@ private func fields(_ line: Substring) -> [String] {
     #expect(try list(sbd) == before)
   }
 
+  @Test func keepsARepoAfterItsWorktreeSessionIsRemoved() throws {
+    let sbd = try Instance()
+    let beta = try sbd.makeRepo("beta")
+    let s = try new(sbd, beta, "b", branch: "feat-b")
+    let before = try list(sbd)
+
+    try sbd.sb("rm", s.id)
+
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(before.map(\.path) == [real(beta)])
+    #expect(try list(sbd) == before)
+  }
+
   // MARK: Most recently used ordering
 
   @Test func listsTheRepoOfTheNewestSessionFirst() throws {

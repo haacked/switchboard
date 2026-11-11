@@ -100,7 +100,7 @@ import Testing
     #expect(last == RepoPickerList.Row.addFolder.id)
   }
 
-  @Test func theHighlightReturnsToTheFirstRowWhenTheFilterChanges() {
+  @Test func theInitialHighlightIsTheFirstRow() {
     let before = RepoPickerList(repos: Self.repos, filter: "")
     let narrowed = RepoPickerList(repos: Self.repos, filter: "o")
     let pasted = RepoPickerList(repos: Self.repos, filter: "/Users/me/Work")

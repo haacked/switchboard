@@ -6,12 +6,25 @@ import SwitchboardCore
 struct NewSessionView: View {
   /// See SessionViewState for why this isn't `@State`.
   final class Form: ObservableObject {
-    @Published var repo: KnownRepo?
+    @Published private(set) var repo: KnownRepo?
+    /// The user chose `repo`, so a newer list does not replace it.
+    private(set) var picked = false
     @Published var branch = ""
     @Published var name = ""
     @Published var prompt = ""
     /// The folder of the chosen account, or empty for the active one.
     @Published var account = ""
+
+    func pick(_ repo: KnownRepo?) {
+      self.repo = repo
+      picked = true
+    }
+
+    /// Selects the most recently used repository of `repos` until the user picks one. The sheet first
+    /// offers the list that the app kept from its last opening, then the list that sbd answers.
+    func offer(_ repos: [KnownRepo]?) {
+      if !picked { repo = repos?.first }
+    }
   }
 
   @EnvironmentObject var model: BoardModel
@@ -23,7 +36,9 @@ struct NewSessionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text("New Session").font(.title2.bold())
       SwiftUI.Form {
-        LabeledContent("Repository") { RepoPicker(selection: $form.repo) }
+        LabeledContent("Repository") {
+          RepoPicker(selection: Binding(get: { form.repo }, set: { form.pick($0) }))
+        }
         Toggle("Create a worktree", isOn: $createWorktree)
           .help("Start in a new worktree of the repository")
         if createWorktree {
@@ -59,14 +74,10 @@ struct NewSessionView: View {
     .padding(20)
     .frame(width: 560)
     .onAppear {
-      selectMostRecent()
+      form.offer(model.knownRepos)
       model.loadRepos()
     }
-    .onChange(of: model.knownRepos) { selectMostRecent() }
-  }
-
-  private func selectMostRecent() {
-    if form.repo == nil { form.repo = model.knownRepos?.first }
+    .onChange(of: model.knownRepos) { form.offer(model.knownRepos) }
   }
 
   private func start() {

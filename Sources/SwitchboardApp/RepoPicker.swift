@@ -97,11 +97,17 @@ struct RepoPicker: View {
     }
     .onAppear { DispatchQueue.main.async { focused = true } }
     .onChange(of: model.knownRepos) {
+      // Keys typed before sbd answers open the popover on a list with only the folder row.
+      if popover.open { popover.highlight = list.initialHighlight }
       if Snapshot.opensRepoPicker, model.knownRepos != nil, !popover.open { open(filter: "") }
     }
     .onChange(of: popover.filter) {
       popover.highlight = list.initialHighlight
       popover.error = nil
+    }
+    .onChange(of: popover.error) {
+      // A refusal leaves the filter and the focus as they were, so VoiceOver would say nothing.
+      if let error = popover.error { AccessibilityNotification.Announcement(error).post() }
     }
     .onChange(of: popover.open) {
       // Esc and a click outside close the popover without `close()`.
@@ -288,7 +294,7 @@ private struct RepoPickerRows: View {
     return HStack(spacing: 8) {
       switch row {
       case .repo(let repo):
-        icon("checkmark").opacity(repo.path == selected ? 1 : 0)
+        icon("checkmark").opacity(repo.path == selected ? 1 : 0).accessibilityHidden(repo.path != selected)
         VStack(alignment: .leading, spacing: 1) {
           Text(repo.name).lineLimit(1)
           Text(RepoPickerList.abbreviated(repo.path))
@@ -313,7 +319,7 @@ private struct RepoPickerRows: View {
     .onContinuousHover { if case .active = $0, popover.highlight != row.id { popover.highlight = row.id } }
     .onTapGesture { choose(row) }
     .accessibilityElement(children: .combine)
-    .accessibilityAddTraits(.isButton)
+    .accessibilityAddTraits(highlighted ? [.isButton, .isSelected] : .isButton)
     .accessibilityIdentifier(row.id)
   }
 }

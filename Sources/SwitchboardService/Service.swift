@@ -707,7 +707,7 @@ public final class Service {
     let folder = try prepareFolder(args)
     awaitMCPServers()
     let summary = try queue.sync { try create(args, folder) }
-    rememberRepo(folder, used: summary.created ?? nowMs())
+    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
     return summary
   }
 
