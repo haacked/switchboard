@@ -7,9 +7,9 @@ import AppKit
 /// In a field, the check types "one" and sets marked text as an input method does. An input method takes the
 /// Return that confirms its marked text, and a script cannot run one. So a key monitor stands in for it: it logs
 /// whether the Return handler would see the marked text, and keeps that Return from the field. The check then
-/// confirms the marked text, presses Shift+Return, types "two", and presses Return. It posts each key to the app's
-/// event queue, so SwiftUI's key handlers see it as they see a typed key. Each step logs the field's text to
-/// standard error, and the app quits at the end.
+/// confirms the marked text, presses Shift+Return, types "two", presses Shift+Return again, and presses Return.
+/// It posts each key to the app's event queue, so SwiftUI's key handlers see it as they see a typed key. Each step
+/// logs the field's text to standard error, and the app quits at the end.
 @MainActor
 enum KeySelfTest {
   static let prompt = "prompt"
@@ -19,7 +19,7 @@ enum KeySelfTest {
     guard let target = env["SB_KEY_TEST"] else { return }
     Task { @MainActor in
       if let field = await waitForField(target) {
-        await run(field, model, composes: target != prompt)
+        await run(field, model, sendsOnReturn: target != prompt)
       } else {
         log("no field \(target)")
       }
@@ -32,6 +32,7 @@ enum KeySelfTest {
   }
 
   /// A field that the check types into: the view that takes focus, and the text view that edits it.
+  @MainActor
   private struct Field {
     let view: NSView
     var text: String { (view as? NSTextField)?.stringValue ?? (view as? NSTextView)?.string ?? "" }
@@ -39,7 +40,7 @@ enum KeySelfTest {
     var focused: Bool { editor.map { $0.window?.firstResponder === $0 } ?? false }
   }
 
-  private static func run(_ field: Field, _ model: BoardModel, composes: Bool) async {
+  private static func run(_ field: Field, _ model: BoardModel, sendsOnReturn: Bool) async {
     // A view that sets its own focus as it appears, as the decision steps and the sheet do, can take focus back.
     for _ in 0..<5 where !field.focused {
       field.view.window?.makeFirstResponder(field.view)
@@ -48,17 +49,19 @@ enum KeySelfTest {
     guard field.focused, let editor = field.editor else { return log("no focus") }
     let end = NSRange(location: NSNotFound, length: 0)
     editor.insertText("one", replacementRange: end)
-    if composes { await compose(editor) }
+    if sendsOnReturn { await compose(editor) }
     press(field.view, modifiers: .shift)
     await pause()
     editor.insertText("two", replacementRange: end)
+    // A field must trim this trailing new line from the text it sends.
+    press(field.view, modifiers: .shift)
     await pause()
     log("shift-return: \(field.text.debugDescription)")
-    if !composes { log("sheet open: \(model.showingNew)") }
+    if !sendsOnReturn { log("sheet open: \(model.showingNew)") }
     press(field.view, modifiers: [])
     // A field empties once sbd accepts what it sent, and a card's field leaves the window once its card closes.
     // The prompt keeps its text.
-    for _ in 0..<(composes ? 120 : 1) where !field.text.isEmpty && field.view.window != nil {
+    for _ in 0..<(sendsOnReturn ? 120 : 1) where !field.text.isEmpty && field.view.window != nil {
       await pause()
     }
     log("return: \(field.text.debugDescription)")

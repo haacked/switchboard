@@ -621,11 +621,12 @@ CARD
     wait_for 120 app_gone || fail "the app did not finish the keys in the $view"
     end_app
     if [ "$view" = prompt ]; then
-      key_logged "$view" 'shift-return: "one\ntwo"'
+      key_logged "$view" 'shift-return: "one\ntwo\n"'
       key_logged "$view" "sheet open: true"
+      key_logged "$view" 'return: "one\ntwo\n\n"'
     else
       key_logged "$view" "composing at return: true"
-      key_logged "$view" "shift-return: $typed"
+      key_logged "$view" 'shift-return: "onex\ntwo\n"'
     fi
     key_logged "$view" done
   done
