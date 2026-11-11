@@ -3,7 +3,7 @@
 #
 #   bin/measure              measures 25 and then 50 stub sessions
 #   bin/measure 10 25 100    measures each count in turn
-#   bin/measure --cap 10 25  holds the live stubs to 10
+#   bin/measure --cap 7 25   holds the live stubs to 7
 #   bin/measure --running    measures the sbd that runs now, with real claude
 #   bin/measure --running --json
 #
@@ -12,9 +12,10 @@
 # tests, which stays idle at its prompt. For each count, it adds sessions until
 # that many exist. It then reports the memory of sbd, of the terminals (the
 # tmux server and the panes' shells), and of the stub claudes, and the median
-# wall time of `sb ls` and `sb ls --json`. The live cap is unlimited unless
-# --cap sets it. The stub stands in for claude, so its memory says nothing
-# about claude's. The panes run your login shell, as the installed sbd's do.
+# wall time of `sb ls` and `sb ls --json`. sbd's live cap limits how many
+# stubs run: --cap sets it, and sbd's default applies otherwise. The stub
+# stands in for claude, so its memory says nothing about claude's. The panes
+# run your login shell, as the installed sbd's do.
 #
 # With --running, it starts and stops nothing. It reads the sbd at SB_HOME
 # (~/.sb by default) through the sb on your PATH, or the one in SB_BIN_DIR, and

@@ -53,16 +53,21 @@ private func runningSessions(_ sbd: Instance, _ count: Int) throws -> [String] {
     var total: Group
   }
 
-  func measure(_ sbd: Instance) throws -> Report {
+  /// The output of `bin/measure --running` with `flags` after it.
+  func output(_ sbd: Instance, _ flags: [String] = []) throws -> String {
     let script = Instance.root.appendingPathComponent("bin/measure").path
-    let r = try runCommand(script, ["--running", "--json"], env: sbd.environment(["SB_BIN_DIR": Instance.bin]))
+    let r = try runCommand(script, ["--running"] + flags, env: sbd.environment(["SB_BIN_DIR": Instance.bin]))
     guard r.status == 0 else { throw TestError(description: "bin/measure --running failed: \(r.stderr)") }
-    return try JSONDecoder().decode(Report.self, from: Data(r.stdout.utf8))
+    return r.stdout
+  }
+
+  func measure(_ sbd: Instance) throws -> Report {
+    try JSONCoding.decode(Report.self, from: try output(sbd, ["--json"]))
   }
 
   @Test func reportsTheMemoryOfEachGroup() throws {
     let sbd = try Instance(config: ["liveCap": 7])
-    let ids = try runningSessions(sbd, 2)
+    _ = try runningSessions(sbd, 2)
 
     let report = try measure(sbd)
 
@@ -71,7 +76,8 @@ private func runningSessions(_ sbd: Instance, _ count: Int) throws -> [String] {
     #expect(report.live == 2)
     #expect(report.cap == 7)
     #expect(report.groups.keys.sorted() == ["app", "claude", "sbd", "terminals", "tools"])
-    #expect(report.groups["sbd"]?.processes == 1)
+    // sbd starts tmux and ps on each tick, and they count while they run.
+    #expect((report.groups["sbd"]?.processes ?? 0) >= 1)
     // The app that shows another home, such as the installed one on a
     // developer's machine, is not this home's app.
     #expect(report.groups["app"]?.processes == 0)
@@ -85,6 +91,29 @@ private func runningSessions(_ sbd: Instance, _ count: Int) throws -> [String] {
       #expect((report.groups[name]?.footprintKB ?? 0) > 0, "\(name) has no footprint")
       #expect((report.groups[name]?.residentKB ?? 0) > 0, "\(name) has no resident size")
     }
+  }
+
+  @Test func printsATableWithoutJSON() throws {
+    let sbd = try Instance(config: ["liveCap": 7])
+    _ = try runningSessions(sbd, 2)
+
+    let table = try output(sbd)
+
+    #expect(table.contains("2 sessions, 2 live claude processes, cap 7"))
+    for name in ["group", "sbd", "terminals", "claude", "tools", "app", "total"] {
+      #expect(table.contains("\n\(name) "), "the table has no \(name) row")
+    }
+  }
+
+  @Test func countsAProcessThatClaudeStartedAsATool() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "background 100 held")
+    try sbd.waitFor(s.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+
+    let report = try measure(sbd)
+
+    #expect(report.groups["claude"]?.processes == 1)
+    #expect((report.groups["tools"]?.processes ?? 0) >= 1)
   }
 
   @Test func leavesOutAStoppedSessionsClaude() throws {
