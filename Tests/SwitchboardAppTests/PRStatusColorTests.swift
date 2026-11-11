@@ -27,3 +27,14 @@ import Testing
     }
   }
 }
+
+@Suite struct QueueBadgeColors {
+  // nil is GitHub's merge queue.
+  @Test(arguments: [
+    (TrunkQueueState?.some(.submitted), Color.purple), (.pending, .purple), (.testing, .purple), (.queued, .purple),
+    (nil, .purple), (.passed, .green), (.failing, .red), (.removed, .red),
+  ])
+  func tintsTheQueueState(_ queue: TrunkQueueState?, _ color: Color) {
+    #expect(QueueBadge.color(for: queue) == color)
+  }
+}

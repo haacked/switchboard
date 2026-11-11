@@ -339,6 +339,21 @@ public struct PRSummary: Codable, Equatable, Sendable {
     codeOwners = CodeOwnerStatus(pr)
   }
 
+  /// Where a merge queue holds the PR, for the session's tiles, or nil when
+  /// no queue holds it. A merged or closed PR keeps its last queue state.
+  /// Trunk drops a draft from its queue. Neither shows a state here.
+  public var queueWord: String? {
+    guard state == .open, status != .draft else { return nil }
+    return queue?.word ?? (inMergeQueue == true ? "Queued" : nil)
+  }
+
+  /// The queue state for `line` and the PR tooltip, such as "Trunk testing".
+  /// Trunk's own label, such as "Cancelled", wins over sbd's state.
+  public var queueWords: String? {
+    if let queue, queue != .unknown { return "Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
+    return inMergeQueue == true ? "in the merge queue" : nil
+  }
+
   /// The PR's page, or nil unless `url` is https. Any local process can
   /// record a `pr` event, and the app opens this link when the user clicks it.
   public var link: URL? { URL(httpsOnly: url) }
@@ -347,7 +362,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// testing".
   public var line: String {
     var line = "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")"
-    if let queue, queue != .unknown { line += ", Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
+    if let queueWords { line += ", \(queueWords)" }
     if trunkLoginNeeded == true { line += "; trunk login needed" }
     return line
   }

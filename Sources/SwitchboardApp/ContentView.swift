@@ -342,7 +342,7 @@ struct ManagerButton: View {
 
 extension PRSummary {
   var numberLabel: String { "#\(number)" }
-  var tooltip: String { "\(status.rawValue) · \(repo): \(title)" }
+  var tooltip: String { "\(status.rawValue)\(queueWords.map { ", \($0)" } ?? "") · \(repo): \(title)" }
 }
 
 struct SessionRow: View {
@@ -373,6 +373,7 @@ struct SessionRow: View {
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
+              QueueBadge(pr: pr)
               if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
             }
           }
@@ -879,8 +880,12 @@ struct BoardCard: View {
           }
           CleanupNote(session: s)
           MergeNote(session: s)
-          Text(statusLine)
-            .font(.caption2).foregroundStyle(.tertiary)
+          // A Board column is too narrow for the badge beside the PR number.
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let pr = s.pr { QueueBadge(pr: pr) }
+            Text(statusLine)
+              .font(.caption2).foregroundStyle(.tertiary)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)

@@ -144,3 +144,61 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
     #expect(decoded.reviewDecisionRead == true)
   }
 }
+
+@Suite struct PRSummaryQueueWords {
+  @Test(arguments: [
+    (TrunkQueueState.submitted, "Submitted"),
+    (.pending, "Waiting"),
+    (.testing, "Testing"),
+    (.passed, "Passed"),
+    (.failing, "Failing"),
+    (.queued, "Queued"),
+    (.removed, "Removed"),
+  ])
+  func namesEachTrunkState(_ queue: TrunkQueueState, _ word: String) {
+    #expect(PRSummary(samplePR(reviewDecision: .approved, queue: queue)).queueWord == word)
+  }
+
+  @Test(arguments: [TrunkQueueState.unknown, .merged])
+  func namesNoTrunkStateThatHoldsNothing(_ queue: TrunkQueueState) {
+    #expect(PRSummary(samplePR(queue: queue)).queueWord == nil)
+  }
+
+  @Test(arguments: [nil, TrunkQueueState.unknown])
+  func namesGitHubsMergeQueue(_ queue: TrunkQueueState?) {
+    var pr = samplePR(reviewDecision: .approved, queue: queue)
+    pr.inMergeQueue = true
+
+    #expect(PRSummary(pr).queueWord == "Queued")
+    #expect(PRSummary(pr).line == "#42 Approved, in the merge queue")
+  }
+
+  @Test(arguments: [
+    samplePR(state: .merged, queue: .testing), samplePR(state: .closed, queue: .removed),
+    samplePR(draft: true, queue: .submitted),
+    {
+      var pr = samplePR(draft: true)
+      pr.inMergeQueue = true
+      return pr
+    }(),
+  ])
+  func namesNoQueueOnATileForAPRThatCannotBeQueued(_ pr: PullRequest) {
+    #expect(PRSummary(pr).queueWord == nil)
+  }
+
+  @Test func keepsTrunksLastStateInTheLineOfAClosedPR() {
+    var pr = samplePR(state: .closed, queue: .removed)
+    pr.queueLabel = "Cancelled"
+
+    #expect(PRSummary(pr).line == "#42 Closed, Trunk cancelled")
+  }
+
+  @Test func prefersTrunksOwnLabelInTheWords() {
+    var pr = samplePR(reviewDecision: .approved, queue: .removed)
+    pr.queueLabel = "Cancelled"
+
+    #expect(PRSummary(pr).queueWord == "Removed")
+    #expect(PRSummary(pr).queueWords == "Trunk cancelled")
+    #expect(PRSummary(pr).line == "#42 Approved, Trunk cancelled")
+  }
+}
