@@ -653,6 +653,24 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr == nil)
   }
 
+  /// The current transcript does not hold a link from before `/clear`, so a
+  /// reread after a remote change can't find it again.
+  @Test func keepsAPRLinkedBeforeClearWhenAnotherRemoteIsAdded() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    try sbd.clear(s)
+    try sbd.poll()
+
+    try sbd.git(s.cwd, "remote", "add", "fork", "https://github.com/haacked/posthog.git")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
   /// A session that an older sbd linked to a PR from a repo that no remote
   /// names loses it at the first poll of the new sbd.
   @Test func clearsARecordedPRFromAnotherRepoAfterARestart() throws {
@@ -730,6 +748,21 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 189)
   }
 
+  @Test func keepsRefusingAForeignLinkWhileGitCannotReadTheConfig() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.poll()
+    let config = "\(s.cwd)/.git/config"
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: config)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: config) }
+    try sbd.link(s, "haacked/review-code", 189)
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
   /// A checkout without a GitHub remote has unknown remotes, which keep the PR.
   @Test(arguments: [
     ("no remote", nil as String?),
@@ -787,6 +820,23 @@ extension FakeGitHub {
 
     #expect(try sbd.get(s.id).pr?.number == 18303)
     #expect(github.lookedUp.contains("PostHog/charts#18303"))
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  /// `gh repo set-default` names a fork's parent without a remote for it.
+  @Test func acceptsALinkedPRFromTheRepoThatGhResolvedNames() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "haacked/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.git(s.cwd, "config", "remote.origin.gh-resolved", "PostHog/charts")
+    try sbd.link(s, "PostHog/charts", 18303)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 18303)
     sbd.stopSbd()
     try sbd.startSbd()
     try sbd.poll(all: true)

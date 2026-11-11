@@ -573,11 +573,19 @@ public enum GitHub {
   }
 
   /// The lowercased owner/name of every GitHub remote in `config`, which
-  /// holds the git config values by key.
+  /// holds the git config values by key, and of gh's default repo.
+  /// `gh repo set-default` can name a fork's parent, which no remote's URL
+  /// names. gh then stores the parent's owner/name in `gh-resolved` and
+  /// opens PRs there.
   public static func repositories(config: [String: String]) -> Set<String> {
     Set(
-      config.compactMap { key, url in
-        key.hasPrefix("remote.") && key.hasSuffix(".url") ? repo(remoteURL: url)?.lowercased() : nil
+      config.compactMap { key, value in
+        guard key.hasPrefix("remote.") else { return nil }
+        if key.hasSuffix(".url") { return repo(remoteURL: value)?.lowercased() }
+        if key.hasSuffix(".gh-resolved"), value != "base", value.split(separator: "/").count == 2 {
+          return value.lowercased()
+        }
+        return nil
       })
   }
 

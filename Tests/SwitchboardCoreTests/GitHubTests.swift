@@ -745,6 +745,15 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(repositories == ["haacked/posthog", "posthog/posthog", "posthog/charts"])
   }
 
+  @Test func repositoriesIncludesTheDefaultRepoThatGhResolvedNames() {
+    let config = [
+      "remote.origin.url": "https://github.com/haacked/supacode.git",
+      "remote.origin.gh-resolved": "supabitapp/Supacode",
+    ]
+
+    #expect(GitHub.repositories(config: config) == ["haacked/supacode", "supabitapp/supacode"])
+  }
+
   @Test(arguments: [
     [String: String](),
     ["branch.main.remote": "origin", "branch.main.merge": "refs/heads/main", "remote.pushdefault": "origin"],

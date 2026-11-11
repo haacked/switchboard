@@ -196,4 +196,21 @@ import Testing
     let sessions = try listed(sbd, [later.id], inGit: [later.id])
     #expect(sessions[0].checkout == real(folder))
   }
+
+  @Test func readsARepositoryAgainAMinuteAfterItFoundNoGitHubOrigin() throws {
+    let sbd = try Instance()
+    let beta = try sbd.makeRepo("beta")
+    let main = try new(sbd, beta, "main")
+    // A checkout with a GitHub origin, read after the one under test.
+    let control = try new(
+      sbd, try sbd.makeRepo("gamma", origin: "https://github.com/acme/gamma.git"), "control")
+    _ = try listed(sbd, [main.id, control.id], inGit: [main.id, control.id], withOrigin: [control.id])
+    try sbd.git(beta, "remote", "add", "origin", "https://github.com/acme/beta.git")
+
+    #expect(try sbd.get(main.id).repository == nil)
+    try sbd.advanceClock(61_000)
+
+    let sessions = try listed(sbd, [main.id], inGit: [main.id], withOrigin: [main.id])
+    #expect(sessions[0].repository == "acme/beta")
+  }
 }

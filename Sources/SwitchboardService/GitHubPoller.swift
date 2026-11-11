@@ -92,8 +92,9 @@ final class GitHubPoller {
     /// When the poller last looked the key up. nil until the first lookup.
     var lookedUp: Int64?
     /// The lowercased owner/name of each GitHub remote in the repo's config.
-    /// It is empty outside git, for a folder that can't be read, and for a
-    /// repo with no GitHub remote.
+    /// It is empty outside git, until git first reads the config, and for a
+    /// repo with no GitHub remote. A failed read keeps the remotes of the
+    /// last good read.
     var repositories: Set<String> = []
 
     /// Whether a PR in `repo` can be the session's: one of the repo's
@@ -251,12 +252,15 @@ final class GitHubPoller {
     refreshBranch(&t.branch, cwd: s.cwd, on: s.machine, all: all, now: now, configs: &shared.configs)
     // A link that the old remotes refused can count under the new ones. A
     // link that they allowed may not. The poller reads the transcript again
-    // from its start.
+    // from its start. It keeps a link that the new remotes still allow,
+    // because a link from before `/clear` is not in the current transcript.
     if t.branch.repositories != repositories {
       t.transcript.offset = 0
-      t.transcript.link = nil
-      t.transcript.prId = nil
-      t.transcript.lookedUp = false
+      if case .number(let repo, _)? = t.transcript.link, !t.branch.allows(repo) {
+        t.transcript.link = nil
+        t.transcript.prId = nil
+        t.transcript.lookedUp = false
+      }
     }
     if let id = t.recordedPRId, let repo = prs[id]?.pr.repo ?? s.facts.pr.flatMap({ $0.id == id ? $0.repo : nil }),
       !t.branch.allows(repo)
@@ -627,15 +631,17 @@ final class GitHubPoller {
           changed = true
         }
       }
-    } else if let pr = s.facts.pr,
-      !t.branch.allows(pr.repo)
-        || (t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp))
-    {
-      // No remote of the session's repo names the PR's repo, or GitHub
-      // answered that the branch has no PR. Without a branch, as in a folder
-      // outside git, the session keeps the PR that it had.
-      event(s.id, "pr", ["pr": .null, "comments": []])
-      changed = true
+    } else if let pr = s.facts.pr {
+      let noRemoteNamesIt = !t.branch.allows(pr.repo)
+      let branchHasNoPR =
+        t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp)
+      // A session without a branch, as in a folder outside git or with HEAD
+      // detached, keeps its PR only while its remotes are unknown or one of
+      // them names the PR's repo.
+      if noRemoteNamesIt || branchHasNoPR {
+        event(s.id, "pr", ["pr": .null, "comments": []])
+        changed = true
+      }
     }
     return changed
   }
