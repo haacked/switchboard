@@ -99,9 +99,11 @@ struct RepoPicker: View {
     .onChange(of: model.knownRepos) { old, _ in
       // Keys typed before sbd answers open the popover on only the Add repository… row. The highlight moves
       // to the new first row unless the user moved it to a row that the new list still has.
-      let before = RepoPickerList(repos: old ?? [], filter: popover.filter)
-      if popover.open, popover.highlight == before.initialHighlight || list.row(popover.highlight) == nil {
-        popover.highlight = list.initialHighlight
+      if popover.open {
+        let before = RepoPickerList(repos: old ?? [], filter: popover.filter)
+        if popover.highlight == before.initialHighlight || list.row(popover.highlight) == nil {
+          popover.highlight = list.initialHighlight
+        }
       }
       if Snapshot.opensRepoPicker, model.knownRepos != nil, !popover.open { open(filter: "") }
     }

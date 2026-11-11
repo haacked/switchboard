@@ -931,9 +931,7 @@ final class BoardModel: ObservableObject {
   /// returns preselects it, because the sheet's `repos` request waits behind `new` on `worker`.
   func create(_ args: NewSession) {
     guard let json = try? JSON(encoding: args).object else { return }
-    if let repo = knownRepos?.first(where: { $0.path == args.path }) {
-      knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
-    }
+    if let repo = knownRepos?.first(where: { $0.path == args.path }) { moveToFront(repo) }
     perform("new", json) { value in
       if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
@@ -952,12 +950,15 @@ final class BoardModel: ObservableObject {
       "repo-add", ["path": .string(path.expandingTilde)],
       then: { value in
         let result = Result { try JSONCoding.convert(value, to: KnownRepo.self) }
-        if let repo = try? result.get() {
-          self.knownRepos = [repo] + (self.knownRepos ?? []).filter { $0.path != repo.path }
-        }
+        if let repo = try? result.get() { self.moveToFront(repo) }
         then(result)
       },
       failed: { then(.failure($0)) })
+  }
+
+  /// Puts `repo` first in `knownRepos` and drops any other row with its path.
+  private func moveToFront(_ repo: KnownRepo) {
+    knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
   }
 
   /// Asks sbd for the session's tmux targets. It blocks, so it runs off the
