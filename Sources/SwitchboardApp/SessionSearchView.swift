@@ -63,6 +63,18 @@ struct SessionSearchView: View {
       fieldFocused = true
     }
     .onChange(of: search.query) { search.highlighted = nil }
+    // Focus stays in the field, so VoiceOver does not read the highlighted row. A query edit resets `highlighted` to
+    // nil, so only the arrows announce a row.
+    .onChange(of: search.highlighted) {
+      if let name = results.first(where: { $0.id == search.highlighted })?.session.name {
+        AccessibilityNotification.Announcement(name).post()
+      }
+    }
+    .onChange(of: results.isEmpty) {
+      if results.isEmpty && !search.sessions.isEmpty {
+        AccessibilityNotification.Announcement("No sessions match").post()
+      }
+    }
     .onExitCommand { model.showingSearch = false }
   }
 

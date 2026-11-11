@@ -2,8 +2,8 @@ import Foundation
 
 /// Finds sessions by what the user types, for the app's search panel.
 public enum SessionSearch {
-  /// The fields that a query searches. The order breaks ties between fields.
-  public enum Field: String, CaseIterable, Sendable {
+  /// The fields that a query searches.
+  public enum Field: Sendable {
     case name, branch, pr, issue, repo, prTitle, group, reason, note
 
     var weight: Int {
@@ -40,7 +40,8 @@ public enum SessionSearch {
       }
     }
 
-    /// Whether a result row shows the field, so a match in it needs no hint.
+    /// Whether a result row shows the field, so a match in it needs no hint. `searchable` overrides it for a value
+    /// that the row leaves out.
     public var shownOnRow: Bool {
       switch self {
       case .name, .branch, .pr, .issue, .repo: true
@@ -77,7 +78,7 @@ public enum SessionSearch {
       return term.first == "#" && !digits.isEmpty && digits.allSatisfy(\.isASCII) && digits.allSatisfy(\.isNumber)
         ? String(digits) : String(term)
     }
-    let labels = RepoLabels.labels(sessions, evenForOneRepo: true)
+    let labels = RepoLabels.fullLabels(sessions, evenForOneRepo: true)
     var results: [(result: Result, name: String)] = []
     sessions: for s in sessions {
       let values = searchable(s, repo: labels[s.id])
@@ -86,10 +87,11 @@ public enum SessionSearch {
       for term in terms {
         guard let best = bestHit(term, in: values) else { continue sessions }
         score += best.score
-        if hint == nil, !best.hit.field.shownOnRow { hint = best.hit }
+        if hint == nil, !best.value.shown { hint = Hit(field: best.value.field, text: best.value.text) }
       }
       // `searchable` puts the name first.
-      results.append((Result(session: s, repo: labels[s.id], score: score, hint: hint), values[0].folded))
+      let result = Result(session: s, repo: labels[s.id].map(RepoLabels.capped), score: score, hint: hint)
+      results.append((result, values[0].folded))
     }
     results.sort { a, b in
       if a.result.score != b.result.score { return a.result.score > b.result.score }
@@ -143,32 +145,42 @@ public enum SessionSearch {
     var field: Field
     var text: String
     var folded: String
+    /// Whether the result row shows this value, so a match in it needs no hint.
+    var shown: Bool
   }
 
-  /// The session's searchable values in `Field` order.
+  /// The session's searchable values. `bestHit` keeps the earlier of two values with the same score, so this
+  /// order breaks ties between fields. `repo` is the full label, before `RepoLabels.capped` shortens it for the row.
   private static func searchable(_ s: SessionSummary, repo: String?) -> [Value] {
-    var values: [(Field, String)] = [(.name, s.name)]
-    if let branch = s.branch { values.append((.branch, branch)) }
-    if let pr = s.pr { values.append((.pr, String(pr.number))) }
-    for issue in s.issues ?? [] { values.append((.issue, String(issue.number))) }
-    if let repo { values.append((.repo, repo)) }
-    if let pr = s.pr {
-      values.append((.repo, pr.repo))
-      values.append((.prTitle, pr.title))
+    var values: [Value] = []
+    func add(_ field: Field, _ text: String, shown: Bool? = nil) {
+      values.append(Value(field: field, text: text, folded: fold(text), shown: shown ?? field.shownOnRow))
     }
-    if let group = s.groupName { values.append((.group, group)) }
-    values.append((.reason, s.reason))
-    for note in s.notes { values.append((.note, note.text)) }
-    return values.map { Value(field: $0.0, text: $0.1, folded: fold($0.1)) }
+    add(.name, s.name)
+    if let branch = s.branch { add(.branch, branch) }
+    if let pr = s.pr { add(.pr, String(pr.number)) }
+    // The row's issue badge names only the first issue.
+    for (i, issue) in (s.issues ?? []).enumerated() { add(.issue, String(issue.number), shown: i == 0) }
+    if let repo { add(.repo, repo, shown: RepoLabels.capped(repo) == repo) }
+    if let pr = s.pr {
+      // The row shows the folder's label, not the PR's owner/name. When the two are equal, the label comes first
+      // and wins the tie.
+      add(.repo, pr.repo, shown: false)
+      add(.prTitle, pr.title)
+    }
+    if let group = s.groupName { add(.group, group) }
+    add(.reason, s.reason)
+    for note in s.notes { add(.note, note.text) }
+    return values
   }
 
   /// The highest-scoring value for `term`. A tie goes to the earlier value.
-  private static func bestHit(_ term: String, in values: [Value]) -> (hit: Hit, score: Int)? {
-    var best: (hit: Hit, score: Int)?
+  private static func bestHit(_ term: String, in values: [Value]) -> (value: Value, score: Int)? {
+    var best: (value: Value, score: Int)?
     for v in values {
       guard let t = tier(term, in: v.folded, subsequence: v.field.allowsSubsequence) else { continue }
       let score = t * v.field.weight
-      if score > best?.score ?? 0 { best = (Hit(field: v.field, text: v.text), score) }
+      if score > best?.score ?? 0 { best = (v, score) }
     }
     return best
   }

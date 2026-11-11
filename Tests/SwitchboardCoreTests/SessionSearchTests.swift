@@ -204,10 +204,40 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
     #expect(ids(sessions, "haacked/switchboard") == ["s"])
   }
 
-  @Test func subsequenceAppliesToTheNameButNotToNotes() {
-    let sessions = [session("a", name: "fix-kafka-timeout"), session("b", name: "other", notes: ["fake kafka test"])]
+  /// `27` is a subsequence of 217 but not a substring, so only a gapped match would find the PR or issue.
+  @Test(arguments: [
+    (SessionSearch.Field.name, true), (.branch, true), (.repo, true), (.group, true),
+    (.pr, false), (.issue, false), (.prTitle, false), (.reason, false), (.note, false),
+  ])
+  func subsequenceFollowsTheField(_ field: SessionSearch.Field, _ allowed: Bool) {
+    let text = "fix-kafka-timeout"
+    let target =
+      switch field {
+      case .name: session("s", name: text)
+      case .branch: session("s", branch: text)
+      case .repo: session("s", repo: "/Users/me/dev/o/\(text)")
+      case .group: session("s", group: text)
+      case .pr: session("s", pr: pr(217))
+      case .issue: session("s", issues: [217])
+      case .prTitle: session("s", pr: pr(5, title: text))
+      case .reason: session("s", reason: text)
+      case .note: session("s", notes: [text])
+      }
+    let query = field == .pr || field == .issue ? "27" : "fkt"
 
-    #expect(ids(sessions, "fkt") == ["a"])
+    #expect(ids([target, session("other")], query) == (allowed ? ["s"] : []))
+  }
+
+  /// `capped` shortens the label to `…ong-repository-name-for-tests` for the row.
+  @Test func aLongRepoNameMatchesByItsStart() throws {
+    let folder = "/Users/me/dev/acme/a-very-long-repository-name-for-tests"
+    let sessions = [session("s", repo: folder), session("other")]
+
+    let result = try #require(SessionSearch.rank(sessions, query: "a-very").first)
+
+    #expect(ids(sessions, "a-very") == ["s"])
+    #expect(result.repo == "…ong-repository-name-for-tests")
+    #expect(result.hint == SessionSearch.Hit(field: .repo, text: "a-very-long-repository-name-for-tests"))
   }
 
   @Test func sessionsWithoutBranchPRGroupOrNotesStillMatchByName() {
@@ -326,6 +356,30 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
     #expect(result.hint == SessionSearch.Hit(field: .prTitle, text: "Show the Merge queue badge"))
   }
 
+  /// The row's issue badge names only the first issue.
+  @Test(arguments: [
+    ("12", SessionSearch.Hit?.none), ("141", SessionSearch.Hit(field: .issue, text: "141")),
+  ])
+  func aMatchOnALaterIssueGivesAnIssueHint(_ query: String, _ hint: SessionSearch.Hit?) throws {
+    let sessions = [session("s", issues: [12, 141])]
+
+    let result = try #require(SessionSearch.rank(sessions, query: query).first)
+
+    #expect(result.hint == hint)
+  }
+
+  /// The row shows the label `widgets`, not the PR's `acme/widgets`.
+  @Test(arguments: [
+    ("widgets", SessionSearch.Hit?.none), ("acme", SessionSearch.Hit(field: .repo, text: "acme/widgets")),
+  ])
+  func aMatchOnThePRsOwnerGivesARepoHint(_ query: String, _ hint: SessionSearch.Hit?) throws {
+    let sessions = [session("s", pr: pr(1, repo: "acme/widgets"))]
+
+    let result = try #require(SessionSearch.rank(sessions, query: query).first)
+
+    #expect(result.hint == hint)
+  }
+
   /// The note also holds the term, so only the best field's place on the row decides.
   @Test func aNameMatchGivesNoHint() throws {
     let sessions = [session("s", name: "queue-badge", notes: ["Check the queue colors"])]
@@ -348,7 +402,7 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
     #expect(result.hint == hint)
   }
 
-  /// The PR title and the group have the same weight, and the PR title comes first in `Field.allCases`.
+  /// The PR title and the group have the same weight, and `searchable` adds the PR title first.
   @Test func aTieBetweenFieldsGoesToTheEarlierField() throws {
     let sessions = [session("s", pr: pr(5, title: "Queue badge"), group: "Queue work")]
 
