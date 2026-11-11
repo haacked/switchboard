@@ -209,14 +209,14 @@ extension Service {
     try runHeadless(arguments, input: input, env: env, folder: home.path, timeout: config.triage.timeoutSeconds)
   }
 
-  /// Why a model call does not run: the account has no quota left, or the
-  /// session had its calls for the hour.
   /// Why the turn summary does not run: the session wrote its card, or the budget is spent.
   private func summarySkip(_ facts: SessionFacts, account: String) -> String? {
     if facts.sessionSummary != nil { return "the session wrote its card" }
     return budgetSkip(facts, account: account)
   }
 
+  /// Why a model call does not run: the account has no quota left, or the
+  /// session had its calls for the hour.
   private func budgetSkip(_ facts: SessionFacts, account: String) -> String? {
     if !quota.hasBudget(account: account) { return "no quota left for \(account)" }
     let now = nowMs()

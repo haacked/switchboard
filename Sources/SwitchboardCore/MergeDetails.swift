@@ -170,10 +170,8 @@ public struct MergeDetails: Codable, Equatable, Sendable {
 
   /// The text's sentences that say something was not tested, each cut to one line.
   static func gapSentences(_ text: String) -> [String] {
-    Attention.sentences(text, trimming: .whitespaces).filter {
-      gap.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
-    }
-    .map { oneLine($0, max: TriageCard.lineLength) }
+    Attention.sentences(text, trimming: .whitespaces).filter { matches(gap, $0) }
+      .map { oneLine($0, max: TriageCard.lineLength) }
   }
 
   /// Whether `text` says only what `title` says, ignoring case, spaces, and
