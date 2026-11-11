@@ -324,7 +324,10 @@ public struct Wait: Codable, Equatable, Sendable {
   /// Reads a duration after `now` (`90s`, `30m`, `2h`, `1d`, `1w`), a date
   /// (`2026-10-26`, midnight in `zone`), a date and time in `zone`
   /// (`2026-10-26T09:00`, `2026-10-26 09:00`, optionally with seconds), or an
-  /// ISO 8601 time with a zone. Returns ms since the epoch.
+  /// ISO 8601 time with a zone. Returns ms since the epoch. A local time that
+  /// `zone` skips at a daylight-saving change moves forward by the length of
+  /// the skip, so `02:30` on a day that jumps from 02:00 to 03:00 reads as
+  /// `03:30`.
   public static func parseTime(_ text: String, now: Int64, zone: TimeZone = .current) -> Int64? {
     let text = text.trimmingCharacters(in: .whitespaces)
     if let unit = text.last.flatMap({ units[$0] }) {
@@ -334,8 +337,24 @@ public struct Wait: Codable, Equatable, Sendable {
       let (time, later) = now.addingReportingOverflow(ms)
       return overflow || later ? nil : time
     }
-    let local = localFormats.lazy.compactMap { formatter($0, zone).date(from: text) }
-    return (ISO8601DateFormatter().date(from: text) ?? local.first).map { Int64($0.timeIntervalSince1970 * 1000) }
+    // The zone formatter reads a time that the zone repeats as the later one.
+    // Calendar would read it as the earlier one, so it only handles skips.
+    let local =
+      localFormats.lazy.compactMap { formatter($0, zone).date(from: text) }.first
+      ?? localFormats.lazy.compactMap { skippedTime(text, $0, zone) }.first
+    return (ISO8601DateFormatter().date(from: text) ?? local).map { Int64($0.timeIntervalSince1970 * 1000) }
+  }
+
+  /// The strict zone formatter refuses a time that `zone` skips. GMT skips no
+  /// time, so a GMT parse checks the text, and Calendar then moves the parts
+  /// past the skip. Calendar alone would also accept `25:00` and `02-30`.
+  static func skippedTime(_ text: String, _ format: String, _ zone: TimeZone) -> Date? {
+    guard let wall = formatter(format, .gmt).date(from: text) else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .gmt
+    let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: wall)
+    calendar.timeZone = zone
+    return calendar.date(from: parts)
   }
 
   static func formatter(_ format: String, _ zone: TimeZone) -> DateFormatter {

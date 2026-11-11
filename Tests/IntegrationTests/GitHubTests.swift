@@ -69,8 +69,8 @@ extension Instance {
   }
 
   /// Replaces the transcript that the stub wrote in the cwd's folder with
-  /// one at `transcript(s)`. The poller would find the stub's copy instead
-  /// when its folder lists first.
+  /// one at `transcript(s)`. The poller looks in the cwd's folder first.
+  /// It would otherwise read the stub's copy.
   func writeTranscript(_ s: SessionSummary, _ lines: [String]) throws {
     if let stub = Transcript.find(s.claudeSessionId, account: claudeConfig, cwd: s.cwd) {
       try FileManager.default.removeItem(atPath: stub)
@@ -539,6 +539,26 @@ extension Instance {
     try sbd.startSbd()
     try sbd.poll(all: true)
     #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// The conversation that `/clear` starts writes its transcript in the old
+  /// one's folder, which the cwd doesn't name.
+  @Test func findsThePRLinkOfTheConversationThatClearStarts() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLink()
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    let next = UUID().uuidString.lowercased()
+    try sbd.sb("send", s.id, "clear \(next)")
+    let cleared = try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
+    // The stub writes the new transcript after sbd switches the session id.
+    try sbd.waitFor("the stub's transcript of the new conversation") {
+      Transcript.find(next, account: sbd.claudeConfig, cwd: s.cwd) != nil
+    }
+    try sbd.link(cleared, "PostHog/charts", 18303)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
   @Test(arguments: [
