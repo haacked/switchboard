@@ -276,9 +276,12 @@ final class TerminalHost {
   }
 
   /// The visible screen as text, with wrapped lines joined. `history` adds
-  /// that many lines of scrollback above it.
-  func screen(_ name: String, history: Int = 0) throws -> String {
-    try run(["capture-pane", "-p", "-J"] + (history > 0 ? ["-S", "-\(history)"] : []) + ["-t", "=\(name):"])
+  /// that many lines of scrollback above it. `colors` keeps the colors as
+  /// SGR escape sequences, which `ClaudeScreen.promptIsEmpty` reads.
+  func screen(_ name: String, history: Int = 0, colors: Bool = false) throws -> String {
+    try run(
+      ["capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + (history > 0 ? ["-S", "-\(history)"] : [])
+        + ["-t", "=\(name):"])
   }
 
   /// The last `count` lines that the pane's program printed, without the

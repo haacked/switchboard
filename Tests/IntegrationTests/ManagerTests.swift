@@ -268,6 +268,11 @@ import Testing
     try expectNoSecondAnnouncement(after: try returnPR(as: 18303))
 
     try dropPR()
+    // A restart in the middle of a paste leaves the pasted text in claude's
+    // prompt box, and that text holds every later message.
+    try sbd.waitFor(parent.id, "the parent's reply to the notice") {
+      $0.lastReply?.contains("(\(kid.id)) needs you") == true
+    }
     try sbd.restart(setting: "tickSeconds", to: 0.2)
     try #require(try sbd.get(kid.id).pr == nil)
     try expectNoSecondAnnouncement(after: try returnPR(as: 18303))

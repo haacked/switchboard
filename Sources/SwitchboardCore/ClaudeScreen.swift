@@ -93,6 +93,81 @@ public enum ClaudeScreen {
     line.range(of: "^(⏺|  ⎿|❯ (?![0-9]+\\. ))", options: .regularExpression) != nil
   }
 
+  /// Whether Claude Code's prompt box holds no typed text, read from a
+  /// screen that `capture-pane -e -J` captured with its colors. The box is
+  /// the lines from a line that starts with ❯ and a no-break space down to
+  /// the next full-width rule, below the last rule that such a line follows.
+  /// A past prompt and a menu item put a plain space after their ❯. Claude
+  /// Code draws its placeholder and its prompt suggestion dim (SGR 2), so
+  /// dim text does not count as typed. A draft can start on a later line of
+  /// the box. Without a box, as while a dialog or a menu shows, the answer
+  /// is false.
+  public static func promptIsEmpty(_ coloredScreen: String) -> Bool {
+    let lines = styledLines(coloredScreen)
+    let plain = lines.map { String($0.map(\.char)) }
+    guard let top = plain.indices.dropLast().last(where: { isRule(plain[$0]) && plain[$0 + 1].hasPrefix("❯\u{A0}") }),
+      let bottom = plain[(top + 1)...].firstIndex(where: isRule)
+    else { return false }
+    let box = lines[(top + 1)..<bottom].joined().dropFirst()
+    return box.allSatisfy { $0.dim || $0.char.isWhitespace }
+  }
+
+  /// The screen's lines, each character with whether SGR 2 dims it. The
+  /// attributes carry across lines, as tmux prints them.
+  static func styledLines(_ screen: String) -> [[(char: Character, dim: Bool)]] {
+    var lines: [[(char: Character, dim: Bool)]] = [[]]
+    var dim = false
+    var chars = screen.makeIterator()
+    while let c = chars.next() {
+      switch c {
+      case "\n":
+        lines.append([])
+      case "\u{1B}":
+        switch chars.next() {
+        case "[":
+          var body = ""
+          while let p = chars.next() {
+            if ("\u{40}"..."\u{7E}").contains(p) {
+              if p == "m" { sgrDim(body, &dim) }
+              break
+            }
+            body.append(p)
+          }
+        case "]":
+          // An OSC sequence, such as a hyperlink, ends with BEL or ESC \.
+          while let p = chars.next(), p != "\u{07}" {
+            if p == "\u{1B}" {
+              _ = chars.next()
+              break
+            }
+          }
+        default:
+          break
+        }
+      default:
+        lines[lines.count - 1].append((c, dim))
+      }
+    }
+    return lines
+  }
+
+  /// Applies one SGR sequence's parameters to the dim state. The color
+  /// parameters 38, 48, and 58 take operands, such as `5;N` or `2;R;G;B`,
+  /// which are not attributes.
+  private static func sgrDim(_ body: String, _ dim: inout Bool) {
+    var params = body.split(separator: ";", omittingEmptySubsequences: false).makeIterator()
+    while let p = params.next() {
+      switch p {
+      case "", "0", "22": dim = false
+      case "2": dim = true
+      case "38", "48", "58":
+        let operands = params.next() == "5" ? 1 : 3
+        for _ in 0..<operands { _ = params.next() }
+      default: break
+      }
+    }
+  }
+
   static func isRule(_ line: String) -> Bool {
     line.range(of: "^─{10,}$", options: .regularExpression) != nil
   }

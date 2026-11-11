@@ -118,7 +118,8 @@ let usage = """
                                   start the session's shell pane, or end it. A shell
                                   that exits ends its pane too. A closed shell stays
                                   closed until --open or attach --shell
-    screen <session> [--shell]    print the pane's screen
+    screen <session> [--shell] [--colors]
+                                  print the pane's screen, with --colors as SGR escapes
     watch <session> --until <state> [--timeout S]
     events [--session S] [--since ID] [--follow]
                                   the newest events, or those after an id
@@ -721,7 +722,10 @@ case "attach":
 case "screen":
   let result = call(
     "screen",
-    ["session": .string(a.session("screen")), "pane": .string(a.switches.contains("--shell") ? "shell" : "claude")])
+    [
+      "session": .string(a.session("screen")), "pane": .string(a.switches.contains("--shell") ? "shell" : "claude"),
+      "colors": .bool(a.switches.contains("--colors")),
+    ])
   print(result.string ?? "")
 case "watch":
   watch(a)
