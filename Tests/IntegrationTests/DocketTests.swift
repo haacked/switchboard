@@ -396,8 +396,9 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
 
   @Test func aStartThatOutlastsItsLimitFails() throws {
     let docket = try DocketHome()
-    let sbd = try Instance(config: docket.config(docket: ["timeoutSeconds": 20, "startTimeoutSeconds": 1]))
-    try docket.write("stub-start-delay", "3")
+    // The start limit leaves room for python3 to start under load. The poll limit outlasts the delay.
+    let sbd = try Instance(config: docket.config(docket: ["timeoutSeconds": 30, "startTimeoutSeconds": 3]))
+    try docket.write("stub-start-delay", "10")
 
     let refused = try sbd.run(["docket", "--json", "o/r#14"])
     #expect(refused.status != 0)
