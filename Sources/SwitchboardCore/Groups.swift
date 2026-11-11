@@ -212,7 +212,7 @@ public struct GroupSend: Codable, Equatable, Sendable {
   }
 }
 
-/// Proposes groups from dependencies between sessions, branch names, and PR titles.
+/// Proposes groups from dependencies between sessions, branch name prefixes, and PR title scopes.
 public enum GroupSuggestions {
   public struct Candidate: Sendable {
     public var id: String
@@ -226,10 +226,13 @@ public enum GroupSuggestions {
     /// The number of the session's PR.
     public var pr: Int?
     public var dependencies: [Dependency]
+    /// True once the session's work is over: its state is Done or its PR
+    /// merged. A join or a new group never moves it.
+    public var finished: Bool
 
     public init(
       id: String, branch: String?, prTitle: String?, group: String?, placedByHand: Bool, repo: String? = nil,
-      pr: Int? = nil, dependencies: [Dependency] = []
+      pr: Int? = nil, dependencies: [Dependency] = [], finished: Bool = false
     ) {
       self.id = id
       self.branch = branch
@@ -239,17 +242,17 @@ public enum GroupSuggestions {
       self.repo = repo
       self.pr = pr
       self.dependencies = dependencies
+      self.finished = finished
     }
 
-    /// In no group, and not placed there by hand.
-    var open: Bool { group == nil && !placedByHand }
+    /// In no group, not placed there by hand, and not finished.
+    var open: Bool { group == nil && !placedByHand && !finished }
   }
 
   /// Ranked from the strongest signal to the weakest.
   enum Kind: Comparable {
     case prefix
     case scope
-    case word
   }
 
   struct Key: Hashable {
@@ -291,19 +294,22 @@ public enum GroupSuggestions {
     return scope.isEmpty ? nil : scope
   }
 
+  /// A one-word prefix such as `board` matches sessions that have nothing
+  /// else in common.
+  static let minPrefixWords = 2
+
+  /// The most suggestions shown at once.
+  public static let defaultLimit = 3
+
   static func keys(branch: String?, prTitle: String?) -> Set<Key> {
     var keys: Set<Key> = []
     if let branch {
       let w = branchWords(branch)
-      for n in stride(from: 1, to: w.count, by: 1) where w.prefix(n).contains(where: significant) {
+      for n in stride(from: minPrefixWords, to: w.count, by: 1) where w.prefix(n).contains(where: significant) {
         keys.insert(Key(kind: .prefix, text: w.prefix(n).joined(separator: "-")))
       }
-      for word in w where significant(word) { keys.insert(Key(kind: .word, text: word)) }
     }
-    if let prTitle {
-      if let scope = scope(prTitle) { keys.insert(Key(kind: .scope, text: scope)) }
-      for word in words(prTitle) where significant(word) { keys.insert(Key(kind: .word, text: word)) }
-    }
+    if let scope = prTitle.flatMap(scope) { keys.insert(Key(kind: .scope, text: scope)) }
     return keys
   }
 
@@ -311,7 +317,6 @@ public enum GroupSuggestions {
     switch key.kind {
     case .prefix: "branches start with \(key.text)"
     case .scope: "PR titles have the scope \(key.text)"
-    case .word: "branches or PR titles share the word \(key.text)"
     }
   }
 
@@ -324,18 +329,19 @@ public enum GroupSuggestions {
   /// The suggestions, strongest first: merges of groups that a dependency
   /// links, then joins from a dependency, then joins and new groups from
   /// keys. A session in no group that the user didn't place there by hand
-  /// appears in at most one join or new group. A suggestion whose id is in
-  /// `declined` is left out.
-  public static func make(candidates: [Candidate], groups: [SessionGroup], declined: Set<String> = [])
-    -> [GroupSuggestion]
-  {
+  /// appears in at most one join or new group, and a finished session in
+  /// none. A suggestion whose id is in `declined` is left out. At most
+  /// `limit` suggestions come back, so declining one lets the next appear.
+  public static func make(
+    candidates: [Candidate], groups: [SessionGroup], declined: Set<String> = [], limit: Int = defaultLimit
+  ) -> [GroupSuggestion] {
     let links = Links(candidates: candidates, groups: groups)
     let merges = links.merges(declined: declined)
     let kept = keptGroups(merges)
     let joins = links.joins(declined: declined, kept: kept)
     let taken = Set(joins.flatMap(\.sessions))
     let open = candidates.filter { $0.open && !taken.contains($0.id) }
-    return merges + joins + keyed(open, candidates, groups, declined: declined, kept: kept)
+    return Array((merges + joins + keyed(open, candidates, groups, declined: declined, kept: kept)).prefix(limit))
   }
 
   /// Joins and new groups from keys. A join to a group in `kept` goes to the

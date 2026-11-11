@@ -237,7 +237,7 @@ private func recordedDecisionsAnswer() throws -> JSON {
 @Suite struct DecisionSummarizerTests {
   /// Design A test 12.
   @Test func parsesTheRecordedAnswerForTheDecisionsReplyIntoSixDecisions() throws {
-    let summary = try TriageSummarizer.parse(decisionsEnvelope(try recordedDecisionsAnswer()))
+    let summary = try TriageSummarizer.parse(decisionsEnvelope(try recordedDecisionsAnswer()), reply: "")
 
     let recommended = summary.decisions.map { $0.options.filter(\.recommended).map(\.label) }
     #expect(summary.decisions.map(\.number) == [1, 2, 3, 4, 5, 6])

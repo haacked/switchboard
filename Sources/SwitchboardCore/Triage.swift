@@ -172,10 +172,11 @@ public struct TriageSummary: Codable, Equatable, Sendable {
   public var multiSelect: Bool
   /// The separate decisions that the reply asks for, each with its own options.
   public var decisions: [PendingDecision]
+  public var drafts: [TriageDraft]
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, decisions: [PendingDecision] = []
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [TriageDraft] = []
   ) {
     self.title = title
     self.kind = kind
@@ -184,10 +185,11 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     self.callouts = callouts
     self.multiSelect = multiSelect
     self.decisions = decisions
+    self.drafts = drafts
   }
 
-  /// A `triage` event recorded before cards had callouts, multiSelect, or
-  /// decisions holds none and a single-choice card.
+  /// A `triage` event recorded before cards had callouts, multiSelect,
+  /// decisions, or drafts holds none and a single-choice card.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     title = try c.decode(String.self, forKey: .title)
@@ -197,6 +199,7 @@ public struct TriageSummary: Codable, Equatable, Sendable {
     callouts = try c.decodeIfPresent([Callout].self, forKey: .callouts) ?? []
     multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
     decisions = try c.decodeIfPresent([PendingDecision].self, forKey: .decisions) ?? []
+    drafts = try c.decodeIfPresent([TriageDraft].self, forKey: .drafts) ?? []
   }
 }
 
@@ -214,6 +217,9 @@ public struct TriageItem: Codable, Equatable, Sendable {
   /// The separate decisions that the item asks for. While a decision list is
   /// open, they are the list's copy.
   public var decisions: [PendingDecision]
+  /// Messages that the session wrote for the user to send to someone else.
+  /// The JSON carries them only in `message.summary`.
+  public var drafts: [TriageDraft]
   public var source: TriageSource
   /// What the user can open after the Summary and the Action. The builder
   /// fills in the card's parts. The service adds the session's fields,
@@ -226,8 +232,8 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, decisions: [PendingDecision] = [], source: TriageSource, ref: String = "",
-    details: TriageDetails = TriageDetails()
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [TriageDraft] = [], source: TriageSource,
+    ref: String = "", details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
     self.details = details
@@ -238,26 +244,33 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.callouts = callouts
     self.multiSelect = multiSelect
     self.decisions = decisions
+    self.drafts = drafts
     self.source = source
   }
 
   init(_ summary: TriageSummary, source: TriageSource, ref: String = "") {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
-      callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions, source: source,
-      ref: ref)
+      callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions,
+      drafts: summary.drafts, source: source, ref: ref)
   }
 
   private enum CodingKeys: String, CodingKey {
     case title, kind, summary, options, callouts, multiSelect, decisions, source, ref, message
   }
 
-  private struct Sections: Decodable { var details: TriageDetails? }
+  private struct Sections: Decodable {
+    struct Summary: Decodable { var drafts: [TriageDraft]? }
+    var summary: Summary?
+    var details: TriageDetails?
+  }
 
-  /// An item that an older sbd wrote has no multiSelect, decisions, or message.
+  /// An item that an older sbd wrote has no multiSelect, decisions, drafts, or message.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
-    details = try c.decodeIfPresent(Sections.self, forKey: .message)?.details ?? TriageDetails()
+    let sections = try c.decodeIfPresent(Sections.self, forKey: .message)
+    details = sections?.details ?? TriageDetails()
+    drafts = sections?.summary?.drafts ?? []
     title = try c.decode(String.self, forKey: .title)
     kind = try c.decode(TriageKind.self, forKey: .kind)
     summary = try c.decode(String.self, forKey: .summary)
