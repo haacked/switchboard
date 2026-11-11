@@ -6,18 +6,31 @@ import Testing
   typealias Candidate = GroupSuggestions.Candidate
 
   func session(
-    _ id: String, branch: String? = nil, title: String? = nil, group: String? = nil, byHand: Bool = false
+    _ id: String, branch: String? = nil, title: String? = nil, group: String? = nil, byHand: Bool = false,
+    finished: Bool = false
   ) -> Candidate {
-    Candidate(id: id, branch: branch, prTitle: title, group: group, placedByHand: byHand)
+    Candidate(id: id, branch: branch, prTitle: title, group: group, placedByHand: byHand, finished: finished)
   }
 
   func group(_ id: String, _ name: String) -> SessionGroup {
     SessionGroup(id: id, name: name, notes: [], created: 0)
   }
 
-  func suggest(_ candidates: [Candidate], groups: [SessionGroup] = []) -> [GroupSuggestion] {
-    GroupSuggestions.make(candidates: candidates, groups: groups)
+  /// The suggestions under the default cap, or under `limit` when given.
+  func suggest(
+    _ candidates: [Candidate], groups: [SessionGroup] = [], declined: Set<String> = [], limit: Int? = nil
+  ) -> [GroupSuggestion] {
+    guard let limit else { return GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined) }
+    return GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined, limit: limit)
   }
+
+  /// Two sessions in no group on `haacked/<prefix>-one` and `haacked/<prefix>-two`.
+  func pair(_ prefix: String) -> [Candidate] {
+    [session("\(prefix)-1", branch: "haacked/\(prefix)-one"), session("\(prefix)-2", branch: "haacked/\(prefix)-two")]
+  }
+
+  /// Four pairs whose prefixes have the same length, so the name decides their order.
+  var fourPairs: [Candidate] { ["delta-team", "alpha-team", "gamma-team", "bravo-team"].flatMap(pair) }
 
   // MARK: Keys
 
@@ -51,11 +64,37 @@ import Testing
     #expect(try #require(found.first).id == "prefix:flag-evaluations")
   }
 
-  @Test func aPrefixLeavesOutTheLastWordOfTheBranch() throws {
-    let found = suggest([session("a", branch: "haacked/cache"), session("b", branch: "haacked/cache-warmup")])
+  @Test func aPrefixLeavesOutTheLastWordOfTheBranch() {
+    let found = suggest([
+      session("a", branch: "haacked/flag-evaluations"), session("b", branch: "haacked/flag-evaluations-cache"),
+    ])
 
-    #expect(!found.contains { $0.id.hasPrefix("prefix:") })
-    #expect(try #require(found.first).id == "word:cache")
+    #expect(found.isEmpty)
+  }
+
+  @Test(arguments: ["haacked/board-alpha", "board-alpha", "haacked/board"])
+  func aOneWordPrefixGivesNoSuggestion(_ branch: String) {
+    let found = suggest([session("a", branch: branch), session("b", branch: "haacked/board-bravo")])
+
+    #expect(found.isEmpty)
+  }
+
+  @Test func onlyTheSessionsThatShareTwoWordsGetANewGroup() {
+    let found = suggest([
+      session("a", branch: "haacked/board-alpha"), session("b", branch: "haacked/board-bravo"),
+      session("c", branch: "haacked/flag-evaluations-cache"), session("d", branch: "haacked/flag-evaluations-perf"),
+    ])
+
+    #expect(found.map(\.id) == ["prefix:flag-evaluations"])
+    #expect(found.first?.sessions == ["c", "d"])
+  }
+
+  @Test func branchesThatShareOnlyTheirFirstOfThreeWordsGetNoSuggestion() {
+    let found = suggest([
+      session("a", branch: "haacked/board-header-button"), session("b", branch: "haacked/board-popover-width"),
+    ])
+
+    #expect(found.isEmpty)
   }
 
   @Test func aPrefixOfOnlyInsignificantWordsGivesNoSuggestion() {
@@ -77,14 +116,23 @@ import Testing
     #expect(first.reason == "PR titles have the scope flags")
   }
 
-  @Test func aSignificantWordSharedByABranchAndAPRTitleGetsANewGroup() throws {
-    let found = suggest([session("a", branch: "haacked/tune-evaluations"), session("b", title: "speed up evaluations")])
+  /// How two sessions can share a significant word and nothing else.
+  static let sharedWord: [[(branch: String?, title: String?)]] = [
+    [("haacked/tune-evaluations", nil), (nil, "speed up evaluations")],
+    [("haacked/alpha-evaluations", nil), ("haacked/bravo-evaluations", nil)],
+    [(nil, "speed up evaluations"), (nil, "cache evaluations")],
+    [("haacked/tune-evaluations", "tune evaluations"), ("haacked/cache-evaluations", "cache evaluations")],
+    [("haacked/alpha-evaluations-cache", nil), ("haacked/bravo-evaluations-perf", nil)],
+  ]
 
-    let first = try #require(found.first)
-    #expect(first.id == "word:evaluations")
-    #expect(first.name == "evaluations")
-    #expect(Set(first.sessions) == ["a", "b"])
-    #expect(first.reason == "branches or PR titles share the word evaluations")
+  @Test(arguments: sharedWord.indices)
+  func aSharedWordAloneGivesNoSuggestion(_ shape: Int) {
+    let found = suggest(
+      Self.sharedWord[shape].enumerated().map {
+        session("s\($0.offset)", branch: $0.element.branch, title: $0.element.title)
+      })
+
+    #expect(found.isEmpty)
   }
 
   @Test(arguments: [
@@ -94,13 +142,20 @@ import Testing
     // A number.
     "1234",
   ])
-  func aSharedInsignificantWordGivesNoSuggestion(_ word: String) {
+  func aTwoWordPrefixOfInsignificantWordsGivesNoSuggestion(_ word: String) {
     let found = suggest([
-      session("a", branch: "haacked/\(word)-alpha", title: "\(word) alpha"),
-      session("b", branch: "haacked/\(word)-bravo", title: "\(word) bravo"),
+      session("a", branch: "haacked/\(word)-a1-alpha"), session("b", branch: "haacked/\(word)-a1-bravo"),
     ])
 
     #expect(found.isEmpty)
+  }
+
+  @Test func aTwoWordPrefixWithOneSignificantWordGetsANewGroup() {
+    let found = suggest([
+      session("a", branch: "haacked/update-billing-alpha"), session("b", branch: "haacked/update-billing-bravo"),
+    ])
+
+    #expect(found.map(\.id) == ["prefix:update-billing"])
   }
 
   @Test func aSingleSessionGetsNoNewGroup() {
@@ -122,6 +177,19 @@ import Testing
     #expect(first.group == "g1")
     #expect(first.name == "Flags")
     #expect(first.sessions == ["c"])
+  }
+
+  /// No one-word prefix key exists, so neither a member's branch nor the group's name gives one.
+  @Test(arguments: [true, false])
+  func aOneWordPrefixDoesNotJoinAGroup(_ memberHasTheBranch: Bool) {
+    let found = suggest(
+      [
+        session("m", branch: memberHasTheBranch ? "haacked/billing-alpha" : nil, group: "g1"),
+        session("c", branch: "haacked/billing-retry"),
+      ],
+      groups: [group("g1", "Billing")])
+
+    #expect(found.isEmpty)
   }
 
   @Test func aKeyThatAGroupHasGivesNoNewGroupEvenWhenCandidatesShareIt() {
@@ -209,50 +277,44 @@ import Testing
     #expect(ids.count == Set(ids).count)
   }
 
+  /// The larger suggestion has the shorter key, so the key's length does not put it first.
   @Test func aSuggestionThatTouchesMoreSessionsRanksFirst() {
     let found = suggest([
-      session("d", branch: "haacked/cache-tuning-delta"), session("e", branch: "haacked/cache-tuning-echo"),
-      session("a", branch: "haacked/alpha-evaluations"), session("b", branch: "haacked/bravo-evaluations"),
-      session("c", branch: "haacked/charlie-evaluations"),
+      session("d", branch: "haacked/flag-evaluations-delta"), session("e", branch: "haacked/flag-evaluations-echo"),
+      session("a", branch: "haacked/cache-tuning-alpha"), session("b", branch: "haacked/cache-tuning-bravo"),
+      session("c", branch: "haacked/cache-tuning-charlie"),
     ])
 
-    #expect(found.prefix(2).map(\.id) == ["word:evaluations", "prefix:cache-tuning"])
+    #expect(found.map(\.id) == ["prefix:cache-tuning", "prefix:flag-evaluations"])
   }
 
+  /// The scope is longer than the prefix and sorts before it, so only the kind puts the prefix first.
   @Test func atTheSameSizeAPrefixRanksBeforeAScope() {
     let found = suggest([
-      session("c", title: "feat(flags): cache evaluations"), session("d", title: "fix(flags): retry payloads"),
-      session("a", branch: "haacked/billing-alpha"), session("b", branch: "haacked/billing-bravo"),
+      session("c", title: "feat(api-evaluations-cache): one"), session("d", title: "fix(api-evaluations-cache): two"),
+      session("a", branch: "haacked/billing-retry-alpha"), session("b", branch: "haacked/billing-retry-bravo"),
     ])
 
-    #expect(found.prefix(2).map(\.id) == ["prefix:billing", "scope:flags"])
+    #expect(found.map(\.id) == ["prefix:billing-retry", "scope:api-evaluations-cache"])
   }
 
-  @Test func atTheSameSizeAScopeRanksBeforeAWord() {
-    let found = suggest([
-      session("c", branch: "haacked/alpha-evaluations"), session("d", branch: "haacked/bravo-evaluations"),
-      session("a", title: "feat(flags): cache"), session("b", title: "fix(flags): retry"),
-    ])
-
-    #expect(found.prefix(2).map(\.id) == ["scope:flags", "word:evaluations"])
-  }
-
+  /// The longer key sorts after the shorter one, so only its length puts it first.
   @Test func atTheSameSizeAndKindALongerKeyRanksFirst() {
     let found = suggest([
-      session("c", branch: "haacked/flags-alpha"), session("d", branch: "haacked/flags-bravo"),
-      session("a", branch: "haacked/evaluations-cache-delta"), session("b", branch: "haacked/evaluations-cache-echo"),
+      session("c", branch: "haacked/flags-api-alpha"), session("d", branch: "haacked/flags-api-bravo"),
+      session("a", branch: "haacked/zebra-evaluations-delta"), session("b", branch: "haacked/zebra-evaluations-echo"),
     ])
 
-    #expect(found.prefix(2).map(\.id) == ["prefix:evaluations-cache", "prefix:flags"])
+    #expect(found.map(\.id) == ["prefix:zebra-evaluations", "prefix:flags-api"])
   }
 
   @Test func atTheSameSizeKindAndLengthTheNameDecides() {
     let found = suggest([
-      session("c", branch: "haacked/delta-one"), session("d", branch: "haacked/delta-two"),
-      session("a", branch: "haacked/bravo-one"), session("b", branch: "haacked/bravo-two"),
+      session("c", branch: "haacked/delta-team-one"), session("d", branch: "haacked/delta-team-two"),
+      session("a", branch: "haacked/bravo-team-one"), session("b", branch: "haacked/bravo-team-two"),
     ])
 
-    #expect(found.prefix(2).map(\.id) == ["prefix:bravo", "prefix:delta"])
+    #expect(found.map(\.id) == ["prefix:bravo-team", "prefix:delta-team"])
   }
 
   @Test func theLongestSharedPrefixWinsOverItsShorterPrefixes() throws {
@@ -264,14 +326,22 @@ import Testing
     #expect(try #require(found.first).id == "prefix:flag-evaluations-cache")
   }
 
-  @Test(arguments: [("feat(flags): cache", "fix(flags): retry"), ("Speed up flags", "Retry flags")])
-  func aKeyThatMatchesAGroupsNameJoinsItWhateverItsKind(_ titles: (String, String)) throws {
-    let found = suggest(
-      [session("a", title: titles.0), session("b", title: titles.1)], groups: [group("g1", "flags")])
+  /// The kinds of key that two sessions can share with the name of the group `flag-evals`.
+  enum NamedKey: CaseIterable { case prefix, scope }
+
+  @Test(arguments: NamedKey.allCases)
+  func aKeyThatMatchesAGroupsNameJoinsItWhateverItsKind(_ kind: NamedKey) throws {
+    let candidates =
+      switch kind {
+      case .prefix: [session("a", branch: "haacked/flag-evals-cache"), session("b", branch: "haacked/flag-evals-perf")]
+      case .scope: [session("a", title: "feat(flag-evals): cache"), session("b", title: "fix(flag-evals): retry")]
+      }
+
+    let found = suggest(candidates, groups: [group("g1", "flag-evals")])
 
     let first = try #require(found.first)
     #expect(first.group == "g1")
-    #expect(found.allSatisfy { $0.name != "flags" || $0.group == "g1" })
+    #expect(found.allSatisfy { $0.name != "flag-evals" || $0.group == "g1" })
   }
 
   @Test(arguments: ["api/flags", "flag_eval", "flag evals", "flag-evals"])
@@ -282,5 +352,89 @@ import Testing
 
     let join = try #require(found.first { $0.id.hasPrefix("scope:") })
     #expect(join.group == "g1")
+  }
+
+  // MARK: Finished sessions
+
+  /// The key that the sessions share.
+  enum SharedKey: CaseIterable { case prefix, scope }
+
+  func sharing(_ key: SharedKey, _ id: String, group: String? = nil, finished: Bool = false) -> Candidate {
+    switch key {
+    case .prefix: session(id, branch: "haacked/flag-evaluations-\(id)", group: group, finished: finished)
+    case .scope: session(id, title: "feat(flags): \(id)", group: group, finished: finished)
+    }
+  }
+
+  @Test(arguments: SharedKey.allCases)
+  func aFinishedSessionIsLeftOutOfANewGroup(_ key: SharedKey) {
+    let found = suggest([sharing(key, "a"), sharing(key, "f", finished: true), sharing(key, "b")])
+
+    #expect(found.map(\.sessions) == [["a", "b"]])
+  }
+
+  @Test(arguments: SharedKey.allCases)
+  func twoFinishedSessionsGiveNoNewGroup(_ key: SharedKey) {
+    let found = suggest([sharing(key, "a", finished: true), sharing(key, "b", finished: true)])
+
+    #expect(found.isEmpty)
+  }
+
+  @Test(arguments: SharedKey.allCases)
+  func aFinishedSessionDoesNotCountTowardTheTwoOfANewGroup(_ key: SharedKey) {
+    let found = suggest([sharing(key, "a"), sharing(key, "f", finished: true)])
+
+    #expect(found.isEmpty)
+  }
+
+  @Test(arguments: SharedKey.allCases)
+  func aFinishedSessionGetsNoJoinFromAKey(_ key: SharedKey) {
+    let found = suggest(
+      [sharing(key, "m", group: "g1"), sharing(key, "f", finished: true)], groups: [group("g1", "Cache")])
+
+    #expect(found.isEmpty)
+  }
+
+  /// The group's name matches no key, so only its finished member gives it the key.
+  @Test(arguments: SharedKey.allCases)
+  func aFinishedMemberStillGivesItsGroupKeys(_ key: SharedKey) throws {
+    let found = suggest(
+      [sharing(key, "m", group: "g1", finished: true), sharing(key, "c")], groups: [group("g1", "Cache")])
+
+    let join = try #require(found.first)
+    #expect(join.group == "g1")
+    #expect(join.sessions == ["c"])
+    #expect(found.count == 1)
+  }
+
+  // MARK: The cap
+
+  @Test func atMostThreeSuggestionsComeBack() {
+    let found = suggest(fourPairs)
+
+    #expect(found.map(\.id) == ["prefix:alpha-team", "prefix:bravo-team", "prefix:delta-team"])
+  }
+
+  @Test func theFourthSuggestionAppearsOnceTheFirstIsDeclined() {
+    let found = suggest(fourPairs, declined: ["prefix:alpha-team"])
+
+    #expect(found.map(\.id) == ["prefix:bravo-team", "prefix:delta-team", "prefix:gamma-team"])
+  }
+
+  @Test func aLimitLargerThanTheListReturnsAll() {
+    let found = suggest(fourPairs, limit: 10)
+
+    #expect(
+      found.map(\.id) == ["prefix:alpha-team", "prefix:bravo-team", "prefix:delta-team", "prefix:gamma-team"])
+  }
+
+  @Test func theCappedListIsTheStartOfTheFullRanking() {
+    let candidates = fourPairs + [session("x", title: "feat(flags): one"), session("y", title: "fix(flags): two")]
+
+    let full = suggest(candidates, limit: 10)
+
+    #expect(full.count == 5)
+    #expect(suggest(candidates) == Array(full.prefix(3)))
+    #expect(suggest(candidates, limit: 1) == Array(full.prefix(1)))
   }
 }

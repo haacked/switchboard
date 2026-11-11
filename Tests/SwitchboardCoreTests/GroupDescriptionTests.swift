@@ -76,15 +76,6 @@ import Testing
     #expect(first.description?.contains("flags") == true)
   }
 
-  @Test func aNewGroupFromASharedWordNamesTheWord() throws {
-    let found = GroupSuggestions.make(
-      candidates: [session("a", branch: "haacked/cache"), session("b", branch: "haacked/cache-warmup")], groups: [])
-
-    let first = try #require(found.first)
-    #expect(first.id == "word:cache")
-    #expect(first.description?.contains("cache") == true)
-  }
-
   /// Accepting a join leaves the group's own description alone, so the
   /// suggestion carries none.
   @Test func aJoinCarriesNoDescription() throws {

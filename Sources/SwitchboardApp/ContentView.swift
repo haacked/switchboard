@@ -536,6 +536,7 @@ struct BoardView: View {
                   .help("Show a lane per repo or per group")
                   // The header stays pinned, so the name field shows without a scroll.
                   if laneKind == .group { NewGroupRow() }
+                  GroupSuggestionButton()
                 }
                 .frame(width: Self.labelWidth)
                 ForEach(MergeBoard.columns, id: \.self) { stage in
@@ -574,15 +575,6 @@ struct BoardView: View {
         }
       }
       .groupDeleteDialog(model)
-      .safeAreaInset(edge: .top, spacing: 0) {
-        if !model.suggestions.isEmpty {
-          VStack(spacing: 0) {
-            GroupSuggestionList()
-            Divider()
-          }
-          .background(.background)
-        }
-      }
     }
   }
 }
@@ -783,7 +775,36 @@ struct PlanArtifactList: View {
   }
 }
 
-/// The group suggestions above the board, each with Accept and Decline.
+/// Shows how many group suggestions wait, and opens them in a popover. It
+/// draws nothing when there are none.
+struct GroupSuggestionButton: View {
+  @EnvironmentObject var model: BoardModel
+  @State private var showing = false
+
+  /// Such as `2 suggestions`, or nil when there are none.
+  static func label(count: Int) -> String? {
+    count > 0 ? "\(count) suggestion\(count == 1 ? "" : "s")" : nil
+  }
+
+  var body: some View {
+    if let label = Self.label(count: model.suggestions.count) {
+      Button {
+        showing = true
+      } label: {
+        Label(label, systemImage: "lightbulb")
+      }
+      .buttonStyle(.link)
+      .help("Show the groups that Switchboard suggests")
+      .accessibilityLabel("Group suggestions: \(model.suggestions.count)")
+      .accessibilityIdentifier("group-suggestions-button")
+      .popover(isPresented: $showing, arrowEdge: .bottom) {
+        GroupSuggestionList().frame(width: 420)
+      }
+    }
+  }
+}
+
+/// The group suggestions in the popover, each with Accept and Decline.
 struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 

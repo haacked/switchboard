@@ -146,6 +146,13 @@ public final class Store {
     try run("INSERT OR IGNORE INTO declined_suggestions (id) VALUES (?)", [id])
   }
 
+  /// Deletes the rows in one statement, so it needs no transaction of its own.
+  public func removeDeclined(_ ids: Set<String>) throws {
+    guard !ids.isEmpty else { return }
+    let marks = Array(repeating: "?", count: ids.count).joined(separator: ", ")
+    try run("DELETE FROM declined_suggestions WHERE id IN (\(marks))", Array(ids))
+  }
+
   /// The ids of the group suggestions and the plan row suggestions that the
   /// user declined. A group suggestion's id starts with its kind, such as
   /// `merge:`. A plan row's id starts with its plan's id.

@@ -97,7 +97,10 @@ public enum MergeBoard {
 
   public static let otherLane = "Other"
 
-  public static func isDone(_ s: SessionSummary) -> Bool { s.state == .done || s.pipeline?.stage == .merged }
+  public static func isDone(_ s: SessionSummary) -> Bool { isDone(state: s.state, stage: s.pipeline?.stage) }
+
+  /// The rule for the Done footer. Group suggestions also use it to leave a finished session alone.
+  public static func isDone(state: AttentionState, stage: PipelineStage?) -> Bool { state == .done || stage == .merged }
 
   /// A session without a pipeline, such as a follow-up that hasn't started, is Building.
   public static func stage(_ s: SessionSummary) -> PipelineStage { s.pipeline?.stage ?? .building }

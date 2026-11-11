@@ -186,10 +186,14 @@ let usage = """
                                   moves to it at its next launch. New sessions in
                                   the group use it, and a different --account is
                                   refused
-    group suggest [--accept <id> | --decline <id>]
-                                  list groups suggested from dependencies, branch
-                                  names, and PR titles, or accept or decline one.
-                                  A session that you placed by hand never moves
+    group suggest [--accept <id> | --decline <id> | --declined | --undecline <id>]
+                                  list at most 3 groups suggested from
+                                  dependencies, branch prefixes of two or more
+                                  words, and PR title scopes, or accept or decline
+                                  one. A session that you placed by hand never
+                                  moves, and a finished session joins nothing.
+                                  --declined lists the declined ids, and
+                                  --undecline lets one be suggested again
     chat <group> [<text> | --send <text>]
                                   open the group's chat, a session that manages
                                   the group's sessions, starting it the first
@@ -290,7 +294,8 @@ struct Args {
       "--since",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
+      "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
+      "--plan", "--text",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit",
     ]).union(waitFlags.keys)
     var rest = argv

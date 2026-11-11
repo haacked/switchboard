@@ -137,7 +137,7 @@ extension MCPToolServer {
       required: ["text"]),
     Tool(
       "suggest_groups",
-      "Lists groups suggested from branch names and PR titles. With `accept`, it accepts that suggestion instead.",
+      "Lists at most 3 groups suggested from dependencies, branch prefixes, and PR title scopes. With `accept`, it accepts that suggestion instead.",
       ["accept": string("The id of a suggestion to accept.")]),
     Tool(
       "plan_artifact",

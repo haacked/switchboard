@@ -190,6 +190,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
+    pruneDeclinedSuggestions()
     snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain { try settleUncertain(id, texts) }
     seedParentMarks(now: nowMs())
