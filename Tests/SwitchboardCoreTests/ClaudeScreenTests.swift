@@ -4,9 +4,13 @@ import Testing
 @testable import SwitchboardCore
 
 /// A screen that `TerminalHost.screen` captured from Claude Code 2.1.317.
+/// The `prompt-*` screens come from 2.1.322 with their colors. Their files
+/// store each ESC as ␛, because `gh pr diff` refuses a diff that holds raw
+/// escape sequences.
 func screenFixture(_ name: String) throws -> String {
   let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/screens")
   return try String(contentsOf: dir.appendingPathComponent("\(name).txt"), encoding: .utf8)
+    .replacingOccurrences(of: "␛", with: "\u{1B}")
 }
 
 /// The command that the captured permission dialogs ask about.
