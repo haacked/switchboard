@@ -532,6 +532,30 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       return model
     }
 
+    /// A chat shows its terminal only while the Terminal toggle is on. A request left for a hidden terminal
+    /// would take focus later, when the user turns the toggle on.
+    @Test(arguments: Place.allCases)
+    func aChatWithTheTerminalToggleOffRefuses(_ place: Place) throws {
+      let model = try model(chatItem("c", group: "g"), at: place)
+      model.showingTerminal = false
+      let before = Snapshot(model)
+
+      model.focusTerminal()
+
+      #expect(!model.canFocusTerminal)
+      #expect(Snapshot(model) == before)
+    }
+
+    @Test func aSelectedChatWithTheTerminalToggleOnGetsTheTerminalFocus() throws {
+      let model = try model(chatItem("c", group: "g"), at: .selection)
+      model.showingTerminal = true
+
+      model.focusTerminal()
+
+      #expect(model.canFocusTerminal)
+      #expect(model.terminalFocus == "c")
+    }
+
     @Test func aSelectedSessionGetsTheTerminalFocus() throws {
       let model = try model(needsItem("a"), at: .selection)
 

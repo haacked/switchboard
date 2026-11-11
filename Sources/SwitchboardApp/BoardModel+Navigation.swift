@@ -58,12 +58,12 @@ extension BoardModel {
     }
   }
 
-  var canFocusTerminal: Bool { terminalTarget.map(Self.hasClaudeTerminal) ?? false }
+  var canFocusTerminal: Bool { terminalTarget.map(showsClaudeTerminal) ?? false }
 
   /// Puts keyboard focus in the target session's Claude terminal. The Inbox keeps showing an item whose
   /// terminal shows in place. Any other target is selected first, so its terminal shows.
   func focusTerminal() {
-    guard let target = terminalTarget, Self.hasClaudeTerminal(target) else { return }
+    guard let target = terminalTarget, showsClaudeTerminal(target) else { return }
     let inPlace =
       visibleView == .inbox && TriageDetail.pane(for: target, showingTerminal: showingTerminal) == .terminal
     if !inPlace { selection = target.id }
@@ -75,7 +75,9 @@ extension BoardModel {
     if terminalFocus == id { terminalFocus = nil }
   }
 
-  private static func hasClaudeTerminal(_ session: SessionSummary) -> Bool {
-    session.hasTerminals && !session.waitsToStart
+  /// A chat shows its terminal only while the Terminal toggle is on. A request for a hidden terminal would
+  /// take focus later, when the user turns the toggle on.
+  private func showsClaudeTerminal(_ session: SessionSummary) -> Bool {
+    session.hasTerminals && !session.waitsToStart && (session.kind != .chat || showingTerminal)
   }
 }
