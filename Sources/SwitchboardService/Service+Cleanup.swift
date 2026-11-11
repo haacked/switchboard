@@ -45,7 +45,7 @@ extension Service {
       }
     }
     queue.sync {
-      record(
+      _ = record(
         session.id, "cleanup",
         [
           "worktree": .string(session.cwd), "branch": .string(branchName),
