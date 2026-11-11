@@ -54,12 +54,14 @@ import Testing
     return "\(bin)/ssh"
   }
 
-  /// Starts `program` under bash with argv[0] set to the mux title. Bash first opens each path in `holding`, from
+  /// Starts `program` under bash with argv[0] set to `title`. Bash first opens each path in `holding`, from
   /// fd 3 up.
-  private func startMux(_ program: String, cwd: String, holding paths: [String] = []) throws -> Process {
+  private func startMux(
+    _ program: String, cwd: String, holding paths: [String] = [], title: String = Self.muxTitle
+  ) throws -> Process {
     let opens = paths.indices.map { "exec \($0 + 3)<\"$\($0 + 1)\"; " }.joined()
     return try start(
-      ["\(opens)exec -a \"\(Self.muxTitle)\" \"$0\" 30", program] + paths, cwd: cwd, shell: "/bin/bash")
+      ["\(opens)exec -a \"\(title)\" \"$0\" 30", program] + paths, cwd: cwd, shell: "/bin/bash")
   }
 
   private func user(_ p: Process, in folder: String) -> FolderUser? {
@@ -139,7 +141,7 @@ import Testing
     defer { p.terminate() }
     try waitForArgs(p, prefix: "\(folder)/sleep")
 
-    let found = try #require(Processes.using(folder).first { $0.pid == Int(p.processIdentifier) })
+    let found = try #require(user(p, in: folder))
     #expect(found.use == .program)
     #expect(found.path.hasSuffix("/w/sleep"))
   }
@@ -226,6 +228,19 @@ import Testing
     let p = try start(["exec \"$0\" 30", ssh], cwd: folder)
     defer { p.terminate() }
     try waitForArgs(p, prefix: ssh)
+
+    let found = try #require(user(p, in: folder))
+
+    #expect(found.use == .workingFolder)
+  }
+
+  /// A title with only the `ssh: ` prefix or only the ` [mux]` suffix is not the multiplexer's title.
+  @Test(arguments: ["ssh: host", "x/sock [mux]"])
+  func findsAnSshProcessWithHalfTheMuxTitleByItsWorkingFolder(_ title: String) throws {
+    let (folder, _) = try folders()
+    let p = try startMux(try fakeSsh(besides: folder), cwd: folder, title: title)
+    defer { p.terminate() }
+    try waitForArgs(p, prefix: title)
 
     let found = try #require(user(p, in: folder))
 

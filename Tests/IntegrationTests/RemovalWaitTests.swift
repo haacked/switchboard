@@ -135,7 +135,7 @@ private final class Strays {
   /// The removal must refuse, name each pid, leave the session, the folder, and the branch, and send no signal to
   /// the processes. Once the test kills them, a retry must remove the worktree.
   private func expectRefusalUntilTheyExit(
-    _ how: WorktreeRemoval, naming use: String? = nil,
+    _ how: WorktreeRemoval, naming use: String? = nil, startedBySession: Bool = false,
     _ start: (Instance, SessionSummary, Terminals, Strays) throws -> Void
   ) throws {
     let github = try FakeGitHub()
@@ -153,6 +153,11 @@ private final class Strays {
     try #require(r.status != 0, Comment(rawValue: r.stderr))
     for pid in pids {
       #expect(names(r.stderr, pid), Comment(rawValue: "\(pid) is not in: \(r.stderr)"))
+      if startedBySession {
+        #expect(
+          r.stderr.contains(try Regex("\\b\(pid) \\([^)]*, started by the session\\)")),
+          Comment(rawValue: r.stderr))
+      }
       #expect(Processes.exists(Int(pid)), "sbd ended \(pid)")
     }
     if let use, let folder = realPath(s.cwd) {
@@ -277,7 +282,7 @@ private final class Strays {
   /// child with the pid that `$!` names.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAShellPaneProcessOutsideTheFolderExits(_ how: WorktreeRemoval) throws {
-    try expectRefusalUntilTheyExit(how) { sbd, _, terminals, strays in
+    try expectRefusalUntilTheyExit(how, startedBySession: true) { sbd, _, terminals, strays in
       strays.pidFiles = ["root.pid"]
       try sbd.typeInShell(
         terminals,
@@ -343,7 +348,7 @@ private final class Strays {
         "/bin/bash", ["-c", "exec -a \"ssh: $0/sock [mux]\" \"$0/ssh\" 100", bin], cwd: s.cwd)
       return { pid in
         guard let r = try? runCommand("/bin/ps", ["-ww", "-o", "args=", "-p", String(pid)]) else { return false }
-        return r.stdout.contains("[mux]")
+        return r.stdout.hasPrefix("ssh: ")
       }
     }
   }

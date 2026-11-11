@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 /// How a process uses a folder.
-public enum FolderUse: String, Sendable, Equatable {
+public enum FolderUse: String, Sendable {
   case workingFolder = "cwd"
   case program
   case openFile = "open file"
