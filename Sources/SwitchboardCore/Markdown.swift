@@ -610,36 +610,38 @@ extension MarkdownText {
   /// that `sb --json` shows readable text.
   /// cmark-gfm finds email addresses after it resolves the backslashes, so a
   /// word joiner, which draws nothing, goes before each `@`.
+  /// It walks Unicode scalars, as cmark-gfm does. A grapheme cluster would
+  /// hide a bracket behind a prepend or combining mark.
   public static func escaped(_ text: String) -> String {
-    var out = ""
-    let chars = Array(text)
+    var out = String.UnicodeScalarView()
+    let scalars = Array(text.unicodeScalars)
     var word = ""
     var lineStart = true
     var number = false
-    for (i, c) in chars.enumerated() {
-      let next = i + 1 < chars.count ? chars[i + 1] : nil
+    for (i, c) in scalars.enumerated() {
+      let next = i + 1 < scalars.count ? scalars[i + 1] : nil
       var escape = alwaysEscaped.contains(c)
       // A list marker, a heading underline, or an ordered list number at the start of a line.
-      if lineStart, "-+=".contains(c) { escape = true }
-      if number, ".)".contains(c) { escape = true }
+      if lineStart, "-+=".unicodeScalars.contains(c) { escape = true }
+      if number, ".)".unicodeScalars.contains(c) { escape = true }
       // GFM turns `scheme://`, `mailto:`, `xmpp:`, and `www.` into links.
       if c == ":", next == "/" || ["mailto", "xmpp"].contains(word.lowercased()) { escape = true }
       if c == ".", word.lowercased() == "www" { escape = true }
       if c == "@" { out.append("\u{2060}") }
       if escape { out.append("\\") }
       out.append(c)
-      number = (lineStart || number) && c.isASCII && c.isNumber
-      if c.isNewline {
+      number = (lineStart || number) && ("0"..."9").contains(c)
+      if c == "\n" || c == "\r" {
         lineStart = true
-      } else if !c.isWhitespace {
+      } else if !c.properties.isWhitespace {
         lineStart = false
       }
-      word = c.isLetter ? word + String(c) : ""
+      word = c.properties.isAlphabetic ? word + String(c) : ""
     }
-    return out
+    return String(out)
   }
 
-  static let alwaysEscaped = Set("\\`*_[]<>!#|~&")
+  static let alwaysEscaped = Set("\\`*_[]<>!#|~&".unicodeScalars)
 }
 
 extension MarkdownBlock {

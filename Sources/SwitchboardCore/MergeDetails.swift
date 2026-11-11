@@ -43,10 +43,16 @@ public struct MergeDetails: Codable, Equatable, Sendable {
   static let maxGist = 300
   static let maxTestGaps = 5
 
-  /// The sections whose heading holds one of these words are boilerplate.
-  static let boilerplate = [
-    "test", "release", "docs", "documentation", "agent", "checklist", "screenshot", "changelog",
-  ]
+  /// The sections whose heading has a word that starts with one of these
+  /// are boilerplate. A match inside a word, as in "Latest", does not count.
+  static let boilerplate = try! NSRegularExpression(
+    pattern: #"\b(?:test|release|docs|documentation|agent|checklist|screenshot|changelog)"#,
+    options: [.caseInsensitive])
+  static let testHeading = try! NSRegularExpression(pattern: #"\btest"#, options: [.caseInsensitive])
+
+  static func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
+    regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+  }
 
   static let gap = try! NSRegularExpression(
     pattern:
@@ -80,8 +86,8 @@ public struct MergeDetails: Codable, Equatable, Sendable {
         headings.removeAll { $0.level >= level }
         headings.append((level, heading.plain.lowercased()))
         section += 1
-        inBoilerplate = headings.contains { h in boilerplate.contains { h.text.contains($0) } }
-        inTests = headings.contains { $0.text.contains("test") }
+        inBoilerplate = headings.contains { matches(boilerplate, $0.text) }
+        inTests = headings.contains { matches(testHeading, $0.text) }
         if !inBoilerplate { lines.append(heading.plain) }
         continue
       }

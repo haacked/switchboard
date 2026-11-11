@@ -239,6 +239,16 @@ extension MergeDetailsTests {
       #expect(description.contains("Kept words"), "\(heading)")
     }
 
+    @Test(arguments: ["Latest numbers", "Attestation flow", "Contest rules", "Reagent costs"])
+    func keepsASectionWhoseHeadingHasTheWordInsideAnotherWord(_ heading: String) {
+      let body = "## Problem\n\nThe cache drops writes.\n\n## \(heading)\n\nKept words.\n\n- [ ] follow up"
+
+      let read = MergeDetails.read(body: body, title: "")
+
+      #expect(read.description.contains("Kept words"), "\(heading)")
+      #expect(read.testGaps == [], "\(heading)")
+    }
+
     @Test func dropsTheSubsectionsOfADroppedSection() {
       let body = "## Testing\n\n### Unit\n\nDropped words here.\n\n## Changes\n\nKept words."
 

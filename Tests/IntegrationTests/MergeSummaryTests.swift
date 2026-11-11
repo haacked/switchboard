@@ -108,6 +108,47 @@ extension Instance {
     #expect(detailsReads(github) == 1)
   }
 
+  @Test func statusReReadAtTheSameHeadReadsTheThreadsAgain() throws {
+    let github = try github()
+    let sbd = try Instance.withMergeStub(github)
+    try sbd.restart(setting: "triage", to: ["systemPrompt": "", "enabled": false])
+    let s = try MergeTests().readySession(sbd)
+    #expect(detailsReads(github) == 1)
+
+    github.reviewThreads(MergeTests.number, resolved: [false])
+    try sbd.advanceClock(600_000)
+    try sbd.poll()
+
+    #expect(detailsReads(github) == 2)
+    let callouts = try #require(try sbd.mergeSummary(s.id)["callouts"]?.array)
+    #expect(callouts.first?["title"]?.string == "1 open review thread")
+  }
+
+  @Test func briefThatTheHourlyLimitSkippedRunsOnceTheHourPasses() throws {
+    let github = try github()
+    let sbd = try Instance.withMergeStub(github)
+    try sbd.restart(setting: "triage", to: ["systemPrompt": "", "perHour": 1])
+    let s = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch)
+    // The turn's summary uses the hour's one call.
+    _ = try sbd.waitForTriageEvents(s.id, count: 1)
+    try sbd.poll()
+    try sbd.advanceClock(1_000)
+
+    let briefs = try sbd.events(s.id).filter { $0.kind == MergeBrief.event }
+    #expect(briefs.count == 1)
+    #expect(briefs.first?.data["skipped"]?.string?.isEmpty == false)
+    #expect(sbd.briefCalls().isEmpty)
+    #expect(plain(try sbd.mergeSummary(s.id)["text"]?.string ?? "").hasPrefix(Self.gist))
+
+    try sbd.advanceClock(3_600_000)
+
+    let text = try sbd.waitFor("the brief", fetch: { try sbd.mergeSummary(s.id)["text"]?.string }) {
+      $0.contains("It changes the code.")
+    }
+    #expect(plain(text).hasPrefix("It changes the code.\n4 files"))
+    #expect(sbd.briefCalls().count == 1)
+  }
+
   @Test func newHeadReadsTheDetailsAndTheBriefAgain() throws {
     let github = try github()
     let sbd = try Instance.withMergeStub(github)
@@ -164,9 +205,10 @@ extension Instance {
     let s = try MergeTests().readySession(sbd)
 
     #expect(plain(try sbd.mergeSummary(s.id)["text"]?.string ?? "") == "Approved by stamphog. Checks passed.")
+    #expect(try sbd.poll()["mergeDetailsError"]?.string?.isEmpty == false)
 
     github.recover(MergeTests.number, in: .mergeDetails)
-    try sbd.poll()
+    #expect(try sbd.poll()["mergeDetailsError"] == nil)
 
     #expect(plain(try sbd.mergeSummary(s.id)["text"]?.string ?? "").hasPrefix(Self.gist))
   }

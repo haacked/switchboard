@@ -503,6 +503,11 @@ private let hostileText = [
   "see https://evil.example/x now",
   "see www.evil.example now",
   "mail a@evil.example now",
+  // U+0600 is a prepend mark and U+0301 a combining mark. Each forms one grapheme cluster with the bracket beside it.
+  "\u{0600}[x\u{0600}](file:///etc/passwd)",
+  "[\u{0301}x\u{0600}](y:z)",
+  "\u{0600}!\u{0600}[i\u{0600}](https://x.example/y.png)",
+  "\u{0600}\\[x\u{0600}\\](file:///etc/passwd)",
 ]
 
 /// Where PR-derived text enters the card.
@@ -535,16 +540,18 @@ extension MergeAttentionTests {
       #expect(f.mergeBrief == MergeBrief(pr: 42, head: samplePRHead, text: briefText))
     }
 
-    @Test func mergeBriefErrorGivesNoBriefText() throws {
-      let f = try summaryFacts(then: [briefEvent(4, error: "claude timed out")])
+    @Test func mergeBriefErrorKeepsTheLastBrief() throws {
+      let f = try summaryFacts(then: [briefEvent(4, text: briefText), briefEvent(5, error: "claude timed out")])
 
-      #expect(f.mergeBrief?.text == nil)
+      #expect(f.mergeBrief?.text == briefText)
     }
 
-    @Test func mergeBriefSkipGivesNoBriefText() throws {
-      let f = try summaryFacts(then: [briefEvent(4, skipped: "the hourly limit was reached")])
+    @Test func mergeBriefSkipKeepsTheLastBrief() throws {
+      let f = try summaryFacts(then: [
+        briefEvent(4, text: briefText), briefEvent(5, skipped: "the hourly limit was reached"),
+      ])
 
-      #expect(f.mergeBrief?.text == nil)
+      #expect(f.mergeBrief?.text == briefText)
     }
 
     @Test func mergeBriefWithTextCountsAsASummaryCall() {
@@ -607,6 +614,12 @@ extension MergeAttentionTests {
       let v = verdict(try summaryFacts(details: mergeDetails(gist: nil)))
 
       #expect(shownSummary(v) == approvedFacts)
+    }
+
+    @Test func readyPRWithAnUnknownMergeMethodSaysToMergeOnGitHub() throws {
+      let v = verdict(try summaryFacts(readyPR(trunkConfig: nil, mergeQueue: nil)))
+
+      #expect(shownSummary(v)?.hasSuffix("sbd can't tell how acme/widgets merges, so merge it on GitHub.") == true)
     }
 
     @Test func readyPRThatNobodyApprovedSaysNoReviewIsRequired() throws {

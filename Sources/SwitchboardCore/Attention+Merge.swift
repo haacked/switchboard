@@ -128,8 +128,11 @@ extension Attention {
     parts.append(pr.approvers.isEmpty ? "No review required." : "Approved by \(names(pr.approvers)).")
     // Both merge verdicts refuse running and failed checks.
     parts.append(pr.checks == nil ? "No checks ran." : "Checks passed.")
+    if facts.mergeMethod == .unknown {
+      parts.append("sbd can't tell how \(pr.repo) merges, so merge it on GitHub.")
+    }
     let prose = facts.currentMergeBrief?.text ?? details?.gist
-    let text = ([prose].compactMap { $0 } + [parts.joined(separator: " ")]).map(MarkdownText.escaped)
+    let text = [prose, parts.joined(separator: " ")].compactMap { $0 }.map(MarkdownText.escaped)
       .joined(separator: "\n\n")
     return (text, pauseCallouts(pr))
   }

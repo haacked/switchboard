@@ -123,6 +123,12 @@ extension Service {
 
   // MARK: Summaries
 
+  /// Starts each model call that `verdict` asks for: the turn's summary and the PR's merge brief.
+  func startSummaries(_ id: String, _ verdict: Verdict) {
+    summarizeTurn(id, verdict)
+    summarizeMerge(id, verdict)
+  }
+
   /// Starts the summary of the turn that just ended, when `verdict`, the
   /// session's current verdict, comes from the last reply and no card or
   /// rule decides it. The result is a `triage` event keyed by the Stop event.
@@ -136,7 +142,7 @@ extension Service {
     // guard above.
     entries[id]?.summaryAttempt = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
-    if let skip = e.facts.sessionSummary != nil ? "the session wrote its card" : budgetSkip(e.facts, account: account) {
+    if let skip = summarySkip(e.facts, account: account) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])
       return
     }
@@ -155,19 +161,25 @@ extension Service {
   /// Starts the model's brief of the session's PR when `verdict` asks the
   /// user to merge or enqueue it, the poller read the PR's details at its
   /// head, and no brief exists for that head. The result is a `mergeBrief`
-  /// event. A head gets one attempt per run of sbd. A session that wrote its
-  /// own card gets none, because its card shows no rule's summary.
+  /// event. A head gets one call per run of sbd. A head whose call the budget
+  /// skipped gets its call on the first tick after the budget returns. A
+  /// session that wrote its own card gets none, because its card shows no
+  /// rule's summary.
   func summarizeMerge(_ id: String, _ verdict: Verdict) {
     guard config.triage.enabled, verdict.summarizesPR, let e = entries[id], e.facts.sessionSummary == nil,
       let pr = e.facts.pr, let details = pr.mergeDetails, e.facts.currentMergeBrief == nil
     else { return }
     let attempt = "#\(pr.number)@\(pr.headSha)"
-    guard e.mergeBriefAttempt != attempt else { return }
+    guard e.mergeBriefAttempt != attempt || e.mergeBriefSkipped else { return }
+    let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
+    let skip = budgetSkip(e.facts, account: account)
+    // A head records one skip, and then waits for the budget.
+    if e.mergeBriefAttempt == attempt, skip != nil { return }
     // A skip records an event, which calls this again.
     entries[id]?.mergeBriefAttempt = attempt
+    entries[id]?.mergeBriefSkipped = skip != nil
     let key: [String: JSON] = ["pr": .number(Double(pr.number)), "head": .string(pr.headSha)]
-    let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
-    if let skip = budgetSkip(e.facts, account: account) {
+    if let skip {
       record(id, MergeBrief.event, .object(key.merging(["skipped": .string(skip)]) { $1 }))
       return
     }
@@ -199,6 +211,12 @@ extension Service {
 
   /// Why a model call does not run: the account has no quota left, or the
   /// session had its calls for the hour.
+  /// Why the turn summary does not run: the session wrote its card, or the budget is spent.
+  private func summarySkip(_ facts: SessionFacts, account: String) -> String? {
+    if facts.sessionSummary != nil { return "the session wrote its card" }
+    return budgetSkip(facts, account: account)
+  }
+
   private func budgetSkip(_ facts: SessionFacts, account: String) -> String? {
     if !quota.hasBudget(account: account) { return "no quota left for \(account)" }
     let now = nowMs()
