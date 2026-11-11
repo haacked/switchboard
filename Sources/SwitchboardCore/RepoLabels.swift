@@ -7,20 +7,29 @@ public enum RepoLabels {
   /// Each session's label by session id. A session with no known repo, the
   /// Manager, and a group chat get none. When the sessions span fewer than two repos, no
   /// session gets one, because every row would say the same thing, unless
-  /// `evenForOneRepo` is true, as for the merge board's lanes.
-  public static func labels(_ sessions: [SessionSummary], evenForOneRepo: Bool = false) -> [String: String] {
-    fullLabels(sessions, evenForOneRepo: evenForOneRepo).mapValues(capped)
+  /// `evenForOneRepo` is true, as for the merge board's lanes. With
+  /// `fullName`, a repo whose owner/name is known is labeled with it.
+  ///
+  /// Every session in a folder takes the folder's `repository`, or else the
+  /// owner/name of the first started follow-up in it. A PR never names a
+  /// folder's repo, because a session can link a PR from another repo. The
+  /// sessions in one folder therefore count as one repo. A session with no
+  /// folder takes its PR's repo, or else its follow-up's.
+  public static func labels(_ sessions: [SessionSummary], evenForOneRepo: Bool = false, fullName: Bool = false)
+    -> [String: String]
+  {
+    fullLabels(sessions, evenForOneRepo: evenForOneRepo, fullName: fullName).mapValues(capped)
   }
 
   /// The labels that `labels` gives, before `capped` shortens them.
-  static func fullLabels(_ sessions: [SessionSummary], evenForOneRepo: Bool) -> [String: String] {
+  static func fullLabels(_ sessions: [SessionSummary], evenForOneRepo: Bool, fullName: Bool = false) -> [String: String]
+  {
     let listed = sessions.filter { $0.kind == .work }
-    // Every session in a folder takes the owner/name of the first PR in that
-    // folder, or else of the first started follow-up in it. A session's own PR
-    // does not override it. The sessions in one folder therefore count as one repo.
     var slugOfFolder: [String: String] = [:]
     for s in listed {
-      if let folder = s.repoFolder, let pr = s.pr, slugOfFolder[folder] == nil { slugOfFolder[folder] = pr.repo }
+      if let folder = s.repoFolder, let repository = s.repository, slugOfFolder[folder] == nil {
+        slugOfFolder[folder] = repository
+      }
     }
     for s in listed {
       if let folder = s.repoFolder, let repository = s.followup?.repository, slugOfFolder[folder] == nil {
@@ -33,7 +42,7 @@ public enum RepoLabels {
     for s in listed {
       let folder = s.repoFolder
       let slug = if let folder { slugOfFolder[folder] } else { s.pr?.repo ?? s.followup?.repository }
-      guard let repo = Repo(folder: folder, slug: slug) else { continue }
+      guard let repo = Repo(folder: folder, slug: slug, fullName: fullName) else { continue }
       if indexOfKey[repo.key] == nil {
         indexOfKey[repo.key] = repos.count
         repos.append(repo)
@@ -77,11 +86,11 @@ public enum RepoLabels {
     var label: String { forms[level] }
 
     /// `slug` is the repo's `owner/name`, when it is known.
-    init?(folder: String?, slug: String?) {
+    init?(folder: String?, slug: String?, fullName: Bool) {
       if let slug {
         let short = folder.map { ($0 as NSString).lastPathComponent } ?? String(slug.split(separator: "/").last ?? "")
         key = "github:" + slug.lowercased()
-        forms = [short, slug]
+        forms = fullName ? [slug] : [short, slug]
       } else if let folder {
         let parts = folder.split(separator: "/").map(String.init)
         guard !parts.isEmpty else { return nil }

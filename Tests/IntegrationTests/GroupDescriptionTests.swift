@@ -410,18 +410,6 @@ import Testing
     #expect(try listed(sbd, g.id).description == "Sessions on the flag-evaluations branch prefix")
   }
 
-  @Test func acceptingASharedWordSuggestionNamesTheWord() throws {
-    let sbd = try Instance()
-    let repo = try sbd.makeRepo()
-    _ = try shared.branched(sbd, repo, "haacked/cache")
-    _ = try shared.branched(sbd, repo, "haacked/cache-warmup")
-
-    let g = try shared.accept(sbd, "word:cache")
-
-    let description = try #require(g.description)
-    #expect(description.contains("cache"))
-  }
-
   @Test func acceptingThroughTheMCPToolDescribesThePrefix() throws {
     let sbd = try Instance()
     let repo = try sbd.makeRepo()

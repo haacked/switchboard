@@ -287,7 +287,9 @@ final class Instance {
   }
 
   /// A git repo in the home, on branch main with one empty commit.
-  func makeRepo(_ name: String = "repo") throws -> String { try Repos.create("\(home.path)/\(name)") }
+  func makeRepo(_ name: String = "repo", origin: String? = nil) throws -> String {
+    try Repos.create("\(home.path)/\(name)", origin: origin)
+  }
 
   /// A linked worktree of the repo on a new branch, in <home>/trees/<repo>/<branch>.
   func addWorktree(_ repo: String, _ branch: String) throws -> String {

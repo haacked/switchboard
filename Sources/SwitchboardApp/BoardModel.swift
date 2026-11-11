@@ -21,6 +21,8 @@ final class BoardModel: ObservableObject {
   @Published var selection: String?
   @Published var showingNew = false
   @Published var showingImport = false
+  /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
+  @Published var knownRepos: [KnownRepo]?
   @Published var showingSearch = false
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
@@ -268,8 +270,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event and the views never show. Publishing for it redraws the views
-  /// and restarts a tooltip's hover delay.
+  /// hook event. Publishing for it redraws the views and restarts a tooltip's
+  /// hover delay. The session tooltip shows `lastActivity`, so its "Last
+  /// activity" line can lag until another shown field changes.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
@@ -353,6 +356,9 @@ final class BoardModel: ObservableObject {
 
   /// The account that new sessions without a parent use.
   var activeAccount: AccountInfo? { accounts.first(where: \.active) }
+
+  /// The active account's folder. It is the default folder until the accounts load.
+  var activeAccountFolder: String { activeAccount?.folder ?? ClaudeAccount.defaultFolder }
 
   /// Closes the account menu and makes new sessions run under the account.
   /// When sessions on other accounts could move to it, this asks first.
@@ -926,11 +932,38 @@ final class BoardModel: ObservableObject {
     perform("followup-start", args, finally: { self.starting.remove(id) })
   }
 
+  /// Puts the session's repository first in `knownRepos` at once. A New Session sheet opened before `new`
+  /// returns preselects it, because the sheet's `repos` request waits behind `new` on `worker`.
   func create(_ args: NewSession) {
     guard let json = try? JSON(encoding: args).object else { return }
+    if let repo = knownRepos?.first(where: { $0.path == args.path }) { moveToFront(repo) }
     perform("new", json) { value in
       if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
+  }
+
+  func loadRepos() {
+    perform(
+      "repos", [:],
+      then: { self.knownRepos = (try? JSONCoding.convert($0, to: [KnownRepo].self)) ?? [] },
+      failed: { _ in self.knownRepos = self.knownRepos ?? [] })
+  }
+
+  /// Asks sbd to add the repository that holds `path` and puts it first in `knownRepos`.
+  func addRepo(_ path: String, then: @escaping (Result<KnownRepo, Error>) -> Void) {
+    perform(
+      "repo-add", ["path": .string(path.expandingTilde)],
+      then: { value in
+        let result = Result { try JSONCoding.convert(value, to: KnownRepo.self) }
+        if let repo = try? result.get() { self.moveToFront(repo) }
+        then(result)
+      },
+      failed: { then(.failure($0)) })
+  }
+
+  /// Puts `repo` first in `knownRepos` and drops any other row with its path.
+  private func moveToFront(_ repo: KnownRepo) {
+    knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
   }
 
   /// Asks sbd for the session's tmux targets. It blocks, so it runs off the

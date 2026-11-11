@@ -614,14 +614,14 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 }
 
 @Suite struct TranscriptPRLink {
-  static func linkLine(_ number: Int) -> String {
+  static func linkLine(_ number: Int, repo: String = "PostHog/ops-platform") -> String {
     #"{"type":"pr-link","sessionId":"1e2aaefe-e22f-4e93-9446-f8d157928dfe","prNumber":\#(number),"#
-      + #""prUrl":"https://github.com/PostHog/ops-platform/pull/\#(number)","prRepository":"PostHog/ops-platform","#
+      + #""prUrl":"https://github.com/\#(repo)/pull/\#(number)","prRepository":"\#(repo)","#
       + #""timestamp":"2026-08-25T23:59:58.451Z"}"#
   }
 
-  static func link(_ number: Int) -> PRKey {
-    .number(repo: "PostHog/ops-platform", number: number)
+  static func link(_ number: Int, repo: String = "PostHog/ops-platform") -> PRKey {
+    .number(repo: repo, number: number)
   }
 
   // Multi-byte text, so that a count of characters differs from a count of bytes.
@@ -689,6 +689,78 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     let text = Self.linkLine(628) + "\n" + line + "\n"
 
     #expect(GitHub.lastPRLink(in: Data(text.utf8)).key == Self.link(628))
+  }
+
+  @Test func lastPRLinkSkipsARefusedLaterLineForAnEarlierAcceptedOne() {
+    let text =
+      Self.linkLine(628) + "\n" + Self.userLine + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
+      + Self.assistantLine + "\n"
+
+    let result = GitHub.lastPRLink(in: Data(text.utf8)) { $0 == "PostHog/ops-platform" }
+
+    #expect(result.key == Self.link(628))
+    #expect(result.consumed == Data(text.utf8).count)
+  }
+
+  @Test func lastPRLinkReturnsNoKeyButConsumesEverythingWhenNoLineIsAccepted() {
+    let complete = Self.linkLine(628) + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
+    let text = complete + Self.linkLine(629)
+
+    let result = GitHub.lastPRLink(in: Data(text.utf8)) { _ in false }
+
+    #expect(result.key == nil)
+    #expect(result.consumed == Data(complete.utf8).count)
+  }
+
+  @Test func lastPRLinkAcceptsEveryRepoByDefault() {
+    let text = Self.linkLine(628) + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
+
+    #expect(GitHub.lastPRLink(in: Data(text.utf8)).key == Self.link(217, repo: "haacked/switchboard"))
+  }
+
+  @Test func lastPRLinkAsksAboutTheRepoAsTheLineWritesIt() {
+    let text = Self.linkLine(628, repo: "PostHog/Ops-Platform") + "\n"
+
+    let result = GitHub.lastPRLink(in: Data(text.utf8)) { $0 == "PostHog/Ops-Platform" }
+
+    #expect(result.key == Self.link(628, repo: "PostHog/Ops-Platform"))
+  }
+}
+
+@Suite struct GitHubRemoteRepositories {
+  @Test func repositoriesListsEveryGitHubRemoteInLowercase() {
+    let config = [
+      "remote.origin.url": "https://github.com/haacked/PostHog.git",
+      "remote.upstream.url": "git@github.com:PostHog/posthog.git",
+      "remote.upstream.gh-resolved": "base",
+      "remote.port443.url": "ssh://git@ssh.github.com:443/PostHog/Charts.git",
+      "remote.gitlab.url": "https://gitlab.com/acme/widgets.git",
+      "remote.pushdefault": "origin",
+      "branch.main.remote": "origin",
+      "branch.main.merge": "refs/heads/main",
+    ]
+
+    let repositories = GitHub.repositories(config: config)
+
+    #expect(repositories == ["haacked/posthog", "posthog/posthog", "posthog/charts"])
+  }
+
+  @Test func repositoriesIncludesTheDefaultRepoThatGhResolvedNames() {
+    let config = [
+      "remote.origin.url": "https://github.com/haacked/supacode.git",
+      "remote.origin.gh-resolved": "supabitapp/Supacode",
+    ]
+
+    #expect(GitHub.repositories(config: config) == ["haacked/supacode", "supabitapp/supacode"])
+  }
+
+  @Test(arguments: [
+    [String: String](),
+    ["branch.main.remote": "origin", "branch.main.merge": "refs/heads/main", "remote.pushdefault": "origin"],
+    ["remote.origin.url": "https://gitlab.com/acme/widgets.git"],
+  ])
+  func repositoriesIsEmptyWithoutRemotes(_ config: [String: String]) {
+    #expect(GitHub.repositories(config: config).isEmpty)
   }
 }
 

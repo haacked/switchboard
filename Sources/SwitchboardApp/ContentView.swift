@@ -44,8 +44,8 @@ struct StateBadge: View {
   }
 }
 
-func ago(_ ms: Int64) -> String {
-  let s = max(0, (nowMs() - ms) / 1000)
+func ago(_ ms: Int64, now: Int64 = nowMs()) -> String {
+  let s = max(0, (now - ms) / 1000)
   if s < 60 { return "\(s)s" }
   if s < 3600 { return "\(s / 60)m" }
   if s < 86400 { return "\(s / 3600)h" }
@@ -183,10 +183,11 @@ struct Sidebar: View {
 
   var body: some View {
     let repos = model.repoLabels
+    let activeAccount = model.activeAccountFolder
     List(selection: $model.selection) {
       if let manager = model.manager {
         Section {
-          SessionRow(session: manager).tag(manager.id)
+          SessionRow(session: manager, activeAccount: activeAccount).tag(manager.id)
         } header: {
           Text("Manager")
         }
@@ -196,7 +197,7 @@ struct Sidebar: View {
         Section(isExpanded: expanded(state)) {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
-              SessionRow(session: row.session, repo: repos[row.id])
+              SessionRow(session: row.session, activeAccount: activeAccount, repo: repos[row.id])
               NotesButton(session: row.session)
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if row.session.isRemovableDone { DeleteButton(session: row.session) }
@@ -375,6 +376,8 @@ extension PRSummary {
 
 struct SessionRow: View {
   let session: SessionSummary
+  /// The active account's folder. The tooltip names the session's account only when it differs.
+  let activeAccount: String
   var repo: String? = nil
   @Environment(\.backgroundProminence) private var prominence
 
@@ -416,6 +419,7 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
+    .help(session.tooltip(activeAccount: activeAccount))
   }
 
   /// Text truncates at its end. The reason therefore truncates before the repo does.
@@ -477,7 +481,7 @@ struct BoardView: View {
   private func lanes(_ open: [SessionSummary], labelling board: [SessionSummary]) -> [Lane] {
     switch laneKind {
     case .repo:
-      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true)).map {
+      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true, fullName: true)).map {
         Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
       }
     case .group:
@@ -569,6 +573,7 @@ struct BoardView: View {
                   .help("Show a lane per repo or per group")
                   // The header stays pinned, so the name field shows without a scroll.
                   if laneKind == .group { NewGroupRow() }
+                  GroupSuggestionButton()
                 }
                 .frame(width: Self.labelWidth)
                 ForEach(MergeBoard.columns, id: \.self) { stage in
@@ -607,15 +612,6 @@ struct BoardView: View {
         }
       }
       .groupDeleteDialog(model)
-      .safeAreaInset(edge: .top, spacing: 0) {
-        if !model.suggestions.isEmpty {
-          VStack(spacing: 0) {
-            GroupSuggestionList()
-            Divider()
-          }
-          .background(.background)
-        }
-      }
     }
   }
 }
@@ -816,7 +812,40 @@ struct PlanArtifactList: View {
   }
 }
 
-/// The group suggestions above the board, each with Accept and Decline.
+/// Shows how many group suggestions wait, and opens them in a popover. It
+/// draws nothing when there are none.
+struct GroupSuggestionButton: View {
+  @EnvironmentObject var model: BoardModel
+  @State private var showing = false
+
+  /// Such as `2 suggestions`, or nil when there are none.
+  static func label(count: Int) -> String? {
+    count > 0 ? "\(count) suggestion\(count == 1 ? "" : "s")" : nil
+  }
+
+  var body: some View {
+    if let label = Self.label(count: model.suggestions.count) {
+      Button {
+        showing = true
+      } label: {
+        Label(label, systemImage: "lightbulb")
+      }
+      .buttonStyle(.link)
+      .help("Show the groups that Switchboard suggests")
+      .accessibilityLabel("Group suggestions: \(model.suggestions.count)")
+      .accessibilityIdentifier("group-suggestions-button")
+      .popover(isPresented: $showing, arrowEdge: .bottom) {
+        GroupSuggestionList().frame(width: 420)
+      }
+      // GroupSuggestionButton keeps `showing` after the last suggestion
+      // removes this button. Without the reset, the popover would open by
+      // itself when the next suggestion arrives.
+      .onDisappear { showing = false }
+    }
+  }
+}
+
+/// The group suggestions in the popover, each with Accept and Decline.
 struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 
@@ -876,6 +905,7 @@ struct BoardCard: View {
 
   var body: some View {
     let s = session
+    let tooltip = s.tooltip(activeAccount: model.activeAccountFolder)
     ZStack(alignment: .bottomTrailing) {
       Button {
         model.openFromBoard(s.id)
@@ -928,6 +958,8 @@ struct BoardCard: View {
         }
       }
       .buttonStyle(.plain)
+      .help(tooltip)
+      .modifier(SnapshotHover(id: s.id, text: tooltip))
       .accessibilityValue(s.state.title)
       .accessibilityAddTraits(keyboardFocused ? .isSelected : [])
       .overlayPreferenceValue(PRLinkBounds.self) { bounds in

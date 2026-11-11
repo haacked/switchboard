@@ -93,6 +93,12 @@ public final class Service {
   var checkouts: [String: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<String> = []
+  /// The owner/name that the origin remote of each checkout names on GitHub,
+  /// or nil when it names none, with the time of the lookup. sbd reads a
+  /// checkout without one again after `checkoutRetryMs`.
+  var repositories: [String: (repository: String?, readMs: Int64)] = [:]
+  /// The checkouts whose origin a lookup off the queue is reading.
+  var repositoryLookups: Set<String> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   let triageJobs: OperationQueue = {
@@ -190,6 +196,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
+    pruneDeclinedSuggestions()
     snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain { try settleUncertain(id, texts) }
     seedParentMarks(now: nowMs())
@@ -231,6 +238,10 @@ public final class Service {
         return try .success(JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self))))
       case "spawn":
         return try .success(JSON(encoding: spawn(request.args)))
+      case "repos":
+        return try .success(JSON(encoding: knownRepos()))
+      case "repo-add":
+        return try .success(JSON(encoding: addRepo(request.args)))
       case "manager":
         return managerRequest()
       case "chat":
@@ -634,6 +645,28 @@ public final class Service {
     return nil
   }
 
+  /// The owner/name that the origin remote of `checkout` names on GitHub.
+  /// This returns nil until a lookup off the queue has read it.
+  func repository(_ checkout: String, of s: Session) -> String? {
+    if let known = repositories[checkout],
+      known.repository != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
+    {
+      return known.repository
+    }
+    if repositoryLookups.insert(checkout).inserted {
+      let machine = machine(for: s)
+      DispatchQueue.global().async { [self] in
+        let url = try? gitOutput(checkout, ["config", "--get", "remote.origin.url"], on: machine)
+        let repository = url.flatMap(GitHub.repo(remoteURL:))
+        queue.async { [self] in
+          repositories[checkout] = (repository, nowMs())
+          repositoryLookups.remove(checkout)
+        }
+      }
+    }
+    return nil
+  }
+
   func worktreeEntry(
     _ repo: String, at path: String, on machine: any Machine
   ) throws -> WorktreeEntry? {
@@ -702,7 +735,9 @@ public final class Service {
     }
     let folder = try prepareFolder(args)
     awaitMCPServers()
-    return try queue.sync { try create(args, folder) }
+    let summary = try queue.sync { try create(args, folder) }
+    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
+    return summary
   }
 
   /// `configure` changes the session before its first launch.
@@ -1719,7 +1754,10 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
-    if s.kind == .work { out.checkout = checkout(s) }
+    if s.kind == .work {
+      out.checkout = checkout(s)
+      out.repository = out.checkout.flatMap { repository($0, of: s) }
+    }
     out.parent = s.parent
     out.manager = s.manager
     out.kind = s.kind

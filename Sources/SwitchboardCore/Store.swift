@@ -23,6 +23,7 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
+    try exec("CREATE TABLE IF NOT EXISTS known_repos (path TEXT PRIMARY KEY, used INTEGER NOT NULL)")
     try exec(
       "CREATE TABLE IF NOT EXISTS resolved_todos (id INTEGER PRIMARY KEY, session TEXT, name TEXT, repo TEXT, branch TEXT, pr INTEGER, note TEXT, text TEXT, by TEXT, added INTEGER, resolved INTEGER, how TEXT)"
     )
@@ -146,6 +147,13 @@ public final class Store {
     try run("INSERT OR IGNORE INTO declined_suggestions (id) VALUES (?)", [id])
   }
 
+  /// Deletes the rows in one statement, so it needs no transaction of its own.
+  public func removeDeclined(_ ids: Set<String>) throws {
+    guard !ids.isEmpty else { return }
+    let marks = Array(repeating: "?", count: ids.count).joined(separator: ", ")
+    try run("DELETE FROM declined_suggestions WHERE id IN (\(marks))", Array(ids))
+  }
+
   /// The ids of the group suggestions and the plan row suggestions that the
   /// user declined. A group suggestion's id starts with its kind, such as
   /// `merge:`. A plan row's id starts with its plan's id.
@@ -233,6 +241,18 @@ public final class Store {
 
   public func importedLines() throws -> Set<String> {
     Set(try query("SELECT line FROM followup_imports", []) { $0.text(0) })
+  }
+
+  /// Records that the repository whose main checkout is at `path` was used at `used`. An earlier time
+  /// than the stored one changes nothing.
+  public func remember(repo path: String, used: Int64) throws {
+    try run(
+      "INSERT INTO known_repos (path, used) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET used = max(used, excluded.used)",
+      [path, used])
+  }
+
+  public func knownRepos() throws -> [(path: String, used: Int64)] {
+    try query("SELECT path, used FROM known_repos", []) { ($0.text(0), $0.int(1)) }
   }
 
   // MARK: SQLite

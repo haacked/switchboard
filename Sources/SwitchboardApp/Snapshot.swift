@@ -1,8 +1,9 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the new-session sheet, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and shows that session's tooltip text in a popover on its card, because a tooltip appears only on a real hover and in a window the snapshot doesn't draw, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -16,6 +17,8 @@ import Foundation
 @MainActor
 enum Snapshot {
   static let opensDetails = ProcessInfo.processInfo.environment["SB_DETAILS"] != nil
+  static let opensRepoPicker = ProcessInfo.processInfo.environment["SB_REPO_PICKER"] == "open"
+  static let hoverSession = ProcessInfo.processInfo.environment["SB_HOVER"]
   static let searchQuery = ProcessInfo.processInfo.environment["SB_SEARCH"]
 
   static func start(_ model: BoardModel) {
@@ -29,6 +32,7 @@ enum Snapshot {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.selectNextNeedingYou() }
       }
     }
+    if hoverSession != nil { model.show(.board) }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
     if env["SB_SHEET"] == "new" { model.showingNew = true }
     if env["SB_SHEET"] == "search" { openSearch(model) }
@@ -112,9 +116,10 @@ enum Snapshot {
       FileHandle.standardError.write(Data("snapshot: no window to draw\n".utf8))
       return
     }
-    // A popover's window is a child window of the window that presents it.
-    let popovers = (main.childWindows ?? []).filter(\.isVisible)
-    let windows = [main] + [main.attachedSheet].compactMap { $0 } + popovers
+    // A popover's window is a child window of the window that presents it, which is the main window or its sheet.
+    let sheet = main.attachedSheet
+    let popovers = ((main.childWindows ?? []) + (sheet?.childWindows ?? [])).filter { $0.isVisible && $0 != sheet }
+    let windows = [main] + [sheet].compactMap { $0 } + popovers
     let bounds = windows.reduce(main.frame) { $0.union($1.frame) }
     let scale = main.backingScaleFactor
     guard
@@ -150,6 +155,30 @@ enum Snapshot {
       try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     } catch {
       FileHandle.standardError.write(Data("snapshot: \(error)\n".utf8))
+    }
+  }
+}
+
+/// Shows a card's tooltip text in a popover for SB_HOVER. It attaches the
+/// popover only to the card that SB_HOVER names.
+struct SnapshotHover: ViewModifier {
+  let id: String
+  let text: String
+  @State private var shown = false
+
+  func body(content: Content) -> some View {
+    if Snapshot.hoverSession == id {
+      content
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+          Text(verbatim: text)
+            .font(Font(NSFont.toolTipsFont(ofSize: 0)))
+            .fixedSize()
+            .padding(8)
+        }
+        // A card in a lazy stack can appear before it has a frame. The popover therefore opens 1 s later.
+        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { shown = true } }
+    } else {
+      content
     }
   }
 }
