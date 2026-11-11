@@ -268,8 +268,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event and the views never show. Publishing for it redraws the views
-  /// and restarts a tooltip's hover delay.
+  /// hook event. Publishing for it redraws the views and restarts a tooltip's
+  /// hover delay. The session tooltip shows `lastActivity`, so its "Last
+  /// activity" line can lag until another shown field changes.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
@@ -353,6 +354,9 @@ final class BoardModel: ObservableObject {
 
   /// The account that new sessions without a parent use.
   var activeAccount: AccountInfo? { accounts.first(where: \.active) }
+
+  /// The active account's folder. It is the default folder until the accounts load.
+  var activeAccountFolder: String { activeAccount?.folder ?? ClaudeAccount.defaultFolder }
 
   /// Closes the account menu and makes new sessions run under the account.
   /// When sessions on other accounts could move to it, this asks first.
