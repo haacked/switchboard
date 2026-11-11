@@ -11,7 +11,8 @@ import SwitchboardCore
 /// change, as GitHub does. It records each request.
 final class FakeGitHub {
   struct Request {
-    /// lookup, status, base, bodies, codeowners, files, approvals, or actions.
+    /// lookup, status, base, bodies, codeowners, files, approvals, actions,
+    /// or mergeDetails.
     var kind: String
     /// The node ids that a status, base, body, files, approvals, or actions query
     /// asked for, each lookup key as owner/name:branch or owner/name#number,
@@ -63,7 +64,7 @@ final class FakeGitHub {
 
   /// The queries that ask for PR nodes.
   enum PRQuery: String {
-    case status, base, files, approvals, actions
+    case status, base, files, approvals, actions, mergeDetails
   }
 
   /// A base branch's code owner settings, as the codeowners query reads them.
@@ -137,6 +138,12 @@ final class FakeGitHub {
     for id in prs.keys {
       if prs[id]!["isMergeQueueEnabled"] == nil { prs[id]!["isMergeQueueEnabled"] = false }
       if prs[id]!["isInMergeQueue"] == nil { prs[id]!["isInMergeQueue"] = false }
+      // Nor do they hold the fields that the merge details query reads.
+      for (key, value) in [
+        "additions": 12, "deletions": 3, "changedFiles": 2, "reviewThreads": ["totalCount": 0, "nodes": []],
+      ] as [String: JSON] where prs[id]![key] == nil {
+        prs[id]![key] = value
+      }
     }
     for node in try FakeGitHub.recorded("github-bodies.json") {
       if let id = node["id"]?.string { bodies[id] = node }
@@ -182,6 +189,17 @@ final class FakeGitHub {
     lock.withLock {
       let id = prs.first { $0.value["number"]?.int == number }!.key
       edit(&prs[id]!)
+    }
+  }
+
+  /// Gives the PR one review thread for each value, resolved or not, and
+  /// `totalCount` as GitHub's count when it differs.
+  func reviewThreads(_ number: Int, resolved: [Bool], totalCount: Int? = nil) {
+    change(number) {
+      $0["reviewThreads"] = [
+        "totalCount": .number(Double(totalCount ?? resolved.count)),
+        "nodes": .array(resolved.map { ["isResolved": .bool($0)] }),
+      ]
     }
   }
 
@@ -644,6 +662,8 @@ final class FakeGitHub {
         let prQuery: PRQuery
         if query.contains("onBehalfOf(") {
           prQuery = .approvals
+        } else if query.contains("reviewThreads(") {
+          prQuery = .mergeDetails
         } else if query.contains("reviews(") {
           prQuery = .status
         } else if query.contains("checkSuites(") {

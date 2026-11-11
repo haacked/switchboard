@@ -136,7 +136,7 @@ extension Service {
     // guard above.
     entries[id]?.summaryAttempt = stop
     let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
-    if let skip = summarySkip(e.facts, account: account) {
+    if let skip = e.facts.sessionSummary != nil ? "the session wrote its card" : budgetSkip(e.facts, account: account) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])
       return
     }
@@ -146,19 +146,60 @@ extension Service {
     let env = headlessEnv(session: id, account: config.triage.account)
     triageJobs.addOperation { [self] in
       let result = Result {
-        try TriageSummarizer.parse(
-          runHeadless(
-            TriageSummarizer.arguments(model: config.triage.model), input: input, env: env, folder: home.path,
-            timeout: config.triage.timeoutSeconds))
+        try TriageSummarizer.parse(triageCall(TriageSummarizer.arguments(model: config.triage.model), input, env))
       }
       queue.async { self.finishSummary(id, stop: stop, result) }
     }
   }
 
-  /// Why the summary call does not run: the session wrote its own card, the
-  /// account has no quota left, or the session had its calls for the hour.
-  private func summarySkip(_ facts: SessionFacts, account: String) -> String? {
-    if facts.sessionSummary != nil { return "the session wrote its card" }
+  /// Starts the model's brief of the session's PR when `verdict` asks the
+  /// user to merge or enqueue it, the poller read the PR's details at its
+  /// head, and no brief exists for that head. The result is a `mergeBrief`
+  /// event. A head gets one attempt per run of sbd. A session that wrote its
+  /// own card gets none, because its card shows no rule's summary.
+  func summarizeMerge(_ id: String, _ verdict: Verdict) {
+    guard config.triage.enabled, verdict.summarizesPR, let e = entries[id], e.facts.sessionSummary == nil,
+      let pr = e.facts.pr, let details = pr.mergeDetails, e.facts.currentMergeBrief == nil
+    else { return }
+    let attempt = "#\(pr.number)@\(pr.headSha)"
+    guard e.mergeBriefAttempt != attempt else { return }
+    // A skip records an event, which calls this again.
+    entries[id]?.mergeBriefAttempt = attempt
+    let key: [String: JSON] = ["pr": .number(Double(pr.number)), "head": .string(pr.headSha)]
+    let account = config.triage.account.map(ClaudeAccount.normalize) ?? claudeAccount(of: id)
+    if let skip = budgetSkip(e.facts, account: account) {
+      record(id, MergeBrief.event, .object(key.merging(["skipped": .string(skip)]) { $1 }))
+      return
+    }
+    let input = MergeBrief.input(pr, description: details.description)
+    let env = headlessEnv(session: id, account: config.triage.account)
+    let (number, title) = (pr.number, pr.title)
+    triageJobs.addOperation { [self] in
+      let result = Result {
+        try MergeBrief.parse(triageCall(MergeBrief.arguments(model: config.triage.model), input, env), title: title)
+      }
+      queue.async {
+        guard self.entries[id] != nil else { return }
+        var data = key
+        switch result {
+        case .success(let text): data["text"] = .string(text)
+        case .failure(let error):
+          logLine("can't summarize #\(number) of \(id): \(error)")
+          data["error"] = .string("\(error)")
+        }
+        self.record(id, MergeBrief.event, .object(data))
+      }
+    }
+  }
+
+  /// Runs one `claude -p` call under the triage settings, off the state queue.
+  private func triageCall(_ arguments: [String], _ input: String, _ env: [String: String]) throws -> String {
+    try runHeadless(arguments, input: input, env: env, folder: home.path, timeout: config.triage.timeoutSeconds)
+  }
+
+  /// Why a model call does not run: the account has no quota left, or the
+  /// session had its calls for the hour.
+  private func budgetSkip(_ facts: SessionFacts, account: String) -> String? {
     if !quota.hasBudget(account: account) { return "no quota left for \(account)" }
     let now = nowMs()
     let calls = facts.summaryCalls.filter { now - $0 < AutoContinue.hourMs }.count

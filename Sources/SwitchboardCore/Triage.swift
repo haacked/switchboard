@@ -356,9 +356,7 @@ extension SessionFacts {
       sessionSummary = card
       sessionSummaryId = event.id
     case "triage":
-      if event.data["skipped"] == nil {
-        summaryCalls = summaryCalls.filter { event.t - $0 < AutoContinue.hourMs } + [event.t]
-      }
+      countSummaryCall(event)
       guard lastStop != 0, event.data["stop"]?.int.map(Int64.init) == lastStop, event.data["error"] == nil,
         event.data["skipped"] == nil
       else { return }
@@ -366,6 +364,13 @@ extension SessionFacts {
     default:
       break
     }
+  }
+
+  /// Counts a model call that the event records toward `triage.perHour`. A
+  /// skipped call does not count.
+  mutating func countSummaryCall(_ event: Event) {
+    guard event.data["skipped"] == nil else { return }
+    summaryCalls = summaryCalls.filter { event.t - $0 < AutoContinue.hourMs } + [event.t]
   }
 }
 

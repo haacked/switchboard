@@ -602,3 +602,32 @@ enum HTML {
     return String(decoding: UnsafeBufferPointer(start: buffer.ptr, count: Int(buffer.size)), as: UTF8.self)
   }
 }
+
+extension MarkdownText {
+  /// The text with a backslash before each ASCII punctuation character, so
+  /// that Markdown shows it as it is and makes no link, image, or HTML of it.
+  /// cmark-gfm finds email addresses after it resolves the backslashes, so a
+  /// word joiner, which draws nothing, goes before each `@`.
+  public static func escaped(_ text: String) -> String {
+    var out = ""
+    for c in text {
+      if c == "@" { out.append("\u{2060}") }
+      if c.isASCII, c.isPunctuation || c.isSymbol { out.append("\\") }
+      out.append(c)
+    }
+    return out
+  }
+}
+
+extension MarkdownBlock {
+  /// The block's text without styles, for a paragraph, a heading, a list,
+  /// or a quote. Other blocks give none.
+  public var plainText: String {
+    switch self {
+    case .paragraph(let text), .heading(_, let text): text.plain
+    case .list(_, let items): items.flatMap(\.blocks).map(\.plainText).joined(separator: " ")
+    case .quote(let blocks): blocks.map(\.plainText).joined(separator: " ")
+    default: ""
+    }
+  }
+}

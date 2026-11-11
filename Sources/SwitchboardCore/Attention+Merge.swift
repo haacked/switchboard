@@ -99,8 +99,86 @@ extension Attention {
     } else {
       options.insert(TriageOption(label: "\(method.verb) #\(pr.number)", action: .merge, recommended: true), at: 0)
     }
-    return Verdict(
+    var verdict = Verdict(
       state: .readyToMerge, reason: oneLine(reason, max: 200), kind: .approval, options: options,
       callouts: facts.mergeError.map { [Callout(kind: .warning, title: "The last merge failed", body: $0)] } ?? [])
+    verdict.addMergeSummary(facts)
+    return verdict
+  }
+
+  /// Whether the session's PR is at a merge decision: the rule for its open
+  /// PR asks the user to merge or enqueue it. The poller reads the PR's merge
+  /// details only then.
+  public static func atMergeDecision(_ facts: SessionFacts) -> Bool {
+    openPR(facts)?.summarizesPR == true
+  }
+
+  /// The merge card's Summary and the callouts that should give the user
+  /// pause. The Summary says what the PR does, from the model's brief at the
+  /// PR's head or else the description's gist, then the PR's size, approvals,
+  /// and checks. Text from the PR is escaped, because the card draws the
+  /// Summary as Markdown and anyone who can open a PR wrote it.
+  static func mergeSummary(_ facts: SessionFacts) -> (text: String, callouts: [Callout]) {
+    guard let pr = facts.pr else { return ("", []) }
+    let details = pr.mergeDetails
+    var parts: [String] = []
+    if let d = details {
+      parts.append("\(d.changedFiles) \(d.changedFiles == 1 ? "file" : "files"), +\(d.additions) -\(d.deletions).")
+    }
+    parts.append(pr.approvers.isEmpty ? "No review required." : "Approved by \(names(pr.approvers)).")
+    // Both merge verdicts refuse running and failed checks.
+    parts.append(pr.checks == nil ? "No checks ran." : "Checks passed.")
+    let prose = facts.currentMergeBrief?.text ?? details?.gist
+    let text = ([prose].compactMap { $0 } + [parts.joined(separator: " ")]).map(MarkdownText.escaped)
+      .joined(separator: "\n\n")
+    return (text, pauseCallouts(pr))
+  }
+
+  /// The warnings for a PR that is otherwise ready: code owners whose
+  /// review is still missing, open review threads, and gaps in the test plan.
+  static func pauseCallouts(_ pr: PullRequest) -> [Callout] {
+    var callouts: [Callout] = []
+    if let status = CodeOwnerStatus(pr), !status.satisfied {
+      let waiting = status.groups.filter { !$0.approved }.map { $0.owners.joined(separator: " or ") }
+      callouts.append(
+        Callout(
+          kind: .warning, title: "Code owner review still required",
+          body: MarkdownText.escaped(waiting.joined(separator: "; "))))
+    } else if let requests = pr.codeOwnerRequests, !requests.isEmpty {
+      callouts.append(
+        Callout(
+          kind: .warning, title: "Code owners still requested",
+          body: MarkdownText.escaped(requests.joined(separator: ", "))))
+    }
+    if let d = pr.mergeDetails {
+      let open = d.openThreads
+      let threads = "\(open) open review \(open == 1 ? "thread" : "threads")"
+      if d.threadsRead < d.threads {
+        callouts.append(
+          Callout(
+            kind: .warning, title: open == 0 ? "Not every review thread was read" : "At least \(threads)",
+            body: "#\(pr.number) has \(d.threads) review threads, and sbd read \(d.threadsRead)."))
+      } else if open > 0 {
+        callouts.append(Callout(kind: .warning, title: threads))
+      }
+      if !d.testGaps.isEmpty {
+        callouts.append(
+          Callout(
+            kind: .warning, title: "The test plan has gaps",
+            body: d.testGaps.map { "- " + MarkdownText.escaped($0) }.joined(separator: "\n")))
+      }
+    }
+    return callouts
+  }
+}
+
+extension Verdict {
+  /// Makes this a verdict that asks the user to merge or enqueue the PR: its
+  /// summary says what the PR does, and the pause callouts follow its own.
+  mutating func addMergeSummary(_ facts: SessionFacts) {
+    let merge = Attention.mergeSummary(facts)
+    summary = merge.text
+    callouts += merge.callouts
+    summarizesPR = true
   }
 }

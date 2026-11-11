@@ -55,6 +55,9 @@ final class GitHubPoller {
   /// What the poller knows about each plan document, by plan id.
   var trackedPlans: [String: TrackedPlan] = [:]
   var codeOwners = CodeOwnerReads()
+  /// Each PR's merge details, by node id, with the head commit they belong
+  /// to and when the poller read them.
+  var mergeDetails: [String: (head: String, read: Int64, details: MergeDetails)] = [:]
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -205,6 +208,8 @@ final class GitHubPoller {
     let codeOwnersError = readCodeOwners(all: all, now: now, stats: &stats)
     applyCodeOwners()
     stats.trunkRuns = readTrunk(sessions, all: all, now: now)
+    let mergeDetailsError = readMergeDetails(sessions, now: now, stats: &stats)
+    applyMergeDetails()
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
@@ -213,12 +218,14 @@ final class GitHubPoller {
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
     pruneCodeOwners()
+    pruneMergeDetails()
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
     if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
+    if let mergeDetailsError { result["mergeDetailsError"] = .string(mergeDetailsError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }

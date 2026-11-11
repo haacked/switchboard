@@ -70,6 +70,12 @@
 # structured output in the same envelope, or {"rows":[]} when the file is
 # missing. It appends the arguments to $SB_HOME/plan-calls.log and not to
 # summary-calls.log, and keeps the last prompt in $SB_HOME/plan-input.txt.
+# A `claude -p` prompt that holds <pr-body> is the merge brief call. It
+# prints $SB_HOME/pr-brief-answer.json, a fixture that the test writes, or
+# {"summary":"It changes the code."} when the file is missing, in the same
+# envelope. A prompt that holds FAIL-BRIEF makes it exit 1. It appends the
+# arguments to $SB_HOME/pr-brief-calls.log and not to summary-calls.log, and
+# keeps the last prompt in $SB_HOME/pr-brief-input.txt.
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read. It adds a row for each session
 # that is in the middle of an interrupt or a slow tool call, which are the
@@ -98,6 +104,14 @@ if [ "${1-}" = -p ]; then
     printf '%s\0' "${args[*]}" >>"$SB_HOME/plan-calls.log"
     printf '%s' "$input" >"$SB_HOME/plan-input.txt"
     out=$(cat "$SB_HOME/plan-answer.json" 2>/dev/null) || out='{"rows":[]}'
+    jq -nc --argjson o "$out" '{type: "result", subtype: "success", is_error: false, result: ($o | tojson), structured_output: $o}'
+    exit 0
+  fi
+  if [[ $input == *"<pr-body>"* ]]; then
+    printf '%s\0' "${args[*]}" >>"$SB_HOME/pr-brief-calls.log"
+    printf '%s' "$input" >"$SB_HOME/pr-brief-input.txt"
+    [[ $input == *FAIL-BRIEF* ]] && echo "brief failed" >&2 && exit 1
+    out=$(cat "$SB_HOME/pr-brief-answer.json" 2>/dev/null) || out='{"summary":"It changes the code."}'
     jq -nc --argjson o "$out" '{type: "result", subtype: "success", is_error: false, result: ($o | tojson), structured_output: $o}'
     exit 0
   fi
