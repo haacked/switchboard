@@ -42,6 +42,12 @@ extension BoardModel {
 
   nonisolated static let unreadOrgReason = "sbd hasn't read its org yet"
 
+  /// Why Delete All may not remove the session now, or nil when it may.
+  func removalRefusal(_ id: String) -> String? {
+    if removableIDs.contains(id) { return nil }
+    return shownIDs.contains(id) ? Self.unreadOrgReason : "hidden by the org filter"
+  }
+
   /// Asks sbd which Done sessions it would remove and which it would skip.
   /// The plan leaves out the sessions that the org filter hides. Under a
   /// filter, a shown session whose org sbd hasn't read yet moves from the
@@ -56,9 +62,8 @@ extension BoardModel {
         do {
           var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
           let shown = self.shownIDs
-          let removable = self.removableIDs
-          let unread = plan.remove.filter { shown.contains($0.id) && !removable.contains($0.id) }
-          plan.remove.removeAll { !removable.contains($0.id) }
+          let unread = plan.remove.filter { self.removalRefusal($0.id) == Self.unreadOrgReason }
+          plan.remove.removeAll { self.removalRefusal($0.id) != nil }
           plan.skip.removeAll { !shown.contains($0.id) }
           plan.skip += unread.map { .init(id: $0.id, name: $0.name, reason: Self.unreadOrgReason) }
           self.doneRemoval = .confirming(plan)
@@ -80,11 +85,7 @@ extension BoardModel {
       var result = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
       for (n, item) in plan.remove.enumerated() {
         // A filter change after the plan can hide a session. The loop checks each one just before its send.
-        let refusal = await MainActor.run { () -> String? in
-          if self.removableIDs.contains(item.id) { return nil }
-          return self.shownIDs.contains(item.id) ? Self.unreadOrgReason : "hidden by the org filter"
-        }
-        if let refusal {
+        if let refusal = await MainActor.run(body: { self.removalRefusal(item.id) }) {
           result.skipped.append(.init(id: item.id, name: item.name, reason: refusal))
           await MainActor.run { self.doneRemoval = .removing(plan, done: n + 1) }
           continue

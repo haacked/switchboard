@@ -55,8 +55,7 @@ public struct OrgFilter: Equatable, Sendable {
   }
 
   public mutating func toggle(_ key: String) {
-    let key = key.lowercased()
-    if keys.remove(key) == nil { keys.insert(key) }
+    if keys.remove(key.lowercased()) == nil { insert(key) }
   }
 
   /// One row of the filter's menu.

@@ -247,7 +247,7 @@ final class BoardModel: ObservableObject {
   /// Adds the session's org to the filter when the filter hides it, so a
   /// session that the app opens never stays out of sight.
   func showOrg(of id: String) {
-    guard let s = allBoard.first(where: { $0.id == id }), !orgFilter.shows(s), let key = OrgFilter.key(of: s)
+    guard !orgFilter.isAll, let s = allBoard.first(where: { $0.id == id }), let key = OrgFilter.key(of: s)
     else { return }
     orgFilter.insert(key)
   }

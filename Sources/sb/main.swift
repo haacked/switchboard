@@ -631,11 +631,14 @@ case "ls", "list":
   if a.switches.contains("--local") { filter.insert(OrgFilter.localKey) }
   if a.json && filter.isAll {
     printJSON(result)
-  } else if !a.json {
-    printSessionList(decode(result, as: [SessionSummary].self).filter(filter.shows))
   } else {
-    let ids = Set(decode(result, as: [SessionSummary].self).filter(filter.shows).map(\.id))
-    printJSON(.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false }))
+    let shown = decode(result, as: [SessionSummary].self).filter(filter.shows)
+    if a.json {
+      let ids = Set(shown.map(\.id))
+      printJSON(.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false }))
+    } else {
+      printSessionList(shown)
+    }
   }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
