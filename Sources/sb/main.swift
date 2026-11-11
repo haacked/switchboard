@@ -628,14 +628,13 @@ case "hook":
 case "ls", "list":
   let result = call("ls")
   var filter = OrgFilter(list: a.values["--org"] ?? "")
-  if a.switches.contains("--local") { filter.toggle(OrgFilter.localKey) }
-  let shown = decode(result, as: [SessionSummary].self).filter(filter.shows)
-  if !a.json {
-    printSessionList(shown)
-  } else if filter.isAll {
+  if a.switches.contains("--local") { filter.insert(OrgFilter.localKey) }
+  if a.json && filter.isAll {
     printJSON(result)
+  } else if !a.json {
+    printSessionList(decode(result, as: [SessionSummary].self).filter(filter.shows))
   } else {
-    let ids = Set(shown.map(\.id))
+    let ids = Set(decode(result, as: [SessionSummary].self).filter(filter.shows).map(\.id))
     printJSON(.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false }))
   }
 case "new":

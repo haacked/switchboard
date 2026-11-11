@@ -51,7 +51,7 @@ extension BoardModel {
         guard self.doneRemoval == .checking else { return }
         do {
           var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
-          let shown = self.shownIDs
+          let shown = self.removableIDs
           plan.remove.removeAll { !shown.contains($0.id) }
           plan.skip.removeAll { !shown.contains($0.id) }
           self.doneRemoval = .confirming(plan)
@@ -73,7 +73,7 @@ extension BoardModel {
       var result = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
       for (n, item) in plan.remove.enumerated() {
         // A filter change after the plan can hide a session. The loop checks each one just before its send.
-        guard await MainActor.run(body: { self.shownIDs.contains(item.id) }) else {
+        guard await MainActor.run(body: { self.removableIDs.contains(item.id) }) else {
           result.skipped.append(.init(id: item.id, name: item.name, reason: "hidden by the org filter"))
           await MainActor.run { self.doneRemoval = .removing(plan, done: n + 1) }
           continue

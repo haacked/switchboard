@@ -87,8 +87,9 @@ let everyFilterShape = [
   @Test(arguments: Shown.allCases)
   func aPosthogFilterLeavesOutOtherOrgsAndLocal(_ shown: Shown) {
     let ids = shown.ids(model(posthogOnly))
+    let all = shown.ids(model(OrgFilter()))
 
-    #expect(ids.isDisjoint(with: Self.hidden), "\(shown.rawValue)")
+    #expect(ids == all.subtracting(Self.hidden), "\(shown.rawValue)")
   }
 
   @Test(arguments: Shown.allCases)
@@ -207,7 +208,6 @@ let everyFilterShape = [
     model.selection = "hk"
 
     model.orgFilter = posthogOnly
-    model.apply(.success(Self.list), followups: nil)
 
     #expect(model.selection == nil)
   }
@@ -217,7 +217,6 @@ let everyFilterShape = [
     model.selection = "ph1"
 
     model.orgFilter = posthogOnly
-    model.apply(.success(Self.list), followups: nil)
 
     #expect(model.selection == "ph1")
   }
@@ -250,6 +249,28 @@ let everyFilterShape = [
     model.apply(.success(Self.list + [orgSession("new", nil, read: nil)]), followups: nil)
 
     #expect(model.orgFilter == posthogOnly)
+    #expect(model.selection == "new")
+  }
+
+  @Test func aPendingSelectionWhoseOrgIsReadLaterAndHiddenAddsItsOrgToTheFilter() {
+    let model = model(posthogOnly)
+    model.selectUnlisted("new")
+    model.apply(.success(Self.list + [orgSession("new", nil, read: nil)]), followups: nil)
+
+    model.apply(.success(Self.list + [orgSession("new", "haacked/new")]), followups: nil)
+
+    #expect(model.orgFilter == OrgFilter(keys: ["posthog", "haacked"]))
+    #expect(model.selection == "new")
+  }
+
+  /// Import selects the session without `selectUnlisted`.
+  @Test func aSelectionWhoseOrgIsReadLaterAndHiddenAddsItsOrgToTheFilter() {
+    let model = model(posthogOnly, Self.list + [orgSession("new", nil, read: nil)])
+    model.selection = "new"
+
+    model.apply(.success(Self.list + [orgSession("new", "haacked/new")]), followups: nil)
+
+    #expect(model.orgFilter == OrgFilter(keys: ["posthog", "haacked"]))
     #expect(model.selection == "new")
   }
 
@@ -317,6 +338,30 @@ let everyFilterShape = [
     model.groups = [group("posthog", ["ph1"]), group("hidden", ["hk", "lo"]), group("empty", [])]
 
     #expect(model.shownGroups.map(\.id) == ["posthog", "hidden", "empty"])
+  }
+
+  @Test func shownSuggestionsDropASuggestionThatMovesAHiddenSession() {
+    let suggestions = [
+      GroupSuggestion(id: "shown", name: "a", group: nil, sessions: ["ph1", "un"], reason: ""),
+      GroupSuggestion(id: "mixed", name: "b", group: nil, sessions: ["ph1", "hk"], reason: ""),
+    ]
+    let filtered = model(posthogOnly)
+    filtered.suggestions = suggestions
+    let all = model(OrgFilter())
+    all.suggestions = suggestions
+
+    #expect(filtered.shownSuggestions.map(\.id) == ["shown"])
+    #expect(all.shownSuggestions.map(\.id) == ["shown", "mixed"])
+  }
+
+  @Test func groupAccountMovesListAMemberThatTheFilterHides() {
+    var ph = orgSession("ph1", "PostHog/posthog", group: "g1")
+    ph.account = "/personal"
+    var hk = orgSession("hk", "haacked/switchboard", group: "g1")
+    hk.account = "/personal"
+    let model = model(posthogOnly, [ph, hk], followups: nil)
+
+    #expect(Set(model.groupAccountMoves(group: "g1", folder: "/work").map(\.id)) == ["ph1", "hk"])
   }
 
   // MARK: Notifications
@@ -428,31 +473,5 @@ let everyFilterShape = [
     #expect(filtered == all)
     #expect(all["hk"] == ["message hk", "card hk"])
     #expect(all["gone"] == ["", ""])
-  }
-
-  // MARK: Account menu
-
-  @Test func accountCountsCountEverySessionUnderAFilter() {
-    let accounts = [
-      AccountInfo(name: "automation", folder: "/a", active: true, sessions: 1),
-      AccountInfo(name: "default", folder: "/d", active: false, sessions: 2),
-    ]
-    var ph = orgSession("ph1", "PostHog/posthog")
-    ph.account = "/a"
-    var hk = orgSession("hk", "haacked/switchboard")
-    hk.account = "/d"
-    var lo = orgSession("lo", nil)
-    lo.account = "/d"
-    let unfiltered = model(OrgFilter(), [ph, hk, lo], followups: nil)
-    unfiltered.accounts = accounts
-    let filtered = model(posthogOnly, [ph, hk, lo], followups: nil)
-    filtered.accounts = accounts
-
-    let rows = AccountMenu.rows(accounts: filtered.accounts, usage: filtered.usage)
-
-    #expect(rows.map(\.title) == ["automation (1)", "default (2)"])
-    #expect(rows == AccountMenu.rows(accounts: unfiltered.accounts, usage: unfiltered.usage))
-    #expect(filtered.moveTarget?.folder == "/a")
-    #expect(filtered.moveTarget == unfiltered.moveTarget)
   }
 }

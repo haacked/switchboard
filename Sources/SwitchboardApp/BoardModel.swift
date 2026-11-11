@@ -13,8 +13,10 @@ enum MainView {
 /// state in memory and answers in a few milliseconds.
 @MainActor
 final class BoardModel: ObservableObject {
-  /// The sessions that the org filter shows. Every list, count, and badge
-  /// reads this. Lookups of one session by id read `allSessions`.
+  /// The sessions that the org filter shows. Every list, count, badge, and
+  /// action target reads this. A lookup of a session that a shown session
+  /// names, such as a card's asker or a parent, reads `allSessions` or
+  /// `allBoard`, because that session may be hidden.
   var sessions: [SessionSummary] { allSessions.filter(orgFilter.shows) }
   /// Every session that sbd lists, whatever the org filter says.
   @Published private(set) var allSessions: [SessionSummary] = []
@@ -23,7 +25,7 @@ final class BoardModel: ObservableObject {
     didSet {
       guard orgFilter != oldValue else { return }
       orgFilterStore?.set(orgFilter.keys.sorted(), forKey: Self.orgFilterKey)
-      applyOrgFilter()
+      clearHiddenSelectionAndUpdateBadge()
     }
   }
   @Published var showingOrgFilter = false
@@ -187,7 +189,7 @@ final class BoardModel: ObservableObject {
   }
 
   /// Clears a selection that the org filter hides, and counts the shown sessions in the Dock badge.
-  private func applyOrgFilter() {
+  private func clearHiddenSelectionAndUpdateBadge() {
     let listed = shownIDs
     if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
     if NSApp != nil { NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)" }
@@ -210,6 +212,13 @@ final class BoardModel: ObservableObject {
 
   /// The ids of the sessions and follow-ups that the org filter shows.
   var shownIDs: Set<String> { Set(board.map(\.id)) }
+
+  /// The ids that Delete All may remove. Under a filter, a session whose org
+  /// sbd hasn't read yet shows but isn't removable, because its org may be one
+  /// that the filter hides.
+  var removableIDs: Set<String> {
+    orgFilter.isAll ? shownIDs : Set(board.filter { OrgFilter.key(of: $0) != nil }.map(\.id))
+  }
 
   /// The org filter's menu rows, counted over every session.
   var orgEntries: [OrgFilter.Entry] { orgFilter.entries(allBoard) }
@@ -240,7 +249,7 @@ final class BoardModel: ObservableObject {
   func showOrg(of id: String) {
     guard let s = allBoard.first(where: { $0.id == id }), !orgFilter.shows(s), let key = OrgFilter.key(of: s)
     else { return }
-    orgFilter.toggle(key)
+    orgFilter.insert(key)
   }
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
@@ -374,9 +383,11 @@ final class BoardModel: ObservableObject {
       drafts = drafts.filter { open.contains($0.key) }
       messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list)))
       if !sameShown(allSessions, list) { allSessions = list }
-      if let id = pendingSelection { showOrg(of: id) }
+      // A filter change that hides the selection clears it in `orgFilter.didSet`.
+      // A selected session that is hidden here therefore had no known org until this refresh.
+      if let id = selection { showOrg(of: id) }
       if let id = pendingSelection, allBoard.contains(where: { $0.id == id }) { pendingSelection = nil }
-      applyOrgFilter()
+      clearHiddenSelectionAndUpdateBadge()
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0.state) })

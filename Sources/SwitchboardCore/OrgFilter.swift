@@ -25,14 +25,14 @@ public struct OrgFilter: Equatable, Sendable {
   /// The org that a session belongs to, or nil when the session belongs to
   /// none (the Manager, a group chat) or sbd hasn't read its folder yet.
   public static func key(of s: SessionSummary) -> String? {
-    key(title: s).map { $0.lowercased() }
+    owner(of: s).map { $0.lowercased() }
   }
 
   /// The menu title of `key`, whose first session named it `seen`.
   private static func title(_ key: String, seen: String) -> String { key == localKey ? localTitle : seen }
 
   /// The org with the casing that GitHub uses, such as "PostHog", or `localKey`.
-  static func key(title s: SessionSummary) -> String? {
+  static func owner(of s: SessionSummary) -> String? {
     guard s.kind == .work else { return nil }
     if let docket = s.docket { return DocketRef(docket.pullRequest)?.org ?? localKey }
     if let repo = s.repository ?? s.pr?.repo ?? s.followup?.repository {
@@ -48,6 +48,10 @@ public struct OrgFilter: Equatable, Sendable {
   public func shows(_ s: SessionSummary) -> Bool {
     guard !isAll, let key = Self.key(of: s) else { return true }
     return keys.contains(key)
+  }
+
+  public mutating func insert(_ key: String) {
+    keys.insert(key.lowercased())
   }
 
   public mutating func toggle(_ key: String) {
@@ -69,7 +73,7 @@ public struct OrgFilter: Equatable, Sendable {
   public func entries(_ sessions: [SessionSummary]) -> [Entry] {
     var byKey: [String: Entry] = [:]
     for s in sessions {
-      guard let seen = Self.key(title: s) else { continue }
+      guard let seen = Self.owner(of: s) else { continue }
       let key = seen.lowercased()
       var entry = byKey[key] ?? Entry(key: key, title: Self.title(key, seen: seen), count: 0, needsYou: 0)
       entry.count += 1

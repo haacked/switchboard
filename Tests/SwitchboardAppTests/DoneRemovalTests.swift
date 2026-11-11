@@ -215,14 +215,15 @@ final class SentArgs: @unchecked Sendable {
       Issue.record("the check did not finish")
       return
     }
-    #expect(shown.remove.map(\.id) == ["ph", "un"])
+    // The unread session shows under the filter, but its org may be hidden, so Delete All leaves it out.
+    #expect(shown.remove.map(\.id) == ["ph"])
     #expect(shown.skip.isEmpty)
   }
 
   @Test func aPlanDropsAnIdThatTheBoardDoesNotList() async throws {
     let sent = SentArgs()
     let model = model(OrgFilter())
-    let plan = DoneRemovalPlan(remove: [item("ph"), item("ghost")], skip: [skip("phantom")])
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("ghost")], skip: [skip("phantom"), skip("lo")])
     model.send = recordingSend(sent, plan: plan)
 
     model.checkDoneRemoval()
@@ -233,7 +234,7 @@ final class SentArgs: @unchecked Sendable {
       return
     }
     #expect(shown.remove.map(\.id) == ["ph"])
-    #expect(shown.skip.isEmpty)
+    #expect(shown.skip.map(\.id) == ["lo"])
   }
 
   // MARK: The sends
@@ -280,6 +281,19 @@ final class SentArgs: @unchecked Sendable {
       ]), followups: nil)
     let result = try #require(await confirm(model, plan))
 
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.skipped.map(\.id) == ["un"])
+  }
+
+  @Test func aSessionWhoseOrgIsUnknownIsNeverSentUnderAFilter() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("un")], skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    let result = try #require(await confirm(model, plan))
+
+    #expect(model.shownIDs.contains("un"))
     #expect(confirmedTargets(sent) == ["ph"])
     #expect(result.skipped.map(\.id) == ["un"])
   }
