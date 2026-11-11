@@ -34,15 +34,15 @@ import Testing
     #expect(cleared.state != .waiting)
   }
 
-  /// Los Angeles skips 02:00 to 03:00 on 2027-03-14.
+  /// Los Angeles skips 02:00 to 03:00 on 2090-03-12.
   @Test func aDateWaitUntilATimeTheZoneSkipsWaitsUntilTheTimeAfterTheSkip() throws {
     let sbd = try Instance()
     sbd.stopSbd()
     sbd.sbdEnvironment["TZ"] = "America/Los_Angeles"
     try sbd.startSbd()
     let s = try idleSession(sbd)
-    let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "date", "--until", "2027-03-14 02:30"))
-    #expect(waiting.reason == "until 2027-03-14 03:30")
+    let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "date", "--until", "2090-03-12 02:30"))
+    #expect(waiting.reason == "until 2090-03-12 03:30")
   }
 
   @Test func aDateWaitStopsTheSessionAndResumesItWhenTheClockPassesIt() throws {
