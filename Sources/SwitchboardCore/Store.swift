@@ -27,6 +27,8 @@ public final class Store {
       "CREATE TABLE IF NOT EXISTS resolved_todos (id INTEGER PRIMARY KEY, session TEXT, name TEXT, repo TEXT, branch TEXT, pr INTEGER, note TEXT, text TEXT, by TEXT, added INTEGER, resolved INTEGER, how TEXT)"
     )
     try exec("CREATE TABLE IF NOT EXISTS host_events (id TEXT PRIMARY KEY, host TEXT, session TEXT)")
+    try exec(
+      "CREATE TABLE IF NOT EXISTS removed_host_sessions (id TEXT NOT NULL, host TEXT NOT NULL, PRIMARY KEY (id, host))")
   }
 
   deinit { sqlite3_close(db) }
@@ -202,14 +204,34 @@ public final class Store {
     !(try query("SELECT 1 FROM host_events WHERE id = ?", [id.text]) { $0.int(0) }).isEmpty
   }
 
+  /// Whether the id is recorded for exactly this host and this session. The spool cut asks this, so a line
+  /// that carries an id recorded for another host or another session is not one that sbd recorded.
+  public func hasHostEvent(_ id: HostEventID, host: String, session: String) throws -> Bool {
+    !(try query(
+      "SELECT 1 FROM host_events WHERE id = ? AND host = ? AND session = ?", [id.text, host, session]
+    ) { $0.int(0) }).isEmpty
+  }
+
+  /// Records that sbd removed the session `id` of `host`, so the spool cut may remove its leftover lines.
+  public func recordRemovedHostSession(_ id: String, host: String) throws {
+    try run("INSERT OR IGNORE INTO removed_host_sessions (id, host) VALUES (?, ?)", [id, host])
+  }
+
+  /// The ids of the sessions of `host` that sbd removed.
+  public func removedHostSessions(host: String) throws -> Set<String> {
+    Set(try query("SELECT id FROM removed_host_sessions WHERE host = ?", [host]) { $0.text(0) })
+  }
+
   /// How far behind a host's newest id a recorded id is kept. It is far past the longest time an event can be
   /// in flight after its spool line is cut.
   public static let hostEventKeepNs: UInt64 = 24 * 3_600 * 1_000_000_000
 
   /// Removes the host's recorded ids whose clock is more than `hostEventKeepNs` behind the host's newest id.
   /// It also keeps every id whose clock is within that time of `nowNs`, so one id with a clock far ahead
-  /// removes nothing that is recent.
-  public func pruneHostEvents(host: String, nowNs: UInt64) throws {
+  /// removes nothing that is recent. It removes no id at or above `floor`, the lowest recorded id whose line may
+  /// still be in the host's spool: a line that stays in the spool is read again on each reconnect, and only its
+  /// recorded id keeps it from being recorded twice.
+  public func pruneHostEvents(host: String, nowNs: UInt64, keeping floor: HostEventID? = nil) throws {
     let newest = try query("SELECT id FROM host_events WHERE host = ? ORDER BY id DESC LIMIT 1", [host]) {
       HostEventID($0.text(0))?.ns
     }.first
@@ -219,7 +241,7 @@ public final class Store {
     // Ids start with their clock as 20 digits, so ids below this text are the ids with an earlier clock.
     let digits = String(end - Store.hostEventKeepNs)
     let cutoff = String(repeating: "0", count: 20 - digits.count) + digits
-    try run("DELETE FROM host_events WHERE host = ? AND id < ?", [host, cutoff])
+    try run("DELETE FROM host_events WHERE host = ? AND id < ?", [host, floor.map { min($0.text, cutoff) } ?? cutoff])
   }
 
   /// The time of the session's last event, or nil for a session with none.

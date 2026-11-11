@@ -113,8 +113,26 @@ public final class Service {
   var remoteSnapshots: [String: Snapshot] = [:]
   /// When sbd last started or killed a pane on each host. An older snapshot can't replace the host's.
   var remotePaneChanges: [String: Int64] = [:]
-  /// The hosts whose setup or snapshot read runs off the state queue.
+  /// The hosts whose reconcile or snapshot read runs off the state queue.
   var siteReads: Set<String> = []
+  /// One serial queue per host. A host's reconcile runs on it, so one runs at a time.
+  let hostQueues: [String: DispatchQueue]
+  /// The connection of each host on which a reconcile finished. A session on a host reads `.unknown` on any
+  /// other connection.
+  var reconciledOn: [String: Int] = [:]
+  /// The connection on which each host's last reconcile failed, and when. The tick waits
+  /// `reconcileRetryMs` before it tries again on that connection.
+  var reconcileFailures: [String: (connection: Int, at: Int64)] = [:]
+  /// For each host whose spool a reconcile of this sbd read: the lowest recorded id whose line may still be in
+  /// the spool, or nil when no recorded line may be. The shim spools every hook, so each id that sbd records
+  /// after the read lowers it.
+  var spoolFloors: [String: HostEventID?] = [:]
+  /// For each host whose spool a reconcile reads now: the lowest id recorded since the read began, or nil when
+  /// sbd recorded none. The read may not hold the lines of these ids.
+  var spoolReadFloors: [String: HostEventID?] = [:]
+  /// The messages of each session on a host whose paste may have reached claude before sbd stopped. The
+  /// reconcile settles them from the transcript on the host.
+  var unsettled: [String: [String]] = [:]
   /// The Claude sessions that `claude agents` listed, by Claude session id.
   var remembered: [String: ClaudeSession] = [:]
   var github: GitHubPoller?
@@ -179,6 +197,8 @@ public final class Service {
     self.hostLinks = links
     let config = self.config
     self.remoteSites = links.mapValues { RemoteSite(link: $0, config: $0.config, home: home, settings: config) }
+    self.hostQueues = Dictionary(
+      uniqueKeysWithValues: links.keys.map { ($0, DispatchQueue(label: "sbd.host.\($0)")) })
   }
 
   public var tickSeconds: Double { config.tickSeconds }
@@ -208,7 +228,10 @@ public final class Service {
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
     mac.snapshot = buildSnapshot() ?? Snapshot()
-    for (id, texts) in uncertain { try settleUncertain(id, texts) }
+    for (id, texts) in uncertain {
+      // A transcript on a host can't be read before the host's link is up. The reconcile settles those.
+      if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
+    }
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -523,6 +546,7 @@ public final class Service {
       let stored = try store.append(
         Event(session: id, t: stamp.t, kind: kind, data: payload), hostEvent: stamp.id, host: stamp.host)
       guard let stored else { return nil }
+      lowerSpoolFloors(stamp.id, host: stamp.host)
       event = fold(stored)
     } else {
       event = record(id, kind, payload)
@@ -961,23 +985,24 @@ public final class Service {
   /// For a session on a host, it throws `HostUnread` unless the host answered every read of the lookup, so a
   /// lookup that got no answer never starts the conversation again.
   func hasTranscript(_ session: Session) throws -> Bool {
-    try site(for: session).confirmed("the transcript lookup of \(session.id)") {
-      try transcriptFile(session, on: $0) != nil
+    let named = entries[session.id]?.facts.transcriptPath
+    return try site(for: session).confirmed("the transcript lookup of \(session.id)") {
+      try transcriptFile(session, named: named, on: $0) != nil
     }
   }
 
   /// The session's transcript file, by the rules of `hasTranscript`. It is nil when the session's host is not
   /// ready, and a read that got no answer reads as a missing file.
   func transcriptFile(_ session: Session) -> String? {
-    (try? transcriptFile(session, on: site(for: session).machine)) ?? nil
+    let named = entries[session.id]?.facts.transcriptPath
+    return (try? transcriptFile(session, named: named, on: site(for: session).machine)) ?? nil
   }
 
-  /// A session on a host keeps its transcripts under `~/.claude` there.
-  private func transcriptFile(_ session: Session, on machine: any Machine) throws -> String? {
+  /// A session on a host keeps its transcripts under `~/.claude` there. `named` is the transcript that the
+  /// session's last SessionStart named. For a session on a host, this reads nothing of the state queue.
+  func transcriptFile(_ session: Session, named: String?, on machine: any Machine) throws -> String? {
     guard session.started else { return nil }
-    if let path = entries[session.id]?.facts.transcriptPath,
-      (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl"
-    {
+    if let path = named, (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl" {
       return machine.exists(path) ? path : nil
     }
     let account = session.host == nil ? claudeAccount(of: session.id) : "\(try boxHome(session))/.claude"
@@ -1052,6 +1077,8 @@ public final class Service {
     let generation = entries[id]!.deliveryGeneration
     queue.asyncAfter(deadline: .now() + delay) { [self] in
       guard let e = entries[id], !e.pending.isEmpty, e.deliveryGeneration == generation else { return }
+      // The facts of a session whose host sbd can't read may be old. The reconcile delivers after it.
+      guard claudeState(id) != .unknown else { return }
       let now = nowMs()
       guard readyForPaste(id, now: now) else {
         if e.facts.live, !e.facts.turnRunning, let start = e.facts.lastStart, start >= (e.facts.lastLaunch ?? 0) {
@@ -1071,18 +1098,40 @@ public final class Service {
   /// that paste started. It records `delivery_unknown` for the rest, which
   /// sbd leaves for the user instead of pasting them again.
   private func settleUncertain(_ id: String, _ texts: [String]) throws {
-    var pastings = try store.events(session: id).filter { $0.kind == "pasting" }
-    for text in texts {
-      let pasting = pastings.lastIndex { $0.data["text"]?.string == text }.map { pastings.remove(at: $0) }
+    let machine = try site(of: id).machine
+    for paste in try uncertainPastes(id, texts) {
       // A paste that found no transcript started before claude wrote any of it.
-      let path = pasting?.data["transcript"]?.string ?? entries[id].flatMap { transcriptFile($0.session) }
-      let offset = UInt64(pasting?.data["transcript_bytes"]?.int ?? 0)
-      let pasted = Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text
-      let machine = try site(of: id).machine
-      let landed =
-        pasting != nil
-        && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset, on: machine) } == true
-      record(id, landed ? "delivered" : "delivery_unknown", ["text": .string(text)])
+      let path = paste.transcript ?? entries[id].flatMap { transcriptFile($0.session) }
+      record(id, paste.landed(in: path, on: machine) ? "delivered" : "delivery_unknown", ["text": .string(paste.text)])
+    }
+  }
+
+  /// A message whose paste started before sbd stopped, with what its `pasting` event recorded.
+  struct UncertainPaste {
+    var text: String
+    /// The text that the paste typed, without the image paths.
+    var pasted: String
+    /// Whether the log holds the message's `pasting` event.
+    var started: Bool
+    /// The transcript and its size when the paste started.
+    var transcript: String?
+    var offset: UInt64
+
+    /// Whether the transcript at `path` holds the message in a user message after the paste started.
+    func landed(in path: String?, on machine: any Machine) -> Bool {
+      started && path.map { Transcript.hasUserMessage($0, holding: pasted, from: offset, on: machine) } == true
+    }
+  }
+
+  /// The messages with the `pasting` event of each. It runs on the state queue.
+  func uncertainPastes(_ id: String, _ texts: [String]) throws -> [UncertainPaste] {
+    var pastings = try store.events(session: id).filter { $0.kind == "pasting" }
+    return texts.map { text in
+      let pasting = pastings.lastIndex { $0.data["text"]?.string == text }.map { pastings.remove(at: $0) }
+      return UncertainPaste(
+        text: text, pasted: Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text,
+        started: pasting != nil, transcript: pasting?.data["transcript"]?.string,
+        offset: UInt64(pasting?.data["transcript_bytes"]?.int ?? 0))
     }
   }
 
@@ -1152,8 +1201,10 @@ public final class Service {
       if let session = entries[id]?.session {
         // A restart looks for the message after this size, so a size that a host did not answer must not
         // read as a missing transcript.
+        let named = entries[id]?.facts.transcriptPath
         let found: (path: String, size: UInt64)? = try site(for: session).confirmed("the transcript size of \(id)") {
-          guard let path = (try? transcriptFile(session, on: $0)) ?? nil, let size = $0.size(path) else { return nil }
+          guard let path = (try? transcriptFile(session, named: named, on: $0)) ?? nil, let size = $0.size(path)
+          else { return nil }
           return (path, size)
         }
         if let found {

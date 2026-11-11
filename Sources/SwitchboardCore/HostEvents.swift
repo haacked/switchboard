@@ -86,6 +86,21 @@ public enum Spool {
     return (lines, firstUnreadable, start)
   }
 
+  /// The count of bytes at the start of a spool that sbd may remove: the longest run of whole spool lines from
+  /// the first byte in which each line is one that `recorded` or `removed` accepts. `recorded` says whether
+  /// this sbd recorded the line's event, and `removed` whether this sbd removed the session of that id. The
+  /// run ends before the first line that neither accepts, before the first line that is not a spool line, and
+  /// before a last line that has no newline yet.
+  public static func cutLength(_ data: Data, recorded: (SpoolLine) -> Bool, removed: (String) -> Bool) -> Int {
+    var end = 0
+    for line in parse(data).lines {
+      // `lines` leaves out a line that is not a spool line, so a line that starts later than `end` follows one.
+      guard line.bytes.lowerBound == end, recorded(line) || removed(line.session) else { break }
+      end = line.bytes.upperBound
+    }
+    return end
+  }
+
   private static func line(_ bytes: ArraySlice<UInt8>, at range: Range<Int>) -> SpoolLine? {
     guard let text = String(bytes: bytes, encoding: .utf8),
       let json = JSON.parse(text), let fields = json.object, fields["v"] == .number(Double(version)),

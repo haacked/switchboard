@@ -64,11 +64,11 @@ extension Service {
   }
 
   /// The snapshot of the session's site. It is nil for a session on a host unless the host answered a read on
-  /// the link's current connection.
+  /// the link's current connection and the reconcile finished on that connection.
   private func snapshot(of id: String) -> Snapshot? {
     guard let host = entries[id]?.session.host else { return mac.snapshot }
     guard let read = remoteSnapshots[host], let connection = read.connection,
-      remoteSites[host]?.facts?.epoch == connection
+      remoteSites[host]?.facts?.epoch == connection, reconciledOn[host] == connection
     else { return nil }
     return read
   }
@@ -158,11 +158,13 @@ extension Service {
 
   // MARK: Hosts
 
-  /// Connects the session's host and waits up to `seconds` for its site to be ready. It throws the reason when
-  /// the host is still not ready, and does nothing for a session on this Mac. It runs off the state queue.
+  /// Connects the session's host, waits up to `seconds` for its site to be ready, and then runs the reconcile
+  /// unless it finished on this connection. It throws the reason when the host is still not ready or the
+  /// reconcile did not finish, and does nothing for a session on this Mac. It runs off the state queue.
   func awaitSite(_ site: any SessionSite, seconds: Double = 15) throws {
     if let remote = site as? RemoteSite {
       try remote.awaitReady(seconds: seconds)
+      if let host = remote.hostName, let reconciles = hostQueues[host] { try reconciles.sync { try reconcile(host) } }
     } else if site.hostName != nil {
       _ = try site.terminals()
     }
@@ -174,36 +176,60 @@ extension Service {
     return try site.readSnapshot(claudeProgram: claudeProgram(onHost: host))
   }
 
-  /// Whether the session may have a running claude on record, or has a queued message.
-  private func wantsItsHost(_ e: Entry) -> Bool {
+  /// Whether the session may have a running claude on record: claude reported a SessionStart with no end after
+  /// it, or sbd launched claude and has seen neither its SessionStart nor its exit.
+  func mayRunClaude(_ e: Entry) -> Bool {
     let launched = e.facts.lastLaunch.map { $0 > (e.facts.lastStart ?? 0) && $0 > (e.facts.lastExit ?? 0) } ?? false
-    return e.facts.live || launched || !e.pending.isEmpty
+    return e.facts.live || launched
   }
 
-  /// Connects each host that a session needs and whose link is disconnected. For each connected host, it runs
-  /// setup when the connection has none, and reads the panes and processes when the host has a started session.
-  /// Both run off the state queue, one at a time per host. `tick` and `load` call it.
+  /// Connects each host that a session needs and whose link is disconnected. It records `link_down` for the
+  /// sessions of each host that sbd has not read on the link's current connection. For a connected host, it
+  /// starts the reconcile when the connection has none, and otherwise reads the panes and processes when the
+  /// host has a started session. Both run off the state queue, one at a time per host. `tick` and `load` call it.
   func superviseSites(now: Int64) {
+    let onHosts = Dictionary(grouping: entries.values.filter { $0.session.host != nil }) { $0.session.host ?? "" }
+    for (host, sessions) in onHosts where remoteSites[host] == nil {
+      recordLinkDown(sessions, host: host, link: nil, error: "\(home.config) lists no host of that name")
+    }
     for (host, site) in remoteSites {
-      let sessions = entries.values.filter { $0.session.host == host }
-      let state = site.link.status.state
-      if state == .disconnected, sessions.contains(where: wantsItsHost) { site.link.connect() }
-      guard state == .connected, !siteReads.contains(host) else { continue }
-      let reads = sessions.contains { $0.session.started }
-      let setsUp = site.facts == nil && site.setupError == nil
-      guard reads || setsUp else { continue }
+      let sessions = onHosts[host] ?? []
+      let status = site.link.status
+      if status.state == .disconnected, sessions.contains(where: { mayRunClaude($0) || !$0.pending.isEmpty }) {
+        site.link.connect()
+      }
+      // One read of the status decides both, so the reason below is the one of the state that was judged.
+      let read = status.state == .connected && reconciledOn[host] == status.connection
+      if !read {
+        let waits =
+          status.state == .connected ? "sbd has not read it since it connected" : "its link is \(status.state.rawValue)"
+        recordLinkDown(
+          sessions, host: host, link: status.state,
+          error: status.error ?? status.lastFailure ?? site.setupError ?? waits)
+      }
+      guard status.state == .connected, !siteReads.contains(host), let reconciles = hostQueues[host] else { continue }
+      if !read {
+        // A failed setup waits for the next request or the next connection.
+        guard site.setupError == nil, !reconcileFailedLately(host, now: now) else { continue }
+        siteReads.insert(host)
+        reconciles.async { [self] in
+          try? reconcile(host)
+          queue.async { [self] in siteReads.remove(host) }
+        }
+        continue
+      }
+      guard sessions.contains(where: { $0.session.started }) else { continue }
       siteReads.insert(host)
       DispatchQueue.global().async { [self] in
-        var read: Snapshot?
+        var snapshot: Snapshot?
         do {
-          if setsUp { try site.prepare() }
-          if reads { read = try readSnapshot(onHost: host) }
+          snapshot = try readSnapshot(onHost: host)
         } catch {
-          if setsUp || !(error is HostUnread) { logLine("host \(host): \(error)") }
+          if !(error is HostUnread) { logLine("host \(host): \(error)") }
         }
         queue.async { [self] in
           siteReads.remove(host)
-          if reads { install(read, onHost: host) }
+          install(snapshot, onHost: host)
         }
       }
     }

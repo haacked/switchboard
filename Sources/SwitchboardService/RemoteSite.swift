@@ -129,6 +129,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   /// Why setup failed, and the connection it failed on.
   private var failed: (epoch: Int, text: String)?
   private var listenerFailure: String?
+  /// Why the reconcile last failed, and the connection it failed on.
+  private var reconcileFailure: (epoch: Int, text: String)?
   private var lastClockOffsetMs: Int64?
   /// One setup runs at a time.
   private let setup = NSLock()
@@ -170,6 +172,19 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   var listenerProblem: String? {
     get { lock.withLock { listenerFailure } }
     set { lock.withLock { listenerFailure = newValue } }
+  }
+
+  /// Why the reconcile failed on the current connection, or nil. `sb host ls` shows it, because the link reads
+  /// `connected` while the host's sessions still wait for the reconcile.
+  var reconcileError: String? {
+    let status = link.status
+    guard status.state == .connected else { return nil }
+    return lock.withLock { reconcileFailure.flatMap { $0.epoch == status.connection ? $0.text : nil } }
+  }
+
+  /// Keeps why the reconcile failed on the connection, or forgets it with nil.
+  func noteReconcile(failure text: String?, on epoch: Int) {
+    lock.withLock { reconcileFailure = text.map { (epoch, $0) } }
   }
 
   /// This Mac's clock minus the host's, as the last setup measured it on any connection.
@@ -234,7 +249,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
         return
       }
       if Date() >= deadline {
-        let why = status.error.map { ": \($0)" } ?? ""
+        // A retry clears the link's error while it runs. The cause of the last failure is still why.
+        let why = (status.error ?? status.lastFailure).map { ": \($0)" } ?? ""
         throw APIError("\(name) is not connected (\(status.state.rawValue)\(why)). Switchboard keeps trying.")
       }
       Thread.sleep(forTimeInterval: 0.05)
@@ -344,6 +360,14 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   /// names the box's agent.sock, which setup points at each connection's agent. The link may forward no agent,
   /// and the name then leads nowhere.
   private func terminals(for facts: BoxFacts) -> TerminalHost {
+    TerminalHost(
+      tmux: facts.tmux, socket: "\(facts.folder)/tmux.sock", conf: "\(facts.folder)/tmux.conf", shell: facts.shell,
+      baseEnv: Self.environment(for: facts), timeout: Self.commandSeconds, machine: machine)
+  }
+
+  /// The environment that sbd gives a program on the host that runs as a pane's program does: the host's
+  /// values and nothing from sbd's environment.
+  static func environment(for facts: BoxFacts) -> [String: String] {
     var env = [
       "TERM": "xterm-256color", "SHELL": facts.shell, "HOME": facts.home,
       "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "SSH_AUTH_SOCK": "\(facts.folder)/agent.sock",
@@ -353,9 +377,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
       env["LOGNAME"] = facts.user
     }
     if !facts.lang.isEmpty { env["LANG"] = facts.lang }
-    return TerminalHost(
-      tmux: facts.tmux, socket: "\(facts.folder)/tmux.sock", conf: "\(facts.folder)/tmux.conf", shell: facts.shell,
-      baseEnv: env, timeout: Self.commandSeconds, machine: machine)
+    return env
   }
 
   // MARK: The site

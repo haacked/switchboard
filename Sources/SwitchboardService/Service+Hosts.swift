@@ -35,7 +35,7 @@ extension Service {
     return HostStatus(
       name: host.name, kind: host.kind.rawValue, destination: link.destination, link: status.state,
       since: status.since, failures: status.failures, retryAt: status.retryAt,
-      error: status.error ?? remoteSites[host.name]?.setupError)
+      error: status.error ?? remoteSites[host.name]?.setupError ?? remoteSites[host.name]?.reconcileError)
   }
 
   /// The host's link. It throws for a name that config.json does not list, for an invalid

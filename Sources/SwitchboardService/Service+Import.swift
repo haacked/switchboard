@@ -151,6 +151,28 @@ extension Service {
     return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: seen)
   }
 
+  /// The rows of `claude agents --json` on a host, under the host's Claude login. The host's login shell runs
+  /// claude, as the Claude pane does, so the shell's PATH finds it. The shell prints a token first, and the
+  /// rows are what follows the token's line, so the output of a login file is not read as rows. claude gets
+  /// the environment of a pane's program and nothing from sbd's. It throws `HostUnread` unless the host
+  /// answered the run.
+  func agentRows(at site: RemoteSite, seen: Int64, timeout: Double) throws -> [ClaudeSession] {
+    let host = site.config.name
+    let token = "sb-agents-\(UUID().uuidString)"
+    let claude = shellQuote(config.hosts[host]?.claude ?? "claude")
+    let r = try site.confirmed("claude agents") { machine in
+      guard let facts = site.facts else { throw HostUnread(hostName: host, why: "setup has not run") }
+      return try machine.run(
+        facts.shell, ["-lc", "printf '%s\\n' \(token); exec \(claude) agents --json"],
+        env: RemoteSite.environment(for: facts), input: nil, timeout: timeout)
+    }
+    guard r.status == 0, let mark = r.stdout.range(of: token + "\n") else {
+      throw APIError("claude agents failed on \(host): \(oneLine(r.stderr, max: 200))")
+    }
+    return try ClaudeSession.list(
+      fromAgents: String(r.stdout[mark.upperBound...]), account: "\(host):~/.claude", seen: seen)
+  }
+
   /// Remembers the listed sessions that Switchboard doesn't own, and forgets
   /// the ones that left the list more than a day ago. `ids` are the listed ones.
   private func remember(_ listed: [ClaudeSession], owned: Set<String>, ids: Set<String>, now: Int64) {

@@ -6,13 +6,14 @@ import SwitchboardCore
 /// `claude agents --json` about it. A row that says `idle` ends the turn. A
 /// long tool call reads `busy` and keeps its turn. Each session backs off
 /// between checks (see `TurnProbe`). One `claude agents` run per account
-/// answers every session that is due in that account.
+/// answers every session that is due in that account. For the sessions on a
+/// host, one run on the host answers every session that is due there.
 extension Service {
   /// The tick waits for `claude agents`, so a claude that hangs gets SIGTERM
   /// after this many seconds.
   static let turnCheckTimeout = 15.0
 
-  private struct TurnCheck {
+  struct TurnCheck {
     var id: String
     var claudeSessionId: String
     var activity: Int64
@@ -28,14 +29,21 @@ extension Service {
   /// Ends the turns of the sessions that `claude agents` reports idle. It
   /// runs claude off the state queue.
   func endIdleTurns() {
-    let due = queue.sync { dueTurnChecks(now: nowMs()) }
+    let all = queue.sync { dueTurnChecks(now: nowMs()) }
+    guard !all.isEmpty else { return }
+    let claude = findExecutable(config.claude)
+    // Without this Mac's claude, only the sessions on a host can be checked.
+    let due = all.filter { claude != nil || $0.site is RemoteSite }
     guard !due.isEmpty else { return }
-    guard let claude = findExecutable(config.claude) else { return }
     let answers = concurrentMap(due) { group in
       (
         group.account, group.checks,
-        Result {
-          try agentRows(
+        Result { () throws -> [ClaudeSession] in
+          if let host = group.site as? RemoteSite {
+            return try agentRows(at: host, seen: nowMs(), timeout: Service.turnCheckTimeout)
+          }
+          guard let claude else { throw APIError("can't find \(config.claude)") }
+          return try agentRows(
             claude, account: group.account, seen: nowMs(), timeout: Service.turnCheckTimeout, on: group.site.machine)
         }
       )
@@ -46,7 +54,7 @@ extension Service {
         case .failure(let error):
           logLine("can't check the turns in \(account): \(error)")
         case .success(let rows):
-          let idle = Set(rows.filter { $0.running && $0.status == "idle" }.map(\.id))
+          let idle = Service.idleTurns(rows)
           for check in checks where idle.contains(check.claudeSessionId) {
             endTurn(check, account: account)
           }
@@ -60,8 +68,6 @@ extension Service {
     var due: [TurnChecks] = []
     for id in entries.keys.sorted() {
       guard let e = entries[id], e.facts.live, e.facts.turnRunning, case .running = claudeState(id) else { continue }
-      // `claude agents` would run this Mac's claude path on the host.
-      guard e.session.host == nil else { continue }
       let activity = e.facts.lastActivity
       guard entries[id]?.turnProbe.check(activity: activity, now: now) == true else { continue }
       let site = self.site(for: e.session)
@@ -93,8 +99,13 @@ extension Service {
     return ClaudeAccount.normalize(paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder)
   }
 
+  /// The conversations that `claude agents` lists with a running claude that sits idle.
+  static func idleTurns(_ rows: [ClaudeSession]) -> Set<String> {
+    Set(rows.filter { $0.running && $0.status == "idle" }.map(\.id))
+  }
+
   /// Ends the turn unless an event arrived while claude ran.
-  private func endTurn(_ check: TurnCheck, account: String) {
+  func endTurn(_ check: TurnCheck, account: String) {
     guard let e = entries[check.id], e.facts.turnRunning, e.facts.lastActivity == check.activity,
       e.session.claudeSessionId == check.claudeSessionId
     else { return }

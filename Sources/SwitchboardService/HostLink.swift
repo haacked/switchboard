@@ -21,6 +21,9 @@ final class HostLink: @unchecked Sendable {
     var failures: Int
     var retryAt: Int64?
     var error: String?
+    /// Why the link last failed. A retry clears `error` while it runs and keeps this, so the cause of a drop
+    /// stays known between attempts. It is nil while the link is `connected` or `disconnected`.
+    var lastFailure: String?
     /// How many times the link has become `connected`. It names one connection.
     var connection = 0
   }
@@ -176,6 +179,7 @@ final class HostLink: @unchecked Sendable {
     current.since = time
     current.retryAt = time + retryDelayMs(failuresInARow: current.failures)
     current.error = reason
+    current.lastFailure = reason
     generation += 1
     defer { open = nil }
     return open
@@ -247,6 +251,7 @@ final class HostLink: @unchecked Sendable {
     lock.withLock {
       guard attempt == generation, current.state == .connecting else { return }
       current.state = .connected
+      current.lastFailure = nil
       current.since = now()
       current.connection += 1
       connectedControlPath = controlPath

@@ -291,4 +291,8 @@ else:
 
 env = dict(os.environ)
 env["HOME"] = box_home
+# A launcher such as pyenv puts its own folder first in the PATH of this script. A test that puts programs on
+# the box names the PATH that the box's shell gets.
+if "SB_SSH_STUB_PATH" in env:
+    env["PATH"] = env.pop("SB_SSH_STUB_PATH")
 os.execve("/bin/sh", ["/bin/sh", "-c", " ".join(command)], env)

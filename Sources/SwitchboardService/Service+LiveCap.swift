@@ -39,7 +39,8 @@ extension Service {
   /// wait, it stops enough idle sessions to make room for them. The tick
   /// calls it after it reads the processes.
   func runQueuedStarts(now: Int64) {
-    var queued = queuedStarts()[...]
+    // A start on a host that sbd can't read would fail and lose its place, so it waits for the reconcile.
+    var queued = queuedStarts().filter { claudeState($0.session.id) != .unknown }[...]
     guard !queued.isEmpty else { return }
     var live = liveEntries()
     // A start needs the shared MCP servers, as the tick's other launches do.

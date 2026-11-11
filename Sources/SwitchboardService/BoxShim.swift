@@ -8,12 +8,16 @@ enum BoxShim {
   /// `$SB_HOME/spool.jsonl` under a lock, and sends it to `$SB_HOME/sbd.sock`, the far end of the forward to
   /// sbd. It prints sbd's answer only for a hook that waits, which is the rule of `HostHook.waits`. It exits 0
   /// and prints nothing on any failure, because Claude Code shows a failed hook in the conversation.
+  /// `sb-shim spool-drop <count> <sha256>` is the spool cut. It exits 0 only after it removed exactly the
+  /// first `count` bytes of the spool. See `spool_drop` for what it checks first.
   static let source = #"""
     #!/usr/bin/env python3
     # Written by Switchboard's sbd on each connect. Changes here are overwritten.
     import fcntl
+    import hashlib
     import json
     import os
+    import re
     import socket
     import sys
     import time
@@ -102,13 +106,86 @@ enum BoxShim {
             sys.stdout.flush()
 
 
+    EVENT_ID = re.compile(r"[0-9]{20}-[0-9]{1,10}-[0-9a-f]{4}")
+
+
+    def spool_line(raw):
+        """Whether the bytes of one line, without the newline, are a spool line."""
+        try:
+            fields = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            return False
+        if not isinstance(fields, dict) or isinstance(fields.get("v"), bool) or fields.get("v") != 1:
+            return False
+        event = fields.get("id")
+        if not isinstance(event, str) or not EVENT_ID.fullmatch(event) or int(event[:20]) >= 2 ** 64:
+            return False
+        return isinstance(fields.get("session"), str) and isinstance(fields.get("payload"), dict)
+
+
+    def spool_drop(arguments):
+        """Removes the first <count> bytes of the spool and returns True, or removes nothing and returns False.
+
+        It removes them only when, under the spool lock, the file starts with <count> bytes whose SHA-256 is
+        <digest> and those bytes are whole spool lines. The file is replaced in one rename, so a drop that ends
+        early leaves the file from before or the file without the bytes.
+        """
+        if len(arguments) != 2:
+            return False
+        count, digest = arguments
+        if not re.fullmatch(r"[0-9]{1,18}", count) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return False
+        count = int(count)
+        home = os.environ.get("SB_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(home, "spool.jsonl")
+        if not os.path.isfile(path):
+            return False
+        lock = os.open(os.path.join(home, "spool.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            with open(path, "rb") as source:
+                head = source.read(count)
+                if len(head) != count or hashlib.sha256(head).hexdigest() != digest:
+                    return False
+                if count == 0:
+                    return True
+                if not head.endswith(b"\n") or not all(spool_line(raw) for raw in head[:-1].split(b"\n")):
+                    return False
+                rest = path + ".drop"
+                # A drop that ended early can leave this file. A link at this name must not be written through.
+                try:
+                    os.unlink(rest)
+                except FileNotFoundError:
+                    pass
+                fd = os.open(rest, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                try:
+                    while True:
+                        block = source.read(1 << 20)
+                        if not block:
+                            break
+                        while block:
+                            block = block[os.write(fd, block):]
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            # A hook opens the spool by its name after it takes the lock, so the next hook appends to this file.
+            os.replace(rest, path)
+            return True
+        finally:
+            os.close(lock)
+
+
     if __name__ == "__main__":
+        drops = sys.argv[1:2] == ["spool-drop"]
+        status = 1 if drops else 0
         try:
             if sys.argv[1:] == ["hook"]:
                 hook()
+            elif drops and spool_drop(sys.argv[2:]):
+                status = 0
         except BaseException:
             pass
-        os._exit(0)
+        os._exit(status)
 
     """#
 

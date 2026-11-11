@@ -36,11 +36,32 @@ extension Service {
     return session
   }
 
-  /// Takes a hook from the socket of `host`. An event whose id sbd holds or recorded is answered and skipped.
+  /// Takes a hook from the socket of `host`. While the link is connected and the reconcile has not finished on
+  /// that connection, the hook waits for the reconcile. An event whose id sbd holds or recorded is answered
+  /// and skipped.
   /// A hook that waits for an answer is applied at once, after the session's waiting events with lower ids,
   /// and holds its request when it opened a card. Any other hook waits `HostEventOrder.windowMs` for events
   /// with lower ids and is answered at once.
   func handleHostHook(_ args: JSON, from host: String, hookGone: @escaping () -> Bool) throws -> Response {
+    // The forward is up from the end of setup, before the reconcile has read the spool. A hook that arrives
+    // then would be applied ahead of the earlier events that wait in the spool. So the reconcile runs first.
+    // When it fails, the hook is refused, and its event stays in the spool for the next reconcile. A reconcile
+    // that failed on this connection is not run again for each hook. The tick runs the next one.
+    let (waits, failed) = try queue.sync { () -> (Bool, Bool) in
+      _ = try hostSession(args, on: host)
+      let status = remoteSites[host]?.link.status
+      return (
+        status?.state == .connected && reconciledOn[host] != status?.connection,
+        reconcileFailedLately(host, now: nowMs())
+      )
+    }
+    if waits {
+      guard !failed, let reconciles = hostQueues[host] else {
+        throw HostUnread(
+          hostName: host, why: remoteSites[host]?.reconcileError ?? "sbd has not read it since it connected")
+      }
+      try reconciles.sync { try reconcile(host) }
+    }
     let connection = remoteSites[host]?.facts?.epoch
     let (answer, opened): (JSON, (card: Int64, request: HeldRequest)?) = try queue.sync {
       let session = try hostSession(args, on: host)
@@ -133,13 +154,20 @@ extension Service {
     return answered == true
   }
 
-  /// Removes the recorded ids of each host's events that are too old to arrive again, at most once an hour.
+  /// Removes the recorded ids of each host's events that are too old to arrive again, at most once an hour. It
+  /// keeps every id of a host whose spool no reconcile of this sbd has read, and every id at or above the
+  /// host's spool floor: the lowest recorded id whose line the last read left in the spool or that sbd recorded
+  /// after the read began.
   func pruneHostEvents(now: Int64) {
     guard hostEventsPruned == 0 || now - hostEventsPruned >= 3_600_000 else { return }
     hostEventsPruned = now
     let clock = UInt64(max(0, Date().timeIntervalSince1970) * 1_000_000_000)
-    for host in remoteSites.keys {
-      do { try store.pruneHostEvents(host: host, nowNs: clock) } catch { logLine("host \(host): \(error)") }
+    // A recorded id may be forgotten only when a read of the host's spool showed that its line is gone. sbd
+    // knows what the spool holds only for a host whose spool a reconcile of this sbd read.
+    for (host, floor) in spoolFloors {
+      do { try store.pruneHostEvents(host: host, nowNs: clock, keeping: floor) } catch {
+        logLine("host \(host): \(error)")
+      }
     }
   }
 }

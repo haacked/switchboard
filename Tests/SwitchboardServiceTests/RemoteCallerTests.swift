@@ -483,6 +483,8 @@ private func withReadyService(
       var read = Service.Snapshot()
       read.taken = nowMs()
       read.connection = facts.epoch
+      // A session on a host reads its snapshot only on a connection whose reconcile finished.
+      service.reconciledOn["mini"] = facts.epoch
       service.install(read, onHost: "mini")
       return service.autoContinueBlocker("s1", canContinue(), live: 0, now: nowMs())
     }

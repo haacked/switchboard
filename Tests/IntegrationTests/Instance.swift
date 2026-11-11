@@ -617,6 +617,7 @@ extension Instance {
       let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
       sbd.stopSbd()
       sbd.sbdEnvironment["PATH"] = "\(sbd.boxBin):\(path)"
+      sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = "\(sbd.boxBin):\(path)"
       try sbd.startSbd()
     }
     return sbd
@@ -949,4 +950,166 @@ final class HeldLine: @unchecked Sendable {
       fd = -1
     }
   }
+}
+
+/// The reconcile that sbd runs on each reconnect of a host, and what a test does on the box while the link is down.
+extension Instance {
+  /// A step of the reconcile that a test can hold on the box.
+  enum BoxGate: String, CaseIterable, Sendable {
+    /// The read of `~/.sb/spool.jsonl`.
+    case spoolRead = "spool-read"
+    /// `claude agents --json`.
+    case agents
+    /// The read of a session's transcript.
+    case transcript
+    /// `sb-shim spool-drop`, the spool cut.
+    case spoolDrop = "spool-drop"
+  }
+
+  /// The programs that a file read on the box can run, and `python3`, which runs the shim.
+  private static let gatedPrograms = [
+    "tail": "/usr/bin/tail", "head": "/usr/bin/head", "cat": "/bin/cat", "dd": "/bin/dd", "wc": "/usr/bin/wc",
+    "stat": "/usr/bin/stat",
+  ]
+
+  private func boxGateFile(_ gate: BoxGate, _ suffix: String) -> String {
+    "\(home.path)/box-gate-\(gate.rawValue).\(suffix)"
+  }
+
+  /// A sbd with the host `mini` whose box runs its file reads, its python3, and its claude through wrappers that
+  /// a test can hold with `holdBoxGate`. The box's claude is the claude stub behind a wrapper that gives it the
+  /// box's `.sb` as SB_HOME when it has none, as a pane does, so `claude agents` there reads the stub's status
+  /// files.
+  static func remoteWithGates(config settings: [String: JSON] = [:]) throws -> Instance {
+    let sbd = try remote(config: settings, boxBin: true)
+    try sbd.installBoxGates()
+    try sbd.restart(
+      setting: "hosts", to: ["mini": remoteHost(boxDestination, ["claude": .string("\(sbd.boxBin)/claude-stub")])])
+    return sbd
+  }
+
+  /// Writes the wrappers into `boxBin`. A wrapper waits while a gate is held and its run matches the gate: one of
+  /// its arguments holds the gate's word, or its stdin is the gate's file. It then runs the real program.
+  func installBoxGates() throws {
+    func write(_ name: String, _ script: String) throws {
+      try script.write(toFile: "\(boxBin)/\(name)", atomically: true, encoding: .utf8)
+      try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/\(name)")
+    }
+    var programs = Instance.gatedPrograms
+    programs["python3"] = try #require(findExecutable("python3"), "python3 is not installed")
+    for (name, path) in programs {
+      try write(
+        name,
+        """
+        #!/bin/sh
+        for on in '\(home.path)'/box-gate-*.on; do
+          [ -e "$on" ] || continue
+          gate=${on%.on}
+          hit=
+          if [ -s "$gate.word" ]; then
+            word=$(/bin/cat "$gate.word")
+            case " $* " in *"$word"*) hit=1 ;; esac
+          fi
+          if [ -z "$hit" ] && [ -s "$gate.file" ]; then
+            want=$(/usr/bin/stat -L -f %d:%i "$(/bin/cat "$gate.file")" 2>/dev/null)
+            have=$(/usr/bin/stat -f %d:%i 2>/dev/null)
+            [ -n "$want" ] && [ "$want" = "$have" ] && hit=1
+          fi
+          if [ -n "$hit" ]; then
+            : >"$gate.waiting"
+            while [ -e "$on" ]; do /bin/sleep 0.05; done
+          fi
+        done
+        exec '\(path)' "$@"
+
+        """)
+    }
+    let agents = boxGateFile(.agents, "on")
+    // sbd finds a pane's claude by the last word of the host's claude command, so the wrapper has the stub's name.
+    try write(
+      "claude-stub",
+      """
+      #!/bin/sh
+      : "${SB_HOME:=$HOME/.sb}"
+      export SB_HOME
+      if [ "${1-}" = agents ] && [ -e '\(agents)' ]; then
+        : >'\(boxGateFile(.agents, "waiting"))'
+        while [ -e '\(agents)' ]; do /bin/sleep 0.05; done
+      fi
+      if [ "${1-}" = agents ] && [ -e '\(boxAgentsFail)' ]; then
+        echo 'claude agents failed on the box' >&2
+        exit 1
+      fi
+      exec '\(Instance.stub)' "$@"
+
+      """)
+  }
+
+  /// While this file exists, `claude agents` on the box exits 1.
+  var boxAgentsFail: String { "\(home.path)/box-agents-fail" }
+
+  /// Holds the step from now on. The transcript gate needs the session's conversation, whose transcript it holds.
+  func holdBoxGate(_ gate: BoxGate, claudeSessionId: String? = nil) throws {
+    try? FileManager.default.removeItem(atPath: boxGateFile(gate, "waiting"))
+    var word: String?
+    var file: String?
+    switch gate {
+    case .spoolRead:
+      word = "spool.jsonl"
+      file = boxSpool
+    case .spoolDrop: word = "spool-drop"
+    case .transcript:
+      let id = try #require(claudeSessionId, "the transcript gate needs a conversation")
+      word = "\(id).jsonl"
+      file = try #require(boxTranscripts(id).first, "no transcript of \(id) on the box")
+    case .agents: break
+    }
+    if let word { try word.write(toFile: boxGateFile(gate, "word"), atomically: true, encoding: .utf8) }
+    if let file { try file.write(toFile: boxGateFile(gate, "file"), atomically: true, encoding: .utf8) }
+    FileManager.default.createFile(atPath: boxGateFile(gate, "on"), contents: nil)
+  }
+
+  /// Whether a run on the box waits at the gate, or waited there since it was last held.
+  func boxGateReached(_ gate: BoxGate) -> Bool { FileManager.default.fileExists(atPath: boxGateFile(gate, "waiting")) }
+
+  func releaseBoxGate(_ gate: BoxGate) throws {
+    try FileManager.default.removeItem(atPath: boxGateFile(gate, "on"))
+  }
+
+  /// Types a line into the session's Claude pane on the box with the box's own tmux, as a person at the box does.
+  /// It works while the link is down.
+  func typeOnBox(_ id: String, _ line: String) throws {
+    for keys in [["-l", line], ["Enter"]] {
+      let tmux = try #require(findExecutable("tmux"))
+      let r = try runCommand(tmux, ["-S", "\(boxSB)/tmux.sock", "send-keys", "-t", "=\(id)-claude:"] + keys)
+      guard r.status == 0 else { throw TestError(description: "tmux send-keys \(keys) on the box: \(r.stderr)") }
+    }
+  }
+
+  /// Runs the shim that sbd wrote on the box with the payload, as a hook of the session's claude does. It appends
+  /// the event to the box's spool, and sends it to sbd when the forward is up.
+  @discardableResult
+  func runBoxShim(session: String, payload: JSON) throws -> CommandResult {
+    try runCommand(
+      findExecutable("python3") ?? "/usr/bin/python3", [boxShim, "hook"],
+      env: ["HOME": boxHome, "SB_HOME": boxSB, "SB_SESSION_ID": session, "PATH": "/usr/local/bin:/usr/bin:/bin"],
+      input: Data(payload.text.utf8), timeout: 15)
+  }
+
+  /// Spools a probe for the session through the box's shim.
+  func spoolProbe(_ marker: String, session: String) throws {
+    let r = try runBoxShim(session: session, payload: Instance.probePayload(marker))
+    guard r.status == 0 else { throw TestError(description: "the box's shim exited \(r.status): \(r.stderr)") }
+  }
+
+  /// The bytes of the box's spool, or none when the file is missing.
+  var boxSpoolData: Data { FileManager.default.contents(atPath: boxSpool) ?? Data() }
+
+  /// The whole lines of the box's spool that name the marker in their payload's `probe`.
+  func boxSpoolProbes(_ marker: String) -> [JSON] {
+    boxSpoolLines().filter { $0["payload"]?["probe"]?.string == marker }
+  }
+
+  /// The session's events of the kind, oldest first.
+  func events(_ id: String, kind: String) throws -> [Event] { try events(id).filter { $0.kind == kind } }
 }
