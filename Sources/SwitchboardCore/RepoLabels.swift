@@ -9,6 +9,11 @@ public enum RepoLabels {
   /// session gets one, because every row would say the same thing, unless
   /// `evenForOneRepo` is true, as for the merge board's lanes.
   public static func labels(_ sessions: [SessionSummary], evenForOneRepo: Bool = false) -> [String: String] {
+    fullLabels(sessions, evenForOneRepo: evenForOneRepo).mapValues(capped)
+  }
+
+  /// The labels that `labels` gives, before `capped` shortens them.
+  static func fullLabels(_ sessions: [SessionSummary], evenForOneRepo: Bool) -> [String: String] {
     let listed = sessions.filter { $0.kind == .work }
     // Every session in a folder takes the owner/name of the first PR in that
     // folder, or else of the first started follow-up in it. A session's own PR
@@ -50,7 +55,7 @@ public enum RepoLabels {
         }
       }
     }
-    return repoIndexOfSession.mapValues { capped(repos[$0].label) }
+    return repoIndexOfSession.mapValues { repos[$0].label }
   }
 
   /// A longer label keeps its first component. Collisions add components at

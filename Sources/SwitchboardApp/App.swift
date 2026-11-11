@@ -50,6 +50,8 @@ struct SwitchboardApp: App {
           .keyboardShortcut("2")
         Divider()
         Group {
+          Button("Search Sessions…") { model.showingSearch = true }
+            .keyboardShortcut(NavShortcuts.searchSessions)
           Button("Next Session") { model.selectAdjacentSession(by: 1) }
             .keyboardShortcut(NavShortcuts.nextSession)
           Button("Previous Session") { model.selectAdjacentSession(by: -1) }
