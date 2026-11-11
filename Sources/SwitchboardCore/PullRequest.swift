@@ -349,7 +349,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
 
   /// The queue state for `line` and the PR tooltip, such as "Trunk testing".
   /// Trunk's own label, such as "Cancelled", wins over sbd's state.
-  public var queueWords: String? {
+  public var queuePhrase: String? {
     if let queue, queue != .unknown { return "Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
     return inMergeQueue == true ? "in the merge queue" : nil
   }
@@ -362,7 +362,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// testing".
   public var line: String {
     var line = "#\(number) \(status.rawValue)\(checks.map { ", checks \($0.lowercased())" } ?? "")"
-    if let queueWords { line += ", \(queueWords)" }
+    if let queuePhrase { line += ", \(queuePhrase)" }
     if trunkLoginNeeded == true { line += "; trunk login needed" }
     return line
   }

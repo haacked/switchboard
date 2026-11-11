@@ -18,7 +18,7 @@ struct QueueBadge: View {
   }
 
   var body: some View {
-    if let word = pr.queueWord, let words = pr.queueWords {
+    if let word = pr.queueWord, let phrase = pr.queuePhrase {
       Label(word, systemImage: "arrow.triangle.merge")
         .labelStyle(.titleAndIcon)
         .font(.caption2.bold())
@@ -27,7 +27,7 @@ struct QueueBadge: View {
         .foregroundStyle(
           prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(Self.color(for: pr.queue))
         )
-        .help(words)
+        .help(phrase)
         .accessibilityLabel("Merge queue: \(word)")
     }
   }

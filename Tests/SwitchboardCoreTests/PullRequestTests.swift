@@ -193,12 +193,12 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
     #expect(PRSummary(pr).line == "#42 Closed, Trunk cancelled")
   }
 
-  @Test func prefersTrunksOwnLabelInTheWords() {
+  @Test func prefersTrunksOwnLabelInThePhrase() {
     var pr = samplePR(reviewDecision: .approved, queue: .removed)
     pr.queueLabel = "Cancelled"
 
     #expect(PRSummary(pr).queueWord == "Removed")
-    #expect(PRSummary(pr).queueWords == "Trunk cancelled")
+    #expect(PRSummary(pr).queuePhrase == "Trunk cancelled")
     #expect(PRSummary(pr).line == "#42 Approved, Trunk cancelled")
   }
 }

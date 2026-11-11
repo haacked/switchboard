@@ -342,7 +342,7 @@ struct ManagerButton: View {
 
 extension PRSummary {
   var numberLabel: String { "#\(number)" }
-  var tooltip: String { "\(status.rawValue)\(queueWords.map { ", \($0)" } ?? "") · \(repo): \(title)" }
+  var tooltip: String { "\(status.rawValue)\(queuePhrase.map { ", \($0)" } ?? "") · \(repo): \(title)" }
 }
 
 struct SessionRow: View {
@@ -373,13 +373,16 @@ struct SessionRow: View {
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
-              QueueBadge(pr: pr)
               if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
             }
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
-        subtitle
+        // The sidebar can be too narrow for the badge beside the PR number.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          if let pr = session.pr { QueueBadge(pr: pr) }
+          subtitle
+        }
         CleanupNote(session: session)
       }
     }

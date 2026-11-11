@@ -32,9 +32,29 @@ import Testing
   // nil is GitHub's merge queue.
   @Test(arguments: [
     (TrunkQueueState?.some(.submitted), Color.purple), (.pending, .purple), (.testing, .purple), (.queued, .purple),
-    (nil, .purple), (.passed, .green), (.failing, .red), (.removed, .red),
+    (.merged, .purple), (.unknown, .purple), (nil, .purple), (.passed, .green), (.failing, .red), (.removed, .red),
   ])
   func tintsTheQueueState(_ queue: TrunkQueueState?, _ color: Color) {
     #expect(QueueBadge.color(for: queue) == color)
+  }
+}
+
+@Suite struct PRTooltips {
+  func summary(queue: TrunkQueueState? = nil, inMergeQueue: Bool? = nil) -> PRSummary {
+    var pr = PRSummary(PullRequest(id: "PR_42", number: 42, url: "https://github.com/o/r/pull/42", repo: "o/r"))
+    pr.title = "Fix"
+    pr.status = .approved
+    pr.queue = queue
+    pr.inMergeQueue = inMergeQueue
+    return pr
+  }
+
+  @Test func endsTheReviewStateWithTheQueuePhrase() {
+    #expect(summary(queue: .testing).tooltip == "Approved, Trunk testing · o/r: Fix")
+    #expect(summary(inMergeQueue: true).tooltip == "Approved, in the merge queue · o/r: Fix")
+  }
+
+  @Test func showsOnlyTheReviewStateOutsideAQueue() {
+    #expect(summary().tooltip == "Approved · o/r: Fix")
   }
 }
