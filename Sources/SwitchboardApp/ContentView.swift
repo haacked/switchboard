@@ -386,7 +386,7 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
-    .help(session.tooltip(now: nowMs(), activeAccount: activeAccount))
+    .help(session.tooltip(activeAccount: activeAccount))
   }
 
   /// Text truncates at its end. The reason therefore truncates before the repo does.
@@ -847,7 +847,7 @@ struct BoardCard: View {
 
   var body: some View {
     let s = session
-    let tooltip = s.tooltip(now: nowMs(), activeAccount: model.activeAccountFolder)
+    let tooltip = s.tooltip(activeAccount: model.activeAccountFolder)
     ZStack(alignment: .bottomTrailing) {
       Button {
         model.openFromBoard(s.id)

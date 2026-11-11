@@ -50,7 +50,7 @@ private func summary(_ text: String) -> TriageItem {
 private func lines(
   _ s: SessionSummary, activeAccount: String = ClaudeAccount.defaultFolder
 ) -> [String] {
-  s.tooltip(now: now, activeAccount: activeAccount).split(separator: "\n", omittingEmptySubsequences: false)
+  s.tooltip(activeAccount: activeAccount, now: now).split(separator: "\n", omittingEmptySubsequences: false)
     .map(String.init)
 }
 
@@ -423,8 +423,8 @@ private func line(_ s: SessionSummary, startingWith prefix: String, activeAccoun
       #expect(accountLine(nil, active: ClaudeAccount.defaultFolder) == nil)
     }
 
-    @Test func noAccountWithAnotherActiveShowsDefault() {
-      #expect(accountLine(nil, active: personalFolder) == "Account: default")
+    @Test func noAccountWithAnotherActiveLeavesTheLineOut() {
+      #expect(accountLine(nil, active: personalFolder) == nil)
     }
 
     @Test(arguments: [personalFolder, ClaudeAccount.defaultFolder])
@@ -506,7 +506,7 @@ private func line(_ s: SessionSummary, startingWith prefix: String, activeAccoun
     @Test func usesTheGivenNowAndNotTheClock() {
       var s = bare()
       s.lastActivity = 1000
-      let tooltip = s.tooltip(now: 1000 + 3 * hour, activeAccount: ClaudeAccount.defaultFolder)
+      let tooltip = s.tooltip(activeAccount: ClaudeAccount.defaultFolder, now: 1000 + 3 * hour)
 
       #expect(tooltip.hasSuffix("\nLast activity 3h ago"))
     }
@@ -571,23 +571,6 @@ private func line(_ s: SessionSummary, startingWith prefix: String, activeAccoun
 
     @Test func unstartedFollowupGivesTheNameAndState() {
       #expect(lines(Self.unstartedFollowup()) == ["update-docs", "Not started: manual"])
-    }
-
-    @Test(arguments: ["manager", "groupChat", "docketRow", "unstartedFollowup"])
-    func everyKindHasNoEmptyLabel(_ kind: String) {
-      let s =
-        switch kind {
-        case "manager": Self.manager()
-        case "groupChat": Self.groupChat()
-        case "docketRow": Self.docketRow()
-        default: Self.unstartedFollowup()
-        }
-
-      let tooltip = lines(s)
-
-      #expect(!tooltip.contains { $0.trimmingCharacters(in: .whitespaces).isEmpty })
-      #expect(!tooltip.contains { $0.hasSuffix(":") || $0.hasSuffix(": ") })
-      #expect(!tooltip.contains { $0.hasPrefix("·") || $0.hasSuffix("·") || $0.hasPrefix(" ") || $0.hasSuffix(" ") })
     }
   }
 

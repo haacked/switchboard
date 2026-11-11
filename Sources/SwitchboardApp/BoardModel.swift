@@ -267,8 +267,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event and the views never show. Publishing for it redraws the views
-  /// and restarts a tooltip's hover delay.
+  /// hook event. Publishing for it redraws the views and restarts a tooltip's
+  /// hover delay. The session tooltip shows `lastActivity`, so its "Last
+  /// activity" line can lag until another shown field changes.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in

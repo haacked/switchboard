@@ -4,12 +4,13 @@ import SwitchboardCore
 extension SessionSummary {
   /// The text a session tile shows on hover, one fact per line. It leaves out
   /// each fact the session lacks. The account line appears only when the
-  /// session runs under an account other than `activeAccount`.
-  func tooltip(now: Int64, activeAccount: String) -> String {
+  /// session records an account other than `activeAccount`. A session without
+  /// a recorded account runs under sbd's own account, which the app can't name.
+  func tooltip(activeAccount: String, now: Int64 = nowMs()) -> String {
     let repoName = pr?.repo ?? repoFolder.map { ($0 as NSString).lastPathComponent }
     let place = [repoName, branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     let shownIssues = issues ?? []
-    let account = self.account.map(ClaudeAccount.normalize) ?? ClaudeAccount.defaultFolder
+    let account = self.account.map(ClaudeAccount.normalize)
     let lines: [String?] = [
       name,
       place,
@@ -20,7 +21,7 @@ extension SessionSummary {
       reason.isEmpty ? state.title : "\(state.title): \(reason)",
       excerpt,
       groupName.flatMap { $0.isEmpty ? nil : "Group: \($0)" },
-      account == ClaudeAccount.normalize(activeAccount) ? nil : "Account: \(ClaudeAccount.name(account))",
+      account.flatMap { $0 == ClaudeAccount.normalize(activeAccount) ? nil : "Account: \(ClaudeAccount.name($0))" },
       waitsToStart || lastActivity <= 0 ? nil : "Last activity \(ago(lastActivity, now: now)) ago",
     ]
     return lines.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
