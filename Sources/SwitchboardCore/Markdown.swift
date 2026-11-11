@@ -602,3 +602,57 @@ enum HTML {
     return String(decoding: UnsafeBufferPointer(start: buffer.ptr, count: Int(buffer.size)), as: UTF8.self)
   }
 }
+
+extension MarkdownText {
+  /// The text with a backslash before each character that could start
+  /// Markdown syntax, so that Markdown shows it as it is and makes no link,
+  /// image, emphasis, list, or HTML of it. Other punctuation stays bare, so
+  /// that `sb --json` shows readable text.
+  /// cmark-gfm finds email addresses after it resolves the backslashes, so a
+  /// word joiner, which draws nothing, goes before each `@`.
+  /// It walks Unicode scalars, as cmark-gfm does. A grapheme cluster would
+  /// hide a bracket behind a prepend or combining mark.
+  public static func escaped(_ text: String) -> String {
+    var out = String.UnicodeScalarView()
+    let scalars = Array(text.unicodeScalars)
+    var word = ""
+    var lineStart = true
+    var number = false
+    for (i, c) in scalars.enumerated() {
+      let next = i + 1 < scalars.count ? scalars[i + 1] : nil
+      var escape = alwaysEscaped.contains(c)
+      // A list marker, a heading underline, or an ordered list number at the start of a line.
+      if lineStart, "-+=".unicodeScalars.contains(c) { escape = true }
+      if number, ".)".unicodeScalars.contains(c) { escape = true }
+      // GFM turns `scheme://`, `mailto:`, `xmpp:`, and `www.` into links.
+      if c == ":", next == "/" || ["mailto", "xmpp"].contains(word.lowercased()) { escape = true }
+      if c == ".", word.lowercased() == "www" { escape = true }
+      if c == "@" { out.append("\u{2060}") }
+      if escape { out.append("\\") }
+      out.append(c)
+      number = (lineStart || number) && ("0"..."9").contains(c)
+      if c == "\n" || c == "\r" {
+        lineStart = true
+      } else if !c.properties.isWhitespace {
+        lineStart = false
+      }
+      word = c.properties.isAlphabetic ? word + String(c) : ""
+    }
+    return String(out)
+  }
+
+  static let alwaysEscaped = Set("\\`*_[]<>!#|~&".unicodeScalars)
+}
+
+extension MarkdownBlock {
+  /// The block's text without styles, for a paragraph, a heading, a list,
+  /// or a quote. Other blocks give none.
+  public var plainText: String {
+    switch self {
+    case .paragraph(let text), .heading(_, let text): text.plain
+    case .list(_, let items): items.flatMap(\.blocks).map(\.plainText).joined(separator: " ")
+    case .quote(let blocks): blocks.map(\.plainText).joined(separator: " ")
+    default: ""
+    }
+  }
+}

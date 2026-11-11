@@ -86,9 +86,11 @@ extension Attention {
     guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }
     switch pr.queue {
     case nil:
-      return approvedNotReady(pr)
-        ?? Verdict(
-          state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
+      if let v = approvedNotReady(pr) { return v }
+      var verdict = Verdict(
+        state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
+      verdict.addMergeSummary(facts)
+      return verdict
     case .unknown:
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
     default:

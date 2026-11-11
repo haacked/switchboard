@@ -52,6 +52,11 @@ public final class Service {
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
     var summaryAttempt: Int64 = 0
+    /// The PR and head commit whose merge brief this sbd last started or
+    /// skipped, as `#N@sha`. A head gets one call per run of sbd.
+    var mergeBriefAttempt: String?
+    /// Whether the budget skipped the brief of `mergeBriefAttempt`.
+    var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
 
@@ -204,7 +209,8 @@ public final class Service {
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
     for (id, e) in entries {
-      summarizeTurn(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+      let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
+      startSummaries(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -531,7 +537,7 @@ public final class Service {
       entries[id] = e
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
-      summarizeTurn(id, verdict)
+      startSummaries(id, verdict)
     }
     releaseCards(id)
     return event
@@ -1700,7 +1706,7 @@ public final class Service {
         if var e = entries[id] {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
-          summarizeTurn(id, verdict)
+          startSummaries(id, verdict)
         }
       }
       runQueuedStarts(now: now)

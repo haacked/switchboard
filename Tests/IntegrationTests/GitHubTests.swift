@@ -118,13 +118,13 @@ extension FakeGitHub {
     let result = try sbd.poll()
     #expect(result["lookups"]?.int == 1)
     #expect(result["polled"]?.int == 1)
-    #expect(result["points"]?.int == 3)
+    #expect(result["points"]?.int == 4)
     let after = try sbd.get(s.id)
     #expect(after.pr?.number == 18303)
     #expect(after.pr?.status == .approved)
     #expect(after.state == .readyToMerge)
     #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
-    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners"])
+    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners", "mergeDetails"])
     #expect(github.requests.first?.ids == ["PostHog/charts:haacked/cdp-dlq-runbook-lookup-step"])
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
     #expect(
@@ -614,7 +614,9 @@ extension FakeGitHub {
     github.reply(401, #"{"message":"Bad credentials"}"#)
     try sbd.poll()
     #expect(
-      github.requests.map(\.authorization) == ["bearer token-1", "bearer token-2", "bearer token-2", "bearer token-2"])
+      github.requests.map(\.authorization) == [
+        "bearer token-1", "bearer token-2", "bearer token-2", "bearer token-2", "bearer token-2",
+      ])
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
