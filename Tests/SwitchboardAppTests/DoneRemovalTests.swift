@@ -215,9 +215,28 @@ final class SentArgs: @unchecked Sendable {
       Issue.record("the check did not finish")
       return
     }
-    // The unread session shows under the filter, but its org may be hidden, so Delete All leaves it out.
+    // The unread session shows under the filter, but its org may be hidden, so Delete All skips it.
     #expect(shown.remove.map(\.id) == ["ph"])
-    #expect(shown.skip.isEmpty)
+    #expect(shown.skip.map(\.id) == ["un"])
+    #expect(shown.skip.first?.reason == BoardModel.unreadOrgReason)
+  }
+
+  @Test func aFilteredPlanKeepsSbdsSkipsForShownSessions() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [], skip: [skip("ph"), skip("un"), skip("hk")])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.checkDoneRemoval()
+    await settle { if case .confirming = model.doneRemoval { true } else { false } }
+
+    guard case .confirming(let shown) = model.doneRemoval else {
+      Issue.record("the check did not finish")
+      return
+    }
+    #expect(shown.remove.isEmpty)
+    #expect(shown.skip.map(\.id) == ["ph", "un"])
+    #expect(shown.skip.allSatisfy { $0.reason == "has uncommitted files" })
   }
 
   @Test func aPlanDropsAnIdThatTheBoardDoesNotList() async throws {
@@ -296,6 +315,7 @@ final class SentArgs: @unchecked Sendable {
     #expect(model.shownIDs.contains("un"))
     #expect(confirmedTargets(sent) == ["ph"])
     #expect(result.skipped.map(\.id) == ["un"])
+    #expect(result.skipped.first?.reason == BoardModel.unreadOrgReason)
   }
 
   @Test func anIdThatTheBoardDoesNotListIsNeverSent() async throws {

@@ -40,8 +40,12 @@ extension BoardModel {
   /// branch and the remote branch when the PR merged.
   nonisolated static let doneRemovalArgs: [String: JSON] = ["worktree": true, "remote_branch": true]
 
+  nonisolated static let unreadOrgReason = "sbd hasn't read its org yet"
+
   /// Asks sbd which Done sessions it would remove and which it would skip.
-  /// The plan leaves out the sessions that the org filter hides.
+  /// The plan leaves out the sessions that the org filter hides. Under a
+  /// filter, a shown session whose org sbd hasn't read yet moves from the
+  /// remove list to the skip list.
   func checkDoneRemoval() {
     guard doneRemoval == nil else { return }
     doneRemoval = .checking
@@ -51,9 +55,12 @@ extension BoardModel {
         guard self.doneRemoval == .checking else { return }
         do {
           var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
-          let shown = self.removableIDs
-          plan.remove.removeAll { !shown.contains($0.id) }
+          let shown = self.shownIDs
+          let removable = self.removableIDs
+          let unread = plan.remove.filter { shown.contains($0.id) && !removable.contains($0.id) }
+          plan.remove.removeAll { !removable.contains($0.id) }
           plan.skip.removeAll { !shown.contains($0.id) }
+          plan.skip += unread.map { .init(id: $0.id, name: $0.name, reason: Self.unreadOrgReason) }
           self.doneRemoval = .confirming(plan)
         } catch {
           self.actionError = "rm-done: \(error)"
@@ -73,8 +80,12 @@ extension BoardModel {
       var result = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
       for (n, item) in plan.remove.enumerated() {
         // A filter change after the plan can hide a session. The loop checks each one just before its send.
-        guard await MainActor.run(body: { self.removableIDs.contains(item.id) }) else {
-          result.skipped.append(.init(id: item.id, name: item.name, reason: "hidden by the org filter"))
+        let refusal = await MainActor.run { () -> String? in
+          if self.removableIDs.contains(item.id) { return nil }
+          return self.shownIDs.contains(item.id) ? Self.unreadOrgReason : "hidden by the org filter"
+        }
+        if let refusal {
+          result.skipped.append(.init(id: item.id, name: item.name, reason: refusal))
           await MainActor.run { self.doneRemoval = .removing(plan, done: n + 1) }
           continue
         }

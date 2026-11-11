@@ -237,6 +237,25 @@ private let chat = session("c", kind: .chat)
     #expect(filter.keys == [OrgFilter.localKey])
   }
 
+  // MARK: insert
+
+  @Test func insertFromAllOrgsSelectsOnlyThatKey() {
+    var filter = OrgFilter()
+
+    filter.insert("PostHog")
+
+    #expect(filter.keys == ["posthog"])
+  }
+
+  @Test func insertingAKeyThatIsAlreadySelectedKeepsIt() {
+    var filter = OrgFilter(keys: ["posthog", OrgFilter.localKey])
+
+    filter.insert(OrgFilter.localKey)
+    filter.insert("POSTHOG")
+
+    #expect(filter.keys == ["posthog", OrgFilter.localKey])
+  }
+
   // MARK: decoding
 
   @Test func aSummaryFromAnOlderSbdHasNoRepositoryFields() throws {
