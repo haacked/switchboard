@@ -343,7 +343,7 @@ struct ManagerButton: View {
 
 extension PRSummary {
   var numberLabel: String { "#\(number)" }
-  var tooltip: String { "\(status.rawValue) · \(repo): \(title)" }
+  var tooltip: String { "\(status.rawValue)\(queuePhrase.map { ", \($0)" } ?? "") · \(repo): \(title)" }
 }
 
 struct SessionRow: View {
@@ -373,6 +373,7 @@ struct SessionRow: View {
             HStack(spacing: 3) {
               PRLink(text: pr.numberLabel, url: url)
                 .font(.caption)
+                .fixedSize()
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
                 .accessibilityValue(pr.status.rawValue)
@@ -381,7 +382,11 @@ struct SessionRow: View {
           }
           Text(ago(session.since)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
         }
-        subtitle
+        // The sidebar can be too narrow for the badge beside the PR number.
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          if let pr = session.pr { QueueBadge(pr: pr) }
+          subtitle
+        }
         CleanupNote(session: session)
       }
     }
@@ -884,8 +889,12 @@ struct BoardCard: View {
           }
           CleanupNote(session: s)
           MergeNote(session: s)
-          Text(statusLine)
-            .font(.caption2).foregroundStyle(.tertiary)
+          // A Board column is too narrow for the badge beside the PR number.
+          HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let pr = s.pr { QueueBadge(pr: pr) }
+            Text(statusLine)
+              .font(.caption2).foregroundStyle(.tertiary)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
