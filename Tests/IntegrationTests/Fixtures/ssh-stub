@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""A stand-in for ssh in sbd's tests. It runs the remote command on this Mac.
+
+Usage:
+  ssh-stub -M -T [-o K=V]... -- <destination> <command>...
+  ssh-stub [-T] -G [-o K=V]... -- <destination>
+  ssh-stub [-T] -O check|exit [-o K=V]... -- <destination>
+
+It keeps its files in <ControlPath's folder>/../ssh-stub, which is
+$SB_HOME/ssh-stub when sbd passes ControlPath=$SB_HOME/ssh/%C:
+
+  log                 one line per run of the stub: a JSON object with the
+                      run's "pid" and "argv". A master that found its
+                      ControlPath taken adds the line `multiplexing disabled`.
+  <socket name>.pid   the pid of the master that last bound the socket
+  home/               the HOME of the remote command, which stands in for the box
+  refuse              while it exists, a master prints its text to stderr and
+                      exits 255
+  hang                while it exists, a master sleeps before it does anything
+
+%C in a ControlPath becomes 40 hex characters from a hash of the destination.
+An -o value may stand in double quotes, with \\" and \\\\ for those two characters.
+A value with a space and no quotes is an error, as it is for ssh.
+
+-G prints `controlpath <expanded path>` among other lines, as `ssh -G` does.
+-O check exits 0 only when the socket file exists and the pid in its pid file
+is alive. -O exit ends that pid.
+
+A master binds a real Unix socket at its ControlPath when nothing is there.
+When something is there, it binds nothing and writes no pid file, as a real
+ssh that disabled multiplexing answers no -O check. It then replaces
+itself with `/bin/sh -c <command>`, so its pid is the remote shell's pid. A
+test drops the connection by killing that pid with SIGKILL, which leaves the
+socket file behind as a killed master does.
+"""
+import hashlib
+import json
+import os
+import re
+import signal
+import socket
+import stat
+import sys
+import time
+
+
+def fail(message):
+    sys.stderr.write(f"ssh-stub: {message}\n")
+    sys.exit(255)
+
+
+def parse(argv):
+    flags, options, control, rest = set(), {}, None, []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--":
+            rest = argv[i + 1:]
+            break
+        if arg in ("-M", "-T", "-G"):
+            flags.add(arg)
+        elif arg in ("-o", "-O"):
+            if i + 1 == len(argv):
+                fail(f"{arg} needs a value")
+            i += 1
+            if arg == "-O":
+                control = argv[i]
+            else:
+                key, sep, value = argv[i].partition("=")
+                if not sep:
+                    fail(f"-o needs K=V, not {argv[i]}")
+                if len(value) > 1 and value[0] == value[-1] == '"':
+                    value = re.sub(r'\\(["\\])', r"\1", value[1:-1])
+                elif " " in value:
+                    fail(f"keyword {key.lower()} extra arguments at end of line")
+                options[key.lower()] = value
+        elif arg.startswith("-"):
+            fail(f"unknown option {arg}")
+        else:
+            rest = argv[i:]
+            break
+        i += 1
+    if not rest:
+        fail("no destination")
+    return flags, options, control, rest[0], rest[1:]
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_pid(path):
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def is_socket(path):
+    try:
+        return stat.S_ISSOCK(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+flags, options, control, destination, command = parse(sys.argv[1:])
+if "controlpath" not in options:
+    fail("needs -o ControlPath=<path>")
+digest = hashlib.sha1(destination.encode()).hexdigest()
+control_path = options["controlpath"].replace("%C", digest)
+folder = os.path.join(os.path.dirname(os.path.dirname(control_path)), "ssh-stub")
+box_home = os.path.join(folder, "home")
+os.makedirs(box_home, exist_ok=True)
+log = os.path.join(folder, "log")
+pid_file = os.path.join(folder, os.path.basename(control_path) + ".pid")
+
+
+def append_log(line):
+    fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, (line + "\n").encode())
+    finally:
+        os.close(fd)
+
+
+append_log(json.dumps({"pid": os.getpid(), "argv": sys.argv[1:]}))
+
+if "-G" in flags:
+    print(f"hostname {destination}")
+    print("controlmaster false")
+    print(f"controlpath {control_path}")
+    print("controlpersist no")
+    sys.exit(0)
+
+if control is not None:
+    pid = read_pid(pid_file)
+    running = is_socket(control_path) and pid is not None and alive(pid)
+    if control == "check":
+        if running:
+            print(f"Master running (pid={pid})")
+            sys.exit(0)
+        fail(f"Control socket connect({control_path}): No such file or directory")
+    if control == "exit":
+        if not running:
+            fail(f"Control socket connect({control_path}): No such file or directory")
+        os.kill(pid, signal.SIGTERM)
+        for path in (control_path, pid_file):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        print("Exit request sent.")
+        sys.exit(0)
+    fail(f"unknown -O command {control}")
+
+if "-M" not in flags:
+    fail("only a master (-M), -G, and -O run in the stub")
+if not command:
+    fail("a master needs a command")
+
+refuse = os.path.join(folder, "refuse")
+if os.path.exists(refuse):
+    with open(refuse) as f:
+        sys.stderr.write(f.read())
+    sys.exit(255)
+
+while os.path.exists(os.path.join(folder, "hang")):
+    time.sleep(0.05)
+
+if os.path.lexists(control_path):
+    sys.stderr.write(f"ControlSocket {control_path} already exists, disabling multiplexing\n")
+    append_log("multiplexing disabled")
+else:
+    # Python closes the listening socket when the shell replaces this process.
+    # The socket file stays, as it does when a real master is killed.
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(control_path)
+    listener.listen(1)
+    with open(pid_file + ".tmp", "w") as f:
+        f.write(str(os.getpid()))
+    os.replace(pid_file + ".tmp", pid_file)
+
+env = dict(os.environ)
+env["HOME"] = box_home
+os.execve("/bin/sh", ["/bin/sh", "-c", " ".join(command)], env)

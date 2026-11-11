@@ -449,3 +449,75 @@ final class Instance {
       "events", ["session": .string(id), "since": .number(Double(after)), "limit": 10_000], as: [Event].self)
   }
 }
+
+/// Remote hosts, which reach Fixtures/ssh-stub in place of ssh.
+extension Instance {
+  static let sshStub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/ssh-stub").path
+
+  /// A config.json `hosts` entry for an ssh host.
+  static func sshHost(_ destination: String) -> JSON { ["kind": "ssh", "destination": .string(destination)] }
+
+  /// The config.json keys that give sbd these hosts and the stub as its ssh.
+  static func hostsConfig(_ hosts: [String: JSON]) -> [String: JSON] {
+    ["ssh": .string(sshStub), "hosts": .object(hosts)]
+  }
+
+  /// Where the stub keeps its files, and where a test writes `refuse` and `hang`.
+  var sshStubFolder: String { "\(home.path)/ssh-stub" }
+
+  func setSSHStub(_ file: String, _ text: String = "") throws {
+    try FileManager.default.createDirectory(atPath: sshStubFolder, withIntermediateDirectories: true)
+    try text.write(toFile: "\(sshStubFolder)/\(file)", atomically: true, encoding: .utf8)
+  }
+
+  func clearSSHStub(_ file: String) throws {
+    try FileManager.default.removeItem(atPath: "\(sshStubFolder)/\(file)")
+  }
+
+  var sshStubLog: String { (try? String(contentsOfFile: "\(sshStubFolder)/log", encoding: .utf8)) ?? "" }
+
+  /// The arguments of each run of the stub as a master, oldest first.
+  func sshStubMasters() -> [[String]] {
+    sshStubLog.split(separator: "\n").compactMap { line in
+      guard let argv = JSON.parse(String(line))?["argv"]?.array?.compactMap(\.string), argv.contains("-M") else {
+        return nil
+      }
+      return argv
+    }
+  }
+
+  /// The pid of the master that last started for the destination, or nil before one did. The
+  /// stub names its pid file after the control socket.
+  func sshStubPid(_ destination: String) throws -> pid_t? {
+    let r = try runCommand(Instance.sshStub, ["-G", "-o", "ControlPath=\(home.path)/ssh/%C", "--", destination])
+    let line = try #require(r.stdout.split(separator: "\n").first { $0.hasPrefix("controlpath ") })
+    let socket = (String(line.dropFirst("controlpath ".count)) as NSString).lastPathComponent
+    return stubPid("ssh-stub/\(socket).pid")
+  }
+
+  func hosts() throws -> [HostStatus] { try client.call("hosts", as: [HostStatus].self) }
+
+  /// Waits for the host to match, and returns it.
+  @discardableResult
+  func waitForHost(_ name: String, _ what: String, timeout: Double = 15, _ match: (HostStatus) -> Bool) throws
+    -> HostStatus
+  {
+    try waitFor(what, timeout: timeout, fetch: { try hosts().first { $0.name == name } }, until: match)
+  }
+
+  @discardableResult
+  func waitForLink(_ name: String, _ state: LinkState) throws -> HostStatus {
+    try waitForHost(name, "\(name)'s link to be \(state.rawValue)") { $0.link == state }
+  }
+
+  /// Drops the host's connection by killing the stub's master, which leaves its socket file
+  /// behind as a killed ssh does. It returns the pid that it killed.
+  @discardableResult
+  func dropLink(_ name: String) throws -> pid_t {
+    let host = try #require(try hosts().first { $0.name == name })
+    let destination = try #require(host.destination)
+    let pid = try #require(try sshStubPid(destination))
+    kill(pid, SIGKILL)
+    return pid
+  }
+}

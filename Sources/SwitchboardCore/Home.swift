@@ -12,6 +12,8 @@ public struct Home: Sendable {
   }
 
   public var socket: String { "\(path)/sbd.sock" }
+  /// Where the ssh links to remote hosts keep their control sockets.
+  public var sshFolder: String { "\(path)/ssh" }
   /// The file that the running sbd holds an exclusive lock on.
   public var lock: String { "\(path)/sbd.lock" }
   public var database: String { "\(path)/sb.db" }
@@ -96,6 +98,13 @@ public struct Config: Codable, Equatable, Sendable {
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
   public var mcpServers: [String: MCPServer] = [:]
+  /// The ssh command for links to remote hosts. A test points it at a stub.
+  public var ssh = "ssh"
+  /// The valid remote hosts, by name.
+  public var hosts: [String: HostConfig] = [:]
+  /// The invalid entries of `hosts` in config.json, by name. It is not read from or written to
+  /// JSON.
+  public var invalidHosts: [String: InvalidHost] = [:]
   /// Local checkouts by `owner/name`, for repositories outside `repoRoots`.
   public var repos: [String: String] = [:]
   /// Folders that hold checkouts at <root>/<owner>/<name>.
@@ -126,6 +135,12 @@ public struct Config: Codable, Equatable, Sendable {
 
   public init() {}
 
+  enum CodingKeys: String, CodingKey {
+    case claude, idleStopSeconds, liveCap, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs, autoMode, env
+    case testClock, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile, cleanupDeletes, supacode
+    case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
+  }
+
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = Config()
@@ -149,6 +164,20 @@ public struct Config: Codable, Equatable, Sendable {
       } catch {
         logLine("skipping MCP server \(name): \(error)")
       }
+    }
+    ssh = try c.decodeIfPresent(String.self, forKey: .ssh) ?? d.ssh
+    // An invalid host is left out and listed in `invalidHosts`. Throwing would make sbd ignore
+    // all of config.json.
+    switch try c.decodeIfPresent(JSON.self, forKey: .hosts) {
+    case .object(let entries):
+      (hosts, invalidHosts) = HostConfig.parse(entries)
+      for (name, host) in invalidHosts.sorted(by: { $0.key < $1.key }) {
+        logLine("skipping host \(name): \(host.problem)")
+      }
+    case nil, .null:
+      break
+    default:
+      logLine("skipping hosts: its value must be an object")
     }
     repos = try c.decodeIfPresent([String: String].self, forKey: .repos) ?? d.repos
     repoRoots = try c.decodeIfPresent([String].self, forKey: .repoRoots) ?? d.repoRoots

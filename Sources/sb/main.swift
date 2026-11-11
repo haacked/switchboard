@@ -247,6 +247,11 @@ let usage = """
     mcp                           list the shared MCP servers that sbd runs
     mcp-server [--group G]        run the MCP server for Claude on stdin and stdout.
                                   --group limits its tools to the group's sessions
+    host [ls]                     list the remote hosts in config.json and each
+                                  host's ssh link
+    host connect <host>           open the host's ssh link and keep it open. An
+                                  open link keeps a devbox running
+    host disconnect <host>        close the host's ssh link
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -751,6 +756,8 @@ case "mcp":
   mcp(a)
 case "mcp-server":
   mcpServer(a)
+case "host":
+  host(a)
 case "autocontinue":
   autoContinue(a)
 case "live":

@@ -71,6 +71,9 @@ sb deny <session> Use the Makefile instead.
 sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
 sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
+sb host                      # the remote hosts in config.json and each host's ssh link
+sb host connect <host>       # opens the host's ssh link and keeps it open; an open link keeps a devbox running
+sb host disconnect <host>    # closes the host's ssh link
 sb triage                    # what needs you, in the order to go through it
 sb next                      # the first item
 sb choose <session> 1        # click an option, by number or label
