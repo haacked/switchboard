@@ -22,6 +22,17 @@ import Testing
     #expect(model.knownRepos == [Self.alpha, Self.beta])
   }
 
+  /// The next sheet's `repos` request waits behind `new`, so the kept list must already have the repository first.
+  @Test func createMovesTheSessionsRepoFirstBeforeSbdAnswers() {
+    let model = offlineModel()
+    model.knownRepos = [Self.beta, Self.alpha]
+    model.send = { _, _ in .null }
+
+    model.create(NewSession(path: Self.alpha.path))
+
+    #expect(model.knownRepos == [Self.alpha, Self.beta])
+  }
+
   @Test func addRepoLeavesTheListAsItIsWhenSbdRefusesThePath() async {
     let model = offlineModel()
     model.knownRepos = [Self.alpha]

@@ -106,6 +106,20 @@ private func fields(_ line: Substring) -> [String] {
     #expect(try list(sbd) == before)
   }
 
+  @Test func keepsARepoAfterItsFollowupSessionIsRemoved() throws {
+    let repos = try Repos()
+    let widgets = try repos.make("acme/widgets")
+    let sbd = try Instance(config: ["repoRoots": [.string(repos.root)], "branchPrefix": "haacked/"])
+    let f = try sbd.client.call(
+      "followup-add", ["prompt": "Fix the cache.", "repository": "acme/widgets"], as: SessionSummary.self)
+    _ = try sbd.client.call("followup-start", ["session": .string(f.id)], as: SessionSummary.self)
+
+    try sbd.sb("rm", f.id)
+
+    #expect(try sbd.client.sessions().isEmpty)
+    #expect(try list(sbd).map(\.path) == [real(widgets)])
+  }
+
   // MARK: Most recently used ordering
 
   @Test func listsTheRepoOfTheNewestSessionFirst() throws {

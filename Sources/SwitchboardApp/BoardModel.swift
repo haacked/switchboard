@@ -927,8 +927,13 @@ final class BoardModel: ObservableObject {
     perform("followup-start", args, finally: { self.starting.remove(id) })
   }
 
+  /// Puts the session's repository first in `knownRepos` at once. A New Session sheet opened before `new`
+  /// returns preselects it, because the sheet's `repos` request waits behind `new` on `worker`.
   func create(_ args: NewSession) {
     guard let json = try? JSON(encoding: args).object else { return }
+    if let repo = knownRepos?.first(where: { $0.path == args.path }) {
+      knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
+    }
     perform("new", json) { value in
       if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
