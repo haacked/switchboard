@@ -349,7 +349,9 @@ final class Instance {
   }
 
   /// The session's Claude pane as sbd reads it, with wrapped lines joined.
-  func screen(_ id: String) throws -> String { try client.call("screen", ["session": .string(id)]).string ?? "" }
+  func screen(_ id: String, colors: Bool = false) throws -> String {
+    try client.call("screen", ["session": .string(id), "colors": .bool(colors)]).string ?? ""
+  }
 
   /// Presses one key in the session's Claude pane, by its tmux key name,
   /// such as Down or Escape.
@@ -367,7 +369,7 @@ final class Instance {
   /// Whether the session's prompt box shows no typed text, read from the
   /// colored screen that sbd checks before a paste.
   func promptIsEmpty(_ id: String) throws -> Bool {
-    ClaudeScreen.promptIsEmpty(try client.call("screen", ["session": .string(id), "colors": true]).string ?? "")
+    ClaudeScreen.promptIsEmpty(try screen(id, colors: true))
   }
 
   /// The pid that the stub wrote to the file in SB_HOME, or nil before it wrote one.

@@ -685,10 +685,12 @@ echo "claude-stub $session ($source)"
 [ -n "$prompt" ] && turn "$prompt"
 # box: draws Claude Code's prompt box between two rules and moves the cursor
 # after its ❯ and no-break space, so the tty echoes typed text into the box.
-# sbd pastes only while the box shows empty. Each line that read returns
-# moves the cursor down one line, so unbox moves up one more than the lines
-# read since box drew it, and clears the box before the turn prints.
-box() { printf '%s\n❯\xc2\xa0\n%s\033[1A\033[3G' "$rule" "$rule"; boxed=0; }
+# sbd pastes only while the box shows empty. The box holds a dim placeholder,
+# as Claude Code's does, so it reads as empty only in a capture with colors.
+# Each line that read returns moves the cursor down one line, so unbox moves
+# up one more than the lines read since box drew it, and clears the box
+# before the turn prints.
+box() { printf '%s\n❯\xc2\xa0\033[2mTry "fix lint errors"\033[0m\n%s\033[1A\033[3G' "$rule" "$rule"; boxed=0; }
 unbox() { printf '\033[%dA\r\033[J' $((boxed + 1)); }
 box
 # tmux turns each LF of a paste into CR. The tty in cooked mode turns CR back

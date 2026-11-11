@@ -31,6 +31,10 @@ public final class Service {
     /// The text of the last message that a draft in claude's prompt box
     /// held. The log names each held message once.
     var heldText: String?
+    /// Counts the calls to `deliverPending`. Only the newest call's timer
+    /// pastes, so a held message keeps one retry timer however many messages
+    /// queue behind it.
+    var deliveryTimer = 0
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
     var lastJobSeen: Int64 = 0
@@ -878,8 +882,10 @@ public final class Service {
   /// Otherwise the next SessionStart or end of a turn tries again.
   func deliverPending(_ id: String, after delay: Double) {
     guard entries[id]?.pending.isEmpty == false else { return }
+    entries[id]!.deliveryTimer += 1
+    let timer = entries[id]!.deliveryTimer
     queue.asyncAfter(deadline: .now() + delay) { [self] in
-      guard let e = entries[id], !e.pending.isEmpty else { return }
+      guard let e = entries[id], !e.pending.isEmpty, e.deliveryTimer == timer else { return }
       let now = nowMs()
       guard readyForPaste(id, now: now) else {
         if e.facts.live, !e.facts.turnRunning, let start = e.facts.lastStart, start >= (e.facts.lastLaunch ?? 0) {
