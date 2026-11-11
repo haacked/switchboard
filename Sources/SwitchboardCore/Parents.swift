@@ -9,10 +9,15 @@ public struct ChildMark: Equatable, Sendable {
   /// drops out and returns keeps its number here, so the parent does not
   /// hear about it twice.
   public var heardPRs: Set<Int>
+  /// What a docket row in Needs you needs, or nil for any other child. A
+  /// docket row can go from one need to another between two polls, such as
+  /// from a failed poll to a ready draft. Its parent hears each need.
+  public var needs: String?
 
-  public init(state: AttentionState, pr: Int?) {
+  public init(state: AttentionState, pr: Int?, needs: String? = nil) {
     self.state = state
     self.pr = pr
+    self.needs = needs
     heardPRs = pr.map { [$0] } ?? []
   }
 
@@ -44,7 +49,7 @@ public enum ParentNotice {
     static func between(_ before: ChildMark, _ after: ChildMark, reason: String, prURL: String?) -> [Change] {
       var changes: [Change] = []
       if let number = after.pr, !before.heardPRs.contains(number) { changes.append(.pr(number, url: prURL)) }
-      if after.state != before.state {
+      if after.state != before.state || after.needs != before.needs {
         switch after.state {
         case .needsYou: changes.append(.needsYou(oneLine(reason)))
         case .readyToMerge: changes.append(.readyToMerge(oneLine(reason)))

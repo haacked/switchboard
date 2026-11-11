@@ -10,8 +10,10 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
 }
 
 @Suite struct ParentNoticeTests {
-  func lines(_ before: ChildMark, _ after: ChildMark, url: String? = nil) -> [String] {
-    ParentNotice.lines(name: "fix", id: "s1", before: before, after: after, reason: "answer: which?", prURL: url)
+  func lines(_ before: ChildMark, _ after: ChildMark, reason: String = "answer: which?", url: String? = nil)
+    -> [String]
+  {
+    ParentNotice.lines(name: "fix", id: "s1", before: before, after: after, reason: reason, prURL: url)
   }
 
   @Test func saysWhenAChildNeedsYou() {
@@ -48,6 +50,17 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
     #expect(lines(.fresh, needs).count == 1)
     #expect(lines(needs, .fresh).isEmpty)
     #expect(lines(.fresh, needs).count == 1)
+  }
+
+  @Test func saysAgainWhenADocketRowInNeedsYouNeedsSomethingElse() {
+    let failed = ChildMark(state: .needsYou, pr: nil, needs: "can't read docket")
+    let drafted = ChildMark(state: .needsYou, pr: nil, needs: "draft ready to submit")
+    #expect(lines(failed, drafted, reason: "draft ready to submit") == ["fix (s1) needs you: draft ready to submit"])
+    #expect(lines(drafted, drafted).isEmpty)
+    #expect(lines(drafted, ChildMark(state: .working, pr: nil)).isEmpty)
+    #expect(
+      ParentDigest.line(name: "fix", id: "s1", heard: failed, now: drafted, reason: "draft ready to submit", prURL: nil)
+        == "fix (s1): needs you: draft ready to submit")
   }
 
   func announced(_ prs: [Int?]) -> [String] {
