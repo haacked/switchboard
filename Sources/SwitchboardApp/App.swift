@@ -49,6 +49,19 @@ struct SwitchboardApp: App {
         Button("Show Board") { model.show(.board) }
           .keyboardShortcut("2")
         Divider()
+        Group {
+          Button("Next Session") { model.selectAdjacentSession(by: 1) }
+            .keyboardShortcut(NavShortcuts.nextSession)
+          Button("Previous Session") { model.selectAdjacentSession(by: -1) }
+            .keyboardShortcut(NavShortcuts.previousSession)
+          Button("Move Focus to List") { model.requestListFocus() }
+            .keyboardShortcut(NavShortcuts.focusList)
+          Button("Move Focus to Terminal") { model.focusTerminal() }
+            .keyboardShortcut(NavShortcuts.focusTerminal)
+            .disabled(!model.canFocusTerminal)
+        }
+        .disabled(model.presentingSheet)
+        Divider()
         Button("Stop Claude") { model.selection.map(model.stop) }
           .keyboardShortcut(".", modifiers: [.command])
           .disabled(model.selected?.live != true)

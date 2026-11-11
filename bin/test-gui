@@ -460,6 +460,13 @@ check_shell() {
   app snapshot "$shots/chat-closed.png" >/dev/null
   # Close acts on the key window. An app that a script starts may have none, so this checks only the binding.
   [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
+  # A focused terminal keeps every key but the menu's, so these must reach their own menu items. Without a
+  # key window, SwiftUI does not refresh the menu's enabled states. Move Focus to Terminal then keeps its
+  # state from launch, disabled, and the result names the item that owns ⌘T instead.
+  nav=$(app nav-keys)
+  keys="} ran Next Session; { ran Previous Session; l ran Move Focus to List; t ran"
+  [ "$nav" = "$keys Move Focus to Terminal" ] || [ "$nav" = "$keys none (Move Focus to Terminal is disabled)" ] ||
+    fail "the navigation shortcuts did not run their menu items: $nav"
   end_app
   save_shots
   echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat)"

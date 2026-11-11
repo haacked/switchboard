@@ -66,14 +66,20 @@ enum TerminalSelfTest {
 
   /// The key code that types `char` on the current keyboard layout, so the script
   /// works on a Dvorak keyboard too. Keys that aren't characters keep their fixed code.
-  static func code(for char: String) -> UInt16 {
-    for code in UInt16(0)..<UInt16(50) {
-      let probe = NSEvent.keyEvent(
-        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-        characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)
-      if probe?.characters(byApplyingModifiers: []) == char { return code }
+  static func code(for char: String) -> UInt16 { keystroke(for: char).code }
+
+  /// The key for `char`, as `code(for:)` finds it, and whether it needs ⇧, as "}" does on a US keyboard. A key
+  /// that types `char` without ⇧ wins.
+  static func keystroke(for char: String) -> (code: UInt16, shift: Bool) {
+    for shift in [false, true] {
+      for code in UInt16(0)..<UInt16(50) {
+        let probe = NSEvent.keyEvent(
+          with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)
+        if probe?.characters(byApplyingModifiers: shift ? .shift : []) == char { return (code, shift) }
+      }
     }
-    return 0
+    return (0, false)
   }
 
   static func key(

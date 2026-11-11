@@ -39,7 +39,9 @@ struct InboxView: View {
 
 /// One row for each session that needs you, then one for each that Claude
 /// can continue. No Claude output appears here, only what the user does.
-/// While the list has focus, j and k move to the next and previous item.
+/// While the list has focus, j and k move to the next and previous item
+/// around the ends, ↓ and ↑ move and stop at the ends, and Return goes into
+/// the item's Claude terminal.
 struct TriageList: View {
   @EnvironmentObject var model: BoardModel
   @FocusState private var focused: Bool
@@ -76,6 +78,16 @@ struct TriageList: View {
         model.moveInbox(by: press.characters == "j" ? 1 : -1)
         return .handled
       }
+      .onKeyPress(keys: [.upArrow, .downArrow, .return], phases: [.down, .repeat]) { press in
+        switch NavKey.action(press.key, modifiers: press.modifiers) {
+        case .move(.down): model.moveInbox(by: 1, wrap: false)
+        case .move(.up): model.moveInbox(by: -1, wrap: false)
+        case .open: model.focusTerminal()
+        default: return .ignored
+        }
+        return .handled
+      }
+      .takesListFocus(.inbox, $focused, model: model)
       .onAppear { focused = true }
       .onChange(of: model.inboxJumps, initial: true) {
         // The rows have no layout yet when the Inbox replaces the Board. A scroll

@@ -41,7 +41,9 @@ struct SessionView: View {
                   .help("Start a shell in the session's folder beside the Claude terminal")
               }
             }
-            TerminalPane(command: terminals.attachCommand(.claude))
+            TerminalPane(
+              command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
+              onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) })
           }
           .frame(minWidth: 320, idealWidth: 760)
           if session.shellClosed != true {
@@ -76,6 +78,8 @@ struct SessionView: View {
       )
       .padding(8)
     }
+    // A request that no terminal took would otherwise take focus the next time this session shows.
+    .onDisappear { [model, id = session.id] in model.releaseTerminalFocus(id) }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
       if !session.hasTerminals { return }
