@@ -50,7 +50,7 @@ final class SnapshotKeeper {
   }
 
   func compact(_ id: String, session: Session, events: Int) {
-    lock.withLock { running.insert(id) }
+    lock.withLock { _ = running.insert(id) }
     work.async { [self] in
       var done = (events, session)
       do {

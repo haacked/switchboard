@@ -250,7 +250,7 @@ final class BoardModel: ObservableObject {
   /// Reads the follow-ups, then the sessions. sbd moves a follow-up from
   /// `followup-ls` to `ls` in one step, so this order lists it in at least one
   /// of the two.
-  static func read(
+  nonisolated static func read(
     sessions: () throws -> [SessionSummary], followups: (() throws -> [SessionSummary])?
   ) -> (Result<[SessionSummary], Error>, [SessionSummary]?) {
     let more = followups.flatMap { try? $0() }
@@ -756,7 +756,7 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  static let recentEventCount = 10
+  nonisolated static let recentEventCount = 10
 
   /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ group: String) {

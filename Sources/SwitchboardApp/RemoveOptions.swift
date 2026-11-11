@@ -37,8 +37,8 @@ struct RemoveOptions: Equatable {
   /// Reads the folder off the main thread, because `git rev-parse` waits on the disk.
   static func load(
     _ session: SessionSummary,
-    folderExists: @escaping @Sendable (String) -> Bool = RemoveOptions.folderExists,
-    isLinkedWorktree: @escaping @Sendable (String) -> Bool = RemoveOptions.isLinkedWorktree
+    folderExists: @escaping @Sendable (String) -> Bool = { RemoveOptions.folderExists($0) },
+    isLinkedWorktree: @escaping @Sendable (String) -> Bool = { RemoveOptions.isLinkedWorktree($0) }
   ) async -> RemoveOptions {
     await Task.detached {
       RemoveOptions(session, folderExists: folderExists, isLinkedWorktree: isLinkedWorktree)
