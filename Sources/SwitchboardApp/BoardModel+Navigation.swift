@@ -20,6 +20,16 @@ extension BoardModel {
   /// Asks the list that `listFocusTarget` names to take keyboard focus.
   func requestListFocus() { listFocusRequests += 1 }
 
+  /// Closes the search panel and selects `id` as a sidebar click does, even when the session has an Inbox
+  /// item. A work session's collapsed section opens, so the sidebar shows the selected row.
+  func openFromSearch(_ id: String) {
+    showingSearch = false
+    guard let session = board.first(where: { $0.id == id }) else { return }
+    if session.kind == .work { collapsed.remove(session.state) }
+    selection = id
+    requestListFocus()
+  }
+
   /// The focused Board card while the Board still shows it, else the first card, as the Inbox falls back to
   /// its first item.
   var currentBoardCard: String? { boardFocus.flatMap { boardGrid.contains($0) ? $0 : nil } ?? boardGrid.first }
