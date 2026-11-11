@@ -338,6 +338,7 @@ struct ManagerButton: View {
 }
 
 extension PRSummary {
+  var numberLabel: String { "#\(number)" }
   var tooltip: String { "\(status.rawValue) · \(repo): \(title)" }
 }
 
@@ -364,7 +365,7 @@ struct SessionRow: View {
           IssueBadge(session: session)
           if let pr = session.pr, let url = pr.link {
             HStack(spacing: 3) {
-              Link(destination: url) { Text(verbatim: "#\(pr.number)") }
+              PRLink(text: pr.numberLabel, url: url)
                 .font(.caption)
                 .foregroundStyle(prominence == .increased ? AnyShapeStyle(.secondary) : AnyShapeStyle(pr.status.color))
                 .help(pr.tooltip)
@@ -853,10 +854,17 @@ struct BoardCard: View {
             IssueBadge(session: s, linked: false)
             if let pr = s.pr {
               HStack(spacing: 3) {
-                Text(verbatim: "#\(pr.number)")
-                  .font(.caption.bold())
-                  .foregroundStyle(pr.status.color)
-                  .help(pr.tooltip)
+                Group {
+                  if pr.link != nil {
+                    Text(verbatim: pr.numberLabel).hidden()
+                      .anchorPreference(key: PRLinkBounds.self, value: .bounds) { $0 }
+                  } else {
+                    Text(verbatim: pr.numberLabel)
+                      .foregroundStyle(pr.status.color)
+                      .help(pr.tooltip)
+                  }
+                }
+                .font(.caption.bold())
                 if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
               }
             }
@@ -882,6 +890,20 @@ struct BoardCard: View {
       .buttonStyle(.plain)
       .accessibilityValue(s.state.title)
       .accessibilityAddTraits(keyboardFocused ? .isSelected : [])
+      .overlayPreferenceValue(PRLinkBounds.self) { bounds in
+        if let bounds, let pr = s.pr, let url = pr.link {
+          GeometryReader { proxy in
+            let rect = proxy[bounds]
+            PRLink(text: pr.numberLabel, url: url)
+              .font(.caption.bold())
+              .foregroundStyle(pr.status.color)
+              .help(pr.tooltip)
+              .accessibilityValue(pr.status.rawValue)
+              .frame(width: rect.width, height: rect.height)
+              .offset(x: rect.minX, y: rect.minY)
+          }
+        }
+      }
       HStack(spacing: 4) {
         NotesButton(session: s)
         if s.canMerge { MergeButton(session: s) }
