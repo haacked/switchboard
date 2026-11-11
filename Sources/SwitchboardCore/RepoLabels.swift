@@ -18,6 +18,12 @@ public enum RepoLabels {
   public static func labels(_ sessions: [SessionSummary], evenForOneRepo: Bool = false, fullName: Bool = false)
     -> [String: String]
   {
+    fullLabels(sessions, evenForOneRepo: evenForOneRepo, fullName: fullName).mapValues(capped)
+  }
+
+  /// The labels that `labels` gives, before `capped` shortens them.
+  static func fullLabels(_ sessions: [SessionSummary], evenForOneRepo: Bool, fullName: Bool = false) -> [String: String]
+  {
     let listed = sessions.filter { $0.kind == .work }
     var slugOfFolder: [String: String] = [:]
     for s in listed {
@@ -58,7 +64,7 @@ public enum RepoLabels {
         }
       }
     }
-    return repoIndexOfSession.mapValues { capped(repos[$0].label) }
+    return repoIndexOfSession.mapValues { repos[$0].label }
   }
 
   /// A longer label keeps its first component. Collisions add components at
