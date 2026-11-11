@@ -26,12 +26,12 @@ extension Service {
   }
 
   /// Returns once claude has exited, the Claude pane is closed, every process
-  /// that `stop` recorded has exited, and no process has its working folder,
-  /// its program, or an open file in the session's folder. It runs off the
-  /// state queue. A claude that has not exited 5 s after SIGTERM throws, and
-  /// its pane stays open, so that a later call finds it. A process that still
-  /// runs or still has the folder open 5 s after the pane closes throws. sbd
-  /// does not signal those processes, because the user may want to keep them.
+  /// that `stop` recorded has exited, and no process uses the session's folder
+  /// as `Processes.using` defines it. It runs off the state queue. A claude
+  /// that has not exited 5 s after SIGTERM throws, and its pane stays open, so
+  /// that a later call finds it. A process that still runs or still uses the
+  /// folder 5 s after the pane closes throws. sbd does not signal those
+  /// processes, because the user may want to keep them.
   /// `command` names the command that the error tells the user to run again.
   func finishPaneStop(_ session: Session, _ stop: PaneStop, command: String) throws {
     // A process can write to the folder until it exits. `worktree remove` deletes ignored files.
@@ -50,8 +50,8 @@ extension Service {
     let commands = Dictionary(
       uniqueKeysWithValues: Processes.byParent().values.joined().map { ($0.pid, $0.command) })
     let named =
-      running.sorted().map { "\($0) (\(commands[$0] ?? "?"))" }
-      + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.path))" }
+      running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
+      + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
       "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )
