@@ -409,8 +409,11 @@ import Testing
       Press(KeyEquivalent.return.character, [.command, .shift]), Press("r"),
       Press("q"), Press("w"), Press("h"), Press("h", [.command, .option]), Press("m"), Press(","), Press("c"),
       Press("v"), Press("x"), Press("a"), Press("z"), Press("z", [.command, .shift]), Press("f", [.command, .control]),
-      Press("p"),
+      Press("p"), Self.filterByOrg,
     ]
+
+    /// Session > Filter by Org….
+    static let filterByOrg = Press("o", [.command, .shift])
 
     /// A focused terminal passes only ⌘ keys to the menu bar.
     @Test func everyShortcutUsesCommand() {
@@ -429,6 +432,11 @@ import Testing
       for shortcut in Self.all {
         #expect(!Self.taken.contains(Press(shortcut)), "\(shortcut.key.character)")
       }
+    }
+
+    @Test func filterByOrgCollidesWithNoOtherShortcut() {
+      #expect(Self.taken.filter { $0 == Self.filterByOrg }.count == 1)
+      #expect(!Self.all.map(Press.init).contains(Self.filterByOrg))
     }
 
     @Test func theShortcutsAreTheKeysTheReadmeNames() {

@@ -181,6 +181,10 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// or nil when that remote is missing or isn't on GitHub. An sbd that
   /// predates it sends nil.
   public var repository: String?
+  /// True once sbd has read `checkout` and its origin remote. While it is
+  /// nil, a nil `repository` means sbd hasn't looked yet, not that the
+  /// folder has no GitHub remote.
+  public var repositoryRead: Bool?
   /// The folder that names the session's repo. An sbd that predates
   /// `checkout` sends only `repo`.
   public var repoFolder: String? { checkout ?? repo }

@@ -119,7 +119,7 @@ final class SentArgs: @unchecked Sendable {
 @Suite struct BoardModelDoneRemoval {
   @Test func removesOneSessionPerRequestAndSkipsARequestThatFails() async {
     let sent = SentArgs()
-    let model = offlineModel()
+    let model = appliedModel(["a", "b", "c", "d"].map { needsItem($0, state: .done) })
     model.send = { op, args in
       #expect(op == "rm-done")
       sent.append(args)
@@ -150,5 +150,213 @@ final class SentArgs: @unchecked Sendable {
       #expect(args["worktree"] == .bool(true))
       #expect(args["remote_branch"] == .bool(true))
     }
+  }
+}
+
+/// Delete All sends `confirmed: true` only for sessions that the org filter
+/// shows at the moment of the send.
+@MainActor
+@Suite struct DoneRemovalOrgFilterTests {
+  static let done = [
+    orgSession("ph", "PostHog/posthog", state: .done), orgSession("hk", "haacked/switchboard", state: .done),
+    orgSession("lo", nil, state: .done), orgSession("un", nil, read: nil, state: .done),
+  ]
+
+  func item(_ id: String) -> DoneRemovalPlan.Item {
+    .init(id: id, name: id, pr: nil, worktree: nil, branch: nil, remoteBranch: false)
+  }
+
+  func skip(_ id: String) -> DoneRemovalPlan.Skip { .init(id: id, name: id, reason: "has uncommitted files") }
+
+  func model(_ filter: OrgFilter, _ list: [SessionSummary] = done) -> BoardModel {
+    let model = orgFilterModel(filter)
+    model.apply(.success(list), followups: nil)
+    return model
+  }
+
+  /// A `send` that records every request, answers the check with `plan`, and removes each confirmed target.
+  /// `beforeAnswer` runs on the main actor after a confirmed request is recorded and before it is answered.
+  func recordingSend(
+    _ sent: SentArgs, plan: DoneRemovalPlan, beforeAnswer: (@MainActor @Sendable (String) -> Void)? = nil
+  ) -> @Sendable (String, [String: JSON]) throws -> JSON {
+    { op, args in
+      sent.append(args)
+      guard args["confirmed"] == .bool(true) else { return try JSON(encoding: plan) }
+      let id = args["targets"]?.array?.first?.string ?? ""
+      if let beforeAnswer { DispatchQueue.main.sync { MainActor.assumeIsolated { beforeAnswer(id) } } }
+      return try JSON(encoding: DoneRemovalResult(removed: [id], skipped: [], partial: []))
+    }
+  }
+
+  func confirmedTargets(_ sent: SentArgs) -> [String] {
+    sent.value.filter { $0["confirmed"] == .bool(true) }.flatMap { $0["targets"]?.array?.compactMap(\.string) ?? [] }
+  }
+
+  func confirm(_ model: BoardModel, _ plan: DoneRemovalPlan) async -> DoneRemovalResult? {
+    model.doneRemoval = .confirming(plan)
+    model.removeDone(plan)
+    await settle { if case .finished = model.doneRemoval { true } else { false } }
+    guard case .finished(let result) = model.doneRemoval else { return nil }
+    return result
+  }
+
+  // MARK: The plan
+
+  @Test func aPlanShowsOnlyTheSessionsThatTheFilterShows() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("hk"), item("un")], skip: [skip("lo"), skip("ph2")])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.checkDoneRemoval()
+    await settle { if case .confirming = model.doneRemoval { true } else { false } }
+
+    guard case .confirming(let shown) = model.doneRemoval else {
+      Issue.record("the check did not finish")
+      return
+    }
+    // The unread session shows under the filter, but its org may be hidden, so Delete All skips it.
+    #expect(shown.remove.map(\.id) == ["ph"])
+    #expect(shown.skip.map(\.id) == ["un"])
+    #expect(shown.skip.first?.reason == BoardModel.unreadOrgReason)
+  }
+
+  @Test func aFilteredPlanKeepsSbdsSkipsForShownSessions() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [], skip: [skip("ph"), skip("un"), skip("hk")])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.checkDoneRemoval()
+    await settle { if case .confirming = model.doneRemoval { true } else { false } }
+
+    guard case .confirming(let shown) = model.doneRemoval else {
+      Issue.record("the check did not finish")
+      return
+    }
+    #expect(shown.remove.isEmpty)
+    #expect(shown.skip.map(\.id) == ["ph", "un"])
+    #expect(shown.skip.allSatisfy { $0.reason == "has uncommitted files" })
+  }
+
+  @Test func aPlanDropsAnIdThatTheBoardDoesNotList() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter())
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("ghost")], skip: [skip("phantom"), skip("lo")])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.checkDoneRemoval()
+    await settle { if case .confirming = model.doneRemoval { true } else { false } }
+
+    guard case .confirming(let shown) = model.doneRemoval else {
+      Issue.record("the check did not finish")
+      return
+    }
+    #expect(shown.remove.map(\.id) == ["ph"])
+    #expect(shown.skip.map(\.id) == ["lo"])
+  }
+
+  // MARK: The sends
+
+  @Test func confirmingAfterAFilterChangeThatHidesAPlannedIdNeverSendsIt() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter())
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("hk"), item("lo")], skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.orgFilter = OrgFilter(keys: ["posthog"])
+    let result = try #require(await confirm(model, plan))
+
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.removed == ["ph"])
+    #expect(result.skipped.map(\.id) == ["hk", "lo"])
+    #expect(result.skipped.allSatisfy { $0.reason == BoardModel.hiddenOrgReason })
+  }
+
+  @Test func aFilterChangeBetweenTwoSendsSkipsTheSecondId() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter())
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("hk")], skip: [])
+    model.send = recordingSend(sent, plan: plan) { id in
+      if id == "ph" { model.orgFilter = OrgFilter(keys: ["posthog"]) }
+    }
+
+    let result = try #require(await confirm(model, plan))
+
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.skipped.map(\.id) == ["hk"])
+    #expect(result.skipped.first?.reason == BoardModel.hiddenOrgReason)
+  }
+
+  @Test func aSessionWhoseOrgBecomesKnownAndHiddenWhileTheSheetIsOpenIsSkipped() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("un")], skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.apply(
+      .success([
+        orgSession("ph", "PostHog/posthog", state: .done), orgSession("un", "haacked/late", state: .done),
+      ]), followups: nil)
+    let result = try #require(await confirm(model, plan))
+
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.skipped.map(\.id) == ["un"])
+  }
+
+  @Test func aSessionWhoseOrgIsUnknownIsNeverSentUnderAFilter() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter(keys: ["posthog"]))
+    let plan = DoneRemovalPlan(remove: [item("ph"), item("un")], skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    let result = try #require(await confirm(model, plan))
+
+    #expect(model.shownIDs.contains("un"))
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.skipped.map(\.id) == ["un"])
+    #expect(result.skipped.first?.reason == BoardModel.unreadOrgReason)
+  }
+
+  @Test func anIdThatTheBoardDoesNotListIsNeverSent() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter())
+    let plan = DoneRemovalPlan(remove: [item("ghost"), item("ph")], skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    let result = try #require(await confirm(model, plan))
+
+    #expect(confirmedTargets(sent) == ["ph"])
+    #expect(result.skipped.map(\.id) == ["ghost"])
+    #expect(result.skipped.first?.reason == BoardModel.unlistedReason)
+  }
+
+  @Test func underAllOrgsTheRequestsMatchTheUnfilteredOnes() async throws {
+    let sent = SentArgs()
+    let model = model(OrgFilter())
+    let plan = DoneRemovalPlan(remove: Self.done.map { item($0.id) }, skip: [])
+    model.send = recordingSend(sent, plan: plan)
+
+    model.checkDoneRemoval()
+    await settle { if case .confirming = model.doneRemoval { true } else { false } }
+    guard case .confirming(let shown) = model.doneRemoval else {
+      Issue.record("the check did not finish")
+      return
+    }
+    #expect(shown == plan)
+    let result = try #require(await confirm(model, shown))
+
+    #expect(sent.value.first == BoardModel.doneRemovalArgs)
+    #expect(
+      sent.value.dropFirst().map { $0["targets"]?.array?.compactMap(\.string) ?? [] } == [
+        ["ph"], ["hk"], ["lo"], ["un"],
+      ])
+    for args in sent.value.dropFirst() {
+      #expect(args["confirmed"] == .bool(true))
+      #expect(args["worktree"] == .bool(true))
+      #expect(args["remote_branch"] == .bool(true))
+    }
+    #expect(result.removed == ["ph", "hk", "lo", "un"])
+    #expect(result.skipped.isEmpty)
   }
 }

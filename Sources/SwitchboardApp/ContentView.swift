@@ -135,6 +135,7 @@ struct ContentView: View {
         .labelsHidden()
         .help("Show the Inbox (⌘1) or the Board (⌘2)")
       }
+      ToolbarItem(placement: .navigation) { OrgFilterMenu() }
       ToolbarItem { ManagerButton() }
       ToolbarItem { AccountMenu() }
       ToolbarItem {
@@ -275,17 +276,20 @@ struct Sidebar: View {
       .accessibilityLabel("Search Sessions")
       .accessibilityIdentifier("sidebar-search")
     }
-    .safeAreaInset(edge: .bottom) {
-      Button {
-        model.startNewGroup()
-      } label: {
-        Label("New Group", systemImage: "plus")
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      VStack(spacing: 0) {
+        OrgFilterBar()
+        Button {
+          model.startNewGroup()
+        } label: {
+          Label("New Group", systemImage: "plus")
+        }
+        .buttonStyle(.borderless)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .help("Create an empty group on the Board (⇧⌘G)")
+        .accessibilityIdentifier("sidebar-new-group")
       }
-      .buttonStyle(.borderless)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
-      .help("Create an empty group on the Board (⇧⌘G)")
-      .accessibilityIdentifier("sidebar-new-group")
     }
     .overlay {
       if model.sidebarIsEmpty {
@@ -485,7 +489,7 @@ struct BoardView: View {
         Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
       }
     case .group:
-      return BoardRows.make(sessions: open, groups: model.groups).map { row in
+      return BoardRows.make(sessions: open, groups: model.shownGroups).map { row in
         Lane(id: row.id, title: row.title, group: model.groups.first { $0.id == row.group }, sessions: row.sessions)
       }
     }
@@ -824,7 +828,7 @@ struct GroupSuggestionButton: View {
   }
 
   var body: some View {
-    if let label = Self.label(count: model.suggestions.count) {
+    if let label = Self.label(count: model.shownSuggestions.count) {
       Button {
         showing = true
       } label: {
@@ -832,7 +836,7 @@ struct GroupSuggestionButton: View {
       }
       .buttonStyle(.link)
       .help("Show the groups that Switchboard suggests")
-      .accessibilityLabel("Group suggestions: \(model.suggestions.count)")
+      .accessibilityLabel("Group suggestions: \(model.shownSuggestions.count)")
       .accessibilityIdentifier("group-suggestions-button")
       .popover(isPresented: $showing, arrowEdge: .bottom) {
         GroupSuggestionList().frame(width: 420)
@@ -850,11 +854,11 @@ struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    let names = Dictionary(model.board.map { ($0.id, $0.name) }) { first, _ in first }
+    let names = Dictionary(model.allBoard.map { ($0.id, $0.name) }) { first, _ in first }
     let name = { (id: String) in names[id] ?? id }
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
-        ForEach(model.suggestions) { s in
+        ForEach(model.shownSuggestions) { s in
           let action = Triage.capitalized(s.action)
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "lightbulb").foregroundStyle(.secondary)

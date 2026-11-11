@@ -60,7 +60,7 @@ struct FollowupView: View {
         if let parent = session.parent {
           GridRow {
             Text("Parent").foregroundStyle(.secondary)
-            if let p = model.board.first(where: { $0.id == parent }) {
+            if let p = model.allBoard.first(where: { $0.id == parent }) {
               Button(p.name) { model.selection = parent }.buttonStyle(.link)
             } else {
               Text("\(parent) (removed)").foregroundStyle(.secondary)

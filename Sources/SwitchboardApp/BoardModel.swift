@@ -13,12 +13,30 @@ enum MainView {
 /// state in memory and answers in a few milliseconds.
 @MainActor
 final class BoardModel: ObservableObject {
-  @Published var sessions: [SessionSummary] = []
+  /// The sessions that the org filter shows. Every list, count, badge, and
+  /// action target reads this. A lookup of a session that a shown session
+  /// names, such as a card's asker or a parent, reads `allSessions` or
+  /// `allBoard`, because that session may be hidden.
+  var sessions: [SessionSummary] { allSessions.filter(orgFilter.shows) }
+  /// Every session that sbd lists, whatever the org filter says.
+  @Published private(set) var allSessions: [SessionSummary] = []
+  /// The GitHub orgs whose sessions the app shows. The installed app saves it.
+  @Published var orgFilter: OrgFilter {
+    didSet {
+      guard orgFilter != oldValue else { return }
+      orgFilterStore?.set(orgFilter.keys.sorted(), forKey: Self.orgFilterKey)
+      clearHiddenSelectionAndUpdateBadge()
+    }
+  }
+  @Published var showingOrgFilter = false
   /// Why sbd can't be reached, or nil while it answers.
   @Published var unreachable: String?
   /// The last failed action, shown until the next one succeeds.
   @Published var actionError: String?
-  @Published var selection: String?
+  /// Selecting a session that the org filter hides adds its org to the filter.
+  @Published var selection: String? {
+    didSet { if let selection, selection != oldValue { showOrg(of: selection) } }
+  }
   @Published var showingNew = false
   @Published var showingImport = false
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
@@ -97,7 +115,9 @@ final class BoardModel: ObservableObject {
   /// Follow-ups that wait to start, from `followup-ls`. `ls` also lists the
   /// ones whose trigger fired. They change only through actions and
   /// triggers, so the app reads them every 5 s.
-  @Published var followups: [SessionSummary] = []
+  var followups: [SessionSummary] { allFollowups.filter(orgFilter.shows) }
+  /// Every follow-up that waits to start, whatever the org filter says.
+  @Published private(set) var allFollowups: [SessionSummary] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
   /// True while the Board's new group name field is open.
@@ -153,16 +173,93 @@ final class BoardModel: ObservableObject {
   /// sbd reads the usage every few minutes, so the app asks once a minute.
   private var usageRead = Date.distantPast
 
+  static let orgFilterKey = "orgFilter"
+  /// Where the org filter is saved. It is nil outside the installed app, so
+  /// a debug or test run never saves a filter that hides a later run's sessions.
+  private let orgFilterStore: UserDefaults?
+
   /// Takes the client so that tests can't reach the user's sbd by default.
   /// Without `draftsFolder`, the message drafts last only while the model does.
-  init(client: Client, draftsFolder: String? = nil) {
+  /// The filter starts from `orgFilterStore` when it holds one, else from `orgFilter`.
+  init(
+    client: Client, draftsFolder: String? = nil, orgFilterStore: UserDefaults? = nil,
+    orgFilter: OrgFilter = OrgFilter()
+  ) {
     self.client = client
     messageDrafts = MessageDrafts(folder: draftsFolder)
+    self.orgFilterStore = orgFilterStore
+    self.orgFilter = orgFilterStore?.stringArray(forKey: Self.orgFilterKey).map { OrgFilter(keys: $0) } ?? orgFilter
+  }
+
+  /// Clears a selection that the org filter hides, and counts the shown sessions in the Dock badge.
+  private func clearHiddenSelectionAndUpdateBadge() {
+    let listed = shownIDs
+    if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
+    if NSApp != nil { NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)" }
+  }
+
+  /// Changes the session before sbd lists the change.
+  private func update(_ id: String, _ change: (inout SessionSummary) -> Void) {
+    for i in allSessions.indices where allSessions[i].id == id { change(&allSessions[i]) }
+    for i in allFollowups.indices where allFollowups[i].id == id { change(&allFollowups[i]) }
+  }
+
+  /// The sessions and the follow-ups that wait to start, whatever the org
+  /// filter says. A follow-up whose trigger fired is in both lists until it
+  /// starts. A follow-up that started since the last read of follow-ups is in
+  /// both lists for up to 5 s. The board shows the copy from `ls`.
+  var allBoard: [SessionSummary] {
+    let ids = Set(allSessions.map(\.id))
+    return allSessions + allFollowups.filter { !ids.contains($0.id) }
+  }
+
+  /// The ids of the sessions and follow-ups that the org filter shows.
+  var shownIDs: Set<String> { Set(board.map(\.id)) }
+
+  /// The ids that Delete All may remove. Under a filter, a session whose org
+  /// sbd hasn't read yet shows but isn't removable, because its org may be one
+  /// that the filter hides.
+  var removableIDs: Set<String> {
+    orgFilter.isAll ? shownIDs : Set(board.filter { OrgFilter.key(of: $0) != nil }.map(\.id))
+  }
+
+  /// The org filter's menu rows, counted over every session.
+  var orgEntries: [OrgFilter.Entry] { orgFilter.entries(allBoard) }
+
+  /// The groups that the Board shows: all of them under All Orgs, else each
+  /// group that is empty or has a member that the filter shows.
+  var shownGroups: [GroupSummary] {
+    guard !orgFilter.isAll else { return groups }
+    let shown = shownIDs
+    return groups.filter { $0.sessions.isEmpty || $0.sessions.contains(where: shown.contains) }
+  }
+
+  /// The group suggestions whose sessions the filter all shows, so accepting
+  /// one never moves a hidden session.
+  var shownSuggestions: [GroupSuggestion] {
+    guard !orgFilter.isAll else { return suggestions }
+    let shown = shownIDs
+    return suggestions.filter { $0.sessions.allSatisfy(shown.contains) }
+  }
+
+  /// How many sessions and follow-ups the org filter hides.
+  var hiddenCount: Int { allBoard.count - board.count }
+  /// How many hidden sessions would be in the Inbox.
+  var hiddenNeedingYou: Int { allBoard.filter(Triage.needsYou).count - board.filter(Triage.needsYou).count }
+
+  /// Adds the session's org to the filter when the filter hides it, so a
+  /// session that the app opens never stays out of sight.
+  func showOrg(of id: String) {
+    // An insert of a key that the filter already holds still publishes. `apply` calls this every second.
+    guard !orgFilter.isAll, let s = allBoard.first(where: { $0.id == id }), !orgFilter.shows(s),
+      let key = OrgFilter.key(of: s)
+    else { return }
+    orgFilter.insert(key)
   }
 
   /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
   /// star fills and turns the Needs you color while it needs you.
-  var needsUser: [SessionSummary] { sessions.filter { $0.state.needsUser && Triage.mayHaveItem($0) } }
+  var needsUser: [SessionSummary] { sessions.filter(Triage.needsYou) }
 
   var manager: SessionSummary? { sessions.first { $0.kind == .manager } }
 
@@ -198,14 +295,8 @@ final class BoardModel: ObservableObject {
   /// labels. A session therefore shows the same repo in both lists.
   var repoLabels: [String: String] { RepoLabels.labels(board) }
 
-  /// The sessions and the follow-ups that wait to start. A follow-up whose
-  /// trigger fired is in both lists until it starts. A follow-up that started
-  /// since the last read of follow-ups is in both lists for up to 5 s. The
-  /// board shows the copy from `ls`.
-  var board: [SessionSummary] {
-    let ids = Set(sessions.map(\.id))
-    return sessions + followups.filter { !ids.contains($0.id) }
-  }
+  /// The sessions and the follow-ups that wait to start, as the org filter shows them.
+  var board: [SessionSummary] { allBoard.filter(orgFilter.shows) }
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
@@ -289,30 +380,34 @@ final class BoardModel: ObservableObject {
       // refresh every second would redraw the views each time, and a redraw
       // resets the hover delay before a tooltip shows.
       if unreachable != nil { unreachable = nil }
-      if let more, followups != more { followups = more }
+      if let more, allFollowups != more { allFollowups = more }
+      // Only shown sessions notify. The known states cover every session.
+      // Widening the filter later therefore sends nothing for a change that happened while the session was hidden.
       if loaded { sessionsToNotify(list).forEach(notify) }
+      // A hidden session keeps its drafts.
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list)))
-      if !sameShown(sessions, list) { sessions = list }
-      let listed = Set(board.map(\.id))
-      if let id = pendingSelection, listed.contains(id) { pendingSelection = nil }
-      if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
+      if !sameShown(allSessions, list) { allSessions = list }
+      // A filter change that hides the selection clears it in `orgFilter.didSet`.
+      // A selected session that is hidden here therefore had no known org until this refresh.
+      if let id = selection { showOrg(of: id) }
+      if let id = pendingSelection, allBoard.contains(where: { $0.id == id }) { pendingSelection = nil }
+      clearHiddenSelectionAndUpdateBadge()
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
-      knownStates = Dictionary(uniqueKeysWithValues: board.map { ($0.id, $0.state) })
+      knownStates = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0.state) })
       loaded = true
-      NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)"
     case .failure(let error):
       let problem = "\(error)"
       if unreachable != problem { unreachable = problem }
     }
   }
 
-  /// The sessions that just started needing the user.
+  /// The shown sessions that just started needing the user.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard s.state.needsUser, Triage.mayHaveItem(s), let known = knownStates[s.id], !known.needsUser
+      guard Triage.needsYou(s), let known = knownStates[s.id], !known.needsUser, orgFilter.shows(s)
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
@@ -494,8 +589,7 @@ final class BoardModel: ObservableObject {
     guard let session = workBoard.first(where: { $0.id == id }), group.map(known.contains) ?? true,
       BoardRows.group(of: session, known: known) != group
     else { return false }
-    for i in sessions.indices where sessions[i].id == id { sessions[i].group = group }
-    for i in followups.indices where followups[i].id == id { followups[i].group = group }
+    update(id) { $0.group = group }
     var args: [String: JSON] = ["sessions": [.string(id)]]
     if let group { args["group"] = .string(group) } else { args["ungrouped"] = true }
     perform("group-move", args)
@@ -513,8 +607,9 @@ final class BoardModel: ObservableObject {
 
   /// The group's work sessions that move to the account at their next launch.
   /// A follow-up that hasn't started has no conversation to move.
+  /// sbd moves every member, so this lists the ones that the org filter hides too.
   func groupAccountMoves(group: String, folder: String) -> [SessionSummary] {
-    sessions.filter { $0.group == group && $0.kind == .work && !$0.cwd.isEmpty && $0.account != folder }
+    allSessions.filter { $0.group == group && $0.kind == .work && !$0.cwd.isEmpty && $0.account != folder }
   }
   func acceptSuggestion(_ id: String) { answerSuggestion(id, "accept") }
   func declineSuggestion(_ id: String) { answerSuggestion(id, "decline") }
@@ -749,10 +844,8 @@ final class BoardModel: ObservableObject {
       then: { value in
         self.decisionErrors[session] = nil
         // sbd answers with the updated list. A pick made before the next refresh lands builds on it.
-        if op == "decision-answer", let list = try? JSONCoding.convert(value, to: DecisionList.self),
-          let i = self.sessions.firstIndex(where: { $0.id == session })
-        {
-          self.sessions[i].decisions = list
+        if op == "decision-answer", let list = try? JSONCoding.convert(value, to: DecisionList.self) {
+          self.update(session) { $0.decisions = list }
         }
         then?()
       },

@@ -101,7 +101,7 @@ struct CardView: View {
     if let message = card.send {
       VStack(alignment: .leading, spacing: 8) {
         // The Inbox lists other sessions' send cards in this session's pane.
-        let asker = model.sessions.first { $0.id == card.session }?.name ?? card.session
+        let asker = model.allSessions.first { $0.id == card.session }?.name ?? card.session
         Text(verbatim: "\(asker) wants to send \(message.summary)").font(.headline)
         if !compact {
           VStack(alignment: .leading, spacing: 2) {

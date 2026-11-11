@@ -642,6 +642,9 @@ public enum Triage {
   /// itself, such as an out-of-date sbd. This refuses every item of theirs.
   public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.kind == .work }
 
+  /// Whether the session needs the user and counts toward the Inbox and the badge.
+  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && mayHaveItem(s) }
+
   /// The sessions that have an item, by group and then oldest first.
   public static func order(_ sessions: [SessionSummary]) -> [SessionSummary] {
     var ranked: [(session: SessionSummary, rank: Int)] = []

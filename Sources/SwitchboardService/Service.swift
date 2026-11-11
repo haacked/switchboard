@@ -676,6 +676,13 @@ public final class Service {
     return nil
   }
 
+  /// Whether sbd has read the session's checkout and, when it has one, the
+  /// checkout's origin remote.
+  func repositoryRead(_ s: Session, checkout: String?) -> Bool {
+    if let checkout { return repositories[checkout] != nil }
+    return checkouts[s.cwd] != nil
+  }
+
   func worktreeEntry(
     _ repo: String, at path: String, on machine: any Machine
   ) throws -> WorktreeEntry? {
@@ -1770,6 +1777,7 @@ public final class Service {
     if s.kind == .work {
       out.checkout = checkout(s)
       out.repository = out.checkout.flatMap { repository($0, of: s) }
+      if repositoryRead(s, checkout: out.checkout) { out.repositoryRead = true }
     }
     out.parent = s.parent
     out.manager = s.manager
