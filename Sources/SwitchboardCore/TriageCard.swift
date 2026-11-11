@@ -57,12 +57,13 @@ public enum TriageCard {
         TriageOption(label: $0.label, detail: $0.detail, action: .send, message: $0.label, recommended: $0.recommended)
       }
     }
+    let drafts = TriageDrafts.read(raw["drafts"], &dropped)
     let title = oneLine(raw["title"]?.string ?? "", max: Triage.titleLength)
     let card = TriageSummary(
       title: title.isEmpty ? oneLine(first, max: Triage.titleLength) : title,
       kind: kind ?? (decisions.formList ? .decision : self.kind(for: options)),
       summary: lines.prefix(maxLines).joined(separator: "\n"), options: options, callouts: callouts,
-      multiSelect: multiSelect, decisions: decisions)
+      multiSelect: multiSelect, decisions: decisions, drafts: drafts)
     return Cleaned(card: card, dropped: dropped)
   }
 
@@ -76,8 +77,7 @@ public enum TriageCard {
       do {
         kept.append(try parse(value))
       } catch {
-        let label = value["label"]?.string.map { "\"\(oneLine($0, max: 40))\"" } ?? "\(i + 1)"
-        dropped.append("\(name) \(label): \(error)")
+        dropped.append(droppedLine(name, label: value["label"]?.string, index: i, error))
       }
     }
     if kept.count > max {
@@ -85,6 +85,11 @@ public enum TriageCard {
       kept = Array(kept.prefix(max))
     }
     return kept
+  }
+
+  /// The line in `dropped` for the element at `index`, named by its label when it has one.
+  static func droppedLine(_ name: String, label: String?, index: Int, _ error: Error) -> String {
+    "\(name) \(label.map { "\"\(oneLine($0, max: 40))\"" } ?? "\(index + 1)"): \(error)"
   }
 
   /// A card with several options asks for a decision, and one with a single
@@ -223,6 +228,12 @@ public enum TriageCard {
                 multiSelect optional, true when the user may pick several options
               The user answers each decision with an option, typed text, or a skip, and Switchboard sends
               you one message that answers them all in order.
+    drafts    Optional. Messages you wrote for the user to send to someone else, such as a review request, a
+              Slack message, a PR comment, or an email, up to \(TriageDrafts.maxDrafts). Each is a string, or an object
+              with "text" and a short "label" ("Review request to HogQL"). The text is the message itself, in
+              Markdown, without quote markers or code fences. The Inbox shows each draft in full with a copy
+              button, so the summary only says that it is ready. Leave drafts out when the message is not for
+              someone else, such as a commit message you will use yourself.
     callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that
               the summary doesn't already say: a conflict, a failing check, a risk, a call you made
               without asking, a destructive step. Each has "kind" (warning, decision, or info), "title"

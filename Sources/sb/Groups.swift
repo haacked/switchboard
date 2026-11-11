@@ -71,6 +71,18 @@ func group(_ a: Args) {
       let result = call("group-suggest", ["decline": .string(id)])
       return a.json ? printJSON(result) : print("declined \(id)".printable)
     }
+    if let id = a.values["--undecline"] {
+      let result = call("group-suggest", ["undecline": .string(id)])
+      return a.json ? printJSON(result) : print("undeclined \(id)".printable)
+    }
+    if a.switches.contains("--declined") {
+      let result = call("group-suggest", ["declined": true])
+      if a.json { return printJSON(result) }
+      let ids = decode(result, as: [String].self)
+      if ids.isEmpty { return print("No declined suggestions.") }
+      for id in ids { print(id.printable) }
+      return
+    }
     let result = call("group-suggest")
     if a.json { return printJSON(result) }
     let suggestions = decode(result, as: [GroupSuggestion].self)

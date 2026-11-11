@@ -18,6 +18,33 @@ import Testing
     try decode([GroupSuggestion].self, sbd.sb("group", "suggest", "--json"))
   }
 
+  /// The declined group suggestion ids, as `sb group suggest --declined` lists them.
+  func declinedIds(_ sbd: Instance) throws -> [String] {
+    try decode([String].self, sbd.sb("group", "suggest", "--json", "--declined"))
+  }
+
+  func decline(_ sbd: Instance, _ id: String) throws { try sbd.sb("group", "suggest", "--decline", id) }
+
+  /// Stops sbd, declines the ids in its database, and starts it again. This
+  /// writes ids that the running sbd would refuse, such as a plan row's.
+  func restart(_ sbd: Instance, declining ids: [String]) throws {
+    sbd.stopSbd()
+    do {
+      let store = try Store(path: sbd.home.database)
+      for id in ids { try store.decline(suggestion: id) }
+    }
+    try sbd.startSbd()
+  }
+
+  /// Stops sbd and reads every declined id in its database, plan rows included.
+  func storedDeclinesAfterStopping(_ sbd: Instance) throws -> Set<String> {
+    sbd.stopSbd()
+    return try Store(path: sbd.home.database).declinedSuggestions()
+  }
+
+  /// Declined plan row ids. The second has `prefix` as its plan's id.
+  static let planRowDeclines = ["pab2cd:posthog/posthog#12", "prefix:posthog/posthog#12"]
+
   /// A session in a new worktree of the repo on the branch.
   func branched(_ sbd: Instance, _ repo: String, _ branch: String) throws -> SessionSummary {
     try sbd.client.call("new", ["path": .string(repo), "branch": .string(branch)], as: SessionSummary.self)
@@ -416,6 +443,200 @@ import Testing
     #expect(accepted.status != 0)
     #expect(try list(sbd).groups.isEmpty)
     #expect(try sbd.get(a.id).group == nil)
+  }
+
+  // MARK: Fewer suggestions
+
+  @Test func branchesThatShareOnlyOneWordGetNoSuggestion() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    _ = try branched(sbd, repo, "haacked/board-alpha")
+    _ = try branched(sbd, repo, "haacked/board-bravo")
+
+    #expect(try suggestions(sbd).isEmpty)
+    #expect(try sbd.sb("group", "suggest").trimmingCharacters(in: .whitespacesAndNewlines) == "No suggestions.")
+  }
+
+  @Test func aSessionMarkedDoneDropsOutOfAPrefixSuggestion() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    let a = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    let b = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+    let c = try branched(sbd, repo, "haacked/flag-evaluations-docs")
+    #expect(try suggestions(sbd).map { Set($0.sessions) } == [[a.id, b.id, c.id]])
+
+    try sbd.sb("done", c.id)
+
+    let found = try suggestions(sbd)
+    #expect(found.map(\.id) == ["prefix:flag-evaluations"])
+    #expect(found.map { Set($0.sessions) } == [[a.id, b.id]])
+
+    try sbd.sb("done", b.id)
+
+    #expect(try suggestions(sbd).isEmpty)
+  }
+
+  @Test func aSessionMarkedDoneInAGroupStillLetsAnotherSessionJoinIt() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    let member = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    let g = try add(sbd, "Cache", member.id)
+    let c = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+
+    try sbd.sb("done", member.id)
+
+    let found = try suggestions(sbd)
+    #expect(found.map(\.id) == ["prefix:flag-evaluations:\(g.id)"])
+    #expect(found.first?.sessions == [c.id])
+  }
+
+  /// The four prefixes have the same length, so their names order them.
+  @Test func fourPrefixPairsListThreeSuggestionsAndADeclineBringsInTheFourth() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    for prefix in ["delta-team", "alpha-team", "gamma-team", "bravo-team"] {
+      _ = try branched(sbd, repo, "haacked/\(prefix)-one")
+      _ = try branched(sbd, repo, "haacked/\(prefix)-two")
+    }
+
+    #expect(try suggestions(sbd).map(\.id) == ["prefix:alpha-team", "prefix:bravo-team", "prefix:delta-team"])
+    // Accept and decline find the id among the listed three.
+    #expect(try sbd.run(["group", "suggest", "--json", "--accept", "prefix:gamma-team"]).status != 0)
+    #expect(try sbd.run(["group", "suggest", "--json", "--decline", "prefix:gamma-team"]).status != 0)
+    #expect(try list(sbd).groups.isEmpty)
+
+    try decline(sbd, "prefix:alpha-team")
+
+    #expect(try suggestions(sbd).map(\.id) == ["prefix:bravo-team", "prefix:delta-team", "prefix:gamma-team"])
+    #expect(try declinedIds(sbd) == ["prefix:alpha-team"])
+  }
+
+  // MARK: Declined suggestions
+
+  @Test func declinedListsTheDeclinedIdsSortedAndLeavesOutPlanRowDeclines() throws {
+    let sbd = try Instance()
+    try restart(sbd, declining: Self.planRowDeclines)
+    let repo = try sbd.makeRepo()
+    for branch in ["flag-evaluations-cache", "flag-evaluations-perf", "billing-retry-one", "billing-retry-two"] {
+      _ = try branched(sbd, repo, "haacked/\(branch)")
+    }
+    try decline(sbd, "prefix:flag-evaluations")
+    try decline(sbd, "prefix:billing-retry")
+
+    let ids = try declinedIds(sbd)
+    let text = try sbd.sb("group", "suggest", "--declined")
+
+    #expect(ids == ["prefix:billing-retry", "prefix:flag-evaluations"])
+    #expect(text.split(separator: "\n").map(String.init) == ["prefix:billing-retry", "prefix:flag-evaluations"])
+    #expect(try storedDeclinesAfterStopping(sbd).isSuperset(of: Self.planRowDeclines))
+  }
+
+  @Test func declinedPrintsThatNothingIsDeclinedWhenOnlyPlanRowsAre() throws {
+    let sbd = try Instance()
+    try restart(sbd, declining: Self.planRowDeclines)
+
+    let text = try sbd.sb("group", "suggest", "--declined")
+
+    #expect(text.trimmingCharacters(in: .whitespacesAndNewlines) == "No declined suggestions.")
+    #expect(try declinedIds(sbd).isEmpty)
+  }
+
+  @Test func undeclineBringsTheSuggestionBack() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    let a = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    let b = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+    let id = "prefix:flag-evaluations"
+    try decline(sbd, id)
+    try #require(try !suggestions(sbd).contains { $0.id == id })
+
+    let result = try decode(JSON.self, sbd.sb("group", "suggest", "--json", "--undecline", id))
+
+    #expect(result["undeclined"]?.string == id)
+    #expect(try declinedIds(sbd).isEmpty)
+    let back = try #require(try suggestions(sbd).first { $0.id == id })
+    #expect(Set(back.sessions) == [a.id, b.id])
+  }
+
+  @Test func undeclinePrintsTheId() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    _ = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    _ = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+    try decline(sbd, "prefix:flag-evaluations")
+
+    let text = try sbd.sb("group", "suggest", "--undecline", "prefix:flag-evaluations")
+
+    #expect(text.trimmingCharacters(in: .whitespacesAndNewlines) == "undeclined prefix:flag-evaluations")
+  }
+
+  /// A plan row's decline is not a group suggestion, so `--undecline` never deletes it.
+  @Test func undeclineRefusesAnIdThatDeclinedDoesNotListAndDeletesNothing() throws {
+    let sbd = try Instance()
+    try restart(sbd, declining: Self.planRowDeclines)
+    let repo = try sbd.makeRepo()
+    for branch in ["flag-evaluations-cache", "flag-evaluations-perf", "billing-retry-one", "billing-retry-two"] {
+      _ = try branched(sbd, repo, "haacked/\(branch)")
+    }
+    try decline(sbd, "prefix:flag-evaluations")
+
+    // The second is a live suggestion that the user has not declined.
+    for id in ["prefix:nothing-like-it", "prefix:billing-retry"] + Self.planRowDeclines {
+      let r = try sbd.run(["group", "suggest", "--undecline", id])
+
+      #expect(r.status != 0, Comment(rawValue: id))
+      #expect(
+        (r.stdout + r.stderr).contains("no declined suggestion \(id). List them with: sb group suggest --declined"),
+        Comment(rawValue: r.stdout + r.stderr))
+    }
+    #expect(try declinedIds(sbd) == ["prefix:flag-evaluations"])
+    #expect(try suggestions(sbd).map(\.id) == ["prefix:billing-retry"])
+    #expect(try storedDeclinesAfterStopping(sbd) == Set(Self.planRowDeclines + ["prefix:flag-evaluations"]))
+  }
+
+  @Test func removingAGroupPrunesOnlyTheDeclinedJoinsToIt() throws {
+    let sbd = try Instance()
+    let repo = try sbd.makeRepo()
+    let flagsMember = try branched(sbd, repo, "haacked/flag-evaluations-cache")
+    let cacheMember = try branched(sbd, repo, "haacked/cache-tuning-one")
+    let flags = try add(sbd, "Flags", flagsMember.id)
+    let cache = try add(sbd, "Cache", cacheMember.id)
+    _ = try branched(sbd, repo, "haacked/flag-evaluations-perf")
+    _ = try branched(sbd, repo, "haacked/cache-tuning-two")
+    let toFlags = "prefix:flag-evaluations:\(flags.id)"
+    let toCache = "prefix:cache-tuning:\(cache.id)"
+    try decline(sbd, toFlags)
+    try decline(sbd, toCache)
+    try #require(try declinedIds(sbd) == [toCache, toFlags].sorted())
+
+    try sbd.sb("group", "rm", "Flags")
+
+    #expect(try declinedIds(sbd) == [toCache])
+    #expect(try storedDeclinesAfterStopping(sbd) == [toCache])
+  }
+
+  /// The start prunes after sbd has loaded every session and group, so an
+  /// id that names a live session or group stays.
+  @Test func aRestartPrunesTheDeclinedIdsThatNoSuggestionCanHaveAgain() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let flags = try add(sbd, "Flags", s.id)
+    let cache = try add(sbd, "Cache")
+    let kept =
+      Self.planRowDeclines + [
+        "merge:" + [flags.id, cache.id].sorted().joined(separator: ":"), "dependency:\(s.id):\(flags.id)",
+        "prefix:flag-evaluations:\(cache.id)", "prefix:flag-evaluations", "scope:flags:gnone1", "scope:a:b",
+      ]
+    let gone = [
+      "word:each", "word:evaluations", "merge:\(flags.id):gnone1", "dependency:snone1:\(flags.id)",
+      "dependency:\(s.id):gnone1", "prefix:flag-evaluations:gnone1",
+    ]
+
+    try restart(sbd, declining: kept + gone)
+    // A request that sbd answers only after it has loaded.
+    #expect(try list(sbd).groups.map(\.id).sorted() == [flags.id, cache.id].sorted())
+
+    #expect(try storedDeclinesAfterStopping(sbd) == Set(kept))
   }
 
   // MARK: The parent's group

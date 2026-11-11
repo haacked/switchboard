@@ -165,6 +165,114 @@ extension GroupTests {
     #expect(try suggestions(l.sbd).map(\.id) == [mergeId(l.flags, l.docs)])
   }
 
+  /// What sbd loses after the user declines the join of top to Flags.
+  enum Gone: CaseIterable { case session, group }
+
+  @Test(arguments: Gone.allCases)
+  func removingTheSessionOrTheGroupPrunesADeclinedDependencyJoin(_ gone: Gone) throws {
+    let (github, sbd) = try stackedInstance()
+    defer { withExtendedLifetime(github) {} }
+    let base = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
+    let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")
+    let flags = try add(sbd, "Flags", base.id)
+    try sbd.pollTwice()
+    let id = "dependency:\(top.id):\(flags.id)"
+    try #require(try suggestions(sbd).contains { $0.id == id })
+    try decline(sbd, id)
+    try #require(try declinedIds(sbd) == [id])
+
+    switch gone {
+    case .session: try sbd.sb("rm", top.id)
+    case .group: try sbd.sb("group", "rm", "Flags")
+    }
+
+    #expect(try declinedIds(sbd).isEmpty)
+    #expect(try storedDeclinesAfterStopping(sbd).isEmpty)
+  }
+
+  /// The session that the join does not name is not what keeps the decline.
+  @Test func removingAnotherSessionKeepsADeclinedDependencyJoin() throws {
+    let (github, sbd) = try stackedInstance()
+    defer { withExtendedLifetime(github) {} }
+    let base = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
+    let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")
+    let other = try sbd.new(name: "other")
+    let flags = try add(sbd, "Flags", base.id)
+    try sbd.pollTwice()
+    let id = "dependency:\(top.id):\(flags.id)"
+    try #require(try suggestions(sbd).contains { $0.id == id })
+    try decline(sbd, id)
+
+    try sbd.sb("rm", other.id)
+
+    #expect(try declinedIds(sbd) == [id])
+    #expect(try !suggestions(sbd).contains { $0.id == id })
+  }
+
+  @Test func removingAGroupPrunesADeclinedMergeOfIt() throws {
+    let l = try linkedGroups()
+    let id = mergeId(l.flags, l.docs)
+    try decline(l.sbd, id)
+    try #require(try declinedIds(l.sbd) == [id])
+
+    try l.sbd.sb("group", "rm", "Docs")
+
+    #expect(try declinedIds(l.sbd).isEmpty)
+  }
+
+  @Test func acceptingAMergePrunesTheDeclinedIdsOfTheAbsorbedGroup() throws {
+    let l = try linkedGroups()
+    let kept = "prefix:flag-evaluations:\(l.flags.id)"
+    let absorbed = "prefix:flag-evaluations:\(l.docs.id)"
+    l.sbd.stopSbd()
+    do {
+      let store = try Store(path: l.sbd.home.database)
+      for id in [kept, absorbed] { try store.decline(suggestion: id) }
+    }
+    try l.sbd.startSbd()
+    try l.sbd.pollTwice()
+
+    let accepted = try accept(l.sbd, mergeId(l.flags, l.docs))
+
+    try #require(accepted.id == l.flags.id)
+    #expect(try declinedIds(l.sbd) == [kept])
+  }
+
+  // MARK: Finished sessions
+
+  @Test func aSessionMarkedDoneGetsNoDependencyJoin() throws {
+    let (github, sbd) = try stackedInstance()
+    defer { withExtendedLifetime(github) {} }
+    let base = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
+    let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")
+    let flags = try add(sbd, "Flags", base.id)
+    try sbd.pollTwice()
+    try #require(try suggestions(sbd).map(\.id) == ["dependency:\(top.id):\(flags.id)"])
+
+    try sbd.sb("done", top.id)
+
+    #expect(try suggestions(sbd).isEmpty)
+  }
+
+  @Test func aSessionWhosePRMergedGetsNoDependencyJoin() throws {
+    let (github, sbd) = try stackedInstance()
+    defer { withExtendedLifetime(github) {} }
+    let base = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
+    let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")
+    let flags = try add(sbd, "Flags", top.id)
+    try sbd.pollTwice()
+    try #require(try suggestions(sbd).map(\.id) == ["dependency:\(base.id):\(flags.id)"])
+
+    // An uncommitted file keeps the merged session out of Done, so only its
+    // merged stage marks it finished.
+    try "x".write(toFile: "\(base.cwd)/notes.txt", atomically: true, encoding: .utf8)
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.pollTwice()
+
+    #expect(try sbd.get(base.id).state == .needsYou)
+    #expect(try suggestions(sbd).isEmpty)
+  }
+
   // MARK: Sessions placed by hand
 
   @Test func aSessionPlacedByHandStaysInItsGroupWhichSurvivesTheMerge() throws {

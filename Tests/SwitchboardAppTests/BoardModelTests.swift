@@ -557,6 +557,51 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(sent.args == ["decline": "dependency:s1:g1"])
   }
 
+  func suggestion(_ id: String) -> GroupSuggestion {
+    GroupSuggestion(id: id, name: "Flags", group: nil, sessions: ["a", "b"], reason: "branches start with \(id)")
+  }
+
+  @Test func aDeclineThatSbdTakesRemovesTheRowFromTheSuggestions() async {
+    let model = offlineModel()
+    model.send = { _, _ in .null }
+    model.suggestions = ["prefix:flag-evaluations", "prefix:billing-retry"].map(suggestion)
+
+    model.declineSuggestion("prefix:flag-evaluations")
+    await settle { model.suggestions.count == 1 }
+
+    #expect(model.suggestions.map(\.id) == ["prefix:billing-retry"])
+  }
+
+  @Test func aDeclineThatSbdRefusesKeepsTheRow() async {
+    let model = offlineModel()
+    model.send = { _, _ in throw APIError("no suggestion prefix:flag-evaluations") }
+    model.suggestions = ["prefix:flag-evaluations", "prefix:billing-retry"].map(suggestion)
+
+    model.declineSuggestion("prefix:flag-evaluations")
+    await settle { model.actionError != nil }
+
+    #expect(model.actionError != nil)
+    #expect(model.suggestions.map(\.id) == ["prefix:flag-evaluations", "prefix:billing-retry"])
+  }
+
+  @Test func theSuggestionButtonHasNoLabelWithoutSuggestions() {
+    #expect(GroupSuggestionButton.label(count: 0) == nil)
+  }
+
+  @Test func theSuggestionButtonsLabelCountsOneSuggestion() throws {
+    let label = try #require(GroupSuggestionButton.label(count: 1))
+
+    #expect(label.contains("1"))
+    #expect(label.hasSuffix("suggestion"))
+  }
+
+  @Test func theSuggestionButtonsLabelCountsThreeSuggestions() throws {
+    let label = try #require(GroupSuggestionButton.label(count: 3))
+
+    #expect(label.contains("3"))
+    #expect(label.hasSuffix("suggestions"))
+  }
+
   @Test func mergeSendsMergeWithTheSession() async {
     let sent = await firstRequest { $0.merge("a") }
 

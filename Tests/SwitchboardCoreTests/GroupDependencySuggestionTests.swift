@@ -10,11 +10,11 @@ private let posthog = "PostHog/posthog"
   /// A session whose own PR is `posthog#pr`, or in `repo` when given.
   func session(
     _ id: String, group: String? = nil, byHand: Bool = false, pr: Int? = nil, repo: String = posthog,
-    edges: [Dependency] = [], branch: String? = nil
+    edges: [Dependency] = [], branch: String? = nil, finished: Bool = false
   ) -> Candidate {
     Candidate(
       id: id, branch: branch, prTitle: nil, group: group, placedByHand: byHand, repo: pr == nil ? nil : repo, pr: pr,
-      dependencies: edges)
+      dependencies: edges, finished: finished)
   }
 
   /// An edge to PR `number`, which `session` works on.
@@ -26,10 +26,11 @@ private let posthog = "PostHog/posthog"
     SessionGroup(id: id, name: name, notes: [], created: created)
   }
 
-  func suggest(_ candidates: [Candidate], groups: [SessionGroup] = [], declined: Set<String> = [])
-    -> [GroupSuggestion]
-  {
-    GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined)
+  func suggest(
+    _ candidates: [Candidate], groups: [SessionGroup] = [], declined: Set<String> = [],
+    limit: Int = GroupSuggestions.defaultLimit
+  ) -> [GroupSuggestion] {
+    GroupSuggestions.make(candidates: candidates, groups: groups, declined: declined, limit: limit)
   }
 
   /// Flags is older than Cache.
@@ -431,10 +432,74 @@ private let posthog = "PostHog/posthog"
     #expect(found.contains { $0.id == "prefix:flag-evaluations" && $0.sessions == ["u2", "u3"] })
   }
 
+  // MARK: Finished sessions
+
+  @Test(arguments: [true, false])
+  func aFinishedUngroupedSessionGetsNoDependencyJoin(_ ungroupedDepends: Bool) {
+    let found = suggest(
+      [
+        session("u", pr: 1, edges: ungroupedDepends ? [edge(to: "m", 2)] : [], finished: true),
+        session("m", group: "g1", pr: 2, edges: ungroupedDepends ? [] : [edge(to: "u", 1)]),
+      ],
+      groups: [group("g1", "Flags")])
+
+    #expect(found.isEmpty)
+  }
+
+  @Test(arguments: [true, false])
+  func anOpenSessionStillJoinsTheGroupOfAFinishedSession(_ ungroupedDepends: Bool) throws {
+    let found = suggest(
+      [
+        session("u", pr: 1, edges: ungroupedDepends ? [edge(to: "m", 2)] : []),
+        session("m", group: "g1", pr: 2, edges: ungroupedDepends ? [] : [edge(to: "u", 1)], finished: true),
+      ],
+      groups: [group("g1", "Flags")])
+
+    let join = try #require(found.first)
+    #expect(join.id == "dependency:u:g1")
+    #expect(join.sessions == ["u"])
+    #expect(found.count == 1)
+  }
+
+  /// Which sessions of the two groups are finished.
+  enum FinishedEnd: CaseIterable { case moving, staying, both }
+
+  /// Flags survives on a, placed by hand, so the merge moves b.
+  @Test(arguments: FinishedEnd.allCases)
+  func aMergeStillMovesAFinishedSession(_ end: FinishedEnd) throws {
+    let found = suggest(
+      [
+        session("a", group: "g1", byHand: true, pr: 1, edges: [edge(to: "b", 2)], finished: end != .moving),
+        session("b", group: "g2", pr: 2, finished: end != .staying),
+      ],
+      groups: flagsAndCache)
+
+    let merge = try #require(found.first)
+    #expect(merge.id == "merge:g1:g2")
+    #expect(merge.group == "g1")
+    #expect(merge.sessions == ["b"])
+    #expect(found.count == 1)
+  }
+
+  @Test func aFinishedSessionWithADependencyJoinAndAKeyGetsNeither() {
+    let found = suggest(
+      [
+        session("m", group: "g1", pr: 2),
+        session("f", pr: 1, edges: [edge(to: "m", 2)], branch: "haacked/flag-evaluations-cache", finished: true),
+        session("u2", branch: "haacked/flag-evaluations-perf"),
+        session("u3", branch: "haacked/flag-evaluations-docs"),
+      ],
+      groups: [group("g1", "Billing")])
+
+    #expect(found.map(\.id) == ["prefix:flag-evaluations"])
+    #expect(found.first?.sessions == ["u2", "u3"])
+  }
+
   // MARK: Order
 
-  @Test func mergesComeFirstThenJoinsFromEdgesThenKeySuggestions() {
-    let found = suggest(
+  /// Two merges, two joins from edges, and one new group from branch names.
+  var oneOfEachOrder: (candidates: [Candidate], groups: [SessionGroup]) {
+    (
       [
         // A merge of g1 and g2 that moves one session.
         session("a", group: "g1", pr: 1, edges: [edge(to: "b", 2)]), session("b", group: "g2", pr: 2),
@@ -446,14 +511,43 @@ private let posthog = "PostHog/posthog"
         // A new group from branch names.
         session("k1", branch: "haacked/flag-evaluations-cache"), session("k2", branch: "haacked/flag-evaluations-perf"),
       ],
-      groups: [
+      [
         group("g1", "One", created: 1), group("g2", "Two", created: 2), group("g3", "Three", created: 3),
         group("g4", "Four", created: 4),
-      ])
+      ]
+    )
+  }
+
+  @Test func mergesComeFirstThenJoinsFromEdgesThenKeySuggestions() {
+    let (candidates, groups) = oneOfEachOrder
+
+    let found = suggest(candidates, groups: groups, limit: 10)
 
     #expect(found.prefix(2).map(\.id) == ["merge:g3:g4", "merge:g1:g2"])
     #expect(found.dropFirst(2).prefix(2).map { $0.sessions } == [["u1"], ["u2"]])
-    #expect(found.dropFirst(4).first?.id == "prefix:flag-evaluations")
+    #expect(found.dropFirst(4).map(\.id) == ["prefix:flag-evaluations"])
+  }
+
+  // MARK: The cap
+
+  @Test func mergesAndJoinsCountTowardTheCapAheadOfKeySuggestions() {
+    let (candidates, groups) = oneOfEachOrder
+
+    let found = suggest(candidates, groups: groups)
+
+    #expect(found.prefix(2).map(\.id) == ["merge:g3:g4", "merge:g1:g2"])
+    #expect(found.dropFirst(2).map(\.sessions) == [["u1"]])
+  }
+
+  @Test func aDeclinedMergeLetsTheNextSuggestionIn() {
+    let (candidates, groups) = oneOfEachOrder
+    let full = suggest(candidates, groups: groups, declined: ["merge:g3:g4"], limit: 10)
+
+    let found = suggest(candidates, groups: groups, declined: ["merge:g3:g4"])
+
+    #expect(found.count == 3)
+    #expect(found == Array(full.prefix(3)))
+    #expect(found.first?.id == "merge:g1:g2")
   }
 
   @Test func mergesThatMoveTheSameNumberOfSessionsAreOrderedById() {
@@ -550,10 +644,13 @@ private let posthog = "PostHog/posthog"
 
   @Test func aDeclinedKeySuggestionLeavesItsSessionsForTheNextKey() {
     let found = suggest(
-      [session("a", branch: "haacked/flag-evaluations-cache"), session("b", branch: "haacked/flag-evaluations-perf")],
-      declined: ["prefix:flag-evaluations"])
+      [
+        session("a", branch: "haacked/flag-evaluations-cache-perf"),
+        session("b", branch: "haacked/flag-evaluations-cache-load"),
+      ],
+      declined: ["prefix:flag-evaluations-cache"])
 
-    #expect(found.contains { $0.sessions == ["a", "b"] })
+    #expect(found.contains { $0.id == "prefix:flag-evaluations" && $0.sessions == ["a", "b"] })
   }
 
   // MARK: Sessions that are not candidates
