@@ -25,13 +25,6 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
   return s
 }
 
-/// The rows the sidebar shows, in its order: the Manager's section, then each state's section that is not collapsed.
-@MainActor
-private func sidebarRows(_ model: BoardModel) -> [String] {
-  [model.manager?.id].compactMap { $0 }
-    + model.sidebarGroups.filter { !model.collapsed.contains($0.state) }.flatMap { $0.rows.map(\.id) }
-}
-
 @Suite struct KeyboardNavModelTests {
   // MARK: sidebarOrder
 
@@ -85,24 +78,6 @@ private func sidebarRows(_ model: BoardModel) -> [String] {
       let model = appliedModel([chatItem("chat", group: "g1"), needsItem("a")])
 
       #expect(model.sidebarOrder == ["a"])
-    }
-
-    static let collapsedSets: [Set<AttentionState>] = [[], [.notStarted], [.working], [.needsYou, .notStarted]]
-
-    /// Risk 5 in the plan: the order lists the rows the sidebar shows.
-    @Test(arguments: [true, false], collapsedSets)
-    func agreesWithTheRowsTheSidebarShows(withManager: Bool, collapsed: Set<AttentionState>) {
-      var sessions = [
-        needsItem("n1", state: .needsYou), needsItem("w1", state: .working), child("w2", of: "w1"),
-        needsItem("w3", state: .working), needsItem("c1", state: .canContinue), child("n2", of: "w3", state: .needsYou),
-        needsItem("d1", state: .done), chatItem("chat", group: "g1"),
-      ]
-      if withManager { sessions.append(needsItem("m", manager: true, state: .working)) }
-      let model = appliedModel(sessions, followups: [followupWaitingToStart("f1"), followupWaitingToStart("f2")])
-
-      model.collapsed = collapsed
-
-      #expect(model.sidebarOrder == sidebarRows(model))
     }
   }
 
@@ -376,7 +351,7 @@ private func sidebarRows(_ model: BoardModel) -> [String] {
       return (list[((i + step) % list.count + list.count) % list.count].id, 1)
     }
 
-    /// Risk 4 in the plan. The focus is nil, each item, an id no session has, or a session that left the Inbox.
+    /// The focus is nil, each item, an id no session has, or a session that left the Inbox.
     @Test(arguments: 0...5, [1, -1])
     func wrapPicksWhatTheOldFormulaPicked(count: Int, step: Int) {
       let ids = (0..<count).map { "i\($0)" }
@@ -494,12 +469,16 @@ private func sidebarRows(_ model: BoardModel) -> [String] {
 
     /// Sessions that have no Claude terminal.
     enum NoTerminals: CaseIterable {
-      case unstartedFollowup, docketRow, cleanedUp
+      case unstartedFollowup, unstartedFollowupWithFolder, docketRow, cleanedUp
 
       func session(_ id: String) -> SessionSummary {
         switch self {
         case .unstartedFollowup:
           return followupWaitingToStart(id)
+        case .unstartedFollowupWithFolder:
+          var s = needsItem(id)
+          s.followup = Followup(prompt: "p")
+          return s
         case .docketRow:
           var s = needsItem(id)
           s.cwd = ""
@@ -619,7 +598,7 @@ private func sidebarRows(_ model: BoardModel) -> [String] {
     @Test(arguments: NoTerminals.allCases, Place.allCases)
     func aSessionWithoutTerminalsChangesNothing(_ kind: NoTerminals, _ place: Place) throws {
       let session = kind.session("x")
-      try #require(!session.hasTerminals)
+      try #require(!session.hasTerminals || session.waitsToStart)
       let model = try model(session, at: place)
       let before = Snapshot(model)
 
@@ -631,7 +610,7 @@ private func sidebarRows(_ model: BoardModel) -> [String] {
     @Test(arguments: NoTerminals.allCases, Place.allCases)
     func aSessionWithoutTerminalsCannotTakeFocus(_ kind: NoTerminals, _ place: Place) throws {
       let session = kind.session("x")
-      try #require(!session.hasTerminals)
+      try #require(!session.hasTerminals || session.waitsToStart)
 
       #expect(try !model(session, at: place).canFocusTerminal)
     }

@@ -40,15 +40,15 @@ final class BoardModel: ObservableObject {
   /// Counts ⌘J presses in the Inbox. Each one scrolls to the current item,
   /// even when ⌘J lands on the item it reached last time.
   @Published var inboxJumps = 0
-  /// The Board card that the arrow keys last moved to.
+  /// The Board card that the arrow keys or Next and Previous Session last moved to.
   @Published var boardFocus: String?
   /// Counts ⌘L presses and session steps. The list that `listFocusTarget` names takes keyboard focus on each one.
   @Published var listFocusRequests = 0
   /// The session whose Claude terminal takes keyboard focus when it shows. The terminal clears it.
   @Published var terminalFocus: String?
-  /// The Board's open cards as it last drew them. BoardView keeps it current. It is not published, because
-  /// only the arrow keys read it.
-  var boardGrid = BoardGrid(lanes: [])
+  /// The Board's open cards as it last drew them. BoardView keeps it current. The Session menu's ⌘T state and
+  /// the Board's ring read it, so a change redraws them.
+  @Published var boardGrid = BoardGrid(lanes: [])
   /// The right pane of the Inbox shows the session's terminals instead of its summary.
   @Published var showingTerminal = false
   /// The last reply of the sessions the Inbox showed, read from their

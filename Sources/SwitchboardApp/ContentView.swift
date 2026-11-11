@@ -550,6 +550,9 @@ struct BoardView: View {
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return], phases: [.down, .repeat]) { press in
+          // SwiftUI offers a key to this handler before a text field inside the Board. The new group's name
+          // field and a lane's description field keep their own arrows and Return.
+          if NSApp.keyWindow?.firstResponder is NSText { return .ignored }
           switch NavKey.action(press.key, modifiers: press.modifiers) {
           case .move(let direction): model.moveBoardFocus(direction)
           case .open:

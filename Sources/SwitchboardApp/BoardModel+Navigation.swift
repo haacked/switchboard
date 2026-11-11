@@ -49,8 +49,12 @@ extension BoardModel {
   var terminalTarget: SessionSummary? {
     switch visibleView {
     case nil: return selected
-    case .inbox: return sessions.first { $0.id == currentInboxItem }
-    case .board: return board.first { $0.id == currentBoardCard }
+    case .inbox:
+      let id = currentInboxItem
+      return sessions.first { $0.id == id }
+    case .board:
+      let id = currentBoardCard
+      return board.first { $0.id == id }
     }
   }
 

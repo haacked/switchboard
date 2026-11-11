@@ -58,7 +58,7 @@ import Testing
       #expect(ListStep.step(["only"], from: from, by: step, wrap: false) == "only")
     }
 
-    /// `moveInbox` stepped with this formula before it called `ListStep`. Risk 4 in the plan.
+    /// `moveInbox` stepped with this formula before it called `ListStep`.
     @Test(arguments: 0...5, [1, -1])
     func wrapAgreesWithTheOldInboxFormula(count: Int, step: Int) {
       let ids = (0..<count).map { "i\($0)" }
@@ -293,7 +293,7 @@ import Testing
       #expect(reached(grid, from: first) == Set(lanes.flatMap { $0.flatMap { $0 } }))
     }
 
-    /// The plan's property: from any card, arrows reach every card.
+    /// From any card, the arrows reach every card.
     @Test(arguments: grids)
     func arrowsFromAnyCardReachEveryCard(_ lanes: [[[String]]]) {
       let grid = BoardGrid(lanes: lanes)
@@ -355,7 +355,7 @@ import Testing
       #expect(NavKey.action(key, modifiers: []) == expected)
     }
 
-    /// Menu shortcuts and ⇧-arrow text selection keep their keys. Risk 1 in the plan.
+    /// Menu shortcuts and ⇧-arrow text selection keep their keys.
     @Test(arguments: mapped.map(\.0), anyOfTheFour)
     func aMappedKeyWithCommandOptionControlOrShiftIsLeftAlone(_ key: KeyEquivalent, _ modifiers: EventModifiers) {
       #expect(NavKey.action(key, modifiers: modifiers) == nil)
@@ -379,9 +379,7 @@ import Testing
   // MARK: NavShortcuts
 
   @Suite struct Shortcuts {
-    static let all: [KeyboardShortcut] = [
-      NavShortcuts.nextSession, NavShortcuts.previousSession, NavShortcuts.focusList, NavShortcuts.focusTerminal,
-    ]
+    static let all = NavShortcuts.all
 
     /// The key as a US keyboard types it. AppKit can store ⇧⌘] as ⌘}, and both name one key press.
     struct Press: Equatable {
@@ -412,7 +410,7 @@ import Testing
       Press("v"), Press("x"), Press("a"), Press("z"), Press("z", [.command, .shift]), Press("f", [.command, .control]),
     ]
 
-    /// A focused terminal passes only ⌘ keys to the menu bar. Risk 2 in the plan.
+    /// A focused terminal passes only ⌘ keys to the menu bar.
     @Test func everyShortcutUsesCommand() {
       for shortcut in Self.all {
         #expect(shortcut.modifiers.contains(.command), "\(shortcut.key.character)")
@@ -431,7 +429,7 @@ import Testing
       }
     }
 
-    @Test func theShortcutsAreTheKeysThePlanAndReadmeName() {
+    @Test func theShortcutsAreTheKeysTheReadmeNames() {
       #expect(Press(NavShortcuts.nextSession) == Press("]", [.command, .shift]))
       #expect(Press(NavShortcuts.previousSession) == Press("[", [.command, .shift]))
       #expect(Press(NavShortcuts.focusList) == Press("l"))
