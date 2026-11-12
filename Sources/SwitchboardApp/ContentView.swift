@@ -477,26 +477,6 @@ struct BoardView: View {
   static let labelWidth: CGFloat = 140
   static let columnWidth: CGFloat = 200
 
-  private struct Lane: Identifiable {
-    var id: String
-    var title: String
-    var group: GroupSummary?
-    var sessions: [SessionSummary]
-  }
-
-  private func lanes(_ open: [SessionSummary], labelling board: [SessionSummary]) -> [Lane] {
-    switch laneKind {
-    case .repo:
-      return MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true, fullName: true)).map {
-        Lane(id: "repo-\($0.id)", title: $0.title, sessions: $0.sessions)
-      }
-    case .group:
-      return BoardRows.make(sessions: open, groups: model.shownGroups).map { row in
-        Lane(id: row.id, title: row.title, group: model.groups.first { $0.id == row.group }, sessions: row.sessions)
-      }
-    }
-  }
-
   /// Makes the same moves as a drag, because keyboard and VoiceOver users
   /// can't start a drag. It also offers Ungrouped when the Board hides the
   /// Ungrouped lane.
@@ -511,23 +491,18 @@ struct BoardView: View {
   }
 
   var body: some View {
-    let board = model.workBoard
-    let done = board.filter(MergeBoard.isDone)
-    let open = board.filter { !MergeBoard.isDone($0) }
-    // A repo lane has no group, like the Ungrouped lane, so a drop there would ungroup the card.
-    let drops = laneKind == .group
-    let shown = lanes(open, labelling: board)
     // The arrow keys' grid and the drawn cards both come from this one value, so they always agree.
-    let cells = shown.map { lane in MergeBoard.columns.map { MergeBoard.cards(lane.sessions, in: $0) } }
-    let grid = BoardGrid(lanes: cells.map { $0.map { $0.map(\.id) } })
-    cards(shown: shown, cells: cells, done: done, drops: drops)
-      .onChange(of: grid, initial: true) { model.boardGrid = grid }
+    let layout = model.boardLayout(lanes: laneKind)
+    cards(layout)
+      .onChange(of: layout.grid, initial: true) { model.boardGrid = layout.grid }
   }
 
   @ViewBuilder
-  private func cards(shown: [Lane], cells: [[[SessionSummary]]], done: [SessionSummary], drops: Bool) -> some View {
+  private func cards(_ layout: BoardLayout) -> some View {
     let ring = focused ? model.currentBoardCard : nil
-    if shown.isEmpty && done.isEmpty && !(model.namingGroup && laneKind == .group) {
+    // A repo lane has no group, like the Ungrouped lane, so a drop there would ungroup the card.
+    let drops = laneKind == .group
+    if layout.lanes.isEmpty && layout.done.isEmpty && !(model.namingGroup && laneKind == .group) {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
@@ -540,12 +515,12 @@ struct BoardView: View {
         ScrollView([.horizontal, .vertical]) {
           LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
             Section {
-              ForEach(Array(zip(shown, cells)), id: \.0.id) { lane, laneCells in
+              ForEach(layout.lanes) { lane in
                 Divider()
                 HStack(alignment: .top, spacing: 12) {
-                  LaneLabel(title: lane.title, group: lane.group, count: lane.sessions.count)
+                  LaneLabel(title: lane.title, group: lane.group, count: lane.cells.joined().count)
                     .frame(width: Self.labelWidth, alignment: .leading)
-                  ForEach(Array(zip(MergeBoard.columns, laneCells)), id: \.0) { _, stack in
+                  ForEach(Array(zip(layout.columns, lane.cells)), id: \.0) { _, stack in
                     VStack(spacing: 8) {
                       ForEach(stack) { s in
                         Group {
@@ -567,7 +542,7 @@ struct BoardView: View {
                 .accessibilityLabel(lane.title)
                 .accessibilityIdentifier("board-row-\(lane.id)")
               }
-              DoneFooter(sessions: done)
+              DoneFooter(sessions: layout.done)
             } header: {
               HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -582,8 +557,8 @@ struct BoardView: View {
                   GroupSuggestionButton()
                 }
                 .frame(width: Self.labelWidth)
-                ForEach(MergeBoard.columns, id: \.self) { stage in
-                  Text(stage.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
+                ForEach(layout.columns, id: \.self) { column in
+                  Text(column.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
                     .frame(width: Self.columnWidth, alignment: .leading)
                 }
               }
@@ -889,6 +864,50 @@ struct GroupSuggestionList: View {
   }
 }
 
+extension SessionSummary {
+  /// The card's line: the session's reason in In progress, where `place`
+  /// leaves the line nil because it takes no reason, and wherever the
+  /// placement has no line. Elsewhere it is what the card waits on, who
+  /// approved it, or the queue's state.
+  var boardLine: String { board.flatMap { $0.column == .inProgress ? nil : $0.line } ?? reason }
+
+  /// sbd sets a holder only on Waiting, so a holder on another column is stale.
+  var holderBadge: BoardHolder? { board?.column == .waiting ? board?.holder : nil }
+
+  var backNote: String? { board?.back.map { "back from \($0.from.title): \($0.reason)" } }
+
+  /// Needs you is not a column, so its card keeps its column and gets an orange edge.
+  var hasNeedsYouEdge: Bool { state == .needsYou }
+}
+
+extension BoardHolder {
+  var badgeTitle: String {
+    switch self {
+    case .you: "you"
+    case .machine: "a machine"
+    case .session: "another session"
+    }
+  }
+}
+
+/// Who holds a Waiting card, in a capsule.
+struct HolderBadge: View {
+  let holder: BoardHolder
+
+  var body: some View {
+    Text(holder.badgeTitle)
+      .font(.caption2.bold())
+      .lineLimit(1)
+      .fixedSize()
+      .padding(.horizontal, 5)
+      .padding(.vertical, 1)
+      .background(Capsule().fill(Color.secondary.opacity(0.15)))
+      .foregroundStyle(.secondary)
+      .help("Held by \(holder.badgeTitle)")
+      .accessibilityLabel("Held by \(holder.badgeTitle)")
+  }
+}
+
 struct BoardCard: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
@@ -937,12 +956,16 @@ struct BoardCard: View {
               }
             }
           }
-          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          Text(s.boardLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          if let note = s.backNote {
+            Text(note).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+          }
           CleanupNote(session: s)
           MergeNote(session: s)
           // A Board column is too narrow for the badge beside the PR number.
           HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let pr = s.pr { QueueBadge(pr: pr) }
+            if let holder = s.holderBadge { HolderBadge(holder: holder) }
             Text(statusLine)
               .font(.caption2).foregroundStyle(.tertiary)
           }
@@ -950,7 +973,12 @@ struct BoardCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(s.state.color.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(s.state.color.opacity(0.3)))
+        .overlay {
+          RoundedRectangle(cornerRadius: 8)
+            .stroke(
+              s.hasNeedsYouEdge ? AttentionState.needsYou.color : s.state.color.opacity(0.3),
+              lineWidth: s.hasNeedsYouEdge ? 2 : 1)
+        }
         .overlay {
           if keyboardFocused { RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor, lineWidth: 2) }
         }
@@ -977,6 +1005,7 @@ struct BoardCard: View {
       }
       HStack(spacing: 4) {
         NotesButton(session: s)
+        if let nudge = Nudge.text(for: s, now: nowMs()) { NudgeButton(session: s, text: nudge) }
         if s.canMerge { MergeButton(session: s) }
         if let base = s.mergeBase { MergeBaseButton(session: s, base: base) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
