@@ -208,14 +208,10 @@ extension Service {
     let now = nowMs()
     let candidates = entries.values.filter { groupable($0.session) }.map { e in
       let state = Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state
-      let column = BoardColumn.place(
-        state: state, stateSince: e.facts.stateSince, waits: e.session.waits ?? [], facts: e.facts,
-        created: e.session.created
-      ).column
       return GroupSuggestions.Candidate(
         id: e.session.id, branch: e.branch, prTitle: e.facts.pr?.title, group: e.session.group,
         placedByHand: e.session.placedByHand ?? false, repo: e.facts.pr?.repo, pr: e.facts.pr?.number,
-        dependencies: e.facts.dependencies, finished: MergeBoard.isDone(state: state, column: column))
+        dependencies: e.facts.dependencies, finished: MergeBoard.isDone(state: state, pr: e.facts.pr))
     }
     return GroupSuggestions.make(
       candidates: candidates, groups: Array(groups.values), declined: try store.declinedSuggestions())

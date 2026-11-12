@@ -177,7 +177,7 @@ private func teamOwners(_ owners: [String]) -> CodeOwnerStatus {
 
       let text = Nudge.text(pr: pr, reviewers: ["team-flags", "alice", "@bob"], waited: 5 * hour)
 
-      #expect(text.hasPrefix("@PostHog/team-flags and @alice and @bob could you"))
+      #expect(text.hasPrefix("@PostHog/team-flags, @alice, and @bob could you"))
     }
   }
 

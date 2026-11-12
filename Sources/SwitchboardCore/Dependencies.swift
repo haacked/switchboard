@@ -72,6 +72,11 @@ public struct Dependency: Codable, Equatable, Sendable {
   public func label(from repo: String) -> String {
     Wait.PullRequest(repository: Dependencies.sameRepo(self.repo, repo) ? nil : self.repo, number: number).text
   }
+
+  /// "waits on #N" while the PR is open, and "waits on the deploy of #N" once it merged.
+  func waitLine(from repo: String) -> String {
+    state == .merged ? "waits on the deploy of \(label(from: repo))" : "waits on \(label(from: repo))"
+  }
 }
 
 extension DeployComment {

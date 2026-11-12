@@ -871,10 +871,10 @@ extension SessionSummary {
   /// approved it, or the queue's state.
   var boardLine: String { board.flatMap { $0.column == .inProgress ? nil : $0.line } ?? reason }
 
-  /// sbd sets a holder only on Waiting, so a holder on another column is stale.
+  /// sbd sets a holder only on Waiting.
   var holderBadge: BoardHolder? { board?.column == .waiting ? board?.holder : nil }
 
-  var backNote: String? { board?.back.map { "back from \($0.from.title): \($0.reason)" } }
+  var backNote: String? { board?.back?.text }
 
   /// Needs you is not a column, so its card keeps its column and gets an orange edge.
   var hasNeedsYouEdge: Bool { state == .needsYou }
@@ -1005,7 +1005,7 @@ struct BoardCard: View {
       }
       HStack(spacing: 4) {
         NotesButton(session: s)
-        if let nudge = Nudge.text(for: s, now: nowMs()) { NudgeButton(session: s, text: nudge) }
+        if Nudge.shows(s, now: nowMs()) { NudgeButton(session: s) }
         if s.canMerge { MergeButton(session: s) }
         if let base = s.mergeBase { MergeBaseButton(session: s, base: base) }
         if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }

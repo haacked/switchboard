@@ -20,7 +20,7 @@ enum Nudge {
   }
 
   static func text(pr: PRSummary, reviewers: [String], waited: Int64) -> String {
-    let mentions = reviewers.map { mention($0, pr: pr) }.joined(separator: " and ")
+    let mentions = englishList(reviewers.map { mention($0, pr: pr) })
     let ask = mentions.isEmpty ? "Could you" : "\(mentions) could you"
     let title = pr.title.isEmpty ? "" : " (\(pr.title))"
     return "\(ask) take a look at #\(pr.number)\(title)? It has waited for review for \(duration(waited)). \(pr.url)"
@@ -48,19 +48,18 @@ enum Nudge {
   }
 }
 
-/// Copies the card's nudge to the clipboard, and shows a check mark for two seconds after.
+/// Copies the card's nudge to the clipboard. It shows a check mark for a moment after.
 struct NudgeButton: View {
   let session: SessionSummary
-  let text: String
   @State private var copied = false
 
   var body: some View {
     Button {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(text, forType: .string)
+      guard let text = Nudge.text(for: session, now: nowMs()) else { return }
+      DraftCopy.copy(text)
       copied = true
       Task { @MainActor in
-        try? await Task.sleep(for: .seconds(2))
+        try? await Task.sleep(for: .seconds(DraftView.copiedSeconds))
         copied = false
       }
     } label: {

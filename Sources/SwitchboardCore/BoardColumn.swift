@@ -36,7 +36,7 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
   /// The session's column, from its attention state, its open waits, and its
   /// facts. The first rule that matches wins: Done, Merging, In progress,
   /// Approved, In review, and Waiting. `acknowledged` is true when
-  /// `Attention.shown` moved an acknowledged Inbox verdict to Waiting, and it
+  /// `Attention.shown` moved an acknowledged Inbox verdict to Waiting. It
   /// decides only a Waiting card's holder. `stateSince` is when the session
   /// entered `state`. A session that no `pr` event has placed counts its PR
   /// column from `created`.
@@ -44,35 +44,40 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
     state: AttentionState, acknowledged: Bool = false, stateSince: Int64, waits: [Wait], facts: SessionFacts,
     created: Int64
   ) -> BoardPlacement {
+    var placement = column(
+      state: state, acknowledged: acknowledged, stateSince: stateSince, waits: waits, facts: facts, created: created)
+    placement.back = facts.boardBack
+    return placement
+  }
+
+  private static func column(
+    state: AttentionState, acknowledged: Bool, stateSince: Int64, waits: [Wait], facts: SessionFacts, created: Int64
+  ) -> BoardPlacement {
     let pr = facts.pr
     let column = prColumn(pr)
     let prSince = facts.boardSince ?? created
-    if state == .done || column == .done {
-      return BoardPlacement(column: .done, since: stateSince, back: facts.boardBack)
-    }
+    if MergeBoard.isDone(state: state, column: column) { return BoardPlacement(column: .done, since: stateSince) }
     if let pr, column == .merging {
-      return BoardPlacement(column: .merging, since: prSince, line: queueLine(pr), back: facts.boardBack)
+      let phrase = TrunkQueueState.phrase(pr.queue, label: pr.queueLabel, inMergeQueue: pr.inMergeQueue)
+      let line = phrase.map { $0 + (pr.queueText.map { ": \($0)" } ?? "") }
+      return BoardPlacement(column: .merging, since: prSince, line: line)
     }
-    if state == .working || state == .notStarted {
-      return BoardPlacement(column: .inProgress, since: stateSince, back: facts.boardBack)
-    }
+    if state == .working || state == .notStarted { return BoardPlacement(column: .inProgress, since: stateSince) }
     if let pr, column == .approved {
       let line = pr.approvers.isEmpty ? nil : "approved by \(Attention.names(pr.approvers))"
-      return BoardPlacement(column: .approved, since: prSince, line: line, back: facts.boardBack)
+      return BoardPlacement(column: .approved, since: prSince, line: line)
     }
     if let pr, column == .inReview {
-      let names = reviewers(pr)
+      let names = reviewers(facts)
       let line =
         "waits on \(names.isEmpty ? "a review" : Attention.names(names))" + (pr.checksRunning ? ", CI running" : "")
-      return BoardPlacement(
-        column: .inReview, since: prSince, line: line, reviewers: names.isEmpty ? nil : names, back: facts.boardBack)
+      return BoardPlacement(column: .inReview, since: prSince, line: line, reviewers: names.isEmpty ? nil : names)
     }
     let oldest = waits.min { $0.created < $1.created }
     let on = waitingOn(oldest, facts)
     let yours = acknowledged || [.needsYou, .readyToMerge, .canContinue, .stale].contains(state)
     return BoardPlacement(
-      column: .waiting, since: oldest?.created ?? stateSince, line: on?.line, holder: yours ? .you : on?.holder,
-      back: facts.boardBack)
+      column: .waiting, since: oldest?.created ?? stateSince, line: on?.line, holder: yours ? .you : on?.holder)
   }
 
   /// The column that the PR alone gives, or nil when no PR column claims it.
@@ -84,38 +89,24 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
     // Trunk drops a draft from its queue, and GitHub's queue holds no draft.
     guard pr.ready else { return nil }
     if pr.queue?.isHeld == true || pr.inMergeQueue == true { return .merging }
-    guard !ciFailed(pr), pr.mergeable != .conflicting else { return nil }
+    guard !pr.ciFailed, pr.mergeable != .conflicting else { return nil }
     if pr.reviewSatisfied && !pr.checksRunning { return .approved }
     // A branch that requires no review still waits on a reviewer whom someone asked.
     let awaits =
       pr.needsReview == true
       || (pr.needsReview == false && pr.reviewDecision == nil && pr.reviewRequests?.isEmpty == false)
-    return awaits && !changesRequested(pr) ? .inReview : nil
+    return awaits && pr.changesRequestedLine == nil ? .inReview : nil
   }
 
-  static func ciFailed(_ pr: PullRequest) -> Bool { pr.checksFailed || pr.blockingDepotFailure != nil }
-
-  static func changesRequested(_ pr: PullRequest) -> Bool {
-    !pr.changesRequestedBy.isEmpty || pr.reviewDecision == .changesRequested
-  }
-
-  /// The reviewers that the PR asks, as GitHub's review requests and its
-  /// code owner requests name them, once each. A reviewer that both name keeps
+  /// The reviewers that the PR asks, as its code owner requests and
+  /// `requestedReviewers` name them, once each. A reviewer that both name keeps
   /// the code owner form, which carries the `@` and a team's org.
-  static func reviewers(_ pr: PullRequest) -> [String] {
+  static func reviewers(_ facts: SessionFacts) -> [String] {
     var seen = Set<String>()
-    return ((pr.codeOwnerRequests ?? []) + (pr.reviewRequests ?? [])).filter { name in
+    return ((facts.pr?.codeOwnerRequests ?? []) + (facts.requestedReviewers ?? [])).filter { name in
       let bare = name.lowercased().drop { $0 == "@" }.split(separator: "/").last.map(String.init) ?? ""
       return seen.insert(bare).inserted
     }
-  }
-
-  /// The queue's state and its own text, such as "Trunk testing".
-  static func queueLine(_ pr: PullRequest) -> String {
-    let state =
-      pr.queue.flatMap { q in q.isHeld ? "Trunk \((pr.queueLabel ?? q.word ?? q.rawValue).lowercased())" : nil }
-      ?? "in the merge queue"
-    return state + (pr.queueText.map { ": \($0)" } ?? "")
   }
 
   /// What a Waiting card waits on and who holds it, from the first of these
@@ -135,20 +126,15 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
       return (holder, wait.line)
     }
     if let d = facts.dependencies.first(where: \.holds) {
-      return (d.session == nil ? .machine : .session, "waits on \(d.label(from: facts.pr?.repo ?? d.repo))")
+      return (d.session == nil ? .machine : .session, d.waitLine(from: facts.pr?.repo ?? d.repo))
     }
     if facts.jobs > 0 { return (.machine, facts.jobs == 1 ? "a background job" : "\(facts.jobs) background jobs") }
     guard let pr = facts.pr, pr.state == .open else { return nil }
     if pr.checksRunning { return (.machine, "CI running") }
-    if ciFailed(pr) { return (.you, "CI failed") }
+    if pr.ciFailed { return (.you, "CI failed") }
     if pr.mergeable == .conflicting { return (.you, "conflicts with \(pr.base)") }
-    if changesRequested(pr) { return (.you, changesLine(pr)) }
+    if let changes = pr.changesRequestedLine { return (.you, changes) }
     return nil
-  }
-
-  static func changesLine(_ pr: PullRequest) -> String {
-    pr.changesRequestedBy.isEmpty
-      ? "changes requested" : "changes requested by \(Attention.names(pr.changesRequestedBy))"
   }
 }
 
@@ -174,6 +160,9 @@ public struct BoardMove: Codable, Equatable, Sendable {
     self.at = at
   }
 
+  /// "back from Merging: CI failed", as the card and `sb get` show it.
+  public var text: String { "back from \(from.title): \(reason)" }
+
   /// Why the same PR left `from` between `old` and `new`, or nil when no
   /// listed reason applies, as for checks that run again on the same head.
   static func reason(leaving from: BoardColumn, _ old: PullRequest, _ new: PullRequest) -> String? {
@@ -186,9 +175,9 @@ public struct BoardMove: Codable, Equatable, Sendable {
     }
     if new.draft { return "back to draft" }
     if new.headSha != old.headSha { return "new commits" }
-    if BoardColumn.ciFailed(new) { return "CI failed" }
+    if new.ciFailed { return "CI failed" }
     if new.mergeable == .conflicting { return "conflicts with \(new.base)" }
-    if BoardColumn.changesRequested(new) { return BoardColumn.changesLine(new) }
+    if let changes = new.changesRequestedLine { return changes }
     if (old.reviewDecision == .approved && new.reviewDecision != .approved)
       || (!old.approvers.isEmpty && new.approvers.isEmpty)
     {
@@ -264,8 +253,13 @@ public enum MergeBoard {
 
   public static func isDone(_ s: SessionSummary) -> Bool { isDone(state: s.state, column: s.board?.column) }
 
-  /// The rule for the Done footer. Group suggestions also use it to leave a finished session alone.
+  /// The rule for the Done footer.
   public static func isDone(state: AttentionState, column: BoardColumn?) -> Bool { state == .done || column == .done }
+
+  /// Whether the session is Done from its state and PR alone. Group suggestions use it to leave a finished session alone.
+  public static func isDone(state: AttentionState, pr: PullRequest?) -> Bool {
+    isDone(state: state, column: BoardColumn.prColumn(pr))
+  }
 
   /// A session without a placement, such as a follow-up that hasn't started, is In progress.
   public static func column(_ s: SessionSummary) -> BoardColumn { s.board?.column ?? .inProgress }

@@ -270,6 +270,13 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
 
+  /// "changes requested by X and Y", or "changes requested" when GitHub's
+  /// decision requests changes that no verdict names. nil when nobody requests changes.
+  public var changesRequestedLine: String? {
+    if !changesRequestedBy.isEmpty { return "changes requested by \(Attention.names(changesRequestedBy))" }
+    return reviewDecision == .changesRequested ? "changes requested" : nil
+  }
+
   /// The reviewers whose last verdict requests changes.
   public var changesRequestedBy: [String] {
     verdicts.filter { $0.state == "CHANGES_REQUESTED" }.map(\.author).sorted()
@@ -352,10 +359,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   }
 
   /// The queue state for `line` and the PR tooltip, such as "Trunk testing".
-  /// Trunk's own label, such as "Cancelled", wins over sbd's state.
   public var queuePhrase: String? {
-    if let queue, queue != .unknown { return "Trunk \((queueLabel ?? queue.rawValue).lowercased())" }
-    return inMergeQueue == true ? "in the merge queue" : nil
+    TrunkQueueState.phrase(queue, label: queueLabel, inMergeQueue: inMergeQueue)
   }
 
   /// The PR's page, or nil unless `url` is https. Any local process can
