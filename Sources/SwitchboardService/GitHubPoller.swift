@@ -451,7 +451,7 @@ final class GitHubPoller {
         let checkedOut = t.branch.checkedOut
         let earlier = { (id: String?) -> Bool in
           guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
-          return pr.repo.lowercased() == repo.lowercased() && pr.head != branch && checkedOut.contains(pr.head)
+          return GitHub.isEarlierWork(pr, repo: repo, branch: branch, checkedOut: checkedOut)
         }
         if earlier(t.transcript.prId) { t.transcript.prId = nil }
         if earlier(t.recordedPRId) { t.recordedPRId = nil }

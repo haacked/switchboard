@@ -591,6 +591,13 @@ public enum GitHub {
     return branches
   }
 
+  /// Whether the PR belongs to the session's earlier work in this folder: it
+  /// is in the branch's repo, its head is another branch, and the folder had
+  /// that head checked out before.
+  public static func isEarlierWork(_ pr: PullRequest, repo: String, branch: String, checkedOut: Set<String>) -> Bool {
+    pr.repo.lowercased() == repo.lowercased() && pr.head != branch && checkedOut.contains(pr.head)
+  }
+
   /// The values of `git config --get-regexp` output, by key.
   public static func gitConfig(_ text: String) -> [String: String] {
     var values: [String: String] = [:]
