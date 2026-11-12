@@ -123,7 +123,9 @@ extension Service {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
       data["answers"] = .array(answers.map(JSON.string))
-      if card.deferred { return answered(try send(id, card.answerMessage(answers), byUser: false).rawValue) }
+      if card.deferred {
+        return answered(try send(id, card.answerMessage(answers), byUser: false, trigger: .card).rawValue)
+      }
       reply = (card.decision(answers: answers), .escape(then: card.answerMessage(answers)))
     } else {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
@@ -167,7 +169,7 @@ extension Service {
             "card \(card.id)'s dialog still shows after Escape, so sbd didn't send the message. Answer it in the terminal"
           )
         }
-        _ = try send(id, message, byUser: false)
+        _ = try send(id, message, byUser: false, trigger: .card)
       }
       return result
     }

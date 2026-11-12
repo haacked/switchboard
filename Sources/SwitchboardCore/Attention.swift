@@ -38,6 +38,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var lastLaunch: Int64?
   /// The prompt that the last launch passed to claude, if any.
   public var lastLaunchPrompt: String?
+  /// What caused the last launch, when it resumed a conversation.
+  public var lastResumeTrigger: LaunchTrigger?
   /// The launch whose trust dialog opened a trust card. sbd opens one card
   /// per launch.
   public var trustLaunch: Int64?
@@ -194,6 +196,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "started", "resumed":
       lastLaunch = event.t
       lastLaunchPrompt = d["prompt"]?.string
+      lastResumeTrigger = event.kind == "resumed" ? d["trigger"]?.string.flatMap(LaunchTrigger.init) : nil
       exitedAtTrust = false
       hookSinceLaunch = false
       permissionMode = d["permission_mode"]?.string
@@ -390,7 +393,7 @@ public enum ReplyKind: Equatable, Sendable {
 /// they have no rule for a PR that Trunk's queue holds.
 public enum Attention {
   static let notificationPromptTool = "prompt"
-  static let dayMs: Int64 = 24 * 3600 * 1000
+  public static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs
   /// A subagent with no event for this long is taken to have lost its
   /// SubagentStop, as when sbd was down.

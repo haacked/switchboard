@@ -255,6 +255,16 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
     #expect(Wait.parseTime(text, now: fixedNow) == fixedNow + Int64(seconds) * 1000)
   }
 
+  @Test(arguments: [("90s", 90), ("1w", 604_800)])
+  func durationMsIsTheLengthAlone(_ text: String, _ seconds: Int) {
+    #expect(Wait.durationMs(text) == Int64(seconds) * 1000)
+  }
+
+  @Test(arguments: ["", "2", " 2h", "2026-10-26", "9223372036854775807s"])
+  func durationMsRefusesWhatIsNotADuration(_ text: String) {
+    #expect(Wait.durationMs(text) == nil)
+  }
+
   @Test(arguments: [utc, losAngeles, kolkata])
   func dateIsMidnightInTheZone(_ zone: TimeZone) {
     #expect(Wait.parseTime("2026-10-26", now: fixedNow, zone: zone) == epochMs(2026, 10, 26, zone: zone))

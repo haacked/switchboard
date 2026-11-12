@@ -282,6 +282,10 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
+    activity [on|off|status]      record how long each resume takes, in a local
+                                  log that sbd keeps 30 days. Off by default
+    activity report [--since 3d]  summarize the activity log
+    activity clear                delete the activity log
     live [--set N]                list the sessions whose claude runs and the
                                   starts that queue behind the cap. --set changes
                                   the cap and saves it in config.json
@@ -803,6 +807,8 @@ case "repo", "repos":
   repo(a)
 case "autocontinue":
   autoContinue(a)
+case "activity":
+  activity(a)
 case "live":
   live(a)
 case "group", "groups":

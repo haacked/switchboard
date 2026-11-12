@@ -31,7 +31,7 @@ extension Service {
         return (created.id, created)
       }
       guard let created else { return try openOrSend(id, text) }
-      return try createdAnswer(created, text: text, queued: queue.sync { entries[id]?.queuedSince != nil })
+      return try createdAnswer(created, text: text, queued: queue.sync { entries[id]?.queued != nil })
     } catch {
       return .failure("\(error)")
     }
@@ -199,7 +199,9 @@ extension Service {
         try? stop(id, reason: "its MCP servers changed")
       case (.stopped, .stopping):
         entries[id]?.mcpRelaunch = nil
-        do { try launch(id, prompt: nil) } catch { logLine("can't relaunch \(id) for its MCP servers: \(error)") }
+        do { try launch(id, prompt: nil, trigger: .mcp) } catch {
+          logLine("can't relaunch \(id) for its MCP servers: \(error)")
+        }
       case (.stopped, .pending):
         entries[id]?.mcpRelaunch = nil
       default:

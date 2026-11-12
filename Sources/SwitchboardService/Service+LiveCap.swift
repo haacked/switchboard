@@ -9,7 +9,7 @@ extension Service {
 
   /// Whether a launch would start claude now instead of queueing. A launch
   /// waits behind any queued start, so the oldest start takes the next free slot.
-  func hasRoom() -> Bool { !entries.values.contains { $0.queuedSince != nil } && liveCount() < liveCap }
+  func hasRoom() -> Bool { !entries.values.contains { $0.queued != nil } && liveCount() < liveCap }
 
   var queuedReason: String { "queued: \(liveCount()) of \(liveCap) live" }
 
@@ -24,11 +24,11 @@ extension Service {
   /// Starts claude when the live cap has room. Otherwise the start queues
   /// until the tick finds a free slot, and its prompt becomes a queued
   /// message, so that a restart of sbd keeps it.
-  func launch(_ id: String, prompt: String?) throws {
-    if hasRoom() { return try startClaude(id, prompt: prompt) }
+  func launch(_ id: String, prompt: String?, trigger: LaunchTrigger) throws {
+    if hasRoom() { return try startClaude(id, prompt: prompt, trigger: trigger) }
     _ = try requireStartable(id)
-    if entries[id]?.queuedSince == nil {
-      entries[id]?.queuedSince = nowMs()
+    if entries[id]?.queued == nil {
+      entries[id]?.queued = (nowMs(), trigger)
       record(id, "start-queued", ["live": .number(Double(liveCount())), "cap": .number(Double(liveCap))])
     }
     if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
@@ -44,9 +44,9 @@ extension Service {
     // A start needs the shared MCP servers, as the tick's other launches do.
     while !mcpStarting(now: now), live.count < liveCap, let next = queued.popFirst() {
       let id = next.session.id
-      entries[id]?.queuedSince = nil
+      entries[id]?.queued = nil
       do {
-        try startClaude(id, prompt: nil)
+        try startClaude(id, prompt: nil, trigger: next.queued!.trigger)
         live.append(entries[id]!)
       } catch {
         logLine("can't start queued \(id): \(error)")
@@ -62,8 +62,8 @@ extension Service {
 
   /// The sessions whose start queued, oldest first.
   private func queuedStarts() -> [Entry] {
-    entries.values.filter { $0.queuedSince != nil }.sorted {
-      ($0.queuedSince!, $0.session.id) < ($1.queuedSince!, $1.session.id)
+    entries.values.filter { $0.queued != nil }.sorted {
+      ($0.queued!.since, $0.session.id) < ($1.queued!.since, $1.session.id)
     }
   }
 
@@ -108,7 +108,7 @@ extension Service {
         state: Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state)
     }.sorted { ($0.name, $0.session) < ($1.name, $1.session) }
     let queued = queuedStarts().map {
-      LiveStatus.QueuedStart(session: $0.session.id, name: $0.session.name, since: $0.queuedSince!)
+      LiveStatus.QueuedStart(session: $0.session.id, name: $0.session.name, since: $0.queued!.since)
     }
     return try JSON(encoding: LiveStatus(cap: liveCap, live: live, queued: queued))
   }
