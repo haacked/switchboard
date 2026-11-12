@@ -86,10 +86,12 @@ private func makeConnection(
   /// A retry waits a second and does not rest again.
   @Test(arguments: [true, false]) func retriesAFailedRequestAfterASecond(live: Bool) async {
     let log = ConnectionLog()
-    let connection = makeConnection(log) { n in
-      if n == 1 { throw Boom() }
-      return sample
-    }
+    let connection = makeConnection(
+      log,
+      answer: { n in
+        if n == 1 { throw Boom() }
+        return sample
+      })
 
     await connection.connect("a", live: live)
 
@@ -100,7 +102,7 @@ private func makeConnection(
 
   @Test func givesUpAfterTenFailedRequestsAndShowsTheError() async {
     let log = ConnectionLog()
-    let connection = makeConnection(log) { _ in throw Boom() }
+    let connection = makeConnection(log, answer: { _ in throw Boom() })
 
     await connection.connect("a", live: true)
 
