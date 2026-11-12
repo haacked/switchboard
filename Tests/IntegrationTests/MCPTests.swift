@@ -69,8 +69,11 @@ extension Instance {
         "grafana": Instance.stubServer("grafana"), "posthog-db": Instance.stubServer("posthog-db", type: "sse"),
       ]
     ])
-    let s = try sbd.new(prompt: "mcp grafana")
+    // A server that listens more than 10 s after its start misses the
+    // launch. aLaunchWaitsForAServerThatIsStarting covers that wait.
     let grafana = try sbd.waitForRunning("grafana")
+    let db = try sbd.waitForRunning("posthog-db")
+    let s = try sbd.new(prompt: "mcp grafana")
     try sbd.waitFor(s.id, "the call to grafana") { $0.lastReply == "MCP grafana: grafana \(grafana.pid!)" }
     #expect(
       sbd.stubArgs().first
@@ -79,7 +82,6 @@ extension Instance {
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["grafana", "posthog-db"])
 
     try sbd.sb("send", s.id, "mcp posthog-db")
-    let db = try sbd.waitForRunning("posthog-db")
     try sbd.waitFor(s.id, "the call to posthog-db") { $0.lastReply == "MCP posthog-db: posthog-db \(db.pid!)" }
     #expect(grafana.type == .http && grafana.url.hasSuffix("/mcp"))
     #expect(db.type == .sse && db.url.hasSuffix("/sse"))
@@ -98,6 +100,23 @@ extension Instance {
     let s = try gate.open(sbd) { try sbd.new(prompt: "mcp slow") }
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func theStatusCountsTheRequestsThatWaitForAStartingServer() throws {
+    let gate = try MCPGate()
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    let launches = ["a", "b"].map { name in Outcome.detached { try sbd.new(prompt: "hello", name: name) } }
+    try sbd.waitForServer("slow", "both launches to wait for slow", timeout: 30) { $0.waiting == 2 }
+    let listed = try JSONCoding.decode([MCPServerStatus].self, from: sbd.sb("mcp", "--json")).first
+    #expect(listed?.state == .starting && listed?.waiting == 2)
+    try gate.open()
+    for launch in launches {
+      #expect(launch.done.wait(timeout: .now() + 30) == .success)
+      _ = try launch.result?.get()
+    }
+    let running = try sbd.waitForRunning("slow")
+    #expect(running.waiting == 0)
+    #expect(try sbd.restartServer(running, behind: gate).waiting == 0)
   }
 
   @Test func aSendToALiveSessionDoesNotWaitForAStartingServer() throws {

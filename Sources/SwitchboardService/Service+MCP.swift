@@ -19,6 +19,9 @@ struct SharedServer {
   var restartAt: Int64?
   var lastExit: String?
   var lastOutput: [String]?
+  /// The requests in `awaitMCPServers` that wait for the server to accept
+  /// connections.
+  var waiting = 0
 
   var pane: String { Service.mcpPanePrefix + name }
 }
@@ -130,11 +133,17 @@ extension Service {
       let dead = host.isDead(paneName(id, .claude))
       guard request.op == "terminals" ? dead == nil : dead != false else { return }
     }
+    var waitingOn: Set<Int> = []
+    defer { queue.sync { waitingOn.forEach { mcp[$0].waiting -= 1 } } }
     let deadline = Date().addingTimeInterval(Double(Service.mcpStartMs) / 1000)
     while Date() < deadline {
       let starting: [(index: Int, port: Int, run: Int64)] = queue.sync {
         let now = nowMs()
-        return mcp.indices.filter { isStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
+        let indices = Set(mcp.indices.filter { isStarting(mcp[$0], now: now) })
+        indices.subtracting(waitingOn).forEach { mcp[$0].waiting += 1 }
+        waitingOn.subtracting(indices).forEach { mcp[$0].waiting -= 1 }
+        waitingOn = indices
+        return indices.sorted().map { ($0, mcp[$0].port, mcp[$0].started) }
       }
       if starting.isEmpty { return }
       let open = starting.filter { LocalPort.accepts($0.port) }
@@ -154,7 +163,7 @@ extension Service {
       MCPServerStatus(
         name: s.name, type: s.config.type, url: s.config.url(port: s.port), state: mcpState(s),
         pid: snapshot.panes[s.pane].flatMap { !$0.dead && $0.pid > 0 ? $0.pid : nil }, restarts: s.restarts,
-        restartAt: s.restartAt, lastExit: s.lastExit, lastOutput: s.lastOutput)
+        restartAt: s.restartAt, lastExit: s.lastExit, lastOutput: s.lastOutput, waiting: s.waiting)
     }
   }
 
