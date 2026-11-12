@@ -66,12 +66,6 @@ public struct DocketReview: Codable, Equatable, Sendable {
   public var error: String?
   public var progress: DocketProgress?
 
-  public init(pullRequest: String, url: String, state: String) {
-    self.pullRequest = pullRequest
-    self.url = url
-    self.state = state
-  }
-
   /// docket's `start_review` restarts a review that did not start, and refuses every other open review.
   public var restartable: Bool { state == "not_started" }
 }
@@ -83,12 +77,6 @@ public struct DocketProgress: Codable, Equatable, Sendable {
   /// True while the review's claude session waits on the user.
   public var waiting: Bool?
   public var needs: String?
-
-  public init(detail: String? = nil, waiting: Bool? = nil, needs: String? = nil) {
-    self.detail = detail
-    self.waiting = waiting
-    self.needs = needs
-  }
 }
 
 /// What a docket row's `docket` events say.
@@ -170,9 +158,6 @@ public struct DocketRef: Sendable {
     self.repo = repo
     self.number = n
   }
-
-  /// `org/repo#N`, the form docket reports.
-  public var text: String { "\(org)/\(repo)#\(number)" }
 
   /// GitHub ignores the case of an owner and a repository name, so docket does too.
   public func matches(_ other: DocketRef) -> Bool {

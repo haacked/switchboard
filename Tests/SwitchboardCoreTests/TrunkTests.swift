@@ -31,19 +31,14 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
 @Suite struct TrunkTimelineTests {
   @Test func queuedPRUnderTestInABatch() throws {
     let t = try timeline("testing-in-batch", now: "2026-09-09T23:33:24.916Z")
-    #expect(t.number == 97577)
-    #expect(t.title == "fix(cohorts): keep HogQL property filters out of the operator default")
-    #expect(t.author == "posthog[bot]")
-    #expect(t.url == "https://app.trunk.io/gh/PostHog/posthog/merge/master/97577")
     #expect(t.entries.map(\.label) == ["Not Ready", "Pending", "Testing"])
     #expect(t.entries.map(\.state) == [.submitted, .pending, .testing])
     #expect(
       t.entries.map(\.time) == [
         ms("2026-09-09T22:04:52.434Z"), ms("2026-09-09T23:30:15.165Z"), ms("2026-09-09T23:30:24.522Z"),
       ])
-    #expect(t.state == .testing)
-    #expect(t.state?.isQueued == true)
-    #expect(!t.isStack)
+    #expect(t.entries.last?.state == .testing)
+    #expect(t.entries.last?.state.isQueued == true)
     #expect(
       t.entries[0].text
         == "Pull request has been submitted to Merge by Phil Haack. It will be added to the merge queue once all "
@@ -64,8 +59,8 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
   @Test func aWordThatFillsTheLineJoinsWithASpace() throws {
     let t = try timeline("failed-check", now: "2026-09-29T17:32:37.693Z")
     #expect(t.entries.map(\.label) == ["Not Ready", "Pending", "Testing", "Failed"])
-    #expect(t.state == .removed)
-    #expect(t.state?.isQueued == false)
+    #expect(t.entries.last?.state == .removed)
+    #expect(t.entries.last?.state.isQueued == false)
     #expect(
       t.entries[3].text
         == "Pull request was removed from the merge queue because the following required check failed: "
@@ -98,16 +93,14 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
 
   @Test func stackThatFailsWhileThePRsBelowItFinishTesting() throws {
     let t = try timeline("stack-pending-failure", now: "2026-10-02T22:07:35.831Z")
-    #expect(t.number == 110392)
     #expect(
       t.entries.map(\.label) == [
         "Not Ready", "Pending", "Testing", "Pending Failure", "Pending", "Testing", "Pending", "Testing",
         "Tests Passed",
         "Pending", "Testing", "Pending Failure",
       ])
-    #expect(t.state == .failing)
-    #expect(t.state?.isQueued == true)
-    #expect(t.isStack)
+    #expect(t.entries.last?.state == .failing)
+    #expect(t.entries.last?.state.isQueued == true)
     #expect(
       t.entries[8].text
         == "Stack passed testing during a batch bisection (tested using "
@@ -116,30 +109,26 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
 
   @Test func mergedStackWithoutBlankLines() throws {
     let t = try timeline("stack-merged", now: "2026-10-02T23:31:24.556Z")
-    #expect(t.number == 110487)
     #expect(t.entries.map(\.state) == [.submitted, .pending, .testing, .passed, .merged])
     #expect(t.entries.last?.time == ms("2026-10-02T23:30:35.039Z"))
-    #expect(t.state == .merged)
-    #expect(t.state?.isQueued == false)
-    #expect(t.isStack)
+    #expect(t.entries.last?.state == .merged)
+    #expect(t.entries.last?.state.isQueued == false)
     #expect(t.entries.last?.text == "Stack has been merged successfully.")
   }
 
   @Test func singlePRThroughABisectionToRemoval() throws {
     let t = try timeline("bisection-failed", now: "2026-10-14T17:23:02.532Z")
-    #expect(t.number == 114757)
     #expect(t.entries.count == 12)
     #expect(t.entries.contains { $0.label == "Pending Failure" })
-    #expect(!t.isStack)
-    #expect(t.state == .removed)
+    #expect(t.entries.last?.state == .removed)
   }
 
   @Test func cancelledPRsAreRemoved() throws {
     let timeout = try timeline("cancelled-timeout", now: "2026-09-23T17:27:33.361Z")
     #expect(timeout.entries.map(\.label) == ["Not Ready", "Cancelled"])
-    #expect(timeout.state == .removed)
+    #expect(timeout.entries.last?.state == .removed)
     let byUser = try timeline("cancelled-by-user", now: "2026-10-19T23:06:47.364Z")
-    #expect(byUser.state == .removed)
+    #expect(byUser.entries.last?.state == .removed)
     #expect(
       byUser.entries.last?.text
         == "Pull request was removed from the merge queue because it was canceled by Phil Haack.")
@@ -151,6 +140,14 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
     #expect(TrunkTimeline.parse(try trunkFixture("not-set-up"), now: 0) == .notSetUp)
     #expect(TrunkTimeline.parse("✖ Something new went wrong\n", now: 0) == .unrecognized("✖ Something new went wrong"))
     #expect(TrunkTimeline.parse("", now: 0) == .unrecognized(""))
+  }
+
+  @Test func aHeaderWithoutAPRNumberIsUnrecognized() throws {
+    let output = try trunkFixture("stack-merged").replacingOccurrences(of: "#110487 ", with: "#PR ")
+    guard case .unrecognized = TrunkTimeline.parse(output, now: ms("2026-10-02T23:31:24.556Z")) else {
+      Issue.record("parsed a header without a PR number")
+      return
+    }
   }
 
   @Test func theYearIsTheLatestThatIsNotInTheFuture() throws {
@@ -261,7 +258,7 @@ func reply(_ body: String, at: String = trunkTime) -> PRComment {
   PRComment(id: "R_\(body.hashValue)_\(at)", author: "trunk-io[bot]", createdAt: at, edited: false, body: body)
 }
 func queue(_ comments: [PRComment], _ state: PRState = .open) -> TrunkQueueState? {
-  TrunkComments.state(of: PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: state), comments)
+  TrunkComments.change(of: PullRequest(id: "a", number: 1, url: "", repo: "a/b", state: state), comments)?.state
 }
 
 /// The comment cases come from git-pr's tests (`~/.dotfiles/bin/lib/test-git-pr.sh`), whose jq this parser ports.
