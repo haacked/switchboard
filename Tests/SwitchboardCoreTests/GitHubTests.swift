@@ -712,6 +712,16 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(GitHub.checkedOutBranches(reflog: reflog) == ["main", "haacked/a", "2222abcd", "haacked/b"])
   }
 
+  @Test func checkedOutBranchesNamesBothSidesOfARename() {
+    let reflog = [
+      "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first",
+      "1111 1111 T <t@t> 1794400001 -0800\tBranch: renamed refs/heads/haacked/a to refs/heads/haacked/b",
+      "",
+    ].joined(separator: "\n")
+
+    #expect(GitHub.checkedOutBranches(reflog: reflog) == ["haacked/a", "haacked/b"])
+  }
+
   @Test(arguments: [
     "",
     "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first\n",

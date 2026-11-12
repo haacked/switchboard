@@ -431,12 +431,18 @@ extension FakeGitHub {
   }
 
   /// A session can open its PR from another worktree of its own repo. The
-  /// folder never had the PR's head checked out, so the PR stays the
-  /// session's, and its merge moves the session to Done.
+  /// main checkout's reflog names the PR's head. The session's worktree never
+  /// had it checked out, so the PR stays the session's. Its merge moves the
+  /// session to Done.
   @Test func keepsALinkedPRWhoseHeadAnotherWorktreeOfTheRepoHad() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
-    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    let repo = try sbd.makeRepo("posthog", origin: "https://github.com/PostHog/posthog.git")
+    try sbd.git(repo, "checkout", "-q", "-b", "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.git(repo, "checkout", "-q", "main")
+    let tree = try sbd.addWorktree(repo, "haacked/no-pr-yet")
+    let started = try sbd.client.call("new", ["path": .string(tree), "prompt": "hello"], as: SessionSummary.self)
+    let s = try sbd.waitFor(started.id, "the first reply") { $0.lastReply == "Done: hello" }
     try sbd.link(s, "PostHog/posthog", 122953)
     try sbd.poll()
     try sbd.poll()

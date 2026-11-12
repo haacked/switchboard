@@ -895,6 +895,24 @@ private func calls(_ log: String) -> [String] {
     #expect(calls(log).isEmpty)
   }
 
+  @Test func rmDoneSkipsAWorktreeThatSupacodeLockedWhenItsMergedPRIsFromAnotherRepo() throws {
+    let s = try Setup()
+    let session = try s.sbd.worktreeSession(s.repo, branch: "haacked/no-pr-yet")
+    try s.sbd.link(session, "haacked/review-code", 189)
+    s.github.change(189) { $0["state"] = "MERGED" }
+    try s.pollUntilDone(session)
+    let log = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, session.cwd)
+
+    let result = try parse(try s.sbd.rmDone("--worktree", "--yes", "--json"))
+
+    #expect(removed(result).isEmpty)
+    let reason = try #require(skip(result["skipped"], session.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains("has no merged PR"), Comment(rawValue: reason))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
+    #expect(calls(log).isEmpty)
+  }
+
   @Test func cleanupRemovesAWorktreeThatSupacodeLockedAndKeepsTheSession() throws {
     let s = try Setup()
     let session = try s.finished(.breaker, state: "MERGED")

@@ -562,19 +562,30 @@ public enum GitHub {
     return String(text.dropFirst("ref: \(refs)".count))
   }
 
-  /// The branches that a HEAD reflog shows a checkout moving from or to.
-  /// git writes one "checkout: moving from <a> to <b>" line for each
-  /// checkout or switch. A detach shows as `HEAD`, and a checkout from a
-  /// detached HEAD as a commit id.
+  /// The branches that a HEAD reflog shows the folder had checked out: both
+  /// sides of each checkout, and both names of each rename of the
+  /// checked-out branch. git writes one "checkout: moving from <a> to <b>"
+  /// line for each checkout or switch. A detach shows as `HEAD`, and a
+  /// checkout from a detached HEAD shows as a commit id. `git branch -m` on
+  /// the checked-out branch writes "Branch: renamed refs/heads/<a> to
+  /// refs/heads/<b>".
   public static func checkedOutBranches(reflog: String) -> Set<String> {
-    let marker = "\tcheckout: moving from "
+    let checkout = "\tcheckout: moving from "
+    let renamed = "\tBranch: renamed "
+    let heads = "refs/heads/"
     var branches: Set<String> = []
     for line in reflog.split(separator: "\n") {
-      guard let range = line.range(of: marker) else { continue }
-      let names = line[range.upperBound...].split(separator: " ")
-      guard names.count == 3, names[1] == "to" else { continue }
-      branches.insert(String(names[0]))
-      branches.insert(String(names[2]))
+      if let range = line.range(of: checkout) {
+        let names = line[range.upperBound...].split(separator: " ")
+        guard names.count == 3, names[1] == "to" else { continue }
+        branches.insert(String(names[0]))
+        branches.insert(String(names[2]))
+      } else if let range = line.range(of: renamed) {
+        let names = line[range.upperBound...].split(separator: " ")
+        guard names.count == 3, names[1] == "to", names[0].hasPrefix(heads), names[2].hasPrefix(heads) else { continue }
+        branches.insert(String(names[0].dropFirst(heads.count)))
+        branches.insert(String(names[2].dropFirst(heads.count)))
+      }
     }
     return branches
   }

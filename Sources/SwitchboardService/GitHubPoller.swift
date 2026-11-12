@@ -302,9 +302,7 @@ final class GitHubPoller {
       // The worktrees of a repo share its config, so git reads it once per poll.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
-        if let r = try? machine.run(service.git, ["-C", cwd, "config", "--get-regexp", pattern]) {
-          configs[common] = GitHub.gitConfig(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        configs[common] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern], on: machine) ?? "")
       }
       let config = configs[common] ?? [:]
       key = GitHub.branchKey(branch: branch, config: config) { remote in
@@ -593,7 +591,8 @@ final class GitHubPoller {
       // the folder unread, which stays unsafe.
       var info = stat()
       let gone = dirty == nil && stat(s.cwd, &info) != 0 && errno == ENOENT
-      // The checks run 8 git commands, or 9 in a worktree that Supacode locked. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
+      // The checks run 8 git commands, or 9 in a worktree that Supacode locked.
+      // `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
       let checked: CleanupStatus? =
         dirty != 0 || pr.state != .merged
         ? nil
