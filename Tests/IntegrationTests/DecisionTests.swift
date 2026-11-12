@@ -469,7 +469,7 @@ extension Instance {
     if left > 0 { usleep(useconds_t(left * 1_000_000)) }
     let other = Outcome.detached { try sbd.run(["decide", s.id] + change.args) }
     let returned = other.done.wait(timeout: .now() + 5) == .success
-    try gate.open(sbd, after: submit, sentAt: sent)
+    _ = try gate.open(sbd, after: submit, sentAt: sent)
     if !returned { _ = other.done.wait(timeout: .now() + 30) }
 
     #expect(returned, "the \(change) waited for the submit's send instead of being refused")

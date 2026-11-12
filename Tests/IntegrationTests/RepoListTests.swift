@@ -181,7 +181,7 @@ private func fields(_ line: Substring) -> [String] {
     _ = try new(sbd, beta, "made", branch: "feat-b2")
     let external = try new(sbd, tree, "external")
     let main = try new(sbd, beta, "main")
-    try sbd.waitFor("the checkouts", fetch: { try sbd.client.sessions() }) { all in
+    _ = try sbd.waitFor("the checkouts", fetch: { try sbd.client.sessions() }) { all in
       all.allSatisfy { ![external.id, main.id].contains($0.id) || $0.checkout != nil }
     }
 
