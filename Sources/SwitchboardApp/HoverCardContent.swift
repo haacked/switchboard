@@ -54,7 +54,7 @@ struct HoverCardContent: Equatable {
   private static func summary(_ s: SessionSummary) -> String? {
     let candidates = [
       s.triage?.summary,
-      plain(s.reason),
+      plain(s.reason, working: s.state == .working),
       s.lastReply.map { String($0.drop(while: \.isWhitespace).prefix(400)) },
     ]
     guard let text = candidates.lazy.compactMap({ $0.map { oneLine($0, max: 160) } }).first(where: { !$0.isEmpty })
@@ -63,13 +63,16 @@ struct HoverCardContent: Equatable {
   }
 
   /// The reason with its shell command replaced by words. sbd writes a Bash call as its command in
-  /// backticks (`Attention.toolSummary`), at the start of a Working reason and after "approve " in a
-  /// permission's reason. Other backticks, such as those in Claude's question, stay.
-  private static func plain(_ reason: String) -> String {
-    for (prefix, words) in [("`", "Running a shell command"), ("approve `", "approve a shell command")]
-    where reason.hasPrefix(prefix) {
-      let rest = reason.dropFirst(prefix.count)
-      if let close = rest.lastIndex(of: "`") { return words + rest[rest.index(after: close)...] }
+  /// backticks (`Attention.toolSummary`). A Working reason is that command and an optional " (N min)".
+  /// A permission's reason is "approve " and the command. The command can contain backticks, so the
+  /// rewrite matches the whole reason rather than the first closing backtick. Other reasons stay as
+  /// written, such as a wait note that starts with a code span.
+  private static func plain(_ reason: String, working: Bool) -> String {
+    if working, let match = reason.wholeMatch(of: #/`.+`((?: \((?:<1|\d+) min\))?)/#) {
+      return "Running a shell command" + match.1
+    }
+    if reason.hasPrefix("approve `"), reason.hasSuffix("`"), reason.count > "approve ``".count {
+      return "approve a shell command"
     }
     return reason
   }

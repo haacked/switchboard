@@ -681,6 +681,15 @@ private func everything() -> SessionSummary {
       #expect(summaryOf("`swift build (<1 min)") == "`swift build (<1 min)")
     }
 
+    @Test(arguments: [
+      "`bin/test` passes on CI, then run `gh pr merge`",
+      "`swift build` green; `deploy` reaches prod",
+      "`swift build`",
+    ])
+    func waitNoteThatStartsWithACodeSpanStays(_ note: String) {
+      #expect(content(bare(state: .waiting, reason: note)).summary == Triage.capitalized(note))
+    }
+
     @Test func commandLongerThanTheCutReadsAsAShellCommand() {
       #expect(summaryOf("`" + String(repeating: "x", count: 300) + "` (<1 min)") == "Running a shell command (<1 min)")
     }

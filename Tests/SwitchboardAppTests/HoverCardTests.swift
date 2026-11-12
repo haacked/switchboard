@@ -458,6 +458,7 @@ private final class Fixture {
       f.card.entered("B", anchor: f.b)
 
       f.card.exitedCard()
+      #expect(f.card.shown == "A")
       f.scheduler.fire(delay)
 
       #expect(f.card.shown == "B")
