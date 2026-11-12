@@ -699,7 +699,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a GitHub PR comment or review for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, and don't post it yourself."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a comment or review on your GitHub PR for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, copied as is. Leave `replyTo` out if you don't have that URL. Don't post the reply yourself, because the user's Post button in the Inbox is the approval."
 
   public init() {}
 
