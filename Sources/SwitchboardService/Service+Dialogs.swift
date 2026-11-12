@@ -42,14 +42,39 @@ extension Service {
   /// Types the answer into the card's dialog. It refuses when the screen
   /// doesn't show the card's dialog, because the keys would answer another.
   func type(_ answer: TypedAnswer, _ card: Card) throws {
+    let (pane, dialog) = try shownDialog(card)
+    switch answer {
+    case .yes: try pick("Yes", card, pane, dialog, ClaudeScreen.isYes, key: "Up")
+    case .escape: try host.press(pane, ["Escape"])
+    }
+  }
+
+  /// Picks Trust or Exit in the trust card's dialog, then waits up to 3 s for
+  /// that dialog to leave. The dialog lists No, exit first and highlights it,
+  /// so Enter alone exits claude. Claude can show another startup dialog
+  /// after Trust, so only the card's own dialog counts.
+  func typeTrust(_ trust: Bool, _ card: Card) throws {
+    let (pane, dialog) = try shownDialog(card)
+    if trust {
+      try pick("Trust", card, pane, dialog, ClaudeScreen.isTrustYes, key: "Down")
+    } else {
+      try pick("Exit", card, pane, dialog, ClaudeScreen.isTrustNo, key: "Up")
+    }
+    let deadline = Date() + 3
+    while cardDialog(card, pane) != nil {
+      if Date() >= deadline { throw APIError("card \(card.id)'s dialog still shows. Answer it in the terminal") }
+      usleep(100_000)
+    }
+  }
+
+  /// The card's pane and the lines of its dialog. It throws when the screen
+  /// doesn't show the card's dialog, because keys would answer another.
+  private func shownDialog(_ card: Card) throws -> (pane: String, dialog: [String]) {
     let pane = paneName(card.session, .claude)
     guard case .running = claudeState(card.session), let dialog = cardDialog(card, pane) else {
       throw APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
     }
-    switch answer {
-    case .yes: try pickYes(card, pane, dialog)
-    case .escape: try host.press(pane, ["Escape"])
-    }
+    return (pane, dialog)
   }
 
   /// Waits up to 3 s for the card's session to show no dialog, and returns
@@ -65,21 +90,24 @@ extension Service {
     }
   }
 
-  /// Moves the highlight up to Yes, then presses Enter. Yes is the menu's
-  /// first item, so Up moves toward it. This runs on the state queue, so it
-  /// gives up when Claude Code hasn't moved the highlight to Yes within 1 s.
-  private func pickYes(_ card: Card, _ pane: String, _ dialog: [String]) throws {
+  /// Moves the highlight with `key` until it rests on the item that `wanted`
+  /// matches, then presses Enter. This runs on the state queue, so it gives
+  /// up when Claude Code hasn't moved the highlight there within 1 s, and
+  /// presses no Enter.
+  private func pick(
+    _ name: String, _ card: Card, _ pane: String, _ dialog: [String], _ wanted: (String) -> Bool, key: String
+  ) throws {
     let deadline = Date() + 1
     var item = ClaudeScreen.highlighted(dialog)
-    while let current = item, !ClaudeScreen.isYes(current), Date() < deadline {
-      try host.press(pane, ["Up"])
+    while let current = item, !wanted(current), Date() < deadline {
+      try host.press(pane, [key])
       repeat {
         usleep(50_000)
         item = cardDialog(card, pane).flatMap(ClaudeScreen.highlighted)
       } while item == current && Date() < deadline
     }
-    guard let item, ClaudeScreen.isYes(item) else {
-      throw APIError("can't pick Yes in card \(card.id)'s dialog. Answer it in the terminal")
+    guard let item, wanted(item) else {
+      throw APIError("can't pick \(name) in card \(card.id)'s dialog. Answer it in the terminal")
     }
     try host.press(pane, ["Enter"])
   }

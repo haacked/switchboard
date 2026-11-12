@@ -543,7 +543,8 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   /// More `..` steps than the cwd has folders stop at the root.
   @Test func aRelativePathThatClimbsPastTheRootStopsThere() throws {
     let outside = "/Users/someone/sbcap173.txt"
-    #expect(ClaudeScreen.shows(editCard(outside, old: "TWO", new: "2", cwd: "/private/tmp"), try dialog("edit-outside")))
+    #expect(
+      ClaudeScreen.shows(editCard(outside, old: "TWO", new: "2", cwd: "/private/tmp"), try dialog("edit-outside")))
   }
 
   /// A path wider than the pane wraps onto a second row.
@@ -758,5 +759,169 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   @Test(arguments: [("beta", "beta "), ("a b", "a  b"), ("x", "x"), ("a\nb", "a b"), ("a\tb", "ab")])
   func anEditWhoseStringsDifferOnlyInWhiteSpaceIsNotFindable(_ old: String, _ new: String) {
     #expect(!editCard(old: old, new: new).findable)
+  }
+}
+
+/// The folder that the trust dialog in trust-open.txt names. Claude Code
+/// 2.1.322 drew it for a chat folder, and the fixture writes the user's home
+/// as /Users/me.
+let capturedTrustFolder = "/Users/me/.sb/chats/g4rvrf"
+
+/// The path line of the captured trust dialog, as `redrawnDialog` names it.
+let capturedTrustLine = " \(capturedTrustFolder)"
+
+@Suite struct ClaudeScreenTrust {
+  @Test func findsTheTrustDialogAndItsFolder() throws {
+    #expect(ClaudeScreen.trustFolder(try dialog("trust-open")) == capturedTrustFolder)
+  }
+
+  /// The login shell's lines above the dialog are not conversation lines, so
+  /// the dialog starts at its own rule.
+  @Test func theTrustDialogStartsAtItsRuleBelowTheShellsLines() throws {
+    let lines = try dialog("trust-open")
+
+    #expect(lines.first.map(ClaudeScreen.isRule) == true)
+    #expect(lines.dropFirst().first == " Accessing workspace:")
+    #expect(!lines.contains { $0.contains("Mencken") || $0.contains("(oo)") })
+  }
+
+  /// Claude Code breaks a path that is wider than the pane in the middle of a word.
+  @Test(arguments: [
+    [" /Users/me/.sb/cha", " ts/g4rvrf"], [" /Users/me/.sb/chats/g4rvrf"], [" /Users/me/", " .sb/chats/", " g4rvrf"],
+    [" /Users/me/.sb/chats/g4rvr", "f"],
+  ])
+  func readsAWrappedFolder(_ rows: [String]) throws {
+    let lines = try redrawnDialog("trust-open", capturedTrustLine, rows)
+
+    #expect(ClaudeScreen.trustFolder(lines) == capturedTrustFolder)
+  }
+
+  @Test func findsNoDialogOnADeadPane() throws {
+    #expect(ClaudeScreen.dialog(try screenFixture("trust-dead")) == nil)
+  }
+
+  @Test(arguments: ["perm-open", "perm-down", "q-open", "edit-open", "write-open", "read-open"])
+  func aPermissionDialogIsNoTrustDialog(_ fixture: String) throws {
+    #expect(ClaudeScreen.trustFolder(try dialog(fixture)) == nil)
+  }
+
+  @Test(arguments: ["trust-dead", "prompt-empty", "prompt-typed", "perm-after-yes"])
+  func aScreenWithoutADialogHasNoTrustFolder(_ fixture: String) throws {
+    #expect(ClaudeScreen.dialog(try screenFixture(fixture)).flatMap(ClaudeScreen.trustFolder) == nil)
+  }
+
+  /// The title must be the line right below the dialog's top rule.
+  @Test(arguments: [
+    [" Bash command", " Accessing workspace:"], ["", " Accessing workspace:"], [" ❯ 1. Yes", " Accessing workspace:"],
+  ])
+  func aTitleThatIsNotRightBelowTheRuleIsNoTrustDialog(_ rows: [String]) throws {
+    let lines = try redrawnDialog("trust-open", " Accessing workspace:", rows)
+
+    #expect(ClaudeScreen.trustFolder(lines) == nil)
+  }
+
+  @Test(arguments: [
+    " Accessing workspace", " Accessing workspaces:", " Accessing workspace: now", " Accessing:",
+    " accessing workspace:",
+  ])
+  func anotherTitleIsNoTrustDialog(_ title: String) throws {
+    let lines = try redrawnDialog("trust-open", " Accessing workspace:", [title])
+
+    #expect(ClaudeScreen.trustFolder(lines) == nil)
+  }
+
+  /// A dialog whose line below the title is not a path names no folder,
+  /// because the next paragraph's prose would read as one.
+  @Test(arguments: [[""], [" Review this folder"], [" ~/dev/repo"], [" dev/repo"]])
+  func aTrustDialogWithoutAFolderLineNamesNoFolder(_ rows: [String]) throws {
+    let lines = try redrawnDialog("trust-open", capturedTrustLine, rows)
+
+    #expect(ClaudeScreen.trustFolder(lines) == nil)
+  }
+
+  @Test func highlightsNoExitFirst() throws {
+    let item = try #require(ClaudeScreen.highlighted(try dialog("trust-open")))
+
+    #expect(item == "No, exit")
+    #expect(ClaudeScreen.isTrustNo(item))
+    #expect(!ClaudeScreen.isTrustYes(item))
+  }
+
+  /// The highlight on Yes, as Down draws it, built from the capture so that
+  /// nobody presses keys in a live session.
+  @Test func aHighlightMovedToYesIsTrustYes() throws {
+    let lines = try redrawnDialog(
+      "trust-open",
+      [(" ❯ No, exit", ["   No, exit"]), ("   Yes, I trust this folder", [" ❯ Yes, I trust this folder"])])
+    let item = try #require(ClaudeScreen.highlighted(lines))
+
+    #expect(item == "Yes, I trust this folder")
+    #expect(ClaudeScreen.isTrustYes(item))
+    #expect(ClaudeScreen.trustFolder(lines) == capturedTrustFolder)
+  }
+
+  @Test func showsATrustCardForItsFolder() throws {
+    let lines = try dialog("trust-open")
+
+    #expect(ClaudeScreen.shows(trustCard(capturedTrustFolder), lines))
+    #expect(ClaudeScreen.mayShow(trustCard(capturedTrustFolder), lines))
+  }
+
+  @Test func showsATrustCardForItsWrappedFolder() throws {
+    let lines = try redrawnDialog("trust-open", capturedTrustLine, [" /Users/me/.sb/cha", "ts/g4rvrf"])
+
+    #expect(ClaudeScreen.shows(trustCard(capturedTrustFolder), lines))
+  }
+
+  @Test(arguments: [
+    "/Users/me/.sb/chats/other", "/Users/me/.sb/chats/g4rv", "/Users/me/.sb/chats/g4rvrf/",
+    "/Users/me/.sb/chats/g4rvrf/sub", "/Users/me/.sb/chats", "/private/Users/me/.sb/chats/g4rvrf", "",
+  ])
+  func showsATrustCardOnlyForItsFolder(_ folder: String) throws {
+    let lines = try dialog("trust-open")
+
+    #expect(!ClaudeScreen.shows(trustCard(folder), lines))
+    #expect(!ClaudeScreen.mayShow(trustCard(folder), lines))
+  }
+
+  @Test(arguments: ["perm-open", "q-open", "edit-open"])
+  func anotherDialogShowsNoTrustCard(_ fixture: String) throws {
+    let lines = try dialog(fixture)
+
+    #expect(!ClaudeScreen.shows(trustCard(capturedTrustFolder), lines))
+    #expect(!ClaudeScreen.mayShow(trustCard(capturedTrustFolder), lines))
+  }
+
+  /// A dialog that names another folder, as when the screen changed after
+  /// the card opened, never takes the card's answer.
+  @Test func anotherFoldersTrustDialogShowsNoTrustCard() throws {
+    let lines = try redrawnDialog("trust-open", capturedTrustLine, [" /Users/me/dev/other"])
+
+    #expect(!ClaudeScreen.shows(trustCard(capturedTrustFolder), lines))
+  }
+
+  /// Keys for a permission card must never land on the trust dialog.
+  @Test func theTrustDialogShowsNoPermissionOrQuestionCard() throws {
+    let lines = try dialog("trust-open")
+
+    #expect(!ClaudeScreen.shows(bashCard(capturedCommand), lines))
+    #expect(!ClaudeScreen.shows(fruitCard(), lines))
+  }
+
+  @Test(arguments: [
+    ("Yes, I trust this folder", true, false), ("2. Yes, I trust this folder", true, false),
+    ("No, exit", false, true), ("1. No, exit", false, true), ("Yes", false, false), ("1. Yes", false, false),
+    ("Yes, I trust this folder and its parents", false, false), ("Yes, I trust this", false, false),
+    ("No", false, false), ("2. No", false, false), ("No, exit now", false, false), ("No, exit.", false, false),
+    ("❯ Yes, I trust this folder", false, false),
+  ])
+  func isTrustYesAndIsTrustNo(_ item: String, _ yes: Bool, _ no: Bool) {
+    #expect(ClaudeScreen.isTrustYes(item) == yes)
+    #expect(ClaudeScreen.isTrustNo(item) == no)
+  }
+
+  /// A permission card's typed Yes must not pick the trust dialog's Yes.
+  @Test func theTrustDialogsYesIsNotAPermissionsYes() {
+    #expect(!ClaudeScreen.isYes("Yes, I trust this folder"))
   }
 }

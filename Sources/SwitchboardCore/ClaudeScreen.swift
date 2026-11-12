@@ -26,6 +26,7 @@ public enum ClaudeScreen {
   /// show its change, as `FileCall` describes. A question dialog is the
   /// card's when one of the card's marks appears in it.
   public static func shows(_ card: Card, _ dialog: [String]) -> Bool {
+    if card.kind == .trust { return card.cwd != nil && trustFolder(dialog) == card.cwd }
     guard card.kind == .permission else {
       return card.marks.contains { mark in dialog.contains { $0.contains(mark) } }
     }
@@ -79,6 +80,28 @@ public enum ClaudeScreen {
     }
     return line.replacingOccurrences(of: "^ *❯ ", with: "", options: .regularExpression)
       .trimmingCharacters(in: .whitespaces)
+  }
+
+  /// The folder that Claude Code's workspace trust dialog names, or nil when
+  /// the dialog is another. The title "Accessing workspace:" follows the
+  /// dialog's top rule. The folder is the lines after the title up to the
+  /// next blank line. Claude Code breaks a path that is wider than the pane
+  /// in the middle, so the lines join with no separator.
+  public static func trustFolder(_ dialog: [String]) -> String? {
+    let lines = dialog.map { $0.trimmingCharacters(in: .whitespaces) }
+    guard lines.count > 2, isRule(lines[0]), lines[1] == "Accessing workspace:" else { return nil }
+    let folder = lines[2...].drop { $0.isEmpty }.prefix { !$0.isEmpty }.joined()
+    return folder.hasPrefix("/") ? folder : nil
+  }
+
+  /// Whether a menu item is the trust dialog's Yes.
+  public static func isTrustYes(_ item: String) -> Bool {
+    item.range(of: "^(\\d+\\. )?Yes, I trust this folder$", options: .regularExpression) != nil
+  }
+
+  /// Whether a menu item is the trust dialog's No, which exits claude.
+  public static func isTrustNo(_ item: String) -> Bool {
+    item.range(of: "^(\\d+\\. )?No, exit$", options: .regularExpression) != nil
   }
 
   /// Whether a menu item is a permission dialog's plain Yes.

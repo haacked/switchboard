@@ -179,3 +179,74 @@ private let pasteDeliveries: [Delivery] = [.pasted, .queued]
     #expect(decoded.uncertain == ["fix it"])
   }
 }
+
+/// What a restart rebuilds after claude exited at the trust dialog. Live,
+/// `Service.closeTrust` puts the launch's prompt at the front of `pending`,
+/// and later messages go behind it. Replay must build the same queue.
+@Suite struct ReplayTrustTests {
+  /// A launch that carried `prompt` and stopped at the trust dialog, a
+  /// message queued while the card was open, the exit, and a message queued after it.
+  private func exitAtTheDialog(_ prompt: String) -> [Event] {
+    [
+      sent(prompt, .resumed, 1), event("started", 1, ["prompt": .string(prompt)]), event("running", 2),
+      trustDialog(prompt: prompt), sent("queued before the exit", .queued, 4), trustClosed(5, prompt: prompt),
+      sent("queued after the exit", .queued, 7),
+    ]
+  }
+
+  @Test(arguments: ["hello", "null", "  42  ", "Say \"hi\"\nthen\tstop", "queued before the exit"])
+  func trustClosedPutsThePromptFirst(_ prompt: String) {
+    let r = replay(exitAtTheDialog(prompt))
+
+    #expect(r.pending == [prompt, "queued before the exit", "queued after the exit"])
+    #expect(r.uncertain.isEmpty)
+  }
+
+  @Test func trustClosedPutsThePromptAheadOfAFailedPaste() {
+    let r = replay([
+      sent("one", .queued, 1), after("pasting", "one", 2), after("requeued", "one", 3), trustDialog(t: 4),
+      trustClosed(5, prompt: "hello"),
+    ])
+
+    #expect(r.pending == ["hello", "one"])
+  }
+
+  @Test(arguments: [nil, ""] as [String?])
+  func trustClosedWithoutAPromptAddsNothing(_ prompt: String?) {
+    let r = replay([
+      event("started", 1, ["prompt": .null]), trustDialog(prompt: nil), sent("queued", .queued, 4),
+      trustClosed(5, prompt: prompt),
+    ])
+
+    #expect(r.pending == ["queued"])
+  }
+
+  @Test func trustClosedWithANullPromptAddsNothing() {
+    let closed = Event(id: 6, session: "s1", t: 5, kind: "trust_closed", data: ["card": 5, "prompt": .null])
+
+    let r = replay([trustDialog(prompt: nil), closed])
+
+    #expect(r.pending.isEmpty)
+  }
+
+  /// The kept prompt reaches claude by a paste after the next launch, so
+  /// its `delivered` takes it out like any other message.
+  @Test func theKeptPromptLeavesPendingWhenItsPasteIsDelivered() {
+    let r = replay(
+      exitAtTheDialog("hello") + [
+        event("resumed", 8, ["prompt": .null]), event("SessionStart", 9), after("pasting", "hello", 10),
+        after("delivered", "hello", 11),
+      ])
+
+    #expect(r.pending == ["queued before the exit", "queued after the exit"])
+    #expect(r.uncertain.isEmpty)
+  }
+
+  @Test func theKeptPromptSurvivesEncoding() throws {
+    let r = replay(exitAtTheDialog("hello"))
+
+    let decoded = try JSONCoding.decode(SessionReplay.self, from: try JSONCoding.encode(r))
+
+    #expect(decoded.pending == r.pending)
+  }
+}
