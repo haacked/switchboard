@@ -13,6 +13,14 @@ func screenFixture(_ name: String) throws -> String {
     .replacingOccurrences(of: "␛", with: "\u{1B}")
 }
 
+/// The data of a hook event that Claude Code sent, with the user's name
+/// written as "someone".
+func eventFixture(_ name: String) throws -> JSON {
+  let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/events")
+  let text = try String(contentsOf: dir.appendingPathComponent("\(name).json"), encoding: .utf8)
+  return try JSONCoding.decode(JSON.self, from: text)
+}
+
 /// The command that the captured permission dialogs ask about.
 let capturedCommand = "touch SB800284.txt"
 
@@ -109,13 +117,14 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   @Test(arguments: [
     "perm-open", "perm-down", "q-open", "edit-open", "edit-down", "edit-multi", "write-open", "write-overwrite",
     "write-long", "read-open", "write-memory", "write-cut-path", "write-symlink", "write-overwrite-symlink",
-    "edit-symlink", "read-symlink",
+    "edit-symlink", "read-symlink", "write-restart", "write-restart-tall", "write-restart-cut-path",
+    "write-restart-narrow",
   ])
   func anOpenDialogEndsAtItsFooter(_ fixture: String) throws {
     #expect(try dialog(fixture).last?.contains("Esc to cancel") == true)
   }
 
-  @Test(arguments: ["perm-after-yes", "perm-after-esc", "q-after-esc", "edit-after-esc"])
+  @Test(arguments: ["perm-after-yes", "perm-after-esc", "q-after-esc", "edit-after-esc", "write-restart-after-esc"])
   func aScreenWithThePromptBoxShowsNoDialog(_ fixture: String) throws {
     #expect(ClaudeScreen.dialog(try screenFixture(fixture)) == nil)
   }
@@ -384,8 +393,10 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   @Test func anotherCardsDialogIsAMiss() throws {
     var watch = DialogWatch()
     let card = bashCard(capturedCommand)
+    var other = bashCard("rm other.txt")
+    other.id = 5
     let screens = [try shown(), try otherCommandsScreen(), try otherCommandsScreen()]
-    #expect(results(&watch, [card], screens) == [[], [], [card.id]])
+    #expect(results(&watch, [card, other], screens) == [[], [], [card.id]])
   }
 
   @Test func aCardThatIsNoLongerOpenIsNotReported() throws {
@@ -436,8 +447,10 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   @Test func anotherEditsDialogIsAMiss() throws {
     var watch = DialogWatch()
     let card = editCard()
+    var other = multiEditCard()
+    other.id = 5
     let screens = try ["edit-open", "edit-multi", "edit-multi"].map(screenFixture)
-    #expect(results(&watch, [card], screens) == [[], [], [card.id]])
+    #expect(results(&watch, [card, other], screens) == [[], [], [card.id]])
   }
 
   @Test func aClosedHooksEditCardHasLeftAfterTwoMissesThoughNoCheckSawIt() throws {
@@ -462,12 +475,12 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(results(&watch, [editCard()], screens) == [[], [], []])
   }
 
-  @Test func aClosedHooksEditDialogWhoseTopScrolledOffHasLeft() throws {
+  @Test func aClosedHooksEditDialogWhoseTopScrolledOffStays() throws {
     var watch = DialogWatch()
     var card = editCard()
     card.hookClosed = true
     let screens = [try screenFixture("edit-open"), try editWithItsTopScrolledOff(), try editWithItsTopScrolledOff()]
-    #expect(results(&watch, [card], screens) == [[], [], [card.id]])
+    #expect(results(&watch, [card], screens) == [[], [], []])
   }
 
   @Test func aReadCardStaysWhileItsDialogShows() throws {
@@ -484,6 +497,254 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     card.deferred = true
     let screens = [try screenFixture("q-open"), try screenFixture("q-after-esc"), try screenFixture("q-after-esc")]
     #expect(results(&watch, [card], screens) == [[], [], []])
+  }
+
+  @Test(arguments: [false, true], [false, true])
+  func anUnmatchedDialogIsNotAMiss(_ hookClosed: Bool, _ seen: Bool) throws {
+    var watch = DialogWatch()
+    var card = bashCard(capturedCommand)
+    card.hookClosed = hookClosed
+    let screens = (seen ? [try shown()] : []) + Array(repeating: try otherCommandsScreen(), count: 3)
+    #expect(results(&watch, [card], screens) == Array(repeating: [], count: screens.count))
+  }
+
+  @Test(arguments: [false, true])
+  func anUnmatchedDialogResetsTheRunOfMisses(_ hookClosed: Bool) throws {
+    var watch = DialogWatch()
+    var card = editCard()
+    card.hookClosed = hookClosed
+    let gone = try screenFixture("edit-after-esc")
+    let screens = [try screenFixture("edit-open"), gone, try editWithItsTopScrolledOff(), gone, gone]
+    #expect(results(&watch, [card], screens) == [[], [], [], [], [card.id]])
+  }
+
+  @Test(arguments: [("perm-open", "perm-after-yes"), ("edit-open", "edit-after-esc")], [false, true])
+  func aDialogThatTwoCardsMatchIsASightingForBoth(_ fixtures: (String, String), _ hookClosed: Bool) throws {
+    var watch = DialogWatch()
+    var first = fixtures.0 == "perm-open" ? bashCard(capturedCommand) : editCard()
+    first.hookClosed = hookClosed
+    var second = first
+    second.id = 5
+    let shown = try screenFixture(fixtures.0)
+    let gone = try screenFixture(fixtures.1)
+    #expect(results(&watch, [first, second], [shown, shown, gone, gone]) == [[], [], [], [first.id, 5]])
+  }
+
+  /// Whether the card's hook closed, and whether a check saw its dialog first.
+  static let hookAndSeen: [(Bool, Bool)] = [(false, false), (false, true), (true, false), (true, true)]
+
+  /// A captured screen, or one that this suite redraws from a capture.
+  func screen(_ name: String) throws -> String {
+    switch name {
+    case "perm-open-other": return try otherCommandsScreen()
+    case "edit-open-top-scrolled-off": return try editWithItsTopScrolledOff()
+    default: return try screenFixture(name)
+    }
+  }
+
+  /// The card's own dialog when `seen` holds, then `rest`.
+  func run(_ shown: String, seen: Bool, _ rest: [String]) throws -> [String] {
+    try ((seen ? [shown] : []) + rest).map(screen)
+  }
+
+  /// A lone card, its own dialog, and a dialog that no open card may show.
+  static let unmatchedDialogs: [(Card, String, String)] = [
+    (bashCard(capturedCommand), "perm-open", "perm-open-other"), (bashCard(capturedCommand), "perm-open", "edit-open"),
+    (bashCard(capturedCommand), "perm-open", "q-open"), (bashCard(capturedCommand), "perm-open", "trust-open"),
+    (editCard(), "edit-open", "edit-open-top-scrolled-off"), (editCard(), "edit-open", "edit-multi"),
+    (editCard(), "edit-open", "read-open"), (editCard(), "edit-open", "perm-open-other"),
+  ]
+
+  @Test(arguments: unmatchedDialogs, hookAndSeen)
+  func noUnmatchedDialogIsAMiss(_ shape: (Card, String, String), _ state: (Bool, Bool)) throws {
+    var watch = DialogWatch()
+    var card = shape.0
+    card.hookClosed = state.0
+    let screens = try run(shape.1, seen: state.1, Array(repeating: shape.2, count: 3))
+    #expect(results(&watch, [card], screens) == Array(repeating: [], count: screens.count))
+  }
+
+  /// A card, its own dialog, and a screen without a dialog.
+  static let screensWithoutADialog: [(Card, String, String)] = [
+    (bashCard(capturedCommand), "perm-open", "perm-after-yes"),
+    (bashCard(capturedCommand), "perm-open", "perm-after-esc"),
+    (bashCard(capturedCommand), "perm-open", "prompt-empty"), (editCard(), "edit-open", "edit-after-esc"),
+    (editCard(), "edit-open", "prompt-typed"),
+  ]
+
+  @Test(arguments: screensWithoutADialog, hookAndSeen)
+  func aScreenWithoutADialogIsAMiss(_ shape: (Card, String, String), _ state: (Bool, Bool)) throws {
+    var watch = DialogWatch()
+    var card = shape.0
+    card.hookClosed = state.0
+    let screens = try run(shape.1, seen: state.1, [shape.2, shape.2])
+    let leaves = state.0 || state.1
+    let expected: [[Int64]] = (state.1 ? [[]] : []) + [[], leaves ? [card.id] : []]
+    #expect(results(&watch, [card], screens) == expected)
+  }
+
+  static func withId(_ card: Card, _ id: Int64) -> Card {
+    var card = card
+    card.id = id
+    return card
+  }
+
+  /// A card, its own dialog, another open card with id 5, and that card's dialog.
+  static let otherCardsDialogs: [(Card, String, Card, String)] = [
+    (bashCard(capturedCommand), "perm-open", withId(bashCard("rm other.txt"), 5), "perm-open-other"),
+    (editCard(), "edit-open", withId(multiEditCard(), 5), "edit-multi"),
+    (editCard(), "edit-open", withId(bashCard(capturedCommand), 5), "perm-open"),
+    (bashCard(capturedCommand), "perm-open", withId(editCard(), 5), "edit-open"),
+  ]
+
+  @Test(arguments: otherCardsDialogs, hookAndSeen)
+  func anotherOpenCardsDialogIsAMiss(_ shape: (Card, String, Card, String), _ state: (Bool, Bool)) throws {
+    var watch = DialogWatch()
+    var card = shape.0
+    card.hookClosed = state.0
+    let screens = try run(shape.1, seen: state.1, [shape.3, shape.3])
+    let leaves = state.0 || state.1
+    let expected: [[Int64]] = (state.1 ? [[]] : []) + [[], leaves ? [card.id] : []]
+    #expect(results(&watch, [card, shape.2], screens) == expected)
+  }
+
+  /// A card, its own dialog, and another open card with id 5 whose dialog
+  /// sbd doesn't watch, with that dialog.
+  static let unwatchedCardsDialogs: [(Card, String, Card, String)] = [
+    (bashCard(capturedCommand), "perm-open", deferred(withId(fruitCard(), 5)), "q-open"),
+    (bashCard(capturedCommand), "perm-open", deferred(withId(bashCard("rm other.txt"), 5)), "perm-open-other"),
+  ]
+
+  static func deferred(_ card: Card) -> Card {
+    var card = card
+    card.deferred = true
+    return card
+  }
+
+  @Test(arguments: unwatchedCardsDialogs, hookAndSeen)
+  func aDialogThatOnlyAnUnwatchedCardMayShowIsNotAMiss(
+    _ shape: (Card, String, Card, String), _ state: (Bool, Bool)
+  ) throws {
+    var watch = DialogWatch()
+    var card = shape.0
+    card.hookClosed = state.0
+    let screens = try run(shape.1, seen: state.1, Array(repeating: shape.3, count: 3))
+    #expect(results(&watch, [card, shape.2], screens) == Array(repeating: [], count: screens.count))
+  }
+
+  @Test(arguments: [false, true])
+  func aCardsOwnDialogIsNeverAMiss(_ hookClosed: Bool) throws {
+    var watch = DialogWatch()
+    var card = editCard()
+    card.hookClosed = hookClosed
+    let screens = try ["edit-open", "edit-down", "edit-open", "edit-down"].map(screenFixture)
+    #expect(results(&watch, [card], screens) == [[], [], [], []])
+  }
+
+  /// A question whose header is a word of the file that the Edit dialog shows.
+  static func gammaQuestion() -> Card {
+    let questions: JSON = [
+      "questions": [["question": "Which letter?", "header": "gamma", "options": [["label": "a"], ["label": "b"]]]]
+    ]
+    var card = facts(promptTurn(ask(questions), ask(questions, id: nil))).cards[0]
+    card.id = 5
+    return card
+  }
+
+  @Test(arguments: [false, true])
+  func aQuestionDoesNotClaimAPermissionDialogWhoseTopScrolledOff(_ hookClosed: Bool) throws {
+    var watch = DialogWatch()
+    var card = editCard()
+    card.hookClosed = hookClosed
+    let question = DialogWatchChecks.gammaQuestion()
+    let scrolled = try editWithItsTopScrolledOff()
+    #expect(scrolled.contains("gamma"))
+    let screens = [try screenFixture("edit-open"), scrolled, scrolled, scrolled]
+    #expect(results(&watch, [card, question], screens) == [[], [], [], []])
+  }
+
+  @Test func aQuestionsOwnDialogIsAMissForAnOpenPermissionCard() throws {
+    var watch = DialogWatch()
+    let card = bashCard(capturedCommand)
+    var question = fruitCard()
+    question.id = 5
+    let screens = try ["perm-open", "q-open", "q-open"].map(screenFixture)
+    #expect(results(&watch, [card, question], screens) == [[], [], [card.id]])
+  }
+}
+
+/// The Write prompt of session shtw8y, whose card left the Inbox after sbd
+/// restarted while the pane was too short for the dialog. Claude Code 2.1.322
+/// drew the `write-restart` screens for it.
+func writeRestartCard(restarted: Bool = true) throws -> Card {
+  let request = Event(id: 3, session: "s1", t: 2, kind: "PermissionRequest", data: try eventFixture("write-restart"))
+  var replay = SessionReplay.replaying([request], session: session())
+  if restarted { replay.restarted() }
+  return try #require(replay.facts.cards.first)
+}
+
+@Suite struct WriteRestartDialog {
+  /// The dialog with its title scrolled off, with its path cut by the
+  /// pane's width, and with both.
+  static let cutDialogs = ["write-restart-tall", "write-restart-cut-path", "write-restart-narrow"]
+
+  func results(_ watch: inout DialogWatch, _ card: Card, _ fixtures: [String]) throws -> [[Int64]] {
+    try fixtures.map { watch.check([card], screen: try screenFixture($0)) }
+  }
+
+  @Test func theRestartClosesTheCardsHook() throws {
+    #expect(try writeRestartCard().hookClosed)
+  }
+
+  @Test func theFullDialogShowsTheCard() throws {
+    #expect(ClaudeScreen.shows(try writeRestartCard(), try dialog("write-restart")))
+  }
+
+  @Test(arguments: cutDialogs)
+  func eachCutDialogIsStillADialog(_ fixture: String) throws {
+    let lines = ClaudeScreen.dialog(try screenFixture(fixture))
+    #expect(lines != nil)
+    #expect(!ClaudeScreen.mayShow(try writeRestartCard(), lines ?? []))
+  }
+
+  @Test(arguments: cutDialogs)
+  func aRestartedCardStaysThroughCutDialogs(_ fixture: String) throws {
+    var watch = DialogWatch()
+    let card = try writeRestartCard()
+    let left = try results(&watch, card, Array(repeating: fixture, count: 4))
+    #expect(left == [[], [], [], []])
+    #expect(ClaudeScreen.shows(card, try dialog("write-restart")))
+  }
+
+  @Test func aRestartedCardStaysThroughEachCutDialogInTurn() throws {
+    var watch = DialogWatch()
+    let fixtures = WriteRestartDialog.cutDialogs + WriteRestartDialog.cutDialogs
+    let left = try results(&watch, try writeRestartCard(), fixtures)
+    #expect(left == Array(repeating: [], count: fixtures.count))
+  }
+
+  @Test func aRestartedCardLeavesAfterEscape() throws {
+    var watch = DialogWatch()
+    let fixtures = ["write-restart-after-esc", "write-restart-after-esc"]
+    let left = try results(&watch, try writeRestartCard(), fixtures)
+    #expect(left == [[], [3]])
+  }
+
+  @Test(arguments: cutDialogs)
+  func aRestartedCardLeavesAfterEscapeThatFollowsACutDialog(_ fixture: String) throws {
+    var watch = DialogWatch()
+    let fixtures = [fixture, fixture, "write-restart-after-esc", "write-restart-after-esc"]
+    let left = try results(&watch, try writeRestartCard(), fixtures)
+    #expect(left == [[], [], [], [3]])
+  }
+
+  @Test func aSeenCardWithAnOpenHookStaysWhenThePaneNarrows() throws {
+    var watch = DialogWatch()
+    let card = try writeRestartCard(restarted: false)
+    let fixtures = ["write-restart", "write-restart-cut-path", "write-restart-cut-path", "write-restart-narrow"]
+    #expect(!card.hookClosed)
+    let left = try results(&watch, card, fixtures)
+    #expect(left == [[], [], [], []])
   }
 }
 
@@ -721,8 +982,11 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
   ]
 
   @Test(
-    arguments: parityCards,
-    ["edit-open", "edit-down", "edit-multi", "write-open", "write-overwrite", "write-long", "read-open", "perm-open"])
+    arguments: try parityCards + [writeRestartCard()],
+    [
+      "edit-open", "edit-down", "edit-multi", "write-open", "write-overwrite", "write-long", "read-open", "perm-open",
+      "write-restart", "write-restart-tall", "write-restart-cut-path", "write-restart-narrow",
+    ])
   func aFileCardMayShowExactlyTheDialogsThatShowIt(_ card: Card, _ fixture: String) throws {
     let lines = try dialog(fixture)
     #expect(ClaudeScreen.mayShow(card, lines) == ClaudeScreen.shows(card, lines))

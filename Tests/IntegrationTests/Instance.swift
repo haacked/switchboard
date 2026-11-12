@@ -382,6 +382,14 @@ final class Instance {
   /// Types the text into the session's Claude pane without Enter, so it stays in the prompt box.
   func typeDraft(_ id: String, _ text: String) throws { try sendKeys(id, ["-l", text]) }
 
+  /// Sets the height of the session's Claude pane. tmux moves the top rows
+  /// into the history when the pane shrinks, and brings them back when it grows.
+  func resize(_ id: String, rows: Int) throws {
+    let t = try client.terminals(id)
+    let r = try runCommand(t.tmux, ["-S", t.socket, "resize-window", "-t", "=\(t.claude):", "-y", String(rows)])
+    guard r.status == 0 else { throw TestError(description: "tmux resize-window -y \(rows): \(r.stderr)") }
+  }
+
   private func sendKeys(_ id: String, _ keys: [String]) throws {
     let t = try client.terminals(id)
     let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):"] + keys)

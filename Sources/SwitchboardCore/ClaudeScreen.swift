@@ -35,11 +35,15 @@ public enum ClaudeScreen {
     return words(shown.joined(separator: " ")) == words(command)
   }
 
-  /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
-  /// this holds. Claude Code breaks a token that is wider than the pane in
-  /// the middle, so this ignores white space. `shows` decides what sbd may
-  /// type. A file tool's `shows` already ignores white space.
+  /// Whether the dialog may be the card's. `DialogWatch` uses it to decide
+  /// which open card a dialog belongs to. Claude Code breaks a token that is
+  /// wider than the pane in the middle, so this ignores white space. `shows`
+  /// decides what sbd may type. A file tool's `shows` already ignores white
+  /// space. A question's dialog has no dashed rule. A permission dialog with
+  /// its title scrolled off can still show a question's mark in its rows, so
+  /// a question card never claims a dialog with a dashed rule.
   public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
+    if card.kind == .question && dialog.contains(where: isDashedRule) { return false }
     guard card.kind == .permission, FileCall(card) == nil else { return shows(card, dialog) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
     return squeezed(shown.joined()) == squeezed(command)
@@ -200,14 +204,17 @@ public enum ClaudeScreen {
   }
 }
 
-/// Decides when a card's dialog has left the screen. A card's dialog has left
-/// when two checks in a row don't show it, and either an earlier check showed
-/// it or the card's hook closed. A card whose dialog Claude Code hasn't drawn
-/// yet stays. A hook closes only after its dialog was drawn, so a card whose
-/// hook closed before any check saw its dialog still goes. The second check
-/// keeps a card through a redraw, such as when a terminal attaches and
-/// resizes the pane. While the card's hook is open, a dialog whose top
-/// scrolled off the pane is not a miss, because it may still be the card's.
+/// Decides when a card's dialog has left the screen. A check is a miss for a
+/// card when the screen shows no dialog, or when `mayShow` gives the dialog
+/// to another watched card. A dialog that no watched card may show is not a
+/// miss, because it may be the card's own dialog with its title scrolled off
+/// or its path cut by a narrow pane. Such a dialog resets the run of misses,
+/// so a later miss can't complete a run that began before it. It doesn't
+/// count as a sighting either. A card's dialog has left after two misses in a
+/// row, when an earlier check showed the dialog or the card's hook closed.
+/// The second miss keeps a card through a redraw, such as when a terminal
+/// attaches and resizes the pane. A card whose hook is open stays until a
+/// check shows its dialog, because Claude Code may not have drawn it yet.
 public struct DialogWatch: Equatable, Sendable {
   struct Sighting: Equatable, Sendable {
     var seen = false
@@ -225,14 +232,16 @@ public struct DialogWatch: Equatable, Sendable {
   /// of the cards whose dialog left. It forgets every other card.
   public mutating func check(_ open: [Card], screen: String) -> [Int64] {
     let dialog = ClaudeScreen.dialog(screen)
+    let watched = open.filter(DialogWatch.watches)
     var next: [Int64: Sighting] = [:]
     var left: [Int64] = []
-    for card in open where DialogWatch.watches(card) {
+    for card in watched {
       var s = sightings[card.id] ?? Sighting()
-      let topScrolledOff = !card.hookClosed && dialog?.first.map(ClaudeScreen.isRule) == false
       if let dialog, ClaudeScreen.mayShow(card, dialog) {
         s = Sighting(seen: true, misses: 0)
-      } else if !topScrolledOff {
+      } else if let dialog, !watched.contains(where: { ClaudeScreen.mayShow($0, dialog) }) {
+        s.misses = 0
+      } else {
         s.misses += 1
       }
       if s.misses >= 2 && (s.seen || card.hookClosed) {
