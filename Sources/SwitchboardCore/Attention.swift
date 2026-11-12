@@ -36,6 +36,16 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// The prompt that the last launch passed to claude, if any.
+  public var lastLaunchPrompt: String?
+  /// The launch whose trust dialog opened a trust card. sbd opens one card
+  /// per launch.
+  public var trustLaunch: Int64?
+  /// Whether claude exited at the workspace trust dialog since its last launch.
+  public var exitedAtTrust = false
+  /// Whether the main session sent any hook since the last launch. Claude
+  /// sends none while the trust dialog shows.
+  public var hookSinceLaunch = false
   /// Background jobs that run under claude, as the last `job` event counted
   /// them. A job sends no hooks, so sbd's tick finds it in the process list.
   public var jobs = 0
@@ -164,6 +174,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let fromSubagent = event.fromSubagent
     let tool = d["tool_name"]?.string ?? ""
     if !fromSubagent, let mode = d["permission_mode"]?.string { permissionMode = mode }
+    if !fromSubagent, SessionFacts.hookKinds.contains(event.kind) { hookSinceLaunch = true }
     switch event.kind {
     case "SessionStart":
       live = true
@@ -177,6 +188,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       docket.apply(d)
     case "started", "resumed":
       lastLaunch = event.t
+      lastLaunchPrompt = d["prompt"]?.string
+      exitedAtTrust = false
+      hookSinceLaunch = false
       permissionMode = d["permission_mode"]?.string
     case "imported":
       // The transcript's last line, not the import, is the session's last activity.
@@ -401,6 +415,10 @@ public enum Attention {
     if let verdict = docketVerdict(session, facts) { return verdict }
     if let card = facts.cards.first {
       return Verdict(state: .needsYou, reason: oneLine(card.reason))
+    }
+    if facts.exitedAtTrust {
+      return Verdict(
+        state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
     if let p = facts.openPermission {
       return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))

@@ -404,3 +404,117 @@ private let jobEndsAfterTheTurn = [
     #expect(!f.mayReportJob(now: 3))
   }
 }
+
+/// The reason that a session gives after claude exited at the trust dialog.
+let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the session to answer it again"
+
+@Suite struct TrustAttention {
+  /// `reason` abbreviates the folder with the home of the process that runs
+  /// the test, so the folder is under that home.
+  @Test func aTrustCardOutranksTheFirstPromptRule() throws {
+    let f = facts(trustLaunch(folder: "\(NSHomeDirectory())/dev/repo"))
+    try #require(f.prompts == 0 && f.lastReply == nil)
+
+    let verdict = Attention.evaluate(session(), f, now: 4)
+
+    #expect(verdict == Verdict(state: .needsYou, reason: "trust the folder ~/dev/repo"))
+  }
+
+  @Test func aTrustCardOutsideTheHomeNamesTheWholeFolder() {
+    let f = facts(trustLaunch(folder: "/private/tmp/w"))
+
+    #expect(Attention.evaluate(session(), f, now: 4).reason == "trust the folder /private/tmp/w")
+  }
+
+  /// Exit on the card records `answered` and then `trust_closed`. Exit
+  /// typed in the terminal, `sb stop`, and a crash record only `trust_closed`.
+  @Test(arguments: [false, true])
+  func exitedAtTrustSaysSo(_ answeredFirst: Bool) throws {
+    let answer = answeredFirst ? [event("answered", 5, ["card": 5, "behavior": "deny", "delivery": "terminal"])] : []
+    let f = facts(trustLaunch() + answer + [trustClosed(5), event("exited", 7)])
+    try #require(f.prompts == 0 && f.lastReply == nil)
+
+    let verdict = Attention.evaluate(session(), f, now: 8)
+
+    #expect(verdict == Verdict(state: .needsYou, reason: exitedAtTrustReason))
+  }
+
+  @Test func exitedAtTrustKeepsSayingSoAfterARestart() {
+    var replay = SessionReplay.replaying(trustLaunch() + [trustClosed(5)], session: session())
+
+    replay.restarted()
+
+    #expect(Attention.evaluate(session(), replay.facts, now: 8).reason == exitedAtTrustReason)
+  }
+
+  @Test(arguments: ["started", "resumed"])
+  func aNewLaunchClearsExitedAtTrust(_ kind: String) {
+    let f = facts(trustLaunch() + [trustClosed(5), event(kind, 9, ["prompt": .null])])
+
+    #expect(!f.exitedAtTrust)
+    #expect(Attention.evaluate(session(), f, now: 10).reason != exitedAtTrustReason)
+  }
+
+  /// The next launch's own dialog asks again with a card, which outranks the exit.
+  @Test func theNextLaunchsDialogShowsItsCard() {
+    let f = facts(
+      trustLaunch() + [trustClosed(5), event("resumed", 9, ["prompt": .null]), trustDialog(id: 11, t: 10, launch: 9)])
+
+    #expect(f.cards.map(\.id) == [11])
+    #expect(Attention.evaluate(session(), f, now: 11).reason == "trust the folder /w/repo")
+  }
+
+  @Test func trustLaunchAndLastLaunchPromptFollowTheLaunchEvents() {
+    var f = SessionFacts()
+
+    f.apply(event("started", 1, ["prompt": "hello"]))
+    #expect(f.lastLaunchPrompt == "hello")
+    #expect(f.trustLaunch == nil)
+
+    f.apply(trustDialog(t: 3, launch: 1))
+    #expect(f.trustLaunch == 1)
+    #expect(f.trustLaunch == f.lastLaunch)
+
+    f.apply(event("resumed", 7, ["prompt": .null]))
+    #expect(f.lastLaunchPrompt == nil)
+    #expect(f.lastLaunch == 7)
+    #expect(f.trustLaunch != f.lastLaunch)
+
+    f.apply(event("resumed", 9, ["prompt": "again"]))
+    #expect(f.lastLaunchPrompt == "again")
+  }
+
+  @Test(arguments: ["hello", "null", "", "  42  ", "Say \"hi\"\nthen"])
+  func lastLaunchPromptKeepsThePromptExactly(_ prompt: String) {
+    #expect(facts([event("started", 1, ["prompt": .string(prompt)])]).lastLaunchPrompt == prompt)
+  }
+
+  @Test func aLaunchWithoutAPromptFieldHasNoPrompt() {
+    #expect(facts([event("started", 1, ["prompt": "hello"]), event("resumed", 2)]).lastLaunchPrompt == nil)
+  }
+
+  @Test(arguments: [
+    event("SessionStart", 3), event("UserPromptSubmit", 3, ["prompt": "go"]),
+    event("Notification", 3, ["notification_type": "idle_prompt"]), event("Stop", 3), event("SessionEnd", 3),
+    event("PreToolUse", 3, tool("Bash", ["command": "ls"], id: "b1")),
+  ])
+  func aHookSinceTheLaunchIsAHookSinceLaunch(_ hook: Event) {
+    #expect(facts([event("started", 1, ["prompt": "hello"]), hook]).hookSinceLaunch)
+  }
+
+  /// sbd's own events, and a subagent's hooks, are not the launch's report.
+  @Test(arguments: [
+    event("running", 3), event("job", 3, ["count": 1]), event("sent", 3, ["text": "hi", "delivery": "queued"]),
+    trustDialog(t: 3), event("PreToolUse", 3, tool("Bash", ["command": "ls"], agent: "a1")),
+  ])
+  func otherEventsAreNoHookSinceLaunch(_ other: Event) {
+    #expect(!facts([event("started", 1, ["prompt": "hello"]), other]).hookSinceLaunch)
+  }
+
+  @Test(arguments: ["started", "resumed"])
+  func aNewLaunchClearsHookSinceLaunch(_ kind: String) {
+    let f = facts([event("started", 1), event("SessionStart", 2), event(kind, 5, ["prompt": .null])])
+
+    #expect(!f.hookSinceLaunch)
+  }
+}

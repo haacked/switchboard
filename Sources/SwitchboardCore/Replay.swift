@@ -54,6 +54,10 @@ public struct SessionReplay: Codable, Equatable, Sendable {
       } else if !pending.contains(text) {
         pending.append(text)
       }
+    case "trust_closed":
+      // A launch's prompt that claude never read, because it exited at the
+      // trust dialog, goes to the front, as `Service.closeTrust` puts it.
+      if let prompt = event.data["prompt"]?.string, !prompt.isEmpty { pending.insert(prompt, at: 0) }
     default:
       break
     }

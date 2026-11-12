@@ -824,6 +824,7 @@ public final class Service {
   func startClaude(_ id: String, prompt: String?) throws {
     _ = try requireStartable(id)
     moveToGroupAccount(id)
+    trustOwnFolder(id)
     let session = entries[id]!.session
     let resume = hasTranscript(session)
     var args = [config.claude]
@@ -1698,6 +1699,8 @@ public final class Service {
           if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
+          // Exit typed in the terminal, a stop, or a crash ends claude at the trust dialog.
+          if let card = entries[id]?.facts.trustCard { closeTrust(card) }
           if live { record(id, "exited") }
           // A message sent while claude exited waits in `pending` for a launch.
           // A claude that dies before its SessionStart isn't launched again,
@@ -1729,6 +1732,7 @@ public final class Service {
     }
     endIdleTurns()
     closeGoneDialogs()
+    noteTrustDialogs()
   }
 
   func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {
@@ -1743,13 +1747,14 @@ public final class Service {
   }
 
   /// Whether the session's claude sits idle with nothing that a stop would
-  /// lose: no turn, prompt, queued or in-flight message, or background job,
-  /// and no terminal on screen. The idle stop and the live cap both need it.
+  /// lose: no turn, prompt, trust dialog, queued or in-flight message, or
+  /// background job, and no terminal on screen. The idle stop and the live cap both need it.
   func isQuiet(_ id: String, pid: Int, now: Int64) -> Bool {
     guard let e = entries[id] else { return false }
     let f = e.facts
     return f.live && !f.turnRunning && f.openPermission == nil && f.openQuestion == nil
-      && !e.messageWaiting(now: now) && !attached(id) && backgroundJobs(pid) == 0
+      && f.trustCard == nil && !e.messageWaiting(now: now) && !attached(id)
+      && backgroundJobs(pid) == 0
   }
 
   // MARK: Summaries

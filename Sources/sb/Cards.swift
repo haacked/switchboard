@@ -14,7 +14,7 @@ func cards(_ a: Args) {
     return
   }
   if cards.isEmpty {
-    print("No permission prompts, questions, or group messages are open.")
+    print("No permission prompts, questions, group messages, or folder trust prompts are open.")
     return
   }
   // Claude chose this text, so control characters print as escapes.
@@ -26,6 +26,11 @@ func cards(_ a: Args) {
       // `allow` approves the whole call, so the whole call prints.
       out("\(head)  approve \(card.tool)\(card.offersAutoMode ? ", --auto offered" : "")")
       for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
+      continue
+    }
+    if card.kind == .trust {
+      out("\(head)  trust \(card.summary)")
+      out("      allow trusts the folder, deny exits claude")
       continue
     }
     if let message = card.send {

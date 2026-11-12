@@ -162,10 +162,13 @@ let usage = """
                                   also switches the session to auto mode, where
                                   Claude's classifier decides further
                                   permissions. A prompt from manual or accept
-                                  edits mode offers it
+                                  edits mode offers it. On a folder trust
+                                  prompt, it trusts the folder
     deny [--card N] <session> [message]
                                   deny it. With a message, Claude reads it and
-                                  goes on. Without one, the turn stops.
+                                  goes on. Without one, the turn stops. On a
+                                  folder trust prompt, it exits claude and
+                                  keeps the message that started it
     answer [--card N] <session> <answer>...
                                   answer the session's question, one answer per
                                   question in order. Separate the labels of a

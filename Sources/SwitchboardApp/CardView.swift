@@ -1,7 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
-/// A permission prompt, a question, or a group message, answered without opening the session.
+/// A permission prompt, a question, a group message, or a folder trust prompt, answered without opening the session.
 struct CardView: View {
   /// See SessionViewState for why this isn't `@State`.
   final class Draft: ObservableObject {
@@ -35,6 +35,7 @@ struct CardView: View {
       case .permission: permission
       case .question: questions
       case .send: groupMessage
+      case .trust: trust
       }
     }
     .disabled(model.answering.contains(card.id))
@@ -69,6 +70,23 @@ struct CardView: View {
       if card.offersAutoMode {
         Text(PermissionMode.autoModeNote).font(.caption).foregroundStyle(.secondary)
       }
+    }
+  }
+
+  private var trust: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Claude Code asks whether you trust this folder").font(.headline)
+      Self.textBox(card.summary, maxHeight: 80)
+      HStack {
+        Button("Trust") { model.answer(card, behavior: "allow") }
+          .buttonStyle(.borderedProminent)
+        Button("Exit") { model.answer(card, behavior: "deny") }
+      }
+      Text(
+        "Trust lets Claude Code read, edit, and run files here. Exit stops it and keeps your message for the next start."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
     }
   }
 

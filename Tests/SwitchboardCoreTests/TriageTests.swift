@@ -577,3 +577,32 @@ func replyFixture(_ name: String) throws -> String {
     #expect(config.triage.model == "haiku")
   }
 }
+
+@Suite struct TriageTrustCards {
+  @Test func aTrustCardOffersTrustAndExit() throws {
+    let trust = try #require(item(facts(trustLaunch(folder: "/w/repo"))))
+
+    #expect(trust.source == .card)
+    #expect(trust.kind == .approval)
+    #expect(trust.ref == "card:5")
+    #expect(trust.options.map(\.label) == ["Trust", "Exit"])
+    #expect(trust.options.map(\.action) == [.allow, .deny])
+    #expect(trust.options.map(\.recommended) == [true, false])
+  }
+
+  @Test func aTrustCardsSummaryNamesTheFolderAndWhatEachAnswerDoes() throws {
+    let trust = try #require(item(facts(trustLaunch(folder: "/w/repo"))))
+
+    #expect(
+      trust.summary
+        == "Claude Code asks whether you trust /w/repo before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start."
+    )
+  }
+
+  @Test func anExitAtTheTrustDialogIsARuleItem() throws {
+    let trust = try #require(item(facts(trustLaunch() + [trustClosed(5)])))
+
+    #expect(trust.source == .rule)
+    #expect(trust.summary.hasPrefix("Claude exited at the folder trust prompt"))
+  }
+}

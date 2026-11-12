@@ -498,6 +498,16 @@ public enum Triage {
           openByDefault: true, toolInput: .init(tool: card.tool, text: message.text),
           targets: message.targets.map { "\($0.name) (\($0.id))" }))
     }
+    if card.kind == .trust {
+      return TriageItem(
+        title: title(card.reason), kind: .approval,
+        summary:
+          "Claude Code asks whether you trust \(card.summary) before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start.",
+        options: [
+          TriageOption(label: "Trust", action: .allow, recommended: true),
+          TriageOption(label: "Exit", action: .deny),
+        ], source: .card)
+    }
     if card.kind == .permission {
       return TriageItem(
         title: title(card.reason), kind: .approval, summary: permissionSummary(card),
