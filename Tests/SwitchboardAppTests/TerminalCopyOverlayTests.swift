@@ -110,7 +110,9 @@ private let markdown = """
     window.contentView = view
     // The font of the Claude pane. The captured rows need 90 columns, or SwiftTerm wraps them.
     view.terminal.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-    view.showCopyButtons { done in done(BlockSources(messages: [markdown])) }
+    // The service answers after the overlay has read the screen, so the test holds the answer until then.
+    var deliver: (@MainActor @Sendable (BlockSources) -> Void)?
+    view.showCopyButtons { done in deliver = done }
     let overlay = try #require(view.copyOverlay)
     overlay.pasteboard = board
     let terminal = view.terminal
@@ -120,17 +122,30 @@ private let markdown = """
       try? await Task.sleep(for: .milliseconds(10))
     }
     let cellHeight = terminal.getOptimalFrameSize().height / CGFloat(rowCount)
-    let pointer = terminal.convert(NSPoint(x: 50, y: 10.5 * cellHeight), to: nil)
-    let entered = try #require(
-      NSEvent.enterExitEvent(
-        with: .mouseEntered, location: pointer, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-        context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+    // The terminal is not flipped, and SwiftTerm draws row 0 at the top of its bounds.
+    func onRow(_ row: CGFloat) -> NSPoint {
+      terminal.convert(NSPoint(x: 50, y: terminal.bounds.height - row * cellHeight), to: nil)
+    }
+    func event(_ type: NSEvent.EventType, onRow row: CGFloat) throws -> NSEvent {
+      if type == .mouseMoved {
+        return try #require(
+          NSEvent.mouseEvent(
+            with: type, location: onRow(row), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+      }
+      return try #require(
+        NSEvent.enterExitEvent(
+          with: type, location: onRow(row), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+          context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+    }
 
-    overlay.mouseEntered(with: entered)
+    overlay.mouseEntered(with: try event(.mouseEntered, onRow: 10.5))
+    try #require(deliver != nil)
+    deliver?(BlockSources(messages: [markdown]))
 
     let button = overlay.button
     #expect(!button.isHidden)
-    let quoteTop = terminal.convert(NSPoint(x: 0, y: 9 * cellHeight), to: view).y
+    let quoteTop = terminal.convert(NSPoint(x: 0, y: terminal.bounds.height - 9 * cellHeight), to: view).y
     #expect(abs(button.frame.maxY - quoteTop) < 0.5)
     #expect(button.frame.maxX <= terminal.convert(terminal.bounds, to: view).maxX)
 
@@ -141,6 +156,25 @@ private let markdown = """
         == "First paragraph of the quote with **bold** and `code` and a [link](https://example.com/x) in it, long enough to wrap around the terminal edge.\n\nSecond paragraph."
     )
     #expect(button.title == "Copied")
+
+    overlay.mouseMoved(with: try event(.mouseMoved, onRow: 7.5))
+    #expect(button.isHidden)
+    overlay.mouseMoved(with: try event(.mouseMoved, onRow: 10.5))
+    #expect(!button.isHidden)
+    overlay.mouseExited(with: try event(.mouseExited, onRow: 10.5))
+    #expect(button.isHidden)
+    view.showCopyButtons(nil)
+  }
+
+  @Test func showingTheButtonsAgainKeepsTheRunningOverlay() throws {
+    let view = PaddedTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+    view.showCopyButtons { done in done(BlockSources(messages: [])) }
+    let first = try #require(view.copyOverlay)
+
+    view.showCopyButtons { done in done(BlockSources(messages: ["other"])) }
+
+    #expect(view.copyOverlay === first)
+    #expect(view.subviews.filter { $0 is NSButton }.count == 1)
     view.showCopyButtons(nil)
   }
 
@@ -158,6 +192,13 @@ private let markdown = """
   }
 
   @Test func theButtonSitsOnTheBlocksFirstRowAtTheRightEdge() {
-    #expect(TerminalCopyOverlay.topRight(row: 3, cellHeight: 15, width: 600) == NSPoint(x: 596, y: 45))
+    #expect(
+      TerminalCopyOverlay.topRight(row: 3, cellHeight: 15, size: NSSize(width: 600, height: 310))
+        == NSPoint(x: 596, y: 265))
+  }
+
+  @Test func rowsCountDownFromTheTopOfTheTerminal() {
+    #expect(TerminalCopyOverlay.row(at: 310 - 3.5 * 15, cellHeight: 15, height: 310) == 3)
+    #expect(TerminalCopyOverlay.row(at: 309, cellHeight: 15, height: 310) == 0)
   }
 }

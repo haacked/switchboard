@@ -239,6 +239,12 @@ private let exampleRows =
       ])
   }
 
+  @Test func theLongerOfTwoWholeCodeMatchesWins() {
+    let rows = ["\(Screen.dot) Code:", "", "  let a = 1", "", "  let b = 2", "", "  Done."]
+    let messages = ["```\nlet a = 1\n```", "```\nlet a = 1\n\nlet b = 2\n```"]
+    #expect(TerminalBlocks.find(rows: rows, messages: messages) == [.code(2...4, "let a = 1\n\nlet b = 2")])
+  }
+
   @Test func codeFromSeveralMessagesComesBackInRowOrder() {
     let rows = ["\(Screen.dot) Build:", "", "  make build-all", "", "\(Screen.dot) Test:", "", "  make test-all", ""]
     let messages = ["Test:\n\n```\nmake test-all\n```", "Build:\n\n```\nmake build-all\n```"]
@@ -321,6 +327,12 @@ private let exampleRows =
       ])
     let rows11 = ["  abcdefghijk", "", "  Next."]
     #expect(TerminalBlocks.find(rows: rows11, messages: ["```\nstart()\nabcdefghijk\n```"]) == [])
+  }
+
+  @Test func aWholeCodeMatchWinsOverAPartialOne() {
+    let rows = ["  abcdefghijkl", "", "  Next."]
+    let messages = ["```\nstart()\nabcdefghijkl\n```", "```\nabcdefghijkl\n```"]
+    #expect(TerminalBlocks.find(rows: rows, messages: messages) == [.code(0...0, "abcdefghijkl")])
   }
 
   @Test func partialCodeAtTheBottomNeedsTwelveCharacters() {

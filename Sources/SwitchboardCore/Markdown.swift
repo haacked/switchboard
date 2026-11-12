@@ -205,9 +205,7 @@ public enum MarkdownBlock: Equatable, Sendable {
       return .list(number: number, items: items)
     case "code_block":
       let info = string(cmark_node_get_fence_info(node)).split(whereSeparator: \.isWhitespace).first.map(String.init)
-      var text = literal(node)
-      if text.hasSuffix("\n") { text.removeLast() }
-      return .code(language: info, text: text)
+      return .code(language: info, text: codeText(node))
     case "block_quote":
       return .quote(blocks(of: node, depth: depth + 1))
     case "thematic_break":
@@ -305,6 +303,12 @@ public enum MarkdownBlock: Equatable, Sendable {
     }
   }
   private static func literal(_ node: Node) -> String { string(cmark_node_get_literal(node)) }
+  /// A code block's text without the newline that cmark-gfm keeps after its last line.
+  private static func codeText(_ node: Node) -> String {
+    var text = literal(node)
+    if text.hasSuffix("\n") { text.removeLast() }
+    return text
+  }
   private static func string(_ c: UnsafePointer<CChar>?) -> String { c.map { String(cString: $0) } ?? "" }
 }
 
@@ -320,9 +324,7 @@ extension MarkdownBlock {
       for node in children(parent) {
         switch kind(node) {
         case "code_block":
-          var text = literal(node)
-          if text.hasSuffix("\n") { text.removeLast() }
-          found.append(SourceBlock(kind: .code, text: text))
+          found.append(SourceBlock(kind: .code, text: codeText(node)))
         case "block_quote":
           let first = Int(cmark_node_get_start_line(node)) - 1
           let last = min(Int(cmark_node_get_end_line(node)), lines.count) - 1

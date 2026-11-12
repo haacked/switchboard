@@ -33,6 +33,7 @@ final class TerminalCopyOverlay: NSResponder {
   private var blocks: [TerminalBlock] = []
   private var shown: TerminalBlock?
   private var fetching = false
+  private var fetchQueued = false
   private var lastFetch: ContinuousClock.Instant?
   private var copiedUntil: ContinuousClock.Instant?
 
@@ -139,18 +140,46 @@ final class TerminalCopyOverlay: NSResponder {
 
   private func rematch() { blocks = TerminalBlocks.find(rows: rows, sources: sources) }
 
+  /// Reads the transcript at most once per `fetchInterval`. A request that arrives during a read or inside the
+  /// interval runs once the read or the interval ends. The transcript gets a reply's last lines as the screen
+  /// settles. No later screen change would ask for them.
   private func fetchIfStale() {
-    guard !fetching, lastFetch.map({ ContinuousClock.now - $0 >= Self.fetchInterval }) ?? true else { return }
+    if fetching {
+      fetchQueued = true
+      return
+    }
+    if let lastFetch {
+      let wait = Self.fetchInterval - (ContinuousClock.now - lastFetch)
+      if wait > .zero {
+        guard !fetchQueued else { return }
+        fetchQueued = true
+        Task { @MainActor [weak self] in
+          try? await Task.sleep(for: wait)
+          self?.runQueuedFetch()
+        }
+        return
+      }
+    }
     fetching = true
     loadBlockSources { [weak self] sources in
       guard let self else { return }
       fetching = false
       lastFetch = ContinuousClock.now
+      if fetchQueued {
+        // The read that just finished may predate the request, so the queued one waits out a full interval.
+        fetchQueued = false
+        fetchIfStale()
+      }
       guard sources != self.sources else { return }
       self.sources = sources
       rematch()
       place()
     }
+  }
+
+  private func runQueuedFetch() {
+    fetchQueued = false
+    if pointer != nil { fetchIfStale() }
   }
 
   /// Shows the button on the block under the pointer, or hides it.
@@ -159,21 +188,28 @@ final class TerminalCopyOverlay: NSResponder {
     let rowCount = terminal.terminalDimensions.rows
     guard let pointer, !dragging, rowCount > 0, !terminal.selectionActive else { return hide() }
     let cellHeight = terminal.getOptimalFrameSize().height / CGFloat(rowCount)
-    guard cellHeight > 0, let block = blocks.first(where: { $0.rows.contains(Int(pointer.y / cellHeight)) }) else {
-      return hide()
-    }
+    guard cellHeight > 0 else { return hide() }
+    let size = terminal.bounds.size
+    let row = Self.row(at: pointer.y, cellHeight: cellHeight, height: size.height)
+    guard let block = blocks.first(where: { $0.rows.contains(row) }) else { return hide() }
     let changed = block != shown
     shown = block
     if changed, copiedUntil == nil { showCopyLabel() }
     let topRight = host.convert(
-      Self.topRight(row: block.rows.lowerBound, cellHeight: cellHeight, width: terminal.bounds.width), from: terminal)
+      Self.topRight(row: block.rows.lowerBound, cellHeight: cellHeight, size: size), from: terminal)
     button.setFrameOrigin(NSPoint(x: topRight.x - button.frame.width, y: topRight.y - button.frame.height))
     button.isHidden = false
   }
 
-  /// The button's top right corner in the terminal's flipped coordinates, inset from the pane's right edge.
-  static func topRight(row: Int, cellHeight: CGFloat, width: CGFloat) -> NSPoint {
-    NSPoint(x: width - 4, y: CGFloat(row) * cellHeight)
+  /// The screen row at `y` in the terminal's coordinates. The terminal is not flipped. SwiftTerm draws row 0 at
+  /// the top of its bounds, so rows count down from `height`.
+  static func row(at y: CGFloat, cellHeight: CGFloat, height: CGFloat) -> Int {
+    Int((height - y) / cellHeight)
+  }
+
+  /// The button's top right corner in the terminal's coordinates, inset from the pane's right edge.
+  static func topRight(row: Int, cellHeight: CGFloat, size: NSSize) -> NSPoint {
+    NSPoint(x: size.width - 4, y: size.height - CGFloat(row) * cellHeight)
   }
 
   private func hide() {

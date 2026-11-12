@@ -924,11 +924,17 @@ final class BoardModel: ObservableObject {
   func loadBlockSources(_ session: String, then done: @escaping @MainActor @Sendable (BlockSources) -> Void) {
     let client = client
     poller.async {
-      let messages = (try? client.call("chat-log", ["session": .string(session), "limit": 20], as: [ChatMessage].self))
+      let messages = try? client.call(
+        "chat-log", ["session": .string(session), "limit": .number(Double(Self.blockSourceMessageCount))],
+        as: [ChatMessage].self)
       let sources = BlockSources(messages: (messages ?? []).filter { $0.role == .assistant }.reversed().map(\.text))
       Task { @MainActor in done(sources) }
     }
   }
+
+  /// The transcript messages that the copy buttons match against. The count includes user messages, so fewer
+  /// assistant messages come back.
+  nonisolated static let blockSourceMessageCount = 20
 
   func messageDraft(for session: SessionSummary) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.key(for: session))
