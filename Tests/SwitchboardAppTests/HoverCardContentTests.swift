@@ -664,11 +664,12 @@ private func everything() -> SessionSummary {
     }
 
     @Test func commandAloneReadsAsRunningAShellCommand() {
-      #expect(summaryOf("`swift build`") == "Running a shell command")
+      #expect(summaryOf(Attention.toolSummary("Bash", ["command": "swift build"])) == "Running a shell command")
     }
 
     @Test func commandAfterAWordReadsAsAShellCommand() {
-      #expect(summaryOf("approve `git push`") == "Approve a shell command")
+      let command = Attention.toolSummary("Bash", ["command": "git push"])
+      #expect(summaryOf("approve \(command)") == "Approve a shell command")
     }
 
     @Test func codeSpanInAQuestionStays() {
@@ -689,6 +690,8 @@ private func everything() -> SessionSummary {
       ("`SDKROOT=/Library/Developer/… swift build` (<1 min)", "SDKROOT"),
       ("`swift build`", "swift build"),
       ("approve `git push`", "git push"),
+      ("`git commit -m \"Fix `foo` bar\"` (<1 min)", "foo"),
+      ("approve `echo `whoami``", "whoami"),
       ("`" + String(repeating: "secret ", count: 50) + "` (<1 min)", "secret"),
     ]
 

@@ -86,8 +86,11 @@ final class HoverCard {
   }
 
   func disappeared(anchor: NSView) {
-    if hovered?.anchor === anchor { hovered = nil }
-    if anchor === self.anchor, !onCard { closeAfterGrace() }
+    let wasHovered = hovered?.anchor === anchor
+    if wasHovered { hovered = nil }
+    guard wasHovered || anchor === self.anchor else { return }
+    // A pending open targets the hovered anchor, which can no longer show a card.
+    if shown == nil { cancel() } else if !onCard { closeAfterGrace() }
   }
 
   func enteredCard() {

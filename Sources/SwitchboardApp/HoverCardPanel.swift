@@ -14,7 +14,8 @@ extension View {
 }
 
 /// Watches the pointer over a tile with its own tracking area. A model update
-/// redraws the tile but keeps this view. The update therefore does not reach the card.
+/// redraws the tile but keeps this view and its tracking area. An open card
+/// therefore stays open.
 private struct HoverCardAnchor: NSViewRepresentable {
   let id: String
   let card: HoverCard?

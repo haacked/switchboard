@@ -69,7 +69,7 @@ struct HoverCardContent: Equatable {
     for (prefix, words) in [("`", "Running a shell command"), ("approve `", "approve a shell command")]
     where reason.hasPrefix(prefix) {
       let rest = reason.dropFirst(prefix.count)
-      if let close = rest.firstIndex(of: "`") { return words + rest[rest.index(after: close)...] }
+      if let close = rest.lastIndex(of: "`") { return words + rest[rest.index(after: close)...] }
     }
     return reason
   }

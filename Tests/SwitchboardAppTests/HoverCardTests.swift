@@ -58,11 +58,12 @@ private final class ManualScheduler {
 private final class RecordingPresenter: HoverCardPresenter {
   private(set) var shows: [(id: String, anchor: NSView)] = []
   private(set) var hides = 0
-  private(set) var refreshes = 0
+  private(set) var refreshAnchors: [NSView] = []
+  var refreshes: Int { refreshAnchors.count }
 
   func show(_ id: String, below anchor: NSView) { shows.append((id, anchor)) }
   func hide() { hides += 1 }
-  func refresh(below anchor: NSView) { refreshes += 1 }
+  func refresh(below anchor: NSView) { refreshAnchors.append(anchor) }
 }
 
 private final class MouseButtons {
@@ -435,6 +436,33 @@ private final class Fixture {
       #expect(f.aStaysOpen())
       #expect(f.presenter.shows.map { $0.id } == ["A"])
     }
+
+    @Test func aTileUnderTheCardDoesNotTakeTheCardWhileThePointerIsOnIt() {
+      let f = Fixture()
+      f.openA()
+      f.card.exited("A", anchor: f.a)
+      f.card.enteredCard()
+
+      f.card.entered("B", anchor: f.b)
+      f.scheduler.flush()
+
+      #expect(f.card.shown == "A")
+      #expect(f.presenter.shows.map { $0.id } == ["A"])
+    }
+
+    @Test func leavingTheCardOntoAnotherTileSwitchesTheCardWhenTheDelayEnds() {
+      let f = Fixture()
+      f.openA()
+      f.card.exited("A", anchor: f.a)
+      f.card.enteredCard()
+      f.card.entered("B", anchor: f.b)
+
+      f.card.exitedCard()
+      f.scheduler.fire(delay)
+
+      #expect(f.card.shown == "B")
+      #expect(f.presenter.shows.last?.anchor === f.b)
+    }
   }
 
   @MainActor
@@ -591,6 +619,30 @@ private final class Fixture {
       #expect(f.presenter.shows.first?.anchor === f.a)
     }
 
+    @Test func aTileThatLeavesTheWindowBeforeTheDelayShowsNoCard() {
+      let f = Fixture()
+
+      f.card.entered("A", anchor: f.a)
+      f.card.disappeared(anchor: f.a)
+      f.scheduler.flush()
+
+      #expect(f.card.shown == nil)
+      #expect(f.presenter.shows.isEmpty)
+    }
+
+    @Test func aTileThatLeavesTheWindowWhileAnotherCardIsOpenHidesThatCard() {
+      let f = Fixture()
+      f.openA()
+      f.card.exited("A", anchor: f.a)
+      f.card.entered("B", anchor: f.b)
+
+      f.card.disappeared(anchor: f.b)
+      f.scheduler.flush()
+
+      #expect(f.card.shown == nil)
+      #expect(f.presenter.shows.map { $0.id } == ["A"])
+    }
+
     @Test func aTileThatAppearsAwayFromThePointerShowsNoCard() {
       let f = Fixture()
 
@@ -636,13 +688,15 @@ private final class Fixture {
   @Test func aRebuiltTileThenAnUpdateToAnotherSessionKeepsTheCardOpen() {
     let model = offlineModel()
     let f = openOnA(model, [session("A"), session("B")])
+    let rebuilt = NSView()
     f.card.disappeared(anchor: f.a)
-    f.card.appeared("A", anchor: NSView(), pointerInside: true)
+    f.card.appeared("A", anchor: rebuilt, pointerInside: true)
 
     model.apply(
       .success([session("A"), session("B", state: .needsYou, reason: "answer: which flag?")]), followups: nil)
 
     #expect(f.aStaysOpen())
+    #expect(f.presenter.refreshAnchors.last === rebuilt)
   }
 
   @Test func anUpdateToTheSessionKeepsItsCardOpen() {
