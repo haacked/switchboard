@@ -67,30 +67,14 @@ extension Service {
     }
   }
 
-  /// The sessions that sbd may stop to free a slot, in the order to stop
-  /// them. Each one is quiet, with no card open except a deferred one, no
-  /// subagent, and no background job seen in the last `jobReportMs`.
-  /// Sessions in Done or with an open wait come first, then the rest, each
-  /// longest idle first.
+  /// The sessions that sbd may stop to free a slot, in the order to stop them.
   private func stoppable(now: Int64) -> [String] {
-    let candidates = entries.values.filter { e in
-      guard case .running(let pid) = claudeState(e.session.id), now - e.lastJobSeen >= Service.jobReportMs else {
-        return false
-      }
-      return isQuiet(e.session.id, pid: pid, now: now) && e.facts.cards.allSatisfy(\.deferred)
-        && e.facts.subagents.isEmpty
+    let running = entries.values.compactMap { e -> StopPolicy.Claude? in
+      guard case .running(let pid) = claudeState(e.session.id) else { return nil }
+      return stopInput(e, jobs: backgroundJobs(pid), now: now)
     }
-    func tier(_ e: Entry) -> Int {
-      e.session.done || e.facts.lastState == .done || !(e.session.waits ?? []).isEmpty ? 0 : 1
-    }
-    return candidates.sorted {
-      (tier($0), $0.idleSince, $0.session.id) < (tier($1), $1.idleSince, $1.session.id)
-    }.map(\.session.id)
+    return stopPolicy.capOrder(running, now: now)
   }
-
-  /// A background job's process exits up to 1.3 s before claude starts the
-  /// turn that reports it. A stop in that gap loses the report.
-  static let jobReportMs: Int64 = 5_000
 
   /// Sets the cap when the request names `cap`, and returns the status. A
   /// new cap is saved in config.json and holds at once.

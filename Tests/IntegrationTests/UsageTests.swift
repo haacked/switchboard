@@ -64,6 +64,40 @@ extension Instance {
     #expect(a.checked != nil)
   }
 
+  /// The endpoint reports no session for an Ultra plan. sbd reads the plan
+  /// from the account's .claude.json and adds the unused session only for
+  /// other plans. C shows that sbd keeps a session the endpoint reports.
+  @Test func anUltraAccountReportsNoSessionLimit() throws {
+    let fake = try FakeUsage()
+    let sbd = try Instance.withUsage(fake, accounts: ["A", "B", "C"])
+    let plans = ["A": #","planDisplayName":"Ultra""#, "B": "", "C": #","planDisplayName":"Ultra""#]
+    for (account, plan) in plans {
+      try sbd.signIn(account, token: "token-\(account)")
+      try #"{"oauthAccount":{"emailAddress":"\#(account)@example.com"\#(plan)}}"#.write(
+        toFile: ClaudeAccount.configFile(sbd.account(account)), atomically: true, encoding: .utf8)
+    }
+    fake.reply(try FakeUsage.recorded("no-session"))
+    fake.reply(to: "token-C", try FakeUsage.recorded("with-session"))
+
+    let readings = try sbd.usage()
+    let text = try sbd.sb("usage")
+
+    func reading(_ account: String) throws -> AccountUsage {
+      try #require(readings.first { $0.folder == sbd.account(account) })
+    }
+    #expect(try reading("A").email == "A@example.com")
+    #expect(try reading("A").limits.map(\.kind) == ["weekly_all", "weekly_scoped"])
+    #expect(try reading("B").limits.map(\.kind) == ["session", "weekly_all", "weekly_scoped"])
+    #expect(try reading("C").limits.map(\.kind) == ["session", "weekly_all", "weekly_scoped"])
+    let blocks = text.components(separatedBy: "\n\n")
+    func block(_ account: String) throws -> String {
+      try #require(blocks.first { $0.contains("\(account)@example.com") })
+    }
+    #expect(try !block("A").contains("Session (5h)"))
+    #expect(try block("A").contains("Week (all models)"))
+    #expect(try block("B").contains("Session (5h)"))
+  }
+
   @Test func sendsTheAccountsTokenAsABearerWithTheOAuthBetaHeader() throws {
     let fake = try FakeUsage()
     let sbd = try Instance.withUsage(fake)

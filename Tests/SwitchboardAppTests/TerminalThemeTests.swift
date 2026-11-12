@@ -65,7 +65,7 @@ extension RGB {
 
   // Text needs 4.5:1. In the light palette every color except bright white meets it. In the dark palette black
   // sits close to the background on purpose. Bright black is the muted gray for secondary text.
-  static let minimumContrast: [(Mode, Int, Double)] =
+  nonisolated static let minimumContrast: [(Mode, Int, Double)] =
     (0...14).map { (Mode.light, $0, 4.5) }
     + [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15].map { (Mode.dark, $0, 4.5) }
     + [(Mode.dark, 8, 3.0)]

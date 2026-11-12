@@ -29,7 +29,7 @@ extension ServiceDeployState {
   /// Whether the service builds from `repository`. A state file that names no
   /// repository builds from any.
   public func builds(from repository: String) -> Bool {
-    self.repository.map { Wait.sameRepository($0, repository) } ?? true
+    self.repository.map { Dependencies.sameRepo($0, repository) } ?? true
   }
 }
 
@@ -74,13 +74,13 @@ extension Wait {
     case .merged: break
     }
     if service != nil { return nil }
-    if Wait.sameRepository(pr.repo, Wait.posthogRepository) {
+    if Dependencies.sameRepo(pr.repo, Wait.posthogRepository) {
       let comment = comments.lazy.filter { $0.author == DeployComment.author }
         .compactMap { $0.body.flatMap(DeployComment.parse) }.last
       guard let comment, deployEnvironments.allSatisfy({ comment.state(in: $0) == .deployed }) else { return nil }
       return deployedOutcome
     }
-    if Wait.sameRepository(pr.repo, Wait.chartsRepository) {
+    if Dependencies.sameRepo(pr.repo, Wait.chartsRepository) {
       return "it merged, and Switchboard can't read ArgoCD to see it deploy"
     }
     return "it merged, and Switchboard has no deploy signal for \(pr.repo)"
@@ -97,7 +97,7 @@ extension Wait {
   ) -> String? {
     let name = service ?? ""
     guard let state else { return "\(Wait.chartsRepository) has no state/\(name).yaml" }
-    if let repository = state.repository, !Wait.sameRepository(repository, pr.repo) {
+    if let repository = state.repository, !Dependencies.sameRepo(repository, pr.repo) {
       return "\(name) deploys from \(repository), not \(pr.repo)"
     }
     let named = deployEnvironments
@@ -113,6 +113,4 @@ extension Wait {
   private var deployedOutcome: String {
     "it deployed to " + deployEnvironments.map(\.rawValue).joined(separator: " and ")
   }
-
-  public static func sameRepository(_ a: String, _ b: String) -> Bool { a.lowercased() == b.lowercased() }
 }

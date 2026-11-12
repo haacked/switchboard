@@ -25,7 +25,7 @@ enum KeySelfTest {
       }
       log("done")
       // An open sheet keeps the app from quitting.
-      model.showingNew = false
+      model.newSession = nil
       await pause()
       NSApp.terminate(nil)
     }
@@ -57,7 +57,7 @@ enum KeySelfTest {
     press(field.view, modifiers: .shift)
     await pause()
     log("shift-return: \(field.text.debugDescription)")
-    if !sendsOnReturn { log("sheet open: \(model.showingNew)") }
+    if !sendsOnReturn { log("sheet open: \(model.newSession != nil)") }
     press(field.view, modifiers: [])
     // A field empties once sbd accepts what it sent, and a card's field leaves the window once its card closes.
     // The prompt keeps its text.

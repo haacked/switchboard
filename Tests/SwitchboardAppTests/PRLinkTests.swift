@@ -38,7 +38,10 @@ struct HostedView {
   /// SwiftUI builds no accessibility tree until an assistive client asks for one.
   private static let accessibilityOn: Void = {
     _ = NSApplication.shared
-    NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+    // The NSAccessibility protocol has no setter for this attribute. The test
+    // sends the deprecated message by its selector instead.
+    _ = NSApp.perform(
+      NSSelectorFromString("accessibilitySetValue:forAttribute:"), with: true, with: "AXEnhancedUserInterface")
   }()
 
   /// Records an issue when the view exposes no accessibility elements.

@@ -170,6 +170,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
 
   public init() {}
 
+  /// Whether the claude that the last launch started has reported its SessionStart.
+  public var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
+
   public mutating func apply(_ event: Event) {
     let d = event.data
     if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }

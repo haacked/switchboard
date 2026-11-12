@@ -625,7 +625,7 @@ import Testing
 
     _ = try clear(sbd, "Flags")
 
-    try sbd.waitFor("a message about the cleared description", fetch: { try shared.sent(sbd, c.id).count }) {
+    _ = try sbd.waitFor("a message about the cleared description", fetch: { try shared.sent(sbd, c.id).count }) {
       $0 > before
     }
     #expect(try !context(sbd, c).filter { !$0.contains("cleared") }.contains { $0.contains("Old text.") })

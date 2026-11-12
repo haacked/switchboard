@@ -149,7 +149,7 @@ extension Instance {
     try sbd.waitFor(a.id, "a's first reply") { $0.lastReply == "Done: hello" }
     try sbd.waitFor(b.id, "b's first reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
-    try sbd.waitFor(a.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(a.id)
     try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
     // `done` doesn't launch claude itself. The tick resolves the wait and
     // launches it, but not while the server starts. `clock` runs a tick.
@@ -297,7 +297,7 @@ extension Instance {
     chmod(sbd.home.mcpFolder, 0o700)
     // This moves sbd's clock past the backoff, so the next tick starts the server.
     try sbd.advanceClock(60_000)
-    try sbd.waitForRunning("grafana")
+    _ = try sbd.waitForRunning("grafana")
   }
 
   @Test func keepsServersAcrossARestartOfSbdUnlessTheirConfigChanged() throws {
