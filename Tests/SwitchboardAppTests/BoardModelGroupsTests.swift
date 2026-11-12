@@ -272,6 +272,15 @@ import Testing
     #expect(model.newSessionGroup?.id == "g1")
   }
 
+  @Test func newSessionGroupIsTheSelectedFollowupsGroup() {
+    let model = appliedModel([], followups: [grouped("f1", "g1")])
+    model.groups = [group("g1", "Flags")]
+
+    model.selection = "f1"
+
+    #expect(model.newSessionGroup?.id == "g1")
+  }
+
   @Test func newSessionGroupIsTheCurrentInboxItemsGroup() {
     let model = appliedModel([grouped("s1", "g1")])
     model.groups = [group("g1", "Flags")]

@@ -3,7 +3,7 @@ import SwiftUI
 import SwitchboardCore
 
 /// One opening of the New Session sheet. Each opening has a new id, so the sheet starts from a new form.
-struct NewSessionRequest: Identifiable, Equatable {
+struct NewSessionRequest: Identifiable {
   let id = UUID()
   /// The id of the group that the sheet starts with.
   var group: String?

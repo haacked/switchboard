@@ -666,7 +666,7 @@ private struct LaneLabel: View {
           }
           .buttonStyle(.borderless)
           .disabled(model.presentingSheet)
-          .help("Start a session in \(group.name) (⇧⌘N)")
+          .help("Start a session in \(group.name)")
           .accessibilityLabel("New session in \(group.name)")
           .accessibilityIdentifier("board-new-session-\(group.id)")
         }

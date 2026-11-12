@@ -3,12 +3,10 @@ import SwitchboardCore
 
 extension BoardModel {
   /// The group that ⇧⌘N starts a session in: the group of the ringed card on the Board, else of the current
-  /// Inbox item or the selected session. A group chat names its own group.
+  /// Inbox item or the selected session. A chat's group is the one it manages.
   var newSessionGroup: GroupSummary? {
-    let id = visibleView == .board ? currentBoardCard : acknowledgeTarget?.id
-    guard let session = allSessions.first(where: { $0.id == id }) ?? allFollowups.first(where: { $0.id == id }),
-      let group = session.chat ?? session.group
-    else { return nil }
+    let session = visibleView == .board ? allBoard.first { $0.id == currentBoardCard } : acknowledgeTarget
+    guard let group = session?.chat ?? session?.group else { return nil }
     return groups.first { $0.id == group }
   }
 

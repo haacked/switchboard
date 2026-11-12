@@ -15,9 +15,10 @@ let usage = """
                                   --name. It joins the group G, else its
                                   parent's group. It runs under the group's
                                   account, else the account A, else its
-                                  parent's, else the active account. It starts
-                                  in auto mode unless --no-auto or the autoMode
-                                  setting is false
+                                  parent's, else the active account. It fails
+                                  when the group has an account and A names
+                                  another. It starts in auto mode unless
+                                  --no-auto or the autoMode setting is false
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
         [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
                                   start a session on a new branch B in a new
