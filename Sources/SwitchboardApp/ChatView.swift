@@ -96,10 +96,8 @@ private struct ChatBubble: View {
   let message: ChatMessage
 
   var body: some View {
-    if let output = message.commandOutput {
-      if !output.isEmpty { GreyLine(text: output) }
-    } else if message.isNotice {
-      GreyLine(text: message.text)
+    if let grey = message.commandOutput ?? (message.isNotice ? message.text : nil) {
+      if !grey.isEmpty { GreyLine(text: grey) }
     } else {
       VStack(alignment: .leading, spacing: 4) {
         Text(message.role.label).font(.caption.bold()).foregroundStyle(.secondary)

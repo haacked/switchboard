@@ -95,7 +95,7 @@ public struct ChatMessage: Codable, Equatable, Sendable {
   /// The output of a built-in command such as `/model`, when the message is the line Claude Code writes for
   /// it. Claude Code writes that line as a user message without `isMeta`.
   public var commandOutput: String? {
-    guard role == .user else { return nil }
+    guard role == .user, text.drop(while: \.isWhitespace).hasPrefix("<local-command-") else { return nil }
     let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
     for tag in ["local-command-stdout", "local-command-stderr"] {
       let open = "<\(tag)>"
