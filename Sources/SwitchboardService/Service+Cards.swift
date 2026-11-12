@@ -103,14 +103,17 @@ extension Service {
       return ["card": .number(Double(card.id)), "session": .string(id), "delivery": .string(delivery)]
     }
     if card.kind == .trust {
-      let behavior = args["behavior"]?.string
-      guard args["answers"] == nil, behavior == "allow" || behavior == "deny" else {
-        throw APIError("card \(card.id) asks to trust a folder. Trust it with allow, or exit with deny")
+      let message = args["message"]?.string ?? ""
+      guard args["answers"] == nil, message.isEmpty, let behavior = args["behavior"]?.string,
+        behavior == "allow" || behavior == "deny"
+      else {
+        throw APIError("card \(card.id) asks to trust a folder. Trust it with allow, or exit with deny and no message")
       }
-      try typeTrust(behavior == "allow", card)
-      data["behavior"] = .string(behavior!)
+      let trust = behavior == "allow"
+      try typeTrust(trust, card)
+      data["behavior"] = .string(behavior)
       let result = answered("terminal")
-      if behavior == "deny" { closeTrust(card) }
+      if !trust { closeTrust(card) }
       return result
     }
     // What the hook prints, and what sbd types when Claude Code no longer

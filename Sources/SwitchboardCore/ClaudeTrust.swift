@@ -60,7 +60,9 @@ public enum ClaudeTrust {
     {
       return .alreadyTrusted
     }
-    let lock = "\(target).lock"
+    // Claude Code locks the path it was given, not the resolved one, so a
+    // symlinked config locks beside the link.
+    let lock = "\(configFile).lock"
     if let refusal = takeLock(lock, wait: lockWait, staleAfter: staleAfter) { return .refused(refusal) }
     defer { rmdir(lock) }
     for _ in 0..<3 {

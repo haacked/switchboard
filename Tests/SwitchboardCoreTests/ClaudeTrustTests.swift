@@ -414,7 +414,7 @@ private let otherKeys = """
 
   /// Claude Code reads the file with JavaScript's `JSON.parse`, which
   /// rejects a trailing comma. `JSONSerialization` accepts one.
-  @Test(arguments: ["", " ", "{", "not json", #"{"projects": {}"#, #"{"a": 1,}"#])
+  @Test(arguments: ["", " ", "{", "not json", #"{"projects": {}"#, #"{"a": 1,}"#, "{\n  \"a\": 1,\n}"])
   func refusesInvalidJSON(_ text: String) throws {
     try expectRefused(text)
   }
@@ -432,6 +432,7 @@ private let otherKeys = """
   @Test(arguments: [
     #"{"projects": {}, "numStartups": 1, "projects": {"/Users/me/x": {"hasTrustDialogAccepted": true}}}"#,
     #"{"oauthAccount": {"emailAddress": "old@example.com"}, "oauthAccount": {"emailAddress": "me@example.com"}}"#,
+    #"{"a": 1, "\u0061": 2}"#,
   ])
   func refusesARepeatedKey(_ text: String) throws {
     try expectRefused(text)
@@ -487,6 +488,22 @@ private let otherKeys = """
     #expect(isRefused(outcome), "\(outcome)")
     #expect(Date().timeIntervalSince(start) >= 0.25)
     #expect(dir.bytes() == before)
+    #expect(FileManager.default.fileExists(atPath: dir.lock))
+  }
+
+  /// Claude Code locks beside the link, not beside its target.
+  @Test func waitsForTheLockBesideASymlinkedConfig() throws {
+    let dir = try TrustFolder()
+    let target = "\(dir.path)/real-claude.json"
+    try Data(otherKeys.utf8).write(to: URL(fileURLWithPath: target))
+    try FileManager.default.createSymbolicLink(atPath: dir.config, withDestinationPath: "real-claude.json")
+    let before = FileManager.default.contents(atPath: target)
+    try #require(mkdir(dir.lock, 0o755) == 0)
+
+    let outcome = dir.trust(lockWait: 0.3)
+
+    #expect(isRefused(outcome), "\(outcome)")
+    #expect(FileManager.default.contents(atPath: target) == before)
     #expect(FileManager.default.fileExists(atPath: dir.lock))
   }
 
@@ -592,7 +609,7 @@ private final class OutcomeList: @unchecked Sendable {
     }
 
     #expect(outcome == .trusted(key: dir.key))
-    #expect(calls >= 2)
+    #expect(calls == 2)
     let root = try dir.parsed()
     #expect(root["injected"] as? String == "by claude")
     #expect(isJSONTrue(((root["projects"] as? [String: Any])?[dir.key] as? [String: Any])?["hasTrustDialogAccepted"]))
@@ -615,7 +632,7 @@ private final class OutcomeList: @unchecked Sendable {
     }
 
     #expect(isRefused(outcome), "\(outcome)")
-    #expect(calls >= 1)
+    #expect(calls == 3)
     let root = try dir.parsed()
     #expect(root["writes"] as? Int == calls)
     #expect((root["projects"] as? [String: Any])?[dir.key] == nil)

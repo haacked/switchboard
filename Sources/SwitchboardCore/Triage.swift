@@ -502,7 +502,7 @@ public enum Triage {
       return TriageItem(
         title: title(card.reason), kind: .approval,
         summary:
-          "Claude Code asks whether you trust \(card.summary) before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start.",
+          "Claude Code asks whether you trust \(codeSpan(card.summary)) before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start.",
         options: [
           TriageOption(label: "Trust", action: .allow, recommended: true),
           TriageOption(label: "Exit", action: .deny),

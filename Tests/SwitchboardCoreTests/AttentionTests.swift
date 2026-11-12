@@ -502,7 +502,7 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
     #expect(facts([event("started", 1, ["prompt": "hello"]), hook]).hookSinceLaunch)
   }
 
-  /// sbd's own events, and a subagent's hooks, are not the launch's report.
+  /// sbd's own events and a subagent's hooks don't set `hookSinceLaunch`.
   @Test(arguments: [
     event("running", 3), event("job", 3, ["count": 1]), event("sent", 3, ["text": "hi", "delivery": "queued"]),
     trustDialog(t: 3), event("PreToolUse", 3, tool("Bash", ["command": "ls"], agent: "a1")),

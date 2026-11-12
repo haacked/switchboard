@@ -595,8 +595,15 @@ func replyFixture(_ name: String) throws -> String {
 
     #expect(
       trust.summary
-        == "Claude Code asks whether you trust /w/repo before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start."
+        == "Claude Code asks whether you trust `/w/repo` before it starts. Trust lets it read, edit, and run files there. Exit stops it and keeps your message for the next start."
     )
+  }
+
+  /// The app draws the summary as Markdown, so the folder sits in a code span.
+  @Test func aTrustCardsSummaryKeepsMarkdownCharactersInTheFolder() throws {
+    let trust = try #require(item(facts(trustLaunch(folder: "/w/__tests__"))))
+
+    #expect(trust.summary.contains("trust `/w/__tests__` before"))
   }
 
   @Test func anExitAtTheTrustDialogIsARuleItem() throws {

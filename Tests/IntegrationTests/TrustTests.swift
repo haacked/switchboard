@@ -114,7 +114,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
     try JSON.parse(sbd.sb(verb, "--json", id))
   }
 
-  // MARK: Stage 1: sbd trusts its own folders
+  // MARK: sbd trusts its own folders
 
   @Test func aChatStartsWithoutTheTrustDialog() throws {
     let sbd = try instance()
@@ -212,7 +212,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
   }
 
   /// An account folder without a `.claude.json` holds no login. sbd creates
-  /// no file there, and the chat waits at the dialog for Stage 2's card.
+  /// no file there, and the chat waits at the dialog for the trust card.
   @Test func anAccountWithoutAConfigFileGetsNoFile() throws {
     let sbd = try Instance()
     let account = try #require(sbd.inheritedAccount)
@@ -233,7 +233,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(try events(sbd, c.id, "folder-trusted").isEmpty)
   }
 
-  // MARK: Stage 2: the trust card
+  // MARK: The trust card
 
   @Test func aWorkSessionAtTheTrustDialogShowsATrustCard() throws {
     let sbd = try instance()
@@ -249,10 +249,11 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(cards.first?.kind == .trust)
     #expect(cards.first?.cwd == real(sbd.work))
     #expect(cards.first?.input == ["prompt": "hello"])
+    #expect(try sbd.sb("cards").contains("allow trusts the folder, deny exits claude"))
     #expect(try canonicalConfig(sbd, "A") == seedPlus("A", keys: []))
   }
 
-  /// Path (a): Trust starts claude, which reads the launch prompt as its
+  /// Trust starts claude, which reads the launch prompt as its
   /// argument and then gets the message that waited.
   @Test func trustDeliversTheLaunchPromptThenAQueuedMessage() throws {
     let sbd = try instance()
@@ -273,7 +274,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(try canonicalConfig(sbd, "A") == seedPlus("A", keys: []))
   }
 
-  /// Paths (b) and (d): Exit keeps the prompt, and a restart of sbd keeps
+  /// Exit keeps the prompt, and a restart of sbd keeps
   /// it at the front of the queue until the next launch's Trust.
   @Test func exitKeepsTheMessageForTheNextStart() throws {
     let sbd = try instance()
@@ -309,7 +310,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(try events(sbd, s.id, "trust_closed").count == 1)
   }
 
-  /// Path (c): Enter on the dialog's default item, No, exits claude in the
+  /// Enter on the dialog's default item, No, exits claude in the
   /// terminal. The tick finds the dead pane with the card open.
   @Test func exitTypedInTheTerminalKeepsTheMessage() throws {
     let sbd = try instance()
@@ -340,11 +341,13 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(try prompts(sbd, s.id) == ["hello"])
   }
 
-  /// Path (e): `sb stop` at the dialog keeps the prompt once.
+  /// `sb stop` at the dialog keeps the prompt once, ahead of a
+  /// message sent while the card was open.
   @Test func stopAtTheDialogKeepsTheMessage() throws {
     let sbd = try instance()
     let s = try newWork(sbd)
     try waitForTrustCard(sbd, s.id)
+    try sbd.sb("send", s.id, "second")
 
     try sbd.sb("stop", s.id)
 
@@ -359,9 +362,9 @@ private func canonicalJSON(_ value: Any) throws -> String {
     try sbd.sb("open", s.id)
     try waitForTrustCard(sbd, s.id)
     _ = try answer(sbd, "allow", s.id)
-    try sbd.waitFor(s.id, "the kept prompt's reply") { $0.lastReply == "Done: hello" }
+    try sbd.waitFor(s.id, "the queued message's reply") { $0.lastReply == "Done: second" }
     sleep(2)
-    #expect(try prompts(sbd, s.id) == ["hello"])
+    #expect(try prompts(sbd, s.id) == ["hello", "second"])
   }
 
   /// A launch without a prompt keeps nothing when claude exits at the dialog.
@@ -382,7 +385,7 @@ private func canonicalJSON(_ value: Any) throws -> String {
   }
 
   /// The claude at the dialog holds the user's message, so the idle stop
-  /// and the live cap leave it. The test moves the clock past the 10 s mark
+  /// leaves it. The test moves the clock past the 10 s mark
   /// at which sbd records `running` and counts the claude as live.
   @Test func theIdleStopLeavesAClaudeAtTheTrustDialog() throws {
     let sbd = try instance(idleStopSeconds: 1)
@@ -461,9 +464,11 @@ private func canonicalJSON(_ value: Any) throws -> String {
 
     let auto = try sbd.run("allow", "--auto", s.id)
     let answers = try sbd.run("answer", s.id, "yes")
+    let denied = try sbd.run("deny", s.id, "use another folder")
 
     #expect(auto.status != 0)
     #expect(answers.status != 0)
+    #expect(denied.status != 0)
     #expect(try events(sbd, s.id, "answered").isEmpty)
     #expect(try sbd.get(s.id).cards.map(\.kind) == [.trust])
     #expect(try sbd.highlighted(s.id) == "No, exit")
