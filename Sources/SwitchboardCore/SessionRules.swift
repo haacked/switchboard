@@ -9,6 +9,6 @@ extension SessionSummary {
   /// Whether the user can acknowledge the session's item, or undo that.
   public var canAcknowledge: Bool { acknowledged == true || AttentionState.inbox.contains(state) }
 
-  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
+  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree the cleanup removed.
   public var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
 }
