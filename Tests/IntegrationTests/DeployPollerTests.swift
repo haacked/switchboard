@@ -461,6 +461,21 @@ func deployResponse(_ name: String) throws -> String {
     #expect(try sbd.get(s.id).waits.map(\.service) == ["billing"])
   }
 
+  @Test func aFailedCompareReportsItsStatusAndPath() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try mergedSession(github, sbd)
+    try serveFeatureFlags(github, jobs: try flagsJobs())
+    github.route(DeployPollerTests.comparePath, status: 500, #"{"message":"Server Error"}"#)
+    try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
+
+    let result = try sbd.poll()
+
+    #expect(
+      result["error"]?.string == "GitHub answered 500 for \(DeployPollerTests.comparePath)?per_page=1 Server Error")
+    #expect(try sbd.get(s.id).waits.count == 1)
+  }
+
   @Test func thePollCountsRESTRequests() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
