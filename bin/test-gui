@@ -387,7 +387,8 @@ check_shell() {
     result=$(app click "$1")
     [[ $result == "clicked at "* ]] || fail "the app could not click $1 on $2: $result"
   }
-  # A chat shows its messages until the test shows its terminals, so `attached` waits only when asked.
+  # A chat and the Manager show their messages until the test shows their terminals, so `attached` waits only
+  # when asked.
   start_app() { # <session> [attached]
     SB_SELECT="$1" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
     app_pid=$!
@@ -405,14 +406,18 @@ check_shell() {
     same_claude "$1"
   }
 
-  start_app "$manager" attached
+  start_app "$manager"
+  app show-terminal >/dev/null
+  wait_for 120 has_clients "$manager-claude" || fail "the app did not attach to the Manager's Claude pane"
   wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the Manager's shell"
   remember_claude "$manager"
   click close "the Manager"
   closes "$manager" "the close button"
   app snapshot "$shots/manager-closed.png" >/dev/null
   end_app
-  start_app "$manager" attached
+  start_app "$manager"
+  app show-terminal >/dev/null
+  wait_for 120 has_clients "$manager-claude" || fail "the app did not attach to the Manager's Claude pane"
   sleep 2
   shell_gone "$manager" && panes_are 1 || fail "a relaunch started the Manager's shell again"
   remember_claude "$manager"

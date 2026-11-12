@@ -10,8 +10,8 @@ struct NavLocation: Hashable {
   }
 
   var place: Place
-  /// Whether the place shows the session's terminal instead of its overview. Only the Inbox and a chat
-  /// have a Terminal toggle, so it is false everywhere else.
+  /// Whether the place shows the session's terminal instead of its overview. Only the Inbox, a chat,
+  /// and a Manager conversation have a Terminal toggle, so it is false everywhere else.
   var terminal: Bool
 }
 
@@ -25,7 +25,7 @@ enum NavRecord {
 
 extension BoardModel {
   /// Whether the session shows as a chat pane, with a Terminal toggle in place of its terminal.
-  func hasChatPane(_ s: SessionSummary) -> Bool { s.kind == .chat }
+  func hasChatPane(_ s: SessionSummary) -> Bool { s.kind.showsAsChat }
 
   /// What the window shows now.
   var location: NavLocation {

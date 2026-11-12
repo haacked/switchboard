@@ -556,6 +556,29 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.terminalFocus == "c")
     }
 
+    /// A Manager conversation shows its terminal only while the Terminal toggle is on, as a chat does.
+    @Test(arguments: Place.allCases)
+    func aManagerWithTheTerminalToggleOffRefuses(_ place: Place) throws {
+      let model = try model(needsItem("m", manager: true), at: place)
+      model.showingTerminal = false
+      let before = Snapshot(model)
+
+      model.focusTerminal()
+
+      #expect(!model.canFocusTerminal)
+      #expect(Snapshot(model) == before)
+    }
+
+    @Test func aSelectedManagerWithTheTerminalToggleOnGetsTheTerminalFocus() throws {
+      let model = try model(needsItem("m", manager: true), at: .selection)
+      model.showingTerminal = true
+
+      model.focusTerminal()
+
+      #expect(model.canFocusTerminal)
+      #expect(model.terminalFocus == "m")
+    }
+
     @Test func aSelectedSessionGetsTheTerminalFocus() throws {
       let model = try model(needsItem("a"), at: .selection)
 
