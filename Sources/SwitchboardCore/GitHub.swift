@@ -562,6 +562,34 @@ public enum GitHub {
     return String(text.dropFirst("ref: \(refs)".count))
   }
 
+  /// The branches that a HEAD reflog shows the folder had checked out: both
+  /// sides of each checkout, and both names of each rename of the
+  /// checked-out branch. git writes one "checkout: moving from <a> to <b>"
+  /// line for each checkout or switch. A detach shows as `HEAD`, and a
+  /// checkout from a detached HEAD shows as a commit id. `git branch -m` on
+  /// the checked-out branch writes "Branch: renamed refs/heads/<a> to
+  /// refs/heads/<b>".
+  public static func checkedOutBranches(reflog: String) -> Set<String> {
+    let checkout = "\tcheckout: moving from "
+    let renamed = "\tBranch: renamed "
+    let heads = "refs/heads/"
+    var branches: Set<String> = []
+    for line in reflog.split(separator: "\n") {
+      if let range = line.range(of: checkout) {
+        let names = line[range.upperBound...].split(separator: " ")
+        guard names.count == 3, names[1] == "to" else { continue }
+        branches.insert(String(names[0]))
+        branches.insert(String(names[2]))
+      } else if let range = line.range(of: renamed) {
+        let names = line[range.upperBound...].split(separator: " ")
+        guard names.count == 3, names[1] == "to", names[0].hasPrefix(heads), names[2].hasPrefix(heads) else { continue }
+        branches.insert(String(names[0].dropFirst(heads.count)))
+        branches.insert(String(names[2].dropFirst(heads.count)))
+      }
+    }
+    return branches
+  }
+
   /// The values of `git config --get-regexp` output, by key.
   public static func gitConfig(_ text: String) -> [String: String] {
     var values: [String: String] = [:]
@@ -572,19 +600,11 @@ public enum GitHub {
     return values
   }
 
-  /// The lowercased owner/name of every GitHub remote in `config`, which
-  /// holds the git config values by key, and of gh's default repo.
-  /// `gh repo set-default` can name a fork's parent, which no remote's URL
-  /// names. gh then stores the parent's owner/name in `gh-resolved` and
-  /// opens PRs there.
-  public static func repositories(config: [String: String]) -> Set<String> {
-    Set(
-      config.compactMap { key, value in
-        guard key.hasPrefix("remote.") else { return nil }
-        if key.hasSuffix(".url") { return repo(remoteURL: value)?.lowercased() }
-        if key.hasSuffix(".gh-resolved"), Followup.isRepository(value) { return value.lowercased() }
-        return nil
-      })
+  /// The name that `branch`'s `merge` config gives its upstream branch,
+  /// without `refs/heads/`, or nil when the config names none.
+  public static func upstreamName(of branch: String, config: [String: String]) -> String? {
+    let heads = "refs/heads/"
+    return config["branch.\(branch).merge"].map { String($0.dropFirst($0.hasPrefix(heads) ? heads.count : 0)) }
   }
 
   /// The key of the branch's PR, as `git pr` finds it: the PR from the
@@ -596,8 +616,7 @@ public enum GitHub {
   public static func branchKey(branch: String, config: [String: String], remoteHead: (String) -> String?) -> PRKey? {
     let b = "branch.\(branch)"
     var push = config["\(b).pushremote"] ?? config["remote.pushdefault"] ?? config["\(b).remote"] ?? "origin"
-    let heads = "refs/heads/"
-    var upstream = config["\(b).merge"].map { String($0.dropFirst($0.hasPrefix(heads) ? heads.count : 0)) } ?? branch
+    var upstream = upstreamName(of: branch, config: config) ?? branch
     // "." means that the branch tracks a local branch.
     if push == "." {
       push = "origin"
@@ -677,13 +696,10 @@ public enum GitHub {
 
   static let prLinkMarker = Data(#""pr-link""#.utf8)
 
-  /// The PR of the last `pr-link` line among the complete lines of `data`
-  /// whose repo `accepting` allows, and the number of bytes up to the end of
-  /// the last complete line. A reader that keeps an offset reads the rest
-  /// again once the line ends.
-  public static func lastPRLink(in data: Data, accepting: (String) -> Bool = { _ in true }) -> (
-    key: PRKey?, consumed: Int
-  ) {
+  /// The PR of the last `pr-link` line among the complete lines of `data`,
+  /// and the number of bytes up to the end of the last complete line. A
+  /// reader that keeps an offset reads the rest again once the line ends.
+  public static func lastPRLink(in data: Data) -> (key: PRKey?, consumed: Int) {
     guard let end = data.lastIndex(of: 0x0A) else { return (nil, 0) }
     let complete = data[data.startIndex...end]
     // A transcript reaches 24 MB, so the search runs backwards from its end
@@ -693,8 +709,7 @@ public enum GitHub {
       let start = complete[..<marker.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? complete.startIndex
       let stop = complete[marker.upperBound...].firstIndex(of: 0x0A) ?? complete.endIndex
       if let json = try? JSONCoding.decoder.decode(JSON.self, from: Data(complete[start..<stop])),
-        json["type"]?.string == "pr-link", let repo = json["prRepository"]?.string, let number = json["prNumber"]?.int,
-        accepting(repo)
+        json["type"]?.string == "pr-link", let repo = json["prRepository"]?.string, let number = json["prNumber"]?.int
       {
         return (.number(repo: repo, number: number), complete.count)
       }
