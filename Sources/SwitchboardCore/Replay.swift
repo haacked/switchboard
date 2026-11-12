@@ -65,10 +65,13 @@ public struct SessionReplay: Codable, Equatable, Sendable {
     if event.id > 0 { lastEvent = event.id }
   }
 
-  /// A restart ended every held request, so only the cards that outlive a
-  /// turn stay. A snapshot holds the state before this step.
+  /// A restart ended every held request, as `card_closed` does for one.
+  /// Claude Code keeps each dialog open. A card that outlives its turn has
+  /// no held request. A snapshot holds the state before this step.
   public mutating func restarted() {
-    facts.cards.removeAll { !$0.outlivesTurn }
+    for i in facts.cards.indices.reversed() where !facts.cards[i].outlivesTurn {
+      facts.closeHook(at: i)
+    }
   }
 }
 

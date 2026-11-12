@@ -121,17 +121,6 @@ import Testing
     #expect(replay.lastEvent == (try store.events(session: "s1").last?.id))
   }
 
-  @Test func aRestartDropsTheCardsThatAreNotDeferred() {
-    var replay = SessionReplay()
-    replay.facts.cards = [
-      Card(Event(id: 1, session: "s1", t: 1, kind: "PermissionRequest", data: tool("Bash", "a"))),
-      Card(Event(id: 2, session: "s1", t: 2, kind: "PermissionRequest", data: tool("Bash", "b"))),
-    ]
-    replay.facts.cards[1].deferred = true
-    replay.restarted()
-    #expect(replay.facts.cards.map(\.id) == [2])
-  }
-
   @Test(arguments: ["a new build", "a changed session", "a snapshot that does not decode", "a missing event"])
   func aSnapshotThatMayBeStaleFallsBackToAFullReplay(problem: String) throws {
     let (store, dir) = try store()

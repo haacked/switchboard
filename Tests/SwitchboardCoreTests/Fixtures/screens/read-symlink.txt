@@ -1,0 +1,60 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   /…/00000000-0000-0000-0000-000000000000/scratchpad/cap2/work · /rc            
+
+
+❯ Use the Edit tool to change "beta" to "BETA" in link/notes.txt. Do not read it first with Bash. Then reply DONE.                                 
+
+⏺ Reading link/notes.txt
+  ⎿  link/notes.txt
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Read file
+ This will read /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/sc
+ ratchpad/cap2/real/notes.txt (outside working directory) via a symlink
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Read(/private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/scratchpad/c
+ ap2/work/link/notes.txt)
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                                 
+
+
+
+                                                                                                                                                 
+                                 

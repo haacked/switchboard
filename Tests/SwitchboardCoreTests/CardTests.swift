@@ -435,7 +435,7 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
 
   /// The held requests end with sbd, but a group message waits in the event log.
   @Test func aRestartOfSbdKeepsASendCard() {
-    var replay = SessionReplay.replaying(permissionTurn() + [sendPending()], session: session())
+    var replay = SessionReplay.replaying(fetchTurn() + [sendPending()], session: session())
 
     replay.restarted()
 
@@ -460,6 +460,34 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
     #expect(triage?.kind == .approval)
     #expect(triage?.ref == "card:7")
     #expect(triage?.options.map(\.action) == [.allow, .deny])
+  }
+}
+
+/// sbd's restart ends every held PermissionRequest hook. Claude Code keeps
+/// each dialog open.
+@Suite struct RestartKeepsFindableCards {
+  func restarted(_ cards: [Card]) -> [Card] {
+    var replay = SessionReplay()
+    replay.facts.cards = cards
+    replay.restarted()
+    return replay.facts.cards
+  }
+
+  @Test func aFindableCardStaysWithItsHookClosed() {
+    let cards = restarted([writeCard("/w/notes.txt", "one"), bashCard("touch a.txt"), fruitCard()])
+    #expect(cards.map(\.hookClosed) == [true, true, true])
+  }
+
+  @Test(arguments: [facts(fetchTurn()).cards[0], readCard("/etc/hosts", ["offset": 10]), bashCard(" ")])
+  func anUnfindableCardGoes(_ card: Card) {
+    #expect(!card.findable)
+    #expect(restarted([card]).isEmpty)
+  }
+
+  @Test func aDeferredCardStaysAsItWas() {
+    var question = fruitCard()
+    question.deferred = true
+    #expect(restarted([question]) == [question])
   }
 }
 
