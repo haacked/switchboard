@@ -466,8 +466,8 @@ enum BoardLanes: String, CaseIterable {
   var title: String { self == .repo ? "Repo" : "Group" }
 }
 
-/// The merge board: a lane per repo or per group, and a column per pipeline
-/// stage. Done sessions and merged PRs collapse into a footer.
+/// The board: a lane per repo or per group, and a column for each of
+/// `MergeBoard.columns`. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
   @AppStorage(BoardLanes.storageKey) private var laneKind = BoardLanes.repo
@@ -893,15 +893,12 @@ struct BoardCard: View {
   /// The Board has keyboard focus on this card, so it draws a ring.
   var keyboardFocused = false
 
-  /// A card without a stage shows its state's time instead. A blocked card
-  /// names its state, because the blocker replaces the reason and the tint
-  /// alone tells Needs you from Working only by color.
+  /// A card without a placement shows its state's time instead.
   private var statusLine: String {
     let s = session
     let process = s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped"
     let parts = [
-      s.pipeline.map { "\($0.stage.title) \(ago($0.since))" }, process, s.pipeline == nil ? ago(s.since) : nil,
-      s.pipeline?.blocker != nil ? s.state.title : nil,
+      s.board.map { "\($0.column.title) \(ago($0.since))" }, process, s.board == nil ? ago(s.since) : nil,
       s.acknowledged == true ? "acknowledged" : nil,
     ]
     return parts.compactMap { $0 }.joined(separator: " · ")
@@ -939,11 +936,7 @@ struct BoardCard: View {
               }
             }
           }
-          if let blocker = s.pipeline?.blocker {
-            Text(blocker).font(.caption).foregroundStyle(.orange).lineLimit(2)
-          } else {
-            Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-          }
+          Text(s.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
           CleanupNote(session: s)
           MergeNote(session: s)
           // A Board column is too narrow for the badge beside the PR number.

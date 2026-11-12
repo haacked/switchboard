@@ -129,8 +129,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var submittedDecisionsMessage: String?
   /// Whether the last accepted submit's message reached claude, or nil before any submit.
   public var decisionsDelivery: DecisionsDelivery?
-  /// When the PR entered its pipeline stage. `notePipeline` sets it.
-  public var pipelineSince: Int64?
+  /// When the PR entered its board column, or when the session's PR last
+  /// changed. `noteBoard` sets it.
+  public var boardSince: Int64?
+  /// The PR's last move back on the board, while it stands. `noteBoard` sets it.
+  public var boardBack: BoardMove?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -257,7 +260,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       if let id = d["agent_id"]?.string { subagents.remove(id) }
     case "pr":
       let next = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
-      notePipeline(from: pr, to: next, at: event.t)
+      noteBoard(from: pr, to: next, at: event.t)
       pr = next
       if let number = next?.number { prNumbers.insert(number) }
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
