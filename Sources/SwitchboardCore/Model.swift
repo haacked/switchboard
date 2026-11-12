@@ -146,6 +146,22 @@ public enum SessionKind: String, Codable, Sendable {
     case .chat: "a group chat"
     }
   }
+
+  /// Which of the session's items may reach the Inbox, the badge, the menu
+  /// bar, a notification, or Next Needing You.
+  public var inboxItems: InboxItems {
+    switch self {
+    case .work: .all
+    case .manager, .chat: .none
+    }
+  }
+}
+
+/// The Manager's and the group chats' replies and cards repeat or name the
+/// sessions they manage, and those sessions have their own items.
+public enum InboxItems: Sendable {
+  case all
+  case none
 }
 
 /// One entry in the event log: a hook payload, or something sbd did.

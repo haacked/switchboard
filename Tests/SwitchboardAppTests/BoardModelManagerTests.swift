@@ -68,6 +68,13 @@ import Testing
     #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
   }
 
+  @Test func aWorkSessionThatStillNeedsYouWithANewItemDoesNotNotifyAgain() {
+    let model = model([needsItem("a")])
+    var next = needsItem("a")
+    next.triage = TriageItem(title: "Approve touch x", kind: .approval, summary: "", source: .card)
+    #expect(model.sessionsToNotify([next]).isEmpty)
+  }
+
   @Test func aSessionThatBecomesReadyToMergeNotifiesAndCounts() {
     let model = model([needsItem("a", state: .working)])
     let next = [needsItem("a", state: .readyToMerge)]

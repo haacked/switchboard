@@ -399,17 +399,22 @@ public enum Triage {
   /// puts its stored decisions on the item, so a later card or rule doesn't
   /// replace the answers. A held prompt's item keeps none, because the
   /// prompt needs its own answer first.
-  public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    item(facts, live: liveItem(facts, verdict))
+  public static func item(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> TriageItem? {
+    itemAndDecisions(facts, verdict, kind: kind).item
   }
 
   /// The session's item, its open decision list, and whether a submit sent
   /// the item's decisions, all from one live item.
-  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> (
     item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
   ) {
-    let live = liveItem(facts, verdict)
-    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    switch kind.inboxItems {
+    case .all:
+      let live = liveItem(facts, verdict)
+      return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    case .none:
+      return (nil, nil, false)
+    }
   }
 
   private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
@@ -645,20 +650,27 @@ public enum Triage {
     }
   }
 
-  /// Whether the session may put an item in the Inbox, the badge, the menu
-  /// bar, a notification, or Next Needing You. The Manager and the group chats
-  /// may not, because their replies and cards repeat or name the sessions they
-  /// manage, which have their own entries. Nothing reports a problem with sb
-  /// itself, such as an out-of-date sbd. This refuses every item of theirs.
-  public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.kind == .work }
+  /// Whether the session's item may reach the Inbox, the badge, the menu bar,
+  /// a notification, or Next Needing You. The app checks this itself, so a
+  /// summary from an older sbd cannot add an item that this rule leaves out.
+  public static func inInbox(_ s: SessionSummary) -> Bool {
+    switch s.kind.inboxItems {
+    case .all: true
+    case .none: false
+    }
+  }
+
+  /// Whether sbd asks a model to summarize the session's turns. Only a work
+  /// session's turn gets a summary call.
+  public static func summarizes(_ kind: SessionKind) -> Bool { kind == .work }
 
   /// Whether the session needs the user and counts toward the Inbox and the badge.
-  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && mayHaveItem(s) }
+  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && inInbox(s) }
 
   /// The sessions that have an item, by group and then oldest first.
   public static func order(_ sessions: [SessionSummary]) -> [SessionSummary] {
     var ranked: [(session: SessionSummary, rank: Int)] = []
-    for s in sessions where mayHaveItem(s) {
+    for s in sessions where inInbox(s) {
       if let r = rank(s) { ranked.append((s, r)) }
     }
     ranked.sort { a, b in

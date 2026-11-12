@@ -1814,14 +1814,14 @@ public final class Service {
     out.mcp = s.mcp
     out.kind = s.kind
     out.chat = s.chat
-    if Triage.mayHaveItem(out) {
-      let shown = Triage.itemAndDecisions(e.facts, verdict)
-      out.triage = shown.item
+    let shown = Triage.itemAndDecisions(e.facts, verdict, kind: s.kind)
+    out.triage = shown.item
+    if out.triage != nil {
       let details = Triage.details(for: out)
       out.triage?.details = details
-      out.decisions = shown.decisions
-      if shown.decisionsSent { out.decisionsSent = true }
     }
+    out.decisions = shown.decisions
+    if shown.decisionsSent { out.decisionsSent = true }
     out.decisionsDelivery = e.facts.decisionsDelivery
     out.followup = s.followup
     out.created = s.created

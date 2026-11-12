@@ -148,7 +148,7 @@ extension Service {
       return
     }
     let session = summary(id)
-    guard Triage.mayHaveItem(session) else { return }
+    guard Triage.summarizes(session.kind) else { return }
     let reply = e.facts.lastReply ?? ""
     let input = TriageSummarizer.input(session: session, reply: reply)
     let env = headlessEnv(session: id, account: config.triage.account)

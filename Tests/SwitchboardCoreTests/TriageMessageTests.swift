@@ -14,7 +14,7 @@ private func message(
     id: "s1", name: "s1", cwd: "/", repo: nil, branch: nil, claudeSessionId: "s1", state: verdict.state,
     reason: verdict.reason, since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false,
     lastReply: reply ?? facts.lastReply, waits: waits, notes: notes, cards: facts.cards, pr: pr)
-  s.triage = Triage.item(facts, verdict)
+  s.triage = Triage.item(facts, verdict, kind: .work)
   let details = Triage.details(for: s)
   s.triage?.details = details
   return s.triage?.message
@@ -247,7 +247,7 @@ private func longCommandTurn() -> [Event] {
   @Test func theItemEncodesTheMessageBesideItsFlatFields() throws {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     f.apply(stop(1, 5, proseQuestion))
-    let item = try #require(Triage.item(f, Attention.replyVerdict(proseQuestion)))
+    let item = try #require(Triage.item(f, Attention.replyVerdict(proseQuestion), kind: .work))
     let json = try JSON(encoding: item)
 
     #expect(json["summary"]?.string == item.summary)

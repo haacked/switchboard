@@ -421,15 +421,9 @@ public enum Attention {
     return readyForReview(verdict, facts) ?? verdict
   }
 
-  static func rules(
-    _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState?
-  ) -> Verdict {
-    if session.done { return Verdict(state: .done, reason: "marked done") }
-    if let verdict = followupVerdict(session) { return verdict }
-    if let verdict = docketVerdict(session, facts) { return verdict }
-    if let card = facts.cards.first {
-      return Verdict(state: .needsYou, reason: oneLine(card.reason))
-    }
+  /// The verdict of a Claude Code dialog that waits on the user without a
+  /// card, or of claude's exit at the folder trust dialog.
+  public static func openPromptVerdict(_ facts: SessionFacts) -> Verdict? {
     if facts.exitedAtTrust {
       return Verdict(
         state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
@@ -440,6 +434,19 @@ public enum Attention {
     if let q = facts.openQuestion {
       return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
     }
+    return nil
+  }
+
+  static func rules(
+    _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState?
+  ) -> Verdict {
+    if session.done { return Verdict(state: .done, reason: "marked done") }
+    if let verdict = followupVerdict(session) { return verdict }
+    if let verdict = docketVerdict(session, facts) { return verdict }
+    if let card = facts.cards.first {
+      return Verdict(state: .needsYou, reason: oneLine(card.reason))
+    }
+    if let v = openPromptVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {

@@ -180,6 +180,8 @@ final class BoardModel: ObservableObject {
   private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
   private var knownStates: [String: AttentionState] = [:]
+  /// The sessions that were in the Inbox at the last refresh.
+  private var knownNeedsYou: Set<String> = []
   /// The session that `create` or `openManager` selected before a refresh
   /// listed it.
   private(set) var pendingSelection: String?
@@ -422,6 +424,7 @@ final class BoardModel: ObservableObject {
       // A follow-up that fires appears in `ls` as Needs you. The known states
       // include the follow-ups, so that change from Not started notifies.
       knownStates = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0.state) })
+      knownNeedsYou = Set(allBoard.filter(Triage.needsYou).map(\.id))
       loaded = true
     case .failure(let error):
       let problem = "\(error)"
@@ -429,10 +432,12 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// The shown sessions that just started needing the user.
+  /// The shown sessions that just entered the Inbox. A session can need the
+  /// user before its item reaches the Inbox, so the test reads the last
+  /// refresh's Inbox and not its state.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard Triage.needsYou(s), let known = knownStates[s.id], !known.needsUser, orgFilter.shows(s)
+      guard Triage.needsYou(s), let known = knownStates[s.id], !knownNeedsYou.contains(s.id), orgFilter.shows(s)
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
@@ -772,7 +777,10 @@ final class BoardModel: ObservableObject {
       "ack", args,
       then: { value in
         // The user put the item back, so the refresh must not notify about it.
-        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) {
+          self.knownStates[id] = s.state
+          if Triage.needsYou(s) { self.knownNeedsYou.insert(id) } else { self.knownNeedsYou.remove(id) }
+        }
       },
       finally: { self.acknowledging.remove(id) })
   }
