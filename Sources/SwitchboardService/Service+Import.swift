@@ -151,6 +151,10 @@ extension Service {
     return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: seen)
   }
 
+  /// An interactive login shell gives claude the user's PATH and shell functions. The Claude pane starts claude
+  /// with these flags.
+  static let claudeShellFlags = ["-l", "-i", "-c"]
+
   /// The rows of `claude agents --json` on a host, under the host's Claude login. The host's login shell runs
   /// claude, as the Claude pane does, so the shell's PATH finds it. The shell prints a token first, and the
   /// rows are what follows the token's line, so the output of a login file is not read as rows. claude gets

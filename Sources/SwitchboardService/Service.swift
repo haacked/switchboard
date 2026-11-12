@@ -1013,9 +1013,8 @@ public final class Service {
       "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
         + args.map(shellQuote).joined(separator: " ") + "\n",
       for: id, at: site)
-    // An interactive login shell gives claude the user's PATH and shell
-    // functions.
-    let command = "\(terminals.shell) -l -i -c 'source \"$SB_HOME/sessions/$SB_SESSION_ID/claude.sh\"'"
+    let command =
+      "\(terminals.shell) \(Service.claudeShellFlags.joined(separator: " ")) 'source \"$SB_HOME/sessions/$SB_SESSION_ID/claude.sh\"'"
     let name = paneName(id, .claude)
     if paneRow(id, .claude) != nil {
       try terminals.respawn(name, cwd: session.cwd, env: env, command: command)
