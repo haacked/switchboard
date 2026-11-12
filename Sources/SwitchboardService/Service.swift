@@ -38,8 +38,6 @@ public final class Service {
     /// When the tick last saw a background job under claude. A job sends no
     /// hooks while it runs, so the idle wait counts from here too.
     var lastJobSeen: Int64 = 0
-    /// The time that the idle wait counts from.
-    var idleSince: Int64 { max(facts.lastActivity, lastJobSeen) }
     /// The branch that sbd shows: the folder's checked-out branch once the poller reads one.
     /// Cleanup and branch deletion read `session.branch` instead.
     var branch: String? { facts.branch ?? session.branch }
@@ -63,9 +61,13 @@ public final class Service {
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
 
-    /// Whether a message is queued for the session or on its way.
+    /// Whether a message is queued for the session or on its way. A launch's
+    /// prompt stays on its way until SessionStart, for up to `startingMs`.
     func messageWaiting(now: Int64) -> Bool {
-      !pending.isEmpty || inFlight.map { now - $0 < Service.inFlightMs } == true
+      guard pending.isEmpty else { return true }
+      guard let sent = inFlight else { return false }
+      let starting = !facts.startedSinceLaunch && now - (facts.lastLaunch ?? 0) < Service.startingMs
+      return starting || now - sent < Service.inFlightMs
     }
 
     var dialogs = DialogWatch()
@@ -81,6 +83,13 @@ public final class Service {
 
   /// How long a message counts as in flight without its UserPromptSubmit.
   static let inFlightMs: Int64 = 10_000
+  /// How long a running claude with no SessionStart may run before the tick
+  /// counts it as live, because its hook may have failed.
+  static let unreportedMs: Int64 = 10_000
+  /// How long after its launch a claude with no SessionStart may still be
+  /// starting. The tick counts it as live after `unreportedMs`, but a slow
+  /// start has not read its launch's prompt yet.
+  static let startingMs: Int64 = 60_000
   /// How long sbd keeps a lookup that found no repo before it reads the folder again.
   static let checkoutRetryMs: Int64 = 60_000
 
@@ -1711,7 +1720,7 @@ public final class Service {
           if live || entries[id]?.facts.startedSinceLaunch == true {
             entries[id]?.unreportedSince = nil
           } else if let since = entries[id]?.unreportedSince {
-            if now - since > 10_000 {
+            if now - since > Service.unreportedMs {
               record(id, "running")
               entries[id]?.unreportedSince = nil
             }
@@ -1722,7 +1731,9 @@ public final class Service {
           if jobs > 0 { entries[id]?.lastJobSeen = now }
           // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
-          if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
+          if let e = entries[id], stopPolicy.idleStopDue(stopInput(e, jobs: jobs, now: now), now: now) {
+            try? stop(id, reason: "idle for \(config.idleStopSeconds) s")
+          }
         case .stopped:
           entries[id]?.unreportedSince = nil
           // Exit typed in the terminal, a stop, or a crash ends claude at the trust dialog.
@@ -1762,26 +1773,13 @@ public final class Service {
     noteTrustDialogs()
   }
 
-  func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {
-    guard let e = entries[id], isQuiet(id, pid: pid, now: now) else { return false }
-    // A background job's process exits up to 1.3 s before claude starts the
-    // turn that reports it, so the wait starts again when the job exits.
-    let idle = now - e.idleSince
-    guard idle >= idleStopMs(id) else { return false }
-    // A running subagent's tool calls fire hooks. A subagent with no event
-    // for twice the idle time lost its SubagentStop, as when sbd was down.
-    return e.facts.subagents.isEmpty || idle >= 2 * Int64(config.idleStopSeconds) * 1000
-  }
+  var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
 
-  /// Whether the session's claude sits idle with nothing that a stop would
-  /// lose: no turn, prompt, trust dialog, queued or in-flight message, or
-  /// background job, and no terminal on screen. The idle stop and the live cap both need it.
-  func isQuiet(_ id: String, pid: Int, now: Int64) -> Bool {
-    guard let e = entries[id] else { return false }
-    let f = e.facts
-    return f.live && !f.turnRunning && f.openPermission == nil && f.openQuestion == nil
-      && f.trustCard == nil && !e.messageWaiting(now: now) && !attached(id)
-      && backgroundJobs(pid) == 0
+  /// The session's running claude, as the stop rules see it.
+  func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
+    StopPolicy.Claude(
+      session: e.session, facts: e.facts, lastJobSeen: e.lastJobSeen, jobs: jobs,
+      messageWaiting: e.messageWaiting(now: now), attached: attached(e.session.id))
   }
 
   // MARK: Summaries
@@ -1874,9 +1872,6 @@ public final class Service {
 }
 
 extension SessionFacts {
-  /// Whether the claude that the last launch started has reported its SessionStart.
-  fileprivate var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
-
   /// Whether the claude that the last launch started has ended, so that its
   /// process is exiting.
   var exiting: Bool { !live && startedSinceLaunch }
