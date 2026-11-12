@@ -7,10 +7,11 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
   public var gh: String = "gh"
   /// The API base. The GraphQL endpoint is <url>/graphql.
   public var url: String = "https://api.github.com"
-  /// How often a pending PR polls, and how often sbd polls. 0 turns off the
-  /// timer. Each `sb poll` then reads every pending PR.
+  /// How often a pending PR or a PR that awaits a review polls, and how
+  /// often sbd polls. 0 turns off the timer. Each `sb poll` then reads every
+  /// such PR.
   public var pollSeconds: Double = 30
-  /// How often a settled PR polls, and how often sbd looks up a branch that
+  /// How often any other PR polls, and how often sbd looks up a branch that
   /// had no PR.
   public var idlePollSeconds: Double = 300
   /// How often a named service's deploy state is read while a deploy wait
@@ -667,12 +668,13 @@ public enum GitHub {
   }
 
   /// Whether a PR is due to poll at `now`. A PR that was never read is due.
-  /// A pending PR is due after `pendingMs`, and any other after `idleMs`.
+  /// A pending PR, or one that awaits a review, is due after `pendingMs`, so
+  /// an approval shows within one poll. Any other PR is due after `idleMs`.
   public static func isDue(_ pr: PullRequest?, lastPolled: Int64?, now: Int64, pendingMs: Int64, idleMs: Int64)
     -> Bool
   {
     guard let pr else { return true }
-    return elapsed(since: lastPolled, pr.isPending ? pendingMs : idleMs, now: now)
+    return elapsed(since: lastPolled, pr.isPending || pr.awaitsReview ? pendingMs : idleMs, now: now)
   }
 
   static let prLinkMarker = Data(#""pr-link""#.utf8)

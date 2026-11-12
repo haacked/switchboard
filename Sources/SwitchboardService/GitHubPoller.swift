@@ -436,7 +436,7 @@ final class GitHubPoller {
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
   private func readPRs(all: Bool, now: Int64, waited: Waited, queued: Set<String>, stats: inout Stats) throws {
-    // A PR in `waited.pending` or in Trunk's queue polls like a pending PR. A
+    // A PR in `waited.pending` or in Trunk's queue polls at the pending rate. A
     // PR with any open wait also polls at once when the wait is newer than the
     // last read. That read can't show what happened after the wait was set.
     let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {

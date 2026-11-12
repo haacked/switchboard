@@ -282,6 +282,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
     state == .open && (checksRunning || mergeable == .unknown)
   }
 
+  /// Whether an open PR that is not a draft waits on a review: review does
+  /// not yet satisfy it. A review decision that the poll did not read counts.
+  public var awaitsReview: Bool { ready && !reviewSatisfied }
+
   /// Whether the head commit's checks have not finished.
   public var checksRunning: Bool { checks == "PENDING" || checks == "EXPECTED" }
 }
