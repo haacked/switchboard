@@ -18,3 +18,14 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 - Swift for the app and the service.
 - Sessions run the unmodified `claude` CLI under the user's Claude subscription. Never call the Claude API with a subscription login.
 - Only Xcode's Command Line Tools are installed (Swift 6.4). The service, the CLI, and the app bundle build with SwiftPM.
+
+## Design before adding code
+
+Before you implement a feature or fix, read the code it touches and ask whether the current design makes the change easy. If it doesn't, refactor first, then implement. Examples are a type or view that does two jobs, logic duplicated where the change would add a third copy, a missing abstraction the change would hard-code around, or a long function the change would make longer.
+
+- Refactor only what the change touches or what makes it simpler. Don't clean up unrelated code.
+- A refactor doesn't change behavior. Keep the tests passing, and put it in its own commit before the feature commits.
+- If the refactor is large enough to review on its own, open it as a separate PR first and build the feature on top.
+- In the plan, list the refactors as their own stage before the implementation stages.
+- In the PR description, say what you restructured and why the feature needed it.
+- In review, treat code that works around a design problem instead of fixing it as a finding.
