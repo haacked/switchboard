@@ -29,6 +29,8 @@ final class BoardModel: ObservableObject {
     }
   }
   @Published var showingOrgFilter = false
+  /// Decides when a session tile's hover card shows. Tests replace it.
+  var hoverCard: HoverCard?
   /// Why sbd can't be reached, or nil while it answers.
   @Published var unreachable: String?
   /// The last failed action, shown until the next one succeeds.
@@ -189,12 +191,15 @@ final class BoardModel: ObservableObject {
     messageDrafts = MessageDrafts(folder: draftsFolder)
     self.orgFilterStore = orgFilterStore
     self.orgFilter = orgFilterStore?.stringArray(forKey: Self.orgFilterKey).map { OrgFilter(keys: $0) } ?? orgFilter
+    hoverCard = HoverCard.panel(for: self)
   }
 
-  /// Clears a selection that the org filter hides, and counts the shown sessions in the Dock badge.
+  /// Clears a selection that the org filter hides, closes the hover card of a session that is no longer
+  /// shown, and counts the shown sessions in the Dock badge.
   private func clearHiddenSelectionAndUpdateBadge() {
     let listed = shownIDs
     if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
+    hoverCard?.sessionsChanged(shown: listed)
     if NSApp != nil { NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)" }
   }
 
@@ -315,6 +320,7 @@ final class BoardModel: ObservableObject {
 
   func start() {
     guard timer == nil else { return }
+    hoverCard?.closeOnEvents()
     if Bundle.main.bundleIdentifier != nil {
       UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
@@ -361,9 +367,9 @@ final class BoardModel: ObservableObject {
   }
 
   /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event. Publishing for it redraws the views and restarts a tooltip's
-  /// hover delay. The session tooltip shows `lastActivity`, so its "Last
-  /// activity" line can lag until another shown field changes.
+  /// hook event. Publishing for it would redraw every view each second. The
+  /// hover card shows `lastActivity`, so its "active" time can lag until
+  /// another shown field changes.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
@@ -377,8 +383,7 @@ final class BoardModel: ObservableObject {
     switch result {
     case .success(let list):
       // Assigning a @Published property republishes even an equal value. A
-      // refresh every second would redraw the views each time, and a redraw
-      // resets the hover delay before a tooltip shows.
+      // refresh every second would redraw the views each time.
       if unreachable != nil { unreachable = nil }
       if let more, allFollowups != more { allFollowups = more }
       // Only shown sessions notify. The known states cover every session.

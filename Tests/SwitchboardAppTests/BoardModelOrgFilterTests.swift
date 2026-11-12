@@ -308,7 +308,7 @@ let everyFilterShape = [
     #expect(model.selection == "ph1")
   }
 
-  /// A publish restarts every tooltip's hover delay.
+  /// A publish redraws every view.
   @Test func aRefreshWithTheSameListUnderAFilterWithASelectionDoesNotPublish() {
     let model = model(posthogOnly)
     model.selection = "ph1"
