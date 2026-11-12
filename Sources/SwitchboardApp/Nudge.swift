@@ -67,7 +67,7 @@ struct NudgeButton: View {
     }
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
-    .accessibilityLabel("Copy a nudge for \(session.pr.map { "#\($0.number)" } ?? "the PR") of \(session.name)")
+    .accessibilityLabel(session.nudgeButtonLabel)
     .accessibilityValue(copied ? "Copied" : "")
     .help(copied ? "Copied" : "Copy a message that asks the reviewers to take a look")
   }

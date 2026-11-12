@@ -13,6 +13,16 @@ extension SessionSummary {
 
   var mergeVerb: String { (pr?.mergeMethod ?? .merge).verb }
 
+  var prRef: String { pr.map { "#\($0.number)" } ?? "the PR" }
+
+  /// Names the PR and the session in a card button's VoiceOver label. Each
+  /// card on the Board shows the same buttons, so the label tells them apart.
+  var prOfSession: String { "\(prRef) of \(name)" }
+
+  var mergeButtonLabel: String { "\(mergeVerb) \(prOfSession)" }
+
+  var nudgeButtonLabel: String { "Copy a nudge for \(prOfSession)" }
+
   /// The Ready to merge sessions that Merge All merges or enqueues from this
   /// session's card: this one first, then the others, oldest first.
   func readyToMergeSessions(all: [SessionSummary]) -> [SessionSummary] {
@@ -77,8 +87,6 @@ struct MergeButton: View {
   let session: SessionSummary
   @State private var confirming = false
 
-  private var ref: String { session.pr.map { "#\($0.number)" } ?? "the PR" }
-
   var body: some View {
     Button {
       confirming = true
@@ -88,9 +96,9 @@ struct MergeButton: View {
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
     .disabled(model.merging.contains(session.id))
-    .accessibilityLabel("\(session.mergeVerb) \(ref) of \(session.name)")
+    .accessibilityLabel(session.mergeButtonLabel)
     .help(session.enqueues ? "Add the PR to the merge queue…" : "Merge the PR with a merge commit…")
-    .confirmationDialog("\(session.mergeVerb) \(ref)?", isPresented: $confirming) {
+    .confirmationDialog("\(session.mergeVerb) \(session.prRef)?", isPresented: $confirming) {
       Button(session.mergeVerb) { model.merge(session.id) }
     } message: {
       Text(session.pr.map { "\($0.title) (\($0.repo))" } ?? session.name)
