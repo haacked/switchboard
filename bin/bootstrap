@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Installs Switchboard on a new Mac. It checks for the Command Line Tools,
+# clones the repo to $SWITCHBOARD_DIR (default ~/dev/haacked/switchboard), runs
+# bin/install, and opens the app. It reuses a checkout that is already there.
+# When the app is already installed, it doesn't change anything. A dotfiles
+# bootstrap can run it every time. Run it with:
+#
+#   curl -fsSL https://raw.githubusercontent.com/haacked/switchboard/main/bin/bootstrap | bash
+set -euo pipefail
+
+# bash reads a piped script one line at a time as it runs it. A command that
+# reads stdin, as a build tool can, would read the rest of the script. bash
+# reads all of main before it runs any of it.
+main() {
+  if [ $# -gt 0 ]; then
+    echo "usage: bin/bootstrap (it takes no arguments; set SWITCHBOARD_DIR to choose the checkout folder)" >&2
+    exit 2
+  fi
+  local dir="${SWITCHBOARD_DIR:-$HOME/dev/haacked/switchboard}"
+  local repo="${SWITCHBOARD_REPO:-https://github.com/haacked/switchboard.git}"
+  local app="$HOME/Applications/Switchboard.app"
+
+  if [ -d "$app" ]; then
+    echo "Switchboard is already installed at $app. To update it, run bin/update in its checkout."
+    return
+  fi
+  if [ "$(uname -s)" != Darwin ]; then
+    echo "Switchboard runs only on macOS." >&2
+    exit 1
+  fi
+
+  # git comes with the Command Line Tools. bin/install checks the other tools.
+  if ! xcode-select -p >/dev/null 2>&1; then
+    echo "Switchboard needs the Xcode Command Line Tools. Run xcode-select --install, then run this again." >&2
+    exit 1
+  fi
+
+  if [ -e "$dir" ]; then
+    if [ ! -e "$dir/.git" ] || [ ! -x "$dir/bin/install" ]; then
+      echo "$dir isn't a Switchboard checkout. Move it, or set SWITCHBOARD_DIR to another folder." >&2
+      exit 1
+    fi
+    echo "Installing from the checkout at $dir."
+  else
+    mkdir -p "$(dirname "$dir")"
+    git clone "$repo" "$dir"
+  fi
+  "$dir/bin/install"
+  "$dir/bin/start"
+}
+
+main "$@"

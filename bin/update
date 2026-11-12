@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Updates Switchboard to the latest main: quits the app, fast-forwards this
-# checkout, runs bin/install, and opens the app. It checks the checkout before
-# it quits the app, so a refusal leaves the app running. Quitting the app does
+# checkout, runs bin/install, and opens the app. It checks the tools and the
+# checkout before it quits the app, so a refusal leaves the app running. Quitting the app does
 # not stop sbd or any session. bin/install restarts sbd.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source bin/lib/prerequisites.sh
+check_prerequisites
 app="$HOME/Applications/Switchboard.app"
 timeout=30
 
