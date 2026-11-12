@@ -71,9 +71,7 @@ struct HoverCardContent: Equatable {
     if working, let match = reason.wholeMatch(of: #/`.+`((?: \((?:<1|\d+) min\))?)/#) {
       return "Running a shell command" + match.1
     }
-    if reason.hasPrefix("approve `"), reason.hasSuffix("`"), reason.count > "approve ``".count {
-      return "approve a shell command"
-    }
+    if reason.wholeMatch(of: #/approve `.+`/#) != nil { return "approve a shell command" }
     return reason
   }
 }
