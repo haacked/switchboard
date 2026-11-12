@@ -15,19 +15,43 @@ import Testing
   }
 
   @Test func isQuietOnlyWhenAStopLosesNothing() {
-    #expect(policy.isQuiet(idle()))
-    #expect(!policy.isQuiet(StopPolicy.Claude(session: session(), facts: SessionFacts())))
-    #expect(!policy.isQuiet(idle(events: [event("UserPromptSubmit", 1, ["prompt": "go"])])))
-    #expect(!policy.isQuiet(idle(events: [event("PermissionRequest", 1, tool("Bash", ["command": "x"]))])))
+    #expect(policy.isQuiet(idle(), now: 0))
+    #expect(!policy.isQuiet(StopPolicy.Claude(session: session(), facts: SessionFacts()), now: 0))
+    #expect(!policy.isQuiet(idle(events: [event("UserPromptSubmit", 1, ["prompt": "go"])]), now: 1))
+    #expect(!policy.isQuiet(idle(events: [event("PermissionRequest", 1, tool("Bash", ["command": "x"]))]), now: 1))
     var c = idle()
     c.messageWaiting = true
-    #expect(!policy.isQuiet(c))
+    #expect(!policy.isQuiet(c, now: 0))
     c = idle()
     c.attached = true
-    #expect(!policy.isQuiet(c))
+    #expect(!policy.isQuiet(c, now: 0))
     c = idle()
     c.jobs = 1
-    #expect(!policy.isQuiet(c))
+    #expect(!policy.isQuiet(c, now: 0))
+  }
+
+  /// The tick's fallback records `running` for a claude whose SessionStart
+  /// hasn't come 10 s after its launch.
+  func unreported(launch: Int64) -> StopPolicy.Claude {
+    var s = session(wait: "CI")
+    s.id = "s1"
+    return StopPolicy.Claude(
+      session: s, facts: facts([event("SessionStart", 0), event("resumed", launch), event("running", launch + 10_000)]))
+  }
+
+  @Test func aClaudeWithNoSessionStartSinceItsLaunchIsQuietOnlyAfterStartingMs() {
+    let c = unreported(launch: 1000)
+    #expect(!policy.isQuiet(c, now: 1000 + StopPolicy.startingMs - 1))
+    #expect(policy.isQuiet(c, now: 1000 + StopPolicy.startingMs))
+  }
+
+  @Test func neitherStopTakesAClaudeThatMayStillBeStarting() {
+    let c = unreported(launch: 1000)
+    let short = StopPolicy(idleStopSeconds: 1)
+    #expect(!short.idleStopDue(c, now: 1000 + 15_000))
+    #expect(short.capOrder([c], now: 1000 + 15_000).isEmpty)
+    #expect(short.idleStopDue(c, now: 1000 + StopPolicy.startingMs))
+    #expect(short.capOrder([c], now: 1000 + StopPolicy.startingMs) == ["s1"])
   }
 
   @Test func theIdleStopIsDueAfterIdleStopSeconds() {

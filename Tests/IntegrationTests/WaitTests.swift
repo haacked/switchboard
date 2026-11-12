@@ -88,6 +88,48 @@ import Testing
     }
   }
 
+  /// A session with two waits whose claude stopped. The stub holds its next
+  /// start before SessionStart until `hold` is removed.
+  /// `mark` is the id of the last event before the resume.
+  func heldResume(_ sbd: Instance) throws -> (session: SessionSummary, hold: String, mark: Int64) {
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
+    try sbd.waitFor(s.id, "the stop", timeout: 10) { $0.claudePid == nil }
+    let hold = "\(sbd.home.path)/hold-start"
+    FileManager.default.createFile(atPath: hold, contents: nil)
+    let mark = try #require(try sbd.events(s.id).last?.id)
+    try sbd.sb("wait", s.id, "--id", waiting.waits[0].id, "--resolve", "#1190 merged")
+    try sbd.waitFor(s.id, "the held claude") { $0.claudePid != nil }
+    return (s, hold, mark)
+  }
+
+  /// After 10 s with no SessionStart, sbd counts a claude as live, because
+  /// its hook may have failed. That claude's prompt has not arrived yet.
+  @Test func aClaudeThatStartsSlowlyIsNotStoppedBeforeItsPromptArrives() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, hold, mark) = try heldResume(sbd)
+    let pid = try sbd.get(s.id).claudePid
+    // A tick sees the held claude first, so the clock then passes its 10 s.
+    sleep(1)
+    try sbd.advanceClock(15_000)
+    try sbd.waitFor("the 10 s fallback") { try sbd.events(s.id, after: mark).contains { $0.kind == "running" } }
+    sleep(2)
+    #expect(try !sbd.events(s.id, after: mark).contains { $0.kind == "stopped" })
+    #expect(try sbd.get(s.id).claudePid == pid)
+    try FileManager.default.removeItem(atPath: hold)
+    try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: #1190 to merge: #1190 merged." }
+  }
+
+  /// A claude whose SessionStart never comes, as when its hook fails, still stops once it can no longer be starting.
+  @Test func aClaudeWithNoSessionStartStopsAfterStartingMs() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, _, mark) = try heldResume(sbd)
+    sleep(1)
+    try sbd.advanceClock(StopPolicy.startingMs)
+    try sbd.waitFor("the stop") { try sbd.events(s.id, after: mark).contains { $0.kind == "stopped" } }
+  }
+
   @Test func aClaudeThatIsExitingAfterItsSessionEndedStaysNotLive() throws {
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 8)

@@ -1860,9 +1860,6 @@ public final class Service {
 }
 
 extension SessionFacts {
-  /// Whether the claude that the last launch started has reported its SessionStart.
-  fileprivate var startedSinceLaunch: Bool { (lastStart ?? 0) >= (lastLaunch ?? 0) }
-
   /// Whether the claude that the last launch started has ended, so that its
   /// process is exiting.
   var exiting: Bool { !live && startedSinceLaunch }
