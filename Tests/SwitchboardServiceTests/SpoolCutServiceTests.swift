@@ -100,8 +100,8 @@ private func record(_ service: Service, _ n: Int, session: String = "s1", host: 
     }
   }
 
-  /// A line that stays in a host's spool is read again on each reconnect, and only its recorded id keeps its
-  /// event from being recorded twice. sbd knows what a spool holds only after a reconcile read it.
+  /// A line that stays in a host's spool is read again on each reconnect, and only its recorded id stops sbd
+  /// from recording its event twice. sbd knows what a spool holds only after a reconcile read it.
   @Test(.timeLimit(.minutes(1)))
   func thePruneKeepsTheIdsOfAHostWhoseSpoolNoReconcileHasRead() throws {
     try withHostService { service, _ in

@@ -238,7 +238,6 @@ final class GitHubPoller {
   /// Reads the session's branch and the new lines of its transcript. For a session on a host, it keeps the
   /// last values unless the host answered every read.
   func refreshLocal(_ s: Watched, all: Bool, now: Int64, shared: inout Shared) {
-    guard s.site.hostName != nil else { return refreshLocal(s, at: s.site, all: all, now: now, shared: &shared) }
     let before = (tracked[s.id], shared)
     do {
       try s.site.confirmed("the poll of \(s.id)") { machine in
@@ -333,11 +332,6 @@ final class GitHubPoller {
     let count = { (site: any SessionSite) in
       self.git(s.cwd, ["--no-optional-locks", "status", "--porcelain"], at: site)
         .map { $0.split(separator: "\n").count }
-    }
-    guard s.site.hostName != nil else {
-      let dirty = count(s.site)
-      // A folder that the site can't read is not gone, which stays unsafe.
-      return (dirty, dirty == nil && (try? s.site.folderGone(s.cwd)) == true)
     }
     do {
       let dirty = try s.site.confirmed("the count of \(s.id)'s uncommitted files") { machine in

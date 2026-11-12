@@ -395,7 +395,6 @@ final class HostLink: @unchecked Sendable {
   }
 
   private static func failure(_ what: String, _ r: CommandResult) -> APIError {
-    let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-    return APIError(text.isEmpty ? "\(what) exited with status \(r.status)" : "\(what) failed: \(text)")
+    APIError("\(what) failed: \(r.problem)")
   }
 }

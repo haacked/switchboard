@@ -140,11 +140,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   static let deadlineSlack = 3.0
   static let setupSeconds = 20.0
 
-  let hostName: String?
+  var hostName: String? { name }
   let machine: any Machine
   let link: HostLink
   let config: HostConfig
-  private let name: String
+  private var name: String { config.name }
   private let home: Home
   private let tap: ((any Machine) -> any Machine)?
 
@@ -166,13 +166,9 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   private let setup = NSLock()
 
   /// `tap` wraps each machine that the site builds, below the one that supplies timeouts. Tests record through it.
-  init(
-    link: HostLink, config: HostConfig, home: Home, settings: Config, tap: ((any Machine) -> any Machine)? = nil
-  ) {
+  init(link: HostLink, config: HostConfig, home: Home, tap: ((any Machine) -> any Machine)? = nil) {
     self.link = link
     self.config = config
-    self.name = config.name
-    self.hostName = config.name
     self.home = home
     self.tap = tap
     self.machine = RemoteSite.timed(link, check: nil, tap: tap)
@@ -375,7 +371,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     } catch {
       throw unread("setup got no answer: \(error)")
     }
-    guard r.status == 0 else { throw APIError("setup on \(name) failed: \(Self.problem(r))") }
+    guard r.status == 0 else { throw APIError("setup on \(name) failed: \(r.problem)") }
     try link.forward(remote: BoxShim.socketPath(for: facts), local: home.hostSocket(name))
   }
 
@@ -388,16 +384,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     } catch {
       throw unread("setup got no answer: \(error)")
     }
-    guard r.status == 0 else { throw APIError("setup on \(name) failed: \(Self.problem(r))") }
+    guard r.status == 0 else { throw APIError("setup on \(name) failed: \(r.problem)") }
     let facts = try BoxFacts.parse(Data(r.stdout.utf8), epoch: epoch, host: config, now: nowMs())
     lock.withLock { lastClockOffsetMs = facts.clockOffsetMs }
     try setUpHooks(facts)
     return facts
-  }
-
-  private static func problem(_ r: CommandResult) -> String {
-    let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-    return text.isEmpty ? "exit status \(r.status)" : text
   }
 
   /// The host's tmux server. A pane gets the host's values and nothing from sbd's environment. SSH_AUTH_SOCK
@@ -428,11 +419,17 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
 
   func terminals() throws -> TerminalHost { try current().terminals }
 
+  func requireReady() throws { _ = try current() }
+
+  func sbFolder() throws -> String { try current().facts.folder }
+
+  func userHome() throws -> String { try current().facts.home }
+
   func git() throws -> String { try current().facts.git }
 
   func worktreeRoot() throws -> String { try expand(config.worktreeRoot) }
 
-  func sessionFolder(_ id: String) throws -> String { "\(try current().facts.folder)/sessions/\(id)" }
+  func sessionFolder(_ id: String) throws -> String { "\(try sbFolder())/sessions/\(id)" }
 
   /// `~` and `~/x` become the host's home. Any other `~name` throws, because sbd does not know that user's home.
   func expand(_ path: String) throws -> String {
@@ -520,18 +517,16 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   }
 
   private func batchedRead(_ machine: any Machine, claudeProgram: String) throws -> Service.Snapshot {
-    let facts = try current().facts
+    let ready = try current()
+    let server = ready.terminals
     let taken = nowMs()
     let r = try machine.run(
-      "/bin/sh",
-      [
-        "-c", Self.readScript, "sb", facts.tmux, "\(facts.folder)/tmux.sock", "\(facts.folder)/tmux.conf",
-        TerminalHost.paneFormat,
-      ], env: nil, input: nil, timeout: Self.commandSeconds)
-    guard r.status == 0 else { throw APIError("the pane and process read on \(name) failed: \(Self.problem(r))") }
+      "/bin/sh", ["-c", Self.readScript, "sb", server.tmux, server.socket, server.conf, TerminalHost.paneFormat],
+      env: nil, input: nil, timeout: Self.commandSeconds)
+    guard r.status == 0 else { throw APIError("the pane and process read on \(name) failed: \(r.problem)") }
     var read = try Self.parseBatchedRead(Data(r.stdout.utf8), claudeProgram: claudeProgram)
     read.taken = taken
-    read.connection = facts.epoch
+    read.connection = ready.facts.epoch
     return read
   }
 
@@ -563,7 +558,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
         "/bin/sh", ["-c", Self.killScript, "sb", String(pid), String(process.ppid)], env: nil, input: nil,
         timeout: Self.commandSeconds)
       if r.status == 3 { throw changed }
-      guard r.status == 0 else { throw APIError("the signal to \(pid) on \(name) failed: \(Self.problem(r))") }
+      guard r.status == 0 else { throw APIError("the signal to \(pid) on \(name) failed: \(r.problem)") }
     }
   }
 
@@ -579,7 +574,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
         "/bin/sh", ["-c", Self.aliveScript], env: nil, input: nil, timeout: Self.commandSeconds)
       let lines = r.stdout.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
       guard r.status == 0, lines.last == "done" else {
-        throw APIError("the check of the processes on \(name) failed: \(Self.problem(r))")
+        throw APIError("the check of the processes on \(name) failed: \(r.problem)")
       }
       return pids.intersection(lines.dropLast().compactMap { Int($0) })
     }
@@ -597,10 +592,10 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
         "/bin/sh", ["-c", Self.folderUsersScript, "sb", folder, "/proc"], env: nil, input: nil,
         timeout: Self.fallbackSeconds)
       if r.status == Self.cantCheckStatus {
-        throw APIError("can't check which processes use \(folder) on \(name): \(Self.problem(r))")
+        throw APIError("can't check which processes use \(folder) on \(name): \(r.problem)")
       }
       guard r.status == 0 else {
-        throw APIError("the check of the processes that use \(folder) on \(name) failed: \(Self.problem(r))")
+        throw APIError("the check of the processes that use \(folder) on \(name) failed: \(r.problem)")
       }
       return try Self.parseFolderUsers(Data(r.stdout.utf8))
     }
@@ -612,7 +607,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   private func pathAnswer(_ what: String, _ code: String, _ paths: [String]) throws -> String {
     try confirmed(what) { machine in
       let r = try machine.run(try current().facts.python, ["-I", "-S", "-c", code] + paths)
-      guard r.status == 0 else { throw APIError("\(what) on \(name) failed: \(Self.problem(r))") }
+      guard r.status == 0 else { throw APIError("\(what) on \(name) failed: \(r.problem)") }
       return r.stdout
     }
   }

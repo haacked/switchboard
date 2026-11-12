@@ -64,15 +64,16 @@ extension Service {
   /// When starts still wait, it stops enough idle sessions of the same site
   /// to make room for them. The tick calls it after it reads the processes.
   func runQueuedStarts(now: Int64) {
-    let hosts = Set(queuedStarts().map(\.session.host)).sorted { ($0 ?? "") < ($1 ?? "") }
-    for host in hosts { runQueuedStarts(onHost: host, now: now) }
+    let byHost = Dictionary(grouping: queuedStarts(), by: \.session.host)
+    for host in byHost.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
+      runQueuedStarts(byHost[host] ?? [], onHost: host, now: now)
+    }
   }
 
-  private func runQueuedStarts(onHost host: String?, now: Int64) {
+  /// `starts` are the site's queued starts, oldest first.
+  private func runQueuedStarts(_ starts: [Entry], onHost host: String?, now: Int64) {
     // A start on a host that sbd can't read would fail and lose its place, so it waits for the reconcile.
-    var queued = queuedStarts().filter {
-      $0.session.host == host && claudeState($0.session.id) != .unknown && !removing.contains($0.session.id)
-    }[...]
+    var queued = starts.filter { claudeState($0.session.id) != .unknown && !removing.contains($0.session.id) }[...]
     guard !queued.isEmpty else { return }
     var live = liveEntries(onHost: host)
     let cap = liveCap(onHost: host)

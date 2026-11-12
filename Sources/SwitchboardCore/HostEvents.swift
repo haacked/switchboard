@@ -92,8 +92,15 @@ public enum Spool {
   /// run ends before the first line that neither accepts, before the first line that is not a spool line, and
   /// before a last line that has no newline yet.
   public static func cutLength(_ data: Data, recorded: (SpoolLine) -> Bool, removed: (String) -> Bool) -> Int {
+    cutLength(parse(data).lines, recorded: recorded, removed: removed)
+  }
+
+  /// `cutLength` of the spool whose `parse` gave `lines`.
+  public static func cutLength(
+    _ lines: [SpoolLine], recorded: (SpoolLine) -> Bool, removed: (String) -> Bool
+  ) -> Int {
     var end = 0
-    for line in parse(data).lines {
+    for line in lines {
       // `lines` leaves out a line that is not a spool line, so a line that starts later than `end` follows one.
       guard line.bytes.lowerBound == end, recorded(line) || removed(line.session) else { break }
       end = line.bytes.upperBound

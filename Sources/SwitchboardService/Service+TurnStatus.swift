@@ -82,6 +82,9 @@ extension Service {
     return due
   }
 
+  /// The account of a session on the host. It names the host and is no folder.
+  static func hostAccount(_ host: String) -> String { "\(host):~/.claude" }
+
   /// The Claude account that the session's claude runs under. SessionStart
   /// names the transcript, <account>/projects/<folder>/<id>.jsonl, in the
   /// account that claude uses, which a shell profile or a wrapper can pick.
@@ -89,7 +92,7 @@ extension Service {
   /// A session on a host runs under that host's login, which is no account of this Mac. Its answer names the
   /// host and is no folder.
   func claudeAccount(of id: String) -> String {
-    if let host = entries[id]?.session.host { return "\(host):~/.claude" }
+    if let host = entries[id]?.session.host { return Service.hostAccount(host) }
     if let e = entries[id], let path = e.facts.transcriptPath,
       (path as NSString).lastPathComponent == "\(e.session.claudeSessionId).jsonl"
     {

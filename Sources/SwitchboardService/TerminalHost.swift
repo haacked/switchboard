@@ -31,7 +31,7 @@ final class TerminalHost {
   let tmux: String
   let socket: String
   let shell: String
-  private let conf: String
+  let conf: String
   private let baseEnv: [String: String]
   /// The timeout of each tmux command, or nil for none.
   private let timeout: Double?
@@ -312,9 +312,13 @@ final class TerminalHost {
   /// that many lines of scrollback above it. `colors` keeps the colors as
   /// SGR escape sequences, which `ClaudeScreen.promptIsEmpty` reads.
   func screen(_ name: String, history: Int = 0, colors: Bool = false) throws -> String {
-    try run(
-      ["capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + (history > 0 ? ["-S", "-\(history)"] : [])
-        + ["-t", "=\(name):"])
+    try run(Self.captureArgs(name, colors: colors, history: history))
+  }
+
+  /// The `capture-pane` arguments of the pane's screen. Here `-S` is the first line of scrollback, not the socket.
+  private static func captureArgs(_ name: String, colors: Bool, history: Int = 0) -> [String] {
+    ["capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + (history > 0 ? ["-S", "-\(history)"] : [])
+      + ["-t", "=\(name):"]
   }
 
   /// Prints the exit status of the command in `$@` and its output, with a NUL after each. An `x` ends the
@@ -325,8 +329,7 @@ final class TerminalHost {
   /// the screen, each ended by a NUL. It throws for any other output, which a capture that its timeout ended
   /// gives, and for a capture that tmux refused.
   func answeredScreen(_ name: String, colors: Bool = false, on machine: any Machine) throws -> String {
-    let capture =
-      ["-S", socket, "-f", conf, "capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + ["-t", "=\(name):"]
+    let capture = ["-S", socket, "-f", conf] + Self.captureArgs(name, colors: colors)
     let r = try machine.run(
       "/bin/sh", ["-c", Self.answeredScript, "sb", tmux] + capture, env: baseEnv, input: nil, timeout: timeout)
     guard r.status == 0 else { throw APIError("the screen read of \(name) exited with status \(r.status)") }

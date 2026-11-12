@@ -23,9 +23,9 @@ struct LoggedMachine: Machine {
   private let base: any Machine
   private let log: MachineLog
 
-  init(_ base: any Machine, log: String) {
+  init(_ base: any Machine, log: MachineLog) {
     self.base = base
-    self.log = MachineLog(path: log)
+    self.log = log
   }
 
   func run(

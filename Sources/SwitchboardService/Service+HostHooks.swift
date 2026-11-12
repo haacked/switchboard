@@ -18,6 +18,18 @@ struct HostEventBuffer {
     order.add(id, at: now)
     if payloads[id] == nil { payloads[id] = payload }
   }
+
+  /// Releases every held event, lowest id first, and drops every payload.
+  mutating func flush() -> [(HostEventID, JSON)] {
+    let due = order.flush().compactMap { id in payloads[id].map { (id, $0) } }
+    payloads = [:]
+    return due
+  }
+
+  /// Releases the events that `HostEventOrder.due` releases, lowest id first, with their payloads.
+  mutating func due(now: Int64) -> [(HostEventID, JSON)] {
+    order.due(now: now).compactMap { id in payloads.removeValue(forKey: id).map { (id, $0) } }
+  }
 }
 
 /// The hooks that arrive on a remote host's socket. Everything here runs for a request whose origin is that
@@ -83,13 +95,10 @@ extension Service {
         }
         return ([:], nil)
       }
-      let due = buffer.order.flush()
-      let payloads = buffer.payloads
-      buffer.payloads = [:]
+      let due = buffer.flush()
       hostEvents[session.id] = buffer
       var asked: (event: Event, answer: JSON)?
-      for each in due {
-        guard let payload = payloads[each] else { continue }
+      for (each, payload) in due {
         if each == id {
           asked = try applyHostEvent(session.id, each, payload)
         } else {
@@ -106,10 +115,9 @@ extension Service {
   /// Applies the session's waiting events that are due, lowest id first. It runs on the state queue.
   private func releaseHostEvents(_ session: String) {
     guard var buffer = hostEvents[session] else { return }
-    let due = buffer.order.due(now: Service.uptimeMs())
-    let payloads = due.map { ($0, buffer.payloads.removeValue(forKey: $0)) }
+    let due = buffer.due(now: Service.uptimeMs())
     hostEvents[session] = buffer
-    for case (let id, let payload?) in payloads { applyWaitingHostEvent(session, id, payload) }
+    for (id, payload) in due { applyWaitingHostEvent(session, id, payload) }
   }
 
   /// Applies an event that no hook waits on. A failure is logged. The event stays in the host's spool.

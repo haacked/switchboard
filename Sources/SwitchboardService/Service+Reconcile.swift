@@ -41,9 +41,9 @@ extension Service {
   /// Brings sbd up to date with the host on the link's current connection, unless a reconcile already finished
   /// on it. It runs setup first when the connection has none. It throws, and records no `link_up`, when a step
   /// got no answer from the host or failed. The next call starts again from the spool, and the recorded event
-  /// ids keep an event from being recorded twice. It runs on the host's queue, off the state queue.
+  /// ids stop sbd from recording an event twice. It runs on the host's queue, off the state queue.
   func reconcile(_ host: String) throws {
-    guard let site = remoteSites[host] else { throw APIError("no host named \(host) in \(home.config)") }
+    let site = try remoteSite(host)
     var connection: Int?
     do {
       let facts = try site.prepare()
@@ -85,10 +85,7 @@ extension Service {
     // `Data(base64Encoded:)` gives nil for text with no base64 digit, which is what an empty file prints.
     let text = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     guard r.status == 0, let data = text.isEmpty ? Data() : Data(base64Encoded: text, options: .ignoreUnknownCharacters)
-    else {
-      let why = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      throw APIError("can't read \(path) on \(host): \(why.isEmpty ? "exit status \(r.status)" : why)")
-    }
+    else { throw APIError("can't read \(path) on \(host): \(r.problem)") }
     guard data.count <= spoolLimitBytes else {
       throw APIError(
         "\(path) on \(host) holds more than \(spoolLimitBytes / (1024 * 1024)) MB, so sbd did not load it. "
@@ -106,7 +103,7 @@ extension Service {
     if !data.isEmpty { logLine("host \(host): read \(data.count) bytes of spool in \(parsed.lines.count) lines") }
     let cut = queue.sync { () -> Int in
       recordSpool(parsed.lines, from: host)
-      let cut = spoolCut(data, from: host)
+      let cut = spoolCut(parsed.lines, from: host)
       setSpoolFloor(host, keeping: parsed.lines)
       return cut
     }
@@ -164,12 +161,9 @@ extension Service {
         let session = try hostSession(["session": .string(name)], on: host)
         var buffer = hostEvents[session.id] ?? HostEventBuffer()
         for line in lines where try !store.hasHostEvent(line.id) { buffer.add(line.id, line.payload, at: 0) }
-        let due = buffer.order.flush()
-        let payloads = buffer.payloads
-        buffer.payloads = [:]
+        let due = buffer.flush()
         hostEvents[session.id] = buffer
-        for id in due {
-          guard let payload = payloads[id] else { continue }
+        for (id, payload) in due {
           do { _ = try applyHostEvent(session.id, id, payload) } catch {
             refused += 1
             reason = reason ?? error
@@ -187,10 +181,13 @@ extension Service {
   /// holds its id for this host and its session, or the store lists its session as one that sbd removed from
   /// this host and sbd holds no session of that id. A store that can't answer counts as no. It runs on the
   /// state queue.
-  func spoolCut(_ data: Data, from host: String) -> Int {
+  func spoolCut(_ data: Data, from host: String) -> Int { spoolCut(Spool.parse(data).lines, from: host) }
+
+  /// `spoolCut` of the spool whose `Spool.parse` gave `lines`.
+  func spoolCut(_ lines: [SpoolLine], from host: String) -> Int {
     let removed = (try? store.removedHostSessions(host: host)) ?? []
     return Spool.cutLength(
-      data, recorded: { (try? store.hasHostEvent($0.id, host: host, session: $0.session)) == true },
+      lines, recorded: { (try? store.hasHostEvent($0.id, host: host, session: $0.session)) == true },
       removed: { removed.contains($0) && entries[$0] == nil })
   }
 

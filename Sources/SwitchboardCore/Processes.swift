@@ -12,6 +12,14 @@ public struct CommandResult: Sendable {
   }
 }
 
+extension CommandResult {
+  /// The trimmed error text, else the exit status.
+  public var problem: String {
+    let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? "exit status \(status)" : text
+  }
+}
+
 /// Runs a program and waits for it. `env` replaces the environment when set.
 /// With `timeout`, the program gets SIGTERM after that many seconds.
 @discardableResult

@@ -429,7 +429,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     #expect(sbd.boxStubArgs().count == 1, "\(sbd.boxStubArgs())")
   }
 
-  /// The link drops while the last step reads the panes and processes. The spool's events are recorded by then,
+  /// The link drops while the last step reads the panes and processes. The spool's events are in the log by then,
   /// and the session still gets no `link_up`.
   @Test func aReconcileCutShortDuringTheReadOfThePanesRecordsNoLinkUpAndTheNextReconnectFinishesIt() throws {
     let sbd = try Instance.remote(boxBin: true)

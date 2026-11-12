@@ -146,7 +146,7 @@ private enum Member: String, CaseIterable {
   @Test(arguments: Member.allCases)
   fileprivate func eachMemberWritesOneLineWithItsNameAndItsArguments(member: Member) throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(), log: log)
+      let machine = LoggedMachine(FixedMachine(), log: MachineLog(path: log))
 
       try member.call(machine)
 
@@ -165,7 +165,7 @@ private enum Member: String, CaseIterable {
     try withLog { log in
       let base = FixedMachine()
 
-      try member.call(LoggedMachine(base, log: log))
+      try member.call(LoggedMachine(base, log: MachineLog(path: log)))
 
       #expect(base.calls.count == 1)
       #expect(base.calls.first?.hasPrefix("\(member.rawValue) ") == true, "\(base.calls)")
@@ -174,7 +174,7 @@ private enum Member: String, CaseIterable {
 
   @Test func theLinesAreInTheOrderOfTheCalls() throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(), log: log)
+      let machine = LoggedMachine(FixedMachine(), log: MachineLog(path: log))
 
       for member in Member.allCases { try member.call(machine) }
 
@@ -188,9 +188,9 @@ private enum Member: String, CaseIterable {
 
   @Test func aSecondMachineAppendsToTheSameLog() throws {
     try withLog { log in
-      _ = LoggedMachine(FixedMachine(), log: log).exists("/box/first")
+      _ = LoggedMachine(FixedMachine(), log: MachineLog(path: log)).exists("/box/first")
 
-      _ = LoggedMachine(FixedMachine(), log: log).exists("/box/second")
+      _ = LoggedMachine(FixedMachine(), log: MachineLog(path: log)).exists("/box/second")
 
       let lines = try MachineLogFile.lines(log)
       #expect(lines.count == 2)
@@ -203,7 +203,7 @@ private enum Member: String, CaseIterable {
   @Test(arguments: ["two\nlines", "a \"quoted\" word", "back\\slash", "tab\there", "naïve ✓", ""])
   func anArgumentWithSpecialCharactersStaysWholeOnOneLine(argument: String) throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(), log: log)
+      let machine = LoggedMachine(FixedMachine(), log: MachineLog(path: log))
 
       _ = try machine.run("/box/bin/tool", [argument], env: nil, input: nil, timeout: nil)
 
@@ -215,7 +215,7 @@ private enum Member: String, CaseIterable {
 
   @Test func callsFromManyThreadsEachWriteAWholeLine() throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(), log: log)
+      let machine = LoggedMachine(FixedMachine(), log: MachineLog(path: log))
 
       DispatchQueue.concurrentPerform(iterations: 64) { _ = machine.exists("/box/file-\($0)") }
 
@@ -227,7 +227,7 @@ private enum Member: String, CaseIterable {
 
   @Test func aCallThatThrowsStillWritesItsLine() throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(fails: true), log: log)
+      let machine = LoggedMachine(FixedMachine(fails: true), log: MachineLog(path: log))
 
       #expect(throws: FixedMachine.Failure.self) { try machine.run("/box/bin/tool", []) }
       #expect(throws: FixedMachine.Failure.self) { try machine.createFolder("/box/new folder") }
@@ -244,7 +244,7 @@ private enum Member: String, CaseIterable {
     try withLog { log in
       let base = FixedMachine()
 
-      let result = try LoggedMachine(base, log: log).run(
+      let result = try LoggedMachine(base, log: MachineLog(path: log)).run(
         "/box/bin/tool", ["a", "b"], env: ["KEY": "value"], input: Data("typed".utf8), timeout: 2.5)
 
       #expect(result.status == FixedMachine.result.status)
@@ -258,7 +258,8 @@ private enum Member: String, CaseIterable {
     try withLog { log in
       let base = FixedMachine()
 
-      _ = try LoggedMachine(base, log: log).run("/box/bin/tool", [], env: nil, input: nil, timeout: nil)
+      _ = try LoggedMachine(base, log: MachineLog(path: log)).run(
+        "/box/bin/tool", [], env: nil, input: nil, timeout: nil)
 
       #expect(base.calls == ["run /box/bin/tool [] [:] nil -1.0"])
     }
@@ -266,7 +267,7 @@ private enum Member: String, CaseIterable {
 
   @Test func theFileMembersReturnWhatTheBaseReturns() throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(), log: log)
+      let machine = LoggedMachine(FixedMachine(), log: MachineLog(path: log))
 
       #expect(machine.read("/box/file.jsonl", from: 12, count: 34) == FixedMachine.data)
       #expect(machine.size("/box/file.jsonl") == 4096)
@@ -280,7 +281,7 @@ private enum Member: String, CaseIterable {
   /// A logged machine must not turn "can't read" into an answer.
   @Test func theFileMembersReturnTheBasesMissingAnswers() throws {
     try withLog { log in
-      let machine = LoggedMachine(FixedMachine(fails: true), log: log)
+      let machine = LoggedMachine(FixedMachine(fails: true), log: MachineLog(path: log))
 
       #expect(machine.read("/box/file.jsonl", from: 0, count: nil) == nil)
       #expect(machine.size("/box/file.jsonl") == nil)
@@ -294,7 +295,7 @@ private enum Member: String, CaseIterable {
   @Test func readPassesItsOffsetAndCountToTheBase() throws {
     try withLog { log in
       let base = FixedMachine()
-      let machine = LoggedMachine(base, log: log)
+      let machine = LoggedMachine(base, log: MachineLog(path: log))
 
       _ = machine.read("/box/file.jsonl", from: 12, count: 34)
       _ = machine.read("/box/file.jsonl", from: 0, count: nil)
@@ -307,7 +308,7 @@ private enum Member: String, CaseIterable {
     try withLog { log in
       let base = FixedMachine()
 
-      LoggedMachine(base, log: log).signal(4242, SIGTERM)
+      LoggedMachine(base, log: MachineLog(path: log)).signal(4242, SIGTERM)
 
       #expect(base.calls == ["signal 4242 \(SIGTERM)"])
     }

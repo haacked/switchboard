@@ -201,9 +201,7 @@ extension RemoteSite {
       }
       let r = try machine.run(
         "/bin/sh", ["-c", Self.sessionFolderRemoval, "sb", path], env: nil, input: nil, timeout: Self.commandSeconds)
-      guard r.status == 0 else {
-        throw APIError("rm -rf \(path) on \(host): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-      }
+      guard r.status == 0 else { throw APIError("rm -rf \(path) on \(host): \(r.problem)") }
     }
   }
 }
@@ -216,7 +214,7 @@ extension Service {
     _ session: Session, resolving: Set<String>, worktree: Bool, mayRunClaude: Bool, site: any SessionSite
   ) throws -> JSON {
     let host = session.host ?? "its host"
-    if worktree { _ = try site.terminals() }
+    if worktree { try site.requireReady() }
     if mayRunClaude {
       throw APIError(
         "\(session.id)'s claude may still run on \(host), which \(home.config) no longer lists, so sbd can't stop it. List \(host) there again to remove \(session.id)."
@@ -258,7 +256,7 @@ extension Service {
   /// answers of the host, so the session is never forgotten while its claude may still run there. It runs on the
   /// state queue.
   func stopForRemoval(_ session: Session, at site: any SessionSite) throws {
-    if session.host != nil { try requireRead(session.id) }
+    try requireRead(session.id)
     if case .running(let pid) = claudeState(session.id) { try stopClaude(session.id, pid) }
     guard session.host != nil else { return }
     for pane in [Pane.claude, .shell] { try closePane(session.id, pane, at: site) }

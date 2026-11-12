@@ -159,7 +159,7 @@ extension Service {
   func agentRows(at site: RemoteSite, seen: Int64, timeout: Double) throws -> [ClaudeSession] {
     let host = site.config.name
     let token = "sb-agents-\(UUID().uuidString)"
-    let claude = shellQuote(config.hosts[host]?.claude ?? "claude")
+    let claude = shellQuote(claudeCommand(onHost: host))
     let r = try site.confirmed("claude agents") { machine in
       guard let facts = site.facts else { throw HostUnread(hostName: host, why: "setup has not run") }
       return try machine.run(
@@ -170,7 +170,7 @@ extension Service {
       throw APIError("claude agents failed on \(host): \(oneLine(r.stderr, max: 200))")
     }
     return try ClaudeSession.list(
-      fromAgents: String(r.stdout[mark.upperBound...]), account: "\(host):~/.claude", seen: seen)
+      fromAgents: String(r.stdout[mark.upperBound...]), account: Service.hostAccount(host), seen: seen)
   }
 
   /// Remembers the listed sessions that Switchboard doesn't own, and forgets

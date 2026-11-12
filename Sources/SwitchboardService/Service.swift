@@ -198,8 +198,7 @@ public final class Service {
     self.liveCap = config.liveCap
     let links = Service.makeHostLinks(config: config, home: home)
     self.hostLinks = links
-    let config = self.config
-    self.remoteSites = links.mapValues { RemoteSite(link: $0, config: $0.config, home: home, settings: config) }
+    self.remoteSites = links.mapValues { RemoteSite(link: $0, config: $0.config, home: home) }
     self.hostQueues = Dictionary(
       uniqueKeysWithValues: links.keys.map { ($0, DispatchQueue(label: "sbd.host.\($0)")) })
   }
@@ -363,14 +362,16 @@ public final class Service {
     if request.op == "send-group", request.args["confirmed"]?.bool == true, request.args["from"] == nil {
       awaitMCPServers()
     }
-    if request.op == "answer", request.args["behavior"]?.string == "allow",
-      queue.sync(execute: { answersGroupMessage(request.args) })
-    {
-      awaitMCPServers()
-    }
+    let sendsGroupMessage =
+      request.op == "answer" && request.args["behavior"]?.string == "allow"
+      && queue.sync(execute: { answersGroupMessage(request.args) })
+    if sendsGroupMessage { awaitMCPServers() }
     // A request that acts on claude decides from the current processes,
-    // so it takes a new snapshot. Other requests use the tick's.
-    let fresh = Service.actsOnProcesses.contains(request.op) ? buildSnapshot() : nil
+    // so it takes a new snapshot. Other requests use the tick's. A request
+    // about a session on a host takes the host's read instead. An approved
+    // group message can reach sessions on this Mac, so it takes both.
+    let fresh =
+      Service.actsOnProcesses.contains(request.op) && (hostRead == nil || sendsGroupMessage) ? buildSnapshot() : nil
     return try queue.sync {
       if let fresh { install(fresh) }
       if let hostRead { install(hostRead.snapshot, onHost: hostRead.host) }
@@ -380,8 +381,9 @@ public final class Service {
 
   /// For a request that acts on a session on a host: waits for the host, then reads its panes and processes.
   /// It throws the reason when the host is not ready or the read got no answer. A `send` does not fail then,
-  /// because it queues its message: its snapshot is nil, so the session reads `.unknown`. It returns nil for
-  /// any other request. It runs off the state queue.
+  /// because it queues its message: its snapshot is nil, so the session reads `.unknown`. A `screen` reads no
+  /// snapshot, so it only waits for the host and returns nil. It returns nil for any other request. It runs off
+  /// the state queue.
   private func readHost(for request: Request) throws -> (host: String, snapshot: Snapshot?)? {
     guard Service.needsHost.contains(request.op) else { return nil }
     let found: (host: String, site: any SessionSite)? = queue.sync {
@@ -393,6 +395,7 @@ public final class Service {
     guard let found else { return nil }
     do {
       try awaitSite(found.site)
+      if request.op == "screen" { return nil }
       return (found.host, try readSnapshot(onHost: found.host))
     } catch {
       guard request.op == "send" else { throw error }
@@ -765,12 +768,7 @@ public final class Service {
   func newSession(_ args: NewSession) throws -> SessionSummary {
     if let host = args.host { return try newSession(args, onHost: host) }
     var args = args
-    if args.worktree == true, (args.branch ?? "").isEmpty {
-      let repo = (args.path as NSString).standardizingPath
-      args.branch = NewSession.freeAutoBranch(
-        prefix: config.branchPrefix, name: args.name,
-        exists: { branchOrFolderTaken(repo, $0, at: mac) })
-    }
+    args.branch = branch(of: args, repo: (args.path as NSString).standardizingPath, at: mac)
     // An unknown group, an unknown account, or an account that differs from
     // the group's fails here, before prepareFolder makes a worktree.
     try queue.sync {
@@ -802,18 +800,13 @@ public final class Service {
     guard args.path.hasPrefix("/") else {
       throw APIError("a folder on \(host) is an absolute path or starts with ~, and \(args.path) is neither")
     }
-    if args.worktree == true, (args.branch ?? "").isEmpty {
-      let repo = args.path
-      args.branch = NewSession.freeAutoBranch(
-        prefix: config.branchPrefix, name: args.name,
-        exists: { branchOrFolderTaken(repo, $0, at: site) })
-    }
+    args.branch = branch(of: args, repo: args.path, at: site)
     let folder: (cwd: String, branch: String?, repo: String?)
     do {
       folder = try prepareFolder(args, at: site)
     } catch {
       // A check that got no answer reads as a missing folder. The host's own reason replaces that.
-      try site.confirmed("the folder of the new session") { _ in }
+      try site.requireReady()
       throw error
     }
     let read = try readSnapshot(onHost: host)
@@ -821,6 +814,14 @@ public final class Service {
       install(read, onHost: host)
       return try create(args, folder)
     }
+  }
+
+  /// The branch of a new session: a free branch at the site for a worktree that names none, else the one it names.
+  /// `repo` is the repo's path at the site.
+  private func branch(of args: NewSession, repo: String, at site: any SessionSite) -> String? {
+    guard args.worktree == true, (args.branch ?? "").isEmpty else { return args.branch }
+    return NewSession.freeAutoBranch(
+      prefix: config.branchPrefix, name: args.name, exists: { branchOrFolderTaken(repo, $0, at: site) })
   }
 
   /// `configure` changes the session before its first launch.
@@ -842,7 +843,7 @@ public final class Service {
     if let host = session.host {
       guard session.kind == .work else { throw APIError("the Manager and a chat run on this Mac, not on \(host)") }
       // The host's site is ready before the record is saved, so a host that dropped leaves no session behind.
-      _ = try site(for: session).terminals()
+      try site(for: session).requireReady()
     } else {
       // After `configure`, which sets a chat's group.
       session.claudeConfigDir =
@@ -865,19 +866,11 @@ public final class Service {
 
   func paneName(_ id: String, _ pane: Pane) -> String { "\(id)-\(pane.rawValue)" }
 
-  /// The home folder on the host of a remote session. It throws `HostUnread` while the host's site is not ready.
-  func boxHome(_ session: Session) throws -> String {
-    // The launcher folder is <home>/.sb/sessions/<id>.
-    var path = try site(for: session).sessionFolder(session.id) as NSString
-    for _ in 0..<3 { path = path.deletingLastPathComponent as NSString }
-    return path as String
-  }
-
   /// The environment of a pane that sbd is about to start. A pane on a host gets the session's id and the
   /// box's folder, and nothing of this Mac. It throws `HostUnread` while the host's site is not ready.
   func newPaneEnv(_ id: String) throws -> [String: String] {
     guard let session = entries[id]?.session, session.host != nil else { return paneEnv(id) }
-    return ["SB_SESSION_ID": id, "SB_HOME": "\(try boxHome(session))/.sb"]
+    return ["SB_SESSION_ID": id, "SB_HOME": try site(for: session).sbFolder()]
   }
 
   func paneEnv(_ id: String) -> [String: String] {
@@ -935,7 +928,7 @@ public final class Service {
         ]
       }
     } else {
-      args += ["--settings", "\(try boxHome(session))/.sb/claude-settings.json"]
+      args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
     }
     if let model = session.model { args += ["--model", model] }
     if local { args += config.claudeArgs }
@@ -1008,7 +1001,7 @@ public final class Service {
     if let path = named, (path as NSString).lastPathComponent == "\(session.claudeSessionId).jsonl" {
       return machine.exists(path) ? path : nil
     }
-    let account = session.host == nil ? claudeAccount(of: session.id) : "\(try boxHome(session))/.claude"
+    let account = session.host == nil ? claudeAccount(of: session.id) : try hostClaudeFolder(session)
     return Transcript.find(session.claudeSessionId, account: account, cwd: session.cwd, on: machine)
   }
 

@@ -15,6 +15,9 @@ import Testing
     let folder: String
     init(folder: String) { self.folder = folder }
     func terminals() throws -> TerminalHost { throw Unused() }
+    func requireReady() throws { throw Unused() }
+    func sbFolder() throws -> String { folder }
+    func userHome() throws -> String { throw Unused() }
     func git() throws -> String { throw Unused() }
     func worktreeRoot() throws -> String { throw Unused() }
     func sessionFolder(_ id: String) throws -> String { "\(folder)/sessions/\(id)" }

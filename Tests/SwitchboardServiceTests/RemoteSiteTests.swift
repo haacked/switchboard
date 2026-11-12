@@ -381,7 +381,7 @@ final class SiteBench {
     let tmux: [String: JSON] = ["tmux": .string("\(bench.home.path)/fake-tmux")]
     host = try miniHost(tmux.merging(extra) { $1 })
     let sent = sent
-    site = RemoteSite(link: bench.link, config: host, home: bench.home, settings: Config(), tap: { sent.wrap($0) })
+    site = RemoteSite(link: bench.link, config: host, home: bench.home, tap: { sent.wrap($0) })
   }
 
   private static func write(_ script: String, to path: String) throws {

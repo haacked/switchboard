@@ -110,8 +110,10 @@ extension Service {
   /// transcript, so that the file checks and the folder search run off the queue.
   func transcriptFinder(_ id: String) -> () -> String? {
     let e = entries[id]!
-    let account = paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
     let session = e.session
+    let account =
+      session.host == nil
+      ? (paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder) : transcriptAccount(session)
     let known = e.facts.transcriptPath
     let machine = site(for: session).machine
     return {

@@ -22,12 +22,12 @@ extension Service {
 
   /// Records the shell as closed and ends its tmux session, which also ends
   /// each terminal attached to it. A snapshot that began before the kill can
-  /// no longer replace the pane list, so it can't show the pane again.
+  /// no longer replace the pane list, so it can't show the pane again. On a
+  /// host, the pane stays in the snapshot unless the host answered the close.
   func closeShell(_ id: String) throws {
     if entries[id]?.session.shellClosed != true { try update(id) { $0.shellClosed = true } }
-    let name = paneName(id, .shell)
-    try site(of: id).terminals().kill(name)
-    markKilled(name)
+    try closePane(id, .shell, at: site(of: id))
+    markKilled(paneName(id, .shell))
   }
 
   /// Starts the shell, then records it as open. A shell that fails to start stays closed.

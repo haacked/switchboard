@@ -233,7 +233,7 @@ public final class Store {
   /// It also keeps every id whose clock is within that time of `nowNs`, so one id with a clock far ahead
   /// removes nothing that is recent. It removes no id at or above `floor`, the lowest recorded id whose line may
   /// still be in the host's spool: a line that stays in the spool is read again on each reconnect, and only its
-  /// recorded id keeps it from being recorded twice.
+  /// recorded id stops sbd from recording it twice.
   public func pruneHostEvents(host: String, nowNs: UInt64, keeping floor: HostEventID? = nil) throws {
     let newest = try query("SELECT id FROM host_events WHERE host = ? ORDER BY id DESC LIMIT 1", [host]) {
       HostEventID($0.text(0))?.ns

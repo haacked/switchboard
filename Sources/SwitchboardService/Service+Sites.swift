@@ -40,20 +40,21 @@ extension Service {
         mkdir -p "$1" && rm -f "$1/claude.sh.new" && cat >"$1/claude.sh.new" && mv "$1/claude.sh.new" "$1/claude.sh"
         """#
       let r = try machine.run("/bin/sh", ["-c", write, "sb", dir], env: nil, input: Data(script.utf8), timeout: nil)
-      guard r.status == 0 else {
-        throw APIError("can't write \(dir)/claude.sh: \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-      }
+      guard r.status == 0 else { throw APIError("can't write \(dir)/claude.sh: \(r.problem)") }
     }
   }
 
   /// The last word of the claude command, which names claude's process on this Mac.
   var claudeProgram: String { (config.claude as NSString).lastPathComponent }
 
-  /// The claude command at the session's site: the host's `claude` key, or `claude`, for a session on a host.
+  /// The claude command at the session's site.
   func claudeCommand(for session: Session) -> String {
     guard let host = session.host else { return config.claude }
-    return config.hosts[host]?.claude ?? "claude"
+    return claudeCommand(onHost: host)
   }
+
+  /// The host's `claude` key, or `claude`.
+  func claudeCommand(onHost host: String) -> String { config.hosts[host]?.claude ?? "claude" }
 
   /// The last word of the claude command at the session's site.
   func claudeProgram(for session: Session) -> String {
@@ -62,7 +63,7 @@ extension Service {
 
   /// The last word of the host's claude command.
   private func claudeProgram(onHost host: String) -> String {
-    ((config.hosts[host]?.claude ?? "claude") as NSString).lastPathComponent
+    (claudeCommand(onHost: host) as NSString).lastPathComponent
   }
 
   /// The folder that holds the session's transcripts: its Claude account's folder on this Mac, or `~/.claude`
@@ -71,8 +72,12 @@ extension Service {
     guard session.host != nil else {
       return (paneEnv(session.id)["CLAUDE_CONFIG_DIR"] ?? "~/.claude").expandingTilde
     }
-    return (try? boxHome(session)).map { "\($0)/.claude" } ?? "~/.claude"
+    return (try? hostClaudeFolder(session)) ?? "~/.claude"
   }
+
+  /// `~/.claude` on the session's host, with `~` resolved there. It throws `HostUnread` while the host's site is
+  /// not ready.
+  func hostClaudeFolder(_ session: Session) throws -> String { "\(try site(for: session).userHome())/.claude" }
 
   /// The snapshot of the session's site. It is nil for a session on a host unless the host answered a read on
   /// the link's current connection and the reconcile finished on that connection.
@@ -90,7 +95,7 @@ extension Service {
   /// Throws why sbd can't read the session's host when the session's claude state is unknown.
   func requireRead(_ id: String) throws {
     guard isUnread(id), let host = entries[id]?.session.host else { return }
-    try site(of: id).confirmed("the panes of \(id)") { _ in }
+    try site(of: id).requireReady()
     throw HostUnread(hostName: host, why: "it has not answered a read of its panes yet")
   }
 
@@ -176,15 +181,14 @@ extension Service {
     if let remote = site as? RemoteSite {
       try remote.awaitReady(seconds: seconds)
       if let host = remote.hostName, let reconciles = hostQueues[host] { try reconciles.sync { try reconcile(host) } }
-    } else if site.hostName != nil {
-      _ = try site.terminals()
+    } else {
+      try site.requireReady()
     }
   }
 
   /// A fresh snapshot of the host, read off the state queue.
   func readSnapshot(onHost host: String) throws -> Snapshot {
-    guard let site = remoteSites[host] else { throw APIError("no host named \(host) in \(home.config)") }
-    return try site.readSnapshot(claudeProgram: claudeProgram(onHost: host))
+    try remoteSite(host).readSnapshot(claudeProgram: claudeProgram(onHost: host))
   }
 
   /// Whether the session may have a running claude on record: claude reported a SessionStart with no end after

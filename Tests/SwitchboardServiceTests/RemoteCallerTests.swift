@@ -400,6 +400,18 @@ private func withReadyService(
     }
   }
 
+  /// Triage and the reply lookup read the transcript that the finder names.
+  @Test(.timeLimit(.minutes(1)))
+  func theFinderOfASessionOnAHostSearchesTheHostsClaudeFolder() throws {
+    try withReadyService { _, service, facts in
+      _ = try addSession(service, facts, transcript: true)
+
+      let find = service.queue.sync { service.transcriptFinder("s1") }
+
+      #expect(find() == "\(facts.home)/.claude/projects/elsewhere/u-s1.jsonl")
+    }
+  }
+
   @Test(
     .timeLimit(.minutes(1)),
     arguments: ["script-status 143", "script-status 127", "script-status 2", "a timeout", "a dropped link"])
@@ -1118,6 +1130,37 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
       try Data("ended".utf8).write(to: URL(fileURLWithPath: "\(folder)/kill"))
 
       #expect(throws: (any Error).self) { try close(service) }
+    }
+  }
+
+  /// Holds s1 with a live shell pane in the host's snapshot.
+  private func holdShell(_ service: Service) throws {
+    let facts = try #require(service.remoteSites["mini"]?.facts)
+    var read = Service.Snapshot()
+    read.panes["s1-shell"] = PaneRow(pid: 42, dead: false, clients: 0)
+    hold(try #require(service.queue.sync { service.entries["s1"] }), in: service, facts, snapshot: read)
+    try #require(service.queue.sync { service.paneRow("s1", .shell) } != nil)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aShellCloseThatTheHostAnsweredDropsThePane() throws {
+    try withKillTmux { service, _ in
+      try holdShell(service)
+
+      try service.queue.sync { try service.closeShell("s1") }
+
+      #expect(service.queue.sync { service.paneRow("s1", .shell) } == nil)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aShellCloseThatGotNoAnswerThrowsAndKeepsThePane() throws {
+    try withKillTmux { service, folder in
+      try holdShell(service)
+      try Data("ended".utf8).write(to: URL(fileURLWithPath: "\(folder)/kill"))
+
+      #expect(throws: (any Error).self) { try service.queue.sync { try service.closeShell("s1") } }
+      #expect(service.queue.sync { service.paneRow("s1", .shell) } != nil)
     }
   }
 }

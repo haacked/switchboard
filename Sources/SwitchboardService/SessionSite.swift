@@ -22,6 +22,12 @@ protocol SessionSite: AnyObject {
   var machine: any Machine { get }
   /// The site's tmux server. A remote site throws `HostUnread` until its link is connected and set up.
   func terminals() throws -> TerminalHost
+  /// Throws what `terminals()` throws. It does nothing on this Mac.
+  func requireReady() throws
+  /// The folder where Switchboard keeps its files at the site: sbd's home on this Mac, `~/.sb` on a host.
+  func sbFolder() throws -> String
+  /// The home folder of the user at the site.
+  func userHome() throws -> String
   /// The git program at the site.
   func git() throws -> String
   /// Where `sb new --branch` makes worktrees at the site, with `~` resolved there.
@@ -104,17 +110,19 @@ final class MacSite: SessionSite {
     self.config = config
     let log = config.machineLog ? MachineLog(path: home.machineLog) : nil
     self.log = log
-    self.machine = MacSite.logging(LocalMachine(), to: log)
+    self.machine = log.map { LoggedMachine(LocalMachine(), log: $0) } ?? LocalMachine()
     self.tmuxServer = try TerminalHost(home: home, config: config, machine: machine)
     guard let git = findExecutable("git") else { throw APIError("can't find git") }
     self.gitPath = git
   }
 
-  private static func logging(_ machine: any Machine, to log: MachineLog?) -> any Machine {
-    log.map { LoggedMachine(machine, log: $0.path) } ?? machine
-  }
-
   func terminals() -> TerminalHost { tmuxServer }
+
+  func requireReady() {}
+
+  func sbFolder() -> String { home.path }
+
+  func userHome() -> String { "~".expandingTilde }
 
   func git() -> String { gitPath }
 
@@ -230,6 +238,9 @@ final class UnlistedSite: SessionSite {
   }
 
   func terminals() throws -> TerminalHost { throw failure }
+  func requireReady() throws { throw failure }
+  func sbFolder() throws -> String { throw failure }
+  func userHome() throws -> String { throw failure }
   func git() throws -> String { throw failure }
   func worktreeRoot() throws -> String { throw failure }
   func sessionFolder(_ id: String) throws -> String { throw failure }
@@ -256,6 +267,9 @@ final class CheckedSite: SessionSite {
 
   var hostName: String? { base.hostName }
   func terminals() throws -> TerminalHost { try base.terminals() }
+  func requireReady() throws { try base.requireReady() }
+  func sbFolder() throws -> String { try base.sbFolder() }
+  func userHome() throws -> String { try base.userHome() }
   func git() throws -> String { try base.git() }
   func worktreeRoot() throws -> String { try base.worktreeRoot() }
   func sessionFolder(_ id: String) throws -> String { try base.sessionFolder(id) }
