@@ -698,6 +698,31 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
   }
 }
 
+@Suite struct GitHubReflog {
+  @Test func checkedOutBranchesNamesBothSidesOfEachCheckout() {
+    let reflog = [
+      "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first",
+      "1111 1111 T <t@t> 1794400001 -0800\tcheckout: moving from main to haacked/a",
+      "1111 2222 T <t@t> 1794400002 -0800\tcommit: work",
+      "2222 2222 T <t@t> 1794400003 -0800\tcheckout: moving from haacked/a to 2222abcd",
+      "2222 1111 T <t@t> 1794400004 -0800\tcheckout: moving from 2222abcd to haacked/b",
+      "",
+    ].joined(separator: "\n")
+
+    #expect(GitHub.checkedOutBranches(reflog: reflog) == ["main", "haacked/a", "2222abcd", "haacked/b"])
+  }
+
+  @Test(arguments: [
+    "",
+    "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first\n",
+    "1111 1111 T <t@t> 1794400001 -0800\tbranch: Created from HEAD\n",
+    "1111 1111 T <t@t> 1794400001 -0800\tcheckout: moving from main\n",
+  ])
+  func checkedOutBranchesIsEmptyWithoutACheckout(_ reflog: String) {
+    #expect(GitHub.checkedOutBranches(reflog: reflog).isEmpty)
+  }
+}
+
 @Suite struct GitHubConfig {
   @Test func missingGitHubFieldsKeepTheirDefaults() throws {
     let c = try JSONCoding.decode(Config.self, from: #"{"github": {"pollSeconds": 0}}"#)

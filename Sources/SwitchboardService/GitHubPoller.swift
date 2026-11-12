@@ -70,7 +70,7 @@ final class GitHubPoller {
     /// keeps a restart from losing the PR of a session whose HEAD is detached
     /// or whose conversation `/clear` replaced. The poller drops it when the
     /// branch's lookup finds a PR. It also drops it when the lookup finds none
-    /// and the recorded PR is in the branch's repo with another head branch.
+    /// and the recorded PR is the folder's earlier work, as `readPRs` decides.
     var recordedPRId: String?
 
     /// The branch's PR comes first, then the transcript's.
@@ -94,6 +94,11 @@ final class GitHubPoller {
     var prId: String?
     /// When the poller last looked the key up. nil until the first lookup.
     var lookedUp: Int64?
+    /// The branches that HEAD's reflog shows the folder had checked out, each
+    /// by its local name and by the upstream name that its `merge` config
+    /// gives, read again when HEAD changes. It is empty when the reflog can't
+    /// be read.
+    var checkedOut: Set<String> = []
   }
 
   /// The session's transcript and the PR of its last pr-link line.
@@ -309,6 +314,10 @@ final class GitHubPoller {
         }
       }
     }
+    let config = b.commonDir.flatMap { configs[$0] } ?? [:]
+    let local = b.gitDir.flatMap { read("\($0)/logs/HEAD") }.map(GitHub.checkedOutBranches) ?? []
+    b.checkedOut = local.union(
+      local.compactMap { config["branch.\($0).merge"].flatMap { GitHub.branch(head: "ref: \($0)") } })
     if key != b.key {
       b.key = key
       b.prId = nil
@@ -436,15 +445,17 @@ final class GitHubPoller {
       }
       if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
       if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
-      // A linked or recorded PR from another branch of the branch's repo
-      // belongs to the session's earlier work. It no longer counts once
-      // GitHub answers that the current branch has no PR. A PR in another
-      // repo still counts, because a session can open a PR from another
-      // repo's checkout.
+      // A linked or recorded PR in the branch's repo whose head branch the
+      // folder had checked out before belongs to the session's earlier work.
+      // It no longer counts once GitHub answers that the current branch has
+      // no PR. A PR whose head another checkout made still counts, in this
+      // repo or another, because a session can open its PR from another
+      // worktree.
       if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
+        let checkedOut = t.branch.checkedOut
         let earlier = { (id: String?) -> Bool in
           guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
-          return pr.repo.lowercased() == repo.lowercased() && pr.head != branch
+          return pr.repo.lowercased() == repo.lowercased() && pr.head != branch && checkedOut.contains(pr.head)
         }
         if earlier(t.transcript.prId) { t.transcript.prId = nil }
         if earlier(t.recordedPRId) { t.recordedPRId = nil }

@@ -414,6 +414,44 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr == nil)
   }
 
+  /// The PR's head is the upstream name that the local branch's `merge`
+  /// config gives, which the reflog doesn't name.
+  @Test func dropsTheLinkedPROfAnEarlierBranchWithAnotherUpstreamName() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "local-name")
+    try sbd.git(s.cwd, "config", "branch.local-name.remote", "origin")
+    try sbd.git(s.cwd, "config", "branch.local-name.merge", "refs/heads/haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.link(s, "PostHog/posthog", 122953)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  /// A session can open its PR from another worktree of its own repo. The
+  /// folder never had the PR's head checked out, so the PR stays the
+  /// session's, and its merge moves the session to Done.
+  @Test func keepsALinkedPRWhoseHeadAnotherWorktreeOfTheRepoHad() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.link(s, "PostHog/posthog", 122953)
+    try sbd.poll()
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).state == .done)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+  }
+
   @Test func prefersTheBranchsPRToTheLinkedPR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

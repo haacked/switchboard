@@ -562,6 +562,23 @@ public enum GitHub {
     return String(text.dropFirst("ref: \(refs)".count))
   }
 
+  /// The branches that a HEAD reflog shows a checkout moving from or to.
+  /// git writes one "checkout: moving from <a> to <b>" line for each
+  /// checkout or switch. A detach shows as `HEAD`, and a checkout from a
+  /// detached HEAD as a commit id.
+  public static func checkedOutBranches(reflog: String) -> Set<String> {
+    let marker = "\tcheckout: moving from "
+    var branches: Set<String> = []
+    for line in reflog.split(separator: "\n") {
+      guard let range = line.range(of: marker) else { continue }
+      let names = line[range.upperBound...].split(separator: " ")
+      guard names.count == 3, names[1] == "to" else { continue }
+      branches.insert(String(names[0]))
+      branches.insert(String(names[2]))
+    }
+    return branches
+  }
+
   /// The values of `git config --get-regexp` output, by key.
   public static func gitConfig(_ text: String) -> [String: String] {
     var values: [String: String] = [:]
