@@ -103,8 +103,11 @@ extension Instance {
   }
 
   @Test func theStatusCountsTheRequestsThatWaitForAStartingServer() throws {
-    let gate = try MCPGate()
+    let gate = try MCPGate(open: true)
     let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    // sbd waits for a starting server for 10 s from the server's start. The
+    // restart starts that window just before the launches, not at sbd's start.
+    try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
     let launches = ["a", "b"].map { name in Outcome.detached { try sbd.new(prompt: "hello", name: name) } }
     try sbd.waitForServer("slow", "both launches to wait for slow", timeout: 30) { $0.waiting == 2 }
     let listed = try JSONCoding.decode([MCPServerStatus].self, from: sbd.sb("mcp", "--json")).first
@@ -116,7 +119,16 @@ extension Instance {
     }
     let running = try sbd.waitForRunning("slow")
     #expect(running.waiting == 0)
-    #expect(try sbd.restartServer(running, behind: gate).waiting == 0)
+
+    // The clock passes the start window while the port stays closed. The
+    // request then stops counting the server without seeing it listen.
+    try sbd.restartServer(running, behind: gate)
+    let late = Outcome.detached { try sbd.new(prompt: "hello", name: "c") }
+    try sbd.waitForServer("slow", "the launch to wait for slow", timeout: 30) { $0.waiting == 1 }
+    try sbd.advanceClock(11_000)
+    #expect(late.done.wait(timeout: .now() + 30) == .success)
+    _ = try late.result?.get()
+    #expect(try sbd.mcpServers().first?.waiting == 0)
   }
 
   @Test func aSendToALiveSessionDoesNotWaitForAStartingServer() throws {
