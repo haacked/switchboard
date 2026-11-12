@@ -33,8 +33,10 @@ private func prEvent(_ t: Int64, _ pr: PullRequest) throws -> Event {
   event("pr", t, ["pr": try JSON(encoding: pr), "comments": []])
 }
 
-private func verdict(_ facts: SessionFacts, _ s: Session = session()) -> Verdict {
-  Attention.shown(Attention.evaluate(s, facts, now: now), facts)
+private let acknowledgedMs = RecheckSettings().acknowledgedMs
+
+private func verdict(_ facts: SessionFacts, _ s: Session = session(), at t: Int64 = now) -> Verdict {
+  Attention.shown(Attention.evaluate(s, facts, now: t), facts, now: t, acknowledgedMs: acknowledgedMs)
 }
 
 /// The suites nest under one name, so `--filter AcknowledgeTests` runs them all.
@@ -66,7 +68,7 @@ extension AcknowledgeTests {
     @Test func ackEventSetsTheAcknowledgment() throws {
       let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, readTheReply, head: "abc")])
 
-      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: "abc"))
+      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: "abc", at: 2))
     }
 
     /// The data that the spec gives as the wire format.
@@ -74,13 +76,13 @@ extension AcknowledgeTests {
       let f = facts(
         turn("Done.") + [event("ack", 2, ["state": "needs_you", "reason": .string(readTheReply), "head": "abc"])])
 
-      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: "abc"))
+      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: "abc", at: 2))
     }
 
     @Test func ackEventWithoutAHeadSetsANilHead() {
       let f = facts(turn("Done.") + [event("ack", 2, ["state": "needs_you", "reason": .string(readTheReply)])])
 
-      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: nil))
+      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: nil, at: 2))
     }
 
     @Test func laterAckEventReplacesTheEarlierOne() throws {
@@ -89,7 +91,7 @@ extension AcknowledgeTests {
           try ackEvent(2, .needsYou, "first"), try ackEvent(3, .needsYou, readTheReply),
         ])
 
-      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: nil))
+      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: readTheReply, head: nil, at: 3))
     }
 
     @Test func unackEventClearsTheAcknowledgment() throws {
@@ -126,7 +128,7 @@ extension AcknowledgeTests {
 
       let f = facts(events)
 
-      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: "approve `touch x`", head: nil))
+      #expect(f.acknowledgment == Acknowledgment(state: .needsYou, reason: "approve `touch x`", head: nil, at: 3))
     }
 
     @Test func subagentPreToolUseKeepsTheAcknowledgment() throws {
@@ -501,7 +503,7 @@ extension AcknowledgeTests {
     @Test func staleVerdictIgnoresAMatchingAcknowledgment() throws {
       let f = facts(turn("Done.") + [try ackEvent(2, .stale, "idle for 3 days")])
 
-      let v = Attention.shown(Attention.evaluate(session(), f, now: 3 * Attention.dayMs + 2), f)
+      let v = verdict(f, at: 3 * Attention.dayMs + 2)
 
       #expect(v == Verdict(state: .stale, reason: "idle for 3 days"))
       #expect(!v.acknowledged)
@@ -517,7 +519,258 @@ extension AcknowledgeTests {
       #expect(v.state == .needsYou)
       #expect(!v.acknowledged)
       #expect(f.lastState == .needsYou)
-      #expect(Attention.shown(v, f).state == .waiting)
+      #expect(Attention.shown(v, f, now: now, acknowledgedMs: acknowledgedMs).state == .waiting)
+    }
+  }
+}
+
+/// The time of the `ack` in the manager-redesign (sni5dx) replay.
+let sni5dxAck = fixedNow + 220_000
+
+/// The events that held manager-redesign (sni5dx) in Waiting, as its event
+/// log recorded them: a turn that ran a job and ended with an informational
+/// reply, an `ack` at `sni5dxAck`, an idle stop, and an `open` that resumed
+/// claude without a prompt and ran a job. No prompt follows the `ack`, so no
+/// new turn clears it.
+func sni5dxEvents(acknowledged: Bool = true) -> [Event] {
+  let start = fixedNow
+  let minute: Int64 = 60_000
+  var events = [
+    event("UserPromptSubmit", start, ["prompt": "redesign the manager"]),
+    event("job", start + 1000, ["count": 1]),
+    event("Stop", start + minute, ["last_assistant_message": "The manager redesign is pushed and the tests pass."]),
+    event("job", start + minute + 1000, ["count": 0]),
+  ]
+  if acknowledged {
+    events.append(event("ack", sni5dxAck, ["state": "needs_you", "reason": .string(readTheReply)]))
+  }
+  events += [
+    event("stopped", sni5dxAck + 15 * minute),
+    event("SessionEnd", sni5dxAck + 15 * minute + 1, ["reason": "other"]),
+    event("resumed", sni5dxAck + 30 * minute, ["trigger": "open", "prompt": .null]),
+    event("SessionStart", sni5dxAck + 30 * minute + 1000),
+    event("job", sni5dxAck + 31 * minute, ["count": 2]),
+    event("job", sni5dxAck + 40 * minute, ["count": 0]),
+  ]
+  return events
+}
+
+/// The reason of an Inbox verdict whose acknowledgment at `at` passed its recheck time.
+private func expired(_ reason: String, acknowledgedAt at: Int64) -> String {
+  "\(reason) (acknowledged \(Wait.formatTime(at)), time to recheck)"
+}
+
+/// An acknowledgment holds a session in Waiting only until its recheck time.
+extension AcknowledgeTests {
+  @Suite struct Sni5dxReplay {
+    let f = facts(sni5dxEvents())
+
+    @Test func replayHasNoTurnAfterTheAcknowledgment() {
+      #expect(f.acknowledgment != nil)
+      #expect(!f.turnRunning)
+      #expect(f.jobs == 0)
+    }
+
+    @Test func acknowledgedSessionIsWaitingFiftyNineMinutesLater() {
+      let v = verdict(f, at: sni5dxAck + 59 * 60_000)
+
+      #expect(v == Verdict(state: .waiting, reason: readTheReply))
+      #expect(v.acknowledged)
+    }
+
+    @Test func acknowledgedSessionNeedsYouAnHourLater() {
+      let v = verdict(f, at: sni5dxAck + 60 * 60_000)
+
+      #expect(v == Verdict(state: .needsYou, reason: expired(readTheReply, acknowledgedAt: sni5dxAck)))
+      #expect(!v.acknowledged)
+    }
+  }
+}
+
+extension AcknowledgeTests {
+  @Suite struct AcknowledgmentTime {
+    @Test func ackEventWithLiteralDataTakesTheEventsTime() {
+      let f = facts(turn("Done.") + [event("ack", 7, ["state": "needs_you", "reason": .string(readTheReply)])])
+
+      #expect(f.acknowledgment?.at == 7)
+    }
+
+    @Test func ackEventsTimeWinsOverATimeInItsData() {
+      let f = facts(
+        turn("Done.") + [event("ack", 7, ["state": "needs_you", "reason": .string(readTheReply), "at": 999])])
+
+      #expect(f.acknowledgment?.at == 7)
+    }
+
+    @Test func laterAckEventTakesTheLaterTime() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), try ackEvent(9, .needsYou, readTheReply)])
+
+      #expect(f.acknowledgment?.at == 9)
+    }
+
+    /// sbd records the acknowledgment of the evaluated verdict. The event's own time is the acknowledgment's time.
+    @Test func acknowledgmentOfAVerdictHasNoTime() {
+      let f = facts(turn("Done."))
+
+      let ack = Acknowledgment(Attention.evaluate(session(), f, now: now), f)
+
+      #expect(ack.at == nil)
+    }
+  }
+}
+
+/// Each acknowledged Inbox item, with the time of its `ack`.
+enum AcknowledgedItem: String, CaseIterable, Sendable {
+  case reply, question, offer, readyToMerge, permissionPrompt, prRule
+
+  var ackAt: Int64 {
+    switch self {
+    case .reply, .question, .offer: 2
+    case .readyToMerge, .permissionPrompt, .prRule: 3
+    }
+  }
+
+  func acknowledgedFacts() throws -> SessionFacts {
+    switch self {
+    case .reply:
+      return facts(turn("Done.") + [try ackEvent(ackAt, .needsYou, readTheReply)])
+    case .question:
+      let question = "Which database, Postgres or SQLite?"
+      return facts(turn(question) + [try ackEvent(ackAt, .needsYou, "answer: \(question)")])
+    case .offer:
+      return facts(
+        turn("Want me to push?") + [try ackEvent(ackAt, .canContinue, "offered: Want me to push?")])
+    case .readyToMerge:
+      return try prFacts(
+        mergeablePR(), then: [try ackEvent(ackAt, .readyToMerge, "#42 is ready to merge", head: samplePRHead)])
+    case .permissionPrompt:
+      return facts(
+        promptTurn(touchCall, touch) + [try ackEvent(ackAt, .needsYou, "approve `touch x`")])
+    case .prRule:
+      return try prFacts(
+        mergeablePR(mergeable: .conflicting),
+        then: [try ackEvent(ackAt, .needsYou, "merge main in; #42 conflicts with main", head: samplePRHead)])
+    }
+  }
+}
+
+extension AcknowledgeTests {
+  @Suite struct AcknowledgmentRecheck {
+    @Test(arguments: AcknowledgedItem.allCases)
+    func itemIsWaitingAMillisecondBeforeItsRecheck(_ item: AcknowledgedItem) throws {
+      let v = verdict(try item.acknowledgedFacts(), at: item.ackAt + acknowledgedMs - 1)
+
+      #expect(v.state == .waiting)
+      #expect(v.acknowledged)
+    }
+
+    /// Before the recheck time, only the state and the mark change, as before the recheck existed.
+    @Test(arguments: AcknowledgedItem.allCases)
+    func itemKeepsItsReasonBeforeItsRecheck(_ item: AcknowledgedItem) throws {
+      let f = try item.acknowledgedFacts()
+      let t = item.ackAt + acknowledgedMs - 1
+
+      #expect(verdict(f, at: t).reason == Attention.evaluate(session(), f, now: t).reason)
+    }
+
+    @Test(arguments: AcknowledgedItem.allCases)
+    func itemReturnsToItsInboxStateAtItsRecheck(_ item: AcknowledgedItem) throws {
+      let f = try item.acknowledgedFacts()
+      let t = item.ackAt + acknowledgedMs
+
+      let v = verdict(f, at: t)
+
+      #expect(v.state == Attention.evaluate(session(), f, now: t).state)
+      #expect(AttentionState.inbox.contains(v.state))
+      #expect(!v.acknowledged)
+    }
+
+    @Test(arguments: AcknowledgedItem.allCases)
+    func expiredReasonSaysWhenTheUserAcknowledged(_ item: AcknowledgedItem) throws {
+      let f = try item.acknowledgedFacts()
+      let t = item.ackAt + acknowledgedMs
+
+      let evaluated = Attention.evaluate(session(), f, now: t)
+
+      #expect(verdict(f, at: t).reason == expired(evaluated.reason, acknowledgedAt: item.ackAt))
+    }
+
+    /// The expired path equals the unacknowledged path apart from its reason.
+    @Test(arguments: AcknowledgedItem.allCases)
+    func expiredVerdictKeepsEverythingButTheReason(_ item: AcknowledgedItem) throws {
+      let f = try item.acknowledgedFacts()
+      let t = item.ackAt + acknowledgedMs
+      let evaluated = Attention.evaluate(session(), f, now: t)
+
+      let v = verdict(f, at: t)
+
+      #expect(v.kind == evaluated.kind)
+      #expect(v.source == evaluated.source)
+      #expect(v.options == evaluated.options)
+      #expect(v.callouts == evaluated.callouts)
+      #expect(v.summary == evaluated.summary)
+      #expect(v.summarizesPR == evaluated.summarizesPR)
+    }
+
+    @Test func recheckTimeComesFromTheSetting() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)])
+      let t: Int64 = 2 + 60_000
+
+      let v = Attention.shown(Attention.evaluate(session(), f, now: t), f, now: t, acknowledgedMs: 60_000)
+
+      #expect(v == Verdict(state: .needsYou, reason: expired(readTheReply, acknowledgedAt: 2)))
+    }
+
+    @Test func reAcknowledgingAfterTheRecheckHoldsAgain() throws {
+      let again = 2 + acknowledgedMs + 10
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), try ackEvent(again, .needsYou, readTheReply)])
+
+      let v = verdict(f, at: again + 1)
+
+      #expect(v == Verdict(state: .waiting, reason: readTheReply))
+      #expect(v.acknowledged)
+    }
+
+    @Test func reAcknowledgmentHoldsForItsOwnRecheckTime() throws {
+      let again = 2 + acknowledgedMs + 10
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), try ackEvent(again, .needsYou, readTheReply)])
+
+      #expect(verdict(f, at: again + acknowledgedMs).reason == expired(readTheReply, acknowledgedAt: again))
+    }
+
+    /// Only an acknowledgment that covers the verdict adds the recheck text.
+    @Test func acknowledgmentOfAnotherReasonLeavesTheReasonPastItsRecheck() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, "some other reason")])
+
+      let v = verdict(f, at: 2 + acknowledgedMs)
+
+      #expect(v.reason == readTheReply)
+    }
+
+    @Test func acknowledgmentAtAnOlderHeadLeavesTheReasonPastItsRecheck() throws {
+      let f = try prFacts(
+        mergeablePR(), then: [try ackEvent(3, .readyToMerge, "#42 is ready to merge", head: "older")])
+
+      #expect(verdict(f, at: 3 + acknowledgedMs).reason == "#42 is ready to merge")
+    }
+
+    @Test func waitingVerdictIgnoresAMatchingAcknowledgmentPastItsRecheck() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .waiting, "the deploy of #42")])
+
+      let v = verdict(f, session(wait: "the deploy of #42"), at: 2 + acknowledgedMs)
+
+      #expect(v.reason == "the deploy of #42")
+      #expect(v.state == .waiting)
+      #expect(!v.acknowledged)
+    }
+
+    @Test func unackAfterTheRecheckLeavesTheReasonPlain() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), event("unack", 3)])
+
+      #expect(verdict(f, at: 2 + acknowledgedMs).reason == readTheReply)
     }
   }
 }

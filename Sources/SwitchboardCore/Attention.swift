@@ -54,6 +54,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var jobsEndedAt: Int64?
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
+  /// When a subagent last started, stopped, or sent a hook. Other activity
+  /// does not move it, so a subagent that lost its SubagentStop stops holding
+  /// the session `Attention.subagentQuietMs` after it.
+  public var lastSubagentEvent: Int64?
   /// When the state last changed. `Attention.track` sets it.
   public var stateSince: Int64 = 0
   public var lastState: AttentionState?
@@ -180,6 +184,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let tool = d["tool_name"]?.string ?? ""
     if !fromSubagent, let mode = d["permission_mode"]?.string { permissionMode = mode }
     if !fromSubagent, SessionFacts.hookKinds.contains(event.kind) { hookSinceLaunch = true }
+    // SubagentStart and SubagentStop carry agent_id too, so this covers them.
+    if fromSubagent { lastSubagentEvent = event.t }
     switch event.kind {
     case "SessionStart":
       live = true
@@ -431,14 +437,14 @@ public enum Attention {
     if let q = facts.openQuestion {
       return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
     }
-    if let v = finishedPR(session, facts) { return v }
+    if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {
         return Verdict(state: .working, reason: oneLine("\(tool.summary) (\(minutes(now - tool.since)))"))
       }
       return Verdict(state: .working, reason: "working (\(minutes(now - (facts.turnStarted ?? now))))")
     }
-    if let verdict = waitVerdict(session, facts) { return verdict }
+    if let verdict = waitVerdict(session, facts, now: now) { return verdict }
     if facts.prompts == 0 && facts.lastReply == nil {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
@@ -449,7 +455,7 @@ public enum Attention {
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    if !facts.subagents.isEmpty, now - facts.lastActivity <= subagentQuietMs,
+    if !facts.subagents.isEmpty, now - (facts.lastSubagentEvent ?? 0) <= subagentQuietMs,
       case .other = classify(facts.lastReply ?? "")
     {
       let n = facts.subagents.count

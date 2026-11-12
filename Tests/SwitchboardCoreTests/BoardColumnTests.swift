@@ -84,7 +84,8 @@ private func shownPlace(_ events: [Event], waits: [Wait] = []) -> BoardPlacement
   var s = session()
   if !waits.isEmpty { s.waits = waits }
   let f = facts(events)
-  let v = Attention.shown(Attention.evaluate(s, f, now: 100), f)
+  let v = Attention.shown(
+    Attention.evaluate(s, f, now: 100), f, now: 100, acknowledgedMs: RecheckSettings().acknowledgedMs)
   return BoardColumn.place(
     state: v.state, acknowledged: v.acknowledged, stateSince: 50, waits: waits, facts: f, created: 0)
 }
