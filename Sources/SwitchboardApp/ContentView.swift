@@ -369,7 +369,7 @@ struct DeleteButton: View {
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
-  private var waiting: SessionSummary? { model.managers.first { $0.state == .needsYou } }
+  private var waiting: SessionSummary? { model.waitingManager }
   private var needsYou: Bool { waiting != nil }
 
   private var tooltip: String {

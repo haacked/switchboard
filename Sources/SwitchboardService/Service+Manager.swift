@@ -111,7 +111,7 @@ extension Service {
     if !missing.isEmpty { record(id, "mcp-missing", ["servers": .array(missing.map(JSON.string))]) }
     let servers = names.compactMap { name in available[name].map { (name, $0) } }
     if !servers.isEmpty {
-      args += ["--mcp-config", JSON.object(["mcpServers": .object(Dictionary(uniqueKeysWithValues: servers))]).text]
+      args += ["--mcp-config", JSON.object(["mcpServers": .object(Dictionary(servers) { first, _ in first })]).text]
     }
     return args
   }
@@ -143,7 +143,8 @@ extension Service {
   func managerMCP(_ args: JSON) throws -> JSON {
     guard let ref = args["session"]?.string, !ref.isEmpty else { throw APIError("name a Manager conversation") }
     let id = try managerConversation(ref)
-    let add = args["add"]?.array?.compactMap(\.string) ?? []
+    var add: [String] = []
+    for name in args["add"]?.array?.compactMap(\.string) ?? [] where !add.contains(name) { add.append(name) }
     let remove = args["rm"]?.array?.compactMap(\.string) ?? []
     let all = args["all"]?.bool == true
     let none = args["none"]?.bool == true
@@ -158,14 +159,27 @@ extension Service {
           + (known.isEmpty ? "No config lists a server." : "The servers are: \(known.joined(separator: ", "))."))
     }
     let current = entries[id]!.session.mcp
-    let next: [String]? =
-      all
-      ? nil
-      : none ? [] : ((current ?? []) + add.filter { !(current ?? []).contains($0) }).filter { !remove.contains($0) }
-    if changes == 1, next != current {
+    if current == nil, !add.isEmpty || !remove.isEmpty {
+      throw APIError("\(entries[id]!.session.name) loads every server. Run --none first, then add the ones it needs")
+    }
+    let base = current ?? []
+    let next: [String]?
+    if all {
+      next = nil
+    } else if none {
+      next = []
+    } else if !add.isEmpty {
+      next = base + add.filter { !base.contains($0) }
+    } else if !remove.isEmpty {
+      next = base.filter { !remove.contains($0) }
+    } else {
+      next = current
+    }
+    if next != current {
       try update(id) { $0.mcp = next }
       record(id, "mcp", ["servers": next.map { .array($0.map(JSON.string)) } ?? .null])
-      if claudeState(id) != .stopped { entries[id]?.mcpRelaunch = .pending }
+      // A relaunch already under way reads the stored list when it launches.
+      if claudeState(id) != .stopped, entries[id]?.mcpRelaunch == nil { entries[id]?.mcpRelaunch = .pending }
       applyMCPChanges(now: nowMs())
     }
     let session = entries[id]!.session
@@ -178,7 +192,8 @@ extension Service {
   }
 
   /// Relaunches each claude whose MCP servers changed while it ran, once it
-  /// can take a notice: no message waits and no turn runs. It stops claude,
+  /// can take a notice and is quiet: no message waits, no turn runs, no
+  /// background job runs, and no trust dialog is open. It stops claude,
   /// and launches it again with `--resume` once it has exited. A claude that
   /// exits for another reason first, such as `sb stop`, stays stopped, and
   /// its next launch uses the new servers.
@@ -186,8 +201,10 @@ extension Service {
     for (id, e) in entries {
       guard let phase = e.mcpRelaunch else { continue }
       switch (claudeState(id), phase) {
-      case (.running, .pending):
-        guard canTakeNotice(e, now: now), !e.facts.exiting else { continue }
+      case (.running(let pid), .pending):
+        // A stop would lose a background job's result or an open trust dialog.
+        guard canTakeNotice(e, now: now), !e.facts.exiting, backgroundJobs(pid) == 0, e.facts.trustCard == nil
+        else { continue }
         entries[id]?.mcpRelaunch = .stopping
         try? stop(id, reason: "its MCP servers changed")
       case (.stopped, .stopping):

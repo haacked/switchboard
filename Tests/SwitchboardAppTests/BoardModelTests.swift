@@ -493,6 +493,17 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     #expect(model.sidebarOrder == ["m2", "m1", "a"])
   }
 
+  @Test func theStarOpensTheMostRecentConversationEvenWhenAnotherNeedsYou() async {
+    var waiting = summary("m1", manager: true, state: .needsYou)
+    waiting.lastActivity = 1
+    let sent = await firstRequest {
+      $0.apply(.success([waiting, summary("m2", manager: true)]), followups: nil)
+      $0.openManager()
+    }
+    #expect(sent.op == "manager")
+    #expect(sent.args["session"] == nil)
+  }
+
   @Test func withoutAManagerThereIsNoPinnedRow() {
     #expect(model([summary("a")]).managers.isEmpty)
   }

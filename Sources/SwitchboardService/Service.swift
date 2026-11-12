@@ -874,6 +874,8 @@ public final class Service {
     markStarting(name)
     if !session.started { try update(id) { $0.started = true } }
     snapshot.claudePids[id] = nil
+    // This launch reads the current MCP servers, so no relaunch for a change to them is still due.
+    entries[id]?.mcpRelaunch = nil
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
     record(

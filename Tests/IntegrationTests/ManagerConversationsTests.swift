@@ -215,6 +215,17 @@ import Testing
     #expect(try sbd.get(target.id).lastReply == "Done: hello")
   }
 
+  @Test func chatLogReadsAnySessionThatSessionNames() throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "work")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let log = try JSONCoding.convert(
+      sbd.client.call("chat-log", ["session": .string(work.id)]), to: [ChatMessage].self)
+
+    #expect(log.map { "\($0.role): \($0.text)" } == ["user: hello", "assistant: Done: hello"])
+  }
+
   struct NameCase: Sendable, CustomTestStringConvertible {
     let label: String
     let name: String?
@@ -245,6 +256,15 @@ import Testing
 
     #expect(created.name == c.expected)
     #expect(try sbd.get(created.id).name == c.expected)
+  }
+
+  @Test func anUntitledConversationIsNamedByItsFirstPrompt() throws {
+    let sbd = try Instance()
+
+    let c = try idleConversation(sbd, "Fix the cache")
+
+    #expect(c.name == "Fix the cache")
+    #expect(try sbd.events(c.id).contains { $0.kind == "renamed" })
   }
 
   @Test func firstPromptStartsTheConversation() throws {
@@ -476,6 +496,140 @@ import Testing
     #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
   }
 
+  @Test func aRepeatedNameInOneAddIsAddedOnce() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+
+    let args = try changeServers(sbd, c, "add", "grafana", "grafana")
+
+    #expect(serverNames(args) == ["grafana", "switchboard"])
+    let shown = try decode(JSON.self, sbd.sb("manager", "mcp", c.id, "--json"))
+    #expect(shown[Self.serversKey] == ["grafana"], "\(shown.text)")
+  }
+
+  @Test func aSecondChangeWhileClaudeExitsRelaunchesWithBoth() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    let before = launches(sbd, c).count
+
+    try sbd.sb("manager", "mcp", c.id, "add", "grafana")
+    try sbd.sb("manager", "mcp", c.id, "add", "posthog-db")
+
+    _ = try launch(sbd, c, after: before)
+    // Under load the second change can land after the first relaunch, which relaunches claude again.
+    try sbd.waitFor("a launch with both servers and no relaunch due") {
+      let shown = try decode(JSON.self, sbd.sb("manager", "mcp", c.id, "--json"))
+      return try serverNames(scriptArgs(sbd, c.id)) == ["grafana", "posthog-db", "switchboard"]
+        && shown["pending"]?.bool == false
+    }
+  }
+
+  @Test func aChangeWaitsForARunningBackgroundJob() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    defer { if let job = sbd.stubPid("job.pid") { kill(job, SIGTERM) } }
+    try sbd.sb("send", c.id, "background 100 held")
+    try sbd.waitFor(c.id, "the turn that starts the job") { $0.lastReply == "Started a job of 100 s." }
+    // The tick that this runs puts the job in sbd's process list.
+    try sbd.advanceClock(1)
+    let before = launches(sbd, c).count
+
+    try sbd.sb("manager", "mcp", c.id, "add", "grafana")
+
+    Thread.sleep(forTimeInterval: 1.5)
+    #expect(launches(sbd, c).count == before)
+    try sbd.endJob()
+    _ = try launch(sbd, c, after: before)
+    #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
+  }
+
+  @Test func aSendDuringTheRelaunchLeavesALaterStopStopped() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    try sbd.sb("manager", "mcp", c.id, "add", "grafana")
+    try sbd.waitFor(c.id, "the stop for the new servers") { !$0.live }
+
+    try sbd.sb("send", c.id, "next")
+
+    try sbd.waitFor(c.id, "the reply to next", timeout: 30) { $0.lastReply == "Done: next" }
+    let shown = try decode(JSON.self, sbd.sb("manager", "mcp", c.id, "--json"))
+    #expect(shown["pending"]?.bool == false, "\(shown.text)")
+    #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
+    let before = launches(sbd, c).count
+    try sbd.stopClaude(c.id)
+    Thread.sleep(forTimeInterval: 2)
+    #expect(launches(sbd, c).count == before)
+  }
+
+  @Test func addAndRmAreRefusedOnAConversationWithTheFullSetup() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try changeServers(sbd, c, "--all")
+    let before = launches(sbd, c).count
+
+    for change in [["add", "grafana"], ["rm", "grafana"]] {
+      let refused = try sbd.run(["manager", "mcp", c.id] + change)
+      #expect(refused.status != 0)
+      #expect(refused.stderr.contains("--none"), "\(refused.stderr)")
+    }
+
+    Thread.sleep(forTimeInterval: 1)
+    #expect(launches(sbd, c).count == before)
+    #expect(!(try scriptArgs(sbd, c.id)).contains("--strict-mcp-config"))
+  }
+
+  @Test func aChangeThatLeavesTheServersAsTheyWereDoesNotRelaunch() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    let before = launches(sbd, c).count
+
+    try sbd.sb("manager", "mcp", c.id, "--none")
+    try sbd.sb("manager", "mcp", c.id, "rm", "grafana")
+
+    Thread.sleep(forTimeInterval: 1)
+    #expect(launches(sbd, c).count == before)
+  }
+
+  @Test func twoChangesAtOnceAreRefused() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    let before = launches(sbd, c).count
+
+    let refused = try sbd.run(["manager", "mcp", c.id, "add", "grafana", "--all"])
+
+    #expect(refused.status != 0)
+    Thread.sleep(forTimeInterval: 1)
+    #expect(launches(sbd, c).count == before)
+    #expect(try serverNames(scriptArgs(sbd, c.id)) == ["switchboard"])
+  }
+
+  @Test func aServerNoConfigHoldsAnyMoreIsLeftOutAndRecorded() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    let folder = try accountFolder(sbd, c)
+    try addUserServers(folder, ["notes": Self.userServer])
+    try changeServers(sbd, c, "add", "notes")
+    let path = "\(folder)/.claude.json"
+    var config = try #require(JSON.parse(try String(contentsOfFile: path, encoding: .utf8))?.object)
+    config["mcpServers"] = [:]
+    try JSON.object(config).text.write(toFile: path, atomically: true, encoding: .utf8)
+    try sbd.stopClaude(c.id)
+    let before = launches(sbd, c).count
+
+    _ = try sbd.sb("manager", c.id, "--json")
+
+    _ = try launch(sbd, c, after: before)
+    #expect(serverNames(try scriptArgs(sbd, c.id)) == ["switchboard"])
+    let missing = try sbd.events(c.id).last { $0.kind == "mcp-missing" }
+    #expect(missing?.data["servers"] == ["notes"])
+  }
+
   // MARK: The Manager from before conversations
 
   /// Stores a Manager session as the sbd before conversations stored it, with
@@ -573,9 +727,11 @@ import Testing
     let busy = try sbd.new(prompt: "slow 30", name: "busy")
     try sbd.waitFor(busy.id, "its turn") { $0.state == .working }
 
+    let other = try newConversation(sbd, name: "other")
     let c = try newConversation(sbd)
 
     let text = try startDigest(sbd, c)
+    #expect(!text.contains(other.id), "\(text)")
     let lines = text.split(separator: "\n")
     // The Inbox title's line can name its session too, so it doesn't count as the session's line.
     let sessionLines = lines.filter { !$0.contains(Self.inboxTitle) }
@@ -716,11 +872,13 @@ import Testing
     let mcp = try MCPClient(sbd, env: inside(c.id))
     var args = try spawnArgs(sbd, "kid")
     args["wait"] = "soonish"
+    let before = try #require(JSON.parse(try sbd.sb("ls", "--json"))?.array).count
 
     let result = try mcp.call("spawn", args)
 
     #expect(result.isError, "\(result.text)")
     #expect(try sbd.get(c.id).waits.isEmpty)
+    #expect(try #require(JSON.parse(try sbd.sb("ls", "--json"))?.array).count == before)
   }
 
   @Test func spawnWithAWaitOutsideASessionIsRefused() throws {
@@ -794,6 +952,18 @@ import Testing
     try sbd.waitFor(kid.id, "the kid's reply") { $0.lastReply == "Done: hello" }
 
     try sbd.sb("send", kid.id, "rebase on main")
+
+    #expect(try sentEvent(sbd, kid.id, "rebase on main").data[Self.senderKey] == nil)
+  }
+
+  @Test func aMessageTypedInASessionsShellNamesNoSender() throws {
+    let sbd = try Instance()
+    let c = try idleConversation(sbd)
+    let kid = try sbd.new(prompt: "hello", name: "kid")
+    try sbd.waitFor(kid.id, "the kid's reply") { $0.lastReply == "Done: hello" }
+
+    // A session's shell pane sets SB_SESSION_ID and leaves CLAUDECODE unset.
+    try sbd.sb(["send", kid.id, "rebase on main"], env: ["SB_SESSION_ID": c.id])
 
     #expect(try sentEvent(sbd, kid.id, "rebase on main").data[Self.senderKey] == nil)
   }

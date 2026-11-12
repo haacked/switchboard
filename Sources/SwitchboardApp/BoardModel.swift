@@ -283,6 +283,9 @@ final class BoardModel: ObservableObject {
     sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
   }
 
+  /// The Manager conversation that the toolbar star names while one needs you.
+  var waitingManager: SessionSummary? { managers.first { $0.state == .needsYou } }
+
   /// A state's sessions in the sidebar, each one followed by its children.
   struct SidebarGroup: Identifiable {
     var state: AttentionState
