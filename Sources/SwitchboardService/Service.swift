@@ -91,9 +91,18 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
-  /// The drafts whose reply target a gh read is resolving, each as its
-  /// session id and its `DraftReplies.key`.
+  /// The drafts whose reply target a gh read is resolving, or whose unknown
+  /// post a gh read is looking for, each as its session id and its
+  /// `DraftReplies.key`.
   var resolvingDrafts: Set<String> = []
+  /// The drafts that `draft-post` is posting, keyed as `resolvingDrafts` is.
+  var postingDrafts: Set<String> = []
+  /// The unknown posts that the tick doesn't look for, keyed as
+  /// `resolvingDrafts` is: those that it already looked for in this run,
+  /// and those that this run posted.
+  var checkedUnknown: Set<String> = []
+  /// gh's login, which the look for an unknown post's reply reads.
+  var ghLogin: String?
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
@@ -217,6 +226,7 @@ public final class Service {
     pruneDeclinedSuggestions()
     snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain { try settleUncertain(id, texts) }
+    markInterruptedPosts()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -281,8 +291,8 @@ public final class Service {
         return .success(try mergeRequest(request.args))
       case "review":
         return .success(try reviewRequest(request.args))
-      case "draft-check":
-        return .success(try draftReplyRequest(request.op, request.args))
+      case "draft-post", "draft-check":
+        return .success(try draftReplyRequest(request.op, request.args, caller: caller))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -490,7 +500,8 @@ public final class Service {
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
   /// the digest of its children, and the SessionStart of a new Manager
   /// conversation prints the digest of the whole board. sbd records each
-  /// digest as a `digest` event.
+  /// digest as a `digest` event. A work session's UserPromptSubmit prints
+  /// the replies that the user posted from its drafts since it last heard.
   func hook(_ args: JSON) throws -> (event: Event, answer: JSON)? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
       return nil
@@ -524,10 +535,10 @@ public final class Service {
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
       try nameConversation(id, prompt: payload["prompt"]?.string)
-      if let text = digest(id, now: event.t) {
-        record(id, "digest", ["text": .string(text)])
-        answer = ParentDigest.hookOutput(text, event: kind)
-      }
+      let digestText = digest(id, now: event.t)
+      if let digestText { record(id, "digest", ["text": .string(digestText)]) }
+      let context = [digestText, repliesNotice(id)].compactMap { $0 }
+      if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -1754,6 +1765,7 @@ public final class Service {
           entries[id] = e
           startSummaries(id, verdict)
           resolveDraftTargets(id, verdict)
+          checkUnknownPosts(id)
         }
       }
       runQueuedStarts(now: now)

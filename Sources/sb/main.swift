@@ -169,8 +169,12 @@ let usage = """
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
     summary help                  the card's format, for a session to follow
+    draft post <session> <n> [--text <text> | --text -]
+                                  post the item's draft n to GitHub as you, with the draft's
+                                  text, the given text, or stdin. Not inside a session
     draft check <session> <n>     read the GitHub comment that the item's draft n replies to again,
-                                  after gh couldn't read it, and print the draft's state
+                                  after gh couldn't read it, or look on GitHub for the reply
+                                  of a post whose outcome sbd doesn't know
 
   Permission prompts and questions:
     cards [<session>]             list the open ones

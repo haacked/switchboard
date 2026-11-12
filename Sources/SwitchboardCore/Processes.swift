@@ -12,13 +12,25 @@ public struct CommandResult: Sendable {
   }
 }
 
+extension String {
+  /// Whether the text holds a NUL byte, which a program's argument or
+  /// environment value can't carry.
+  public var hasNul: Bool { utf8.contains(0) }
+}
+
 /// Runs a program and waits for it. `env` replaces the environment when set.
-/// With `timeout`, the program gets SIGTERM after that many seconds.
+/// With `timeout`, the program gets SIGTERM after that many seconds. An
+/// argument or environment value with a NUL throws.
 @discardableResult
 public func runCommand(
   _ executable: String, _ args: [String], env: [String: String]? = nil, input: Data? = nil, timeout: Double? = nil,
   cwd: String? = nil
 ) throws -> CommandResult {
+  // Process raises an Objective-C exception for a NUL. Swift can't catch it, so it would end the program.
+  if ([executable] + args + (env.map { Array($0.keys) + Array($0.values) } ?? [])).contains(where: \.hasNul) {
+    throw APIError(
+      "\((executable as NSString).lastPathComponent) can't run with a NUL character in its arguments or environment")
+  }
   let p = Process()
   p.executableURL = URL(fileURLWithPath: executable)
   p.arguments = args

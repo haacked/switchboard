@@ -1002,6 +1002,29 @@ let sessionCard = TriageSummary(
     #expect(result.dropped.count == 1)
   }
 
+  /// The text is still worth copying, so only the target goes.
+  @Test func dropsAReplyToWithANulWithALine() throws {
+    let result = try TriageCard.clean(replyCard(.string(Self.url + "\u{0}")))
+
+    #expect(result.card.drafts.map(\.text) == ["Thanks!"])
+    #expect(result.card.drafts.first?.replyTo == nil)
+    #expect(result.dropped.count == 1)
+  }
+
+  /// gh can't post a text with a NUL, so the card drops the draft.
+  @Test(arguments: ["Thanks\u{0}!", "\u{0}", "Thanks!\u{0}\u{301}"])
+  func dropsADraftWhoseTextHasANul(_ text: String) throws {
+    let card: JSON = [
+      "summary": "Drafted replies.\nPost them.",
+      "drafts": [["label": "Reply", "text": .string(text), "replyTo": .string(Self.url)], "Kept."],
+    ]
+
+    let result = try TriageCard.clean(card)
+
+    #expect(result.card.drafts.map(\.text) == ["Kept."])
+    #expect(result.dropped.count == 1)
+  }
+
   @Test func aNullReplyToLeavesNone() throws {
     let result = try TriageCard.clean(replyCard(.null))
 

@@ -54,6 +54,16 @@ extension Instance {
     try writeGhRouteFile(method, path, "error", stderr)
   }
 
+  /// Makes the stub sleep for `seconds` before it answers the call. nil
+  /// removes the sleep.
+  func ghRouteSleeps(_ method: String, _ path: String, seconds: Int?) throws {
+    guard let seconds else {
+      try? FileManager.default.removeItem(atPath: "\(ghRouteBase(method, path)).sleep")
+      return
+    }
+    try writeGhRouteFile(method, path, "sleep", String(seconds))
+  }
+
   /// Makes the stub hold the call until `openGhGate` writes a line to the
   /// FIFO. It returns the FIFO's path.
   @discardableResult

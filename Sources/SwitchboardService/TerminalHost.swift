@@ -8,6 +8,8 @@ struct PaneRow {
   var dead: Bool
   /// The number of terminals attached to the pane's tmux session.
   var clients: Int
+  /// The pid of the tmux server, which is the parent of every pane's process.
+  var server: Int = 0
 
   /// Reads the output of `list-panes -F` with `TerminalHost.paneFormat`. A
   /// field may be empty: tmux 3.8 prints no pid for a pane whose program
@@ -19,7 +21,8 @@ struct PaneRow {
       let f = line.split(separator: "\t", omittingEmptySubsequences: false)
       guard let name = f.first, !name.isEmpty else { continue }
       func field(_ i: Int) -> Substring { i < f.count ? f[i] : "" }
-      rows[String(name)] = PaneRow(pid: Int(field(1)) ?? 0, dead: field(2) == "1", clients: Int(field(3)) ?? 0)
+      rows[String(name)] = PaneRow(
+        pid: Int(field(1)) ?? 0, dead: field(2) == "1", clients: Int(field(3)) ?? 0, server: Int(field(4)) ?? 0)
     }
     return rows
   }
@@ -113,7 +116,7 @@ final class TerminalHost {
   }
 
   /// The format that `checkedPanes()` asks `list-panes` for, and `PaneRow.parse` reads.
-  static let paneFormat = "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{session_attached}"
+  static let paneFormat = "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{session_attached}\t#{pid}"
 
   /// Every pane on the server, keyed by its tmux session name. A missing
   /// server has no panes. It throws when tmux fails for any other reason,

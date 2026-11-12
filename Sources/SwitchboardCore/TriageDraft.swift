@@ -83,6 +83,10 @@ public enum TriageDrafts {
           TriageCard.droppedLine(
             "replyTo of draft", label: draft.label, index: index,
             APIError("it has \(url.count) characters, and a replyTo has at most \(replyToLength)")))
+      } else if url.hasNul {
+        dropped.append(
+          TriageCard.droppedLine(
+            "replyTo of draft", label: draft.label, index: index, APIError("it has a NUL character")))
       } else if !url.isEmpty {
         draft.replyTo = url
       }
@@ -130,6 +134,7 @@ public enum TriageDrafts {
 
   private static func checked(_ draft: TriageDraft) throws -> TriageDraft {
     guard !draft.text.isEmpty else { throw APIError("it has no text") }
+    guard !draft.text.hasNul else { throw APIError("it has a NUL character") }
     guard draft.text.count <= maxLength else {
       throw APIError("it has \(draft.text.count) characters, and a draft has at most \(maxLength)")
     }
@@ -163,10 +168,15 @@ public enum TriageDrafts {
     return indent + 1 + (line.dropFirst(indent + 1).first == " " ? 1 : 0)
   }
 
-  static func trimBlankLines(_ text: String) -> String {
-    var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    while let first = lines.first, first.allSatisfy(\.isWhitespace) { lines.removeFirst() }
-    while let last = lines.last, last.allSatisfy(\.isWhitespace) { lines.removeLast() }
-    return lines.joined(separator: "\n")
+  /// The text without its leading and trailing blank lines. Line ends inside the text stay as they are.
+  public static func trimBlankLines(_ text: String) -> String {
+    // Swift reads CRLF as one Character, so the split works on scalars to find every line.
+    let lines = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let blank = { (line: String) in line.allSatisfy(\.isWhitespace) }
+    guard let first = lines.firstIndex(where: { !blank($0) }), let last = lines.lastIndex(where: { !blank($0) })
+    else { return "" }
+    var kept = lines[first...last].joined(separator: "\n")
+    if kept.unicodeScalars.last == "\r" { kept.unicodeScalars.removeLast() }
+    return kept
   }
 }

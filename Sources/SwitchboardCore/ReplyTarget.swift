@@ -154,6 +154,13 @@ public struct ResolvedTarget: Codable, Equatable, Sendable {
       excerpt: oneLine(comment["body"]?.string ?? "", max: Self.excerptLength), url: url)
   }
 
+  /// Whether a reply to `other` goes where a reply to this target goes. Two
+  /// replies in one review thread share their root.
+  public func sameThread(as other: ResolvedTarget) -> Bool {
+    Dependencies.sameRepo(target.repo, other.target.repo) && target.pr == other.target.pr
+      && target.kind == other.target.kind && root == other.root
+  }
+
   /// The `gh api` arguments that post `body` as a reply. A review comment's
   /// reply goes to its thread. A reply to an issue comment or a review is a
   /// new PR conversation comment. `-f` sends the body as it is, where `-F`
