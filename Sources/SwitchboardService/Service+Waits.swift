@@ -21,6 +21,7 @@ extension Service {
       if wait.kind == .ci && wait.pr == nil {
         wait.headSha = try? checkedOutBranch(entries[id]!.session, at: site(of: id)).tip
       }
+      wait = config.recheck.stamped(wait)
       try update(id) { $0.waits = open + [wait] }
       record(id, "wait", ["wait": try JSON(encoding: wait)])
     case "clear-wait":
@@ -99,15 +100,19 @@ extension Service {
   }
 
   /// v0.1 stored a free-text wait in `waitNote`. This turns it into a manual
-  /// wait. A Manager from before Manager conversations loads only the
-  /// switchboard MCP server from its next launch. `mcpScoped` records that
-  /// switch, so a later change to the full setup stays.
+  /// wait. A wait set before sbd stamped recheck times gets one that counts
+  /// from now, so the first tick after an upgrade doesn't move every old wait
+  /// to Needs you at once. A Manager from before Manager conversations loads
+  /// only the switchboard MCP server from its next launch. `mcpScoped`
+  /// records that switch, so a later change to the full setup stays.
   func upgraded(_ session: Session) throws -> Session {
     var s = session
     if let note = s.waitNote {
       s.waitNote = nil
       s.waits = (s.waits ?? []) + [Wait(id: shortId("w"), kind: .manual, note: note, created: s.created, then: .notify)]
     }
+    let now = nowMs()
+    s.waits = s.waits?.map { config.recheck.stamped($0, from: now) }
     if s.manager == true, s.mcpScoped != true {
       s.mcp = []
       s.mcpScoped = true

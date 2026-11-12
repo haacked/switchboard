@@ -462,14 +462,11 @@ extension Instance {
     try sbd.stopClaude(s.id)
     try sbd.restartServer(slow, behind: gate)
 
-    let sent = Date()
     let submit = Outcome.detached { try sbd.sb("decide", s.id, "--submit") }
-    try sbd.waitFor("the MCP stub to wait at its gate", timeout: 30) { gate.waitingPid() != nil }
-    let left = 0.5 - Date().timeIntervalSince(sent)
-    if left > 0 { usleep(useconds_t(left * 1_000_000)) }
+    try gate.waitForRequest(sbd, submit)
     let other = Outcome.detached { try sbd.run(["decide", s.id] + change.args) }
     let returned = other.done.wait(timeout: .now() + 5) == .success
-    _ = try gate.open(sbd, after: submit, sentAt: sent)
+    _ = try gate.open(sbd, after: submit)
     if !returned { _ = other.done.wait(timeout: .now() + 30) }
 
     #expect(returned, "the \(change) waited for the submit's send instead of being refused")

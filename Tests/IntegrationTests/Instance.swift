@@ -302,9 +302,7 @@ final class Instance {
 
   @discardableResult
   func git(_ dir: String, _ args: String...) throws -> String {
-    let r = try runCommand("/usr/bin/git", ["-C", dir] + args)
-    guard r.status == 0 else { throw TestError(description: "git \(args.joined(separator: " ")) failed: \(r.stderr)") }
-    return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    try Repos.git(dir, args)
   }
 
   func new(prompt: String? = nil, name: String = "t") throws -> SessionSummary {

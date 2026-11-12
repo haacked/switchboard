@@ -144,6 +144,7 @@ public struct Config: Codable, Equatable, Sendable {
   public var usage = UsageSettings()
   public var docket = DocketSettings()
   public var planUpdates = PlanUpdateSettings()
+  public var recheck = RecheckSettings()
 
   public init() {}
 
@@ -153,6 +154,7 @@ public struct Config: Codable, Equatable, Sendable {
       cleanupDeletes,
       supacode
     case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
+    case recheck = "recheckSeconds"
   }
 
   public init(from decoder: Decoder) throws {
@@ -211,6 +213,7 @@ public struct Config: Codable, Equatable, Sendable {
     usage = try c.decodeIfPresent(UsageSettings.self, forKey: .usage) ?? d.usage
     docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
     planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
+    recheck = try c.decodeIfPresent(RecheckSettings.self, forKey: .recheck) ?? d.recheck
   }
 }
 
