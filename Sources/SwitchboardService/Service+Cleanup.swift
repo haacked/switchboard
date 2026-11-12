@@ -101,7 +101,7 @@ extension Service {
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true)
-    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
+    return (repo, supacode ? try supacodeBranch(session, pr: pr) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// Throws for a follow-up that hasn't started, and for a session whose
