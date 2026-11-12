@@ -217,6 +217,23 @@ extension Instance {
     #expect(sbd.ghMerges().isEmpty)
   }
 
+  /// The fixture's base query has no `baseRef` for #18303, so the poller
+  /// reads no merged base for the `release` base.
+  @Test func approvedPROnANonDefaultBaseSaysWhatBlocksTheMerge() throws {
+    let github = try FakeGitHub()
+    github.change(MergeTests.number) { $0["baseRefName"] = "release" }
+    let sbd = try Instance.withMergeStub(github)
+    let s = try readySession(sbd)
+
+    let got = try sbd.get(s.id)
+    let r = try sbd.run(["merge", s.id])
+
+    #expect(got.state == .needsYou)
+    #expect(got.reason == "merge #18303, approved by stamphog")
+    #expect(r.status != 0)
+    #expect(sbd.ghMerges().isEmpty)
+  }
+
   @Test func failedMergeKeepsTheSessionReadyAndRecordsGhsError() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)

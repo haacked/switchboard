@@ -79,18 +79,13 @@ extension SessionFacts {
 }
 
 extension Attention {
-  /// Ready to merge when the PR targets the default branch, is not a draft,
-  /// GitHub reports no conflict, the checks passed, review is satisfied,
-  /// Trunk reports no queue state for it, and no dependency holds it. `openPR` calls it
-  /// after its blocking rules, its merged attempt, and its
+  /// Ready to merge exactly when `mergeBlocker` finds no blocker. `openPR`
+  /// calls it after its blocking rules, its merged attempt, and its
   /// GitHub merge queue rule, so the PR is open, outside GitHub's queue, and
   /// the session is idle. A repository whose merge method sbd can't tell
   /// gets no Merge or Enqueue option.
   static func readyToMerge(_ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, !pr.draft, pr.mergeable == .mergeable, pr.checks == "SUCCESS",
-      pr.defaultBranch == nil || pr.base == pr.defaultBranch, pr.reviewSatisfied, pr.queue == nil,
-      !facts.dependencies.contains(where: \.holds)
-    else { return nil }
+    guard let pr = facts.pr, mergeBlocker(pr, facts) == nil else { return nil }
     let method = facts.mergeMethod
     var reason = "#\(pr.number) is ready to merge\(approvedBy(pr))"
     var options = [TriageOption(label: "Acknowledge", action: .dismiss)]

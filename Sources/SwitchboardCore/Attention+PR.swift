@@ -82,41 +82,43 @@ extension Attention {
     }
     if pr.inMergeQueue == true { return Verdict(state: .waiting, reason: "\(n) is in the merge queue") }
     if let v = readyToMerge(facts) { return v }
-    // A PR that waits on another can't merge yet.
-    guard pr.isApproved, !facts.dependencies.contains(where: \.holds) else { return nil }
-    switch pr.queue {
-    case nil:
-      if let v = approvedNotReady(pr) { return v }
-      var verdict = Verdict(
-        state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
-      verdict.addMergeSummary(facts)
-      return verdict
-    case .unknown:
-      return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
-    default:
-      return nil
-    }
+    guard pr.isApproved, let blocker = mergeBlocker(pr, facts) else { return nil }
+    return approvedNotReady(blocker, pr, facts)
   }
 
-  /// An approved PR that can't merge yet because of its checks or its
-  /// mergeability. Running checks and an uncomputed mergeability end on their
-  /// own, so the session waits outside Ready to merge and the Inbox. Failed
-  /// checks need someone to fix them.
-  static func approvedNotReady(_ pr: PullRequest) -> Verdict? {
+  /// The verdict for an approved PR that `blocker` keeps out of Ready to
+  /// merge. Running checks and an uncomputed mergeability end on their own,
+  /// so the session waits outside Ready to merge and the Inbox. Failed checks
+  /// need someone to fix them. A PR that waits on another PR or that Trunk
+  /// queued gets no verdict here. Every other blocker asks the user to merge.
+  static func approvedNotReady(_ blocker: MergeBlocker, _ pr: PullRequest, _ facts: SessionFacts) -> Verdict? {
     let n = "#\(pr.number)"
-    if pr.checksFailed {
+    switch blocker {
+    // `isApproved` excludes a draft, and `openPR` returns on a conflict first.
+    case .draft, .conflict:
+      return nil
+    // A PR that waits on another can't merge yet.
+    case .dependency:
+      return nil
+    case .queue(.unknown):
+      return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
+    case .queue:
+      return nil
+    case .checksFailed:
       return Verdict(
         state: .needsYou,
         reason: oneLine("fix the checks on \(n)\(approvedBy(pr, after: ";"))"),
         options: [ask("Fix the checks", "Fix the failing checks on \(n).")])
-    }
-    if pr.checksRunning {
+    case .checksRunning:
       return Verdict(state: .waiting, reason: "checks running on \(n)")
-    }
-    if pr.mergeable == .unknown {
+    case .mergeabilityUnknown:
       return Verdict(state: .waiting, reason: "GitHub is still checking whether \(n) can merge")
+    case .mergeabilityUnread, .noChecks, .checksNotPassed, .base, .review:
+      var verdict = Verdict(
+        state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
+      verdict.addMergeSummary(facts)
+      return verdict
     }
-    return nil
   }
 
   /// Ready for review while an open PR needs only the review that GitHub,
