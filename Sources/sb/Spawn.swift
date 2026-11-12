@@ -1,12 +1,9 @@
 import Foundation
 import SwitchboardCore
 
-/// The request's `planMode` for `--plan-mode`. `Args` reads `--plan` as a
-/// valued flag. `--plan --prompt P` would then swallow the prompt, so `new`
-/// and `spawn` refuse `--plan`.
+/// The request's `planMode` for `--plan-mode`.
 func planMode(_ a: Args) -> Bool? {
-  if a.values["--plan"] != nil { die("use --plan-mode to start in plan mode. --plan names a plan document") }
-  return a.switches.contains("--plan-mode") ? true : nil
+  a.switches.contains("--plan-mode") ? true : nil
 }
 
 func spawn(_ a: Args) {

@@ -191,7 +191,9 @@ import Testing
     try expectLaunches(sbd, s, ["plan", "auto"])
   }
 
-  /// The first resume records no mode. The second resume must not read that nil as plan mode.
+  /// Under --no-auto, no resume after leaving plan mode passes a mode. Each
+  /// resume reads the mode that the previous turn's hooks reported.
+  /// `LaunchModeTests` covers a resume whose reported mode is nil.
   @Test func noAutoResumesAfterLeavingPlanModePassNoMode() throws {
     let sbd = try instance()
     let s = try new(sbd, "--plan-mode", "--no-auto")
@@ -290,10 +292,13 @@ import Testing
     let sbd = try spawnInstance(repos)
     let refused = [
       ["new", sbd.work, "--plan", "--prompt", "hi"],
+      ["new", sbd.work, "--prompt", "hi", "--plan"],
+      ["new", "--plan", sbd.work, "--prompt", "hi"],
       ["new", "--plan", "p1", "--prompt", "hi", sbd.work],
       ["new", "--plan-mode", "--plan", "p1", "--prompt", "hi", sbd.work],
       ["spawn", "--repo", "acme/widgets", "--branch", "b1", "--plan", "--prompt", "hi"],
       ["spawn", "--repo", "acme/widgets", "--branch", "b1", "--prompt", "hi", "--plan", "p1", "--followup"],
+      ["spawn", "--repo", "acme/widgets", "--branch", "b1", "--prompt", "hi", "--plan"],
     ]
 
     for argv in refused {

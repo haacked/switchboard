@@ -642,6 +642,11 @@ guard let command = argv.popFirst() else {
   print(usage)
   exit(0)
 }
+// `Args` reads `--plan` as a valued flag. It would then die on a trailing
+// `--plan` or swallow the next argument. `new` and `spawn` refuse it here.
+if ["new", "spawn"].contains(command), argv.contains("--plan") {
+  die("use --plan-mode to start in plan mode. --plan names a plan document")
+}
 // The text of these commands is everything after the session. All but
 // `send` and `rename` read flags instead when the word after the session is
 // one. `send` reads its leading --image pairs itself, in Send.swift.
