@@ -24,7 +24,8 @@ struct BoxFacts: Equatable {
   /// Reads the setup script's answer: the home, tmux, git, python3, the shell, the user, the locale, and the
   /// clock in ns, with a NUL after each. The shell is empty when the host's `shell` key is not an absolute path to
   /// an executable file there. It throws for an answer that is cut short, for a home that is empty, not absolute,
-  /// or holds a newline, for a host that lacks a tool, and for such a `shell` key.
+  /// or holds a newline, for a host that lacks a tool, for such a `shell` key, and for a shell whose path holds a
+  /// character other than letters, digits, and / . _ + -.
   static func parse(_ answer: Data, epoch: Int, host: HostConfig, now: Int64) throws -> BoxFacts {
     let f = try RemoteSite.fields(answer, count: 8, of: "the setup answer of \(host.name)")
     let home = f[0]
@@ -47,12 +48,18 @@ struct BoxFacts: Equatable {
         "\(host.name)'s shell key names \"\(shell)\", which is not an absolute path to an executable file on \(host.name)"
       )
     }
+    let shell = host.shell ?? (f[4].isEmpty ? "/bin/sh" : f[4])
+    // The pane's command names the shell without quotes, so a character that a shell reads would break it.
+    guard shell.range(of: "^[A-Za-z0-9/._+-]+$", options: .regularExpression) != nil else {
+      let named = host.shell == nil ? "\(host.name)'s $SHELL is" : "\(host.name)'s shell key names"
+      throw APIError("\(named) \"\(shell)\", which holds a character other than letters, digits, and / . _ + -")
+    }
     let clock = f[7]
     guard !clock.isEmpty, clock.utf8.allSatisfy({ $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9") }),
       let ns = UInt64(clock)
     else { throw APIError("\(host.name) reports the clock \"\(clock)\", which is not a count of nanoseconds") }
     return BoxFacts(
-      epoch: epoch, home: home, shell: host.shell ?? (f[4].isEmpty ? "/bin/sh" : f[4]), user: f[5], lang: f[6],
+      epoch: epoch, home: home, shell: shell, user: f[5], lang: f[6],
       tmux: tools[0], git: tools[1], python: tools[2], clockOffsetMs: now - Int64(ns / 1_000_000))
   }
 
@@ -144,6 +151,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   /// How long after a command's timeout the link gives up on the answer and closes.
   static let deadlineSlack = 3.0
   static let setupSeconds = 20.0
+  /// How long a failed setup waits for the link to report a drop before the failure counts as lasting.
+  static let dropGraceSeconds = 1.0
+  /// The host sends SIGKILL this long after the SIGTERM of a command's timeout, in `RemoteShellProtocol`'s
+  /// `sb_run`.
+  static let killGraceSeconds = 2.0
 
   var hostName: String? { name }
   let machine: any Machine
@@ -180,9 +192,9 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   }
 
   private static func timed(
-    _ link: HostLink, check: AnswerCheck?, tap: ((any Machine) -> any Machine)?
+    _ link: HostLink, check: AnswerCheck?, tap: ((any Machine) -> any Machine)?, slack: Double = deadlineSlack
   ) -> any Machine {
-    let base: any Machine = link.machine(slack: deadlineSlack, check: check)
+    let base: any Machine = link.machine(slack: slack, check: check)
     return TimedMachine(tap?(base) ?? base, fallback: fallbackSeconds)
   }
 
@@ -269,8 +281,9 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   }
 
   /// Connects the link and waits up to `seconds` for setup to finish on a connection. It throws the reason when
-  /// the link is still down then. A setup that fails while its connection stays up throws at once. A setup that
-  /// got no answer because its connection dropped runs again on the next connection, until the deadline.
+  /// the link is still down then. A setup that fails while its connection stays up throws within
+  /// `dropGraceSeconds`. A setup that ends because its connection dropped runs again on the next connection,
+  /// until the deadline. A setup that `HostLink.disconnect()` ended throws, and the link stays disconnected.
   func awaitReady(seconds: Double) throws {
     link.connect()
     let deadline = Date().addingTimeInterval(seconds)
@@ -281,10 +294,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
           try prepare()
           return
         } catch {
-          // A command reports a dropped link before the link's status does.
-          let dropped =
-            error is HostUnread ? waitToLeave(status.connection, until: deadline) : hasLeft(status.connection)
-          guard dropped else { throw error }
+          // A command or the forward reports a dropped link before the link's status does. Any other
+          // failure waits `dropGraceSeconds` for that status before it counts as lasting.
+          let wait = error is HostUnread ? deadline : min(deadline, Date().addingTimeInterval(Self.dropGraceSeconds))
+          // `disconnect()` also ends setup. The user closed that link, so it stays closed.
+          guard waitToLeave(status.connection, until: wait), link.status.state != .disconnected else { throw error }
           // Only the service's tick polls the link, so the next connection starts here.
           link.connect()
           continue
@@ -484,9 +498,14 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   /// afterwards. It throws `HostUnread` otherwise, before `body` runs when the site is not ready. An error
   /// that `body` throws passes through when every command was answered.
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T {
+    try confirmed(what, slack: Self.deadlineSlack, body)
+  }
+
+  /// `confirmed(_:_:)` whose machine waits `slack` past each command's timeout for the host's answer.
+  func confirmed<T>(_ what: String, slack: Double, _ body: (any Machine) throws -> T) throws -> T {
     let epoch = try current().facts.epoch
     let check = AnswerCheck()
-    let result = Result { try body(RemoteSite.timed(link, check: check, tap: tap)) }
+    let result = Result { try body(RemoteSite.timed(link, check: check, tap: tap, slack: slack)) }
     try requireAnswered(what, check: check, epoch: epoch)
     return try result.get()
   }

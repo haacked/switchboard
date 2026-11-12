@@ -79,6 +79,17 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
     } throws: { "\($0)".contains("mini's shell key names \"/bin/zhs\"") }
   }
 
+  /// The pane's command names the shell without quotes.
+  @Test(arguments: ["/opt/my shell/zsh", "/bin/zsh;rm", "/bin/$SHELL", "/bin/z'sh", "/bin/zsh\t"])
+  func aShellWhosePathACommandWouldNeedQuotedIsRefused(shell: String) throws {
+    #expect {
+      try parse(setupAnswer(), host: try miniHost(["shell": .string(shell)]))
+    } throws: { "\($0)".contains("mini's shell key names \"\(shell)\"") }
+    #expect {
+      try parse(setupAnswer(shell: shell))
+    } throws: { "\($0)".contains("mini's $SHELL is \"\(shell)\"") }
+  }
+
   @Test func aHostWithNoShellRunsBinSh() throws {
     #expect(try parse(setupAnswer(shell: "")).shell == "/bin/sh")
   }
@@ -811,6 +822,69 @@ func paths(inside folder: String) throws -> [String] {
       #expect(b.bench.masters().count >= 2)
       #expect(b.site.facts?.epoch == b.link.status.connection)
       #expect(b.site.facts?.epoch != connection)
+    }
+  }
+
+  /// `disconnect()` ends a setup in flight. The user closed the link, so the wait does not connect it again.
+  @Test(.timeLimit(.minutes(1)))
+  func aSetupThatADisconnectEndedThrowsAndTheLinkStaysDisconnected() throws {
+    try withSite { b in
+      try holdNextSetup(b)
+      defer { try? FileManager.default.removeItem(atPath: "\(b.home)/setup-gate") }
+      try b.bench.connect()
+      let lock = NSLock()
+      var outcome: Result<Void, any Error>?
+      let finished = DispatchSemaphore(value: 0)
+      Thread.detachNewThread {
+        let r = Result { try b.site.awaitReady(seconds: 15) }
+        lock.withLock { outcome = r }
+        finished.signal()
+      }
+      try #require(waitUntil(seconds: 20) { FileManager.default.fileExists(atPath: "\(b.home)/setup-waiting") })
+
+      b.link.disconnect()
+
+      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(throws: (any Error).self) { try lock.withLock { outcome }?.get() }
+      Thread.sleep(forTimeInterval: 0.3)
+      #expect(b.link.status.state == .disconnected)
+      #expect(b.bench.masters().count == 1)
+    }
+  }
+
+  /// The link drops just after the hook script answered, so the forward fails before the link reports the drop.
+  /// The box's `chmod` of the hook settings starts the drop: it lets the forward through again and kills the
+  /// master 0.4 s later. Until then the stub refuses the forward.
+  @Test(.timeLimit(.minutes(1)))
+  func aSetupWhoseForwardFailsAsTheLinkDropsIsReadyOnTheNextConnection() throws {
+    try withSite { b in
+      let first = try b.bench.connect()
+      let connection = b.link.status.connection
+      try b.set("ssh-stub/refuse-forward", "Control socket connect: Connection refused\n")
+      try b.set("drop-after-hooks", "")
+      let path = "\(b.home)/box-bin/chmod"
+      try Data(
+        """
+        #!/bin/sh
+        d=\(shellQuote(b.home))
+        if [ "$1" = 600 ] && [ -f "$d/drop-after-hooks" ]; then
+          rm -f "$d/drop-after-hooks"
+          ( /bin/sleep 0.4; rm -f "$d/ssh-stub/refuse-forward"; kill -KILL \(first.pid) ) </dev/null >/dev/null 2>&1 &
+        fi
+        exec /bin/chmod "$@"
+
+        """.utf8
+      ).write(to: URL(fileURLWithPath: path))
+      chmod(path, 0o755)
+      let started = Date()
+
+      try b.site.awaitReady(seconds: 15)
+
+      #expect(Date().timeIntervalSince(started) < 15)
+      #expect(b.bench.masters().count >= 2)
+      #expect(b.site.facts?.epoch == b.link.status.connection)
+      #expect(b.site.facts?.epoch != connection)
+      #expect(!FileManager.default.fileExists(atPath: "\(b.home)/drop-after-hooks"), "the hook script never ran")
     }
   }
 

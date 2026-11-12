@@ -1285,6 +1285,36 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
     ).write(to: URL(fileURLWithPath: "\(home)/.bashrc"))
   }
 
+  /// An interactive shell ignores the SIGTERM of the host's timeout, so a slow rc file ends only with the
+  /// SIGKILL 2 s later. The box's `wc`, which builds each answer, then takes 1.5 s more, as a slow round trip
+  /// does. The answer still arrives before the local deadline, so the link stays on its connection, and the run
+  /// reads as unanswered.
+  @Test(.timeLimit(.minutes(1)))
+  func aTurnCheckWhoseRcFileOutlastsTheTimeoutKeepsTheLinkAndReadsAsUnanswered() throws {
+    try withReadyService(host: ["shell": "/bin/bash", "claude": "sb-rc-claude"]) { b, service, facts in
+      try writeRcFiles(facts.home, rcOutput: "/bin/sleep 8")
+      let wc = "\(b.home)/box-bin/wc"
+      try Data(
+        """
+        #!/bin/sh
+        if [ -f \(shellQuote(b.home))/slow-answer ]; then /bin/sleep 1.5; fi
+        exec /usr/bin/wc "$@"
+
+        """.utf8
+      ).write(to: URL(fileURLWithPath: wc))
+      chmod(wc, 0o755)
+      let site = try #require(service.remoteSites["mini"])
+      try b.set("slow-answer", "")
+      defer { try? FileManager.default.removeItem(atPath: "\(b.home)/slow-answer") }
+
+      #expect { try service.agentRows(at: site, seen: 1, timeout: 1) } throws: { $0 is HostUnread }
+
+      #expect(site.link.status.state == .connected)
+      #expect(site.link.status.connection == facts.epoch)
+      #expect(site.facts?.epoch == facts.epoch)
+    }
+  }
+
   @Test(
     .timeLimit(.minutes(1)),
     arguments: [

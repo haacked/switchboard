@@ -159,12 +159,15 @@ extension Service {
   /// with `claudeShellFlags`, as the Claude pane does. The shell prints a token first, and the rows are what
   /// follows the token's line, so the output of a login or rc file is not read as rows. claude gets the
   /// environment of a pane's program and nothing from sbd's. It throws `HostUnread` unless the host answered
-  /// the run.
+  /// the run. An interactive shell ignores SIGTERM, so the host's timeout ends a slow rc file only with the
+  /// SIGKILL `RemoteSite.killGraceSeconds` later. The local deadline leaves room for that, because an answer
+  /// after the deadline drops the link.
   func agentRows(at site: RemoteSite, seen: Int64, timeout: Double) throws -> [ClaudeSession] {
     let host = site.config.name
     let token = "sb-agents-\(UUID().uuidString)"
     let claude = shellQuote(claudeCommand(onHost: host))
-    let r = try site.confirmed("claude agents") { machine in
+    let slack = RemoteSite.deadlineSlack + RemoteSite.killGraceSeconds
+    let r = try site.confirmed("claude agents", slack: slack) { machine in
       guard let facts = site.facts else { throw HostUnread(hostName: host, why: "setup has not run") }
       return try machine.run(
         facts.shell, Service.claudeShellFlags + ["printf '%s\\n' \(token); exec \(claude) agents --json"],
