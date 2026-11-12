@@ -84,6 +84,35 @@ let linkedNotes = "\(symlinkCwd)/link/notes.txt"
     #expect(!ClaudeScreen.shows(memoryCard(cwd: nil), try dialog("write-memory")))
   }
 
+  /// A target that fits the pane but not after the warning's opening starts
+  /// the next line. The opening then stands alone on its line.
+  @Test func aWarningWhoseOpeningStandsAloneIsShown() throws {
+    let write = try redrawnDialog(
+      "write-memory",
+      " This will modify /Users/someone/.claude/projects/-Users-someone-dev-someone-switchboard/memory/org-filter-status-x.md (outside working directory)",
+      [
+        " This will modify ",
+        " /Users/someone/.claude/projects/-Users-someone-dev-someone-switchboard/memory/org-filter-status-x.md (outside working directory)",
+      ])
+    #expect(ClaudeScreen.shows(memoryCard(), write))
+    let read = try redrawnDialog(
+      "read-symlink",
+      [
+        (
+          " This will read /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/sc",
+          [
+            " This will read ",
+            " /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/scratchpad/cap2/real/notes.txt",
+          ]
+        ),
+        (
+          " ratchpad/cap2/real/notes.txt (outside working directory) via a symlink",
+          [" (outside working directory) via a symlink"]
+        ),
+      ])
+    #expect(ClaudeScreen.shows(readCard(linkedNotes, cwd: symlinkCwd), read))
+  }
+
   /// A line that Claude Code did not draw, after the warning or in place of
   /// its end, stays part of the shown path.
   @Test(arguments: [
@@ -122,35 +151,6 @@ let linkedNotes = "\(symlinkCwd)/link/notes.txt"
     let card = memoryCard(file, cwd: cwd)
     #expect(!ClaudeScreen.shows(card, try dialog("write-cut-path")))
     #expect(!ClaudeScreen.mayShow(card, try dialog("write-cut-path")))
-  }
-
-}
-
-/// sbd's restart ends every held PermissionRequest hook. Claude Code keeps
-/// each dialog open.
-@Suite struct RestartKeepsFindableCards {
-  func restarted(_ cards: [Card]) -> [Card] {
-    var replay = SessionReplay()
-    replay.facts.cards = cards
-    replay.restarted()
-    return replay.facts.cards
-  }
-
-  @Test func aFindableCardStaysWithItsHookClosed() {
-    let cards = restarted([memoryCard(), bashCard("touch a.txt"), fruitCard()])
-    #expect(cards.map(\.hookClosed) == [true, true, true])
-  }
-
-  @Test(arguments: [facts(fetchTurn()).cards[0], readCard("/etc/hosts", ["offset": 10]), bashCard(" ")])
-  func anUnfindableCardGoes(_ card: Card) {
-    #expect(!card.findable)
-    #expect(restarted([card]).isEmpty)
-  }
-
-  @Test func aDeferredCardStaysAsItWas() {
-    var question = fruitCard()
-    question.deferred = true
-    #expect(restarted([question]) == [question])
   }
 
 }

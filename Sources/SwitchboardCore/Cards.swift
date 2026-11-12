@@ -283,7 +283,7 @@ extension SessionFacts {
       // A hook that timed out closes too. Claude Code's dialog then stays
       // open, so the prompt stays open.
       guard let card else { return }
-      hookEnded(at: card)
+      closeHook(at: card)
     case "dialog_closed":
       // Only Yes or a pick leaves the hook open, so the call runs. No and
       // Escape leave the prompt open until the turn ends.
@@ -301,10 +301,10 @@ extension SessionFacts {
     }
   }
 
-  /// Ends the hook of the card at the index. A card that sbd can find on the
-  /// screen stays until its dialog leaves. sbd answers it by typing. Any
-  /// other card goes.
-  mutating func hookEnded(at index: Int) {
+  /// Marks the hook of the card at the index closed. A card that sbd can find
+  /// on the screen stays until its dialog leaves. sbd answers it by typing.
+  /// Any other card is removed.
+  mutating func closeHook(at index: Int) {
     if cards[index].findable {
       cards[index].hookClosed = true
     } else {

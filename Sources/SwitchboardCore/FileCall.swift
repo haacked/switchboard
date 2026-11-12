@@ -93,8 +93,10 @@ struct FileCall {
   /// The shown path then names no file.
   private func withoutSymlinkWarning(_ head: [String]) -> [String] {
     let opening: String
-    if case .read = change { opening = "This will read " } else { opening = "This will modify " }
-    guard let start = head.firstIndex(where: { $0.hasPrefix(opening) }),
+    if case .read = change { opening = "This will read" } else { opening = "This will modify" }
+    // A target that fits the pane but not after the opening moves to the next
+    // line. The trimmed opening line then has no trailing space.
+    guard let start = head.firstIndex(where: { $0 == opening || $0.hasPrefix(opening + " ") }),
       ClaudeScreen.squeezed(head[start...].joined()).hasSuffix("(outsideworkingdirectory)viaasymlink")
     else { return head }
     return Array(head[..<start])

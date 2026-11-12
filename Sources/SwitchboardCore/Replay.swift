@@ -66,7 +66,7 @@ public struct SessionReplay: Codable, Equatable, Sendable {
   /// no held request. A snapshot holds the state before this step.
   public mutating func restarted() {
     for i in facts.cards.indices.reversed() where !facts.cards[i].outlivesTurn {
-      facts.hookEnded(at: i)
+      facts.closeHook(at: i)
     }
   }
 }
