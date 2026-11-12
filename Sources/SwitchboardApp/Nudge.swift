@@ -48,6 +48,10 @@ enum Nudge {
   }
 }
 
+extension SessionSummary {
+  var nudgeButtonLabel: String { "Copy a nudge for \(prOfSession)" }
+}
+
 /// Copies the card's nudge to the clipboard. It shows a check mark for a moment after.
 struct NudgeButton: View {
   let session: SessionSummary
@@ -67,7 +71,7 @@ struct NudgeButton: View {
     }
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
-    .accessibilityLabel("Copy a nudge for \(session.pr.map { "#\($0.number)" } ?? "the PR") of \(session.name)")
+    .accessibilityLabel(session.nudgeButtonLabel)
     .accessibilityValue(copied ? "Copied" : "")
     .help(copied ? "Copied" : "Copy a message that asks the reviewers to take a look")
   }

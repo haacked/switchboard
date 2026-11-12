@@ -164,10 +164,12 @@ public struct MCPServerStatus: Codable, Equatable, Sendable {
   public var lastExit: String?
   /// The last lines that its last run printed.
   public var lastOutput: [String]?
+  /// How many requests sbd holds until the server accepts connections.
+  public var waiting: Int
 
   public init(
     name: String, type: MCPServer.Transport, url: String, state: State, pid: Int?, restarts: Int,
-    restartAt: Int64?, lastExit: String?, lastOutput: [String]?
+    restartAt: Int64?, lastExit: String?, lastOutput: [String]?, waiting: Int
   ) {
     self.name = name
     self.type = type
@@ -178,5 +180,6 @@ public struct MCPServerStatus: Codable, Equatable, Sendable {
     self.restartAt = restartAt
     self.lastExit = lastExit
     self.lastOutput = lastOutput
+    self.waiting = waiting
   }
 }

@@ -35,11 +35,9 @@ struct ReviewerPicker: View {
   @State private var error: String?
   @State private var picked: Set<String> = []
 
-  private var prRef: String { session.pr.map { "#\($0.number)" } ?? "the PR" }
-
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("Request a review of \(prRef)").font(.headline)
+      Text("Request a review of \(session.prRef)").font(.headline)
       if let error {
         Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).lineLimit(4)
       } else if let suggestions {
