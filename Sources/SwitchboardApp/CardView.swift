@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// A permission prompt, a question, a group message, or a folder trust prompt, answered without opening the session.
 struct CardView: View {
-  /// See SessionViewState for why this isn't `@State`.
+  /// What the card holds. BoardModel keeps one per card, so it outlives the view.
   final class Draft: ObservableObject {
     @Published var message = ""
     /// The labels picked for each question, by the question's index.
