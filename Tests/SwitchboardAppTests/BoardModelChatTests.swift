@@ -61,6 +61,14 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
     #expect(sent.args == ["session": "c"])
   }
 
+  @Test func loadBlockSourcesAsksForClaudesMessagesOnly() async {
+    let sent = await firstRequest { $0.loadBlockSources("w") { _ in } }
+
+    #expect(sent.op == "chat-log")
+    #expect(
+      sent.args == ["session": "w", "role": "assistant", "limit": .number(Double(BoardModel.blockSourceMessageCount))])
+  }
+
   @Test func loadChatLogAsksForAManagerConversationsLog() async {
     let sent = await firstRequest { $0.loadChatLog("m") }
 

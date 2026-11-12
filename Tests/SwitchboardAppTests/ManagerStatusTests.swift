@@ -229,6 +229,13 @@ import Testing
     #expect(changed(model) == ["a"])
   }
 
+  @Test func aCommandsOutputAfterTheUsersMessageDoesNotMoveTheCutoff() {
+    let output = user(200, "<local-command-stdout>Set model to Sonnet</local-command-stdout>")
+    let model = model([child("a", since: 150)], log: [user(100), output])
+
+    #expect(changed(model) == ["a"])
+  }
+
   @Test func aReplyAfterTheUsersMessageDoesNotMoveTheCutoff() {
     let model = model([child("a", since: 150)], log: [user(100), assistant(200)])
 

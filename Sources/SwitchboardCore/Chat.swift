@@ -92,6 +92,21 @@ public struct ChatMessage: Codable, Equatable, Sendable {
   /// Whether the message is a notice that Switchboard pasted into the conversation.
   public var isNotice: Bool { role == .user && text.hasPrefix("Switchboard:") }
 
+  /// The output of a built-in command such as `/model`, when the message is the line Claude Code writes for
+  /// it. Claude Code writes that line as a user message without `isMeta`.
+  public var commandOutput: String? {
+    guard role == .user else { return nil }
+    let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    for tag in ["local-command-stdout", "local-command-stderr"] {
+      let open = "<\(tag)>"
+      let close = "</\(tag)>"
+      if line.count >= open.count + close.count, line.hasPrefix(open), line.hasSuffix(close) {
+        return line.dropFirst(open.count).dropLast(close.count).trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+    }
+    return nil
+  }
+
   /// The `/name args` that the user typed, when the message is the line Claude Code writes for a slash
   /// command. The line is a run of `<command-…>` elements in no fixed order, so the parser reads each by its tag.
   public var slashCommand: String? {

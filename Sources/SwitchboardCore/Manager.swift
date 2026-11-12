@@ -82,13 +82,30 @@ public enum Manager {
 }
 
 /// sbd's answer to `manager-mcp`.
-public struct ManagerMCPAnswer: Decodable, Equatable, Sendable {
+public struct ManagerMCPAnswer: Codable, Equatable, Sendable {
   public var session: String
   public var name: String
-  /// The servers besides switchboard, or nil for the full setup. sbd sends null for nil.
+  /// The servers besides switchboard, or nil for the full setup. It encodes nil as null.
   public var servers: [String]?
   /// The servers that a list can name.
   public var available: [String]
   /// True until claude relaunches with the stored servers.
   public var pending: Bool
+
+  public init(session: String, name: String, servers: [String]?, available: [String], pending: Bool) {
+    self.session = session
+    self.name = name
+    self.servers = servers
+    self.available = available
+    self.pending = pending
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(session, forKey: .session)
+    try container.encode(name, forKey: .name)
+    try container.encode(servers, forKey: .servers)
+    try container.encode(available, forKey: .available)
+    try container.encode(pending, forKey: .pending)
+  }
 }

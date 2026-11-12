@@ -256,6 +256,26 @@ import Testing
     #expect(error.contains(Self.refusal), Comment(rawValue: error))
   }
 
+  @Test(arguments: SessionRef.allCases) func chatLogForClaudesMessagesReadsAWorkSession(_ how: SessionRef) throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let log = try chatLog(sbd, ["session": .string(ref(work, how)), "role": "assistant"])
+
+    #expect(log == ["assistant: Done: hello"])
+  }
+
+  @Test func chatLogForTheUsersMessagesRefusesAWorkSession() throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let error = failure(sbd, "chat-log", ["session": .string(work.id), "role": "user"])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+  }
+
   @Test func chatLogRefusesAFollowupThatHasNotStarted() throws {
     let sbd = try Instance()
     let f = try add(sbd, ["prompt": "Fix the cache. It reads twice."])

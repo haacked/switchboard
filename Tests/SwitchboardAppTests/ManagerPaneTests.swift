@@ -164,7 +164,7 @@ enum ServerMenuChoice: CaseIterable, Sendable {
   @Test func aNewTaskSheetSendsNewWithTheConversationAsParent() async {
     let sent = await firstRequest { model in
       model.openNewSession(parent: "m")
-      let form = NewSessionView.Form(group: model.newSession?.group, parent: model.newSession?.parent)
+      let form = NewSessionView.Form(request: model.newSession ?? NewSessionRequest())
       form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
       if let request = form.request(worktree: false, groups: model.groups) {
         model.create(request)
@@ -183,7 +183,7 @@ enum ServerMenuChoice: CaseIterable, Sendable {
       #expect(model.newSession?.parent == "m")
       model.newSession = nil
       model.openNewSession()
-      let form = NewSessionView.Form(group: model.newSession?.group, parent: model.newSession?.parent)
+      let form = NewSessionView.Form(request: model.newSession ?? NewSessionRequest())
       form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
       if let request = form.request(worktree: false, groups: model.groups) {
         model.create(request)

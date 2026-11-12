@@ -90,19 +90,16 @@ private struct ChatMessages: View {
   }
 }
 
-/// A message. A notice from Switchboard shows as one grey line with its full text in the tooltip.
+/// A message. A notice from Switchboard and a built-in command's output show as one grey line with the full
+/// text in the tooltip.
 private struct ChatBubble: View {
   let message: ChatMessage
 
   var body: some View {
-    if message.isNotice {
-      Text(message.text.prefix { !$0.isNewline })
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .help(message.text)
-        .padding(.horizontal, 10)
+    if let output = message.commandOutput {
+      if !output.isEmpty { GreyLine(text: output) }
+    } else if message.isNotice {
+      GreyLine(text: message.text)
     } else {
       VStack(alignment: .leading, spacing: 4) {
         Text(message.role.label).font(.caption.bold()).foregroundStyle(.secondary)
@@ -117,5 +114,19 @@ private struct ChatBubble: View {
       .background(
         RoundedRectangle(cornerRadius: 8).fill(message.role == .user ? Color.accentColor.opacity(0.08) : Color.clear))
     }
+  }
+}
+
+private struct GreyLine: View {
+  let text: String
+
+  var body: some View {
+    Text(text.prefix { !$0.isNewline })
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .help(text)
+      .padding(.horizontal, 10)
   }
 }

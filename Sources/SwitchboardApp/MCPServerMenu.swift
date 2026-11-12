@@ -42,6 +42,8 @@ struct MCPServerMenu: View {
     .menuStyle(.borderlessButton)
     .fixedSize(horizontal: false, vertical: true)
     .help("The MCP servers that this conversation loads")
+    .accessibilityLabel("MCP servers")
+    .accessibilityValue(Manager.serversText(session.mcp))
     .accessibilityIdentifier("mcp-servers-\(session.id)")
     // A change stops claude and launches it again. Each step re-reads whether the relaunch is pending.
     .task(id: "\(session.id)/\(session.claudePid ?? 0)/\(session.live)") { model.loadMCPServers(session.id) }

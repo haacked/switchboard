@@ -964,12 +964,17 @@ final class BoardModel: ObservableObject {
   /// Reads the blocks of the session's recent assistant messages for the copy buttons in its Claude terminal.
   /// A failed read gives no blocks, so a quote's button copies the screen's text.
   func loadBlockSources(_ session: String, then done: @escaping @MainActor @Sendable (BlockSources) -> Void) {
-    let client = client
+    let send = send
     poller.async {
-      let messages = try? client.call(
-        "chat-log", ["session": .string(session), "limit": .number(Double(Self.blockSourceMessageCount))],
-        as: [ChatMessage].self)
-      let sources = BlockSources(messages: (messages ?? []).filter { $0.role == .assistant }.reversed().map(\.text))
+      let messages = try? JSONCoding.convert(
+        send(
+          "chat-log",
+          [
+            "session": .string(session), "role": .string(ChatMessage.Role.assistant.rawValue),
+            "limit": .number(Double(Self.blockSourceMessageCount)),
+          ]),
+        to: [ChatMessage].self)
+      let sources = BlockSources(messages: (messages ?? []).reversed().map(\.text))
       Task { @MainActor in done(sources) }
     }
   }

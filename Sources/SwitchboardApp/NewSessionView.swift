@@ -7,7 +7,7 @@ struct NewSessionRequest: Identifiable {
   let id = UUID()
   /// The id of the group that the sheet starts with.
   var group: String?
-  /// The id of the Manager conversation that the new session reports to, from its pane's New Task button.
+  /// The id of the Manager conversation that starts the new session, from its pane's New Task button.
   var parent: String?
 }
 
@@ -25,7 +25,7 @@ struct NewSessionView: View {
     @Published var account = ""
     /// The id of the group that the session joins, or nil for none.
     @Published private(set) var group: String?
-    /// The id of the conversation that the session reports to, or nil for none.
+    /// The id of the conversation that starts the session, or nil for none.
     let parent: String?
     /// The last offer, which a group change selects from again.
     private var offered: (repos: [KnownRepo]?, sessions: [SessionSummary]) = (nil, [])
@@ -34,6 +34,8 @@ struct NewSessionView: View {
       self.group = group
       self.parent = parent
     }
+
+    convenience init(request: NewSessionRequest) { self.init(group: request.group, parent: request.parent) }
 
     func pick(_ repo: KnownRepo?) {
       self.repo = repo
@@ -78,7 +80,7 @@ struct NewSessionView: View {
   @StateObject private var form: Form
 
   init(request: NewSessionRequest) {
-    _form = StateObject(wrappedValue: Form(group: request.group, parent: request.parent))
+    _form = StateObject(wrappedValue: Form(request: request))
   }
 
   var body: some View {
