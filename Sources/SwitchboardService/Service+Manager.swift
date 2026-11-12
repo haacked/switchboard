@@ -143,8 +143,7 @@ extension Service {
   func managerMCP(_ args: JSON) throws -> JSON {
     guard let ref = args["session"]?.string, !ref.isEmpty else { throw APIError("name a Manager conversation") }
     let id = try managerConversation(ref)
-    var add: [String] = []
-    for name in args["add"]?.array?.compactMap(\.string) ?? [] where !add.contains(name) { add.append(name) }
+    let add = args["add"]?.array?.compactMap(\.string) ?? []
     let remove = args["rm"]?.array?.compactMap(\.string) ?? []
     let all = args["all"]?.bool == true
     let none = args["none"]?.bool == true
@@ -162,19 +161,10 @@ extension Service {
     if current == nil, !add.isEmpty || !remove.isEmpty {
       throw APIError("\(entries[id]!.session.name) loads every server. Run --none first, then add the ones it needs")
     }
-    let base = current ?? []
-    let next: [String]?
-    if all {
-      next = nil
-    } else if none {
-      next = []
-    } else if !add.isEmpty {
-      next = base + add.filter { !base.contains($0) }
-    } else if !remove.isEmpty {
-      next = base.filter { !remove.contains($0) }
-    } else {
-      next = current
-    }
+    let next: [String]? =
+      all
+      ? nil
+      : none ? [] : current.map { add.reduce($0) { $0.contains($1) ? $0 : $0 + [$1] }.filter { !remove.contains($0) } }
     if next != current {
       try update(id) { $0.mcp = next }
       record(id, "mcp", ["servers": next.map { .array($0.map(JSON.string)) } ?? .null])
