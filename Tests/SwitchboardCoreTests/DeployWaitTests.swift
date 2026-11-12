@@ -188,11 +188,9 @@ import Testing
 
   // MARK: A named service
 
-  func service(
-    _ name: String = "feature-flags", repository: String? = "PostHog/posthog", approval: Bool = false
-  ) -> ServiceDeployState {
+  func service(repository: String? = "PostHog/posthog", approval: Bool = false) -> ServiceDeployState {
     ServiceDeployState(
-      service: name, repository: repository, devCommit: "a706fcc2eda17bb6ebafa270285bc39b7a2db629",
+      repository: repository, devCommit: "a706fcc2eda17bb6ebafa270285bc39b7a2db629",
       prodCommit: "a706fcc2eda17bb6ebafa270285bc39b7a2db629", requiresProdApproval: approval)
   }
 
@@ -406,12 +404,13 @@ import Testing
   // MARK: From the recorded responses
 
   /// The states that the poller would give each environment of `service`,
-  /// from a recorded jobs response and one ancestry for every environment.
-  func environments(_ service: ServiceDeployState, jobs fixture: String, ancestry: DeployedAncestry) throws
-    -> [DeployEnvironment: EnvironmentDeploy]
-  {
+  /// whose charts app is `app`, from a recorded jobs response and one
+  /// ancestry for every environment.
+  func environments(
+    _ service: ServiceDeployState, app: String, jobs fixture: String, ancestry: DeployedAncestry
+  ) throws -> [DeployEnvironment: EnvironmentDeploy] {
     let jobs = try #require(JSON.parse(try deployFixture(fixture)))
-    let syncs = ChartsDeployJobs.states(jobs, app: service.service)
+    let syncs = ChartsDeployJobs.states(jobs, app: app)
     return Dictionary(
       uniqueKeysWithValues: DeployEnvironment.allCases.map { e in
         (
@@ -427,7 +426,8 @@ import Testing
       ServiceDeployState.parse(service: "feature-flags", yaml: try deployFixture("state-feature-flags.yaml")))
     let w = wait("prod", service: "feature-flags")
 
-    let envs = try environments(flags, jobs: "jobs-feature-flags-deployed.json", ancestry: .contains)
+    let envs = try environments(
+      flags, app: "feature-flags", jobs: "jobs-feature-flags-deployed.json", ancestry: .contains)
 
     #expect(w.serviceDeployResolution(flags, pr: pr(), environments: envs) == "it deployed to prod-us and prod-eu")
   }
@@ -435,7 +435,7 @@ import Testing
   @Test func aRecordedRunWithProdUSSyncingKeepsAProdWaitOpen() throws {
     let posthog = try #require(
       ServiceDeployState.parse(service: "posthog", yaml: try deployFixture("state-posthog.yaml")))
-    let envs = try environments(posthog, jobs: "jobs-posthog-prod-us-running.json", ancestry: .contains)
+    let envs = try environments(posthog, app: "posthog", jobs: "jobs-posthog-prod-us-running.json", ancestry: .contains)
 
     #expect(wait("prod", service: "posthog").serviceDeployResolution(posthog, pr: pr(), environments: envs) == nil)
     #expect(
@@ -444,13 +444,14 @@ import Testing
   }
 
   @Test func aRecordedRunWhoseProdEUSyncFailedResolvesWithTheFailure() throws {
-    let app = service("temporal-worker-tasks-agent")
+    let agent = service()
     let w = wait("prod", service: "temporal-worker-tasks-agent")
 
-    let envs = try environments(app, jobs: "jobs-prod-eu-sync-failed.json", ancestry: .contains)
+    let envs = try environments(
+      agent, app: "temporal-worker-tasks-agent", jobs: "jobs-prod-eu-sync-failed.json", ancestry: .contains)
 
     #expect(
-      w.serviceDeployResolution(app, pr: pr(), environments: envs)
+      w.serviceDeployResolution(agent, pr: pr(), environments: envs)
         == "the deploy to prod-eu failed: \(DeployWaitTests.run)")
   }
 
@@ -460,7 +461,7 @@ import Testing
       ServiceDeployState.parse(service: "duckgres", yaml: try deployFixture("state-duckgres.yaml")))
     let w = wait("prod", service: "duckgres")
 
-    let envs = try environments(duckgres, jobs: "jobs-cancelled.json", ancestry: .contains)
+    let envs = try environments(duckgres, app: "duckgres", jobs: "jobs-cancelled.json", ancestry: .contains)
 
     #expect(
       w.serviceDeployResolution(duckgres, pr: pr(repo: "PostHog/duckgres"), environments: envs)
