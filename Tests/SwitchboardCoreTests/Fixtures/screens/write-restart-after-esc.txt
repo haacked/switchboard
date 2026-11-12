@@ -1,0 +1,70 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   /…/scratchpad/cap/home/dev/worktrees/switchboard/someone/shared-projects-permissions · /rc
+
+
+❯ Read the file /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-inbox-missing-permissi 
+  on-card/00000000-0000-0000-0000-000000000000/scratchpad/cap/home/dev/worktrees/switchboard/someone/shared-pro 
+  jects-permissions/src.md with the Read tool. Then use the Write tool to create the file                       
+  /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-inbox-missing-permission-card/000000 
+  00-0000-0000-0000-000000000000/scratchpad/cap/home/.claude-personal/projects/-Users-someone-dev-someone-switc 
+  hboard/memory/shared-projects-permissions-status.md with exactly its content, byte for byte. Then reply DONE. 
+
+  Read 1 file 
+
+⏺ Write(/private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard…/shared-projects-permissions-status.md)
+  ⎿  User rejected write/private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-inbox-missing-p
+     to                 ermission-card/00000000-0000-0000-0000-000000000000/scratchpad/cap/home/.claude-personal
+                        /projects/-Users-someone-dev-someone-switchboard/memory/shared-projects-permissions-stat
+                        us.md                                                                                  
+       1 ---                                                                                                   
+       2 name: shared-projects-permissions-status                                                              
+       3 description: Fix for permission prompts from the symlinked projects folders; refactors in draft 
+         PR #256, Stage 1 waits for it to merge
+       4 metadata:                                                                                              
+       5   type: project
+       6 ---                                 
+       7                                                                                                      
+       8 Option C was chosen on 2026-11-12. Each account gets a real `projects` folder, and sbd pins ever
+         y session's auto-memory to `~/.claude/projects/<ClaudeFolder.name(main checkout)>/memory` throug
+         h `autoMemoryDirectory` in the per-session `--settings` file. The refactors (`ClaudeFolder.name`
+          and the per-session settings file) are in draft PR #256. The plan is `~/dev/someone/notes/Dev/r
+         epositories/someone/switchboard/plans/shared-projects-permissions.md`.
+       9                                                                                               
+      10 **Why:** a symlink anywhere on the path removes Claude's built-in allowances. When the target is
+          under `~/.claude`, writes are refused as "a sensitive file". The user's decisions: accept the m
+         emory split for sessions outside sbd, include memory folders in the clones, and stop sbd, the au
+         tomation jobs, and the sessions for the migration.                          
+     … +4 lines                                                 
+                                          
+✻ Churned for 7s · done 12:59 PM
+                                                                                                            
+                                         
+                                                                                                               
+                                      
+                                                                 
+     
+                                                                                                          
+                                           
+                                                                                                           
+                                          
+                            
+     
+
+                                                             
+         
+        
+
+                             
+
+
+
+
+
+                                                                                            ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-inbox-missing-permission-card/0000…
+  ⏸ manual mode on · ← 1 agent
