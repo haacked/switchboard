@@ -128,7 +128,16 @@ extension Service {
     return ParentDigest.text(lines, elsewhere: counts)
   }
 
-  private func canTakeNotice(_ e: Entry, now: Int64) -> Bool {
+  /// The digest that a Manager conversation gets when its conversation
+  /// starts, which a SessionStart with `source` startup reports. It is nil
+  /// for every other kind and source. It leaves out every Manager conversation.
+  func startDigest(_ id: String, source: String?) -> String? {
+    guard entries[id]?.session.kind == .manager, source == "startup" else { return nil }
+    let all = summaries().filter { $0.id != id && $0.kind != .manager }
+    return ParentDigest.startText(all, inbox: Triage.order(all))
+  }
+
+  func canTakeNotice(_ e: Entry, now: Int64) -> Bool {
     !e.messageWaiting(now: now) && !e.facts.turnRunning && !mcpStarting(now: now)
   }
 }

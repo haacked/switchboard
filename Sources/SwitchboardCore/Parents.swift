@@ -152,8 +152,26 @@ public enum ParentDigest {
     return out.joined(separator: "\n")
   }
 
-  /// What sbd answers a UserPromptSubmit hook with to add `text` to the prompt.
-  public static func hookOutput(_ text: String) -> JSON {
-    ["hookSpecificOutput": ["hookEventName": "UserPromptSubmit", "additionalContext": .string(text)]]
+  /// The digest that a new Manager conversation starts with: every session
+  /// once, one line each, grouped by state, then the open Inbox items in the
+  /// Inbox's order.
+  public static func startText(_ sessions: [SessionSummary], inbox: [SessionSummary]) -> String {
+    var out = ["Switchboard: the sessions as this conversation starts."]
+    if sessions.isEmpty { out.append("There are no other sessions.") }
+    for state in AttentionState.allCases {
+      let rows = sessions.filter { $0.state == state }
+      guard !rows.isEmpty else { continue }
+      out.append("\(state.title):")
+      out += rows.map { "- \($0.name) (\($0.id)): \(oneLine($0.reason, max: 120))" }
+    }
+    let items = inbox.compactMap { s in s.triage.map { "- \(s.name) (\(s.id)): \($0.title)" } }
+    if !items.isEmpty { out += ["Inbox:"] + items }
+    return out.joined(separator: "\n")
+  }
+
+  /// What sbd answers a hook with to add `text` to the model's context.
+  /// `event` is the hook's event name, such as UserPromptSubmit.
+  public static func hookOutput(_ text: String, event: String) -> JSON {
+    ["hookSpecificOutput": ["hookEventName": .string(event), "additionalContext": .string(text)]]
   }
 }

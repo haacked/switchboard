@@ -71,7 +71,7 @@ public struct Session: Codable, Equatable, Sendable {
   public var notes: [Note]?
   /// The session that added this one, such as the session that captured a follow-up.
   public var parent: String?
-  /// True for the Manager, the one session that manages the others.
+  /// True for a Manager conversation. Several can exist.
   public var manager: Bool?
   /// Set on a follow-up. Until it starts, `cwd` is empty and claude never runs.
   public var followup: Followup?
@@ -99,6 +99,13 @@ public struct Session: Codable, Equatable, Sendable {
   /// Set by `sb issue`. It replaces the issues that sbd finds in the PR body
   /// and the branch name.
   public var issue: IssueRef?
+  /// The MCP servers that a Manager conversation loads besides switchboard,
+  /// by name. Nil launches claude with the full setup, as for every other
+  /// session. An empty list loads only switchboard.
+  public var mcp: [String]?
+  /// True once sbd gave a Manager conversation its first `mcp` list. A
+  /// conversation that the user later set to the full setup keeps nil.
+  public var mcpScoped: Bool?
 
   public var kind: SessionKind { SessionKind(manager: manager, chat: chat) }
 
@@ -209,8 +216,10 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// without a card. Without a card, only the terminal can answer it.
   public var openPrompt: Bool
   public var parent: String?
-  /// True for the Manager.
+  /// True for a Manager conversation.
   public var manager: Bool?
+  /// A Manager conversation's MCP servers besides switchboard, or nil for the full setup.
+  public var mcp: [String]?
   /// The field to read for what the session is. `manager` and `chat` stay
   /// in the JSON for the tools that read them.
   public var kind: SessionKind = .work

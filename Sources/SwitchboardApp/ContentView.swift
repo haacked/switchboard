@@ -187,11 +187,24 @@ struct Sidebar: View {
     let repos = model.repoLabels
     let activeAccount = model.activeAccountFolder
     List(selection: $model.selection) {
-      if let manager = model.manager {
+      if !model.managers.isEmpty {
         Section {
-          SessionRow(session: manager, activeAccount: activeAccount, hoverCard: model.hoverCard).tag(manager.id)
+          ForEach(model.managers) { manager in
+            SessionRow(session: manager, activeAccount: activeAccount, hoverCard: model.hoverCard).tag(manager.id)
+          }
         } header: {
-          Text("Manager")
+          HStack {
+            Text("Manager")
+            Spacer()
+            Button {
+              model.openManager(new: true)
+            } label: {
+              Image(systemName: "plus")
+            }
+            .buttonStyle(.borderless)
+            .help("Start a Manager conversation")
+            .accessibilityLabel("New Manager conversation")
+          }
         }
       }
       ForEach(model.sidebarGroups) { group in
@@ -350,17 +363,19 @@ struct DeleteButton: View {
   }
 }
 
-/// Opens the Manager, or starts it. The star turns the Needs you color and
-/// fills while the Manager needs you, because the Inbox and the Dock badge
-/// leave it out.
+/// Opens the most recent Manager conversation, or starts the first one. The
+/// star turns the Needs you color and fills while a conversation needs you,
+/// because the Inbox and the Dock badge leave the conversations out.
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
-  private var needsYou: Bool { model.manager?.state == .needsYou }
+  private var waiting: SessionSummary? { model.managers.first { $0.state == .needsYou } }
+  private var needsYou: Bool { waiting != nil }
 
   private var tooltip: String {
-    guard let manager = model.manager else { return "Start a session that manages the others through sb (⇧⌘M)" }
-    return needsYou ? "The Manager needs you: \(manager.reason) (⇧⌘M)" : "Open the Manager (⇧⌘M)"
+    if let waiting { return "\(waiting.name) needs you: \(waiting.reason) (⇧⌘M)" }
+    return model.managers.isEmpty
+      ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
   }
 
   var body: some View {

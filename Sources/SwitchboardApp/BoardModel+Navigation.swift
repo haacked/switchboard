@@ -2,11 +2,11 @@ import AppKit
 import SwitchboardCore
 
 extension BoardModel {
-  /// The sessions in the order the sidebar lists them: the Manager, then each section's rows. A collapsed
-  /// section's rows are left out, because the sidebar hides them.
+  /// The sessions in the order the sidebar lists them: the Manager conversations, then each section's rows. A
+  /// collapsed section's rows are left out, because the sidebar hides them.
   var sidebarOrder: [String] {
     let rows = sidebarGroups.filter { !collapsed.contains($0.state) }.flatMap { $0.rows.map(\.id) }
-    return (manager.map { [$0.id] } ?? []) + rows
+    return managers.map(\.id) + rows
   }
 
   var listFocusTarget: ListFocus {

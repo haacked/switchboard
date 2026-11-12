@@ -476,15 +476,25 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
   @Test func theManagerIsPinnedAndNotInAStateGroup() {
     for state in [AttentionState.working, .needsYou, .done] {
       let model = model([summary("m", manager: true, state: state), summary("a", parent: "m")])
-      #expect(model.manager?.id == "m")
+      #expect(model.managers.map(\.id) == ["m"])
       let ids = model.sidebarGroups.flatMap { $0.rows.map(\.id) }
       #expect(!ids.contains("m"))
       #expect(ids == ["a"])
     }
   }
 
+  @Test func managerConversationsArePinnedNewestActivityFirst() {
+    var old = summary("m1", manager: true)
+    old.lastActivity = 1
+    var recent = summary("m2", manager: true)
+    recent.lastActivity = 2
+    let model = model([old, recent, summary("a")])
+    #expect(model.managers.map(\.id) == ["m2", "m1"])
+    #expect(model.sidebarOrder == ["m2", "m1", "a"])
+  }
+
   @Test func withoutAManagerThereIsNoPinnedRow() {
-    #expect(model([summary("a")]).manager == nil)
+    #expect(model([summary("a")]).managers.isEmpty)
   }
 
   @Test func aGrandchildOfTheManagerNestsUnderItsParent() {
@@ -535,7 +545,7 @@ func appliedModel(_ list: [SessionSummary], followups: [SessionSummary]? = nil) 
     let model = model(sessions)
     model.selection = "m"
     model.apply(.success(sessions), followups: nil)
-    #expect(model.manager?.id == "m")
+    #expect(model.managers.map(\.id) == ["m"])
     #expect(model.selection == "m")
     #expect(model.selected?.id == "m")
   }

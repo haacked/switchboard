@@ -6,7 +6,7 @@ func spawn(_ a: Args) {
   if let repo = a.values["--repo"] { args["repository"] = .string(repo.repositoryArgument) }
   let flags = [
     "--branch": "branch", "--prompt": "prompt", "--after": "after", "--name": "name", "--base": "base",
-    "--model": "model", "--account": "account",
+    "--model": "model", "--account": "account", "--wait": "wait",
   ]
   for (flag, key) in flags {
     if let value = a.values[flag] { args[key] = .string(value) }

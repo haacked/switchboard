@@ -160,7 +160,7 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
   }
 
   @Test func answersTheHookWithTheTextAsAdditionalContext() {
-    let output = ParentDigest.hookOutput("t")
+    let output = ParentDigest.hookOutput("t", event: "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["hookEventName"] == "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["additionalContext"] == "t")
   }
