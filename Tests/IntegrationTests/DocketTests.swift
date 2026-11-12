@@ -125,15 +125,17 @@ private func docketLog(_ sbd: Instance, _ id: String) throws -> [String] {
     #expect(sbd.stubArgs().isEmpty)
   }
 
-  @Test func docketRowHasNoPipeline() throws {
+  @Test func docketRowHasNoBoard() throws {
     let docket = try DocketHome()
     let sbd = try Instance(config: docket.config)
+    let work = try sbd.new(prompt: "hello")
+    try #require(try sbd.listed(work.id)["board"]?.object != nil)
 
     let s = try startDocket(sbd, "o/r#1")
 
-    #expect(try sbd.listed(s.id).object?["pipeline"] == nil)
-    #expect(try sbd.getJSON(s.id).object?["pipeline"] == nil)
-    #expect(try !sbd.sb("get", s.id).contains("stage:"))
+    #expect(try sbd.listed(s.id).object?["board"] == nil)
+    #expect(try sbd.getJSON(s.id).object?["board"] == nil)
+    #expect(try !sbd.sb("get", s.id).contains("column:"))
   }
 
   @Test func eachChangeToTheReviewMovesTheRowAndLogsOneEvent() throws {

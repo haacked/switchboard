@@ -421,8 +421,9 @@ func printSession(_ s: SessionSummary) {
     print(
       "  issue:   \(issue.label(from: s.pr?.repo)) (\(issue.via.title))\(issue.url.map { "  \($0)" } ?? "")".printable)
   }
-  if let p = s.pipeline {
-    print("  stage:   \(p.stage.title) \(ago(p.since))\(p.blocker.map { "; \($0)" } ?? "")".printable)
+  if let b = s.board {
+    let back = b.back.map { "; \($0.text)" } ?? ""
+    print("  column:  \(b.column.title) \(ago(b.since))\(b.line.map { "; \($0)" } ?? "")\(back)".printable)
   }
   if let owners = s.pr?.codeOwners { print("  owners:  \(owners.text(separator: "; "))".printable) }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }

@@ -40,11 +40,7 @@ extension Attention {
     var parts: [String] = []
     if pr.reviewDecision == .reviewRequired { parts.append("review required") }
     if !pr.approvers.isEmpty { parts.append("approved by \(names(pr.approvers))") }
-    if !pr.changesRequestedBy.isEmpty {
-      parts.append("changes requested by \(names(pr.changesRequestedBy))")
-    } else if pr.reviewDecision == .changesRequested {
-      parts.append("changes requested")
-    }
+    if let changes = pr.changesRequestedLine { parts.append(changes) }
     if let requested, !requested.isEmpty {
       parts.append("review requested from \(names(requested))")
     }

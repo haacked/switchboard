@@ -91,3 +91,46 @@ extension BoardModel {
     session.hasTerminals && !session.waitsToStart && (session.kind != .chat || showingTerminal)
   }
 }
+
+/// What the Board draws: a lane per repo or group with a cell for each of
+/// `columns`, and the Done footer. `grid` holds the ids of the cells' cards,
+/// so the arrow keys reach exactly the drawn cards.
+struct BoardLayout {
+  struct Lane: Identifiable {
+    var id: String
+    var title: String
+    var group: GroupSummary?
+    var cells: [[SessionSummary]]
+  }
+
+  var columns: [BoardColumn]
+  var lanes: [Lane]
+  var done: [SessionSummary]
+  var grid: BoardGrid
+}
+
+extension BoardModel {
+  func boardLayout(lanes kind: BoardLanes) -> BoardLayout {
+    let board = workBoard
+    let open = board.filter { !MergeBoard.isDone($0) }
+    let rows: [(id: String, title: String, group: GroupSummary?, sessions: [SessionSummary])]
+    switch kind {
+    case .repo:
+      rows = MergeBoard.repoLanes(open, labels: RepoLabels.labels(board, evenForOneRepo: true, fullName: true)).map {
+        ("repo-\($0.id)", $0.title, nil, $0.sessions)
+      }
+    case .group:
+      rows = BoardRows.make(sessions: open, groups: shownGroups).map { row in
+        (row.id, row.title, groups.first { $0.id == row.group }, row.sessions)
+      }
+    }
+    let lanes = rows.map { row in
+      BoardLayout.Lane(
+        id: row.id, title: row.title, group: row.group,
+        cells: MergeBoard.columns.map { MergeBoard.cards(row.sessions, in: $0) })
+    }
+    return BoardLayout(
+      columns: MergeBoard.columns, lanes: lanes, done: board.filter(MergeBoard.isDone),
+      grid: BoardGrid(lanes: lanes.map { $0.cells.map { $0.map(\.id) } }))
+  }
+}

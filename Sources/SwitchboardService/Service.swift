@@ -1819,14 +1819,16 @@ public final class Service {
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil { out.reason = queuedReason }
     out.shellClosed = s.shellClosed
-    if s.kind == .work && s.docket == nil {
-      out.pipeline = Pipeline(e.facts, created: s.created)
-      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
-    }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
     if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
+    if s.kind == .work && s.docket == nil {
+      out.board = BoardColumn.place(
+        state: verdict.state, acknowledged: verdict.acknowledged, stateSince: out.since, waits: s.waits ?? [],
+        facts: e.facts, created: s.created)
+      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+    }
     return out
   }
 
