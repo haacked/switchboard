@@ -2,9 +2,20 @@
 # Updates Switchboard to the latest main: quits the app, fast-forwards this
 # checkout, runs bin/install, and opens the app. It checks the checkout before
 # it quits the app, so a refusal leaves the app running. Quitting the app does
-# not stop sbd or any session. bin/install restarts sbd.
+# not stop sbd or any session. bin/install restarts sbd. --force installs over
+# an app that bin/lib/install-guard.sh refuses to replace.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source bin/lib/install-guard.sh
+force=()
+case "${1:-}" in
+  --force) force=(--force) ;;
+  "") ;;
+  *)
+    echo "Usage: bin/update [--force]" >&2
+    exit 2
+    ;;
+esac
 app="$HOME/Applications/Switchboard.app"
 timeout=30
 
@@ -22,6 +33,7 @@ if ! git merge-base --is-ancestor HEAD origin/main; then
   echo "Refusing to update: main has commits that origin/main lacks, so it cannot fast-forward." >&2
   exit 1
 fi
+if [ ${#force[@]} -eq 0 ]; then require_newer_than_installed "$app" origin/main; fi
 
 bundle_id=com.haacked.switchboard
 if [ -f "$app/Contents/Info.plist" ]; then
@@ -45,5 +57,5 @@ if running; then
 fi
 
 git merge --ff-only origin/main
-bin/install
+bin/install ${force[@]+"${force[@]}"}
 bin/start

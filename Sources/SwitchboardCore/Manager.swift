@@ -58,7 +58,7 @@ public enum Manager {
 
     A session you start with `sb new` has you as its parent. Switchboard sends you no message when it changes. Instead, the context of a prompt can list what changed since your last turn: each session you started that opened a PR, moved to Needs you or Ready to merge, or reached Done, and how many other sessions are in Needs you and Ready to merge. It lists nothing when nothing changed. Run `sb get` on a session before you act on it.
 
-    When the user asks you to follow a session through, such as "remove it when it merges" or "tell me when it's done", set a `session` wait on it with `sb wait`. A wait resumes you with a message that starts with `Switchboard:`.
+    When the user asks you to follow a session through, such as "remove it when it merges" or "tell me when it's done", set a `session` wait on it with `sb wait`. A wait resumes you with a message that starts with `Switchboard:`. The message also arrives when the other session is removed, reaches Done before the state you wanted, or goes stale, so read it to see which happened before you act. A session wait that is still open after a day (the default) moves you to Needs you, so the user can decide whether to keep waiting.
 
     To start a session and hear when it reaches a state, pass `wait` to the `spawn` tool, such as `wait: done`. It sets the wait in the same call, so you need no separate `sb wait`.
 

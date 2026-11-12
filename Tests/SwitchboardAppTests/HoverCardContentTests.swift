@@ -37,12 +37,6 @@ private func pr(
   return pr
 }
 
-private func bodyIssue(_ number: Int, _ repo: String = posthog) -> SessionIssue {
-  SessionIssue(repo: repo, number: number, via: .body, url: "https://github.com/\(repo)/issues/\(number)")
-}
-
-private let branchIssue = SessionIssue(repo: nil, number: 123, via: .branch, url: nil)
-
 private func summary(_ text: String) -> TriageItem {
   TriageItem(title: "Pick one", kind: .decision, summary: text, source: .summary)
 }
