@@ -45,7 +45,7 @@ public final class Service {
     var events = 0
     var turnProbe = TurnProbe()
     /// When the tick last saw a terminal on the Claude pane.
-    var lastOnScreen: Int64 = 0
+    var lastViewed: Int64 = 0
     /// The Stop event of the last turn whose summary this sbd started or
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
@@ -711,6 +711,13 @@ public final class Service {
     if let checkout { return repositories[checkout] != nil }
     return checkouts[s.cwd] != nil
   }
+
+  /// The owner/name of the session's main checkout on GitHub, or nil until
+  /// lookups off the queue have read it.
+  func repository(of s: Session) -> String? { checkout(s).flatMap { repository($0, of: s) } }
+
+  /// Whether sbd has read the session's repository, or found that it has none.
+  func repositoryKnown(of s: Session) -> Bool { repositoryRead(s, checkout: checkout(s)) }
 
   func worktreeEntry(
     _ repo: String, at path: String, on machine: any Machine
@@ -1756,6 +1763,7 @@ public final class Service {
           startSummaries(id, verdict)
         }
       }
+      noteViewed(now: now)
       runQueuedStarts(now: now)
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
@@ -1774,6 +1782,11 @@ public final class Service {
   }
 
   var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
+
+  /// Records that each session with a terminal on its Claude pane was viewed now.
+  func noteViewed(now: Int64) {
+    for id in entries.keys where attached(id) { entries[id]?.lastViewed = now }
+  }
 
   /// The session's running claude, as the stop rules see it.
   func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
@@ -1806,8 +1819,8 @@ public final class Service {
       markedDone: s.done)
     if s.kind == .work {
       out.checkout = checkout(s)
-      out.repository = out.checkout.flatMap { repository($0, of: s) }
-      if repositoryRead(s, checkout: out.checkout) { out.repositoryRead = true }
+      out.repository = repository(of: s)
+      if repositoryKnown(of: s) { out.repositoryRead = true }
     }
     out.parent = s.parent
     out.manager = s.manager

@@ -34,37 +34,34 @@ extension Service {
     if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
   }
 
-  /// Starts the oldest queued starts while slots are free. When starts still
-  /// wait, it stops enough idle sessions to make room for them. The tick
-  /// calls it after it reads the processes.
+  /// Starts the queued starts that have a slot and stops the idle sessions
+  /// that make room for the rest. The tick calls it after it reads the processes.
   func runQueuedStarts(now: Int64) {
-    var queued = queuedStarts()[...]
-    guard !queued.isEmpty else { return }
-    var live = liveEntries()
-    // A start needs the shared MCP servers, as the tick's other launches do.
-    while !mcpStarting(now: now), live.count < liveCap, let next = queued.popFirst() {
-      let id = next.session.id
+    guard entries.values.contains(where: { $0.queuedSince != nil }) else { return }
+    let plan = livePlan(now: now)
+    for id in plan.starts {
       entries[id]?.queuedSince = nil
       do {
         try startClaude(id, prompt: nil)
-        live.append(entries[id]!)
       } catch {
         logLine("can't start queued \(id): \(error)")
       }
     }
-    // A session that sbd stopped keeps its slot until its claude exits.
-    let needed = queued.count - (liveCap - live.count) - live.filter(\.facts.exiting).count
-    guard needed > 0 else { return }
-    for id in stoppable(now: now).prefix(needed) {
+    for id in plan.stops {
       try? stop(id, reason: "the live cap of \(liveCap) needs the slot")
     }
   }
 
-  /// The sessions whose start queued, oldest first.
-  private func queuedStarts() -> [Entry] {
-    entries.values.filter { $0.queuedSince != nil }.sorted {
-      ($0.queuedSince!, $0.session.id) < ($1.queuedSince!, $1.session.id)
+  /// What the live cap does with the queued starts now.
+  func livePlan(now: Int64) -> LivePlan {
+    let queued = entries.values.compactMap { e in
+      e.queuedSince.map { LivePlan.Start(session: e.session.id, since: $0) }
     }
+    return LivePlan.make(
+      cap: liveCap,
+      live: liveEntries().map { LivePlan.Process(session: $0.session.id, exiting: $0.facts.exiting) },
+      queued: queued, candidates: stoppable(now: now), mcpStarting: mcpStarting(now: now),
+      names: entries.mapValues(\.session.name))
   }
 
   /// The sessions that sbd may stop to free a slot, in the order to stop them.
@@ -91,8 +88,8 @@ extension Service {
         session: e.session.id, name: e.session.name, pid: snapshot.claudePids[e.session.id],
         state: Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state)
     }.sorted { ($0.name, $0.session) < ($1.name, $1.session) }
-    let queued = queuedStarts().map {
-      LiveStatus.QueuedStart(session: $0.session.id, name: $0.session.name, since: $0.queuedSince!)
+    let queued = livePlan(now: now).order.map { id in
+      LiveStatus.QueuedStart(session: id, name: entries[id]!.session.name, since: entries[id]!.queuedSince!)
     }
     return try JSON(encoding: LiveStatus(cap: liveCap, live: live, queued: queued))
   }

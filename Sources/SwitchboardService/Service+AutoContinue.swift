@@ -29,10 +29,9 @@ extension Service {
         sessions: sessions))
   }
 
-  /// Notes which sessions are on screen, then continues each session that no
-  /// guard holds back. The tick calls it after it tracks every session's state.
+  /// Continues each session that no guard holds back. The tick calls it
+  /// after it tracks every session's state.
   func autoContinueSessions(now: Int64) {
-    for id in entries.keys where attached(id) { entries[id]?.lastOnScreen = now }
     // A continue can start claude, which needs the shared MCP servers.
     guard autoContinueOn, !mcpStarting(now: now) else { return }
     var live = liveCount()
@@ -78,7 +77,7 @@ extension Service {
     }
     input.busy = e.messageWaiting(now: now)
     input.onScreen = attached(id)
-    input.lastOnScreen = e.lastOnScreen
+    input.lastViewed = e.lastViewed
     input.live = live
     input.account = claudeAccount(of: id)
     input.hasBudget = quota.hasBudget(account: input.account)
