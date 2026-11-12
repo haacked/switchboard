@@ -75,3 +75,10 @@
 4 IntegrationTests.PaneListTests
 4 IntegrationTests.SwiftTestingArgsTests
 1 IntegrationTests.BlockingTests
+0 IntegrationTests.BinDir
+0 IntegrationTests.ClaudeTests
+0 IntegrationTests.HookTests
+0 IntegrationTests.PlanUpdateClaudeTests
+0 IntegrationTests.RecordingTests
+0 IntegrationTests.SelectionProjection
+0 IntegrationTests.TriageClaudeTests

@@ -35,8 +35,9 @@ shards() {
   total=$(grep -c . <<<"$list")
   # Each integration suite, slowest first, goes to the shard with the least
   # time so far. Tests/shard-weights gives each suite's seconds.
-  # bin/shard-weights rebuilds that file from a CI log. A suite that it doesn't
-  # list gets its test count times the listed suites' mean seconds per test.
+  # bin/shard-weights rebuilds that file from a CI log. A suite the file doesn't
+  # list gets its test count times the mean seconds per test of the suites
+  # with a weight above 0. A suite with weight 0 holds no slot in CI.
   # Without the file, that splits the suites by test count. The other targets
   # take seconds and run in shard N. Their time limits then never wait behind
   # integration tests that block threads.
@@ -49,7 +50,7 @@ shards() {
   done < <(awk -F/ -v weights=Tests/shard-weights '
     BEGIN { while ((getline line < weights) > 0) { split(line, f, " "); seconds[f[2]] = f[1] } }
     { count[$1]++ }
-    END { for (key in count) if (key in seconds) { listed += seconds[key]; tests += count[key] }
+    END { for (key in count) if ((key in seconds) && seconds[key] > 0) { listed += seconds[key]; tests += count[key] }
       rate = tests ? listed / tests : 1
       for (key in count) {
         w = (key in seconds) ? seconds[key] : count[key] * rate
