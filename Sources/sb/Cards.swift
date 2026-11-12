@@ -24,7 +24,7 @@ func cards(_ a: Args) {
       "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")\(card.hookClosed ? ", hook closed" : "")"
     if card.kind == .permission {
       // `allow` approves the whole call, so the whole call prints.
-      out("\(head)  approve \(card.tool)\(card.offersAutoMode ? ", --auto offered" : "")")
+      out("\(head)  approve \(card.tool)\(card.offeredExtras.map { ", \($0.flag) offered" }.joined())")
       for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
       continue
     }
@@ -64,7 +64,7 @@ func answer(_ command: String, _ a: Args) {
   switch command {
   case "allow":
     args["behavior"] = "allow"
-    if a.switches.contains("--auto") { args["autoMode"] = true }
+    for extra in AllowExtra.allCases where a.switches.contains(extra.flag) { args[extra.argument] = true }
   case "deny":
     args["behavior"] = "deny"
     if !words.isEmpty { args["message"] = .string(words.joined(separator: " ")) }

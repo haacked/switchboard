@@ -636,7 +636,7 @@ func trustCard(_ folder: String = "/w/repo") -> Card { facts(trustLaunch(folder:
   }
 
   @Test func aTrustCardOffersNoAutoMode() {
-    #expect(!trustCard().offersAutoMode)
+    #expect(!trustCard().offers(.autoMode))
   }
 
   @Test func aTrustCardSurvivesEncoding() throws {

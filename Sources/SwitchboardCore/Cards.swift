@@ -66,22 +66,42 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     cwd = event.data["cwd"]?.string
   }
 
-  /// Whether an allow can also switch the session to auto mode: a permission
-  /// card from manual or acceptEdits mode whose hook still waits. The hook's
-  /// answer switches the mode. A typed answer can't, because the dialog's
-  /// item differs per tool and only Bash's was captured.
-  public var offersAutoMode: Bool { autoModeRefusal == nil }
+  /// Whether an allow can also apply the extra. Auto mode needs a permission
+  /// card from manual or acceptEdits mode whose hook still waits.
+  public func offers(_ extra: AllowExtra) -> Bool { refusal(extra) == nil }
 
-  /// The refusal of an auto mode allow once the card's hook is gone.
-  public var hookClosedRefusal: String { "card \(id)'s hook closed, so sbd can't switch the mode" }
+  /// The extras that an allow of this card can apply.
+  public var offeredExtras: [AllowExtra] { AllowExtra.allCases.filter(offers) }
 
-  /// Why an allow can't switch the session to auto mode, or nil when it can.
-  public var autoModeRefusal: String? {
+  /// The refusal of the extra once the card's hook is gone.
+  public func hookClosedRefusal(_ extra: AllowExtra) -> String {
+    "card \(id)'s hook closed, so sbd can't \(extra.hookClosedVerb)"
+  }
+
+  /// Why an allow can't apply the extra, or nil when it can.
+  public func refusal(_ extra: AllowExtra) -> String? {
     guard kind == .permission else { return "card \(id) isn't a permission prompt" }
-    if hookClosed { return hookClosedRefusal }
-    guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
-    if PermissionMode.offeringAutoMode.contains(mode) { return nil }
-    return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    if hookClosed { return hookClosedRefusal(extra) }
+    switch extra {
+    case .autoMode:
+      guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
+      if PermissionMode.offeringAutoMode.contains(mode) { return nil }
+      return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    }
+  }
+
+  /// The permission updates that the hook's allow sends for the extra.
+  public func permissions(_ extra: AllowExtra) -> [JSON] {
+    switch extra {
+    case .autoMode: [["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]]
+    }
+  }
+
+  /// What the card tells the user before they allow with the extra.
+  public func note(_ extra: AllowExtra) -> String {
+    switch extra {
+    case .autoMode: PermissionMode.autoModeNote
+    }
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a
@@ -221,8 +241,8 @@ public struct Question: Codable, Equatable, Sendable {
 
 /// A held PermissionRequest's answer.
 public enum Decision: Equatable, Sendable {
-  /// With `autoMode`, the allow also switches the session to auto mode.
-  case allow(updatedInput: JSON?, autoMode: Bool = false)
+  /// Claude Code applies `permissions`, such as a switch to auto mode, with the allow.
+  case allow(updatedInput: JSON?, permissions: [JSON] = [])
   /// Claude reads the message and goes on. Without a message, the turn stops,
   /// as No does in the terminal.
   case deny(message: String?)
@@ -231,14 +251,10 @@ public enum Decision: Equatable, Sendable {
   public var hookOutput: JSON {
     var decision: [String: JSON]
     switch self {
-    case .allow(let input, let autoMode):
+    case .allow(let input, let permissions):
       decision = ["behavior": "allow"]
       if let input { decision["updatedInput"] = input }
-      if autoMode {
-        decision["updatedPermissions"] = [
-          ["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]
-        ]
-      }
+      if !permissions.isEmpty { decision["updatedPermissions"] = .array(permissions) }
     case .deny(let message?):
       decision = ["behavior": "deny", "message": .string(message)]
     case .deny(nil):
