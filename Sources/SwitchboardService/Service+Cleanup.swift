@@ -101,12 +101,7 @@ extension Service {
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true)
-    guard supacode else { return (repo, try checkBranchIsMerged(session, pr: pr), false) }
-    // A PR that the transcript linked from another checkout can be merged
-    // while the session's own branch has none.
-    let branch = try checkedOutBranch(session)
-    _ = try requireMergedPR(pr, of: branch.name)
-    return (repo, supacodeBranch(session, branch), true)
+    return (repo, supacode ? try supacodeBranch(session, pr: pr) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// Throws for a follow-up that hasn't started, and for a session whose

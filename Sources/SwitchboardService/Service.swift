@@ -1275,12 +1275,7 @@ public final class Service {
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
     guard branch else { return (repo, nil, supacode) }
-    guard supacode else { return (repo, try checkBranchIsMerged(session, pr: pr), false) }
-    let checked = try checkedOutBranch(session)
-    // A PR that the transcript linked from another checkout can be merged
-    // while the session's own branch has none.
-    if merged { _ = try requireMergedPR(pr, of: checked.name) }
-    return (repo, supacodeBranch(session, checked), true)
+    return (repo, supacode ? try supacodeBranch(session, pr: pr) : try checkBranchIsMerged(session, pr: pr), supacode)
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
