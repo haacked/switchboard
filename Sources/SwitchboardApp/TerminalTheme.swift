@@ -56,7 +56,8 @@ struct TerminalTheme {
   }
 }
 
-/// A SwiftTerm view that recolors itself when the app or system switches between light and dark.
+/// A SwiftTerm view that recolors itself when the app or system switches between light and dark. With
+/// `newlineOnShiftReturn` set, Shift+Return sends ESC CR instead of CR.
 final class ThemedTerminalView: LocalProcessTerminalView {
   /// Shift+Return sends `TerminalReturnKey.newline` instead of CR.
   var newlineOnShiftReturn = false

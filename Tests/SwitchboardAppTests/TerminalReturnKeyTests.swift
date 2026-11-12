@@ -4,7 +4,6 @@ import Testing
 @testable import SwitchboardApp
 
 @Suite struct TerminalReturnKeyTests {
-  static let returnKey: UInt16 = 36
   static let keypadEnter: UInt16 = 76
 
   /// Every combination of Shift, Control, Option, and Command.
@@ -21,7 +20,7 @@ import Testing
   ]
 
   static func sendsNewline(
-    keyCode: UInt16 = returnKey, _ modifiers: NSEvent.ModifierFlags, composing: Bool = false,
+    keyCode: UInt16 = TerminalReturnKey.returnKeyCode, _ modifiers: NSEvent.ModifierFlags, composing: Bool = false,
     kittyKeyboard: Bool = false
   ) -> Bool {
     TerminalReturnKey.sendsNewline(

@@ -7,6 +7,7 @@ import AppKit
 /// tmux turns it into a plain CR.
 enum TerminalReturnKey {
   static let newline: [UInt8] = [0x1b, 0x0d]
+  static let returnKeyCode: UInt16 = 36
 
   /// Whether the key is a Shift+Return that should send `newline`. Keypad Enter keeps its CR. While an input
   /// method holds marked text, Return belongs to it. In the kitty keyboard protocol, SwiftTerm encodes
@@ -14,7 +15,7 @@ enum TerminalReturnKey {
   static func sendsNewline(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, composing: Bool, kittyKeyboard: Bool)
     -> Bool
   {
-    keyCode == 36 && !composing && !kittyKeyboard
+    keyCode == returnKeyCode && !composing && !kittyKeyboard
       && modifiers.intersection([.shift, .control, .option, .command]) == .shift
   }
 }
