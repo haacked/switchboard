@@ -554,6 +554,22 @@ private func mouseEvent(_ type: NSEvent.EventType) -> NSEvent? {
     #expect(events(model, "nav").first?.session == "smgr23")
   }
 
+  @Test func aMouseButtonOrSwipeNamesItsInput() {
+    #expect(NavMouse.input(.otherMouseDown) == "mouse-button")
+    #expect(NavMouse.input(.swipe) == "swipe")
+  }
+
+  @Test func goingBackWithANamedInputRecordsThatInput() throws {
+    let model = activityModel()
+    model.selection = "a"
+    model.selection = "b"
+
+    model.go(.back, input: "mouse-button")
+
+    let command = try #require(events(model, "command").last)
+    #expect(command.data == ["name": "back", "via": "mouse-button"])
+  }
+
   // MARK: Errors
 
   @Test func recordErrorKeepsTheRequestAndTheErrorTypeButNotTheMessage() throws {

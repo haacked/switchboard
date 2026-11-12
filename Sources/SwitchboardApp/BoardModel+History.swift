@@ -94,9 +94,10 @@ extension BoardModel {
   func goBack() { go(.back) }
   func goForward() { go(.forward) }
 
-  /// The menu, the toolbar, the mouse buttons, and swipes all call this to go back or forward.
-  func go(_ direction: NavDirection) {
-    track(direction == .back ? .back : .forward) {
+  /// The menu, the toolbar, the mouse buttons, and swipes all call this to go back or forward. `input` names
+  /// the input when the caller holds the event, as the mouse and swipe handler does.
+  func go(_ direction: NavDirection, input: String? = nil) {
+    track(direction == .back ? .back : .forward, input: input) {
       let resolve = resolver()
       guard let i = history.target(direction, resolve: resolve), let place = resolve(history.entries[i]) else {
         return

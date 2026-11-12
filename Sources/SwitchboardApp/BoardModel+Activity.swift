@@ -111,10 +111,12 @@ extension BoardModel {
 
   // MARK: Commands
 
-  /// Records the command and the input that ran it, then runs `action`. A command that changes the place
+  /// Records the command and the input that ran it, then runs `action`. Without `input`, the input comes from
+  /// the event that AppKit is handling. A command that changes the place
   /// marks the navigation with `command`, or with `back` or `forward`.
-  func track(_ command: ActivityCommand, _ action: () -> Void) {
-    recordActivity("command", ["name": .string(command.rawValue), "via": .string(Self.input(NSApp?.currentEvent))])
+  func track(_ command: ActivityCommand, input: String? = nil, _ action: () -> Void) {
+    let via = input ?? Self.input(NSApp?.currentEvent)
+    recordActivity("command", ["name": .string(command.rawValue), "via": .string(via)])
     guard let via = command.navVia else { return action() }
     withNavVia(via, action)
   }
