@@ -75,14 +75,6 @@ private func workSession(_ id: String, state: AttentionState = .working) -> Sess
   return s
 }
 
-/// A follow-up that has not started. It shows in the sidebar's Not started section, which starts collapsed.
-private func unstartedFollowup(_ id: String) -> SessionSummary {
-  var s = needsItem(id, state: .notStarted)
-  s.followup = Followup(prompt: "p")
-  s.cwd = ""
-  return s
-}
-
 private func childSession(_ id: String, of parent: String) -> SessionSummary {
   var s = workSession(id)
   s.parent = parent

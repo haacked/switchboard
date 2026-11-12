@@ -136,15 +136,15 @@ func orgSession(
   return s
 }
 
-/// A follow-up that has not started.
-func unstartedFollowup(_ id: String, _ repository: String?) -> SessionSummary {
+/// A follow-up that has not started. It shows in the sidebar's Not started section, which starts collapsed.
+func unstartedFollowup(_ id: String, _ repository: String? = nil) -> SessionSummary {
   var s = needsItem(id, state: .notStarted)
   s.cwd = ""
   s.followup = Followup(prompt: "p", repository: repository)
   return s
 }
 
-/// A finished session in a worktree that holds `notes`.
+/// A finished session that holds `notes`, in the worktree of branch haacked/fix.
 func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "s1") -> SessionSummary {
   SessionSummary(
     id: id, name: "fix", cwd: "/worktrees/posthog/haacked/fix", repo: "/repos/posthog", branch: "haacked/fix",
