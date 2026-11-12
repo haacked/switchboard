@@ -180,7 +180,12 @@ extension Service {
   func awaitSite(_ site: any SessionSite, seconds: Double = 15) throws {
     if let remote = site as? RemoteSite {
       try remote.awaitReady(seconds: seconds)
-      if let host = remote.hostName, let reconciles = hostQueues[host] { try reconciles.sync { try reconcile(host) } }
+      // A host reconciled on this connection skips the host's queue, so a request never waits behind a spool cut.
+      if let host = remote.hostName, let reconciles = hostQueues[host],
+        !queue.sync(execute: { reconciledOn[host] != nil && reconciledOn[host] == remote.facts?.epoch })
+      {
+        try reconciles.sync { try reconcile(host) }
+      }
     } else {
       try site.requireReady()
     }

@@ -72,10 +72,11 @@ extension Service {
   // MARK: The spool
 
   /// Prints the first `$2` bytes of the file `$1` in base64. It exits 3 when the file is missing, 4 when it
-  /// is not a regular file that the host can read, and 5 when the file has `$2` bytes or more, before it prints.
+  /// is not a regular file that the host can read or its size can't be read, and 5 when the file has `$2` bytes
+  /// or more, before it prints.
   private static let spoolReadScript =
     #"[ -e "$1" ] || [ -L "$1" ] || exit 3; [ -f "$1" ] && [ -r "$1" ] || exit 4; "#
-    + #"size=$(wc -c <"$1") || exit 4; [ "$size" -lt "$2" ] || exit 5; exec <"$1"; head -c "$2" | base64"#
+    + #"size=$(wc -c <"$1") || exit 4; [ "$size" -lt "$2" ]; case $? in 0) ;; 1) exit 5 ;; *) exit 4 ;; esac; exec <"$1"; head -c "$2" | base64"#
 
   /// The bytes of the host's spool, read in one command. A missing file is an empty spool. It throws for a
   /// spool above `spoolLimitBytes` and for a file that it can't read.
