@@ -6,28 +6,6 @@ import Testing
 @testable import SwitchboardApp
 
 @MainActor
-private final class Field {
-  var text: String
-  init(_ text: String) { self.text = text }
-  var binding: Binding<String> { Binding(get: { self.text }, set: { self.text = $0 }) }
-}
-
-/// A model whose requests wait until the test signals the semaphore. The
-/// counter counts the requests that reach sbd.
-@MainActor
-private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
-  let model = offlineModel()
-  let release = DispatchSemaphore(value: 0)
-  let requests = Counter()
-  model.send = { _, _ in
-    requests.increment()
-    release.wait()
-    return .null
-  }
-  return (model, release, requests)
-}
-
-@MainActor
 @Suite struct ReplySubmit {
 
   private func submit(_ field: Field, to model: BoardModel) {
