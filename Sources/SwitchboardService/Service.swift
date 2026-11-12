@@ -91,6 +91,9 @@ public final class Service {
   var merging: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The drafts whose reply target a gh read is resolving, each as its
+  /// session id and its `DraftReplies.key`.
+  var resolvingDrafts: Set<String> = []
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   var snapshot = Snapshot()
@@ -112,6 +115,13 @@ public final class Service {
   let triageJobs: OperationQueue = {
     let jobs = OperationQueue()
     jobs.name = "sbd.triage"
+    jobs.maxConcurrentOperationCount = 2
+    return jobs
+  }()
+  /// Runs the gh reads of draft reply targets.
+  let ghJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.gh"
     jobs.maxConcurrentOperationCount = 2
     return jobs
   }()
@@ -214,6 +224,7 @@ public final class Service {
     for (id, e) in entries {
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -270,6 +281,8 @@ public final class Service {
         return .success(try mergeRequest(request.args))
       case "review":
         return .success(try reviewRequest(request.args))
+      case "draft-check":
+        return .success(try draftReplyRequest(request.op, request.args))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -554,6 +567,7 @@ public final class Service {
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     releaseCards(id)
     return event
@@ -1739,6 +1753,7 @@ public final class Service {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
           startSummaries(id, verdict)
+          resolveDraftTargets(id, verdict)
         }
       }
       runQueuedStarts(now: now)

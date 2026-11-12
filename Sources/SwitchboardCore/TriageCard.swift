@@ -234,6 +234,9 @@ public enum TriageCard {
               Markdown, without quote markers or code fences. The Inbox shows each draft in full with a copy
               button, so the summary only says that it is ready. Leave drafts out when the message is not for
               someone else, such as a commit message you will use yourself.
+              A reply to a comment, a review, or a conversation comment on your PR also takes "replyTo": the
+              comment's html_url from `gh api`, under \(TriageDrafts.replyToLength) characters. Switchboard checks it with gh,
+              and the user posts the reply from the Inbox. Don't post the reply yourself.
     callouts  Optional, and most cards have none. Up to \(maxCallouts) things the user must read before deciding that
               the summary doesn't already say: a conflict, a failing check, a risk, a call you made
               without asking, a destructive step. Each has "kind" (warning, decision, or info), "title"
@@ -257,6 +260,14 @@ public enum TriageCard {
           "options": [{"label": "Switchboard", "recommended": true}, {"label": "Hub"}]},
          {"number": 2, "header": "Ship it now", "question": "Should I ship the CLI now?",
           "options": [{"label": "Yes", "recommended": true}, {"label": "No", "detail": "Wait for the app"}]}]}
+      EOF
+
+    Example, with a reply for the user to post on your PR:
+
+      sb summary set <<'EOF'
+      {"summary": "Fixed the NOT handling that ann asked about.\\nThe reply to her comment is ready to post.",
+       "drafts": [{"label": "Reply to ann", "text": "Good catch, fixed in abc123.",
+                   "replyTo": "https://github.com/acme/widgets/pull/42#discussion_r2512345678"}]}
       EOF
 
     sbd shows the card until your next turn starts. It drops an option, a decision, or a callout that doesn't fit this

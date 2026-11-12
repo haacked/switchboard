@@ -937,3 +937,103 @@ let sessionCard = TriageSummary(
     #expect(try TriageSummarizer.parse(structured, reply: "") == TriageSummarizer.parse(fenced, reply: ""))
   }
 }
+
+// MARK: Draft reply targets
+
+/// A card's draft can name, in `replyTo`, the GitHub comment that it answers.
+/// The card keeps the string as written and parses it only when it builds
+/// the item, so a bad URL becomes a copy-only reason instead of a lost draft.
+@Suite struct TriageCardTests {
+  static let url = "https://github.com/acme/widgets/pull/42#discussion_r1001"
+
+  func replyCard(_ replyTo: JSON) -> JSON {
+    ["summary": "Drafted a reply.\nPost it.", "drafts": [["label": "Reply", "text": "Thanks!", "replyTo": replyTo]]]
+  }
+
+  @Test func keepsReplyTo() throws {
+    let result = try TriageCard.clean(replyCard(.string(Self.url)))
+
+    #expect(result.card.drafts == [TriageDraft(label: "Reply", text: "Thanks!", replyTo: Self.url)])
+    #expect(result.dropped.isEmpty)
+  }
+
+  @Test func trimsReplyTo() throws {
+    let result = try TriageCard.clean(replyCard(.string("  \(Self.url)\n")))
+
+    #expect(result.card.drafts.first?.replyTo == Self.url)
+  }
+
+  /// Parsing happens when sbd builds the item, so the card keeps a URL that won't parse.
+  @Test(arguments: [
+    "https://example.com/x", "https://github.com/acme/widgets/pull/42", "not a url", "null", "42",
+  ])
+  func keepsAReplyToThatDoesNotParse(_ replyTo: String) throws {
+    let result = try TriageCard.clean(replyCard(.string(replyTo)))
+
+    #expect(result.card.drafts.first?.replyTo == replyTo)
+  }
+
+  @Test func keepsAReplyToOfExactlyFiveHundredCharacters() throws {
+    let long = Self.url + "?" + String(repeating: "x", count: 500 - Self.url.count - 1)
+    try #require(long.count == 500)
+
+    let result = try TriageCard.clean(replyCard(.string(long)))
+
+    #expect(result.card.drafts.first?.replyTo == long)
+  }
+
+  /// The draft's text is still worth copying, so only its target goes.
+  @Test func dropsAReplyToLongerThanFiveHundredCharactersWithALine() throws {
+    let long = Self.url + "?" + String(repeating: "x", count: 501 - Self.url.count - 1)
+    try #require(long.count == 501)
+
+    let result = try TriageCard.clean(replyCard(.string(long)))
+
+    #expect(result.card.drafts.map(\.text) == ["Thanks!"])
+    #expect(result.card.drafts.first?.replyTo == nil)
+    #expect(result.dropped.count == 1)
+  }
+
+  @Test(arguments: [JSON.number(1001), .bool(true), .array([.string(url)]), .object(["url": .string(url)])])
+  func dropsAReplyToThatIsNotAString(_ replyTo: JSON) throws {
+    let result = try TriageCard.clean(replyCard(replyTo))
+
+    #expect(result.card.drafts.allSatisfy { $0.replyTo == nil })
+    #expect(result.dropped.count == 1)
+  }
+
+  @Test func aNullReplyToLeavesNone() throws {
+    let result = try TriageCard.clean(replyCard(.null))
+
+    #expect(result.card.drafts.map(\.text) == ["Thanks!"])
+    #expect(result.card.drafts.first?.replyTo == nil)
+  }
+
+  @Test func aDraftWithoutReplyToHasNone() throws {
+    let result = try TriageCard.clean(["summary": "Drafted one.", "drafts": ["Plain draft."]])
+
+    #expect(result.card.drafts.first?.replyTo == nil)
+  }
+
+  @Test func theSummaryEventRoundTripsReplyTo() throws {
+    var summary = sessionCard
+    summary.drafts = [TriageDraft(label: "Reply", text: "Thanks!", replyTo: Self.url)]
+
+    let decoded = try JSONCoding.convert(try JSON(encoding: summary), to: TriageSummary.self)
+
+    #expect(decoded == summary)
+  }
+
+  @Test func theInstructionsDocumentReplyTo() {
+    #expect(TriageCard.instructions.contains("replyTo"))
+    #expect(TriageCard.instructions.contains("html_url"))
+  }
+
+  @Test func theDefaultSystemPromptAsksForReplyTo() {
+    let prompt = TriageSettings().systemPrompt
+
+    #expect(prompt.contains("replyTo"))
+    #expect(prompt.contains("html_url"))
+    #expect(prompt.contains("sb summary set"))
+  }
+}

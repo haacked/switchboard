@@ -51,7 +51,7 @@ private let hogqlParagraphs = """
     let text = try sbd.sb("triage")
 
     #expect(text.contains("> Could someone review #1?"), "\(text)")
-    let headings = ["Summary:", "Draft: Review request:", "Action:"].map { text.range(of: $0)?.lowerBound }
+    let headings = ["Summary:", "Draft 1: Review request", "Action:"].map { text.range(of: $0)?.lowerBound }
     #expect(headings.allSatisfy { $0 != nil }, "\(text)")
     #expect(headings.compactMap { $0 } == headings.compactMap { $0 }.sorted())
   }

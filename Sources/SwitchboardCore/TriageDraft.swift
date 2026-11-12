@@ -2,14 +2,17 @@ import Foundation
 
 /// A message that the session wrote for the user to send to someone else,
 /// such as a review request. The Inbox shows its text as written and copies
-/// it as Markdown source.
+/// it as Markdown source. `replyTo` is the `html_url` of the GitHub comment
+/// that the message answers, as the session's card wrote it.
 public struct TriageDraft: Codable, Equatable, Sendable {
   public var label: String?
   public var text: String
+  public var replyTo: String?
 
-  public init(label: String? = nil, text: String) {
+  public init(label: String? = nil, text: String, replyTo: String? = nil) {
     self.label = label
     self.text = text
+    self.replyTo = replyTo
   }
 }
 
@@ -19,27 +22,27 @@ public struct InboxDraft: Codable, Equatable, Sendable {
   public var number: Int
   public var label: String?
   public var text: String
+  public var replyTo: String?
+  public var post: DraftPost
 
-  public init(_ draft: TriageDraft, number: Int) {
+  public init(_ draft: TriageDraft, number: Int, post: DraftPost = .copyOnly(reason: nil)) {
     self.number = number
     label = draft.label
     text = draft.text
+    replyTo = draft.replyTo
+    self.post = post
   }
 
-  private enum CodingKeys: String, CodingKey { case number, label, text }
+  private enum CodingKeys: String, CodingKey { case number, label, text, replyTo, post }
 
+  /// An item that an older sbd wrote has drafts without a number, a target, or a state.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     number = try c.decodeIfPresent(Int.self, forKey: .number) ?? 0
     label = try c.decodeIfPresent(String.self, forKey: .label)
     text = try c.decode(String.self, forKey: .text)
-  }
-
-  /// The JSON leaves out `number`, so it stays `{label?, text}`.
-  public func encode(to encoder: Encoder) throws {
-    var c = encoder.container(keyedBy: CodingKeys.self)
-    try c.encodeIfPresent(label, forKey: .label)
-    try c.encode(text, forKey: .text)
+    replyTo = try c.decodeIfPresent(String.self, forKey: .replyTo)
+    post = try c.decodeIfPresent(DraftPost.self, forKey: .post) ?? .copyOnly(reason: nil)
   }
 }
 
@@ -48,18 +51,46 @@ public enum TriageDrafts {
   /// sbd drops a longer draft rather than cut it, because the user would
   /// paste a cut draft as if it were whole.
   public static let maxLength = 10_000
+  public static let replyToLength = 500
 
-  /// The drafts that a card names, as strings or as `{label, text}` objects.
+  /// The drafts that a card names, as strings or as `{label, text, replyTo}` objects.
   /// Each element that fails or doesn't fit adds a line to `dropped`.
   static func read(_ list: JSON?, _ dropped: inout [String]) -> [TriageDraft] {
-    TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { try draft($0) }
+    var index = 0
+    var targets: [String] = []
+    let drafts = TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { raw in
+      defer { index += 1 }
+      return try draft(raw, index: index, &targets)
+    }
+    dropped += targets
+    return drafts
   }
 
-  /// One element of a card's drafts, as a string or a `{label, text}` object.
-  static func draft(_ raw: JSON) throws -> TriageDraft {
+  /// One element of a card's drafts, as a string or a `{label, text, replyTo}`
+  /// object. A `replyTo` that isn't a string of at most `replyToLength`
+  /// characters adds a line to `dropped`, and the draft stays without it.
+  static func draft(_ raw: JSON, index: Int, _ dropped: inout [String]) throws -> TriageDraft {
     let text = raw.string ?? raw["text"]?.string ?? ""
     let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
-    return try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
+    var draft = try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
+    switch raw["replyTo"] {
+    case nil, .null?:
+      break
+    case .string(let url)?:
+      let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+      if url.count > replyToLength {
+        dropped.append(
+          TriageCard.droppedLine(
+            "replyTo of draft", label: draft.label, index: index,
+            APIError("it has \(url.count) characters, and a replyTo has at most \(replyToLength)")))
+      } else if !url.isEmpty {
+        draft.replyTo = url
+      }
+    default:
+      dropped.append(
+        TriageCard.droppedLine("replyTo of draft", label: draft.label, index: index, APIError("it is not text")))
+    }
+    return draft
   }
 
   /// The drafts whose text appears in the reply, each with the reply's own
@@ -86,7 +117,7 @@ public enum TriageDrafts {
         } else {
           throw APIError("its text is not in the reply")
         }
-        kept.append(try checked(TriageDraft(label: draft.label, text: text)))
+        kept.append(try checked(TriageDraft(label: draft.label, text: text, replyTo: nil)))
       } catch {
         dropped.append(TriageCard.droppedLine("draft", label: draft.label, index: i, error))
       }

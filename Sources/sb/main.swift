@@ -169,6 +169,8 @@ let usage = """
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
     summary help                  the card's format, for a session to follow
+    draft check <session> <n>     read the GitHub comment that the item's draft n replies to again,
+                                  after gh couldn't read it, and print the draft's state
 
   Permission prompts and questions:
     cards [<session>]             list the open ones
@@ -791,6 +793,8 @@ case "reply":
   replyCommand(a)
 case "summary":
   summaryCommand(a)
+case "draft":
+  draftCommand(a)
 case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":

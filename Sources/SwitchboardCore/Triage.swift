@@ -402,7 +402,8 @@ public enum Triage {
   /// `verdict` is the session's attention verdict. An open decision list
   /// puts its stored decisions on the item, so a later card or rule doesn't
   /// replace the answers. A held prompt's item keeps none, because the
-  /// prompt needs its own answer first.
+  /// prompt needs its own answer first. Each draft's `post` comes from the
+  /// session's PR and the draft reply facts.
   public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     item(facts, live: liveItem(facts, verdict))
   }
@@ -419,6 +420,15 @@ public enum Triage {
   private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
     guard var item = live else { return nil }
     if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
+    for i in item.drafts.indices {
+      // Only the session's own card names a target. The model's summary reads text that can quote PR comments.
+      if item.source == .session {
+        item.drafts[i].post = DraftReplies.state(item.drafts[i], ref: item.ref, pr: facts.pr, facts: facts.draftReplies)
+      } else {
+        item.drafts[i].replyTo = nil
+        item.drafts[i].post = .copyOnly(reason: nil)
+      }
+    }
     return item
   }
 
@@ -689,7 +699,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a GitHub PR comment or review for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, and don't post it yourself."
 
   public init() {}
 
