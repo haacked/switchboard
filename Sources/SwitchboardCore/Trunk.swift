@@ -99,7 +99,7 @@ public struct TrunkTimeline: Equatable, Sendable {
     if trimmed.hasPrefix("✖ Item for merge queue instance not found") { return .notFound }
     if trimmed.hasPrefix("✖ Please run 'trunk init'") { return .notSetUp }
     guard let start = lines.firstIndex(where: { $0.hasPrefix("#") }),
-      match(lines[start], headerPattern).flatMap({ Int($0[0]) }) != nil
+      match(lines[start], headerPattern) != nil
     else { return .unrecognized(trimmed) }
 
     var timeline = TrunkTimeline(entries: [])
@@ -143,7 +143,7 @@ public struct TrunkTimeline: Equatable, Sendable {
       .replacingOccurrences(of: "\r", with: "")
   }
 
-  static let headerPattern = regex(#"^#(\d+) .* \([^()]*\)\s*$"#)
+  static let headerPattern = regex(#"^#\d+ .* \([^()]*\)\s*$"#)
   static let learnMorePattern = regex(#"^ Learn more at \S"#)
   /// A timeline row: the time, an optional ✖ or ✔ mark, the label, and the
   /// first line of the description.

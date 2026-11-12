@@ -191,6 +191,18 @@ func timeline(_ name: String, now: String) throws -> TrunkTimeline { try found(t
     #expect(t.entries.map(\.label) == ["Paused", "Evicted", "Landed"])
     #expect(t.entries.map(\.state) == [.queued, .removed, .merged])
   }
+
+  @Test func aLearnMoreLineAfterAnEntryDoesNotJoinItsText() throws {
+    let output = """
+      #5 fix: a thing (haacked)
+
+       10-01 10:00:00.000000    Pending     Pull request has been added to the merge queue.
+       Learn more at https://app.trunk.io/gh/o/r/merge/main/5
+       10-01 11:00:00.000000    Testing     Tests running.
+      """
+    let t = try found(output, now: "2026-10-02T00:00:00.000Z")
+    #expect(t.entries.map(\.text) == ["Pull request has been added to the merge queue.", "Tests running."])
+  }
 }
 
 let trunkControl = "<!-- Trunk Merge -->\nMerging to `master` in this repository is managed by Trunk."
