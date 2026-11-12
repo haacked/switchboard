@@ -10,6 +10,7 @@ struct ChatView: View {
   var body: some View {
     VStack(spacing: 0) {
       ChatHeader(session: session)
+      if session.kind == .manager { ManagerStatusStrip(session: session) }
       Divider()
       if model.showingTerminal {
         SessionView(session: session)
