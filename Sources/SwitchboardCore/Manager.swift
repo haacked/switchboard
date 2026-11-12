@@ -77,3 +77,15 @@ public enum Manager {
     Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Its merge commits are on no remote, so remove that session with `sb rm` and then `git worktree remove --force <cwd>` when you finish.
     """
 }
+
+/// sbd's answer to `manager-mcp`.
+public struct ManagerMCPAnswer: Decodable, Equatable, Sendable {
+  public var session: String
+  public var name: String
+  /// The servers besides switchboard, or nil for the full setup. sbd sends null for nil.
+  public var servers: [String]?
+  /// The servers that a list can name.
+  public var available: [String]
+  /// True until claude relaunches with the stored servers.
+  public var pending: Bool
+}

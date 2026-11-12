@@ -740,6 +740,116 @@ import Testing
     #expect(missing?.data["servers"] == ["notes"])
   }
 
+  // MARK: The manager-mcp answer that the app reads
+
+  /// Sends `manager-mcp` with the arguments that the app's server menu sends, and decodes the answer as the app does.
+  func mcpAnswer(_ sbd: Instance, _ c: SessionSummary, _ change: [String: JSON] = [:]) throws -> ManagerMCPAnswer {
+    let args = change.merging(["session": .string(c.id)]) { $1 }
+    return try JSONCoding.convert(sbd.client.call("manager-mcp", args), to: ManagerMCPAnswer.self)
+  }
+
+  /// Sends a change that alters the server list and waits for the relaunch that applies it.
+  func changeAndRelaunch(_ sbd: Instance, _ c: SessionSummary, _ change: [String: JSON]) throws -> ManagerMCPAnswer {
+    let before = launches(sbd, c).count
+    let answer = try mcpAnswer(sbd, c, change)
+    try launch(sbd, c, after: before)
+    return answer
+  }
+
+  @Test func aNoChangeReadOfANewConversationDecodesWithAnEmptyList() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let answer = try mcpAnswer(sbd, c)
+
+    #expect(answer.session == c.id)
+    #expect(answer.servers == [])
+  }
+
+  @Test func aNoChangeReadListsTheSharedServersAndLeavesOutSwitchboard() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let answer = try mcpAnswer(sbd, c)
+
+    #expect(Set(answer.available).isSuperset(of: ["grafana", "posthog-db"]), "\(answer.available)")
+    #expect(!answer.available.contains("switchboard"), "\(answer.available)")
+  }
+
+  @Test func theAppsAllChangeDecodesTheFullSetupAsNil() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let changed = try changeAndRelaunch(sbd, c, ["all": true])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == nil)
+    #expect(read.servers == nil)
+  }
+
+  @Test func theAppsNoneChangeAfterTheFullSetupDecodesAnEmptyList() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+
+    let changed = try changeAndRelaunch(sbd, c, ["none": true])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == [])
+    #expect(read.servers == [])
+  }
+
+  @Test func theAppsAddChangeDecodesTheAddedServer() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+    _ = try changeAndRelaunch(sbd, c, ["none": true])
+
+    let changed = try changeAndRelaunch(sbd, c, ["add": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == ["grafana"])
+    #expect(read.servers == ["grafana"])
+    #expect(read.available.contains("grafana"), "\(read.available)")
+  }
+
+  @Test func theAppsRmChangeDecodesTheListWithoutThatServer() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["add": ["grafana", "posthog-db"]])
+
+    let changed = try changeAndRelaunch(sbd, c, ["rm": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == ["posthog-db"])
+    #expect(read.servers == ["posthog-db"])
+  }
+
+  /// The menu shows the relaunch line while `pending` is true, so it must turn false once claude relaunched.
+  @Test func aChangeAnswersPendingAndAReadAfterTheRelaunchDoesNot() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    let idle = try mcpAnswer(sbd, c)
+    try #require(idle.pending == false)
+
+    let changed = try changeAndRelaunch(sbd, c, ["add": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.pending == true)
+    #expect(read.pending == false)
+  }
+
+  @Test func theAppsAddIsRefusedOnTheFullSetupAndSaysToChooseNoneFirst() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+
+    let error = failure(sbd, "manager-mcp", ["session": .string(c.id), "add": ["grafana"]])
+
+    #expect(error.contains("--none"), Comment(rawValue: error))
+    #expect(try mcpAnswer(sbd, c).servers == nil)
+  }
+
   // MARK: The Manager from before conversations
 
   /// Stores a Manager session as the sbd before conversations stored it, with

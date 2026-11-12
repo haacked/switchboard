@@ -54,7 +54,7 @@ import Testing
   }
 
   @Test func requestIsNilWithoutARepo() {
-    #expect(NewSessionView.Form().request(worktree: false, groups: []) == nil)
+    #expect(NewSessionView.Form().request(worktree: false, groups: [], parent: nil) == nil)
   }
 
   @Test func requestTrimsFieldsAndDropsBlankOnes() throws {
@@ -64,7 +64,7 @@ import Testing
     form.prompt = " \n "
     form.account = "  "
 
-    let r = try #require(form.request(worktree: false, groups: []))
+    let r = try #require(form.request(worktree: false, groups: [], parent: nil))
 
     #expect(r.path == Self.alpha.path)
     #expect(r.name == "fix")
@@ -77,9 +77,9 @@ import Testing
     form.pick(Self.alpha)
     form.branch = "me/fix"
 
-    #expect(try #require(form.request(worktree: true, groups: [])).branch == "me/fix")
-    #expect(try #require(form.request(worktree: true, groups: [])).worktree == true)
-    #expect(try #require(form.request(worktree: false, groups: [])).branch == nil)
+    #expect(try #require(form.request(worktree: true, groups: [], parent: nil)).branch == "me/fix")
+    #expect(try #require(form.request(worktree: true, groups: [], parent: nil)).worktree == true)
+    #expect(try #require(form.request(worktree: false, groups: [], parent: nil)).branch == nil)
   }
 
   @Test func requestCarriesThePresetGroup() throws {
@@ -88,8 +88,8 @@ import Testing
     let plain = NewSessionView.Form()
     plain.pick(Self.alpha)
 
-    #expect(try #require(grouped.request(worktree: false, groups: [])).group == "g1")
-    #expect(try #require(plain.request(worktree: false, groups: [])).group == nil)
+    #expect(try #require(grouped.request(worktree: false, groups: [], parent: nil)).group == "g1")
+    #expect(try #require(plain.request(worktree: false, groups: [], parent: nil)).group == nil)
   }
 
   // MARK: The default repository for a group
@@ -149,7 +149,7 @@ import Testing
     form.pick(Self.alpha)
     form.account = ""
 
-    let r = try #require(form.request(worktree: false, groups: [Self.group("g1", account: "/accounts/B")]))
+    let r = try #require(form.request(worktree: false, groups: [Self.group("g1", account: "/accounts/B")], parent: nil))
 
     #expect(r.account == nil)
   }
@@ -160,7 +160,7 @@ import Testing
     form.pick(Self.alpha)
     form.account = "/accounts/A"
 
-    let r = try #require(form.request(worktree: false, groups: [Self.group("g1", account: "/accounts/B")]))
+    let r = try #require(form.request(worktree: false, groups: [Self.group("g1", account: "/accounts/B")], parent: nil))
 
     #expect(r.account == nil)
   }
@@ -170,7 +170,7 @@ import Testing
     form.pick(Self.alpha)
     form.account = "/accounts/A"
 
-    let r = try #require(form.request(worktree: false, groups: [Self.group("g1")]))
+    let r = try #require(form.request(worktree: false, groups: [Self.group("g1")], parent: nil))
 
     #expect(r.account == "/accounts/A")
   }
@@ -181,8 +181,26 @@ import Testing
     form.pick(Self.alpha)
     form.account = ""
 
-    let r = try #require(form.request(worktree: false, groups: [Self.group("g1")]))
+    let r = try #require(form.request(worktree: false, groups: [Self.group("g1")], parent: nil))
 
     #expect(r.account == nil)
+  }
+
+  @Test func theRequestOfANewTaskNamesTheConversationAsParent() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: [], parent: "m"))
+
+    #expect(request.parent == "m")
+  }
+
+  @Test func theRequestWithoutAParentNamesNone() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: [], parent: nil))
+
+    #expect(request.parent == nil)
   }
 }

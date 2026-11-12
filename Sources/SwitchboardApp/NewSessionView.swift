@@ -7,6 +7,8 @@ struct NewSessionRequest: Identifiable {
   let id = UUID()
   /// The id of the group that the sheet starts with.
   var group: String?
+  /// The id of the Manager conversation that the new session reports to, from its pane's New Task button.
+  var parent: String?
 }
 
 /// The new session sheet: a repository, a branch for a new worktree, and an optional first prompt.
@@ -54,7 +56,7 @@ struct NewSessionView: View {
 
     /// What Start sends, or nil before a repository is chosen. The branch goes only with a worktree. A group
     /// with an account gets no account, because sbd refuses one that differs from the group's.
-    func request(worktree: Bool, groups: [GroupSummary]) -> NewSession? {
+    func request(worktree: Bool, groups: [GroupSummary], parent: String?) -> NewSession? {
       guard let repo else { return nil }
       func optional(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -62,7 +64,8 @@ struct NewSessionView: View {
       }
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
-        prompt: optional(prompt), account: groupAccount(groups) == nil ? optional(account) : nil, group: group)
+        prompt: optional(prompt), parent: parent, account: groupAccount(groups) == nil ? optional(account) : nil,
+        group: group)
     }
   }
 
@@ -70,14 +73,20 @@ struct NewSessionView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form: Form
+  private let parent: String?
 
   init(request: NewSessionRequest) {
     _form = StateObject(wrappedValue: Form(group: request.group))
+    parent = request.parent
   }
 
   var body: some View {
+    let parentSession = model.summary(parent)
     VStack(alignment: .leading, spacing: 12) {
-      Text("New Session").font(.title2.bold())
+      VStack(alignment: .leading, spacing: 2) {
+        Text("New Session").font(.title2.bold())
+        if let parentSession { Text("Started by \(parentSession.name)").foregroundStyle(.secondary) }
+      }
       SwiftUI.Form {
         LabeledContent("Repository") {
           RepoPicker(selection: Binding(get: { form.repo }, set: { form.pick($0) }))
@@ -99,7 +108,7 @@ struct NewSessionView: View {
             .help("This group runs its sessions under this account")
         } else if model.accounts.count > 1 {
           Picker("Account", selection: $form.account) {
-            Text("Active (\(model.activeAccount?.name ?? "default"))").tag("")
+            Text(Self.defaultAccountLabel(parent: parentSession, active: model.activeAccount)).tag("")
             ForEach(model.accounts) { Text($0.name).tag($0.folder) }
           }
         }
@@ -133,7 +142,16 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    if let session = form.request(worktree: createWorktree, groups: model.groups) { model.create(session) }
+    if let session = form.request(worktree: createWorktree, groups: model.groups, parent: parent) {
+      model.create(session)
+    }
+  }
+
+  /// sbd runs a session that names no account under its parent's account, or else under the active one.
+  static func defaultAccountLabel(parent: SessionSummary?, active: AccountInfo?) -> String {
+    guard let parent else { return "Active (\(active?.name ?? "default"))" }
+    guard let account = parent.account else { return "Same as \(parent.name)" }
+    return "Same as \(parent.name) (\(ClaudeAccount.name(account)))"
   }
 }
 

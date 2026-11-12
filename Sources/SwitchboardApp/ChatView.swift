@@ -43,9 +43,15 @@ private struct ChatHeader: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      Text(session.name).fontWeight(.medium)
+      Text(session.name).fontWeight(.medium).lineLimit(1)
       StateBadge(state: session.state)
       Spacer()
+      if session.kind == .manager {
+        MCPServerMenu(session: session)
+        Button("New Task", systemImage: "plus") { model.openNewSession(parent: session.id) }
+          .help("Start a session that this conversation follows")
+          .fixedSize()
+      }
       Toggle("Terminal", isOn: $model.showingTerminal)
         .toggleStyle(.button)
         .help("Show the Claude terminal and shell in place of the messages")

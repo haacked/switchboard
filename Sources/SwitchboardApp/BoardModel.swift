@@ -58,7 +58,9 @@ final class BoardModel: ObservableObject {
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
   var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
-  func openNewSession(group: String? = nil) { newSession = NewSessionRequest(group: group) }
+  func openNewSession(group: String? = nil, parent: String? = nil) {
+    newSession = NewSessionRequest(group: group, parent: parent)
+  }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox {
     didSet { navigate() }
@@ -95,6 +97,8 @@ final class BoardModel: ObservableObject {
   @Published var recentEvents: [String: [Event]] = [:]
   /// Each chat's last messages, by session id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
+  /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
+  @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -907,6 +911,37 @@ final class BoardModel: ObservableObject {
         }
       }
     }
+  }
+
+  /// Reads which MCP servers the conversation can load. A failed read keeps the last answer and shows no error.
+  func loadMCPServers(_ session: String) {
+    perform(
+      "manager-mcp", ["session": .string(session)], then: { self.storeMCPAnswer($0, for: session) }, failed: { _ in })
+  }
+
+  enum MCPChange {
+    case add(String)
+    case remove(String)
+    case all, none
+
+    var args: [String: JSON] {
+      switch self {
+      case .add(let name): ["add": [.string(name)]]
+      case .remove(let name): ["rm": [.string(name)]]
+      case .all: ["all": true]
+      case .none: ["none": true]
+      }
+    }
+  }
+
+  func changeMCPServers(_ session: String, _ change: MCPChange) {
+    perform("manager-mcp", change.args.merging(["session": .string(session)]) { $1 }) {
+      self.storeMCPAnswer($0, for: session)
+    }
+  }
+
+  private func storeMCPAnswer(_ value: JSON, for session: String) {
+    if let answer = try? JSONCoding.convert(value, to: ManagerMCPAnswer.self) { mcpAnswers[session] = answer }
   }
 
   /// Reads the session's last reply from its transcript, which can be large,
