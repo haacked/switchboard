@@ -306,3 +306,126 @@ extension Instance {
     #expect(r.stderr.contains("finished isn't in the Inbox: marked done"))
   }
 }
+
+/// An acknowledgment holds the session in Waiting only until its recheck time.
+extension AcknowledgeTests {
+  static let minuteMs: Int64 = 60_000
+
+  /// manager-redesign (sni5dx): an acknowledged session that stopped and was
+  /// opened again without a prompt, so no new turn cleared the acknowledgment.
+  func acknowledgedAndReopened(_ sbd: Instance) throws -> SessionSummary {
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+    try sbd.sb("stop", s.id)
+    // `open` launches claude only once the stopped one has exited.
+    try sbd.waitFor(s.id, "the exit") { !$0.live && $0.claudePid == nil }
+    try sbd.sb("open", s.id)
+    return try sbd.waitFor(s.id, "the reopened claude") { $0.live }
+  }
+
+  @Test func reopeningWithoutAPromptKeepsTheAcknowledgment() throws {
+    let sbd = try Instance()
+    let s = try acknowledgedAndReopened(sbd)
+
+    #expect(try sbd.count("UserPromptSubmit", of: s.id) == 1)
+    let row = try sbd.listed(s.id)
+    #expect(row["state"]?.string == "waiting")
+    #expect(row["acknowledged"]?.bool == true)
+  }
+
+  @Test func acknowledgmentHoldsForFiftyNineMinutes() throws {
+    let sbd = try Instance()
+    let s = try acknowledgedAndReopened(sbd)
+
+    try sbd.advanceClock(59 * AcknowledgeTests.minuteMs)
+
+    let row = try sbd.listed(s.id)
+    #expect(row["state"]?.string == "waiting")
+    #expect(row["acknowledged"]?.bool == true)
+  }
+
+  @Test func acknowledgmentWithoutANewPromptExpiresAfterAnHour() throws {
+    let sbd = try Instance()
+    let s = try acknowledgedAndReopened(sbd)
+
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+
+    let row = try sbd.listed(s.id)
+    #expect(row["state"]?.string == "needs_you")
+    #expect(row["reason"]?.string?.contains("acknowledged") == true)
+    #expect(row["acknowledged"] == nil)
+  }
+
+  @Test func expiredReasonSaysWhenTheSessionWasAcknowledged() throws {
+    let sbd = try Instance()
+    let s = try acknowledgedAndReopened(sbd)
+
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+
+    let reason = try #require(try sbd.listed(s.id)["reason"]?.string)
+    #expect(reason.hasPrefix("\(AcknowledgeTests.readTheReply) (acknowledged "), Comment(rawValue: reason))
+    #expect(reason.hasSuffix(", time to recheck)"), Comment(rawValue: reason))
+  }
+
+  @Test func expiredAcknowledgmentReturnsTheSessionToTheInbox() throws {
+    let sbd = try Instance()
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+
+    #expect(try sbd.triage().map(\.id).contains(s.id))
+  }
+
+  @Test func lsDropsTheAcknowledgedMarkAfterTheRecheck() throws {
+    let sbd = try Instance()
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+
+    #expect(try !sbd.sb("ls").contains("(acknowledged)"))
+    #expect(try sbd.get(s.id).acknowledged != true)
+  }
+
+  @Test func acknowledgingAgainAfterTheRecheckMovesTheSessionBackToWaiting() throws {
+    let sbd = try Instance()
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+    #expect(try sbd.listed(s.id)["state"]?.string == "needs_you")
+
+    try sbd.sb("ack", s.id)
+
+    let row = try sbd.listed(s.id)
+    #expect(row["state"]?.string == "waiting")
+    #expect(row["reason"]?.string == AcknowledgeTests.readTheReply)
+    #expect(row["acknowledged"]?.bool == true)
+    #expect(try sbd.count("ack", of: s.id) == 2)
+  }
+
+  @Test func undoOfAnExpiredAcknowledgmentIsRefused() throws {
+    let sbd = try Instance()
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+    try sbd.advanceClock(61 * AcknowledgeTests.minuteMs)
+
+    let r = try sbd.run(["ack", "--undo", s.id])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("isn't acknowledged"))
+    #expect(try sbd.count("unack", of: s.id) == 0)
+  }
+
+  @Test func recheckSecondsInTheConfigSetTheAcknowledgmentsRecheck() throws {
+    let sbd = try Instance(config: ["recheckSeconds": ["acknowledged": 120]])
+    let s = try needsYouSession(sbd)
+    try sbd.sb("ack", s.id)
+    try sbd.advanceClock(60_000)
+    #expect(try sbd.listed(s.id)["state"]?.string == "waiting")
+
+    try sbd.advanceClock(61_000)
+
+    #expect(try sbd.listed(s.id)["state"]?.string == "needs_you")
+  }
+}

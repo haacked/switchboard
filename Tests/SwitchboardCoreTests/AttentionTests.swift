@@ -518,3 +518,200 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
     #expect(!f.hookSinceLaunch)
   }
 }
+
+/// A subagent holds the session only while subagent events
+/// keep arriving. Activity that has nothing to do with the subagent does not
+/// extend the hold.
+@Suite struct SubagentBound {
+  static let quiet = Attention.subagentQuietMs
+  static let twentyMinutes: Int64 = 20 * 60_000
+  static let reply = "I'll wait for the review."
+
+  /// A turn that started subagent a1 at t = 1 and ended at t = 2.
+  let started = [
+    event("UserPromptSubmit", 0, ["prompt": "go"]),
+    event("SubagentStart", 1, ["agent_id": "a1"]),
+    event("Stop", 2, ["last_assistant_message": .string(SubagentBound.reply)]),
+  ]
+
+  /// An event of `kind` that the user, sbd, or the session caused, which moves `lastActivity`.
+  static func unrelated(_ kind: String, _ t: Int64) throws -> Event {
+    switch kind {
+    case "ack": return event("ack", t, ["state": "needs_you", "reason": "read its last reply and decide what's next"])
+    case "note": return event("note", t, ["note": try JSON(encoding: Note(id: "n1", text: "x", by: .you, t: t))])
+    case "sent": return event("sent", t, ["text": "hi", "delivery": "queued"])
+    case "wait": return event("wait", t, ["wait": try JSON(encoding: waitOn(.ci))])
+    default: return event(kind, t)
+    }
+  }
+
+  @Test func noSubagentEventLeavesItUnset() {
+    #expect(facts([event("UserPromptSubmit", 0, ["prompt": "go"]), event("Stop", 1)]).lastSubagentEvent == nil)
+  }
+
+  @Test func subagentStartSetsTheLastSubagentEvent() {
+    #expect(facts([event("SubagentStart", 5, ["agent_id": "a1"])]).lastSubagentEvent == 5)
+  }
+
+  @Test func subagentStopSetsTheLastSubagentEvent() {
+    let f = facts([event("SubagentStart", 5, ["agent_id": "a1"]), event("SubagentStop", 8, ["agent_id": "a1"])])
+
+    #expect(f.lastSubagentEvent == 8)
+  }
+
+  @Test(arguments: ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"])
+  func subagentHookSetsTheLastSubagentEvent(_ kind: String) {
+    let f = facts([
+      event("SubagentStart", 5, ["agent_id": "a1"]),
+      event(kind, 7, tool("Bash", ["command": "ls"], id: "t1", agent: "a1")),
+    ])
+
+    #expect(f.lastSubagentEvent == 7)
+  }
+
+  @Test(arguments: ["ack", "note", "sent", "wait", "answered", "unack"])
+  func unrelatedActivityLeavesTheLastSubagentEvent(_ kind: String) throws {
+    let f = facts([event("SubagentStart", 5, ["agent_id": "a1"]), try Self.unrelated(kind, 9)])
+
+    #expect(f.lastSubagentEvent == 5)
+  }
+
+  @Test func mainSessionToolCallLeavesTheLastSubagentEvent() {
+    let f = facts([
+      event("SubagentStart", 5, ["agent_id": "a1"]), event("PreToolUse", 9, tool("Bash", ["command": "ls"], id: "t1")),
+    ])
+
+    #expect(f.lastSubagentEvent == 5)
+  }
+
+  @Test func subagentHoldsTheSessionForItsQuietTime() {
+    let v = Attention.evaluate(session(), facts(started), now: 1 + Self.quiet)
+
+    #expect(v == Verdict(state: .waiting, reason: "waiting on 1 subagent"))
+  }
+
+  @Test func subagentStopsHoldingAMillisecondAfterItsQuietTime() {
+    #expect(Attention.evaluate(session(), facts(started), now: 1 + Self.quiet + 1).state == .needsYou)
+  }
+
+  @Test(arguments: ["ack", "note", "sent", "wait"])
+  func unrelatedActivityDoesNotExtendTheHold(_ kind: String) throws {
+    let f = facts(started + [try Self.unrelated(kind, 1 + Self.twentyMinutes)])
+
+    #expect(Attention.evaluate(session(), f, now: 1 + Self.quiet + 1).state == .needsYou)
+  }
+
+  @Test func severalUnrelatedEventsDoNotExtendTheHold() throws {
+    let later = try ["ack", "note", "sent", "wait"].enumerated().map { i, kind in
+      try Self.unrelated(kind, 1 + Int64(i + 1) * 5 * 60_000)
+    }
+
+    let v = Attention.evaluate(session(), facts(started + later), now: 1 + Self.quiet + 1)
+
+    #expect(v.state == .needsYou)
+  }
+
+  @Test func subagentToolCallExtendsTheHold() {
+    let call = event("PreToolUse", 1 + Self.twentyMinutes, tool("Bash", ["command": "ls"], id: "t1", agent: "a1"))
+
+    let v = Attention.evaluate(session(), facts(started + [call]), now: 1 + Self.quiet + 1)
+
+    #expect(v.state == .waiting)
+  }
+
+  @Test func subagentToolCallHoldsForItsQuietTimeOnly() {
+    let at = 1 + Self.twentyMinutes
+    let call = event("PreToolUse", at, tool("Bash", ["command": "ls"], id: "t1", agent: "a1"))
+
+    #expect(Attention.evaluate(session(), facts(started + [call]), now: at + Self.quiet + 1).state == .needsYou)
+  }
+}
+
+/// An approved PR that every ready-to-merge condition passes, in a repository
+/// that sbd merges with a merge commit.
+private func approvedLandablePR(_ edit: (inout PullRequest) -> Void = { _ in }) -> PullRequest {
+  var pr = samplePR(
+    reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], checks: "SUCCESS", reviewRequests: [])
+  pr.trunkConfig = false
+  pr.mergeQueue = false
+  pr.inMergeQueue = false
+  pr.reviewDecisionRead = true
+  edit(&pr)
+  return pr
+}
+
+/// Each concrete cause of Waiting that `Attention.rules` knows.
+enum WaitingCause: String, CaseIterable, Sendable {
+  case openWait, subagent, backgroundJob, jobReport, mergedNotYetRead, mergeQueue, checksRunning
+  case mergeabilityUnknown, busyStackBase, openDependency
+
+  static let now: Int64 = 10_000
+  static let reply = "I'll wait for it."
+
+  /// The session's verdict at `now`, with the cause or without it.
+  func verdict(withCause: Bool) throws -> Verdict {
+    let turn = [
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      event("Stop", 1, ["last_assistant_message": .string(WaitingCause.reply)]),
+    ]
+    var s = session()
+    var events = turn
+    var stateOf: (String) -> AttentionState? = { _ in nil }
+    switch self {
+    case .openWait:
+      if withCause { s = session(wait: "CI on #12") }
+    case .subagent:
+      if withCause { events.insert(event("SubagentStart", 0, ["agent_id": "a1"]), at: 1) }
+    case .backgroundJob:
+      if withCause { events.append(event("job", 2, ["count": 1])) }
+    case .jobReport:
+      if withCause {
+        events += [event("job", 2, ["count": 1]), event("job", WaitingCause.now - 1, ["count": 0])]
+      }
+    case .mergedNotYetRead:
+      events.append(try prEvent(2, approvedLandablePR()))
+      if withCause { events.append(mergeEvent(3, head: samplePRHead, "merged")) }
+    case .mergeQueue:
+      events.append(try prEvent(2, approvedLandablePR { $0.inMergeQueue = withCause }))
+    case .checksRunning:
+      events.append(try prEvent(2, approvedLandablePR { $0.checks = withCause ? "PENDING" : "SUCCESS" }))
+    case .mergeabilityUnknown:
+      events.append(try prEvent(2, approvedLandablePR { $0.mergeable = withCause ? .unknown : .mergeable }))
+    case .busyStackBase:
+      events.append(try prEvent(2, approvedLandablePR { $0.mergeable = .conflicting }))
+      let base = Dependency(
+        via: .stack, repo: "acme/widgets", number: 41, base: "haacked/base", state: .open, session: "s2")
+      events.append(try dependenciesEvent(3, [base]))
+      stateOf = { $0 == "s2" ? (withCause ? .working : .needsYou) : nil }
+    case .openDependency:
+      events.append(try prEvent(2, samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")])))
+      if withCause {
+        events.append(
+          try dependenciesEvent(3, [Dependency(via: .body, repo: "acme/widgets", number: 41, state: .open)]))
+      }
+    }
+    return Attention.evaluate(s, facts(events), now: WaitingCause.now, stateOf: stateOf)
+  }
+}
+
+/// A session is in Waiting only while a concrete cause holds it.
+@Suite struct WaitingNeedsACause {
+  @Test(arguments: WaitingCause.allCases)
+  func causeGivesWaiting(_ cause: WaitingCause) throws {
+    #expect(try cause.verdict(withCause: true).state == .waiting)
+  }
+
+  @Test(arguments: WaitingCause.allCases)
+  func sameFactsWithoutTheCauseAreNotWaiting(_ cause: WaitingCause) throws {
+    #expect(try cause.verdict(withCause: false).state != .waiting)
+  }
+
+  /// manager-redesign (sni5dx) had none of the causes. Only its acknowledgment held it in Waiting.
+  @Test func sni5dxFactsWithoutTheAcknowledgmentNeedYou() {
+    let f = facts(sni5dxEvents(acknowledged: false))
+
+    let v = Attention.evaluate(session(), f, now: sni5dxAck + 59 * 60_000)
+
+    #expect(v == Verdict(state: .needsYou, reason: "read its last reply and decide what's next"))
+  }
+}
