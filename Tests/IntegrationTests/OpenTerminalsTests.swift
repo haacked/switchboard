@@ -3,7 +3,7 @@ import SwitchboardCore
 import Testing
 
 /// `sb open --terminals` opens the session and returns its tmux targets in the same request. The app
-/// then makes one request for a stopped session.
+/// therefore opens a session's terminals in one request.
 @Suite(.blocking(timeLimit: .seconds(120))) struct OpenTerminalsTests {
   func live(_ sbd: Instance) throws -> SessionSummary {
     let s = try sbd.new(prompt: "hello")
@@ -25,8 +25,10 @@ import Testing
     let s = try live ? self.live(sbd) : stopped(sbd)
 
     let text = try sbd.sb("open", s.id, "--terminals", "--json")
+    let opened = try JSONCoding.decode(Terminals.self, from: text)
 
-    #expect(try sbd.client.terminals(s.id) == JSONCoding.decode(Terminals.self, from: text))
+    #expect(try sbd.tmux("has-session", "-t", "=\(opened.shell)").status == 0)
+    #expect(try sbd.client.terminals(s.id) == opened)
   }
 
   /// A dead Claude pane stays in tmux. A missing one makes `terminals` start claude too.
@@ -47,6 +49,22 @@ import Testing
     sleep(2)
     #expect(try launches(sbd, s.id, after: mark) == 1)
     #expect(sbd.stubArgs().count == runs + 1)
+  }
+
+  /// sbd waits up to 5 s for a starting claude before a request that sends it a message. An open sends
+  /// nothing. It answers at once.
+  @Test func answersWithoutWaitingForAStartingClaude() throws {
+    let sbd = try Instance()
+    // Without SessionStart, sbd counts the claude as live only after 10 s.
+    try sbd.restart(setting: "env", to: ["STUB_HOOKS": "off"])
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "claude to run") { $0.claudePid != nil }
+    #expect(try !sbd.get(s.id).live)
+
+    let start = Date()
+    _ = try sbd.client.open(s.id)
+
+    #expect(Date().timeIntervalSince(start) < 2.5)
   }
 
   @Test func leavesALiveClaudeRunning() throws {

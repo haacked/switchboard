@@ -235,6 +235,10 @@ public final class Service {
     "dependency-resolved",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  /// The launching requests that first wait up to 5 s for a starting claude to go live. `open` launches
+  /// claude only into a dead or missing Claude pane. The wait ends at once for both, so it would only
+  /// delay the answer to `open`.
+  static let settles = launches.subtracting(["open"])
 
   /// `hookGone` reports whether the client closed its connection, which a
   /// held PermissionRequest checks while it waits. `caller` lets a request
@@ -322,7 +326,7 @@ public final class Service {
   /// Takes the steps that `request` needs before it acts, then runs `body`
   /// on the state queue.
   func prepared(_ request: Request, _ body: () throws -> JSON) throws -> JSON {
-    if Service.launches.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
+    if Service.settles.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
       settle(id)
     }
     if Service.waitsForMCP.contains(request.op) { awaitMCPServers(for: request) }
