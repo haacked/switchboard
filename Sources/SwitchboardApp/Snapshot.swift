@@ -38,7 +38,7 @@ enum Snapshot {
       }
     }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
-    if env["SB_SHEET"] == "new" { model.showingNew = true }
+    if env["SB_SHEET"] == "new" { model.openNewSession() }
     if env["SB_SHEET"] == "search" { openSearch(model) }
     if env["SB_ACCOUNTS"] == "open" {
       openAccounts(

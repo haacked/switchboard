@@ -2,6 +2,13 @@ import AppKit
 import SwiftUI
 import SwitchboardCore
 
+/// One opening of the New Session sheet. Each opening has a new id, so the sheet starts from a new form.
+struct NewSessionRequest: Identifiable, Equatable {
+  let id = UUID()
+  /// The id of the group that the sheet starts with.
+  var group: String?
+}
+
 /// The new session sheet: a repository, a branch for a new worktree, and an optional first prompt.
 struct NewSessionView: View {
   /// See SessionViewState for why this isn't `@State`.
@@ -14,6 +21,12 @@ struct NewSessionView: View {
     @Published var prompt = ""
     /// The folder of the chosen account, or empty for the active one.
     @Published var account = ""
+    /// The id of the group that the session joins, or nil for none.
+    @Published var group: String?
+
+    init(group: String? = nil) {
+      self.group = group
+    }
 
     func pick(_ repo: KnownRepo?) {
       self.repo = repo
@@ -25,12 +38,28 @@ struct NewSessionView: View {
     func offer(_ repos: [KnownRepo]?) {
       if !picked { repo = repos?.first }
     }
+
+    /// What Start sends, or nil before a repository is chosen. The branch goes only with a worktree.
+    func request(worktree: Bool) -> NewSession? {
+      guard let repo else { return nil }
+      func optional(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+      }
+      return NewSession(
+        path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
+        prompt: optional(prompt), account: optional(account), group: group)
+    }
   }
 
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
   @AppStorage("createWorktree") private var createWorktree = false
-  @StateObject private var form = Form()
+  @StateObject private var form: Form
+
+  init(request: NewSessionRequest) {
+    _form = StateObject(wrappedValue: Form(group: request.group))
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -81,17 +110,7 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    guard let repo = form.repo else { return }
-    let worktree = createWorktree
-    func optional(_ s: String) -> String? {
-      let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-      return t.isEmpty ? nil : t
-    }
-    model.create(
-      NewSession(
-        path: repo.path, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),
-        worktree: worktree,
-        prompt: optional(form.prompt), account: optional(form.account)))
+    if let session = form.request(worktree: createWorktree) { model.create(session) }
   }
 }
 

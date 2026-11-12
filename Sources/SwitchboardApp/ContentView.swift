@@ -149,7 +149,7 @@ struct ContentView: View {
       }
       ToolbarItem {
         Button {
-          model.showingNew = true
+          model.openNewSession()
         } label: {
           Label("New Session", systemImage: "plus")
         }
@@ -164,8 +164,8 @@ struct ContentView: View {
     } message: { session, todos in
       Text(todos.message(before: BoardModel.deletePlan(session).message))
     }
-    .sheet(isPresented: $model.showingNew) {
-      NewSessionView().environmentObject(model)
+    .sheet(item: $model.newSession) {
+      NewSessionView(request: $0).environmentObject(model)
     }
     .sheet(isPresented: $model.showingImport) {
       ImportView().environmentObject(model)
@@ -310,7 +310,7 @@ struct Sidebar: View {
       if model.sidebarIsEmpty {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
-          Button("Start a Session…") { model.showingNew = true }
+          Button("Start a Session…") { model.openNewSession() }
           Button("Import Sessions…") { model.showingImport = true }
         }
       }
@@ -522,7 +522,7 @@ struct BoardView: View {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
-        Button("New Session…") { model.showingNew = true }
+        Button("New Session…") { model.openNewSession() }
         Button("New Group") { model.startNewGroup() }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)

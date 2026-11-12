@@ -36,4 +36,43 @@ import Testing
     form.offer([Self.alpha])
     #expect(form.repo == Self.alpha)
   }
+
+  @Test func requestIsNilWithoutARepo() {
+    #expect(NewSessionView.Form().request(worktree: false) == nil)
+  }
+
+  @Test func requestTrimsFieldsAndDropsBlankOnes() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+    form.name = "  fix  "
+    form.prompt = " \n "
+    form.account = "  "
+
+    let r = try #require(form.request(worktree: false))
+
+    #expect(r.path == Self.alpha.path)
+    #expect(r.name == "fix")
+    #expect(r.prompt == nil)
+    #expect(r.account == nil)
+  }
+
+  @Test func requestSendsTheBranchOnlyWithAWorktree() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+    form.branch = "me/fix"
+
+    #expect(try #require(form.request(worktree: true)).branch == "me/fix")
+    #expect(try #require(form.request(worktree: true)).worktree == true)
+    #expect(try #require(form.request(worktree: false)).branch == nil)
+  }
+
+  @Test func requestCarriesThePresetGroup() throws {
+    let grouped = NewSessionView.Form(group: "g1")
+    grouped.pick(Self.alpha)
+    let plain = NewSessionView.Form()
+    plain.pick(Self.alpha)
+
+    #expect(try #require(grouped.request(worktree: false)).group == "g1")
+    #expect(try #require(plain.request(worktree: false)).group == nil)
+  }
 }

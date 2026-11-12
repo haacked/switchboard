@@ -9,6 +9,19 @@ import Testing
   static let alpha = KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20)
   static let beta = KnownRepo(path: "/Users/me/dev/beta", name: "beta", used: 30)
 
+  @Test func openNewSessionOpensANewSheetWithoutAGroup() {
+    let model = offlineModel()
+
+    model.openNewSession()
+    let first = model.newSession
+
+    #expect(model.presentingSheet)
+    #expect(first?.group == nil)
+    model.newSession = nil
+    model.openNewSession()
+    #expect(model.newSession?.id != first?.id)
+  }
+
   /// A re-added repository moves to the front. The model removes its older row, so no two rows share an id.
   @Test func addRepoMovesAKnownRepoFirstWithoutADuplicate() async throws {
     let model = offlineModel()
