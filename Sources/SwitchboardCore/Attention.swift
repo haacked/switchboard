@@ -132,7 +132,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// When the PR entered its board column, or when the session's PR last
   /// changed. `noteBoard` sets it.
   public var boardSince: Int64?
-  /// The PR's last move back on the board, while it stands. `noteBoard` sets it.
+  /// The PR's last move back on the board. It clears when the PR gets back to
+  /// the column it left, or when the session's PR changes or goes away.
+  /// `noteBoard` sets it.
   public var boardBack: BoardMove?
 
   /// The hook events that sbd's settings file subscribes claude to.

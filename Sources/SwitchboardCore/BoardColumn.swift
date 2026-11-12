@@ -111,8 +111,8 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
 
   /// What a Waiting card waits on and who holds it, from the first of these
   /// that applies: the oldest open wait, a dependency that holds the PR, a
-  /// running background job, and the open PR's running checks, failed checks,
-  /// conflict, or change request. A `review` or `approval` wait names a
+  /// running background job, and the open PR's failed checks, conflict,
+  /// change request, or running checks. A `review` or `approval` wait names a
   /// person, so it gives no holder.
   static func waitingOn(_ oldest: Wait?, _ facts: SessionFacts) -> (holder: BoardHolder?, line: String)? {
     if let wait = oldest {
@@ -130,11 +130,8 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
     }
     if facts.jobs > 0 { return (.machine, facts.jobs == 1 ? "a background job" : "\(facts.jobs) background jobs") }
     guard let pr = facts.pr, pr.state == .open else { return nil }
-    if pr.checksRunning { return (.machine, "CI running") }
-    if pr.ciFailed { return (.you, "CI failed") }
-    if pr.mergeable == .conflicting { return (.you, "conflicts with \(pr.base)") }
-    if let changes = pr.changesRequestedLine { return (.you, changes) }
-    return nil
+    if let hold = pr.holdLine { return (.you, hold) }
+    return pr.checksRunning ? (.machine, "CI running") : nil
   }
 }
 
@@ -160,7 +157,7 @@ public struct BoardMove: Codable, Equatable, Sendable {
     self.at = at
   }
 
-  /// "back from Merging: CI failed", as the card and `sb get` show it.
+  /// "back from Approved: CI failed", as the card and `sb get` show it.
   public var text: String { "back from \(from.title): \(reason)" }
 
   /// Why the same PR left `from` between `old` and `new`, or nil when no
@@ -175,9 +172,7 @@ public struct BoardMove: Codable, Equatable, Sendable {
     }
     if new.draft { return "back to draft" }
     if new.headSha != old.headSha { return "new commits" }
-    if new.ciFailed { return "CI failed" }
-    if new.mergeable == .conflicting { return "conflicts with \(new.base)" }
-    if let changes = new.changesRequestedLine { return changes }
+    if let hold = new.holdLine { return hold }
     if (old.reviewDecision == .approved && new.reviewDecision != .approved)
       || (!old.approvers.isEmpty && new.approvers.isEmpty)
     {
@@ -201,7 +196,8 @@ public struct BoardPlacement: Codable, Equatable, Sendable {
   /// slug from the review requests, or `@login` or `@org/team` from the code
   /// owner requests.
   public var reviewers: [String]?
-  /// The last move back of the session's PR, while it stands.
+  /// The last move back of the session's PR. It clears when the PR gets back
+  /// to the column it left, or when the session's PR changes or goes away.
   public var back: BoardMove?
 
   public init(

@@ -1003,15 +1003,19 @@ struct BoardCard: View {
           }
         }
       }
-      HStack(spacing: 4) {
-        NotesButton(session: s)
-        if Nudge.shows(s, now: nowMs()) { NudgeButton(session: s) }
-        if s.canMerge { MergeButton(session: s) }
-        if let base = s.mergeBase { MergeBaseButton(session: s, base: base) }
-        if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
-        if s.isRemovableDone { DeleteButton(session: s) }
+      // The model republishes only when a session changes, so the timeline
+      // shows Nudge once the 4 hours pass on a board where nothing else changes.
+      TimelineView(.everyMinute) { _ in
+        HStack(spacing: 4) {
+          NotesButton(session: s)
+          if Nudge.shows(s, now: nowMs()) { NudgeButton(session: s) }
+          if s.canMerge { MergeButton(session: s) }
+          if let base = s.mergeBase { MergeBaseButton(session: s, base: base) }
+          if CleanupOffer.canCleanUp(s) { CleanupButton(session: s) }
+          if s.isRemovableDone { DeleteButton(session: s) }
+        }
+        .padding(6)
       }
-      .padding(6)
     }
   }
 }

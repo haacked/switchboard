@@ -338,7 +338,7 @@ extension BoardColumnTests {
     func approvedPRWhoseChecksRunIsHeldByAMachine(_ checks: String) throws {
       let p = try place(.waiting, pr: approvedPR(checks: checks))
 
-      #expect(p.column == .waiting && p.holder == .machine)
+      #expect(p.column == .waiting && p.holder == .machine && p.line == "CI running")
     }
 
     @Test(arguments: [
@@ -637,14 +637,16 @@ extension BoardColumnTests {
     }
 
     @Test(arguments: [
-      ("checks failed", approvedPR(checks: "FAILURE")),
-      ("conflicts with its base", approvedPR(mergeable: .conflicting)),
-      ("changes requested", changesRequestedPR()),
+      ("checks failed", approvedPR(checks: "FAILURE"), "CI failed"),
+      ("a Depot job failed while checks run", pr(approvedPR(checks: "PENDING")) { $0.depot = depotRun() }, "CI failed"),
+      ("conflicts with its base", approvedPR(mergeable: .conflicting), "conflicts with main"),
+      ("conflicts while checks run", approvedPR(mergeable: .conflicting, checks: "PENDING"), "conflicts with main"),
+      ("changes requested", changesRequestedPR(), "changes requested by alex"),
     ])
-    func prThatYouMustFixIsHeldByYou(_ label: String, _ pr: PullRequest) throws {
+    func prThatYouMustFixIsHeldByYou(_ label: String, _ pr: PullRequest, _ line: String) throws {
       let p = try place(.waiting, pr: pr)
 
-      #expect(p.column == .waiting && p.holder == .you)
+      #expect(p.column == .waiting && p.holder == .you && p.line == line, "\(p)")
     }
 
     @Test(

@@ -277,6 +277,14 @@ public struct PullRequest: Codable, Equatable, Sendable {
     return reviewDecision == .changesRequested ? "changes requested" : nil
   }
 
+  /// "CI failed", "conflicts with <base>", or the change request, whichever
+  /// comes first. nil when none of them holds the PR.
+  public var holdLine: String? {
+    if ciFailed { return "CI failed" }
+    if mergeable == .conflicting { return "conflicts with \(base)" }
+    return changesRequestedLine
+  }
+
   /// The reviewers whose last verdict requests changes.
   public var changesRequestedBy: [String] {
     verdicts.filter { $0.state == "CHANGES_REQUESTED" }.map(\.author).sorted()
