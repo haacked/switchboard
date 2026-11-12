@@ -37,8 +37,6 @@ public struct StopPolicy: Sendable {
     var hasWaits: Bool { !(session.waits ?? []).isEmpty }
   }
 
-  /// How long a session with an open wait sits idle before sbd stops it.
-  public static let waitingStopMs: Int64 = 2_000
   /// How long after its launch a claude with no SessionStart can still be
   /// starting. sbd counts such a claude as live after 10 s, because its hook
   /// may have failed, but a slow start's prompt hasn't reached it yet.
@@ -51,14 +49,9 @@ public struct StopPolicy: Sendable {
 
   public init(idleStopSeconds: Int) { self.idleStopSeconds = idleStopSeconds }
 
-  var idleStopMsDefault: Int64 { Int64(idleStopSeconds) * 1000 }
-
-  /// How long the session sits idle before sbd stops it. A session with an
-  /// open wait has nothing to do until the wait resolves, so it stops soon
-  /// after its turn.
-  public func idleStopMs(_ c: Claude) -> Int64 {
-    c.hasWaits ? min(idleStopMsDefault, StopPolicy.waitingStopMs) : idleStopMsDefault
-  }
+  /// How long a session sits idle before sbd stops it. A session with an open
+  /// wait gets as long as any other, and the live cap stops it first.
+  public var idleStopMs: Int64 { Int64(idleStopSeconds) * 1000 }
 
   /// Whether claude sits idle with nothing that a stop would lose: no turn,
   /// prompt, trust dialog, queued or in-flight message, background job, or
@@ -77,10 +70,10 @@ public struct StopPolicy: Sendable {
     // A background job's process exits up to 1.3 s before claude starts the
     // turn that reports it, so the wait starts again when the job exits.
     let idle = now - c.idleSince
-    guard idle >= idleStopMs(c) else { return false }
+    guard idle >= idleStopMs else { return false }
     // A running subagent's tool calls fire hooks. A subagent with no event
     // for twice the idle time lost its SubagentStop, as when sbd was down.
-    return c.facts.subagents.isEmpty || idle >= 2 * idleStopMsDefault
+    return c.facts.subagents.isEmpty || idle >= 2 * idleStopMs
   }
 
   /// The running claudes that sbd may stop to free a slot, in the order to

@@ -56,6 +56,7 @@ final class Instance {
   }
 
   let home: Home
+  let idleStopSeconds: Int
   let client: Client
   /// The CLAUDE_CONFIG_DIR that sbd inherits, or nil for Claude's default
   /// account.
@@ -86,6 +87,7 @@ final class Instance {
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
+    self.idleStopSeconds = idleStopSeconds
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     let path = String(cString: dir)
@@ -332,6 +334,12 @@ final class Instance {
   /// due waits only when no shared MCP server is starting.
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
+  }
+
+  /// Moves the clock past `idleStopSeconds` and waits until the session's claude stops.
+  func passIdleStop(_ id: String) throws {
+    try advanceClock(Int64(idleStopSeconds + 1) * 1000)
+    try waitFor(id, "the idle stop", timeout: 10) { !$0.live }
   }
 
   /// sbd's clock, in ms since the epoch.

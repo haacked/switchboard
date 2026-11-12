@@ -296,7 +296,7 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
     try sbd.sb("send", s.id, "pick")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
-    // A session with an open wait stops 2 s after its turn. A question waits for idleStopSeconds.
+    // The idle stop and the deferral both wait for idleStopSeconds, whether or not the session has a wait.
     sleep(3)
     #expect(try sbd.get(s.id).cards.map(\.deferred) == [false])
   }

@@ -1716,11 +1716,8 @@ public final class Service {
           if jobs > 0 { entries[id]?.lastJobSeen = now }
           // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
-          if let e = entries[id] {
-            let input = stopInput(e, pid: pid, now: now)
-            if stopPolicy.idleStopDue(input, now: now) {
-              try? stop(id, reason: "idle for \(stopPolicy.idleStopMs(input) / 1000) s")
-            }
+          if let e = entries[id], stopPolicy.idleStopDue(stopInput(e, pid: pid, now: now), now: now) {
+            try? stop(id, reason: "idle for \(config.idleStopSeconds) s")
           }
         case .stopped:
           entries[id]?.unreportedSince = nil

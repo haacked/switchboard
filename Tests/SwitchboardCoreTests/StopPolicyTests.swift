@@ -72,10 +72,9 @@ import Testing
     #expect(policy.idleStopDue(c, now: 1_100_000))
   }
 
-  @Test func aSessionWithAnOpenWaitStopsSoonAfterItsTurn() {
-    #expect(policy.idleStopMs(idle(wait: true)) == StopPolicy.waitingStopMs)
-    #expect(policy.idleStopDue(idle(wait: true), now: StopPolicy.waitingStopMs))
-    #expect(StopPolicy(idleStopSeconds: 1).idleStopMs(idle(wait: true)) == 1000)
+  @Test func aSessionWithAnOpenWaitStopsAfterIdleStopSecondsLikeAnyOther() {
+    #expect(!policy.idleStopDue(idle(wait: true), now: 600_000 - 1))
+    #expect(policy.idleStopDue(idle(wait: true), now: 600_000))
   }
 
   @Test func aRunningSubagentHoldsTheStopForTwiceTheIdleTime() {
