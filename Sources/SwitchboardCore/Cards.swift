@@ -281,14 +281,9 @@ extension SessionFacts {
       closePrompt(cards[card])
     case "card_closed":
       // A hook that timed out closes too. Claude Code's dialog then stays
-      // open, so the prompt stays open. A card that sbd can find on the
-      // screen stays until its dialog leaves. sbd answers it by typing.
+      // open, so the prompt stays open.
       guard let card else { return }
-      if !cards[card].findable {
-        cards.remove(at: card)
-      } else {
-        cards[card].hookClosed = true
-      }
+      closeHook(at: card)
     case "dialog_closed":
       // Only Yes or a pick leaves the hook open, so the call runs. No and
       // Escape leave the prompt open until the turn ends.
@@ -303,6 +298,17 @@ extension SessionFacts {
       cards.removeAll { !$0.outlivesTurn || (userPrompt && $0.deferred) }
     default:
       break
+    }
+  }
+
+  /// Marks the hook of the card at the index closed. A card that sbd can find
+  /// on the screen stays until its dialog leaves. sbd answers it by typing.
+  /// Any other card is removed.
+  mutating func closeHook(at index: Int) {
+    if cards[index].findable {
+      cards[index].hookClosed = true
+    } else {
+      cards.remove(at: index)
     }
   }
 

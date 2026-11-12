@@ -347,17 +347,18 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     #expect(try sbd.cards().isEmpty)
   }
 
-  @Test func dropsAHeldCardWhenSbdRestarts() throws {
+  /// The restart ends the held hook. Claude Code's own dialog still waits.
+  @Test func keepsAHeldCardWithItsHookClosedWhenSbdRestarts() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "perm touch w")
     try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     sbd.stopSbd()
     try sbd.startSbd()
     let after = try sbd.get(s.id)
-    #expect(after.cards.isEmpty)
-    // Claude Code's own dialog still waits, so the session still needs you.
+    #expect(after.cards.map(\.hookClosed) == [true])
     #expect(after.reason == "approve `touch w`")
-    try sbd.type(s.id, "y")
-    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch w" }
+    let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
+    #expect(answer?["delivery"]?.string == "terminal")
+    try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch w" && $0.cards.isEmpty }
   }
 }
