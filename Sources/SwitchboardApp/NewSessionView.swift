@@ -25,11 +25,14 @@ struct NewSessionView: View {
     @Published var account = ""
     /// The id of the group that the session joins, or nil for none.
     @Published private(set) var group: String?
+    /// The id of the conversation that the session reports to, or nil for none.
+    let parent: String?
     /// The last offer, which a group change selects from again.
     private var offered: (repos: [KnownRepo]?, sessions: [SessionSummary]) = (nil, [])
 
-    init(group: String? = nil) {
+    init(group: String? = nil, parent: String? = nil) {
       self.group = group
+      self.parent = parent
     }
 
     func pick(_ repo: KnownRepo?) {
@@ -56,7 +59,7 @@ struct NewSessionView: View {
 
     /// What Start sends, or nil before a repository is chosen. The branch goes only with a worktree. A group
     /// with an account gets no account, because sbd refuses one that differs from the group's.
-    func request(worktree: Bool, groups: [GroupSummary], parent: String?) -> NewSession? {
+    func request(worktree: Bool, groups: [GroupSummary]) -> NewSession? {
       guard let repo else { return nil }
       func optional(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,15 +76,13 @@ struct NewSessionView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form: Form
-  private let parent: String?
 
   init(request: NewSessionRequest) {
-    _form = StateObject(wrappedValue: Form(group: request.group))
-    parent = request.parent
+    _form = StateObject(wrappedValue: Form(group: request.group, parent: request.parent))
   }
 
   var body: some View {
-    let parentSession = model.summary(parent)
+    let parentSession = form.parent.flatMap(model.summary)
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 2) {
         Text("New Session").font(.title2.bold())
@@ -142,7 +143,7 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    if let session = form.request(worktree: createWorktree, groups: model.groups, parent: parent) {
+    if let session = form.request(worktree: createWorktree, groups: model.groups) {
       model.create(session)
     }
   }

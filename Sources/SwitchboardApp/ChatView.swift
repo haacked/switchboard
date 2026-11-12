@@ -21,8 +21,8 @@ struct ChatView: View {
             ? "No messages yet. Ask the Manager about your sessions."
             : "No messages yet. Ask the chat about this group's sessions.")
         Divider()
-        // The Inbox leaves out a chat's or a Manager's cards, such as a group message that waits for the user, so
-        // they show here.
+        // The Inbox leaves out the cards of a chat and a Manager, such as a group message that waits for the user.
+        // They show here instead.
         CardList(cards: session.cards)
         let proposals = session.chat.map { g in model.planProposals.filter { $0.group == g } } ?? []
         if !proposals.isEmpty { PlanProposalList(proposals: proposals) }

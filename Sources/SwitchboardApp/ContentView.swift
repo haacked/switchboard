@@ -103,7 +103,7 @@ struct ContentView: View {
           FollowupView(session: s, followup: f).id(s.id)
         } else if let s = model.selected, let d = s.docket {
           DocketView(session: s, docket: d).id(s.id)
-        } else if let s = model.selected, model.hasChatPane(s) {
+        } else if let s = model.selected, s.kind.showsAsChat {
           ChatView(session: s).id(s.id)
         } else if let s = model.selected {
           SessionView(session: s).id(s.id)

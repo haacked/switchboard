@@ -49,9 +49,8 @@ private func managerMCP(_ a: Args, _ words: [String]) {
   if a.switches.contains("--none") { args["none"] = true }
   let result = call("manager-mcp", args)
   if a.json { return printJSON(result) }
-  let servers = result["servers"]?.array.map { $0.compactMap(\.string) }
-  print("\(result["name"]?.string ?? ref): \(Manager.serversText(servers))".printable)
-  if result["pending"]?.bool == true { print("Claude restarts with them when its turn ends.") }
-  let available = result["available"]?.array?.compactMap(\.string) ?? []
-  if !available.isEmpty { print("Servers you can add: \(available.joined(separator: ", "))") }
+  let answer = decode(result, as: ManagerMCPAnswer.self)
+  print("\(answer.name): \(Manager.serversText(answer.servers))".printable)
+  if answer.pending { print(Manager.relaunchPendingText) }
+  if !answer.available.isEmpty { print("Servers you can add: \(answer.available.joined(separator: ", "))") }
 }

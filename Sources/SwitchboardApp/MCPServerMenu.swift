@@ -34,7 +34,7 @@ struct MCPServerMenu: View {
         .disabled(session.mcp == [])
       if answer?.pending == true {
         Divider()
-        Text("Claude restarts with them when its turn ends.")
+        Text(Manager.relaunchPendingText)
       }
     } label: {
       Text(Manager.serversText(session.mcp)).lineLimit(1)
@@ -43,7 +43,7 @@ struct MCPServerMenu: View {
     .fixedSize(horizontal: false, vertical: true)
     .help("The MCP servers that this conversation loads")
     .accessibilityIdentifier("mcp-servers-\(session.id)")
-    // A change stops claude and launches it again, and each step re-reads whether the relaunch is pending.
+    // A change stops claude and launches it again. Each step re-reads whether the relaunch is pending.
     .task(id: "\(session.id)/\(session.claudePid ?? 0)/\(session.live)") { model.loadMCPServers(session.id) }
   }
 }

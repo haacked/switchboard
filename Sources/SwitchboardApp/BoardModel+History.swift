@@ -11,7 +11,7 @@ struct NavLocation: Hashable {
 
   var place: Place
   /// Whether the place shows the session's terminal instead of its overview. Only the Inbox, a chat,
-  /// and a Manager conversation have a Terminal toggle, so it is false everywhere else.
+  /// and a Manager conversation have a Terminal toggle. It is false everywhere else.
   var terminal: Bool
 }
 
@@ -24,14 +24,11 @@ enum NavRecord {
 }
 
 extension BoardModel {
-  /// Whether the session shows as a chat pane, with a Terminal toggle in place of its terminal.
-  func hasChatPane(_ s: SessionSummary) -> Bool { s.kind.showsAsChat }
-
   /// What the window shows now.
   var location: NavLocation {
     if let selection {
       return NavLocation(
-        place: .session(selection), terminal: showingTerminal && summary(selection).map(hasChatPane) == true)
+        place: .session(selection), terminal: showingTerminal && summary(selection)?.kind.showsAsChat == true)
     }
     if mainView == .board { return NavLocation(place: .board, terminal: false) }
     return NavLocation(place: .inbox(currentInboxItem), terminal: showingTerminal)
@@ -43,7 +40,7 @@ extension BoardModel {
   /// Maps a location to the place it shows now, or nil when its session is removed or the org filter hides
   /// it. A hidden session counts as unavailable, because selecting it would widen the filter.
   func resolver() -> (NavLocation) -> NavLocation? {
-    let shown = Dictionary(board.map { ($0.id, hasChatPane($0)) }, uniquingKeysWith: { a, _ in a })
+    let shown = Dictionary(board.map { ($0.id, $0.kind.showsAsChat) }, uniquingKeysWith: { a, _ in a })
     let pending = pendingSelection
     let inbox = Set(sessions.map(\.id))
     let first = triage.first?.id
@@ -118,7 +115,7 @@ extension BoardModel {
     switch location.place {
     case .session(let id):
       selection = id
-      if summary(id).map(hasChatPane) == true { showingTerminal = location.terminal }
+      if summary(id)?.kind.showsAsChat == true { showingTerminal = location.terminal }
     case .inbox(let item):
       show(.inbox)
       inboxFocus = item

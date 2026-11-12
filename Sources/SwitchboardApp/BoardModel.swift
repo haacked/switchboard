@@ -915,8 +915,11 @@ final class BoardModel: ObservableObject {
 
   /// Reads which MCP servers the conversation can load. A failed read keeps the last answer and shows no error.
   func loadMCPServers(_ session: String) {
-    perform(
-      "manager-mcp", ["session": .string(session)], then: { self.storeMCPAnswer($0, for: session) }, failed: { _ in })
+    let send = send
+    poller.async {
+      guard let answer = try? send("manager-mcp", ["session": .string(session)]) else { return }
+      Task { @MainActor in self.storeMCPAnswer(answer, for: session) }
+    }
   }
 
   enum MCPChange {
@@ -941,7 +944,9 @@ final class BoardModel: ObservableObject {
   }
 
   private func storeMCPAnswer(_ value: JSON, for session: String) {
-    if let answer = try? JSONCoding.convert(value, to: ManagerMCPAnswer.self) { mcpAnswers[session] = answer }
+    if let answer = try? JSONCoding.convert(value, to: ManagerMCPAnswer.self), mcpAnswers[session] != answer {
+      mcpAnswers[session] = answer
+    }
   }
 
   /// Reads the session's last reply from its transcript, which can be large,

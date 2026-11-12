@@ -68,16 +68,6 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
     #expect(sent.args == ["session": "m"])
   }
 
-  @Test(
-    arguments: [
-      (needsItem("m", manager: true), true), (chatItem("c", group: "g1"), true), (needsItem("a"), false),
-    ] as [(SessionSummary, Bool)])
-  func aManagerConversationAndAGroupChatHaveAChatPaneAndAWorkSessionDoesNot(_ s: SessionSummary, _ pane: Bool) {
-    let model = appliedModel([s])
-
-    #expect(model.hasChatPane(s) == pane)
-  }
-
   @Test func openChatSelectsAChatThatExistsWithoutAskingSbd() {
     let model = appliedModel([chatItem("c", group: "g1"), needsItem("a")])
     let sent = Counter()

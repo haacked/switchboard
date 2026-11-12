@@ -28,6 +28,9 @@ public enum Manager {
     return servers.isEmpty ? "switchboard only" : "switchboard, " + servers.joined(separator: ", ")
   }
 
+  /// What `sb manager mcp` and the server menu say while a change waits for claude to relaunch.
+  public static let relaunchPendingText = "Claude restarts with them when its turn ends."
+
   /// The CLAUDE.md that sbd keeps in the Manager's folder. It is a prompt for
   /// a model, so it stays short, and every `sb` command in it exists.
   public static let guide = """

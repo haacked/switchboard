@@ -162,12 +162,11 @@ enum ServerMenuChoice: CaseIterable, Sendable {
   }
 
   @Test func aNewTaskSheetSendsNewWithTheConversationAsParent() async {
-    let form = NewSessionView.Form()
-    form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
-
     let sent = await firstRequest { model in
       model.openNewSession(parent: "m")
-      if let request = form.request(worktree: false, groups: model.groups, parent: model.newSession?.parent) {
+      let form = NewSessionView.Form(group: model.newSession?.group, parent: model.newSession?.parent)
+      form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
+      if let request = form.request(worktree: false, groups: model.groups) {
         model.create(request)
       }
     }
@@ -179,15 +178,14 @@ enum ServerMenuChoice: CaseIterable, Sendable {
   /// ⌘N, the toolbar +, and the menu items open the sheet without a parent, so a sheet they open after a
   /// dismissed New task must not attach the new session to that conversation.
   @Test func theSheetThatOpensAfterADismissedNewTaskSendsNewWithNoParent() async {
-    let form = NewSessionView.Form()
-    form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
-
     let sent = await firstRequest { model in
       model.openNewSession(parent: "m")
       #expect(model.newSession?.parent == "m")
       model.newSession = nil
       model.openNewSession()
-      if let request = form.request(worktree: false, groups: model.groups, parent: model.newSession?.parent) {
+      let form = NewSessionView.Form(group: model.newSession?.group, parent: model.newSession?.parent)
+      form.pick(KnownRepo(path: "/Users/me/dev/alpha", name: "alpha", used: 20))
+      if let request = form.request(worktree: false, groups: model.groups) {
         model.create(request)
       }
     }

@@ -93,7 +93,7 @@ public struct ChatMessage: Codable, Equatable, Sendable {
   public var isNotice: Bool { role == .user && text.hasPrefix("Switchboard:") }
 
   /// The `/name args` that the user typed, when the message is the line Claude Code writes for a slash
-  /// command. The line is a run of `<command-…>` elements in no fixed order, so each is read by its tag.
+  /// command. The line is a run of `<command-…>` elements in no fixed order, so the parser reads each by its tag.
   public var slashCommand: String? {
     guard role == .user else { return nil }
     var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)[...]
