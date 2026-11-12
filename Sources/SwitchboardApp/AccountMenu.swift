@@ -61,14 +61,15 @@ struct AccountMenu: View {
     return reading.budget().isSpent || reading.failedWithoutLimits
   }
 
-  /// The toolbar text: the account's name, its session percent, and its
-  /// highest weekly percent.
+  /// The toolbar text: the account's name, its session percent when the
+  /// reading has a session limit, and its highest weekly percent.
   static func label(_ row: AccountRow?) -> String {
     guard let row else { return "Account" }
     guard let usage = row.usage, !usage.limits.isEmpty else { return row.account.name }
-    let session = Int(usage.sessionPercent.rounded())
-    let week = Int(usage.weeklyPercent.rounded())
-    return "\(row.account.name) · 5h \(session)% · wk \(week)%"
+    var parts = [row.account.name]
+    if let session = usage.sessionPercent { parts.append("5h \(Int(session.rounded()))%") }
+    parts.append("wk \(Int(usage.weeklyPercent.rounded()))%")
+    return parts.joined(separator: " · ")
   }
 
   static func limitRow(_ limit: UsageLimit, now: Int64 = nowMs()) -> String {

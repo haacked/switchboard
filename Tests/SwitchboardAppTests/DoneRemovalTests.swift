@@ -157,7 +157,7 @@ final class SentArgs: @unchecked Sendable {
 /// shows at the moment of the send.
 @MainActor
 @Suite struct DoneRemovalOrgFilterTests {
-  static let done = [
+  nonisolated static let done = [
     orgSession("ph", "PostHog/posthog", state: .done), orgSession("hk", "haacked/switchboard", state: .done),
     orgSession("lo", nil, state: .done), orgSession("un", nil, read: nil, state: .done),
   ]

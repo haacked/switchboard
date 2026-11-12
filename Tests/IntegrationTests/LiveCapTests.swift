@@ -297,7 +297,7 @@ extension Instance {
     FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
     try sbd.waitFor("the turn that reports the job") { try sbd.events(a.id).filter { $0.kind == "Stop" }.count == 2 }
 
-    // Service.jobReportMs is 5 s.
+    // StopPolicy.capJobGraceMs is 5 s.
     try sbd.advanceClock(5_000)
     #expect(try !sbd.capStops(a.id).isEmpty)
     try sbd.waitFor("b's start after a exits", timeout: 20) {
@@ -333,8 +333,6 @@ extension Instance {
     #expect(try !sbd.events(plain.id).contains { $0.kind == "stopped" })
   }
 
-  /// A wait also makes sbd stop the session 2 s after its last activity. The
-  /// cap may not be what stops it, but the plain session must keep running.
   @Test func aWaitingSessionIsStoppedBeforeALongerIdleOne() throws {
     let sbd = try instance(cap: 2)
     let plain = try idleSession(sbd, name: "plain")
@@ -345,6 +343,7 @@ extension Instance {
 
     try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
     try sbd.waitFor(waiting.id, "the waiting session's stop") { $0.claudePid == nil }
+    #expect(try !sbd.capStops(waiting.id).isEmpty)
     #expect(try sbd.get(plain.id).claudePid == plain.claudePid)
     #expect(try !sbd.events(plain.id).contains { $0.kind == "stopped" })
   }

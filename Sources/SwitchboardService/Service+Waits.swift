@@ -4,9 +4,6 @@ import SwitchboardCore
 /// Waits, notes, and the test clock. `plans/waits-notes.md` in the notes repo
 /// describes them.
 extension Service {
-  /// How long a session with an open wait sits idle before sbd stops it.
-  static let waitingStopMs: Int64 = 2_000
-
   /// The `wait`, `clear-wait`, and `resolve-wait` requests. `resolve-wait`
   /// acts on processes, so `handle` settles the session and takes a new
   /// snapshot first, as for `send`.
@@ -100,14 +97,6 @@ extension Service {
       throw APIError(open.isEmpty ? "\(id) has no open wait" : "\(id) has \(open.count) waits, so name one")
     }
     return open[0]
-  }
-
-  /// How long the session sits idle before sbd stops it. A session with an
-  /// open wait has nothing to do until the wait resolves, so it stops soon
-  /// after its turn.
-  func idleStopMs(_ id: String) -> Int64 {
-    let idle = Int64(config.idleStopSeconds) * 1000
-    return (entries[id]?.session.waits ?? []).isEmpty ? idle : min(idle, Service.waitingStopMs)
   }
 
   /// v0.1 stored a free-text wait in `waitNote`. This turns it into a manual

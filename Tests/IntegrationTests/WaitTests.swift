@@ -52,8 +52,7 @@ import Testing
       sbd.sb("wait", "--json", s.id, "--kind", "date", "--until", "1h", "--note", "check the dashboard"))
     #expect(waiting.state == .waiting)
     #expect(waiting.reason.hasPrefix("until "))
-    // idleStopSeconds is 600, so only the open wait stops it this soon.
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     let resumed = try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply?.hasPrefix("Done: Switchboard:") == true }
     #expect(resumed.lastReply?.hasSuffix(": the time came. Your note: check the dashboard.") == true)
@@ -62,12 +61,23 @@ import Testing
     #expect(try sbd.events(s.id).map(\.kind).contains("wait-resolved"))
   }
 
+  @Test func aSessionWithAnOpenWaitStaysLiveUntilTheIdleStop() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    try sbd.advanceClock(Int64(sbd.idleStopSeconds - 10) * 1000)
+    sleep(1)
+    #expect(try sbd.get(s.id).live)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "stopped" })
+    try sbd.passIdleStop(s.id)
+  }
+
   @Test func aWaitResolvedWhileClaudeExitsStillResumesTheSession() throws {
     let sbd = try Instance()
     // `send` waits up to 5 s for an exiting claude, so a 7 s exit outlasts it.
     let s = try lingeringSession(sbd, seconds: 7)
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     // The stub runs for 7 s after the stop, so the resolution meets a claude that is exiting.
     #expect(try sbd.get(s.id).claudePid != nil)
     try sbd.sb("wait", s.id, "--resolve", "#1190 merged")
@@ -81,18 +91,58 @@ import Testing
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 3)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     try sbd.waitFor(s.id, "the resumed turn", timeout: 30) {
       $0.lastReply?.hasPrefix("Done: Switchboard: until ") == true
     }
   }
 
+  /// A session with two waits whose claude stopped. The stub holds its next
+  /// start before SessionStart until `hold` is removed.
+  /// `mark` is the id of the last event before the resume.
+  func heldResume(_ sbd: Instance) throws -> (session: SessionSummary, hold: String, mark: Int64) {
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
+    try sbd.waitFor(s.id, "the stop", timeout: 10) { $0.claudePid == nil }
+    let hold = "\(sbd.home.path)/hold-start"
+    FileManager.default.createFile(atPath: hold, contents: nil)
+    let mark = try #require(try sbd.events(s.id).last?.id)
+    try sbd.sb("wait", s.id, "--id", waiting.waits[0].id, "--resolve", "#1190 merged")
+    try sbd.waitFor(s.id, "the held claude") { $0.claudePid != nil }
+    return (s, hold, mark)
+  }
+
+  /// After 10 s with no SessionStart, sbd counts a claude as live, because
+  /// its hook may have failed. That claude's prompt has not arrived yet.
+  @Test func aClaudeThatStartsSlowlyIsNotStoppedBeforeItsPromptArrives() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, hold, mark) = try heldResume(sbd)
+    let pid = try sbd.get(s.id).claudePid
+    try sbd.passUnreportedFallback(s.id, after: mark)
+    sleep(2)
+    #expect(try !sbd.events(s.id, after: mark).contains { $0.kind == "stopped" })
+    #expect(try sbd.get(s.id).claudePid == pid)
+    try FileManager.default.removeItem(atPath: hold)
+    try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: #1190 to merge: #1190 merged." }
+  }
+
+  /// A claude whose hook fails never sends SessionStart. It still stops once its prompt no longer counts as on its way.
+  @Test func aClaudeWithNoSessionStartStopsAfterStartingMs() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, _, mark) = try heldResume(sbd)
+    try sbd.advanceClock(1)
+    // Service.startingMs is 60 s.
+    try sbd.advanceClock(60_000)
+    try sbd.waitFor("the stop") { try sbd.events(s.id, after: mark).contains { $0.kind == "stopped" } }
+  }
+
   @Test func aClaudeThatIsExitingAfterItsSessionEndedStaysNotLive() throws {
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 8)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     // A tick sees the exiting claude first. Then the clock passes the 10 s that a claude may run without a SessionStart.
     sleep(1)
     try sbd.advanceClock(15_000)
@@ -106,6 +156,7 @@ import Testing
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h", "--then", "notify")
+    try sbd.passIdleStop(s.id)
     try sbd.waitFor("the stop's SessionEnd", timeout: 10) {
       try sbd.events(s.id).contains { $0.kind == "SessionEnd" }
     }
@@ -127,7 +178,7 @@ import Testing
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
     try sbd.sb("done", s.id)
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     sleep(1)
     let after = try sbd.get(s.id)
@@ -177,7 +228,7 @@ import Testing
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex", "--until", "1d")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(25 * WaitTests.hourMs)
     let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
     #expect(due.reason == "ask Alex: time to recheck")
