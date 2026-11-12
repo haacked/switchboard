@@ -132,18 +132,27 @@ public enum MarkdownBlock: Equatable, Sendable {
   case footnotes([Footnote])
 
   public static func parse(_ markdown: String) -> [MarkdownBlock] {
+    withDocument(markdown) { blocks(of: $0, depth: 0) } ?? []
+  }
+
+  /// Parses `markdown` and passes the document to `body`, or returns nil when cmark-gfm fails.
+  private static func withDocument<T>(
+    _ markdown: String, options: Int32 = 0, _ body: (Node) -> T
+  ) -> T? {
     _ = registered
     // A single tilde means "about" in replies, such as "~5 min", so only a
     // double tilde strikes text through.
-    guard let parser = cmark_parser_new(CMARK_OPT_FOOTNOTES | CMARK_OPT_STRIKETHROUGH_DOUBLE_TILDE) else { return [] }
+    guard let parser = cmark_parser_new(options | CMARK_OPT_FOOTNOTES | CMARK_OPT_STRIKETHROUGH_DOUBLE_TILDE) else {
+      return nil
+    }
     defer { cmark_parser_free(parser) }
     for name in ["table", "strikethrough", "tasklist", "autolink"] {
       if let syntax = cmark_find_syntax_extension(name) { cmark_parser_attach_syntax_extension(parser, syntax) }
     }
     cmark_parser_feed(parser, markdown, markdown.utf8.count)
-    guard let document = cmark_parser_finish(parser) else { return [] }
+    guard let document = cmark_parser_finish(parser) else { return nil }
     defer { cmark_node_free(document) }
-    return blocks(of: document, depth: 0)
+    return body(document)
   }
 
   /// cmark-gfm registers its extensions in a global list without a lock, so
@@ -297,6 +306,49 @@ public enum MarkdownBlock: Equatable, Sendable {
   }
   private static func literal(_ node: Node) -> String { string(cmark_node_get_literal(node)) }
   private static func string(_ c: UnsafePointer<CChar>?) -> String { c.map { String(cString: $0) } ?? "" }
+}
+
+extension MarkdownBlock {
+  /// The block quotes and code blocks of `markdown`, in order, as a copy button copies them. A code block inside
+  /// a quote is part of the quote.
+  public static func sourceBlocks(in markdown: String) -> [SourceBlock] {
+    // Swift reads "\r\n" as one character. cmark-gfm counts it as one line break.
+    let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+    var found: [SourceBlock] = []
+    func walk(_ parent: Node, depth: Int) {
+      guard depth <= maxDepth else { return }
+      for node in children(parent) {
+        switch kind(node) {
+        case "code_block":
+          var text = literal(node)
+          if text.hasSuffix("\n") { text.removeLast() }
+          found.append(SourceBlock(kind: .code, text: text))
+        case "block_quote":
+          let first = Int(cmark_node_get_start_line(node)) - 1
+          let last = min(Int(cmark_node_get_end_line(node)), lines.count) - 1
+          guard first >= 0, first <= last else { continue }
+          let column = Int(cmark_node_get_start_column(node)) - 1
+          let text = (first...last).map { quoteLine(lines[$0], column: column, opening: $0 == first) }
+          found.append(SourceBlock(kind: .quote, text: text.joined(separator: "\n")))
+        default:
+          walk(node, depth: depth + 1)
+        }
+      }
+    }
+    withDocument(markdown, options: CMARK_OPT_SOURCEPOS) { walk($0, depth: 0) }
+    return found
+  }
+
+  /// A quote's line without its container's prefix, its `>`, and the one space after that. The prefix is the
+  /// `column` characters before the quote, such as a list item's marker on the quote's first line or its
+  /// indent on the others. A lazy continuation line has no `>` and keeps only its text.
+  private static func quoteLine(_ line: Substring, column: Int, opening: Bool) -> String {
+    let prefix = opening ? column : min(column, line.prefix { $0 == " " }.count)
+    let rest = line.dropFirst(prefix).drop { $0 == " " }
+    guard rest.first == ">" else { return String(rest) }
+    let body = rest.dropFirst()
+    return String(body.first == " " ? body.dropFirst() : body)
+  }
 }
 
 /// Collects a container's blocks, and nests the blocks between an HTML
