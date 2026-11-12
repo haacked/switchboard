@@ -91,7 +91,7 @@ final class BoardModel: ObservableObject {
   /// The newest events of the sessions whose card details the Inbox showed,
   /// oldest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
-  /// Each group chat's last messages, by group id, read while its pane shows.
+  /// Each chat's last messages, by session id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
@@ -893,15 +893,16 @@ final class BoardModel: ObservableObject {
 
   nonisolated static let recentEventCount = 10
 
-  /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
-  func loadChatLog(_ group: String) {
-    let client = client
+  /// Reads the session's chat messages from its transcript, which can be large, so off the main thread.
+  func loadChatLog(_ session: String) {
+    let send = send
     poller.async {
-      let messages = try? client.call("chat-log", ["group": .string(group)], as: [ChatMessage].self)
+      let messages = try? JSONCoding.convert(
+        send("chat-log", ["session": .string(session)]), to: [ChatMessage].self)
       Task { @MainActor in
         // A failed first read shows an empty log, so the pane stops showing that it is loading.
-        if let messages = messages ?? (self.chatLogs[group] == nil ? [] : nil), self.chatLogs[group] != messages {
-          self.chatLogs[group] = messages
+        if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
+          self.chatLogs[session] = messages
         }
       }
     }

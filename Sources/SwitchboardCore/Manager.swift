@@ -22,6 +22,12 @@ public enum Manager {
     return line.isEmpty ? untitled : String(line.prefix(maxNameLength))
   }
 
+  /// Names a conversation's MCP servers for the user. `nil` is the full setup.
+  public static func serversText(_ servers: [String]?) -> String {
+    guard let servers else { return "every MCP server (the full setup)" }
+    return servers.isEmpty ? "switchboard only" : "switchboard, " + servers.joined(separator: ", ")
+  }
+
   /// The CLAUDE.md that sbd keeps in the Manager's folder. It is a prompt for
   /// a model, so it stays short, and every `sb` command in it exists.
   public static let guide = """

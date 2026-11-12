@@ -25,6 +25,18 @@ struct NewSessionView: View {
     func offer(_ repos: [KnownRepo]?) {
       if !picked { repo = repos?.first }
     }
+
+    /// The `new` request for the form's fields, or nil without a repository. Blank fields are left out.
+    func request(worktree: Bool) -> NewSession? {
+      guard let repo else { return nil }
+      func optional(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+      }
+      return NewSession(
+        path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
+        prompt: optional(prompt), account: optional(account))
+    }
   }
 
   @EnvironmentObject var model: BoardModel
@@ -81,17 +93,8 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    guard let repo = form.repo else { return }
-    let worktree = createWorktree
-    func optional(_ s: String) -> String? {
-      let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-      return t.isEmpty ? nil : t
-    }
-    model.create(
-      NewSession(
-        path: repo.path, branch: worktree ? optional(form.branch) : nil, name: optional(form.name),
-        worktree: worktree,
-        prompt: optional(form.prompt), account: optional(form.account)))
+    guard let request = form.request(worktree: createWorktree) else { return }
+    model.create(request)
   }
 }
 

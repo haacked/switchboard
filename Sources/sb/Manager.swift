@@ -10,7 +10,7 @@ func manager(_ a: Args) {
     let result = call("manager-ls")
     if a.json { return printJSON(result) }
     for s in decode(result, as: [SessionSummary].self) {
-      print("\(s.id)  \(s.name)  \(s.state.title)  \(serversText(s.mcp))".printable)
+      print("\(s.id)  \(s.name)  \(s.state.title)  \(Manager.serversText(s.mcp))".printable)
     }
     return
   case "mcp":
@@ -50,13 +50,8 @@ private func managerMCP(_ a: Args, _ words: [String]) {
   let result = call("manager-mcp", args)
   if a.json { return printJSON(result) }
   let servers = result["servers"]?.array.map { $0.compactMap(\.string) }
-  print("\(result["name"]?.string ?? ref): \(serversText(servers))".printable)
+  print("\(result["name"]?.string ?? ref): \(Manager.serversText(servers))".printable)
   if result["pending"]?.bool == true { print("Claude restarts with them when its turn ends.") }
   let available = result["available"]?.array?.compactMap(\.string) ?? []
   if !available.isEmpty { print("Servers you can add: \(available.joined(separator: ", "))") }
-}
-
-private func serversText(_ servers: [String]?) -> String {
-  guard let servers else { return "every MCP server (the full setup)" }
-  return servers.isEmpty ? "switchboard only" : "switchboard, " + servers.joined(separator: ", ")
 }

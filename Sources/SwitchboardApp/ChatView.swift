@@ -6,47 +6,19 @@ import SwitchboardCore
 struct ChatView: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  let group: String
-
-  private var messages: [ChatMessage] { model.chatLogs[group] ?? [] }
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 8) {
-        Text(session.name).fontWeight(.medium)
-        StateBadge(state: session.state)
-        Spacer()
-        Toggle("Terminal", isOn: $model.showingTerminal)
-          .toggleStyle(.button)
-          .help("Show the chat's Claude terminal and shell in place of its messages")
-      }
-      .padding(10)
+      ChatHeader(session: session)
       Divider()
       if model.showingTerminal {
         SessionView(session: session)
       } else {
-        ScrollViewReader { proxy in
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-              if model.chatLogs[group] == nil {
-                ProgressView().controlSize(.small)
-              } else if messages.isEmpty {
-                Text("No messages yet. Ask the chat about this group's sessions.").foregroundStyle(.secondary)
-              }
-              ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
-                ChatBubble(message: message).id(index)
-              }
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-          }
-          // The scroll follows the last message, because the count stops changing once the log is full.
-          .onChange(of: messages.last, initial: true) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
-        }
+        ChatMessages(log: model.chatLogs[session.id])
         Divider()
         // The Inbox leaves out a chat's cards, such as a group message that waits for the user, so they show here.
         CardList(cards: session.cards)
-        let proposals = model.planProposals.filter { $0.group == group }
+        let proposals = session.chat.map { g in model.planProposals.filter { $0.group == g } } ?? []
         if !proposals.isEmpty { PlanProposalList(proposals: proposals) }
         MessageField(
           session: session.id, draft: model.messageDraft(for: session),
@@ -56,7 +28,52 @@ struct ChatView: View {
       }
     }
     // A tool call changes lastActivity, so the log reloads only when the reply or the state changes.
-    .task(id: "\(session.lastReply?.count ?? 0)/\(session.state)/\(session.since)") { model.loadChatLog(group) }
+    .task(id: "\(session.lastReply?.count ?? 0)/\(session.state)/\(session.since)") { model.loadChatLog(session.id) }
+  }
+}
+
+private struct ChatHeader: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Text(session.name).fontWeight(.medium)
+      StateBadge(state: session.state)
+      Spacer()
+      Toggle("Terminal", isOn: $model.showingTerminal)
+        .toggleStyle(.button)
+        .help("Show the chat's Claude terminal and shell in place of its messages")
+    }
+    .padding(10)
+  }
+}
+
+/// The chat's messages, or a spinner while `log` is nil because the log has not loaded.
+private struct ChatMessages: View {
+  let log: [ChatMessage]?
+
+  private var messages: [ChatMessage] { log ?? [] }
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          if log == nil {
+            ProgressView().controlSize(.small)
+          } else if messages.isEmpty {
+            Text("No messages yet. Ask the chat about this group's sessions.").foregroundStyle(.secondary)
+          }
+          ForEach(Array(messages.enumerated()), id: \.offset) { index, message in
+            ChatBubble(message: message).id(index)
+          }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      // The scroll follows the last message, because the count stops changing once the log is full.
+      .onChange(of: messages.last, initial: true) { proxy.scrollTo(messages.count - 1, anchor: .bottom) }
+    }
   }
 }
 
