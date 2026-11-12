@@ -37,12 +37,13 @@ public final class Server {
 
   private func serve(_ client: Int32) {
     defer { close(client) }
+    let caller = Caller.client(pid: UnixSocket.peerPid(client))
     var reader = UnixSocket.LineReader(fd: client, maxLineBytes: maxLineBytes)
     while let line = try? reader.next() {
       if line.isEmpty { continue }
       let response: Response
       if let request = try? JSONCoding.decoder.decode(Request.self, from: line) {
-        response = service.handle(request, origin: origin) { UnixSocket.peerClosed(client) }
+        response = service.handle(request, origin: origin, caller: caller) { UnixSocket.peerClosed(client) }
       } else {
         response = .failure("can't parse the request")
       }

@@ -1,0 +1,83 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   /…/00000000-0000-0000-0000-000000000000/scratchpad/cap/home/dev/worktrees/switchboard/someone/org-filter · /rc            
+
+
+❯ Read src.md in this folder with the Read tool. Then use the Write tool to create the file                                                        
+  /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/scratchpad/cap/h 
+  ome/.claude-automation/projects/-Users-someone-dev-someone-switchboard/memory/org-filter-status.md with exactly the content of src.md, byte for  
+  byte. Then reply DONE.                                                                                                                           
+
+  Read 1 file, ran 1 shell command 
+
+⏺ Write(/private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-0…/org-filter-status.md)
+  ⎿  Wrote 20 lines to /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-0000
+     00000000/scratchpad/cap/home/.claude-automation/projects/-Users-someone-dev-someone-switchboard/memory/org-filter-status.md
+       1 ---
+       2 name: org-filter-status
+       3 description: App-wide GitHub org filter merged 2026-11-11 (PR #223); open follow-ups listed
+       4 metadata:
+       5   type: project
+       6 ---
+       7 
+       8 The app-wide GitHub org filter merged on 2026-11-11 as PR #223. It shares board-repo-grouping's `SessionSummary.repository` derivat
+         ion (origin remote of the main checkout) and adds `repositoryRead`, so the app never hides a session whose org sbd hasn't read.
+       9 
+     … +11 lines 
+  ⎿  Allowed by auto mode
+
+  Ran 1 shell command     
+
+⏺ DONE                                                               
+                                                                                                   
+✻ Sautéed for 15s · done 3:49 PM
+
+❯ Now use the Write tool to create the file                                                                                                        
+  /Users/someone/.claude-automation/projects/-private-tmp-claude-501--Users-someone-dev-worktrees-switchboard-someone-write-create-card-00000000-0 
+  000-0000-0000-000000000000-scratchpad-cap-home-dev-worktrees-switchboard-someone-org-filter/memory/org-filter-status.md with exactly the content 
+  of src.md, byte for byte. Do not create the folder first. Then reply DONE.                                                                       
+
+⏺ Writing ~/.claude-automation/projects/-private-tmp-claude-501--Users-someone-dev-worktrees-switchboard-someone-write-create-card-00000000-0000-00
+  00-0000-000000000000-scratchpad-cap-home-dev-worktrees-switchboard-someone-org-filter/memory/org-filter-status.md
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file                                                                                                                                      
+ …te-create-card-00000000-0000-0000-0000-000000000000-scratchpad-cap-home-dev-worktrees-switchboard-someone-org-filter/memory/org-filter-status.md
+ This will modify [+92 chars] …oard-someone-write-create-card-00000000-0000-0000-0000-000000000000-scratchpad-cap-home-dev-worktrees-switchboard-s
+ omeone-org-filter/memory/org-filter-status.md (outside working directory) via a symlink
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   1 ---                    
+   2 name: org-filter-status                                                                    
+   3 description: App-wide GitHub org filter merged 2026-11-11 (PR #223); open follow-ups listed
+   4 metadata:      
+   5   type: project
+   6 ---
+   7                                                                                                                                            
+   8 The app-wide GitHub org filter merged on 2026-11-11 as PR #223. It shares board-repo-grouping's `SessionSummary.repository` derivation (ori
+     gin remote of the main checkout) and adds `repositoryRead`, so the app never hides a session whose org sbd hasn't read.
+   9                                                                                                                                 
+  10 **Why:** The user asked to narrow every session view to one org or a few. The filter only hides sessions, and they keep running.
+  11                                                                                                                                            
+  12 **How to apply:** New views that list sessions should read `BoardModel.sessions`, `followups`, or `board`, which the filter already applies
+      to. A lookup of one session by id should read `allSessions` or `allBoard`. A destructive action should check `removableIDs` (see `DoneRemo
+     val.swift`). Open items left for the user:         
+  13 - At 900 pt the toolbar overflows into its chevron.                      
+  14 - `sb ls --org` also lists the Manager, group chats, and unread sessions.
+  15 - A failed git read counts as Local.          
+  16 - Merge All and Send All have no filter tests.
+  17 - VoiceOver labels on the popover rows.
+  18                                                               
+  19 Related: [[decision-wizard-status]], [[group-account-status]].
+  20                                                                                                                                               
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create org-filter-status.md?                                                                                                     
+ ❯ 1. Yes                                                                                                                                          
+   2. No
+                                                                                                                                                 
+ Esc to cancel · Tab to amend
+
+
+                                                                                                                                                 
+                                                     

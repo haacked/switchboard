@@ -10,13 +10,16 @@ extension Service {
   /// `confirmed`, it removes each of `targets` that is still a removable Done
   /// session and returns a `DoneRemovalResult`. A target that fails is
   /// skipped with `rm`'s message, and the rest continue. git runs off the
-  /// state queue, as it does for `rm`.
-  func removeDone(_ args: JSON) throws -> JSON {
+  /// state queue, as it does for `rm`. Both steps skip a session whose
+  /// worktree would go when the caller runs inside it, as `rm` refuses it.
+  func removeDone(_ args: JSON, caller: Caller) throws -> JSON {
     let worktree = args["worktree"]?.bool == true
     let remoteBranch = args["remote_branch"]?.bool == true
+    let ancestry = worktree ? try caller.ancestry(command: "sb rm --worktree") : nil
     guard args["confirmed"]?.bool == true else {
       let ids = queue.sync { summaries().filter(\.isRemovableDone).map(\.id) }
-      return try JSON(encoding: planDoneRemoval(ids, worktree: worktree, remoteBranch: remoteBranch))
+      return try JSON(
+        encoding: planDoneRemoval(ids, worktree: worktree, remoteBranch: remoteBranch, ancestry: ancestry))
     }
     guard let targets = args["targets"]?.array?.compactMap(\.string) else {
       throw APIError("rm-done needs targets with confirmed")
@@ -24,7 +27,7 @@ extension Service {
     var result = DoneRemovalResult(removed: [], skipped: [], partial: [])
     for id in targets {
       let target: DoneTarget
-      switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch) {
+      switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch, ancestry: ancestry) {
       case .failure(let skip):
         result.skipped.append(skip.skip)
         continue
@@ -32,10 +35,11 @@ extension Service {
         target = found
       }
       do {
-        _ = try remove([
-          "session": .string(id), "worktree": .bool(target.worktree), "branch": .bool(target.branch),
-          "remote_branch": .bool(target.remoteBranch),
-        ])
+        _ = try remove(
+          [
+            "session": .string(id), "worktree": .bool(target.worktree), "branch": .bool(target.branch),
+            "remote_branch": .bool(target.remoteBranch),
+          ], caller: caller)
         result.removed.append(id)
       } catch {
         let skip = DoneRemovalPlan.Skip(id: id, name: target.session.name, reason: "\(error)")
@@ -54,9 +58,11 @@ extension Service {
   /// Sorts the sessions into those that `rm` would remove and those it
   /// refuses, by running `rm`'s checks. The checks only read git, so they run
   /// concurrently.
-  private func planDoneRemoval(_ ids: [String], worktree: Bool, remoteBranch: Bool) -> DoneRemovalPlan {
+  private func planDoneRemoval(_ ids: [String], worktree: Bool, remoteBranch: Bool, ancestry: Set<Int>?)
+    -> DoneRemovalPlan
+  {
     let outcomes: [Result<DoneRemovalPlan.Item, Skipped>] = concurrentMap(ids) { id in
-      switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch) {
+      switch doneTarget(id, worktree: worktree, remoteBranch: remoteBranch, ancestry: ancestry) {
       case .failure(let skipped):
         return .failure(skipped)
       case .success(let t):
@@ -112,8 +118,11 @@ extension Service {
 
   /// The arguments of the Done delete icon's `rm` for the session, without
   /// running git. A session that is gone or no longer a removable Done
-  /// session fails with the reason.
-  private func doneTarget(_ id: String, worktree: Bool, remoteBranch: Bool) -> Result<DoneTarget, Skipped> {
+  /// session fails with the reason, and so does a session whose worktree
+  /// would go while the caller runs inside it.
+  private func doneTarget(_ id: String, worktree: Bool, remoteBranch: Bool, ancestry: Set<Int>?) -> Result<
+    DoneTarget, Skipped
+  > {
     queue.sync {
       guard let e = entries[id] else {
         return .failure(Skipped(skip: .init(id: id, name: id, reason: "\(id) no longer exists")))
@@ -129,6 +138,9 @@ extension Service {
         return .failure(Skipped(skip: .init(id: id, name: s.name, reason: reason)))
       }
       let removesWorktree = worktree && s.repo != nil
+      if removesWorktree, let refusal = insideRefusal(id, ancestry, command: "sb rm --worktree") {
+        return .failure(Skipped(skip: .init(id: id, name: s.name, reason: "\(refusal)")))
+      }
       let removesBranch = removesWorktree && s.branch != nil && e.facts.pr?.state == .merged
       return .success(
         DoneTarget(

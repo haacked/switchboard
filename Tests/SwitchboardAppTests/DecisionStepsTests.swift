@@ -122,7 +122,7 @@ private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
 
 @Suite struct DecisionStepsKeys {
   /// Every combination of Command, Option, and Control, with and without Shift, that has at least one of the three.
-  static let commandOptionOrControl: [EventModifiers] = MessageKeyTests.allModifiers.filter {
+  static let commandOptionOrControl: [EventModifiers] = ReturnKeyTests.allModifiers.filter {
     !$0.isDisjoint(with: [.command, .option, .control])
   }
 

@@ -213,7 +213,9 @@ extension Instance {
   @Test func aPRThatOnlyTheBoxesTranscriptNamesDoesNotLetCleanupRun() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
-    let (_, origin) = try sbd.makeBoxRepoWithOrigin(url: "https://github.com/haacked/elsewhere.git")
+    let (repo, origin) = try sbd.makeBoxRepoWithOrigin(url: "https://github.com/haacked/elsewhere.git")
+    // A transcript's PR counts only in a repo that a remote names.
+    try sbd.git(repo, "remote", "add", "mirror", "https://github.com/PostHog/posthog.git")
     let s = try sbd.startBoxWorktree(branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")

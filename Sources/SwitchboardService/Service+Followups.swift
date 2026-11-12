@@ -164,6 +164,7 @@ extension Service {
       }
     }
     let folder = try prepareFolder(NewSession(path: repo, branch: branch, base: args["base"]?.string), at: mac)
+    rememberRepo(folder.cwd, used: nowMs())
     awaitMCPServers()
     return try queue.sync {
       try update(session.id) { s in

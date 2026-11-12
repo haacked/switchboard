@@ -164,6 +164,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// The users and teams that GitHub asked to review as code owners, as
   /// `@login` or `@org/team`. nil when the poll did not read every request.
   public var codeOwnerRequests: [String]?
+  /// The size, review threads, and description that the merge card shows.
+  /// The poller sets them, like `codeOwners`, from a read at the current head
+  /// commit. It reads them only while the PR is at a merge decision.
+  public var mergeDetails: MergeDetails?
 
   public init(
     id: String, number: Int, url: String, repo: String, title: String = "", state: PRState = .open,

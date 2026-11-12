@@ -220,7 +220,10 @@ private func recording<V: View>(_ view: V, model: BoardModel, into opened: Opene
   let opened = OpenedURLs()
 
   @Test func pressOnTheOnlyLinkOpensThePROnce() throws {
-    let hosted = HostedView(recording(SessionRow(session: session(.https)), model: offlineModel(), into: opened))
+    let hosted = HostedView(
+      recording(
+        SessionRow(session: session(.https), activeAccount: ClaudeAccount.defaultFolder), model: offlineModel(),
+        into: opened))
     #expect(hosted.prLinks.map(\.label) == [prLabel])
 
     try #require(hosted.prLinks.first).press()

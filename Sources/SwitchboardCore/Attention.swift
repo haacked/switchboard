@@ -106,6 +106,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// current turn, and the id of its event.
   public var sessionSummary: TriageSummary?
   public var sessionSummaryId: Int64 = 0
+  /// The model's summary of the PR for the merge card, from the last
+  /// `mergeBrief` event that has one.
+  public var mergeBrief: MergeBrief?
   /// When sbd called the model for a summary, within the last hour.
   public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
@@ -314,6 +317,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     }
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
+    applyMergeBrief(event)
     applyDecisions(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
@@ -369,6 +373,9 @@ public struct Verdict: Equatable, Sendable {
   public var callouts: [Callout] = []
   /// The card's summary for a rule that has more to say than its reason.
   public var summary: String?
+  /// True for the verdicts that ask the user to merge or enqueue the PR,
+  /// whose summary says what the PR does.
+  public var summarizesPR = false
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }

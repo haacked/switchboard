@@ -59,12 +59,13 @@ func followup(_ a: Args) {
   }
 }
 
-/// Prints the sessions by state, and how many follow-ups haven't started,
-/// which `ls` leaves out. An older sbd without `followup-ls` prints no count.
-func printSessionList(_ sessions: [SessionSummary]) {
+/// Prints the sessions by state, and how many follow-ups that `filter` shows
+/// haven't started, which `ls` leaves out. An older sbd without `followup-ls`
+/// prints no count.
+func printSessionList(_ sessions: [SessionSummary], filter: OrgFilter) {
   printTable(sessions)
   let listed = try? client.call("followup-ls", as: [SessionSummary].self)
-  let followups = (listed ?? []).filter { $0.state == .notStarted }.count
+  let followups = (listed ?? []).filter { $0.state == .notStarted && filter.shows($0) }.count
   if followups > 0 {
     print(
       "\n\(followups) \(followups == 1 ? "follow-up hasn't" : "follow-ups haven't") started. sb followup ls lists them."

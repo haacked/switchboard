@@ -108,7 +108,8 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
 @Suite struct ClaudeScreenDialog {
   @Test(arguments: [
     "perm-open", "perm-down", "q-open", "edit-open", "edit-down", "edit-multi", "write-open", "write-overwrite",
-    "write-long", "read-open",
+    "write-long", "read-open", "write-memory", "write-cut-path", "write-symlink", "write-overwrite-symlink",
+    "edit-symlink", "read-symlink",
   ])
   func anOpenDialogEndsAtItsFooter(_ fixture: String) throws {
     #expect(try dialog(fixture).last?.contains("Esc to cancel") == true)

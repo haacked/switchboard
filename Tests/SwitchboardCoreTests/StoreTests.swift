@@ -135,6 +135,32 @@ func tempFolder() throws -> String {
     try store.delete(claudeSession: "u2")
     #expect(try store.claudeSessions() == [one])
   }
+
+  @Test func rememberKeepsTheLaterUseOfARepo() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try store.remember(repo: "/dev/alpha", used: 5)
+      try store.remember(repo: "/dev/beta", used: 6)
+      try store.remember(repo: "/dev/alpha", used: 9)
+      try store.remember(repo: "/dev/alpha", used: 7)
+    }
+
+    let rows = try Store(path: "\(dir)/sb.db").knownRepos()
+
+    #expect(Dictionary(uniqueKeysWithValues: rows.map { ($0.path, $0.used) }) == ["/dev/alpha": 9, "/dev/beta": 6])
+    #expect(rows.count == 2)
+  }
+
+  @Test func knownReposAreEmptyInANewDatabase() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.knownRepos().isEmpty)
+  }
 }
 
 @Suite struct ConfigTests {
@@ -160,6 +186,53 @@ func tempFolder() throws -> String {
     let store = try Store(path: "\(dir)/sb.db")
 
     #expect(try store.declinedSuggestions().isEmpty)
+  }
+
+  @Test func removeDeclinedDeletesOnlyTheNamedRows() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let kept = ["merge:g1:g2", "pab2cd:posthog/posthog#12", "prefix:posthog/posthog#12", "word:eachother", "word"]
+    let removed = ["word:each", "dependency:s1:g1", "scope:it's a \"scope\"; --:g1", "prefix:flag-evaluations:g1"]
+    for id in kept + removed { try store.decline(suggestion: id) }
+
+    try store.removeDeclined(Set(removed))
+
+    #expect(try Store(path: "\(dir)/sb.db").declinedSuggestions() == Set(kept))
+  }
+
+  @Test func removeDeclinedIgnoresAnIdThatIsNotDeclined() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+
+    try store.removeDeclined(["merge:g1:g3", "merge:g1", "merge:g1:g2:g3", "%", "merge:g1:g_"])
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
+  }
+
+  @Test func removeDeclinedWithNoIdsDeletesNothing() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+
+    try store.removeDeclined([])
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
+  }
+
+  @Test func aRemovedDeclineCanBeDeclinedAgain() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try store.decline(suggestion: "merge:g1:g2")
+    try store.removeDeclined(["merge:g1:g2"])
+
+    try store.decline(suggestion: "merge:g1:g2")
+
+    #expect(try store.declinedSuggestions() == ["merge:g1:g2"])
   }
 
   @Test func missingFieldsKeepTheirDefaults() throws {

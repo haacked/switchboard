@@ -1,8 +1,10 @@
 import AppKit
 import Foundation
+import SwiftUI
+import SwitchboardCore
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and opens that session's hover card a second after its card appears, because the card otherwise opens only on a real hover, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -16,6 +18,9 @@ import Foundation
 @MainActor
 enum Snapshot {
   static let opensDetails = ProcessInfo.processInfo.environment["SB_DETAILS"] != nil
+  static let orgFilter = OrgFilter(list: ProcessInfo.processInfo.environment["SB_ORG_FILTER"] ?? "")
+  static let opensRepoPicker = ProcessInfo.processInfo.environment["SB_REPO_PICKER"] == "open"
+  static let hoverSession = ProcessInfo.processInfo.environment["SB_HOVER"]
   static let searchQuery = ProcessInfo.processInfo.environment["SB_SEARCH"]
 
   static func start(_ model: BoardModel) {
@@ -29,12 +34,23 @@ enum Snapshot {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { model.selectNextNeedingYou() }
       }
     }
+    if hoverSession != nil { model.show(.board) }
     if env["SB_SHEET"] == "import" { model.showingImport = true }
+    if env["SB_SHEET"] == "new" { model.showingNew = true }
     if env["SB_SHEET"] == "search" { openSearch(model) }
     if env["SB_ACCOUNTS"] == "open" {
       openAccounts(
         model, choose: env["SB_ACCOUNTS_CHOOSE"], move: env["SB_ACCOUNTS_MOVE"] != nil,
         confirm: env["SB_ACCOUNTS_CONFIRM"])
+    }
+    if env["SB_ORGS"] == "open" {
+      Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
+        MainActor.assumeIsolated {
+          guard !model.allSessions.isEmpty else { return }
+          timer.invalidate()
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { model.showingOrgFilter = true }
+        }
+      }
     }
     if let path = env["SB_QUIT_FILE"] {
       Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
@@ -45,6 +61,7 @@ enum Snapshot {
     DraftSelfTest.start(model)
     ShellSelfTest.start(model)
     DropSelfTest.start(model)
+    KeySelfTest.start(model)
     guard let path = env["SB_SNAPSHOT"] else { return }
     NSApp.appearance = NSAppearance(named: env["SB_SNAPSHOT_APPEARANCE"] == "dark" ? .darkAqua : .aqua)
     let delay = Double(env["SB_SNAPSHOT_DELAY"] ?? "3") ?? 3
@@ -110,9 +127,10 @@ enum Snapshot {
       FileHandle.standardError.write(Data("snapshot: no window to draw\n".utf8))
       return
     }
-    // A popover's window is a child window of the window that presents it.
-    let popovers = (main.childWindows ?? []).filter(\.isVisible)
-    let windows = [main] + [main.attachedSheet].compactMap { $0 } + popovers
+    // A popover's window is a child window of the window that presents it, which is the main window or its sheet.
+    let sheet = main.attachedSheet
+    let popovers = ((main.childWindows ?? []) + (sheet?.childWindows ?? [])).filter { $0.isVisible && $0 != sheet }
+    let windows = [main] + [sheet].compactMap { $0 } + popovers
     let bounds = windows.reduce(main.frame) { $0.union($1.frame) }
     let scale = main.backingScaleFactor
     guard

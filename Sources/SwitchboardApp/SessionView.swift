@@ -147,7 +147,7 @@ struct SessionView: View {
     let id = session.id
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [model, ui] in
       // The Inbox shows a session without selecting it, so this finds the session by its id.
-      if let s = model.board.first(where: { $0.id == id }), s.shellClosed != true { ui.shellAttach += 1 }
+      if let s = model.allBoard.first(where: { $0.id == id }), s.shellClosed != true { ui.shellAttach += 1 }
     }
   }
 

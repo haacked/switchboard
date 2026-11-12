@@ -243,7 +243,6 @@ struct MessageField: View {
 
   private var field: some View {
     TextField("Message Claude…", text: $draft.text, axis: .vertical)
-      .lineLimit(1...4)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
       .onChange(of: focused) { focus.held = focused }
@@ -267,21 +266,7 @@ struct MessageField: View {
             .padding(.horizontal, 6).background(.background).padding(.trailing, 4).allowsHitTesting(false)
         }
       }
-      // The key handler does not see keypad Enter, which sends here. An input method that passes Return on after composing also sends here.
-      .onSubmit(send)
-      // The handler also takes key repeats. A held Shift+Return would otherwise reach onSubmit and send.
-      .onKeyPress(.return, phases: [.down, .repeat]) { press in
-        // SwiftUI calls this before the input method sees the key. The check for marked text has to happen here.
-        switch Self.keyAction(modifiers: press.modifiers, composing: TextInput.isComposing) {
-        case .send:
-          send()
-        case .newline:
-          Self.editor?.insertNewlineIgnoringFieldEditor(nil)
-        case nil:
-          return .ignored
-        }
-        return .handled
-      }
+      .sendsOnReturn(send)
   }
 
   private func chip(_ image: Draft.Image) -> some View {
@@ -327,22 +312,6 @@ struct MessageField: View {
   }
 
   final class Focus { var held = false }
-
-  private static var editor: NSTextView? { NSApp.keyWindow?.firstResponder as? NSTextView }
-
-  enum KeyAction { case send, newline }
-
-  /// What Return does in the field. Nil leaves the key to the field. On Return while composing, the
-  /// field confirms the input method's marked text. On Option+Return, it inserts a new line.
-  /// Command+Return reaches the Send button's shortcut.
-  static func keyAction(modifiers: EventModifiers, composing: Bool) -> KeyAction? {
-    guard !composing else { return nil }
-    switch modifiers.intersection([.shift, .command, .option, .control]) {
-    case []: return .send
-    case .shift: return .newline
-    default: return nil
-    }
-  }
 }
 
 /// Takes files dropped anywhere on the message field. AppKit gives a drag to the frontmost view that registered

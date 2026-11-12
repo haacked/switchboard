@@ -92,6 +92,7 @@ extension Service {
     try store.delete(session: id, resolving: checkTodos(id, resolving: resolving), onHost: entries[id]?.session.host)
     entries[id] = nil
     hostEvents[id] = nil
+    pruneDeclinedSuggestions()
   }
 
   /// Resolves an open to-do as the user, and records it in `resolved_todos`.

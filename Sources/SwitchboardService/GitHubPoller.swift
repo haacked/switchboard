@@ -55,6 +55,9 @@ final class GitHubPoller {
   /// What the poller knows about each plan document, by plan id.
   var trackedPlans: [String: TrackedPlan] = [:]
   var codeOwners = CodeOwnerReads()
+  /// Each PR's merge details, by node id, with the head commit they belong
+  /// to and when the poller read them.
+  var mergeDetails: [String: (head: String, read: Int64, details: MergeDetails)] = [:]
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -91,6 +94,15 @@ final class GitHubPoller {
     var prId: String?
     /// When the poller last looked the key up. nil until the first lookup.
     var lookedUp: Int64?
+    /// The lowercased owner/name of each GitHub remote in the repo's config.
+    /// It is empty outside git, until git first reads the config, and for a
+    /// repo with no GitHub remote. A failed read keeps the remotes of the
+    /// last good read.
+    var repositories: Set<String> = []
+
+    /// Whether a PR in `repo` can be the session's: one of the repo's
+    /// remotes names it, or no GitHub remote is known.
+    func allows(_ repo: String) -> Bool { repositories.isEmpty || repositories.contains(repo.lowercased()) }
   }
 
   /// The session's transcript and the PR of its last pr-link line.
@@ -205,6 +217,8 @@ final class GitHubPoller {
     let codeOwnersError = readCodeOwners(all: all, now: now, stats: &stats)
     applyCodeOwners()
     stats.trunkRuns = readTrunk(sessions, all: all, now: now)
+    let mergeDetailsError = readMergeDetails(sessions, now: now, stats: &stats)
+    applyMergeDetails()
     for s in sessions { stats.changed += record(s, all: all, now: now) ? 1 : 0 }
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
@@ -213,12 +227,14 @@ final class GitHubPoller {
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
     pruneCodeOwners()
+    pruneMergeDetails()
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
     if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
+    if let mergeDetailsError { result["mergeDetailsError"] = .string(mergeDetailsError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }
     let paused = max(graphQLPausedUntil, restPausedUntil)
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
@@ -252,7 +268,25 @@ final class GitHubPoller {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
+    let repositories = t.branch.repositories
     refreshBranch(&t.branch, cwd: s.cwd, at: site, all: all, now: now, configs: &shared.configs)
+    // A link that the old remotes refused can count under the new ones. A
+    // link that they allowed may not. The poller reads the transcript again
+    // from its start. It keeps a link that the new remotes still allow,
+    // because a link from before `/clear` is not in the current transcript.
+    if t.branch.repositories != repositories {
+      t.transcript.offset = 0
+      if case .number(let repo, _)? = t.transcript.link, !t.branch.allows(repo) {
+        t.transcript.link = nil
+        t.transcript.prId = nil
+        t.transcript.lookedUp = false
+      }
+    }
+    if let id = t.recordedPRId, let repo = prs[id]?.pr.repo ?? s.facts.pr.flatMap({ $0.id == id ? $0.repo : nil }),
+      !t.branch.allows(repo)
+    {
+      t.recordedPRId = nil
+    }
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
     // another.
@@ -268,7 +302,9 @@ final class GitHubPoller {
       t.transcript.folder = nil
       t.transcript.path = nil
     }
-    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, at: site, projects: &shared.projects)
+    readTranscript(
+      &t.transcript, configDir: s.configDir, cwd: s.cwd, at: site, projects: &shared.projects,
+      accepting: t.branch.allows)
     tracked[s.id] = t
   }
 
@@ -303,16 +339,24 @@ final class GitHubPoller {
     var key = head != nil ? b.key : nil
     let branch = head.flatMap { GitHub.branch(head: $0) }
     if let branch { b.name = branch }
-    if let branch, let common = b.commonDir {
+    if let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
       let repo = SitePath(common, at: site)
+      // git exits 1 when no key matches. A read that fails in another way keeps the last known remotes.
       if configs[repo] == nil {
-        configs[repo] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", Self.branchKeyConfig], at: site) ?? "")
+        let r = try? machine.run(site.git(), ["-C", cwd, "config", "--get-regexp", Self.branchKeyConfig])
+        if let r, r.status <= 1 {
+          configs[repo] = GitHub.gitConfig(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
       }
-      key = GitHub.branchKey(branch: branch, config: configs[repo]!) { remote in
-        // A remote's HEAD is a symbolic ref, which git never packs.
-        read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
-          GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
+      let config = configs[repo] ?? [:]
+      if configs[repo] != nil { b.repositories = GitHub.repositories(config: config) }
+      if let branch {
+        key = GitHub.branchKey(branch: branch, config: config) { remote in
+          // A remote's HEAD is a symbolic ref, which git never packs.
+          read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
+            GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
+          }
         }
       }
     }
@@ -352,7 +396,7 @@ final class GitHubPoller {
   /// looks only in the cwd's folder and that one.
   private func readTranscript(
     _ t: inout Transcript, configDir: String, cwd: String, at site: any SessionSite,
-    projects: inout [SitePath: [String]]
+    projects: inout [SitePath: [String]], accepting: (String) -> Bool
   ) {
     let machine = site.machine
     if t.path == nil {
@@ -368,7 +412,7 @@ final class GitHubPoller {
     guard let path = t.path, let size = machine.size(path), size != UInt64(t.offset) else { return }
     if size < UInt64(t.offset) { t.offset = 0 }
     guard let data = machine.read(path, from: UInt64(t.offset), count: nil), !data.isEmpty else { return }
-    let (link, consumed) = GitHub.lastPRLink(in: data)
+    let (link, consumed) = GitHub.lastPRLink(in: data, accepting: accepting)
     t.offset += consumed
     if let link, link != t.link {
       t.link = link
@@ -468,7 +512,7 @@ final class GitHubPoller {
       // A linked or recorded PR from another branch of the branch's repo
       // belongs to the session's earlier work. It no longer counts once
       // GitHub answers that the current branch has no PR. A PR in another
-      // repo still counts.
+      // repo that a remote names, such as a fork's upstream, still counts.
       if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
         let earlier = { (id: String?) -> Bool in
           guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
@@ -626,13 +670,17 @@ final class GitHubPoller {
           changed = true
         }
       }
-    } else if s.facts.pr != nil, t.branch.key != nil, t.branch.lookedUp != nil,
-      t.transcript.link == nil || t.transcript.lookedUp
-    {
-      // GitHub answered that the branch has no PR. Without a branch, as in a
-      // folder outside git, the session keeps the PR that it had.
-      event(s.id, "pr", ["pr": .null, "comments": []])
-      changed = true
+    } else if let pr = s.facts.pr {
+      let noRemoteNamesIt = !t.branch.allows(pr.repo)
+      let branchHasNoPR =
+        t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp)
+      // A session without a branch, as in a folder outside git or with HEAD
+      // detached, keeps its PR only while its remotes are unknown or one of
+      // them names the PR's repo.
+      if noRemoteNamesIt || branchHasNoPR {
+        event(s.id, "pr", ["pr": .null, "comments": []])
+        changed = true
+      }
     }
     return changed
   }

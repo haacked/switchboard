@@ -498,7 +498,7 @@ struct TriageClaudeTests {
     let result = try runCommand(
       claude, TriageSummarizer.arguments(model: "haiku"), input: Data(input.utf8), timeout: 120,
       cwd: NSTemporaryDirectory())
-    let summary = try TriageSummarizer.parse(result.stdout)
+    let summary = try TriageSummarizer.parse(result.stdout, reply: reply)
     print("Haiku wrote (\(summary.kind.rawValue)): \(summary.title)\n\(summary.summary)")
     return summary
   }
@@ -530,5 +530,28 @@ struct TriageClaudeTests {
     let summary = try summarize(reply)
     #expect(summary.kind != .decision)
     #expect(summary.options.isEmpty)
+  }
+
+  @Test func copiesAQuotedDraftAsTheReplyWroteIt() throws {
+    let message = """
+      Could someone from HogQL review https://github.com/PostHog/posthog/pull/131397? It needs a code-owner \
+      approval because it touches `posthog/hogql/flag_called_warnings.py` and `metadata.py`.
+
+      It narrows the SQL editor's `$feature_flag_called` warnings to queries that will fail once flag calls move \
+      to `flag_evaluations`. It doesn't change the swap or the union, and the warning code comes out once every \
+      org has moved.
+      """
+    let quoted = message.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
+    let summary = try summarize("Here's a draft you can paste:\n\n\(quoted)")
+    #expect(summary.drafts.map(\.text) == [message])
+  }
+
+  @Test func aReplyWithoutAMessageHasNoDraft() throws {
+    let reply = """
+      I pushed the fix to haacked/fix-retry. The commit message is "Fix the retry backoff".
+      CI is running.
+      """
+    #expect(try summarize(reply).drafts.isEmpty)
   }
 }

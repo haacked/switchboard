@@ -537,6 +537,36 @@ private func boardSession(
   return s
 }
 
+/// A work session in a checkout whose origin is `repository`, showing a PR in `pr`.
+private func laneSession(_ id: String, checkout: String, repository: String, pr: String?) -> SessionSummary {
+  var s = boardSession(id, .review)
+  s.checkout = checkout
+  s.repository = repository
+  s.pr = pr.map { PRSummary(PullRequest(id: "\($0)#1", number: 1, url: "https://github.com/\($0)/pull/1", repo: $0)) }
+  return s
+}
+
+/// The posthog checkout's sessions, one of which shows a switchboard PR, and
+/// a switchboard session.
+private let foreignPRSessions = [
+  laneSession("foreign", checkout: "/Users/me/dev/posthog", repository: "PostHog/posthog", pr: "haacked/switchboard"),
+  laneSession("withPR", checkout: "/Users/me/dev/posthog", repository: "PostHog/posthog", pr: "PostHog/posthog"),
+  laneSession("noPR", checkout: "/Users/me/dev/posthog", repository: "PostHog/posthog", pr: nil),
+  laneSession(
+    "switchboard", checkout: "/Users/me/dev/switchboard", repository: "haacked/switchboard", pr: "haacked/switchboard"),
+]
+
+private func permutations<T>(_ items: [T]) -> [[T]] {
+  guard let first = items.first else { return [[]] }
+  return permutations(Array(items.dropFirst())).flatMap { rest in
+    (0...rest.count).map { i in
+      var p = rest
+      p.insert(first, at: i)
+      return p
+    }
+  }
+}
+
 extension PipelineTests {
   @Suite struct Board {
     @Test func columnsAreEveryStageBeforeMerged() {
@@ -663,6 +693,16 @@ extension PipelineTests {
 
     @Test func noSessionsGiveNoLanes() {
       #expect(MergeBoard.repoLanes([], labels: [:]).isEmpty)
+    }
+
+    @Test(arguments: permutations(foreignPRSessions))
+    func lanesPutASessionWithAForeignPRInItsFoldersLaneWhateverTheOrder(_ sessions: [SessionSummary]) {
+      let labels = RepoLabels.labels(sessions, evenForOneRepo: true, fullName: true)
+
+      let lanes = MergeBoard.repoLanes(sessions, labels: labels)
+
+      #expect(lanes.map(\.title) == ["PostHog/posthog", "haacked/switchboard"])
+      #expect(lanes.map { Set($0.sessions.map(\.id)) } == [["foreign", "withPR", "noPR"], ["switchboard"]])
     }
   }
 }

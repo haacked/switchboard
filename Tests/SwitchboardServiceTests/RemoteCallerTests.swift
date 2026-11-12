@@ -463,7 +463,7 @@ private func withReadyService(
       let blocker = service.cleanupBlocker("s1", pr: merged())
       #expect(blocker == gone)
       do {
-        _ = try service.cleanup(["session": "s1"])
+        _ = try service.cleanup(["session": "s1"], caller: .inProcess)
         Issue.record("cleanup ran for a session whose folder is gone on its host")
       } catch {
         #expect("\(error)" == gone, "\(error)")
@@ -991,7 +991,7 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
     try withReadyService { b, service, facts in
       let (_, tree) = try addSession(b, service, facts)
 
-      _ = try? service.queue.sync { try service.beginPaneStop("s1") }
+      _ = try? service.queue.sync { try service.beginPaneStop("s1", ancestry: nil, command: "sb rm --worktree") }
 
       #expect(b.stillRuns(tree.child))
       #expect(b.runs(tree.pane))

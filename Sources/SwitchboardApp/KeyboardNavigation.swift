@@ -49,8 +49,11 @@ enum NavKey {
 }
 
 enum TextInput {
-  /// Whether an input method holds marked text in the key window's focused text view.
-  static var isComposing: Bool { (NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() == true }
+  /// The focused text view of the window that the current key went to. An app that is not active has no key window.
+  static var editor: NSTextView? { (NSApp.currentEvent?.window ?? NSApp.keyWindow)?.firstResponder as? NSTextView }
+
+  /// Whether an input method holds marked text in that text view.
+  static var isComposing: Bool { editor?.hasMarkedText() == true }
 }
 
 /// The list that ⌘L focuses.

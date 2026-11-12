@@ -9,16 +9,54 @@ struct PaneStop {
   var processes: Set<Int>
 }
 
+/// Who sent a request.
+public enum Caller: Sendable {
+  /// sbd itself, or a test that calls `handle` directly.
+  case inProcess
+  /// A client on sbd's socket, with the pid that the kernel recorded at connect, or nil when sbd couldn't read it.
+  case client(pid: Int?)
+
+  /// The client's pid and each of its parents, read live, or nil for `.inProcess`. A client
+  /// whose pid sbd can't read throws, because sbd then can't show that the client runs
+  /// outside the session that `command` would stop.
+  func ancestry(command: String) throws -> Set<Int>? {
+    guard case .client(let pid) = self else { return nil }
+    guard let pid, let ancestry = Processes.ancestors(of: pid) else {
+      throw APIError("sbd can't tell which process sent `\(command)`. Run it from a terminal outside the session.")
+    }
+    return ancestry
+  }
+}
+
 extension Service {
+  /// The pids of the session's Claude and shell panes that still run. It runs on the state queue.
+  func livePanePids(_ id: String) -> [Int] {
+    [Pane.claude, .shell].compactMap { paneRow(id, $0) }.filter { !$0.dead }.map(\.pid)
+      .filter(Processes.isValidPid)
+  }
+
+  /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
+  /// A stop would wait on such a caller, which waits on sbd, so the stop could never
+  /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. A client's ancestry holds pids
+  /// of this Mac, and a request from a host's socket is only a hook, so a client is never inside a session
+  /// on a host. The pids of such a session's panes belong to the host, so it returns nil for it.
+  func insideRefusal(_ id: String, _ ancestry: Set<Int>?, command: String) -> APIError? {
+    guard let ancestry, entries[id]?.session.host == nil,
+      !ancestry.isDisjoint(with: livePanePids(id))
+    else { return nil }
+    return APIError(
+      "`\(command)` runs inside \(id), so it would stop itself. Run it from a terminal outside the session.")
+  }
+
   /// Records every process below the session's panes, closes the shell pane,
   /// and sends SIGTERM to claude. It runs on the state queue, after `install`
-  /// of a fresh snapshot, because it reads the panes' processes from it. It
-  /// throws for a session on a host whose snapshot sbd can't read, because it
-  /// would then find no process to wait for.
-  func beginPaneStop(_ id: String) throws -> PaneStop {
+  /// of a fresh snapshot, because it reads the panes' processes from it. It throws for a session on a host
+  /// whose snapshot sbd can't read, because it would then find no process to wait for.
+  /// It first throws `insideRefusal` for a caller inside the session, so a refusal stops nothing.
+  func beginPaneStop(_ id: String, ancestry: Set<Int>?, command: String) throws -> PaneStop {
     try requireRead(id)
-    let pids = [Pane.claude, .shell].compactMap { paneRow(id, $0) }.filter { !$0.dead }.map(\.pid)
-    let processes = Processes.descendants(of: pids.filter(Processes.isValidPid), in: processChildren(of: id))
+    if let refusal = insideRefusal(id, ancestry, command: command) { throw refusal }
+    let processes = Processes.descendants(of: livePanePids(id), in: processChildren(of: id))
     try closePane(id, .shell, at: site(of: id))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {

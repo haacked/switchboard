@@ -5,7 +5,8 @@ let usage = """
   Usage: sb <command> [arguments] [--json]
 
   Sessions:
-    ls                            list sessions by state
+    ls [--org O1,O2] [--local]    list sessions by state, or only those in the
+                                  GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
         [--model M] [--account A] [--no-auto] [--host H]
                                   start a session in the folder, or in a new
@@ -188,10 +189,14 @@ let usage = """
                                   moves to it at its next launch. New sessions in
                                   the group use it, and a different --account is
                                   refused
-    group suggest [--accept <id> | --decline <id>]
-                                  list groups suggested from dependencies, branch
-                                  names, and PR titles, or accept or decline one.
-                                  A session that you placed by hand never moves
+    group suggest [--accept <id> | --decline <id> | --declined | --undecline <id>]
+                                  list at most 3 groups suggested from
+                                  dependencies, branch prefixes of two or more
+                                  words, and PR title scopes, or accept or decline
+                                  one. A session that you placed by hand never
+                                  moves, and a finished session joins nothing.
+                                  --declined lists the declined ids, and
+                                  --undecline lets one be suggested again
     chat <group> [<text> | --send <text>]
                                   open the group's chat, a session that manages
                                   the group's sessions, starting it the first
@@ -254,6 +259,10 @@ let usage = """
     host connect <host>           open the host's ssh link and keep it open. An
                                   open link keeps a devbox running
     host disconnect <host>        close the host's ssh link
+    repo [ls]                     list the repositories that the New Session
+                                  sheet offers, most recently used first
+    repo add <path>               add the repository that holds the folder. A
+                                  worktree adds its main checkout
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -295,8 +304,9 @@ struct Args {
       "--since", "--host",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
-      "--group", "--to", "--note", "--accept", "--decline", "--existing", "--send", "--pending", "--plan", "--text",
-      "--set", "--description", "--artifact", "--kind", "--version", "--limit",
+      "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
+      "--plan", "--text",
+      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -635,7 +645,19 @@ case "hook":
   hook()
 case "ls", "list":
   let result = call("ls")
-  if a.json { printJSON(result) } else { printSessionList(decode(result, as: [SessionSummary].self)) }
+  var filter = OrgFilter(list: (a.allValues["--org"] ?? []).joined(separator: ","))
+  if a.switches.contains("--local") { filter.insert(OrgFilter.localKey) }
+  if a.json && filter.isAll {
+    printJSON(result)
+  } else {
+    let shown = decode(result, as: [SessionSummary].self).filter(filter.shows)
+    if a.json {
+      let ids = Set(shown.map(\.id))
+      printJSON(.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false }))
+    } else {
+      printSessionList(shown, filter: filter)
+    }
+  }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
   // With --host, the folder is on the host, which resolves its ~. sb passes it as typed.
@@ -769,6 +791,8 @@ case "mcp-server":
   mcpServer(a)
 case "host":
   host(a)
+case "repo", "repos":
+  repo(a)
 case "autocontinue":
   autoContinue(a)
 case "live":

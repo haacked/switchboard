@@ -64,6 +64,15 @@ extension Service {
       }
       return try JSON(encoding: groupSummary(id))
     case "group-suggest":
+      let declinedGroupSuggestions = { DeclinedSuggestions.groupSuggestionIDs(try self.store.declinedSuggestions()) }
+      if args["declined"]?.bool == true { return try JSON(encoding: declinedGroupSuggestions()) }
+      if let id = args["undecline"]?.string {
+        guard try declinedGroupSuggestions().contains(id) else {
+          throw APIError("no declined suggestion \(id). List them with: sb group suggest --declined")
+        }
+        try store.removeDeclined([id])
+        return ["undeclined": .string(id)]
+      }
       let suggestions = try groupSuggestions()
       let accept = args["accept"]?.string
       guard let id = accept ?? args["decline"]?.string else { return try JSON(encoding: suggestions) }
@@ -145,6 +154,20 @@ extension Service {
     try store.delete(group: id)
     try detachPlans { $0.group == id }
     groups[id] = nil
+    pruneDeclinedSuggestions()
+  }
+
+  /// Deletes the declined ids that name a group or a session that sbd no
+  /// longer has. It logs a failure instead of throwing, because the caller's
+  /// own change is already done.
+  func pruneDeclinedSuggestions() {
+    do {
+      let gone = DeclinedSuggestions.prunable(
+        declined: try store.declinedSuggestions(), groups: Set(groups.keys), sessions: Set(entries.keys))
+      if !gone.isEmpty { try store.removeDeclined(gone) }
+    } catch {
+      logLine("groups: can't prune the declined suggestions: \(error)")
+    }
   }
 
   /// Moves the sessions into the group, or into no group, and marks them
@@ -187,11 +210,15 @@ extension Service {
   }
 
   func groupSuggestions() throws -> [GroupSuggestion] {
+    let now = nowMs()
     let candidates = entries.values.filter { groupable($0.session) }.map { e in
       GroupSuggestions.Candidate(
         id: e.session.id, branch: e.branch, prTitle: e.facts.pr?.title, group: e.session.group,
         placedByHand: e.session.placedByHand ?? false, repo: e.facts.pr?.repo, pr: e.facts.pr?.number,
-        dependencies: e.facts.dependencies)
+        dependencies: e.facts.dependencies,
+        finished: MergeBoard.isDone(
+          state: Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state,
+          stage: PipelineStage(e.facts.pr)))
     }
     return GroupSuggestions.make(
       candidates: candidates, groups: Array(groups.values), declined: try store.declinedSuggestions())

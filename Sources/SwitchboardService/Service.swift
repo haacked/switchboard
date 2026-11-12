@@ -52,6 +52,11 @@ public final class Service {
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
     var summaryAttempt: Int64 = 0
+    /// The PR and head commit whose merge brief this sbd last started or
+    /// skipped, as `#N@sha`. A head gets one call per run of sbd.
+    var mergeBriefAttempt: String?
+    /// Whether the budget skipped the brief of `mergeBriefAttempt`.
+    var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
 
@@ -95,6 +100,12 @@ public final class Service {
   var checkouts: [SitePath: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<SitePath> = []
+  /// The owner/name that the origin remote of each checkout names on GitHub,
+  /// or nil when it names none, with the time of the lookup. sbd reads a
+  /// checkout without one again after `checkoutRetryMs`.
+  var repositories: [SitePath: (repository: String?, readMs: Int64)] = [:]
+  /// The checkouts whose origin a lookup off the queue is reading.
+  var repositoryLookups: Set<SitePath> = []
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   /// The hook events of each session on a host that wait for their turn in id order, by session id.
@@ -229,6 +240,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
+    pruneDeclinedSuggestions()
     mac.snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain {
       // A transcript on a host can't be read before the host's link is up. The reconcile settles those.
@@ -239,7 +251,8 @@ public final class Service {
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
     for (id, e) in entries {
-      summarizeTurn(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+      let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
+      startSummaries(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -265,10 +278,12 @@ public final class Service {
   /// The requests that wait for the host of the session they name, and read its panes and processes first.
   static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
 
-  /// `origin` is the socket that the request arrived on. `hookGone` reports whether the client closed its
+  /// `origin` is the socket that the request arrived on. `caller` lets a request that stops a session's
+  /// panes refuse a client inside that session. `hookGone` reports whether the client closed its
   /// connection, which a held PermissionRequest checks while it waits.
   public func handle(
-    _ request: Request, origin: RequestOrigin = .mac, hookGone: @escaping () -> Bool = { false }
+    _ request: Request, origin: RequestOrigin = .mac, caller: Caller = .inProcess,
+    hookGone: @escaping () -> Bool = { false }
   ) -> Response {
     do {
       // A request from a host's socket ends here. It reaches no code below, so it can only be a hook, and
@@ -284,6 +299,10 @@ public final class Service {
         return try .success(JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self))))
       case "spawn":
         return try .success(JSON(encoding: spawn(request.args)))
+      case "repos":
+        return try .success(JSON(encoding: knownRepos()))
+      case "repo-add":
+        return try .success(JSON(encoding: addRepo(request.args)))
       case "manager":
         return managerRequest()
       case "chat":
@@ -291,11 +310,11 @@ public final class Service {
       case "chat-log":
         return .success(try chatLog(request.args))
       case "rm":
-        return .success(try remove(request.args))
+        return .success(try remove(request.args, caller: caller))
       case "cleanup":
-        return .success(try cleanup(request.args))
+        return .success(try cleanup(request.args, caller: caller))
       case "rm-done":
-        return .success(try removeDone(request.args))
+        return .success(try removeDone(request.args, caller: caller))
       case "merge":
         return .success(try mergeRequest(request.args))
       case "review":
@@ -615,7 +634,7 @@ public final class Service {
       entries[id] = e
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
-      summarizeTurn(id, verdict)
+      startSummaries(id, verdict)
     }
     releaseCards(id)
     return event
@@ -740,6 +759,37 @@ public final class Service {
     try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }
   }
 
+  /// The owner/name that the origin remote of `checkout` names on GitHub.
+  /// This returns nil until a lookup off the queue has read it.
+  func repository(_ checkout: String, of s: Session) -> String? {
+    let site = self.site(for: s)
+    let key = SitePath(checkout, at: site)
+    if let known = repositories[key],
+      known.repository != nil || !GitHub.elapsed(since: known.readMs, Self.checkoutRetryMs, now: nowMs())
+    {
+      return known.repository
+    }
+    if repositoryLookups.insert(key).inserted {
+      DispatchQueue.global().async { [self] in
+        let url = try? gitOutput(checkout, ["config", "--get", "remote.origin.url"], at: site)
+        let repository = url.flatMap(GitHub.repo(remoteURL:))
+        queue.async { [self] in
+          repositories[key] = (repository, nowMs())
+          repositoryLookups.remove(key)
+        }
+      }
+    }
+    return nil
+  }
+
+  /// Whether sbd has read the session's checkout and, when it has one, the
+  /// checkout's origin remote.
+  func repositoryRead(_ s: Session, checkout: String?) -> Bool {
+    let site = self.site(for: s)
+    if let checkout { return repositories[SitePath(checkout, at: site)] != nil }
+    return checkouts[SitePath(s.cwd, at: site)] != nil
+  }
+
   func lockedError(_ path: String) -> APIError {
     APIError("\(path) is a locked worktree, so git won't remove it. Unlock it with `git worktree unlock` first.")
   }
@@ -779,7 +829,9 @@ public final class Service {
     }
     let folder = try prepareFolder(args, at: mac)
     awaitMCPServers()
-    return try queue.sync { try create(args, folder) }
+    let summary = try queue.sync { try create(args, folder) }
+    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
+    return summary
   }
 
   /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
@@ -1276,7 +1328,9 @@ public final class Service {
   /// claude there, and it closes the host's panes from the host's answers
   /// before it forgets the session. A session whose host config.json no longer
   /// lists is forgotten only when its claude stopped on record.
-  func remove(_ args: JSON) throws -> JSON {
+  /// A removal of the worktree refuses a caller inside a session on this Mac before anything stops, as
+  /// `beginPaneStop` describes.
+  func remove(_ args: JSON, caller: Caller) throws -> JSON {
     let resolving = try resolveArgument(args)
     let removesWorktree = args["worktree"]?.bool == true
     let removesBranch = args["branch"]?.bool == true
@@ -1290,6 +1344,8 @@ public final class Service {
     let flags =
       (removesWorktree ? ["--worktree"] : []) + (removesBranch ? ["--delete-branch"] : [])
       + (removesRemoteBranch ? ["--delete-remote-branch"] : [])
+    let command = "sb rm --worktree"
+    let ancestry = removesWorktree ? try caller.ancestry(command: command) : nil
     do {
       let (session, pr, sharedWith, mayRun): (Session, PullRequest?, String?, Bool) = try queue.sync {
         let id = try lookup(args)
@@ -1345,12 +1401,12 @@ public final class Service {
             install(fresh, of: session)
             try scope.require()
             if session.host != nil { removing.insert(session.id) }
-            if removesWorktree { return try beginPaneStop(session.id) }
+            if removesWorktree { return try beginPaneStop(session.id, ancestry: ancestry, command: command) }
             try stopForRemoval(session, at: site)
             return nil
           }
           if let stop {
-            try finishPaneStop(session, stop, command: "sb rm --worktree")
+            try finishPaneStop(session, stop, command: command)
             (repo, branch, supacode, proven) = try checkRemoval(
               session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
               branch: removesBranch, at: at)
@@ -1878,7 +1934,7 @@ public final class Service {
         if var e = entries[id] {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
-          summarizeTurn(id, verdict)
+          startSummaries(id, verdict)
         }
       }
       runQueuedStarts(now: now)
@@ -1940,7 +1996,11 @@ public final class Service {
       waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
       openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
       markedDone: s.done)
-    if s.kind == .work { out.checkout = checkout(s) }
+    if s.kind == .work {
+      out.checkout = checkout(s)
+      out.repository = out.checkout.flatMap { repository($0, of: s) }
+      if repositoryRead(s, checkout: out.checkout) { out.repositoryRead = true }
+    }
     out.parent = s.parent
     out.manager = s.manager
     out.kind = s.kind

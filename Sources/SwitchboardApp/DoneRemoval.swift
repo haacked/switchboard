@@ -40,7 +40,21 @@ extension BoardModel {
   /// branch and the remote branch when the PR merged.
   nonisolated static let doneRemovalArgs: [String: JSON] = ["worktree": true, "remote_branch": true]
 
+  nonisolated static let unreadOrgReason = "sbd hasn't read its org yet"
+  nonisolated static let hiddenOrgReason = "hidden by the org filter"
+  nonisolated static let unlistedReason = "no longer listed"
+
+  /// Why Delete All may not remove the session now, or nil when it may.
+  func removalRefusal(_ id: String) -> String? {
+    if removableIDs.contains(id) { return nil }
+    if shownIDs.contains(id) { return Self.unreadOrgReason }
+    return allBoard.contains { $0.id == id } ? Self.hiddenOrgReason : Self.unlistedReason
+  }
+
   /// Asks sbd which Done sessions it would remove and which it would skip.
+  /// The plan leaves out the sessions that the org filter hides. Under a
+  /// filter, a shown session whose org sbd hasn't read yet moves from the
+  /// remove list to the skip list.
   func checkDoneRemoval() {
     guard doneRemoval == nil else { return }
     doneRemoval = .checking
@@ -49,7 +63,15 @@ extension BoardModel {
       then: { value in
         guard self.doneRemoval == .checking else { return }
         do {
-          self.doneRemoval = .confirming(try JSONCoding.convert(value, to: DoneRemovalPlan.self))
+          var plan = try JSONCoding.convert(value, to: DoneRemovalPlan.self)
+          let shown = self.shownIDs
+          let removable = self.removableIDs
+          let unreadIDs = shown.subtracting(removable)
+          let unread = plan.remove.filter { unreadIDs.contains($0.id) }
+          plan.remove.removeAll { !removable.contains($0.id) }
+          plan.skip.removeAll { !shown.contains($0.id) }
+          plan.skip += unread.map { .init(id: $0.id, name: $0.name, reason: Self.unreadOrgReason) }
+          self.doneRemoval = .confirming(plan)
         } catch {
           self.actionError = "rm-done: \(error)"
         }
@@ -67,6 +89,12 @@ extension BoardModel {
     Task.detached {
       var result = DoneRemovalResult(removed: [], skipped: plan.skip, partial: [])
       for (n, item) in plan.remove.enumerated() {
+        // A filter change after the plan can hide a session. The loop checks each one just before its send.
+        if let refusal = await MainActor.run(body: { self.removalRefusal(item.id) }) {
+          result.skipped.append(.init(id: item.id, name: item.name, reason: refusal))
+          await MainActor.run { self.doneRemoval = .removing(plan, done: n + 1) }
+          continue
+        }
         var args = Self.doneRemovalArgs
         args["confirmed"] = true
         args["targets"] = [.string(item.id)]

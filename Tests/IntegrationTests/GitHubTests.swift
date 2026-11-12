@@ -83,6 +83,31 @@ extension Instance {
   func transcript(_ s: SessionSummary) -> String {
     "\(claudeConfig)/projects/-somewhere-else/\(s.claudeSessionId).jsonl"
   }
+
+  /// A session in a PostHog/posthog checkout on a branch without a PR, whose
+  /// remote `review` names haacked/review-code, and whose transcript links
+  /// haacked/review-code#189. The poll links #189.
+  func sessionWithAPRLinkThroughASecondRemote() throws -> SessionSummary {
+    let s = try session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try git(s.cwd, "remote", "add", "review", "https://github.com/haacked/review-code.git")
+    try link(s, "haacked/review-code", 189)
+    try poll()
+    guard try get(s.id).pr?.number == 189 else { throw TestError(description: "the poll did not link #189") }
+    return s
+  }
+
+  /// Ends the session's conversation with `/clear`. The new conversation's
+  /// transcript links no PR.
+  func clear(_ s: SessionSummary) throws {
+    let next = UUID().uuidString.lowercased()
+    try sb("send", s.id, "clear \(next)")
+    try waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
+  }
+}
+
+extension FakeGitHub {
+  /// Every lookup key that the poller asked for.
+  var lookedUp: [String] { requests.filter { $0.kind == "lookup" }.flatMap(\.ids) }
 }
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct GitHubTests {
@@ -93,13 +118,13 @@ extension Instance {
     let result = try sbd.poll()
     #expect(result["lookups"]?.int == 1)
     #expect(result["polled"]?.int == 1)
-    #expect(result["points"]?.int == 3)
+    #expect(result["points"]?.int == 4)
     let after = try sbd.get(s.id)
     #expect(after.pr?.number == 18303)
     #expect(after.pr?.status == .approved)
     #expect(after.state == .readyToMerge)
     #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
-    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners"])
+    #expect(github.requests.map(\.kind) == ["lookup", "status", "codeowners", "mergeDetails"])
     #expect(github.requests.first?.ids == ["PostHog/charts:haacked/cdp-dlq-runbook-lookup-step"])
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
     #expect(
@@ -589,26 +614,344 @@ extension Instance {
     github.reply(401, #"{"message":"Bad credentials"}"#)
     try sbd.poll()
     #expect(
-      github.requests.map(\.authorization) == ["bearer token-1", "bearer token-2", "bearer token-2", "bearer token-2"])
+      github.requests.map(\.authorization) == [
+        "bearer token-1", "bearer token-2", "bearer token-2", "bearer token-2", "bearer token-2",
+      ])
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
-  /// A session on a branch without a PR keeps the PR that its conversation
-  /// linked in another repo, also after `/clear` and a restart of sbd.
-  @Test func keepsALinkedPRFromAnotherRepoAfterClearAndARestart() throws {
+  /// A session on a branch without a PR shows no PR that its conversation
+  /// linked in a repo that none of its remotes name, also after `/clear` and
+  /// a restart of sbd.
+  @Test func refusesALinkedPRFromARepoThatNoRemoteNamesAfterClearAndARestart() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
     try sbd.link(s, "haacked/review-code", 189)
     try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+    #expect(github.lookedUp.contains("PostHog/posthog:haacked/no-pr-yet"))
+    #expect(!github.lookedUp.contains("haacked/review-code#189"))
+    try sbd.clear(s)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr == nil)
+    #expect(!github.lookedUp.contains("haacked/review-code#189"))
+  }
+
+  @Test func clearsALinkedPRWhenItsRemoteIsRemoved() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr == nil)
+    // The clear is a pr event, which a restart reads back.
+    sbd.stopSbd()
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  /// The current transcript does not hold a link from before `/clear`, so a
+  /// reread after a remote change can't find it again.
+  @Test func keepsAPRLinkedBeforeClearWhenAnotherRemoteIsAdded() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    try sbd.clear(s)
+    try sbd.poll()
+
+    try sbd.git(s.cwd, "remote", "add", "fork", "https://github.com/haacked/posthog.git")
+    try sbd.poll()
+
     #expect(try sbd.get(s.id).pr?.number == 189)
-    let next = UUID().uuidString.lowercased()
-    try sbd.sb("send", s.id, "clear \(next)")
-    try sbd.waitFor(s.id, "the new conversation") { $0.claudeSessionId == next }
+    sbd.stopSbd()
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// A session that an older sbd linked to a PR from a repo that no remote
+  /// names loses it at the first poll of the new sbd.
+  @Test func clearsARecordedPRFromAnotherRepoAfterARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    sbd.stopSbd()
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    try sbd.startSbd()
+    #expect(try sbd.get(s.id).pr?.number == 189)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  @Test(arguments: [false, true])
+  func clearsAForeignPRWhileHEADIsDetached(restart: Bool) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    if restart { sbd.stopSbd() }
+    try sbd.git(s.cwd, "checkout", "-q", "--detach")
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    if restart { try sbd.startSbd() }
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  @Test func keepsTheRecordedPRWhenTheFolderIsGoneAcrossARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    // The new conversation links no PR, so only the recorded PR is left.
+    try sbd.clear(s)
+    sbd.stopSbd()
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.startSbd()
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  @Test func keepsALinkedPRWhenTheFolderIsGoneWhileSbdRuns() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+
+    try FileManager.default.removeItem(atPath: s.cwd)
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// git fails on a config that it can't read. A failed read keeps the
+  /// remotes that the last read found, and before any read the remotes are
+  /// unknown.
+  @Test(arguments: [false, true])
+  func keepsALinkedPRWhileGitCannotReadTheConfig(restart: Bool) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    let config = "\(s.cwd)/.git/config"
+    if restart { sbd.stopSbd() }
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: config)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: config) }
+    if restart { try sbd.startSbd() }
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  @Test func keepsRefusingAForeignLinkWhileGitCannotReadTheConfig() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.poll()
+    let config = "\(s.cwd)/.git/config"
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: config)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: config) }
+    try sbd.link(s, "haacked/review-code", 189)
+
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  /// A checkout without a GitHub remote has unknown remotes, which keep the PR.
+  @Test(arguments: [
+    ("no remote", nil as String?),
+    ("a GitLab origin", "https://gitlab.com/acme/posthog.git"),
+  ])
+  func keepsALinkedPRWhenTheCheckoutLosesItsLastGitHubRemote(_ name: String, _ origin: String?) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    if let origin {
+      try sbd.git(s.cwd, "remote", "set-url", "origin", origin)
+    } else {
+      try sbd.git(s.cwd, "remote", "remove", "origin")
+    }
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// The clear reads only the checkout's remotes, so a poll whose GitHub
+  /// reads fail still clears a PR from a repo that no remote names.
+  @Test func clearsAForeignRecordedPRInAPollThatGitHubRateLimits() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLinkThroughASecondRemote()
+    sbd.stopSbd()
+    try sbd.git(s.cwd, "remote", "remove", "review")
+    try sbd.startSbd()
+    let reset = Int(Date().timeIntervalSince1970) + 600
+    github.reply(
+      200, headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "\(reset)"],
+      #"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#)
+
+    let limited = try sbd.poll(all: true)
+
+    #expect(limited["error"]?.string?.contains("API rate limit exceeded") == true)
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  /// A fork's PR is in its upstream repo, which `branchKey` asks for the
+  /// branch's PR. The branch's PR has another head owner, so only the link
+  /// finds it.
+  @Test(arguments: ["upstream", "base"])
+  func acceptsALinkedPRFromTheUpstreamRemote(_ remote: String) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "haacked/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.git(s.cwd, "remote", "add", remote, "https://github.com/PostHog/charts.git")
+    if remote != "upstream" { try sbd.git(s.cwd, "config", "remote.\(remote).gh-resolved", "base") }
+    try sbd.link(s, "PostHog/charts", 18303)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+    #expect(github.lookedUp.contains("PostHog/charts#18303"))
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  /// `gh repo set-default` names a fork's parent without a remote for it.
+  @Test func acceptsALinkedPRFromTheRepoThatGhResolvedNames() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "haacked/charts", branch: "haacked/cdp-dlq-runbook-lookup-step")
+    try sbd.git(s.cwd, "config", "remote.origin.gh-resolved", "PostHog/charts")
+    try sbd.link(s, "PostHog/charts", 18303)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  @Test(arguments: [
+    "git@github.com:Haacked/Review-Code.git",
+    "ssh://git@ssh.github.com:443/haacked/review-code.git",
+    "https://github.com/HAACKED/review-code",
+  ])
+  func acceptsALinkedPRFromARemoteInAnyURLFormAndCase(_ url: String) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.git(s.cwd, "remote", "add", "review", url)
+    try sbd.link(s, "haacked/review-code", 189)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// A folder outside git has unknown remotes, as the manager's folder does.
+  @Test func acceptsALinkedPRInAFolderOutsideGit() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.sessionWithAPRLink()
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    #expect(github.lookedUp.contains("haacked/review-code#189"))
     sbd.stopSbd()
     try sbd.startSbd()
     try sbd.poll(all: true)
     #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  @Test(arguments: [
+    ("no remote", nil as String?),
+    ("a GitLab origin", "https://gitlab.com/acme/posthog.git"),
+  ])
+  func acceptsALinkedPRInACheckoutWithoutAGitHubRemote(_ name: String, _ origin: String?) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    if let origin {
+      try sbd.git(s.cwd, "remote", "set-url", "origin", origin)
+    } else {
+      try sbd.git(s.cwd, "remote", "remove", "origin")
+    }
+    try sbd.link(s, "haacked/review-code", 189)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  @Test func acceptsARefusedLinkOnceARemoteNamesItsRepo() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.link(s, "haacked/review-code", 189)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+
+    try sbd.git(s.cwd, "remote", "add", "review", "https://github.com/haacked/review-code.git")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// git exits 1 when the checkout has no remote left. The remotes then become unknown.
+  @Test func acceptsARefusedLinkOnceTheCheckoutHasNoRemote() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.link(s, "haacked/review-code", 189)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr == nil)
+
+    try sbd.git(s.cwd, "remote", "remove", "origin")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+  }
+
+  /// A refused line after an accepted one, whether one read finds both or
+  /// the refused line arrives in a later read.
+  @Test(arguments: [false, true])
+  func aLaterForeignLinkDoesNotHideAnEarlierValidOne(appended: Bool) throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/no-pr-yet")
+    try sbd.git(s.cwd, "remote", "add", "review", "https://github.com/haacked/review-code.git")
+    let valid = #"{"type":"pr-link","prNumber":189,"prRepository":"haacked/review-code"}"#
+    let foreign = #"{"type":"pr-link","prNumber":18303,"prRepository":"PostHog/charts"}"#
+    if appended {
+      try sbd.writeTranscript(s, [valid])
+      try sbd.poll()
+      let file = try #require(FileHandle(forWritingAtPath: sbd.transcript(s)))
+      try file.seekToEnd()
+      try file.write(contentsOf: Data((foreign + "\n").utf8))
+      try file.close()
+    } else {
+      try sbd.writeTranscript(s, [valid, foreign])
+    }
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 189)
+    #expect(!github.lookedUp.contains("PostHog/charts#18303"))
   }
 
   /// A restart doesn't keep the PR of a branch that the session left while
