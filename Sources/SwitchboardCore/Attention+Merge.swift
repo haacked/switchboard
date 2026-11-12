@@ -79,11 +79,9 @@ extension SessionFacts {
 }
 
 extension Attention {
-  /// The Ready to merge verdict for a PR that `mergeBlocker` finds no blocker
-  /// on. `openPR` calls it after its blocking rules, its merged attempt, and
-  /// its GitHub merge queue rule, so the PR is open, outside GitHub's queue,
-  /// and the session is idle. A repository whose merge method sbd can't tell
-  /// gets no Merge or Enqueue option.
+  /// The Ready to merge verdict for a PR that has no merge blocker. The
+  /// caller checks `mergeBlocker` first. A repository whose merge method sbd
+  /// can't tell gets no Merge or Enqueue option.
   static func readyToMerge(_ pr: PullRequest, _ facts: SessionFacts) -> Verdict {
     let method = facts.mergeMethod
     var reason = "#\(pr.number) is ready to merge\(approvedBy(pr))"

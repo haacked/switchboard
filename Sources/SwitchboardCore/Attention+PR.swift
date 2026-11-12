@@ -88,12 +88,11 @@ extension Attention {
   }
 
   /// The verdict for an approved PR that `blocker` keeps out of Ready to
-  /// merge. The reason names the blocker. A reason for failed checks, a wrong
-  /// base, a review gap, no checks, or unrecognized checks then names the
-  /// approvers. A blocker that ends without the user, such as running checks
-  /// or a reviewer, keeps the session Waiting. Failed checks, a non-default
-  /// base, no checks, and checks that report another value need the user. A
-  /// PR that waits on another PR or that Trunk queued gets no verdict here.
+  /// merge. The reason names the blocker, then the approvers, except for
+  /// running checks, mergeability, and Trunk's queue. A blocker that ends
+  /// without the user, such as running checks or a reviewer, keeps the
+  /// session Waiting. A PR that waits on another PR or that Trunk queued gets
+  /// no verdict here.
   static func approvedNotReady(_ blocker: MergeBlocker, _ pr: PullRequest, _ facts: SessionFacts) -> Verdict? {
     let n = "#\(pr.number)"
     let approvers = approvedBy(pr, after: ";")
