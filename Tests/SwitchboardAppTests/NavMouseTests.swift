@@ -37,16 +37,8 @@ import Testing
       NavMouse.direction(type: input.type, buttonNumber: input.buttonNumber, deltaX: input.deltaX) == input.expected)
   }
 
-  /// A press of AppKit button `button` with no window, which matches the test process's missing Switchboard window.
-  private func sideButtonPress(_ button: Int) throws -> NSEvent {
-    let event = try #require(
-      NSEvent.mouseEvent(
-        with: .otherMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-        eventNumber: 0, clickCount: 1, pressure: 1))
-    let cg = try #require(event.cgEvent)
-    cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
-    return try #require(NSEvent(cgEvent: cg))
-  }
+  /// A press with no window, which matches the test process's missing Switchboard window.
+  private func sideButtonPress(_ button: Int) throws -> NSEvent { try #require(ShellSelfTest.otherMouseDown(button)) }
 
   @Test func aSideButtonDoesNothingWhileASheetShows() throws {
     let model = appliedModel(["a", "b"].map { needsItem($0) })

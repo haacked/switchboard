@@ -128,14 +128,14 @@ enum ShellSelfTest {
     return "\(char) ran none" + (owner.map { " (\($0.title) is \($0.isEnabled ? "enabled" : "disabled"))" } ?? "")
   }
 
-  /// A press of the mouse button with number `button` at the window's center. AppKit's mouse event API sets
-  /// no button number, so the number goes into the event's Core Graphics copy.
-  private static func otherMouseDown(_ button: Int, in window: NSWindow) -> NSEvent? {
-    let center = NSPoint(x: window.frame.width / 2, y: window.frame.height / 2)
+  /// A press of the mouse button with number `button` at the window's center, or with no window when `window`
+  /// is nil. AppKit's mouse event API sets no button number, so the number goes into the event's Core Graphics copy.
+  static func otherMouseDown(_ button: Int, in window: NSWindow? = nil) -> NSEvent? {
+    let center = window.map { NSPoint(x: $0.frame.width / 2, y: $0.frame.height / 2) } ?? .zero
     guard
       let event = NSEvent.mouseEvent(
         with: .otherMouseDown, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
+        windowNumber: window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
       let cg = event.cgEvent
     else { return nil }
     cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
