@@ -5,8 +5,6 @@ import SwitchboardCore
 /// macro plugin, and `@State` is a macro in this SDK, so the views keep their
 /// state in an ObservableObject.
 final class SessionViewState: ObservableObject {
-  @Published var terminals: Terminals?
-  @Published var terminalsError: String?
   @Published var deleteWorktree = false
   @Published var deleteBranch = false
   @Published var removeOptions: RemoveOptions?
@@ -24,6 +22,7 @@ struct SessionView: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   @StateObject private var ui = SessionViewState()
+  @StateObject private var connection = TerminalConnection()
   @AppStorage("sessionSidePanel") private var showsSidePanel = true
 
   var body: some View {
@@ -56,26 +55,7 @@ struct SessionView: View {
     .onDisappear { [model, id = session.id] in model.releaseTerminalFocus(id) }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if !session.hasTerminals { return }
-      let id = session.id
-      let model = model
-      // Opening a session resumes a stopped claude. The selection has to rest
-      // first, so moving through the sidebar resumes nothing on the way.
-      try? await Task.sleep(nanoseconds: 800_000_000)
-      if Task.isCancelled { return }
-      model.open(id)
-      // The terminals call can fail while sbd restarts, so it retries for 10 s.
-      for _ in 0..<10 {
-        switch await Task.detached(operation: { model.terminals(id) }).value {
-        case .success(let terminals):
-          ui.terminals = terminals
-          return
-        case .failure(let error):
-          ui.terminalsError = "\(error)"
-        }
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        if Task.isCancelled { return }
-      }
+      if session.hasTerminals { await connection.connect(session.id, model: model) }
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
   }
@@ -86,7 +66,7 @@ struct SessionView: View {
       Text("Cleanup removed this session's worktree, so it has no terminals.")
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else if let terminals = ui.terminals {
+    } else if let terminals = connection.terminals {
       HSplitView {
         VStack(spacing: 0) {
           paneLabel("Claude") {
@@ -117,7 +97,7 @@ struct SessionView: View {
           .frame(minWidth: SessionView.shellMinWidth, idealWidth: 360)
         }
       }
-    } else if let error = ui.terminalsError {
+    } else if let error = connection.error {
       Text("Can't open the terminals: \(error)")
         .foregroundStyle(.secondary)
         .textSelection(.enabled)
