@@ -50,6 +50,42 @@ import Testing
   }
 }
 
+/// An Ultra plan has no 5-hour session, so the menu shows only the weeks.
+@Suite struct AccountMenuWithoutASessionLimit {
+  /// A usage response with no open 5-hour window.
+  static let response = Data(
+    #"""
+    {"limits": [
+      {"kind": "weekly_all", "percent": 8, "severity": "normal"},
+      {"kind": "weekly_scoped", "percent": 3, "severity": "normal", "scope": {"model": {"display_name": "Fable"}}}
+    ]}
+    """#.utf8)
+
+  func row(_ limits: [UsageLimit]) -> AccountRow {
+    AccountRow(
+      account: AccountInfo(name: "max", folder: "/m", active: true, sessions: 2),
+      usage: AccountUsage(name: "max", folder: "/m", limits: limits))
+  }
+
+  @Test func anUltraReadingShowsOnlyTheWeekInTheLabelAndTheRows() throws {
+    let limits = try Usage.parse(Self.response, plan: "Ultra")
+
+    #expect(AccountMenu.label(row(limits)) == "max · wk 8%")
+    #expect(limits.map { AccountMenu.limitRow($0, now: 0) } == ["Week (all models): 8%", "Week (Fable): 3%"])
+  }
+
+  /// The label drops the session only when the reading has none, not when it is at 0%.
+  @Test func anotherPlansReadingShowsItsUnusedSessionInTheLabelAndTheRows() throws {
+    let limits = try Usage.parse(Self.response, plan: "Pro")
+
+    #expect(AccountMenu.label(row(limits)) == "max · 5h 0% · wk 8%")
+    #expect(
+      limits.map { AccountMenu.limitRow($0, now: 0) } == [
+        "Session (5h): 0%", "Week (all models): 8%", "Week (Fable): 3%",
+      ])
+  }
+}
+
 @Suite struct AccountMenuRows {
   let accounts = [
     AccountInfo(name: "default", folder: "/d", active: false, sessions: 0),

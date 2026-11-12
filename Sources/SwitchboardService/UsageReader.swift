@@ -88,7 +88,7 @@ final class UsageReader: @unchecked Sendable {
     var usage = AccountUsage(name: name, folder: folder, email: login?["emailAddress"]?.string)
     do {
       let token = try accessToken(folder)
-      usage.limits = try Usage.parse(try fetch(token))
+      usage.limits = try Usage.parse(try fetch(token), plan: login?["planDisplayName"]?.string)
       usage.checked = nowMs()
     } catch {
       usage.fail(with: error)
