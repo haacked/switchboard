@@ -37,8 +37,8 @@ import Testing
   }
 
   @Test func commandLongerThanTheCutReadsAsRunningAShellCommand() {
-    let reason = Attention.toolSummary("Bash", ["command": .string(String(repeating: "x", count: 300))])
-    #expect(Attention.plainReason(reason, working: true) == "Running a shell command")
+    let v = running("Bash", ["command": .string(String(repeating: "x", count: 300))], for: 10_000)
+    #expect(plain(v) == "Running a shell command (<1 min)")
   }
 
   @Test func otherToolStays() {
