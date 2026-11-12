@@ -235,10 +235,9 @@ public final class Service {
     "dependency-resolved",
   ]
   static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
-  /// The launching requests that first wait up to 5 s for a starting claude to go live. `open` launches
-  /// claude only into a dead or missing Claude pane. The wait ends at once for both, so it would only
-  /// delay the answer to `open`.
-  static let settles = launches.subtracting(["open"])
+  /// The requests that can send claude a message. Each one first waits up to 5 s for a starting claude
+  /// to go live. `open` sends nothing, so it doesn't wait.
+  static let settles: Set<String> = ["send", "resume", "resolve-wait", "answer", "dependency-resolved"]
 
   /// `hookGone` reports whether the client closed its connection, which a
   /// held PermissionRequest checks while it waits. `caller` lets a request
