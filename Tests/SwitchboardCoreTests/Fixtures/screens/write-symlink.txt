@@ -1,0 +1,60 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Haiku 5.5 · Claude Team
+ ▝▝   ▝▝   /…/00000000-0000-0000-0000-000000000000/scratchpad/cap2/work · /rc            
+
+
+❯ Use the Edit tool to change "beta" to "BETA" in link/notes.txt. Do not read it first with Bash. Then reply DONE.                                 
+
+  Read 1 file                 
+
+⏺ Update(link/notes.txt)
+  ⎿  User rejected update to link/notes.txt
+      1  alpha
+      2 -beta                                                                                                                                     
+      2 +BETA                                                                                                                               
+      3  gamma                                                                                                                                    
+                                                                         
+✻ Cooked for 4s · done 3:55 PM                                                                                                                    
+
+❯ Use the Write tool to overwrite link/notes.txt with exactly these lines: "alpha", "BETA", "gamma", "delta". Do not use Edit. Then reply DONE.    
+
+⏺ Write(link/notes.txt)
+  ⎿  User rejected update to link/notes.txt
+      1  alpha                                                                                                                                     
+      2 -beta                                                                                                                               
+      2 +BETA                                                                                                                               
+      3  gamma                                                                                                                                    
+      4 +delta                                                                                                                              
+
+✻ Churned for 1s · done 3:56 PM
+          
+❯ Use the Write tool to create the file link/new.txt with exactly these two lines: "one" and "two". Then reply DONE.                               
+                                                                                                                                                  
+⏺ Write(link/new.txt)
+                                                                                                                                                  
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file                        
+ link/new.txt
+ This will modify /private/tmp/claude-501/-Users-someone-dev-worktrees-switchboard-someone-write-create-card/00000000-0000-0000-0000-000000000000/
+ scratchpad/cap2/real/new.txt (outside working directory) via a symlink
+                             
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 one
+  2 two
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create new.txt?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
+
+
+
+
+                                                                                                                                                 
+
+
+
+                                                                                                                                                 
+                                 

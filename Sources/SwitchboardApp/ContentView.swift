@@ -188,7 +188,7 @@ struct Sidebar: View {
     List(selection: $model.selection) {
       if let manager = model.manager {
         Section {
-          SessionRow(session: manager, activeAccount: activeAccount).tag(manager.id)
+          SessionRow(session: manager, activeAccount: activeAccount, hoverCard: model.hoverCard).tag(manager.id)
         } header: {
           Text("Manager")
         }
@@ -198,7 +198,8 @@ struct Sidebar: View {
         Section(isExpanded: expanded(state)) {
           ForEach(group.rows) { row in
             HStack(spacing: 4) {
-              SessionRow(session: row.session, activeAccount: activeAccount, repo: repos[row.id])
+              SessionRow(
+                session: row.session, activeAccount: activeAccount, repo: repos[row.id], hoverCard: model.hoverCard)
               NotesButton(session: row.session)
               if CleanupOffer.canCleanUp(row.session) { CleanupButton(session: row.session) }
               if row.session.isRemovableDone { DeleteButton(session: row.session) }
@@ -380,9 +381,10 @@ extension PRSummary {
 
 struct SessionRow: View {
   let session: SessionSummary
-  /// The active account's folder. The tooltip names the session's account only when it differs.
+  /// The active account's folder. The hover card names the session's account only when it differs.
   let activeAccount: String
   var repo: String? = nil
+  var hoverCard: HoverCard? = nil
   @Environment(\.backgroundProminence) private var prominence
 
   var body: some View {
@@ -423,7 +425,7 @@ struct SessionRow: View {
       }
     }
     .padding(.vertical, 2)
-    .help(session.tooltip(activeAccount: activeAccount))
+    .hoverCard(session, activeAccount: activeAccount, card: hoverCard)
   }
 
   /// Text truncates at its end. The reason therefore truncates before the repo does.
@@ -906,7 +908,6 @@ struct BoardCard: View {
 
   var body: some View {
     let s = session
-    let tooltip = s.tooltip(activeAccount: model.activeAccountFolder)
     ZStack(alignment: .bottomTrailing) {
       Button {
         model.openFromBoard(s.id)
@@ -955,8 +956,9 @@ struct BoardCard: View {
         }
       }
       .buttonStyle(.plain)
-      .help(tooltip)
-      .modifier(SnapshotHover(id: s.id, text: tooltip))
+      .hoverCard(
+        s, activeAccount: model.activeAccountFolder, card: model.hoverCard, pinned: Snapshot.hoverSession == s.id
+      )
       .accessibilityValue(s.state.title)
       .accessibilityAddTraits(keyboardFocused ? .isSelected : [])
       .overlayPreferenceValue(PRLinkBounds.self) { bounds in

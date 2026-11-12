@@ -7,6 +7,8 @@ import Foundation
 ///   `Overwrite file`, or `Read file`.
 /// - Edit and Write show the file's path below the title, relative to the
 ///   session's cwd. Read shows `Read(<path>)` between the dashed rules.
+/// - When a symbolic link puts the file outside the cwd, a warning follows
+///   the path, as `withoutSymlinkWarning` describes.
 /// - Between the dashed rules, Edit and Write show numbered rows. A diff row
 ///   has a marker after its number: a space for a context line, `-` for a
 ///   removed line, and `+` for an added one. A new file's rows have no
@@ -60,7 +62,9 @@ struct FileCall {
   /// Whether the dialog names this call's file and shows its change. `cwd`
   /// resolves a relative path. Without it, only an absolute path matches.
   func shows(_ dialog: [String], cwd: String?) -> Bool {
-    guard let (head, rows) = ClaudeScreen.dashedBlock(dialog), let title = head.first else { return false }
+    guard let (block, rows) = ClaudeScreen.dashedBlock(dialog) else { return false }
+    let head = withoutSymlinkWarning(block)
+    guard let title = head.first else { return false }
     let shownPath = head.dropFirst().joined()
     switch change {
     case .read:
@@ -80,6 +84,22 @@ struct FileCall {
       default: return false
       }
     }
+  }
+
+  /// The head without the warning that Claude Code adds at its end when a
+  /// symbolic link puts the file outside the cwd: `This will modify <target>
+  /// (outside working directory) via a symlink`, or `This will read` for
+  /// Read. The warning can wrap. A head with any other extra line keeps it.
+  /// The shown path then names no file.
+  private func withoutSymlinkWarning(_ head: [String]) -> [String] {
+    let opening = if case .read = change { "This will read" } else { "This will modify" }
+    let spaced = opening + " "
+    // A target that fits the pane but not after the opening moves to the next
+    // line. The trimmed opening line then has no trailing space.
+    guard let start = head.firstIndex(where: { $0 == opening || $0.hasPrefix(spaced) }),
+      ClaudeScreen.squeezed(head[start...].joined()).hasSuffix("(outsideworkingdirectory)viaasymlink")
+    else { return head }
+    return Array(head[..<start])
   }
 
   /// Whether a path that the dialog shows resolves to this call's file.
