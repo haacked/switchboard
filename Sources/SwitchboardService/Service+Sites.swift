@@ -220,7 +220,7 @@ extension Service {
           status.state == .connected ? "sbd has not read it since it connected" : "its link is \(status.state.rawValue)"
         recordLinkDown(
           sessions, host: host, link: status.state,
-          error: status.error ?? status.lastFailure ?? site.setupError ?? waits)
+          error: status.lastFailure ?? site.setupError ?? waits)
       }
       guard status.state == .connected, !siteReads.contains(host), let reconciles = hostQueues[host] else { continue }
       if !read {
@@ -229,6 +229,17 @@ extension Service {
         siteReads.insert(host)
         reconciles.async { [self] in
           try? reconcile(host)
+          queue.async { [self] in siteReads.remove(host) }
+        }
+        continue
+      }
+      if let cutAt = spoolCutAt[host], now - cutAt >= Service.spoolCutIntervalMs, let facts = site.facts,
+        facts.epoch == status.connection
+      {
+        spoolCutAt[host] = now
+        siteReads.insert(host)
+        reconciles.async { [self] in
+          do { try reconcileSpool(host, site, facts, recording: false) } catch { logLine("host \(host): \(error)") }
           queue.async { [self] in siteReads.remove(host) }
         }
         continue

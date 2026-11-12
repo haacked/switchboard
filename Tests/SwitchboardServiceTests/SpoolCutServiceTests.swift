@@ -424,4 +424,23 @@ private func renameTable(_ table: String, to name: String, in home: Home) throws
       }
     }
   }
+
+  /// The host answers from the file's size, so sbd does not stream about 85 MB of base64 for a spool that it
+  /// refuses.
+  @Test(.timeLimit(.minutes(2)))
+  func aSpoolAboveTheLimitIsRefusedOnTheHostBeforeItsBytesAreStreamed() throws {
+    try withBox { facts, path in
+      FileManager.default.createFile(atPath: path, contents: nil)
+      let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+      try handle.truncate(atOffset: UInt64(Service.spoolLimitBytes) + 1)
+      try handle.close()
+      let machine = CallRecorder(LocalMachine())
+
+      #expect { try Service.readSpool(machine, facts: facts, host: "mini") } throws: {
+        "\($0)".contains("holds more than 64 MB")
+      }
+
+      #expect(machine.results.map(\.stdout) == [""])
+    }
+  }
 }

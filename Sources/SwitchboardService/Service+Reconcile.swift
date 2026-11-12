@@ -14,6 +14,8 @@ extension Service {
   static let spoolSeconds = 60.0
   /// How long the tick waits after a failed reconcile before it runs another on the same connection.
   static let reconcileRetryMs: Int64 = 30_000
+  /// How often the tick cuts the recorded lines from the spool of a host that stays connected and reconciled.
+  static let spoolCutIntervalMs: Int64 = 600_000
 
   // MARK: Link down
 
@@ -69,10 +71,11 @@ extension Service {
 
   // MARK: The spool
 
-  /// Prints the first `$2` bytes of the file `$1` in base64. It exits 3 when the file is missing, and 4 when it
-  /// is not a regular file that the host can read.
+  /// Prints the first `$2` bytes of the file `$1` in base64. It exits 3 when the file is missing, 4 when it
+  /// is not a regular file that the host can read, and 5 when the file has `$2` bytes or more, before it prints.
   private static let spoolReadScript =
-    #"[ -e "$1" ] || [ -L "$1" ] || exit 3; [ -f "$1" ] && [ -r "$1" ] || exit 4; exec <"$1"; head -c "$2" | base64"#
+    #"[ -e "$1" ] || [ -L "$1" ] || exit 3; [ -f "$1" ] && [ -r "$1" ] || exit 4; "#
+    + #"size=$(wc -c <"$1") || exit 4; [ "$size" -lt "$2" ] || exit 5; exec <"$1"; head -c "$2" | base64"#
 
   /// The bytes of the host's spool, read in one command. A missing file is an empty spool. It throws for a
   /// spool above `spoolLimitBytes` and for a file that it can't read.
@@ -82,32 +85,38 @@ extension Service {
       "/bin/sh", ["-c", spoolReadScript, "sb", path, String(spoolLimitBytes + 1)], env: nil, input: nil,
       timeout: spoolSeconds)
     if r.status == 3 { return Data() }
+    if r.status == 5 { throw oversizedSpool(path, host) }
     // `Data(base64Encoded:)` gives nil for text with no base64 digit, which is what an empty file prints.
     let text = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     guard r.status == 0, let data = text.isEmpty ? Data() : Data(base64Encoded: text, options: .ignoreUnknownCharacters)
     else { throw APIError("can't read \(path) on \(host): \(r.problem)") }
-    guard data.count <= spoolLimitBytes else {
-      throw APIError(
-        "\(path) on \(host) holds more than \(spoolLimitBytes / (1024 * 1024)) MB, so sbd did not load it. "
-          + "Move the file away on \(host) to let its sessions reconnect")
-    }
+    guard data.count <= spoolLimitBytes else { throw oversizedSpool(path, host) }
     return data
   }
 
-  /// Step 1: records the events of the spool's lines, then cuts the recorded lines from the spool.
-  private func reconcileSpool(_ host: String, _ site: RemoteSite, _ facts: BoxFacts) throws {
+  private static func oversizedSpool(_ path: String, _ host: String) -> APIError {
+    APIError(
+      "\(path) on \(host) holds more than \(spoolLimitBytes / (1024 * 1024)) MB, so sbd did not load it. "
+        + "Move the file away on \(host) to let its sessions reconnect")
+  }
+
+  /// Step 1: records the events of the spool's lines, then cuts the recorded lines from the spool. With
+  /// `recording` false, it records nothing and cuts the lines that the store already holds. A spooled
+  /// PermissionRequest that sbd recorded before its live hook arrived would make the live hook dedup to an
+  /// empty answer, so only the reconcile records.
+  func reconcileSpool(_ host: String, _ site: RemoteSite, _ facts: BoxFacts, recording: Bool = true) throws {
     queue.sync { spoolReadFloors[host] = .some(nil) }
     defer { queue.sync { spoolReadFloors[host] = nil } }
     let data = try site.confirmed("the read of the spool") { try Service.readSpool($0, facts: facts, host: host) }
     let parsed = Spool.parse(data)
     if !data.isEmpty { logLine("host \(host): read \(data.count) bytes of spool in \(parsed.lines.count) lines") }
     let cut = queue.sync { () -> Int in
-      recordSpool(parsed.lines, from: host)
+      if recording { recordSpool(parsed.lines, from: host) }
       let cut = spoolCut(parsed.lines, from: host)
       setSpoolFloor(host, keeping: parsed.lines)
       return cut
     }
-    if cut < parsed.complete {
+    if recording, cut < parsed.complete {
       let why = parsed.firstUnreadable == cut ? "is not a spool line" : "holds an event that sbd did not record"
       logLine("host \(host): the spool line at byte \(cut) \(why), so it and the lines behind it stay in the spool")
     }
@@ -293,6 +302,7 @@ extension Service {
         throw unread(host, site, during: "the reconcile")
       }
       reconciledOn[host] = facts.epoch
+      spoolCutAt[host] = nowMs()
       reconcileFailures[host] = nil
       site.noteReconcile(failure: nil, on: facts.epoch)
       let ids = entries.values.filter { $0.session.host == host }.map(\.session.id).sorted()

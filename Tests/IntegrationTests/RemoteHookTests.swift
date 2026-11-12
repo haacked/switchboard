@@ -50,13 +50,7 @@ private struct ShimRun {
 /// Runs the shim that sbd wrote on the box, as a hook of the session's claude does, and ends it after 15 s.
 private func runBoxShim(_ sbd: Instance, session: String, payload: JSON) throws -> ShimRun {
   let started = Date()
-  // `runCommand` reads the output on a queue of its own. A global queue gets no thread while the tests block
-  // every thread of the pool.
-  let r = try runCommand(
-    findExecutable("python3") ?? "/usr/bin/python3", [sbd.boxShim, "hook"],
-    env: [
-      "HOME": sbd.boxHome, "SB_HOME": sbd.boxSB, "SB_SESSION_ID": session, "PATH": "/usr/local/bin:/usr/bin:/bin",
-    ], input: Data(payload.text.utf8), timeout: 15)
+  let r = try sbd.runBoxShim(session: session, payload: payload)
   return ShimRun(status: r.status, stdout: r.stdout, seconds: Date().timeIntervalSince(started))
 }
 

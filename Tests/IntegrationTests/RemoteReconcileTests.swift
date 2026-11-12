@@ -263,6 +263,68 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     #expect(Spool.parse(sbd.boxSpoolData).firstUnreadable == nil)
   }
 
+  /// Appends a spool line that sbd never received on the socket, as a hook does while the forward is down.
+  private func appendUnreceivedLine(_ sbd: Instance, session: String, marker: String) throws -> String {
+    let line =
+      JSON.object([
+        "v": 1, "id": .string(Instance.eventId(ns: Instance.clockNs())), "session": .string(session),
+        "payload": Instance.probePayload(marker),
+      ]).text + "\n"
+    let handle = try #require(FileHandle(forWritingAtPath: sbd.boxSpool))
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(line.utf8))
+    try handle.close()
+    return line
+  }
+
+  /// Keeps the link up, spools hooks that sbd records from the socket and one that it never received, and lets
+  /// the cut interval pass. It returns the unreceived line and its marker once the recorded lines are gone.
+  private func spoolAfterTheCutInterval(_ sbd: Instance, _ s: Remote, markers: [String]) throws -> (String, String) {
+    for marker in markers { try sbd.spoolProbe(marker, session: s.id) }
+    try sbd.waitFor("sbd to record the hooks from the socket") {
+      try markers.allSatisfy { try sbd.probes($0).count == 1 }
+    }
+    let unreceived = "unreceived-\(UUID().uuidString)"
+    let line = try appendUnreceivedLine(sbd, session: s.id, marker: unreceived)
+    try #require(sbd.boxSpoolLines().count > markers.count)
+
+    try sbd.advanceClock(601_000)
+    try sbd.waitFor("the tick to cut the recorded lines", timeout: 45) {
+      try sbd.advanceClock(1_000)
+      return markers.allSatisfy { sbd.boxSpoolProbes($0).isEmpty }
+    }
+    return (line, unreceived)
+  }
+
+  /// The tick cuts every 10 minutes (`Service.spoolCutIntervalMs`). A spool takes a day to grow 64 MB. A cut costs a
+  /// read of the whole spool.
+  @Test func aLinkThatStaysUpGetsTheLinesThatSbdRecordedCutFromTheSpoolOnTheInterval() throws {
+    let sbd = try Instance.remote()
+    let s = try idle(sbd)
+    let markers = (0..<3).map { "periodic-\($0)-\(UUID().uuidString)" }
+
+    let (line, _) = try spoolAfterTheCutInterval(sbd, s, markers: markers)
+
+    #expect(
+      String(decoding: sbd.boxSpoolData, as: UTF8.self).hasPrefix(line),
+      "the spool does not start with the unreceived line")
+    for marker in markers { #expect(try sbd.probes(marker).count == 1, "\(marker)") }
+    #expect(try kinds(sbd, s.id).filter { $0 == "link_down" }.isEmpty)
+  }
+
+  /// A spooled PermissionRequest that sbd recorded before its live hook arrived would make the live hook dedup
+  /// to an empty answer, so only the reconcile records spool lines.
+  @Test func theCutOnTheIntervalRecordsNoSpoolLine() throws {
+    let sbd = try Instance.remote()
+    let s = try idle(sbd)
+
+    let (line, unreceived) = try spoolAfterTheCutInterval(sbd, s, markers: ["periodic-\(UUID().uuidString)"])
+    _ = try sbd.settledEvents()
+
+    #expect(try sbd.probes(unreceived).isEmpty, "the cut recorded a line whose hook sbd never received")
+    #expect(String(decoding: sbd.boxSpoolData, as: UTF8.self).hasPrefix(line))
+  }
+
   /// The second reconcile reads a spool that the first one cut, and the ids that sbd recorded stay recorded.
   @Test func aSecondDropAndReconnectRecordsNoEventAgain() throws {
     let sbd = try Instance.remote()
@@ -548,17 +610,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     try (kept.joined(separator: "\n") + "\n").write(toFile: sbd.boxSpool, atomically: true, encoding: .utf8)
     // Claude Code stamps each transcript line. The stub does not, so the test writes the turn's last line.
     let reply = "Finished while the link was down."
-    let stamp = ISO8601DateFormatter()
-    stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let line: JSON = [
-      "type": "assistant", "timestamp": .string(stamp.string(from: Date())),
-      "message": ["role": "assistant", "content": [["type": "text", "text": .string(reply)]]],
-    ]
-    let transcript = try #require(sbd.boxTranscripts(s.claudeSessionId).first)
-    let handle = try #require(FileHandle(forWritingAtPath: transcript))
-    try handle.seekToEnd()
-    try handle.write(contentsOf: Data((line.text + "\n").utf8))
-    try handle.close()
+    try appendReply(sbd, s, reply)
     let wroteAt = try sbd.now()
     // The real claude lists a conversation whose turn ended as idle. The stub removes its row when a turn ends.
     try writeAgentsRow(sbd, s, status: "idle", pid: s.pid)

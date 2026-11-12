@@ -149,11 +149,11 @@ private let otherDestination = "haacked@other.local"
       // sbd holds a PermissionRequest that it took, so a hook that it took gives no answer in time.
       let answer = try? sbd.sendLine(line, to: sbd.hostSocket("mini"))
 
-      #expect(refused(answer ?? nil), "\(shape.label): \((answer ?? nil)?.text ?? "no answer")")
+      #expect(refused(answer), "\(shape.label): \(answer?.text ?? "no answer")")
       if shape.names {
         #expect(
-          (answer ?? nil)?["error"]?.string?.contains("that session is not on mini") == true,
-          "\(shape.label): \((answer ?? nil)?.text ?? "no answer")")
+          answer?["error"]?.string?.contains("that session is not on mini") == true,
+          "\(shape.label): \(answer?.text ?? "no answer")")
       }
     }
 
@@ -248,7 +248,7 @@ private let otherDestination = "haacked@other.local"
 
       let answer = try? sbd.sendLine(line, to: sbd.hostSocket("mini"))
 
-      #expect(refused(answer ?? nil), "\(label): \((answer ?? nil)?.text ?? "no answer")")
+      #expect(refused(answer), "\(label): \(answer?.text ?? "no answer")")
     }
 
     let new = try added(b)
@@ -455,8 +455,8 @@ private let otherDestination = "haacked@other.local"
       let answer = try? sbd.sendLine(Instance.requestLine(request.op, request.args), to: sbd.hostSocket("mini"))
 
       #expect(
-        refused(answer ?? nil),
-        "\(request.op) \(JSON.object(request.args).text): \((answer ?? nil)?.text ?? "no answer")")
+        refused(answer),
+        "\(request.op) \(JSON.object(request.args).text): \(answer?.text ?? "no answer")")
     }
 
     let new = try added(b)
@@ -532,7 +532,7 @@ private let otherDestination = "haacked@other.local"
     for (label, line) in lines {
       let answer = try? sbd.sendLines([line], to: sbd.hostSocket("mini"))[0]
 
-      #expect((answer ?? nil)?["ok"] != true, "\(label): \((answer ?? nil)?.text ?? "")")
+      #expect(answer?["ok"] != true, "\(label): \(answer?.text ?? "")")
     }
 
     let new = try added(b)

@@ -427,7 +427,12 @@ private let noListener: [(socket: ShimBench.Socket, kind: String, tool: String?)
     }
   }
 
-  @Test(.timeLimit(.minutes(1)), arguments: ["", "not json", "{\"hook_event_name\":", "[1, 2]", "\"text\""])
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "", "not json", "{\"hook_event_name\":", "[1, 2]", "\"text\"", #"{"hook_event_name":"Stop","x":NaN}"#,
+      #"{"hook_event_name":"Stop","x":"\ud800"}"#,
+    ])
   func aPayloadThatIsNotAJSONObjectWritesNothingAndSendsNothing(input: String) throws {
     try withBench { b in
       let run = try b.hook(Data(input.utf8))

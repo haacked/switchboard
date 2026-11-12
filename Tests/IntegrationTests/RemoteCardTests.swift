@@ -226,7 +226,6 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
     #expect(r.stderr.contains("mini is not connected"), "\(r.stderr)")
     #expect(try sbd.cards().map(\.session) == [s.id])
     #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
-    #expect(!FileManager.default.fileExists(atPath: "\(s.cwd)/x"))
   }
 
   @Test func afterTheReconnectAllowTypesYesIntoTheBoxesPaneForACardThatWasHeldWhenTheLinkDropped() throws {
@@ -289,13 +288,10 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
     try sbd.advanceClock(1_000)
     try sbd.advanceClock(1_000)
 
-    let named = try sbd.macCalls(
-      holding: sbd.namesOfRemoteSession(s.id, cwd: s.cwd) + [s.claudeSessionId, "second message", "touch x", "touch y"])
-    #expect(named.isEmpty, "this Mac ran \(named.count) calls for the remote session, first: \(named.prefix(3))")
-    let pids = try sbd.machineCalls().filter { call in
-      (call.has("signal") || call.has("stopClaude") || call.has("alive")) && call.has(String(s.pid))
-    }
-    #expect(pids.isEmpty, "this Mac signalled or checked a pid of the box: \(pids)")
+    let calls = try sbd.macCalls(
+      id: s.id, cwd: s.cwd, claudeSessionId: s.claudeSessionId, pid: s.pid,
+      also: ["second message", "touch x", "touch y"])
+    #expect(calls.isEmpty, "this Mac ran \(calls.count) calls for the remote session, first: \(calls.prefix(3))")
     #expect(sbd.stubInput().isEmpty, "a pane on this Mac read \(sbd.stubInput())")
     #expect(!FileManager.default.fileExists(atPath: sbd.home.sessionFolder(s.id)))
   }

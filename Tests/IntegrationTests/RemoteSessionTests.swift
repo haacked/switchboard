@@ -396,7 +396,7 @@ private struct Lifecycle {
     let r = try sbd.run("attach", s.id)
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("the app attaches to a session on a host from stage 5"), "\(r.stderr)")
+    #expect(r.stderr.contains("sb attach can't reach a session on a host yet"), "\(r.stderr)")
   }
 
   /// The move may refuse as a whole or skip the session. Either way it names the reason and moves nothing.

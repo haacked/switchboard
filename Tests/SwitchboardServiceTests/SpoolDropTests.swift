@@ -10,7 +10,7 @@ private func sha256(_ data: Data) -> String {
 }
 
 private func eventId(_ n: Int) -> String {
-  String(format: "%020d-4242-%04x", 1_700_000_000_000_000_000 + n, n % 65_536)
+  String(format: "%020lld-4242-%04x", 1_700_000_000_000_000_000 + n, n % 65_536)
 }
 
 /// One spool line as the shim writes it, with its newline.

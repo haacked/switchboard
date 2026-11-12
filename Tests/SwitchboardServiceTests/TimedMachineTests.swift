@@ -17,12 +17,16 @@ final class CallRecorder: Machine, @unchecked Sendable {
   private let lock = NSLock()
   private var recordedRuns: [Run] = []
   private var recordedCalls: [String] = []
+  private var recordedResults: [CommandResult] = []
   private let next: (any Machine)?
 
   init(_ next: (any Machine)? = nil) { self.next = next }
 
   /// Every `run`, oldest first.
   var runs: [Run] { lock.withLock { recordedRuns } }
+
+  /// What each `run` of `next` answered, oldest first.
+  var results: [CommandResult] { lock.withLock { recordedResults } }
 
   /// Every member that is not `run`, as `<member> <argument>`, oldest first.
   var calls: [String] { lock.withLock { recordedCalls } }
@@ -35,7 +39,11 @@ final class CallRecorder: Machine, @unchecked Sendable {
     lock.withLock {
       recordedRuns.append(Run(executable: executable, args: args, env: env, input: input, timeout: timeout))
     }
-    if let next { return try next.run(executable, args, env: env, input: input, timeout: timeout) }
+    if let next {
+      let result = try next.run(executable, args, env: env, input: input, timeout: timeout)
+      lock.withLock { recordedResults.append(result) }
+      return result
+    }
     return CommandResult(status: 7, stdout: "out of \(executable)", stderr: "err of \(executable)")
   }
 
@@ -104,6 +112,27 @@ private struct FailingMachine: Machine {
     let machine = TimedMachine(base, fallback: 30)
 
     _ = try machine.run("/bin/echo", ["hi"], env: nil, input: nil, timeout: nil)
+
+    #expect(base.runs.map(\.timeout) == [30])
+  }
+
+  @Test(
+    arguments: [
+      ["-C", "/r", "worktree", "add", "-b", "b", "/t", "HEAD"], ["-C", "/r", "worktree", "remove", "/t"],
+    ] as [[String]])
+  func aWorktreeChangeWithNoTimeoutGetsTheWorktreeTimeout(args: [String]) throws {
+    let base = CallRecorder()
+
+    _ = try TimedMachine(base, fallback: 30).run("/usr/bin/git", args, env: nil, input: nil, timeout: nil)
+
+    #expect(base.runs.map(\.timeout) == [TimedMachine.worktreeChangeSeconds])
+  }
+
+  @Test func aWorktreeListGetsTheFallback() throws {
+    let base = CallRecorder()
+
+    _ = try TimedMachine(base, fallback: 30).run(
+      "/usr/bin/git", ["-C", "/r", "worktree", "list", "--porcelain"], env: nil, input: nil, timeout: nil)
 
     #expect(base.runs.map(\.timeout) == [30])
   }

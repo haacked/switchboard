@@ -75,7 +75,7 @@ sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
 sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
 sb host                      # the remote hosts in config.json and each host's ssh link
-sb host connect <host>       # opens the host's ssh link and keeps it open; an open link keeps a devbox running
+sb host connect <host>       # opens the host's ssh link, keeps it open, and sets up ~/.sb there (needs tmux, git, python3); an open link keeps a devbox running
 sb host disconnect <host>    # closes the host's ssh link
 sb repo                      # the repositories that the New Session sheet offers, most recently used first
 sb repo add <path>           # adds the repository that holds the folder; a worktree adds its main checkout

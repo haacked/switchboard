@@ -31,7 +31,9 @@ extension Service {
   }
 
   /// The account of a new session: its group's account, else the one named,
-  /// else its parent's, or nil when none of them applies. It refuses a named
+  /// else its parent's when the parent runs on this Mac, or nil when none of
+  /// them applies. A parent on a host has the host's account, which no session
+  /// on this Mac can use. It refuses a named
   /// account that differs from the group's, because the session's next launch
   /// would move it to the group's account.
   func accountForNew(named ref: String?, parent: String?, for session: Session) throws -> String? {
@@ -45,7 +47,7 @@ extension Service {
       return bound
     }
     if let named { return named }
-    if let parent, entries[parent] != nil { return claudeAccount(of: parent) }
+    if let parent, let entry = entries[parent], entry.session.host == nil { return claudeAccount(of: parent) }
     return nil
   }
 

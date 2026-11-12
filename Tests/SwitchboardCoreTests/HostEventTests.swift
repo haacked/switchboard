@@ -132,9 +132,6 @@ private let clock: UInt64 = 1_794_355_200_000_000_000
   }
 }
 
-// MARK: The reorder buffer
-
-/// `HostEventOrder` holds a session's arriving events for 250 ms and releases them lowest id first.
 /// The kind that sbd records a host's hook under.
 @Suite struct HostEventKindTests {
   @Test(arguments: SessionFacts.hookKinds)
@@ -159,6 +156,9 @@ private let clock: UInt64 = 1_794_355_200_000_000_000
   }
 }
 
+// MARK: The reorder buffer
+
+/// `HostEventOrder` holds a session's arriving events for 250 ms and releases them lowest id first.
 @Suite struct HostEventOrderTests {
   /// Everything that `due` released over these times, in the order released.
   private func released(_ order: inout HostEventOrder, at times: [Int64]) -> [HostEventID] {

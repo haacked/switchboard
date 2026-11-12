@@ -32,6 +32,7 @@ enum SourceAudit {
 
   static let service = "SwitchboardService/"
   static let siteFile = "\(service)SessionSite.swift"
+  static let serviceFile = "\(service)Service.swift"
   /// The files that hold no session work: the shared MCP servers and import, which run on this Mac.
   static let sessionless: Set<String> = ["\(service)Service+MCP.swift", "\(service)Service+Import.swift"]
   static let local = sessionless.union([siteFile])
@@ -54,8 +55,9 @@ enum SourceAudit {
     Rule("snapshot.children", bare + #"snapshot\.children\b"#, under: service, allowed: snapshotReaders),
     Rule("machine(for:)", #"(?<![A-Za-z0-9_])machine\(for\b"#, under: service),
     Rule("machine(of:)", #"(?<![A-Za-z0-9_])machine\(of\b"#, under: service),
-    Rule("Service.host", #"\b(?:let|var)\s+host\s*:\s*TerminalHost\b"#, under: service),
-    Rule("Service.git", #"\b(?:let|var)\s+git\s*:\s*String\b"#, under: service),
+    // Swift extensions hold no stored properties, so only `Service.swift` can give `Service` one.
+    Rule("Service.host", #"\b(?:let|var)\s+host\s*:\s*TerminalHost\b"#, under: serviceFile),
+    Rule("Service.git", #"\b(?:let|var)\s+git\s*:\s*String\b"#, under: serviceFile),
   ]
 
   /// The findings in one file's text. It reads comments too, as `grep` does.
@@ -174,11 +176,18 @@ enum SourceAudit {
     ("  func machine(for session: Session) -> any Machine { site.machine }", "machine(for:)"),
     ("      machine(of: id).signal(pid, SIGTERM)", "machine(of:)"),
     ("    try self.machine(of: id).run(tool, [])", "machine(of:)"),
-    ("  let host: TerminalHost", "Service.host"),
-    ("  let git: String", "Service.git"),
   ])
   func aLocalNameInSessionCodeFails(line: String, rule: String) {
     let file = "SwitchboardService/Service+FolderRelease.swift"
+
+    let findings = SourceAudit.scan(file: file, text: line)
+
+    #expect(findings == [SourceAudit.Finding(file: file, line: 1, rule: rule)])
+  }
+
+  @Test(arguments: [("  let host: TerminalHost", "Service.host"), ("  let git: String", "Service.git")])
+  func aPropertyOfServiceThatHoldsThisMacsToolFails(line: String, rule: String) {
+    let file = SourceAudit.serviceFile
 
     let findings = SourceAudit.scan(file: file, text: line)
 

@@ -13,8 +13,7 @@ struct BoxFacts: Equatable {
   var lang: String
   /// Absolute paths on the host.
   var tmux: String
-  // `SourceAuditTests` reads a `git` property of type `String` as `Service`'s removed copy of this Mac's git.
-  var git: Swift.String
+  var git: String
   var python: String
   /// This Mac's clock minus the host's.
   var clockOffsetMs: Int64
@@ -59,7 +58,7 @@ struct BoxFacts: Equatable {
 /// Gives a timeout to each `run` that names none, so no command reaches a host without one.
 struct TimedMachine: Machine {
   /// `git worktree add` checks out a whole repo, and `git worktree remove` deletes one.
-  static let worktreeAddSeconds = 600.0
+  static let worktreeChangeSeconds = 600.0
 
   private let base: any Machine
   private let fallback: Double
@@ -75,7 +74,7 @@ struct TimedMachine: Machine {
     let changesWorktree = zip(args, args.dropFirst()).contains { $0 == "worktree" && ($1 == "add" || $1 == "remove") }
     return try base.run(
       executable, args, env: env, input: input,
-      timeout: timeout ?? (changesWorktree ? Self.worktreeAddSeconds : fallback))
+      timeout: timeout ?? (changesWorktree ? Self.worktreeChangeSeconds : fallback))
   }
 
   func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { base.read(path, from: offset, count: count) }
@@ -275,8 +274,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
         return
       }
       if Date() >= deadline {
-        // A retry clears the link's error while it runs. The cause of the last failure is still why.
-        let why = (status.error ?? status.lastFailure).map { ": \($0)" } ?? ""
+        // A retry clears the link's error while it runs. The last failure still holds the cause.
+        let why = status.lastFailure.map { ": \($0)" } ?? ""
         throw APIError("\(name) is not connected (\(status.state.rawValue)\(why)). Switchboard keeps trying.")
       }
       Thread.sleep(forTimeInterval: 0.05)

@@ -60,7 +60,8 @@ extension Service {
         }
       }
     } catch  where worktreeRemoved {
-      // The branch's step keeps its own error. This one came after the last answer.
+      // The branch's step keeps its own error. Only the scope's final check reaches here: the link dropped or a host
+      // command got no answer after the worktree was removed. The cleanup is still recorded.
       logLine("cleanup \(session.id): \(error)")
     }
     queue.sync {

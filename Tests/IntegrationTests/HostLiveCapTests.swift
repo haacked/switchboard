@@ -74,8 +74,9 @@ private struct OnHost {
 
   // MARK: Each cap counts its own sessions
 
+  /// The Mac's cap of 2 would let the second start on mini run, so a queue shows that mini's own key wins.
   @Test func aHostWithACapOfOneQueuesItsSecondStartWhileTheMacStartsASession() throws {
-    let sbd = try instance(macCap: 1, hostCap: 1)
+    let sbd = try instance(macCap: 2, hostCap: 1)
     _ = try busyOnHost(sbd, "a")
 
     let local = try sbd.new(prompt: "hello", name: "mac")

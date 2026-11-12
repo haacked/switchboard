@@ -593,9 +593,6 @@ extension Instance {
   /// The folder that Switchboard keeps on the host, which is the SB_HOME of a remote pane.
   var boxSB: String { "\(boxHome)/.sb" }
 
-  /// The same file as `machineLog`, under the name that the remote tests use.
-  var macMachineLog: String { machineLog }
-
   /// A config.json `hosts` entry for an ssh host whose claude is the claude stub and whose panes run /bin/sh.
   static func remoteHost(_ destination: String = boxDestination, _ extra: [String: JSON] = [:]) -> JSON {
     let host: [String: JSON] = [
@@ -1198,9 +1195,17 @@ extension Instance {
   /// The calls on this Mac's machine that name the remote session, its folder, the box, or its claude's pid in a
   /// signal or a process check.
   func macCalls(for s: BoxSession) throws -> [MachineCall] {
-    let named = try macCalls(holding: namesOfRemoteSession(s.id, cwd: s.cwd) + [s.claudeSessionId])
+    try macCalls(id: s.id, cwd: s.cwd, claudeSessionId: s.claudeSessionId, pid: s.pid)
+  }
+
+  /// The calls on this Mac's machine that name the remote session, its folder, the box, its conversation, or any
+  /// text in `also`, and the calls that name its claude's pid in a signal or a process check.
+  func macCalls(id: String, cwd: String, claudeSessionId: String, pid: Int, also: [String] = []) throws
+    -> [MachineCall]
+  {
+    let named = try macCalls(holding: namesOfRemoteSession(id, cwd: cwd) + [claudeSessionId] + also)
     let signalled = try machineCalls().filter {
-      ($0.has("signal") || $0.has("stopClaude") || $0.has("alive") || $0.has("folderUsers")) && $0.has(String(s.pid))
+      ($0.has("signal") || $0.has("stopClaude") || $0.has("alive") || $0.has("folderUsers")) && $0.has(String(pid))
     }
     return named + signalled
   }

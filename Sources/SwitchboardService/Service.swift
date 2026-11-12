@@ -144,6 +144,8 @@ public final class Service {
   /// For each host whose spool a reconcile reads now: the lowest id recorded since the read began, or nil when
   /// sbd recorded none. The read may not hold the lines of these ids.
   var spoolReadFloors: [String: HostEventID?] = [:]
+  /// When the spool of each reconciled host was last cut, by the reconcile or the tick.
+  var spoolCutAt: [String: Int64] = [:]
   /// The messages of each session on a host whose paste may have reached claude before sbd stopped. The
   /// reconcile settles them from the transcript on the host.
   var unsettled: [String: [String]] = [:]
@@ -918,8 +920,8 @@ public final class Service {
 
   func paneName(_ id: String, _ pane: Pane) -> String { "\(id)-\(pane.rawValue)" }
 
-  /// The environment of a pane that sbd is about to start. A pane on a host gets the session's id and the
-  /// box's folder, and nothing of this Mac. It throws `HostUnread` while the host's site is not ready.
+  /// The environment of a pane that sbd is about to start. A pane on a host gets the session's id and `SB_HOME`
+  /// set to the host's `~/.sb`, and nothing of this Mac. It throws `HostUnread` while the host's site is not ready.
   func newPaneEnv(_ id: String) throws -> [String: String] {
     guard let session = entries[id]?.session, session.host != nil else { return paneEnv(id) }
     return ["SB_SESSION_ID": id, "SB_HOME": try site(for: session).sbFolder()]
@@ -1376,7 +1378,7 @@ public final class Service {
         try site.scoped("the removal of \(session.id)") { scope in
           let at = scope.site
           // Only a removal of the worktree reads the answer, so a plain rm asks a host nothing about the folder.
-          let folderGone = removesWorktree || session.host == nil ? try folderIsGone(session.cwd, at: at) : false
+          let folderGone = removesWorktree ? try folderIsGone(session.cwd, at: at) : false
           var supacode: Bool
           var proven: PullRequest?
           (repo, branch, supacode, proven) = try checkRemoval(

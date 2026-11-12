@@ -250,8 +250,7 @@ public final class Store {
     let end = min(newest, nowNs)
     guard end > Store.hostEventKeepNs else { return }
     // Ids start with their clock as 20 digits, so ids below this text are the ids with an earlier clock.
-    let digits = String(end - Store.hostEventKeepNs)
-    let cutoff = String(repeating: "0", count: 20 - digits.count) + digits
+    let cutoff = String(format: "%020llu", end - Store.hostEventKeepNs)
     try run("DELETE FROM host_events WHERE host = ? AND id < ?", [host, floor.map { min($0.text, cutoff) } ?? cutoff])
   }
 

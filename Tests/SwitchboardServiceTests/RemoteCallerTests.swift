@@ -342,6 +342,19 @@ private func withBench(scripts: Bool = true, _ body: (SiteBench) throws -> Void)
       }
     }
   }
+
+  /// A follow-up of a host session runs on this Mac. The host's account would give its claude no login.
+  @Test(.timeLimit(.minutes(1)))
+  func aNewSessionOnThisMacDoesNotTakeTheAccountOfAParentOnAHost() throws {
+    try withHostService { service, _ in
+      let account = try service.queue.sync {
+        service.entries["box"] = Service.Entry(session: remoteSession("box"))
+        return try service.accountForNew(named: nil, parent: "box", for: localSession("child", cwd: "/srv/repo"))
+      }
+
+      #expect(account == nil)
+    }
+  }
 }
 
 // MARK: The launch
@@ -420,15 +433,7 @@ private func withReadyService(
       let session = try addSession(service, facts, transcript: true)
       let launcher = "\(facts.home)/.sb/sessions/s1/claude.sh"
 
-      switch shape {
-      case "a timeout":
-        try b.set("script-hangs", "")
-        try b.set("short-timeouts", "")
-      case "a dropped link":
-        service.hostLinks["mini"]?.disconnect()
-      default:
-        try b.set("script-status", String(shape.split(separator: " ")[1]))
-      }
+      try makeUnanswered(shape, b, service)
 
       #expect { try service.queue.sync { try service.hasTranscript(session) } } throws: { isUnread($0) }
       #expect { try service.queue.sync { try service.startClaude("s1", prompt: nil) } } throws: { isUnread($0) }

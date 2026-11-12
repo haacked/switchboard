@@ -3,7 +3,7 @@ import Testing
 
 @testable import SwitchboardCore
 
-private func eventId(_ n: Int) -> String { String(format: "%020d-4242-%04x", 1_700_000_000_000_000_000 + n, n) }
+private func eventId(_ n: Int) -> String { String(format: "%020lld-4242-%04x", 1_700_000_000_000_000_000 + n, n) }
 
 /// One spool line as the shim writes it, with its newline.
 private func line(_ n: Int, session: String = "s1") -> Data {

@@ -501,7 +501,7 @@ func attach(_ a: Args) -> Never {
   let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
   // The tmux server of a session on a host is on that host, so this terminal can't attach to its socket.
   if let host = summary(call("get", ["session": .string(id)])).host {
-    die("\(id) runs on \(host), and the app attaches to a session on a host from stage 5")
+    die("\(id) runs on \(host), and sb attach can't reach a session on a host yet")
   }
   _ = call("open", ["session": .string(id)])
   if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }

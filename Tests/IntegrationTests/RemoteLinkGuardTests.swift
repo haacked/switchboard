@@ -37,13 +37,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
 
   private func lastEvent(_ sbd: Instance, _ id: String) throws -> Int64 { try sbd.events(id).last?.id ?? 0 }
 
-  /// The Mac's calls that name the session, its folder, the box, or its claude's pid in a signal.
   private func macCalls(_ sbd: Instance, for s: Running) throws -> [Instance.MachineCall] {
-    let named = try sbd.macCalls(holding: sbd.namesOfRemoteSession(s.id, cwd: s.cwd) + [s.claudeSessionId])
-    let signalled = try sbd.machineCalls().filter {
-      ($0.has("signal") || $0.has("stopClaude") || $0.has("alive")) && $0.has(String(s.pid))
-    }
-    return named + signalled
+    try sbd.macCalls(id: s.id, cwd: s.cwd, claudeSessionId: s.claudeSessionId, pid: s.pid)
   }
 
   // MARK: The link drops

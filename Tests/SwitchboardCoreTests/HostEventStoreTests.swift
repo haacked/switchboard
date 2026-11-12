@@ -86,17 +86,15 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
   @Test func anEventThatFailsToStoreLeavesItsIdUnrecorded() throws {
     try withStore { store, path in
       let id = try eventId(clock)
-      let other = try Store(path: path)
+      // The events insert aborts after the id's insert has already run.
+      try ResolvedTodoStoreTests.block("INSERT", on: "events", in: path)
 
-      #expect(throws: (any Error).self) {
-        try other.transaction {
-          // Another connection holds the write lock past the busy timeout.
-          _ = try store.append(stop(), hostEvent: id, host: "mini")
-        }
-      }
+      #expect(throws: (any Error).self) { try store.append(stop(), hostEvent: id, host: "mini") }
 
       #expect(try !store.hasHostEvent(id))
       #expect(try store.events().isEmpty)
+      let dropped = try runCommand("/usr/bin/sqlite3", [path, "DROP TRIGGER block"])
+      try #require(dropped.status == 0, Comment(rawValue: dropped.stderr))
       #expect(try store.append(stop(), hostEvent: id, host: "mini") != nil)
     }
   }
@@ -121,7 +119,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
       let newest = try eventId(clock)
       for id in [old, kept, newest] { try store.append(stop(), hostEvent: id, host: "mini") }
 
-      try store.pruneHostEvents(host: "mini", nowNs: clock + hour)
+      try store.pruneHostEvents(host: "mini", nowNs: clock + 2 * hour)
 
       #expect(try !store.hasHostEvent(old))
       #expect(try store.hasHostEvent(kept))

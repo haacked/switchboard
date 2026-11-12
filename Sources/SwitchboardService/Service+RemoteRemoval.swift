@@ -252,9 +252,9 @@ extension Service {
   }
 
   /// Stops the session's claude before a removal that keeps the worktree. On a host, it refuses while the
-  /// session's claude state is unknown, signals claude through the checked kill, and closes both panes from
-  /// answers of the host, so the session is never forgotten while its claude may still run there. It runs on the
-  /// state queue.
+  /// session's claude state is unknown, sends SIGTERM only after a fresh read on the host shows that the pid is still
+  /// the claude below the session's Claude pane, and closes both panes from answers of the host, so the session is
+  /// never forgotten while its claude may still run there. It runs on the state queue.
   func stopForRemoval(_ session: Session, at site: any SessionSite) throws {
     try requireRead(session.id)
     if case .running(let pid) = claudeState(session.id) { try stopClaude(session.id, pid) }
