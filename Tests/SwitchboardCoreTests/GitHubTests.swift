@@ -691,76 +691,45 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(GitHub.lastPRLink(in: Data(text.utf8)).key == Self.link(628))
   }
 
-  @Test func lastPRLinkSkipsARefusedLaterLineForAnEarlierAcceptedOne() {
-    let text =
-      Self.linkLine(628) + "\n" + Self.userLine + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
-      + Self.assistantLine + "\n"
-
-    let result = GitHub.lastPRLink(in: Data(text.utf8)) { $0 == "PostHog/ops-platform" }
-
-    #expect(result.key == Self.link(628))
-    #expect(result.consumed == Data(text.utf8).count)
-  }
-
-  @Test func lastPRLinkReturnsNoKeyButConsumesEverythingWhenNoLineIsAccepted() {
-    let complete = Self.linkLine(628) + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
-    let text = complete + Self.linkLine(629)
-
-    let result = GitHub.lastPRLink(in: Data(text.utf8)) { _ in false }
-
-    #expect(result.key == nil)
-    #expect(result.consumed == Data(complete.utf8).count)
-  }
-
-  @Test func lastPRLinkAcceptsEveryRepoByDefault() {
+  @Test func lastPRLinkTakesTheLastLineWhateverItsRepo() {
     let text = Self.linkLine(628) + "\n" + Self.linkLine(217, repo: "haacked/switchboard") + "\n"
 
     #expect(GitHub.lastPRLink(in: Data(text.utf8)).key == Self.link(217, repo: "haacked/switchboard"))
   }
-
-  @Test func lastPRLinkAsksAboutTheRepoAsTheLineWritesIt() {
-    let text = Self.linkLine(628, repo: "PostHog/Ops-Platform") + "\n"
-
-    let result = GitHub.lastPRLink(in: Data(text.utf8)) { $0 == "PostHog/Ops-Platform" }
-
-    #expect(result.key == Self.link(628, repo: "PostHog/Ops-Platform"))
-  }
 }
 
-@Suite struct GitHubRemoteRepositories {
-  @Test func repositoriesListsEveryGitHubRemoteInLowercase() {
-    let config = [
-      "remote.origin.url": "https://github.com/haacked/PostHog.git",
-      "remote.upstream.url": "git@github.com:PostHog/posthog.git",
-      "remote.upstream.gh-resolved": "base",
-      "remote.port443.url": "ssh://git@ssh.github.com:443/PostHog/Charts.git",
-      "remote.gitlab.url": "https://gitlab.com/acme/widgets.git",
-      "remote.pushdefault": "origin",
-      "branch.main.remote": "origin",
-      "branch.main.merge": "refs/heads/main",
-    ]
+@Suite struct GitHubReflog {
+  @Test func checkedOutBranchesNamesBothSidesOfEachCheckout() {
+    let reflog = [
+      "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first",
+      "1111 1111 T <t@t> 1794400001 -0800\tcheckout: moving from main to haacked/a",
+      "1111 2222 T <t@t> 1794400002 -0800\tcommit: work",
+      "2222 2222 T <t@t> 1794400003 -0800\tcheckout: moving from haacked/a to 2222abcd",
+      "2222 1111 T <t@t> 1794400004 -0800\tcheckout: moving from 2222abcd to haacked/b",
+      "",
+    ].joined(separator: "\n")
 
-    let repositories = GitHub.repositories(config: config)
-
-    #expect(repositories == ["haacked/posthog", "posthog/posthog", "posthog/charts"])
+    #expect(GitHub.checkedOutBranches(reflog: reflog) == ["main", "haacked/a", "2222abcd", "haacked/b"])
   }
 
-  @Test func repositoriesIncludesTheDefaultRepoThatGhResolvedNames() {
-    let config = [
-      "remote.origin.url": "https://github.com/haacked/supacode.git",
-      "remote.origin.gh-resolved": "supabitapp/Supacode",
-    ]
+  @Test func checkedOutBranchesNamesBothSidesOfARename() {
+    let reflog = [
+      "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first",
+      "1111 1111 T <t@t> 1794400001 -0800\tBranch: renamed refs/heads/haacked/a to refs/heads/haacked/b",
+      "",
+    ].joined(separator: "\n")
 
-    #expect(GitHub.repositories(config: config) == ["haacked/supacode", "supabitapp/supacode"])
+    #expect(GitHub.checkedOutBranches(reflog: reflog) == ["haacked/a", "haacked/b"])
   }
 
   @Test(arguments: [
-    [String: String](),
-    ["branch.main.remote": "origin", "branch.main.merge": "refs/heads/main", "remote.pushdefault": "origin"],
-    ["remote.origin.url": "https://gitlab.com/acme/widgets.git"],
+    "",
+    "0000 1111 T <t@t> 1794400000 -0800\tcommit (initial): first\n",
+    "1111 1111 T <t@t> 1794400001 -0800\tbranch: Created from HEAD\n",
+    "1111 1111 T <t@t> 1794400001 -0800\tcheckout: moving from main\n",
   ])
-  func repositoriesIsEmptyWithoutRemotes(_ config: [String: String]) {
-    #expect(GitHub.repositories(config: config).isEmpty)
+  func checkedOutBranchesIsEmptyWithoutACheckout(_ reflog: String) {
+    #expect(GitHub.checkedOutBranches(reflog: reflog).isEmpty)
   }
 }
 
