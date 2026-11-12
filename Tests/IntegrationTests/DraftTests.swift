@@ -76,6 +76,6 @@ private let hogqlParagraphs = """
     let s = try sbd.new(prompt: "reply hogql")
 
     let item = try #require(try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }.triage)
-    #expect(item.drafts == [TriageDraft(label: "Quoted", text: hogqlParagraphs)])
+    #expect(item.drafts == [InboxDraft(TriageDraft(label: "Quoted", text: hogqlParagraphs), number: 1)])
   }
 }

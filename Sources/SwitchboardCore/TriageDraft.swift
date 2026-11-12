@@ -13,6 +13,36 @@ public struct TriageDraft: Codable, Equatable, Sendable {
   }
 }
 
+/// A draft as an Inbox item shows it. `number` is the draft's 1-based
+/// position in the card, so the item's ref and the number name one draft.
+public struct InboxDraft: Codable, Equatable, Sendable {
+  public var number: Int
+  public var label: String?
+  public var text: String
+
+  public init(_ draft: TriageDraft, number: Int) {
+    self.number = number
+    label = draft.label
+    text = draft.text
+  }
+
+  private enum CodingKeys: String, CodingKey { case number, label, text }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    number = try c.decodeIfPresent(Int.self, forKey: .number) ?? 0
+    label = try c.decodeIfPresent(String.self, forKey: .label)
+    text = try c.decode(String.self, forKey: .text)
+  }
+
+  /// The JSON leaves out `number`, so it stays `{label?, text}`.
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encodeIfPresent(label, forKey: .label)
+    try c.encode(text, forKey: .text)
+  }
+}
+
 public enum TriageDrafts {
   public static let maxDrafts = 5
   /// sbd drops a longer draft rather than cut it, because the user would
@@ -22,11 +52,14 @@ public enum TriageDrafts {
   /// The drafts that a card names, as strings or as `{label, text}` objects.
   /// Each element that fails or doesn't fit adds a line to `dropped`.
   static func read(_ list: JSON?, _ dropped: inout [String]) -> [TriageDraft] {
-    TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { raw in
-      let text = raw.string ?? raw["text"]?.string ?? ""
-      let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
-      return try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
-    }
+    TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { try draft($0) }
+  }
+
+  /// One element of a card's drafts, as a string or a `{label, text}` object.
+  static func draft(_ raw: JSON) throws -> TriageDraft {
+    let text = raw.string ?? raw["text"]?.string ?? ""
+    let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
+    return try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
   }
 
   /// The drafts whose text appears in the reply, each with the reply's own

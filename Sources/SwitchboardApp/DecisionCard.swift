@@ -34,7 +34,7 @@ struct DecisionCard: View {
           if !item.callouts.isEmpty { callouts }
         }
       }
-      if !item.drafts.isEmpty { DraftsSection(drafts: item.drafts) }
+      if !item.drafts.isEmpty { DraftsSection(session: session, item: item) }
       VStack(alignment: .leading, spacing: 8) {
         SectionTitle(text: "Action")
         if let list {

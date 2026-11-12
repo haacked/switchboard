@@ -515,7 +515,7 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
   @Test func theSessionsCardGivesTheItemItsDrafts() throws {
     let item = try #require(itemOf(try drafted()))
 
-    #expect(item.drafts == [reviewDraft])
+    #expect(item.drafts == [InboxDraft(reviewDraft, number: 1)])
   }
 
   @Test func theMessageSummaryCarriesTheItemsDrafts() throws {
@@ -543,6 +543,23 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
     #expect(decoded.drafts.count == 2)
   }
 
+  /// The item's JSON as it was before items had their own draft type.
+  static let draftItemJSON =
+    #"{"callouts":[],"decisions":[],"kind":"info","message":{"action":{"decisions":[],"multiSelect":false,"options":[],"primary":null},"details":{"openByDefault":false},"summary":{"callouts":[],"drafts":[{"label":"Review request","text":"Could someone review #1?"},{"text":"No label.\n\nTwo lines."}],"text":"It drafted two."}},"multiSelect":false,"options":[],"ref":"summary:2","source":"card","summary":"It drafted two.","title":"Send the review request"}"#
+
+  @Test func anItemWithDraftsKeepsItsJSON() throws {
+    let summary = TriageSummary(
+      title: "Send the review request", kind: .info, summary: "It drafted two.",
+      drafts: [reviewDraft, TriageDraft(text: "No label.\n\nTwo lines.")])
+    let item = TriageItem(summary, source: .card, ref: "summary:2")
+
+    let decoded = try JSONCoding.decode(TriageItem.self, from: Self.draftItemJSON)
+
+    #expect(try JSONCoding.encode(item) == Self.draftItemJSON)
+    #expect(decoded == item)
+    #expect(try JSONCoding.encode(decoded) == Self.draftItemJSON)
+  }
+
   @Test func anItemWithoutDraftsHasNone() throws {
     let item = try #require(itemOf(try drafted([])))
 
@@ -565,6 +582,6 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
     let item = try #require(itemOf(f))
 
     #expect(item.source == .summary)
-    #expect(item.drafts == [reviewDraft])
+    #expect(item.drafts == [InboxDraft(reviewDraft, number: 1)])
   }
 }

@@ -59,7 +59,7 @@ struct NudgeButton: View {
       DraftCopy.copy(text)
       copied = true
       Task { @MainActor in
-        try? await Task.sleep(for: .seconds(DraftView.copiedSeconds))
+        try? await Task.sleep(for: .seconds(DraftCopyButton.copiedSeconds))
         copied = false
       }
     } label: {

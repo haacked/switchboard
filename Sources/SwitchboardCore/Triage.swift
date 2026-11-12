@@ -219,7 +219,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var decisions: [PendingDecision]
   /// Messages that the session wrote for the user to send to someone else.
   /// The JSON carries them only in `message.summary`.
-  public var drafts: [TriageDraft]
+  public var drafts: [InboxDraft]
   public var source: TriageSource
   /// What the user can open after the Summary and the Action. The builder
   /// fills in the card's parts. The service adds the session's fields,
@@ -232,7 +232,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [TriageDraft] = [], source: TriageSource,
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [InboxDraft] = [], source: TriageSource,
     ref: String = "", details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
@@ -252,7 +252,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
       callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions,
-      drafts: summary.drafts, source: source, ref: ref)
+      drafts: summary.drafts.enumerated().map { InboxDraft($1, number: $0 + 1) }, source: source, ref: ref)
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -260,7 +260,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   }
 
   private struct Sections: Decodable {
-    struct Summary: Decodable { var drafts: [TriageDraft]? }
+    struct Summary: Decodable { var drafts: [InboxDraft]? }
     var summary: Summary?
     var details: TriageDetails?
   }
@@ -270,7 +270,11 @@ public struct TriageItem: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let sections = try c.decodeIfPresent(Sections.self, forKey: .message)
     details = sections?.details ?? TriageDetails()
-    drafts = sections?.summary?.drafts ?? []
+    drafts = (sections?.summary?.drafts ?? []).enumerated().map { i, draft in
+      var draft = draft
+      draft.number = i + 1
+      return draft
+    }
     title = try c.decode(String.self, forKey: .title)
     kind = try c.decode(TriageKind.self, forKey: .kind)
     summary = try c.decode(String.self, forKey: .summary)
