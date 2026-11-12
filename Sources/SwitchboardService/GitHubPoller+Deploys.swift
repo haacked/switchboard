@@ -193,13 +193,4 @@ extension GitHubPoller {
     deploys.runs[sha] = found
     return found
   }
-
-  /// Sends a REST GET and returns its JSON. Anything but a 200 is an error.
-  private func get(_ path: String, stats: inout Stats) throws -> JSON {
-    let (status, _, _, json) = try send(try apiRequest(path), stats: &stats)
-    guard status == 200, let json else {
-      throw APIError("GitHub answered \(status) for \(path) \(GitHub.message(json))")
-    }
-    return json
-  }
 }
