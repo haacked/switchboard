@@ -581,7 +581,8 @@ extension WaitTests {
   func stoppedWithAReviewWait(_ sbd: Instance) throws -> SessionSummary {
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
-    return try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
+    return try sbd.get(s.id)
   }
 
   static let overdueReview = "a review from alex on the session's PR: still open after 1 d"
@@ -657,7 +658,7 @@ extension WaitTests {
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "ci")
     try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
 
     try sbd.advanceClock(3 * WaitTests.hourMs)
 
@@ -671,7 +672,7 @@ extension WaitTests {
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "ci")
     try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
 
     try sbd.advanceClock(WaitTests.hourMs)
 
@@ -684,7 +685,7 @@ extension WaitTests {
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
 
     try sbd.advanceClock(25 * WaitTests.hourMs)
 
@@ -725,7 +726,7 @@ extension WaitTests {
     let s = try sbd.new(prompt: "offer it")
     try sbd.waitFor(s.id, "the offer") { $0.state == .canContinue }
     try sbd.sb("wait", s.id, "--kind", "ci")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(3 * WaitTests.hourMs)
     try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
 
