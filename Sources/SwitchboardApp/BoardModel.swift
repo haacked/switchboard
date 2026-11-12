@@ -278,7 +278,13 @@ final class BoardModel: ObservableObject {
   /// star fills and turns the Needs you color while it needs you.
   var needsUser: [SessionSummary] { sessions.filter(Triage.needsYou) }
 
-  var manager: SessionSummary? { sessions.first { $0.kind == .manager } }
+  /// The Manager conversations, newest activity first, as `sb manager ls` lists them.
+  var managers: [SessionSummary] {
+    sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
+  }
+
+  /// The Manager conversation that the toolbar star names while one needs you.
+  var waitingManager: SessionSummary? { managers.first { $0.state == .needsYou } }
 
   /// A state's sessions in the sidebar, each one followed by its children.
   struct SidebarGroup: Identifiable {
@@ -318,7 +324,7 @@ final class BoardModel: ObservableObject {
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
   /// True while the sidebar has no rows and sbd answers.
-  var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && manager == nil && unreachable == nil }
+  var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil }
 
   /// The Inbox or the Board while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
@@ -540,9 +546,10 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// Starts the Manager, or opens it, and selects it.
-  func openManager() {
-    perform("manager", [:]) { value in
+  /// Opens the most recent Manager conversation, or starts the first one, and
+  /// selects it. With `new`, it starts a conversation, which its first prompt names.
+  func openManager(new: Bool = false) {
+    perform("manager", new ? ["new": true] : [:]) { value in
       if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
   }

@@ -118,7 +118,7 @@ let everyFilterShape = [
   @Test func theManagerAndAChatStayUnderAPosthogFilter() {
     let model = model(posthogOnly)
 
-    #expect(model.manager?.id == "m")
+    #expect(model.managers.map(\.id) == ["m"])
     #expect(model.chat(of: "g1")?.id == "c")
     #expect(Set(model.sessions.map(\.id)) == ["ph1", "ph2", "un", "m", "c"])
     #expect(model.followups.map(\.id) == ["fph"])

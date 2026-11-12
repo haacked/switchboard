@@ -28,21 +28,26 @@ extension Service {
         return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
       guard let created else { return try openOrSend(id, text) }
-      guard text != nil else { return .success(try JSON(encoding: created)) }
-      let delivery: Delivery = queued ? .queued : .resumed
-      return .success(try withDelivery(created, .string(delivery.rawValue)))
+      return try createdAnswer(created, text: text, queued: queued)
     } catch {
       return .failure("\(error)")
     }
   }
 
   /// Sends `text` to the chat, or without text opens it.
-  private func openOrSend(_ id: String, _ text: String?) throws -> Response {
+  func openOrSend(_ id: String, _ text: String?) throws -> Response {
     var request: [String: JSON] = ["session": .string(id)]
     request["text"] = text.map(JSON.string)
     let response = handle(Request(op: text == nil ? "open" : "send", args: .object(request)))
     guard text != nil, let delivery = response.result?["delivery"] else { return response }
     return .success(try queue.sync { try withDelivery(summary(id), delivery) })
+  }
+
+  /// The answer for a session that a request just created, with `text` as
+  /// its first prompt when there was one.
+  func createdAnswer(_ created: SessionSummary, text: String?, queued: Bool) throws -> Response {
+    guard text != nil else { return .success(try JSON(encoding: created)) }
+    return .success(try withDelivery(created, .string((queued ? Delivery.queued : .resumed).rawValue)))
   }
 
   private func withDelivery(_ summary: SessionSummary, _ delivery: JSON) throws -> JSON {
@@ -51,10 +56,17 @@ extension Service {
     return .object(object)
   }
 
-  /// The `chat-log` request: the last messages of the group's chat, oldest
-  /// first. It reads the transcript off the state queue.
+  /// The `chat-log` request: the last messages of the group's chat, or of
+  /// the session that `session` names, oldest first. With `manager`, the
+  /// session is a Manager conversation, and the most recent one without
+  /// `session`. It reads the transcript off the state queue.
   func chatLog(_ args: JSON) throws -> JSON {
     let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
+      let manager = args["manager"]?.bool == true
+      if manager || args["session"] != nil {
+        let id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
+        return (transcriptFinder(id), self.machine(of: id))
+      }
       let group = try lookupGroup(args)
       guard let id = chatID(group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")

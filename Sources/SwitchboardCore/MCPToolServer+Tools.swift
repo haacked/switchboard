@@ -88,6 +88,9 @@ extension MCPToolServer {
         "account": string("The Claude account, by name or folder."),
         "followup": boolean("Adds a follow-up instead of starting the session."),
         "after": string("For a follow-up, a PR such as pr:123 whose merge moves it to Needs you."),
+        "wait": string(
+          "A state such as done. Sets a session wait on the new session in the same call, and you resume when it reaches that state."
+        ),
       ], required: ["repository", "branch", "prompt"]),
     Tool(
       "set_wait",

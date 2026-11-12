@@ -59,6 +59,9 @@ public final class Service {
     var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// Set when a running claude's MCP servers changed. `applyMCPChanges`
+    /// relaunches claude once it can take the change.
+    var mcpRelaunch: MCPRelaunch?
 
     /// Whether a message is queued for the session or on its way.
     func messageWaiting(now: Int64) -> Bool {
@@ -252,7 +255,7 @@ public final class Service {
       case "repo-add":
         return try .success(JSON(encoding: addRepo(request.args)))
       case "manager":
-        return managerRequest()
+        return managerRequest(request.args)
       case "chat":
         return chatRequest(request.args)
       case "chat-log":
@@ -365,7 +368,9 @@ public final class Service {
     case "send":
       let id = try lookup(args)
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
-      return ["delivery": .string(try send(id, text).rawValue)]
+      // A sender that sbd no longer knows, or the session itself, goes unrecorded.
+      let from = (try? lookup(["session": args["from"] ?? .null])).flatMap { $0 == id ? nil : $0 }
+      return ["delivery": .string(try send(id, text, from: from).rawValue)]
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "stop":
@@ -390,6 +395,10 @@ public final class Service {
       return try noteRequest(op, args)
     case "resolved-todos":
       return try resolvedTodos(args)
+    case "manager-ls":
+      return try JSON(encoding: managerList())
+    case "manager-mcp":
+      return try managerMCP(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -466,7 +475,9 @@ public final class Service {
 
   /// Records a hook event and returns it with what the hook prints, or nil
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
-  /// the digest of its children, which sbd records as a `digest` event.
+  /// the digest of its children, and the SessionStart of a new Manager
+  /// conversation prints the digest of the whole board. sbd records each
+  /// digest as a `digest` event.
   func hook(_ args: JSON) throws -> (event: Event, answer: JSON)? {
     guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
       return nil
@@ -493,11 +504,16 @@ public final class Service {
       // A message that arrived while claude was starting waits until claude
       // has drawn its prompt. 1.5 s covers the redraws that Phase 0 measured.
       deliverPending(id, after: 1.5)
+      if let text = startDigest(id, source: payload["source"]?.string) {
+        record(id, "digest", ["text": .string(text)])
+        answer = ParentDigest.hookOutput(text, event: kind)
+      }
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
+      try nameConversation(id, prompt: payload["prompt"]?.string)
       if let text = digest(id, now: event.t) {
         record(id, "digest", ["text": .string(text)])
-        answer = ParentDigest.hookOutput(text)
+        answer = ParentDigest.hookOutput(text, event: kind)
       }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
@@ -830,12 +846,7 @@ public final class Service {
     var args = [config.claude]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     args += ["--settings", home.claudeSettings]
-    args += mcpArgs
-    if session.kind != .work {
-      args += [
-        "--mcp-config", MCPToolServer.launchConfig(sb: sbPath, home: home.path, session: id, group: session.chat).text,
-      ]
-    }
+    args += launchMCPArgs(id, session)
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
     // After claudeArgs, so that the session's mode wins over a global one.
@@ -863,6 +874,8 @@ public final class Service {
     markStarting(name)
     if !session.started { try update(id) { $0.started = true } }
     snapshot.claudePids[id] = nil
+    // This launch reads the current MCP servers, so no relaunch for a change to them is still due.
+    entries[id]?.mcpRelaunch = nil
     entries[id]?.unreportedSince = nil
     entries[id]?.inFlight = prompt?.isEmpty == false ? nowMs() : nil
     record(
@@ -911,7 +924,10 @@ public final class Service {
   /// claude starts without a prompt and gets the message as a paste, which
   /// checks that the log still holds the `sent` event. It throws, and pastes
   /// nothing, when the store can't keep the `sent` event.
-  func send(_ id: String, _ text: String, byUser: Bool = true, launchesWithPrompt: Bool = true) throws -> Delivery {
+  /// `from` is the session that sent the message, which the `sent` event records.
+  func send(
+    _ id: String, _ text: String, byUser: Bool = true, launchesWithPrompt: Bool = true, from: String? = nil
+  ) throws -> Delivery {
     guard entries[id] != nil else { throw APIError("no session \(id)") }
     let now = nowMs()
     // Claude Code does not attach the images of a prompt that starts it, so
@@ -920,11 +936,11 @@ public final class Service {
     if launchesWithPrompt, claudeState(id) == .stopped, entries[id]!.pending.isEmpty, !attaches, hasRoom() {
       // A missing folder is the usual reason startClaude throws, so the check comes before `sent` is stored.
       try requireFolder(entries[id]!.session)
-      try recordSent(id, text, .resumed, byUser: byUser)
+      try recordSent(id, text, .resumed, byUser: byUser, from: from)
       try startClaude(id, prompt: text)
       return .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
-      let sent = try recordSent(id, text, .pasted, byUser: byUser)
+      let sent = try recordSent(id, text, .pasted, byUser: byUser, from: from)
       paste(id, QueuedMessage(text: text, sent: sent))
       return .pasted
     } else {
@@ -932,24 +948,27 @@ public final class Service {
       // the message has images, the live cap is full, or another start is
       // queued. Its messages arrive in order after SessionStart.
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
-      try queueMessage(id, text, byUser: byUser)
+      try queueMessage(id, text, byUser: byUser, from: from)
       return .queued
     }
   }
 
   /// Adds the message to the session's queue. The `sent` event lets a
   /// restart of sbd rebuild the queue.
-  func queueMessage(_ id: String, _ text: String, byUser: Bool) throws {
-    let sent = try recordSent(id, text, .queued, byUser: byUser)
+  func queueMessage(_ id: String, _ text: String, byUser: Bool, from: String? = nil) throws {
+    let sent = try recordSent(id, text, .queued, byUser: byUser, from: from)
     entries[id]?.pending.append(QueuedMessage(text: text, sent: sent))
     deliverPending(id, after: 0.2)
   }
 
   @discardableResult
-  private func recordSent(_ id: String, _ text: String, _ delivery: Delivery, byUser: Bool) throws -> Event {
+  private func recordSent(_ id: String, _ text: String, _ delivery: Delivery, byUser: Bool, from: String?) throws
+    -> Event
+  {
     var data: [String: JSON] = ["text": .string(text), "delivery": .string(delivery.rawValue)]
     if delivery == .pasted { data[Delivery.awaitsDeliveredKey] = true }
     if !byUser { data["by"] = "sbd" }
+    if let from { data["from"] = .string(from) }
     return try recordStored(id, "sent", .object(data))
   }
 
@@ -1730,6 +1749,7 @@ public final class Service {
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
       notifyParents(now: now)
+      applyMCPChanges(now: now)
       autoContinueSessions(now: now)
       compactSnapshots()
     }
@@ -1789,6 +1809,7 @@ public final class Service {
     }
     out.parent = s.parent
     out.manager = s.manager
+    out.mcp = s.mcp
     out.kind = s.kind
     out.chat = s.chat
     if Triage.mayHaveItem(out) {

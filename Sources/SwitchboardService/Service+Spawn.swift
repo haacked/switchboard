@@ -20,16 +20,36 @@ extension Service {
         "--base needs a started spawn, because a follow-up keeps no base. Pass --base to sb followup start")
     }
 
+    let wait = text("wait")
+    if let wait {
+      if followup { throw APIError("wait needs a started spawn, because a follow-up has no state to reach") }
+      guard let parent = text("parent") else { throw APIError("wait needs a calling session to resume") }
+      _ = try queue.sync { try lookup(["session": .string(parent)]) }
+      guard AttentionState(rawValue: wait) != nil else {
+        throw APIError("wait is a state, one of \(AttentionState.allCases.map(\.rawValue).joined(separator: ", "))")
+      }
+    }
+
     let (checkout, named) = try spawnCheckout(ref)
     if branchOrFolderTaken(checkout, branch) {
       throw APIError("branch \(branch) or its worktree folder exists for \(checkout). Name a new branch")
     }
 
     guard followup else {
-      return try newSession(
+      let child = try newSession(
         NewSession(
           path: checkout, branch: branch, base: text("base"), name: text("name"), prompt: prompt, model: text("model"),
           parent: text("parent"), account: text("account"), group: text("group"), autoMode: args["autoMode"]?.bool))
+      guard let wait, let parent = child.parent else { return child }
+      try queue.sync {
+        _ = try waitRequest(
+          "wait",
+          [
+            "session": .string(parent), "kind": .string(Wait.Kind.session.rawValue), "target": .string(child.id),
+            "state": .string(wait), "by": .string(Author.claude.rawValue),
+          ])
+      }
+      return queue.sync { summary(child.id) }
     }
     // A follow-up keeps only `owner/name`. `followup start` finds the checkout again from it.
     guard let repository = named ?? githubRepository(checkout) else {
