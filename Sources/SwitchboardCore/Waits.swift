@@ -16,7 +16,9 @@ public enum Author: String, Codable, Sendable {
 
 /// Something a session waits on, and what happens when it resolves. sbd
 /// resolves the `date`, `session`, and `manual` kinds on each tick. A poller
-/// resolves the others through `Service.resolveWait`.
+/// resolves the others through `Service.resolveWait`. A wait that passes its
+/// `recheck` time stays open, and its session moves to Needs you until the
+/// wait resolves or the user clears it.
 public struct Wait: Codable, Equatable, Sendable {
   public enum Kind: String, Codable, CaseIterable, Sendable {
     case ci
@@ -125,11 +127,15 @@ public struct Wait: Codable, Equatable, Sendable {
   /// Milliseconds since the epoch.
   public var created: Int64
   public var then: Then
+  /// When the wait stops holding the session in Waiting and moves it to
+  /// Needs you. It is nil for a `date` wait, for a manual wait, whose `until`
+  /// serves instead, and for a wait that sbd has not stamped yet.
+  public var recheck: Int64?
 
   public init(
     id: String, kind: Kind, pr: PullRequest? = nil, session: SessionTarget? = nil, state: AttentionState? = nil,
     who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, note: String? = nil,
-    headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume
+    headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume, recheck: Int64? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -145,6 +151,7 @@ public struct Wait: Codable, Equatable, Sendable {
     self.by = by
     self.created = created
     self.then = then
+    self.recheck = recheck
   }
 
   public static let environments = ["dev", "prod-us", "prod-eu", "prod"]
@@ -175,6 +182,29 @@ public struct Wait: Codable, Equatable, Sendable {
     return summary + (note.map { " (\($0))" } ?? "")
   }
 
+  /// Whether the wait is past its recheck time and still open.
+  public func isOverdue(now: Int64) -> Bool {
+    guard let recheck else { return false }
+    return recheck <= now
+  }
+
+  /// The reason line of an overdue wait. The age is the time from when the
+  /// wait was set to its recheck time, so the line stays the same while the
+  /// wait stays overdue.
+  public var overdueLine: String {
+    outcomeLine("still open after \(Wait.age((recheck ?? created) - created))")
+  }
+
+  /// A duration in its largest whole unit, such as `45 min`, `2 h`, or `3 d`.
+  static func age(_ ms: Int64) -> String {
+    let minute: Int64 = 60_000
+    let hour = 60 * minute
+    let day = 24 * hour
+    if ms >= day { return "\(ms / day) d" }
+    if ms >= hour { return "\(ms / hour) h" }
+    return "\(max(1, ms / minute)) min"
+  }
+
   /// The reason line after the wait resolved with `notify`.
   public func outcomeLine(_ outcome: String) -> String { "\(summary): \(outcome)" }
 
@@ -192,6 +222,10 @@ public struct Wait: Codable, Equatable, Sendable {
   /// What happened, when sbd itself resolves this wait at `now`, or nil while
   /// it stays open. `stateOf` gives another session's state, or nil when that
   /// session no longer exists. The kinds that a poller resolves return nil.
+  ///
+  /// A `session` wait also resolves when its target can't reach the wanted
+  /// state on its own: the target was removed, it reached Done, or it went
+  /// Stale, which is how sbd defines an abandoned session.
   public func resolution(now: Int64, stateOf: (String) -> AttentionState?) -> String? {
     switch kind {
     case .date, .manual:
@@ -200,7 +234,12 @@ public struct Wait: Codable, Equatable, Sendable {
     case .session:
       guard let target = session else { return nil }
       guard let current = stateOf(target.id) else { return "it was removed" }
-      return current == (state ?? .done) ? "it did" : nil
+      switch current {
+      case state ?? .done: return "it did"
+      case .done: return "it reached Done first"
+      case .stale: return "it went stale"
+      default: return nil
+      }
     default:
       return nil
     }
@@ -388,11 +427,16 @@ extension SessionFacts {
 
 extension Attention {
   /// Needs you after a wait resolved with `notify`, until the next prompt,
-  /// even while other waits stay open. Otherwise Waiting while the session
-  /// has an open wait.
-  static func waitVerdict(_ session: Session, _ facts: SessionFacts) -> Verdict? {
+  /// even while other waits stay open. Needs you while an open wait is past
+  /// its recheck time, naming each overdue wait. Otherwise Waiting while the
+  /// session has an open wait.
+  static func waitVerdict(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict? {
     if let outcome = facts.waitOutcome { return Verdict(state: .needsYou, reason: oneLine(outcome), kind: .info) }
     guard let waits = session.waits, !waits.isEmpty else { return nil }
+    let overdue = waits.filter { $0.isOverdue(now: now) }
+    if !overdue.isEmpty {
+      return Verdict(state: .needsYou, reason: oneLine(overdue.map(\.overdueLine).joined(separator: "; ")), kind: .info)
+    }
     return Verdict(state: .waiting, reason: oneLine(waits.map(\.line).joined(separator: "; ")))
   }
 }

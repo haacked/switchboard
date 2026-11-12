@@ -303,7 +303,9 @@ let usage = """
   on the session's own PR. session takes another session as --target and a
   --state (default done). date needs --until (2h, 2026-10-26, or
   2026-10-26T09:00). manual takes an optional --until that returns it to Needs
-  you. --then notify moves the session to Needs you instead of resuming it.
+  you, a day later without one. --then notify moves the session to Needs you
+  instead of resuming it. A wait still open past its recheck time
+  (recheckSeconds in config.json) moves the session to Needs you.
   """
 
 struct Args {

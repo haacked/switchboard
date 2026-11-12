@@ -45,7 +45,8 @@ private let trunkBotComment = PRComment(
 private let now: Int64 = 10
 
 private func verdict(_ facts: SessionFacts, _ s: Session = session()) -> Verdict {
-  Attention.shown(Attention.evaluate(s, facts, now: now), facts)
+  Attention.shown(
+    Attention.evaluate(s, facts, now: now), facts, now: now, acknowledgedMs: RecheckSettings().acknowledgedMs)
 }
 
 /// The suites nest under one name, so `--filter MergeAttentionTests` runs them all.
