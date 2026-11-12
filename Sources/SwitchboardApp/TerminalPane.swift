@@ -11,6 +11,9 @@ struct TerminalPane: NSViewRepresentable {
   /// The terminal takes keyboard focus once it is in a window, then calls `onFocus`.
   var takesFocus = false
   var onFocus: (() -> Void)? = nil
+  /// When true, Shift+Return sends ESC CR, which Claude Code reads as a new line in its prompt. Leave it false
+  /// for a shell, where Shift+Return sends CR and runs the command.
+  var newlineOnShiftReturn = false
 
   func makeCoordinator() -> Coordinator { Coordinator(onExit: onExit) }
 
@@ -33,6 +36,7 @@ struct TerminalPane: NSViewRepresentable {
   func updateNSView(_ view: PaddedTerminalView, context: Context) {
     view.onFocus = onFocus
     view.focusWhenInWindow = takesFocus
+    view.terminal.newlineOnShiftReturn = newlineOnShiftReturn
   }
 
   static func dismantleNSView(_ view: PaddedTerminalView, coordinator: Coordinator) {

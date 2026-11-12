@@ -97,7 +97,7 @@ struct SessionView: View {
           }
           TerminalPane(
             command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
-            onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) })
+            onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) }, newlineOnShiftReturn: true)
         }
         .frame(minWidth: SessionView.claudeMinWidth, idealWidth: 760)
         if session.shellClosed != true {
