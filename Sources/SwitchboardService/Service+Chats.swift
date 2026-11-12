@@ -59,12 +59,17 @@ extension Service {
   /// The `chat-log` request: the last messages of the group's chat, or of
   /// the session that `session` names, oldest first. With `manager`, the
   /// session is a Manager conversation, and the most recent one without
-  /// `session`. It reads the transcript off the state queue.
+  /// `session`. It refuses a session that is not a Manager conversation or a
+  /// group chat. It reads the transcript off the state queue.
   func chatLog(_ args: JSON) throws -> JSON {
     let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
       let manager = args["manager"]?.bool == true
       if manager || args["session"] != nil {
         let id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
+        guard let session = entries[id]?.session, session.kind.showsAsChat else {
+          throw APIError(
+            "\(entries[id]?.session.name ?? id) is not a Manager conversation or a group chat. chat-log reads only those")
+        }
         return (transcriptFinder(id), self.machine(of: id))
       }
       let group = try lookupGroup(args)

@@ -215,15 +215,97 @@ import Testing
     #expect(try sbd.get(target.id).lastReply == "Done: hello")
   }
 
-  @Test func chatLogReadsAnySessionThatSessionNames() throws {
+  // MARK: chat-log with session
+
+  /// How a `chat-log` request names a session: its id, a unique prefix of its id, or its name.
+  enum SessionRef: CaseIterable { case id, idPrefix, name }
+
+  func ref(_ s: SessionSummary, _ how: SessionRef) -> String {
+    switch how {
+    case .id: s.id
+    case .idPrefix: String(s.id.prefix(s.id.count - 1))
+    case .name: s.name
+    }
+  }
+
+  func chatLog(_ sbd: Instance, _ args: [String: JSON]) throws -> [String] {
+    try JSONCoding.convert(sbd.client.call("chat-log", args), to: [ChatMessage].self).map { "\($0.role): \($0.text)" }
+  }
+
+  static let refusal = "is not a Manager conversation or a group chat"
+
+  @Test(arguments: SessionRef.allCases) func chatLogRefusesAWorkSessionAndNamesIt(_ how: SessionRef) throws {
     let sbd = try Instance()
-    let work = try sbd.new(prompt: "hello", name: "work")
+    _ = try newConversation(sbd, name: "Cache work")
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
     try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
 
-    let log = try JSONCoding.convert(
-      sbd.client.call("chat-log", ["session": .string(work.id)]), to: [ChatMessage].self)
+    let error = failure(sbd, "chat-log", ["session": .string(ref(work, how))])
 
-    #expect(log.map { "\($0.role): \($0.text)" } == ["user: hello", "assistant: Done: hello"])
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+    #expect(error.contains("Payroll keys"), Comment(rawValue: error))
+  }
+
+  @Test func chatLogWithManagerFalseRefusesAWorkSession() throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let error = failure(sbd, "chat-log", ["session": .string(work.id), "manager": false])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+  }
+
+  @Test func chatLogRefusesAFollowupThatHasNotStarted() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache. It reads twice."])
+    try #require(f.kind == .work)
+
+    let error = failure(sbd, "chat-log", ["session": .string(f.id)])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+    #expect(error.contains(f.name), Comment(rawValue: error))
+  }
+
+  @Test(arguments: SessionRef.allCases) func chatLogReadsAManagerConversationLikeManagerLog(_ how: SessionRef) throws {
+    let sbd = try Instance()
+    let target = try idleConversation(sbd, name: "Cache work", "hello")
+    let other = try idleConversation(sbd, name: "Docs work", "other")
+    try #require(target.id != other.id)
+
+    let bySession = try chatLog(sbd, ["session": .string(ref(target, how))])
+    let byManager = try chatLog(sbd, ["manager": true, "session": .string(target.name)])
+
+    #expect(bySession == ["user: hello", "assistant: Done: hello"])
+    #expect(bySession == byManager)
+  }
+
+  @Test func chatLogWithManagerAndNoSessionReadsTheConversation() throws {
+    let sbd = try Instance()
+    _ = try idleConversation(sbd, "hello")
+
+    let log = try chatLog(sbd, ["manager": true])
+
+    #expect(log == ["user: hello", "assistant: Done: hello"])
+  }
+
+  @Test func chatLogNamingNoSessionFailsWithTheUnknownSessionError() throws {
+    let sbd = try Instance()
+    _ = try newConversation(sbd, name: "Cache work")
+
+    let error = failure(sbd, "chat-log", ["session": "nope"])
+
+    #expect(error.contains("no session nope"), Comment(rawValue: error))
+  }
+
+  @Test func chatLogNamingTwoSessionsFailsWithTheAmbiguousSessionError() throws {
+    let sbd = try Instance()
+    _ = try newConversation(sbd, name: "Cache work")
+    _ = try sbd.new(name: "Cache work")
+
+    let error = failure(sbd, "chat-log", ["session": "Cache work"])
+
+    #expect(error.contains("Cache work matches 2 sessions"), Comment(rawValue: error))
   }
 
   struct NameCase: Sendable, CustomTestStringConvertible {
