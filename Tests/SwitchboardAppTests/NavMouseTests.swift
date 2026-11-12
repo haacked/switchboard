@@ -44,12 +44,12 @@ import Testing
     let model = appliedModel(["a", "b"].map { needsItem($0) })
     model.selection = "a"
     model.selection = "b"
-    model.showingNew = true
+    model.openNewSession()
 
     #expect(!NavMouse.handle(try sideButtonPress(3), model))
     #expect(model.selection == "b")
 
-    model.showingNew = false
+    model.newSession = nil
 
     #expect(NavMouse.handle(try sideButtonPress(3), model))
     #expect(model.selection == "a")

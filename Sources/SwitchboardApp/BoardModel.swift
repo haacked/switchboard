@@ -40,7 +40,8 @@ final class BoardModel: ObservableObject {
   @Published var selection: String? {
     didSet { navigate { if let selection, selection != oldValue { showOrg(of: selection) } } }
   }
-  @Published var showingNew = false
+  /// The New Session sheet's opening, or nil while it is closed.
+  @Published var newSession: NewSessionRequest?
   @Published var showingImport = false
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
   @Published var knownRepos: [KnownRepo]?
@@ -56,7 +57,8 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { showingNew || showingImport || showingSearch || doneRemoval != nil }
+  var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
+  func openNewSession(group: String? = nil) { newSession = NewSessionRequest(group: group) }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox {
     didSet { navigate() }
