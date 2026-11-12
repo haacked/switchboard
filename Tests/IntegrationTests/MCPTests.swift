@@ -74,7 +74,7 @@ extension Instance {
     try sbd.waitFor(s.id, "the call to grafana") { $0.lastReply == "MCP grafana: grafana \(grafana.pid!)" }
     #expect(
       sbd.stubArgs().first
-        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) --mcp-config \(sbd.home.mcpConfig) -- mcp grafana"
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --mcp-config \(sbd.home.mcpConfig) -- mcp grafana"
     )
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["grafana", "posthog-db"])
 

@@ -96,7 +96,9 @@ final class Outcome<T>: @unchecked Sendable {
     try sbd.waitFor(f.id, "the follow-up's first turn") { $0.lastReply == "Done: Fix the cache. It reads twice." }
     #expect(
       sbd.stubArgs()
-        == ["--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings) -- Fix the cache. It reads twice."]
+        == [
+          "--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings(f.id)) -- Fix the cache. It reads twice."
+        ]
     )
     #expect(try sbd.events(f.id).prefix(3).map(\.kind) == ["followup", "followup-started", "started"])
     #expect(failure(sbd, "followup-start", ["session": .string(f.id)]).contains("isn't a follow-up"))
