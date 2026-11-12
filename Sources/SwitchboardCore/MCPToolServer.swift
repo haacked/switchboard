@@ -304,7 +304,8 @@ public struct MCPToolServer: Sendable {
   /// A scoped server puts the new session in its group.
   private func spawn(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(
-      args, ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after", "wait"])
+      args,
+      ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "planMode", "after", "wait"])
     if let repo = args["repository"]?.string { request["repository"] = .string(repo.repositoryArgument) }
     if let caller { request["parent"] = .string(caller) }
     if let scoped { request["group"] = .string(scoped.group.id) }

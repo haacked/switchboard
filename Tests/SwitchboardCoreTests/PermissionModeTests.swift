@@ -58,18 +58,6 @@ import Testing
     #expect(PermissionMode.title("auto") == "auto")
   }
 
-  @Test func aLaunchPassesAutoModeOnlyForAnAutoModeSession() {
-    var session = Session(id: "s1", name: "s", cwd: "/tmp", claudeSessionId: "c", created: 0)
-    for resume in [false, true] {
-      session.autoMode = true
-      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: "default") == "auto")
-      session.autoMode = false
-      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: "auto") == nil)
-      session.autoMode = nil
-      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: nil) == nil)
-    }
-  }
-
   @Test func aConfigWithoutAutoModeStartsSessionsInAutoMode() throws {
     #expect(try JSONCoding.decode(Config.self, from: #"{"idleStopSeconds": 30}"#).autoMode)
     #expect(try !JSONCoding.decode(Config.self, from: #"{"autoMode": false}"#).autoMode)

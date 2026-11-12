@@ -799,6 +799,7 @@ public final class Service {
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
+    session.planMode = args.planMode
     configure(&session)
     // After `configure`, which sets a chat's group.
     session.claudeConfigDir =

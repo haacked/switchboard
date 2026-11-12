@@ -8,7 +8,7 @@ let usage = """
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--group G] [--no-auto]
+        [--model M] [--account A] [--group G] [--no-auto] [--plan-mode]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
@@ -18,9 +18,12 @@ let usage = """
                                   parent's, else the active account. It fails
                                   when the group has an account and A names
                                   another. It starts in auto mode unless
-                                  --no-auto or the autoMode setting is false
+                                  --no-auto or the autoMode setting is false.
+                                  --plan-mode starts it in plan mode, which
+                                  it keeps until the plan is approved
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
-        [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
+        [--base REF] [--model M] [--account A] [--no-auto] [--plan-mode]
+        [--wait STATE]
                                   start a session on a new branch B in a new
                                   worktree of R, which is owner/name, a name, or
                                   a folder. Inside a session, that session is
@@ -682,7 +685,7 @@ case "new":
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
     account: a.values["--account"], group: a.values["--group"],
-    autoMode: a.switches.contains("--no-auto") ? false : nil)
+    autoMode: a.switches.contains("--no-auto") ? false : nil, planMode: planMode(a))
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":
