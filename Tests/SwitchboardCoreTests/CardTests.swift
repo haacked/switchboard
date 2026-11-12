@@ -624,7 +624,8 @@ func trustCard(_ folder: String = "/w/repo") -> Card { facts(trustLaunch(folder:
 
     replay.restarted()
 
-    #expect(replay.facts.cards.map(\.kind) == [.trust])
+    #expect(replay.facts.trustCard != nil)
+    #expect(replay.facts.trustCard?.hookClosed == false)
   }
 
   @Test func aTrustCardIsNotFindable() {
