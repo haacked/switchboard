@@ -242,4 +242,76 @@ import Testing
         == "Its 2 sessions move to Ungrouped and keep running. Its chat is marked done. "
         + "Switchboard detaches its plans. The plan documents stay.")
   }
+
+  // MARK: newSessionGroup
+
+  /// A session in the group with the given id.
+  func grouped(_ id: String, _ groupID: String) -> SessionSummary {
+    var s = needsItem(id)
+    s.group = groupID
+    return s
+  }
+
+  /// The ⇧⌘N target is the group of the Board card with the keyboard ring.
+  @Test func newSessionGroupIsTheRingedCardsGroupOnTheBoard() {
+    let model = appliedModel([grouped("s1", "g1"), grouped("s2", "g2")])
+    model.groups = [group("g1", "Flags"), group("g2", "Billing")]
+    model.mainView = .board
+    model.boardGrid = BoardGrid(lanes: [[["s1"], ["s2"]]])
+    model.boardFocus = "s2"
+
+    #expect(model.newSessionGroup?.id == "g2")
+  }
+
+  @Test func newSessionGroupIsTheSelectedSessionsGroup() {
+    let model = appliedModel([grouped("s1", "g1")])
+    model.groups = [group("g1", "Flags")]
+
+    model.selection = "s1"
+
+    #expect(model.newSessionGroup?.id == "g1")
+  }
+
+  @Test func newSessionGroupIsTheCurrentInboxItemsGroup() {
+    let model = appliedModel([grouped("s1", "g1")])
+    model.groups = [group("g1", "Flags")]
+    model.mainView = .inbox
+
+    #expect(model.newSessionGroup?.id == "g1")
+  }
+
+  /// A group chat belongs to its group through `chat`, which is the group's id.
+  @Test func newSessionGroupOfAGroupChatIsItsGroup() {
+    let model = appliedModel([chat("c1", of: "g1")])
+    model.groups = [group("g1", "Flags")]
+
+    model.selection = "c1"
+
+    #expect(model.newSessionGroup?.id == "g1")
+  }
+
+  @Test func newSessionGroupIsNilForAnUngroupedSession() {
+    let model = appliedModel([needsItem("s1")])
+    model.groups = [group("g1", "Flags")]
+    model.mainView = .inbox
+
+    #expect(model.newSessionGroup == nil)
+  }
+
+  @Test func newSessionGroupIsNilWhenTheGroupIsGone() {
+    let model = appliedModel([grouped("s1", "gone")])
+    model.groups = [group("g1", "Flags")]
+    model.mainView = .inbox
+
+    #expect(model.newSessionGroup == nil)
+  }
+
+  @Test func openNewSessionWithAGroupPresetsIt() {
+    let model = offlineModel()
+
+    model.openNewSession(group: "g1")
+
+    #expect(model.presentingSheet)
+    #expect(model.newSession?.group == "g1")
+  }
 }

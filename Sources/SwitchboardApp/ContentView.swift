@@ -656,7 +656,21 @@ private struct LaneLabel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(title).fontWeight(.semibold).lineLimit(2)
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(title).fontWeight(.semibold).lineLimit(2).layoutPriority(1)
+        if let group {
+          Button {
+            model.openNewSession(group: group.id)
+          } label: {
+            Image(systemName: "plus")
+          }
+          .buttonStyle(.borderless)
+          .disabled(model.presentingSheet)
+          .help("Start a session in \(group.name) (⇧⌘N)")
+          .accessibilityLabel("New session in \(group.name)")
+          .accessibilityIdentifier("board-new-session-\(group.id)")
+        }
+      }
       if let group {
         GroupDescriptionView(group: group)
         GroupAccountMenu(group: group)

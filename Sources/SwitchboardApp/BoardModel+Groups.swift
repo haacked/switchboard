@@ -2,6 +2,16 @@ import SwiftUI
 import SwitchboardCore
 
 extension BoardModel {
+  /// The group that ⇧⌘N starts a session in: the group of the ringed card on the Board, else of the current
+  /// Inbox item or the selected session. A group chat names its own group.
+  var newSessionGroup: GroupSummary? {
+    let id = visibleView == .board ? currentBoardCard : acknowledgeTarget?.id
+    guard let session = allSessions.first(where: { $0.id == id }) ?? allFollowups.first(where: { $0.id == id }),
+      let group = session.chat ?? session.group
+    else { return nil }
+    return groups.first { $0.id == group }
+  }
+
   /// Shows the Board in group lanes with its new group name field open.
   func startNewGroup() {
     UserDefaults.standard.set(BoardLanes.group.rawValue, forKey: BoardLanes.storageKey)

@@ -8,11 +8,13 @@ let usage = """
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--no-auto]
+        [--model M] [--account A] [--group G] [--no-auto]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
-                                  --name. It runs under the account A, else its
+                                  --name. It joins the group G, else its
+                                  parent's group. It runs under the group's
+                                  account, else the account A, else its
                                   parent's, else the active account. It starts
                                   in auto mode unless --no-auto or the autoMode
                                   setting is false
@@ -677,7 +679,8 @@ case "new":
     worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
-    account: a.values["--account"], autoMode: a.switches.contains("--no-auto") ? false : nil)
+    account: a.values["--account"], group: a.values["--group"],
+    autoMode: a.switches.contains("--no-auto") ? false : nil)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":

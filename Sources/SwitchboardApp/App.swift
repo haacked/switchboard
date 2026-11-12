@@ -34,6 +34,12 @@ struct SwitchboardApp: App {
         Button("New Session…") { model.openNewSession() }
           .keyboardShortcut("n")
           .disabled(model.presentingSheet)
+        let newSessionGroup = model.newSessionGroup
+        Button(newSessionGroup.map { "New Session in \($0.name)…" } ?? "New Session in Group…") {
+          model.openNewSession(group: newSessionGroup?.id)
+        }
+        .keyboardShortcut("n", modifiers: [.command, .shift])
+        .disabled(model.presentingSheet || newSessionGroup == nil)
         Button("Import Sessions…") { model.showingImport = true }
           .keyboardShortcut("i", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
