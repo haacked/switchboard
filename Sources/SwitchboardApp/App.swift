@@ -21,6 +21,7 @@ struct SwitchboardApp: App {
         .environmentObject(model)
         .onAppear {
           model.start()
+          NavMouse.install(model)
           Snapshot.start(model)
         }
         .frame(minWidth: ContentView.windowMinWidth, minHeight: 560)
@@ -61,6 +62,15 @@ struct SwitchboardApp: App {
             .keyboardShortcut(NavShortcuts.nextSession)
           Button("Previous Session") { model.selectAdjacentSession(by: -1) }
             .keyboardShortcut(NavShortcuts.previousSession)
+          Button("Back") { model.goBack() }
+            .keyboardShortcut(NavShortcuts.back)
+            .disabled(!model.canGoBack)
+          Button("Forward") { model.goForward() }
+            .keyboardShortcut(NavShortcuts.forward)
+            .disabled(!model.canGoForward)
+          Button("Show Recent Places") { model.showingRecentPlaces.toggle() }
+            .keyboardShortcut(NavShortcuts.showRecentPlaces)
+            .disabled(!model.hasRecentPlaces)
           Button("Move Focus to List") { model.requestListFocus() }
             .keyboardShortcut(NavShortcuts.focusList)
           Button("Move Focus to Terminal") { model.focusTerminal() }

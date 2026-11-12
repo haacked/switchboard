@@ -125,6 +125,7 @@ struct ContentView: View {
       }
     }
     .toolbar {
+      ToolbarItem(placement: .navigation) { NavHistoryControls() }
       ToolbarItem(placement: .navigation) {
         // No segment is selected while a session shows.
         Picker("View", selection: viewChoice) {

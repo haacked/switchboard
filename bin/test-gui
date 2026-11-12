@@ -16,6 +16,8 @@
 # a switch to another session, that Open Shell starts it again, that the pane
 # attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
+# It also presses mouse buttons 4 and 5 and checks that they go back and forward
+# between two selected sessions.
 # Last it drops sets of files on the message field of a session, the Inbox, and
 # a group chat through the app's DropSelfTest, and checks the chips, the
 # errors, and the images that sbd received from the field's send.
@@ -471,15 +473,38 @@ check_shell() {
   # key window, SwiftUI does not refresh the menu's enabled states. Move Focus to Terminal then keeps its
   # state from launch, disabled, and the result names the item that owns ⌘T instead. ⌘K goes last, because
   # it opens the search sheet.
+  # Back, Forward, and Show Recent Places keep their launch state in the same way.
   nav=$(app nav-keys)
-  keys="} ran Next Session; { ran Previous Session; l ran Move Focus to List; t ran"
-  search="; k ran Search Sessions…"
-  [ "$nav" = "$keys Move Focus to Terminal$search" ] ||
-    [ "$nav" = "$keys none (Move Focus to Terminal is disabled)$search" ] ||
-    fail "the navigation shortcuts did not run their menu items: $nav"
+  expected="} ran Next Session; { ran Previous Session; l ran Move Focus to List"
+  rest="$nav"
+  [[ $rest == "$expected; "* ]] || fail "the navigation shortcuts did not run their menu items: $nav"
+  rest=${rest#"$expected; "}
+  for part in "t:Move Focus to Terminal" "[:Back" "]:Forward" "y:Show Recent Places"; do
+    key=${part%%:*} item=${part#*:}
+    ran="$key ran $item; " off="$key ran none ($item is disabled); "
+    if [[ $rest == "$ran"* ]]; then
+      rest=${rest#"$ran"}
+    elif [[ $rest == "$off"* ]]; then
+      rest=${rest#"$off"}
+    else
+      fail "the navigation shortcuts did not run $item: $nav"
+    fi
+  done
+  [ "$rest" = "k ran Search Sessions…" ] || fail "the navigation shortcuts did not run their menu items: $nav"
+  end_app
+
+  # Mouse buttons 4 and 5 go back and forward through the sessions the user selected.
+  start_app "$work"
+  app select "$manager" >/dev/null
+  shows() { [ "$(app where)" = "session(\"$1\")" ]; }
+  wait_for 5 shows "$manager" || fail "selecting the Manager did not show it: $(app where)"
+  [ "$(app mouse 3)" = posted ] || fail "the app could not post mouse button 4"
+  wait_for 5 shows "$work" || fail "mouse button 4 did not go back to the work session: $(app where)"
+  [ "$(app mouse 4)" = posted ] || fail "the app could not post mouse button 5"
+  wait_for 5 shows "$manager" || fail "mouse button 5 did not go forward to the Manager: $(app where)"
   end_app
   save_shots
-  echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat)"
+  echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat; mouse back and forward)"
 }
 
 if wants shell; then check_shell; fi

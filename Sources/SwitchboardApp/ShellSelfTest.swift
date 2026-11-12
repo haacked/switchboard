@@ -13,7 +13,9 @@ import SwiftUI
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
 /// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
 /// `NavShortcuts` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
-/// `snapshot <path>` draws the window as SB_SNAPSHOT does.
+/// `mouse <3|4>` posts a press of mouse button 4 or 5 (button numbers 3 and 4) over the window to the app's
+/// event queue, so it passes through the app's event monitors as a real press does. `where` reports the place
+/// that the window shows. `snapshot <path>` draws the window as SB_SNAPSHOT does.
 @MainActor
 enum ShellSelfTest {
   static func start(_ model: BoardModel) {
@@ -85,6 +87,13 @@ enum ShellSelfTest {
     case "nav-keys":
       guard let window else { return "no window" }
       return NavShortcuts.all.map { menuItem(running: $0, in: window) }.joined(separator: "; ")
+    case "mouse":
+      guard let window else { return "no window" }
+      guard let button = Int(rest), let event = otherMouseDown(button, in: window) else { return "no event" }
+      NSApp.postEvent(event, atStart: false)
+      return "posted"
+    case "where":
+      return "\(model.location.place)"
     case "snapshot":
       Snapshot.write(to: rest)
       return "wrote"
@@ -117,6 +126,20 @@ enum ShellSelfTest {
     if let ran { return "\(char) ran \(ran)" }
     let owner = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items).first { $0.keyEquivalent == char }
     return "\(char) ran none" + (owner.map { " (\($0.title) is \($0.isEnabled ? "enabled" : "disabled"))" } ?? "")
+  }
+
+  /// A press of the mouse button with number `button` at the window's center, or with no window when `window`
+  /// is nil. AppKit's mouse event API sets no button number, so the number goes into the event's Core Graphics copy.
+  static func otherMouseDown(_ button: Int, in window: NSWindow? = nil) -> NSEvent? {
+    let center = window.map { NSPoint(x: $0.frame.width / 2, y: $0.frame.height / 2) } ?? .zero
+    guard
+      let event = NSEvent.mouseEvent(
+        with: .otherMouseDown, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
+      let cg = event.cgEvent
+    else { return nil }
+    cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+    return NSEvent(cgEvent: cg)
   }
 
   /// The point `offset` pt into the button on the pane's label. The label is a bar about 18 pt tall above the
