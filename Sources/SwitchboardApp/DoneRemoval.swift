@@ -107,7 +107,7 @@ extension BoardModel {
       }
       await MainActor.run { [result] in
         self.doneRemoval = .finished(result)
-        if let selection = self.selection, result.removed.contains(selection) { self.selection = nil }
+        self.deselect(result.removed)
         self.refresh(followups: true)
       }
     }

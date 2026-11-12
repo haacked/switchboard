@@ -4,7 +4,7 @@ import SwiftUI
 import SwitchboardCore
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and shows that session's tooltip text in a popover on its card, because a tooltip appears only on a real hover and in a window the snapshot doesn't draw, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and shows that session's tooltip text in a popover on its card, because a tooltip appears only on a real hover and in a window the snapshot doesn't draw, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, SB_HISTORY=<place,place> goes to each place in turn once sbd lists the sessions, where a place is a session id, `inbox`, or `board`, SB_HISTORY_BACK=<n> then goes back n times, SB_HISTORY_MENU=open then opens the History list, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -25,8 +25,11 @@ enum Snapshot {
 
   static func start(_ model: BoardModel) {
     let env = ProcessInfo.processInfo.environment
-    if let id = env["SB_SELECT"] { model.selection = id }
-    if let id = env["SB_INBOX"] { model.inboxFocus = id }
+    // A launch hook chooses the first place, so it records no history of its own.
+    model.navigate(.replace) {
+      if let id = env["SB_SELECT"] { model.selection = id }
+      if let id = env["SB_INBOX"] { model.inboxFocus = id }
+    }
     if let id = env["SB_BOARD_CLICK"] {
       model.show(.board)
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { model.openFromBoard(id) }
@@ -44,13 +47,12 @@ enum Snapshot {
         confirm: env["SB_ACCOUNTS_CONFIRM"])
     }
     if env["SB_ORGS"] == "open" {
-      Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
-        MainActor.assumeIsolated {
-          guard !model.allSessions.isEmpty else { return }
-          timer.invalidate()
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { model.showingOrgFilter = true }
-        }
-      }
+      whenListed(model) { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { model.showingOrgFilter = true } }
+    }
+    if let places = env["SB_HISTORY"] {
+      visit(
+        places.split(separator: ",").map(String.init), model, back: Int(env["SB_HISTORY_BACK"] ?? "") ?? 0,
+        openList: env["SB_HISTORY_MENU"] == "open")
     }
     if let path = env["SB_QUIT_FILE"] {
       Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
@@ -79,6 +81,36 @@ enum Snapshot {
         // AppKit saves the main window's frame on every change. Restoring it keeps the next launch at the user's last size.
         if let window, let frame { window.setFrame(frame, display: false) }
         if env["SB_SNAPSHOT_EXIT"] != nil { NSApp.terminate(nil) }
+      }
+    }
+  }
+
+  /// Runs `then` once sbd has listed the sessions.
+  private static func whenListed(_ model: BoardModel, then: @escaping () -> Void) {
+    Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
+      MainActor.assumeIsolated {
+        guard !model.allSessions.isEmpty else { return }
+        timer.invalidate()
+        then()
+      }
+    }
+  }
+
+  /// Goes to each place in turn as the user would, once sbd lists the sessions, so each one records a history
+  /// entry. A place is a session id, `inbox`, or `board`. Then it goes back `back` times and opens the History list.
+  private static func visit(_ places: [String], _ model: BoardModel, back: Int, openList: Bool) {
+    var steps: [() -> Void] = places.map { place in
+      switch place {
+      case "inbox": { model.show(.inbox) }
+      case "board": { model.show(.board) }
+      default: { model.selection = place }
+      }
+    }
+    steps += Array(repeating: { model.goBack() }, count: back)
+    if openList { steps.append { model.showingHistory = true } }
+    whenListed(model) {
+      for (i, step) in steps.enumerated() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 * Double(i + 1), execute: step)
       }
     }
   }

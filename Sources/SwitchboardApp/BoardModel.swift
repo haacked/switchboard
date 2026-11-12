@@ -33,9 +33,10 @@ final class BoardModel: ObservableObject {
   @Published var unreachable: String?
   /// The last failed action, shown until the next one succeeds.
   @Published var actionError: String?
-  /// Selecting a session that the org filter hides adds its org to the filter.
+  /// Selecting a session that the org filter hides adds its org to the filter. The filter change runs inside
+  /// the navigation, so it records nothing of its own.
   @Published var selection: String? {
-    didSet { if let selection, selection != oldValue { showOrg(of: selection) } }
+    didSet { navigate { if let selection, selection != oldValue { showOrg(of: selection) } } }
   }
   @Published var showingNew = false
   @Published var showingImport = false
@@ -55,9 +56,13 @@ final class BoardModel: ObservableObject {
   @Published var doneRemoval: DoneRemoval?
   var presentingSheet: Bool { showingNew || showingImport || showingSearch || doneRemoval != nil }
   /// The view that the detail pane shows while no session is selected.
-  @Published var mainView = MainView.inbox
+  @Published var mainView = MainView.inbox {
+    didSet { navigate() }
+  }
   /// The Inbox item that the user last moved to.
-  @Published var inboxFocus: String?
+  @Published var inboxFocus: String? {
+    didSet { navigate() }
+  }
   /// Counts ⌘J presses in the Inbox. Each one scrolls to the current item,
   /// even when ⌘J lands on the item it reached last time.
   @Published var inboxJumps = 0
@@ -71,7 +76,13 @@ final class BoardModel: ObservableObject {
   /// the Board's ring read it, so a change redraws them.
   @Published var boardGrid = BoardGrid(lanes: [])
   /// The right pane of the Inbox shows the session's terminals instead of its summary.
-  @Published var showingTerminal = false
+  @Published var showingTerminal = false {
+    didSet { navigate() }
+  }
+  /// The places the user went, for Back, Forward, and the History list. Only `BoardModel+History` changes it.
+  @Published var history = NavHistory(start: NavLocation(place: .inbox(nil), terminal: false))
+  @Published var showingHistory = false
+  var navigating = false
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
@@ -167,7 +178,7 @@ final class BoardModel: ObservableObject {
   private var knownStates: [String: AttentionState] = [:]
   /// The session that `create` or `openManager` selected before a refresh
   /// listed it.
-  private var pendingSelection: String?
+  private(set) var pendingSelection: String?
   private var loaded = false
   private var followupsRead = Date.distantPast
   /// sbd reads the usage every few minutes, so the app asks once a minute.
@@ -191,10 +202,11 @@ final class BoardModel: ObservableObject {
     self.orgFilter = orgFilterStore?.stringArray(forKey: Self.orgFilterKey).map { OrgFilter(keys: $0) } ?? orgFilter
   }
 
-  /// Clears a selection that the org filter hides, and counts the shown sessions in the Dock badge.
+  /// Clears a selection that the org filter hides, and counts the shown sessions in the Dock badge. The
+  /// current history entry follows what the window shows, because a refresh can change the Inbox's first item.
   private func clearHiddenSelectionAndUpdateBadge() {
     let listed = shownIDs
-    if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil }
+    navigate(.replace) { if let id = selection, id != pendingSelection, !listed.contains(id) { selection = nil } }
     if NSApp != nil { NSApp.dockTile.badgeLabel = needsUser.isEmpty ? nil : "\(needsUser.count)" }
   }
 
@@ -544,8 +556,10 @@ final class BoardModel: ObservableObject {
 
   /// Selects a session that sbd just made, which the next refresh lists.
   func selectUnlisted(_ id: String) {
-    selection = id
-    pendingSelection = id
+    navigate {
+      pendingSelection = id
+      selection = id
+    }
   }
 
   func open(_ id: String) { perform("open", ["session": .string(id)]) }
@@ -736,7 +750,7 @@ final class BoardModel: ObservableObject {
     if undo {
       args["undo"] = true
     } else if currentInboxItem == id {
-      moveInbox(by: 1)
+      navigate(.replace) { moveInbox(by: 1) }
       // A field in the item that scrolls away would keep the keystrokes. A
       // session's terminal outside the Inbox keeps them.
       if visibleView == .inbox { NSApp.keyWindow?.makeFirstResponder(nil) }
@@ -913,7 +927,7 @@ final class BoardModel: ObservableObject {
   /// ids of the open to-dos that the confirmation showed.
   func remove(_ id: String, resolve: [String] = []) {
     let followup = board.first { $0.id == id }?.waitsToStart == true
-    if selection == id { selection = nil }
+    deselect([id])
     perform(followup ? "followup-rm" : "rm", Self.resolving(["session": .string(id)], resolve))
   }
 
@@ -991,7 +1005,7 @@ final class BoardModel: ObservableObject {
     guard deleting.insert(s.id).inserted else { return }
     perform(
       "rm", Self.deleteRequest(s, resolve: resolve),
-      then: { _ in if self.selection == s.id { self.selection = nil } },
+      then: { _ in self.deselect([s.id]) },
       finally: { self.deleting.remove(s.id) })
   }
 
@@ -1012,7 +1026,7 @@ final class BoardModel: ObservableObject {
   func delete(_ id: String, branch: Bool = false, resolve: [String] = []) {
     let args: [String: JSON] = ["session": .string(id), "worktree": .bool(true), "branch": .bool(branch)]
     perform("rm", Self.resolving(args, resolve)) { _ in
-      if self.selection == id { self.selection = nil }
+      self.deselect([id])
     }
   }
 
@@ -1077,8 +1091,10 @@ final class BoardModel: ObservableObject {
 
   /// Clears the selected session and shows the Inbox or the Board.
   func show(_ view: MainView) {
-    selection = nil
-    mainView = view
+    navigate {
+      selection = nil
+      mainView = view
+    }
   }
 
   /// Opens a Board card. A session in the Inbox list is focused there and
@@ -1089,8 +1105,10 @@ final class BoardModel: ObservableObject {
       selection = id
       return
     }
-    show(.inbox)
-    inboxFocus = id
+    navigate {
+      show(.inbox)
+      inboxFocus = id
+    }
     inboxJumps += 1
   }
 
