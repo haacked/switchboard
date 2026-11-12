@@ -344,6 +344,22 @@ import Testing
     #expect(try listed(sbd, g.id).account == sbd.account("B"))
   }
 
+  /// `sb new --group` starts the session in the group, so it takes the group's account.
+  @Test func sbNewWithGroupStartsInTheGroupUnderItsAccount() throws {
+    let sbd = try instance()
+    let g = try addGroup(sbd)
+    try setAccount(sbd, "Flags", "B")
+
+    let s = try decode(
+      SessionSummary.self, sbd.sb("new", "--json", "--group", "Flags", "--prompt", "hello", sbd.work))
+
+    #expect(s.group == g.id)
+    #expect(s.account == sbd.account("B"))
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    #expect(lastLaunch(sbd, s)?.account == sbd.account("B"))
+    #expect(try events(sbd, s, "account-moved").isEmpty)
+  }
+
   // MARK: Global moves
 
   /// `account move` leaves a session that its group binds to

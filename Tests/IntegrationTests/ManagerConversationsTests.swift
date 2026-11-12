@@ -628,6 +628,34 @@ import Testing
     #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
   }
 
+  /// The stub holds the launch before SessionStart until `hold-start` is
+  /// removed. After 10 s the tick counts that claude as live, but its prompt
+  /// hasn't arrived, so the change waits.
+  @Test func aServerChangeWaitsForAClaudeThatIsStillStarting() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    try requireSwitchboardOnly(sbd, c.id)
+    try sbd.sb("stop", c.id)
+    try sbd.waitFor(c.id, "the stop") { $0.claudePid == nil }
+    let hold = "\(sbd.home.path)/hold-start"
+    FileManager.default.createFile(atPath: hold, contents: nil)
+    let mark = try #require(try sbd.events(c.id).last?.id)
+    try sbd.sb("send", c.id, "next")
+    try sbd.waitFor(c.id, "the held claude") { $0.claudePid != nil }
+    try sbd.passUnreportedFallback(c.id, after: mark)
+    let before = launches(sbd, c).count
+
+    try sbd.sb("manager", "mcp", c.id, "add", "grafana")
+    try sbd.advanceClock(1)
+    sleep(1)
+
+    #expect(try !sbd.events(c.id, after: mark).contains { $0.kind == "stopped" })
+    try FileManager.default.removeItem(atPath: hold)
+    try sbd.waitFor(c.id, "the reply to next", timeout: 30) { $0.lastReply == "Done: next" }
+    _ = try launch(sbd, c, after: before)
+    #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
+  }
+
   @Test func aSendDuringTheRelaunchLeavesALaterStopStopped() throws {
     let sbd = try Instance(config: Self.sharedServers)
     let c = try idleConversation(sbd)

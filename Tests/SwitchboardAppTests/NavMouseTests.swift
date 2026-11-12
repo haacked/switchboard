@@ -16,7 +16,7 @@ import Testing
     var testDescription: String { name }
   }
 
-  static let inputs = [
+  nonisolated static let inputs = [
     Input(name: "the back side button", type: .otherMouseDown, buttonNumber: 3, expected: .back),
     Input(name: "the forward side button", type: .otherMouseDown, buttonNumber: 4, expected: .forward),
     Input(name: "the middle button", type: .otherMouseDown, buttonNumber: 2),
@@ -44,12 +44,12 @@ import Testing
     let model = appliedModel(["a", "b"].map { needsItem($0) })
     model.selection = "a"
     model.selection = "b"
-    model.showingNew = true
+    model.openNewSession()
 
     #expect(!NavMouse.handle(try sideButtonPress(3), model))
     #expect(model.selection == "b")
 
-    model.showingNew = false
+    model.newSession = nil
 
     #expect(NavMouse.handle(try sideButtonPress(3), model))
     #expect(model.selection == "a")

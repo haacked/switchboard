@@ -75,8 +75,8 @@ private func usage(_ limits: [(String, Double)]) -> AccountUsage {
 
   // MARK: AccountUsage percents
 
-  @Test func percentsAreZeroWithoutLimits() {
-    #expect(usage([]).sessionPercent == 0)
+  @Test func percentsAreMissingOrZeroWithoutLimits() {
+    #expect(usage([]).sessionPercent == nil)
     #expect(usage([]).weeklyPercent == 0)
   }
 
@@ -84,8 +84,8 @@ private func usage(_ limits: [(String, Double)]) -> AccountUsage {
     #expect(usage([("weekly_all", 70), ("session", 12)]).sessionPercent == 12)
   }
 
-  @Test func sessionPercentIsZeroWithoutASessionLimit() {
-    #expect(usage([("weekly_all", 70)]).sessionPercent == 0)
+  @Test func sessionPercentIsNilWithoutASessionLimit() {
+    #expect(usage([("weekly_all", 70)]).sessionPercent == nil)
   }
 
   @Test func weeklyPercentIsTheHighestNonSessionLimit() {

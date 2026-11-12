@@ -112,14 +112,14 @@ extension Instance {
     #expect(try sbd.autoContinueStatus().live == 2)
     try sbd.sb("stop", a.id)
     try sbd.waitFor(a.id, "the stop") { $0.claudePid == nil }
-    try sbd.waitFor("one live session", fetch: { try sbd.autoContinueStatus().live }, until: { $0 == 1 })
+    _ = try sbd.waitFor("one live session", fetch: { try sbd.autoContinueStatus().live }, until: { $0 == 1 })
   }
 
   @Test func statusTextShowsTheSwitchAndEachSessionsBlocker() throws {
     let sbd = try instance()
     try sbd.sb("autocontinue", "on")
     let s = try offerSession(sbd, name: "parser")
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the status to list the session", fetch: { try sbd.blocker(s.id) },
       until: {
         $0.hasPrefix("you touched it")
@@ -168,7 +168,7 @@ extension Instance {
     let s = try offerSession(sbd)
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
     try waitForContinue(sbd, s.id)
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the reply to the continue", fetch: { try sbd.blocker(s.id) },
       until: {
         $0 == "continued 1 times in the last hour"
@@ -192,7 +192,7 @@ extension Instance {
     let s = try offerSession(sbd)
     try sbd.advanceClock(30_000)
     try sbd.sb("send", s.id, "offer")
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the second offer", fetch: { try sbd.events(s.id).filter { $0.kind == "Stop" }.count },
       until: {
         $0 == 2
@@ -218,7 +218,7 @@ extension Instance {
     #expect(try sbd.autoContinues(s.id).isEmpty)
     detach()
     try sbd.waitFor(s.id, "the detach") { !$0.attached }
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the quiet time after the detach", fetch: { try sbd.blocker(s.id) },
       until: {
         $0.hasPrefix("you touched it")
@@ -284,7 +284,7 @@ extension Instance {
     let s = try offerSession(sbd)
     try sbd.sb("send", s.id, "lag held")
 
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the message on its way", fetch: { try sbd.blocker(s.id) },
       until: {
         $0 == "a message is on its way"
@@ -302,7 +302,7 @@ extension Instance {
     try sbd.sb("autocontinue", "on")
     let s = try offerSession(sbd)
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the third continue to wait", timeout: 30, fetch: { try sbd.blocker(s.id) },
       until: {
         $0 == "continued 2 times in the last hour"
@@ -325,7 +325,7 @@ extension Instance {
     try sbd.waitFor(b.id, "b's reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("autocontinue", "on")
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
-    try sbd.waitFor(
+    _ = try sbd.waitFor(
       "the live cap to hold a back", fetch: { try sbd.blocker(a.id) },
       until: {
         $0 == "the live cap of 1 is full"

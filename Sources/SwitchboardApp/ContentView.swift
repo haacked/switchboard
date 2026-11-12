@@ -149,7 +149,7 @@ struct ContentView: View {
       }
       ToolbarItem {
         Button {
-          model.showingNew = true
+          model.openNewSession()
         } label: {
           Label("New Session", systemImage: "plus")
         }
@@ -164,8 +164,8 @@ struct ContentView: View {
     } message: { session, todos in
       Text(todos.message(before: BoardModel.deletePlan(session).message))
     }
-    .sheet(isPresented: $model.showingNew) {
-      NewSessionView().environmentObject(model)
+    .sheet(item: $model.newSession) {
+      NewSessionView(request: $0).environmentObject(model)
     }
     .sheet(isPresented: $model.showingImport) {
       ImportView().environmentObject(model)
@@ -310,7 +310,7 @@ struct Sidebar: View {
       if model.sidebarIsEmpty {
         VStack(spacing: 8) {
           Text("No sessions").font(.headline)
-          Button("Start a Session…") { model.showingNew = true }
+          Button("Start a Session…") { model.openNewSession() }
           Button("Import Sessions…") { model.showingImport = true }
         }
       }
@@ -522,7 +522,7 @@ struct BoardView: View {
       VStack(spacing: 12) {
         Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
         Text("Start a session to see it here").foregroundStyle(.secondary)
-        Button("New Session…") { model.showingNew = true }
+        Button("New Session…") { model.openNewSession() }
         Button("New Group") { model.startNewGroup() }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -656,7 +656,21 @@ private struct LaneLabel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(title).fontWeight(.semibold).lineLimit(2)
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(title).fontWeight(.semibold).lineLimit(2).layoutPriority(1)
+        if let group {
+          Button {
+            model.openNewSession(group: group.id)
+          } label: {
+            Image(systemName: "plus")
+          }
+          .buttonStyle(.borderless)
+          .disabled(model.presentingSheet)
+          .help("Start a session in \(group.name)")
+          .accessibilityLabel("New session in \(group.name)")
+          .accessibilityIdentifier("board-new-session-\(group.id)")
+        }
+      }
       if let group {
         GroupDescriptionView(group: group)
         GroupAccountMenu(group: group)

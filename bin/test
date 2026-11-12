@@ -29,20 +29,33 @@ export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMU
 shards() {
   local n=$1 clones=.build-shards quiet=IntegrationTests.MeasureTests
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
-  swift build --build-tests ${args[@]+"${args[@]}"}
+  build_tests
   local list total i pattern matched=0 patterns=()
   list=$(swift test list --skip-build | grep /)
   total=$(grep -c . <<<"$list")
-  # Each integration suite goes to the shard with the fewest integration
-  # tests. The other targets take seconds and run in shard N. Their time
-  # limits then never wait behind integration tests that block threads.
+  # Each integration suite, slowest first, goes to the shard with the least
+  # time so far. Tests/shard-weights gives each suite's seconds.
+  # bin/shard-weights rebuilds that file from a CI log. A suite the file doesn't
+  # list gets its test count times the mean seconds per test of the suites
+  # with a weight above 0. A suite with weight 0 holds no slot in CI.
+  # Without the file, that splits the suites by test count. The other targets
+  # take seconds and run in shard N. Their time limits then never wait behind
+  # integration tests that block threads.
   # MeasureTests skips its timing check while the load average is above the
   # CPU count, as it is while the shards run. It runs last, as shard N+1, once
   # the load drops.
   while read -r i pattern; do
     patterns[i]=$pattern
     matched=$((matched + $(grep -c -E "$pattern" <<<"$list")))
-  done < <(cut -d/ -f1 <<<"$list" | sort | uniq -c | sort -rn | awk -v n="$n" -v quiet="$quiet" '
+  done < <(awk -F/ -v weights=Tests/shard-weights '
+    BEGIN { while ((getline line < weights) > 0) { split(line, f, " "); seconds[f[2]] = f[1] } }
+    { count[$1]++ }
+    END { for (key in count) if ((key in seconds) && seconds[key] > 0) { listed += seconds[key]; tests += count[key] }
+      rate = tests ? listed / tests : 1
+      for (key in count) {
+        w = (key in seconds) ? seconds[key] : count[key] * rate
+        print w, key } }' <<<"$list" |
+    sort -k1,1rn -k2,2 | awk -v n="$n" -v quiet="$quiet" '
     { key = $2
       gsub(/\./, "\\.", key)
       s = n

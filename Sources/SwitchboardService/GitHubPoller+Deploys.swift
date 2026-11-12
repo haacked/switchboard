@@ -182,7 +182,8 @@ extension GitHubPoller {
           guard let deploy = c["commit"]?["message"]?.string.flatMap(ChartsDeployCommit.init(message:)) else {
             return false
           }
-          return deploy.app == service && deploy.commit == commit && Wait.sameRepository(deploy.repository, repository)
+          return deploy.app == service && deploy.commit == commit
+            && Dependencies.sameRepo(deploy.repository, repository)
         })?["sha"]?.string
     }
     guard let sha = deploys.chartsCommits[key] else { return nil }

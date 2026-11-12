@@ -289,6 +289,11 @@ public final class Client: Sendable {
     try call("terminals", ["session": .string(id)], as: Terminals.self)
   }
 
+  /// Opens the session, which resumes a stopped claude, and returns its terminals.
+  public func open(_ id: String) throws -> Terminals {
+    try call("open", ["session": .string(id), "terminals": true], as: Terminals.self)
+  }
+
   public func importable(all: Bool = false, repo: String? = nil) throws -> ImportList {
     var args: [String: JSON] = ["all": .bool(all)]
     if let repo { args["repo"] = .string(repo) }
