@@ -489,5 +489,4 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
     question.deferred = true
     #expect(restarted([question]) == [question])
   }
-
 }
