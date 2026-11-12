@@ -98,14 +98,15 @@ enum Snapshot {
   /// Goes to each place in turn as the user would, once sbd lists the sessions, so each one records a history
   /// entry. A place is a session id, `inbox`, or `board`. Then it goes back `back` times and opens Recent Places.
   private static func visit(_ places: [String], _ model: BoardModel, back: Int, openList: Bool) {
-    var steps: [() -> Void] = places.map { place in
+    var steps: [@MainActor @Sendable () -> Void] = places.map { place in
       switch place {
       case "inbox": { model.show(.inbox) }
       case "board": { model.show(.board) }
       default: { model.selection = place }
       }
     }
-    steps += Array(repeating: { model.goBack() }, count: back)
+    let goBack: @MainActor @Sendable () -> Void = { model.goBack() }
+    steps += Array(repeating: goBack, count: back)
     if openList { steps.append { model.showingRecentPlaces = true } }
     whenListed(model) {
       for (i, step) in steps.enumerated() {

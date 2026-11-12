@@ -96,7 +96,7 @@ enum NavMouse {
   static func install(_ model: BoardModel) {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .swipe]) { event in
-      MainActor.assumeIsolated { handle(event, model) ? nil : event }
+      MainActor.assumeIsolated { handle(event, model) } ? nil : event
     }
   }
 
