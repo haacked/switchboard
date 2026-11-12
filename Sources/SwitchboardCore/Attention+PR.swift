@@ -92,21 +92,16 @@ extension Attention {
   /// ends without the user, such as running checks or a reviewer, keeps the
   /// session Waiting. Failed checks, a non-default base, no checks, and checks
   /// that report another value need the user. A PR that waits on another PR
-  /// or that Trunk queued gets no verdict here. No verdict asks the user to
-  /// merge.
+  /// or that Trunk queued gets no verdict here.
   static func approvedNotReady(_ blocker: MergeBlocker, _ pr: PullRequest, _ facts: SessionFacts) -> Verdict? {
     let n = "#\(pr.number)"
     let approvers = approvedBy(pr, after: ";")
     switch blocker {
-    // `isApproved` excludes a draft, and `openPR` returns on a conflict first.
-    case .draft, .conflict:
-      return nil
-    // A PR that waits on another can't merge yet.
-    case .dependency:
-      return nil
     case .queue(.unknown):
       return Verdict(state: .needsYou, reason: "check whether Trunk queued \(n); its queue status did not load")
-    case .queue:
+    // `isApproved` excludes a draft, and `openPR` returns on a conflict first.
+    // A dependency or Trunk's queue holds the PR, so other rules report it.
+    case .draft, .conflict, .dependency, .queue:
       return nil
     case .checksFailed:
       return Verdict(

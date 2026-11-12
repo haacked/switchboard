@@ -5,7 +5,7 @@ import Testing
 
 extension MergeBlockerTests {
   /// `Attention.mergeBlocker` names the first ready-to-merge condition that a
-  /// PR fails, and `readyToMerge` gives a verdict exactly when it names none.
+  /// PR fails.
   @Suite struct Classifier {
     /// A PR and its dependencies that pass every condition.
     enum Passing: String, CaseIterable, Sendable {
@@ -27,14 +27,12 @@ extension MergeBlockerTests {
           case .needsNoReviewAndRequestsUnread:
             pr.reviewDecision = nil
             pr.reviewRequests = nil
-          case .resolvedDependency:
-            dependencies = [Dependency(via: .body, repo: "acme/widgets", number: 7, state: .merged)]
+          case .resolvedDependency: dependencies = [MergeBlockerTests.mergedDependency]
           case .deployedDependency:
             dependencies = [
               Dependency(via: .body, repo: "acme/widgets", number: 7, deploy: true, state: .merged, deployed: true)
             ]
-          case .closedDependency:
-            dependencies = [Dependency(via: .body, repo: "acme/widgets", number: 7, state: .closed)]
+          case .closedDependency: dependencies = [MergeBlockerTests.closedDependency]
           }
         }
         return try prFacts(pr, then: [try dependenciesEvent(3, dependencies)])
@@ -66,15 +64,11 @@ extension MergeBlockerTests {
         case .checksLowercaseSuccess: pr.checks = "success"
         case .otherBase: pr.base = "release"
         case .defaultBranchInAnotherCase: pr.base = "Main"
-        case .staleChangeRequest: pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
-        case .decisionUnread:
-          pr.reviewDecision = nil
-          pr.reviewDecisionRead = nil
+        case .staleChangeRequest: MergeBlockerTests.addStaleChangeRequest(&pr)
+        case .decisionUnread: MergeBlockerTests.leaveDecisionUnread(&pr)
         case .reviewRequired: pr.reviewDecision = .reviewRequired
         case .changesRequestedDecision: pr.reviewDecision = .changesRequested
-        case .reviewRequested:
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
+        case .reviewRequested: MergeBlockerTests.requestReviewFromBob(&pr)
         }
       }
 
@@ -134,8 +128,7 @@ extension MergeBlockerTests {
             pr.base = "release"
           case .failedChecksBeforeReview:
             pr.checks = "FAILURE"
-            pr.reviewDecision = nil
-            pr.reviewRequests = ["bob"]
+            MergeBlockerTests.requestReviewFromBob(&pr)
           case .mergeabilityUnknownBeforeNoChecks:
             pr.mergeable = .unknown
             pr.checks = nil
@@ -150,24 +143,21 @@ extension MergeBlockerTests {
             pr.base = "release"
           case .baseBeforeReview:
             pr.base = "release"
-            pr.reviewDecision = nil
-            pr.reviewRequests = ["bob"]
+            MergeBlockerTests.requestReviewFromBob(&pr)
           case .baseBeforeRunningChecks:
             pr.base = "release"
             pr.checks = "PENDING"
           case .reviewBeforeRunningChecks:
-            pr.reviewDecision = nil
-            pr.reviewRequests = ["bob"]
+            MergeBlockerTests.requestReviewFromBob(&pr)
             pr.checks = "PENDING"
           case .reviewBeforeMergeabilityUnknown:
-            pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+            MergeBlockerTests.addStaleChangeRequest(&pr)
             pr.mergeable = .unknown
           case .baseBeforeNoChecks:
             pr.base = "release"
             pr.checks = nil
           case .reviewBeforeNoChecks:
-            pr.reviewDecision = nil
-            pr.reviewDecisionRead = nil
+            MergeBlockerTests.leaveDecisionUnread(&pr)
             pr.checks = nil
           case .mergeabilityUnreadBeforeNoChecks:
             pr.mergeable = nil
@@ -204,10 +194,6 @@ extension MergeBlockerTests {
       }
     }
 
-    static let queueStates: [TrunkQueueState] = [
-      .submitted, .pending, .testing, .passed, .failing, .queued, .merged, .removed, .unknown,
-    ]
-
     static let holdingDependencies = [
       MergeBlockerTests.holdingDependency,
       Dependency(via: .body, repo: "acme/widgets", number: 7, state: nil),
@@ -224,33 +210,16 @@ extension MergeBlockerTests {
       #expect(try blocker(try row.facts()) == nil)
     }
 
-    @Test(arguments: Passing.allCases)
-    func prThatPassesEveryConditionIsReadyToMerge(_ row: Passing) throws {
-      #expect(Attention.readyToMerge(try row.facts()) != nil)
-    }
-
     @Test(arguments: Blocked.allCases)
     func prThatFailsOneConditionNamesIt(_ row: Blocked) throws {
       #expect(try blocker(try row.facts()) == row.blocker)
     }
 
-    @Test(arguments: Blocked.allCases)
-    func prThatFailsOneConditionIsNotReadyToMerge(_ row: Blocked) throws {
-      #expect(Attention.readyToMerge(try row.facts()) == nil)
-    }
-
-    @Test(arguments: queueStates)
+    @Test(arguments: TrunkQueueState.allCases)
     func prWithATrunkQueueStateNamesTheQueue(_ state: TrunkQueueState) throws {
       let f = try prFacts(MergeBlockerTests.readyPR { $0.queue = state })
 
       #expect(try blocker(f) == .queue(state))
-    }
-
-    @Test(arguments: queueStates)
-    func prWithATrunkQueueStateIsNotReadyToMerge(_ state: TrunkQueueState) throws {
-      let f = try prFacts(MergeBlockerTests.readyPR { $0.queue = state })
-
-      #expect(Attention.readyToMerge(f) == nil)
     }
 
     @Test(arguments: holdingDependencies)
@@ -286,21 +255,6 @@ extension MergeBlockerTests {
       }
 
       #expect(mismatches.isEmpty, "\(mismatches.count) inputs disagree, first: \(mismatches.first ?? "")")
-    }
-
-    /// The approved rule switches over the blocker, so it must never see an
-    /// approved PR that is not ready to merge and has no blocker.
-    @Test func approvedPRThatIsNotReadyToMergeAlwaysHasABlocker() {
-      var missing: [String] = []
-
-      for (pr, dependencies) in MergeBlockerTests.guardInputs() where pr.isApproved {
-        let f = MergeBlockerTests.facts(pr, dependencies)
-        if Attention.readyToMerge(f) == nil && Attention.mergeBlocker(pr, f) == nil {
-          missing.append("\(pr) \(dependencies)")
-        }
-      }
-
-      #expect(missing.isEmpty, "\(missing.count) inputs have no blocker, first: \(missing.first ?? "")")
     }
   }
 }

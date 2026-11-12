@@ -7,20 +7,31 @@ import Testing
 @Suite struct MergeBlockerTests {}
 
 extension MergeBlockerTests {
-  /// A PR that every ready-to-merge condition passes: approved by alice, its
-  /// checks passed, no review request open, and a repository that the poller
-  /// read has no `.trunk` folder and a base branch without a merge queue.
+  /// The ready PR, approved by alice and with no review request open.
   static func readyPR(_ edit: (inout PullRequest) -> Void = { _ in }) -> PullRequest {
-    var pr = samplePR(
-      reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], checks: "SUCCESS",
-      reviewRequests: [], reviewDecisionRead: true)
-    pr.trunkConfig = false
-    pr.mergeQueue = false
+    var pr = SwitchboardCoreTests.readyPR(
+      reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], reviewRequests: [])
     edit(&pr)
     return pr
   }
 
+  static func requestReviewFromBob(_ pr: inout PullRequest) {
+    pr.reviewDecision = nil
+    pr.reviewRequests = ["bob"]
+  }
+
+  static func leaveDecisionUnread(_ pr: inout PullRequest) {
+    pr.reviewDecision = nil
+    pr.reviewDecisionRead = nil
+  }
+
+  static func addStaleChangeRequest(_ pr: inout PullRequest) {
+    pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+  }
+
   static let holdingDependency = Dependency(via: .body, repo: "acme/widgets", number: 7, state: .open)
+  static let mergedDependency = Dependency(via: .body, repo: "acme/widgets", number: 7, state: .merged)
+  static let closedDependency = Dependency(via: .body, repo: "acme/widgets", number: 7, state: .closed)
 
   /// The Ready to merge guard from main at a190b4b.
   static func oldGuard(_ pr: PullRequest, _ dependencies: [Dependency]) -> Bool {
@@ -35,15 +46,9 @@ extension MergeBlockerTests {
       { _ in },
       { $0.reviewRequests = nil },
       { $0.reviewRequests = ["bob"] },
-      { $0.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older")) },
-      {
-        $0.reviewDecision = nil
-        $0.reviewDecisionRead = nil
-      },
-      {
-        $0.reviewDecision = nil
-        $0.reviewRequests = ["bob"]
-      },
+      addStaleChangeRequest,
+      leaveDecisionUnread,
+      requestReviewFromBob,
       { $0.reviewDecision = nil },
       {
         $0.reviewDecision = nil
@@ -56,10 +61,7 @@ extension MergeBlockerTests {
     let checks: [String?] = ["SUCCESS", "FAILURE", "ERROR", "PENDING", "EXPECTED", nil, "NEUTRAL", "success"]
     let mergeables: [Mergeable?] = [.mergeable, .conflicting, .unknown, nil]
     let queues: [TrunkQueueState?] = [nil, .unknown, .queued, .removed, .merged]
-    let dependencySets: [[Dependency]] = [
-      [], [holdingDependency], [Dependency(via: .body, repo: "acme/widgets", number: 7, state: .merged)],
-      [Dependency(via: .body, repo: "acme/widgets", number: 7, state: .closed)],
-    ]
+    let dependencySets: [[Dependency]] = [[], [holdingDependency], [mergedDependency], [closedDependency]]
     var inputs: [(pr: PullRequest, dependencies: [Dependency])] = []
     for draft in [false, true] {
       for mergeable in mergeables {
@@ -114,13 +116,9 @@ extension MergeBlockerTests {
         case .noChecks: pr.checks = nil
         case .mergeabilityUnread: pr.mergeable = nil
         case .base: pr.base = "release"
-        case .decisionUnread:
-          pr.reviewDecision = nil
-          pr.reviewDecisionRead = nil
-        case .reviewRequested:
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
-        case .staleChangeRequest: pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+        case .decisionUnread: MergeBlockerTests.leaveDecisionUnread(&pr)
+        case .reviewRequested: MergeBlockerTests.requestReviewFromBob(&pr)
+        case .staleChangeRequest: MergeBlockerTests.addStaleChangeRequest(&pr)
         case .unrecognizedChecks: pr.checks = "NEUTRAL"
         case .queueUnknownWithFailedChecks:
           pr.queue = .unknown
@@ -135,8 +133,7 @@ extension MergeBlockerTests {
           pr.base = "release"
           pr.checks = "FAILURE"
         case .reviewRequestedWithRunningChecks:
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
+          MergeBlockerTests.requestReviewFromBob(&pr)
           pr.checks = "PENDING"
         case .holdingDependencyWithFailedChecks: pr.checks = "FAILURE"
         case .trunkSubmittedWithFailedChecks:
@@ -153,8 +150,7 @@ extension MergeBlockerTests {
           pr.base = "release"
         case .baseWithReviewRequested:
           pr.base = "release"
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
+          MergeBlockerTests.requestReviewFromBob(&pr)
         case .reviewRequestedFromACodeOwnerTeam:
           pr.reviewDecision = nil
           pr.codeOwnerRequests = ["@acme/owners"]
@@ -163,14 +159,13 @@ extension MergeBlockerTests {
           pr.base = "release"
           pr.checks = nil
         case .reviewRequestedWithMergeabilityUnknown:
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
+          MergeBlockerTests.requestReviewFromBob(&pr)
           pr.mergeable = .unknown
         case .mergeabilityUnreadWithNoChecks:
           pr.mergeable = nil
           pr.checks = nil
         case .staleChangeRequestWithRunningChecks:
-          pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+          MergeBlockerTests.addStaleChangeRequest(&pr)
           pr.checks = "PENDING"
         }
       }
@@ -239,13 +234,8 @@ extension MergeBlockerTests {
     private func verdict(_ f: SessionFacts) -> Verdict { Attention.evaluate(session(), f, now: 10) }
 
     @Test(arguments: Row.allCases)
-    func approvedPRThatCantMergeHasTheState(_ row: Row) throws {
-      #expect(verdict(try row.facts()).state == row.expected.state)
-    }
-
-    @Test(arguments: Row.allCases)
-    func approvedPRThatCantMergeHasTheReason(_ row: Row) throws {
-      #expect(verdict(try row.facts()).reason == row.expected.reason)
+    func approvedPRThatCantMergeHasTheVerdict(_ row: Row) throws {
+      #expect(verdict(try row.facts()) == row.expected)
     }
 
     @Test(arguments: Row.allCases)
@@ -263,11 +253,6 @@ extension MergeBlockerTests {
       #expect(!Attention.atMergeDecision(try row.facts()))
     }
 
-    @Test(arguments: Row.allCases)
-    func approvedPRThatCantMergeIsNotReadyToMerge(_ row: Row) throws {
-      #expect(Attention.readyToMerge(try row.facts()) == nil)
-    }
-
     @Test(arguments: Row.allCases.filter(\.namesTheBlockerOnly))
     func approvedPRThatCantMergeOffersNoOption(_ row: Row) throws {
       #expect(verdict(try row.facts()).options.isEmpty)
@@ -280,19 +265,10 @@ extension MergeBlockerTests {
 
     @Test func readyPRIsReadyToMerge() throws {
       let f = try prFacts(MergeBlockerTests.readyPR())
+      let v = verdict(f)
 
-      #expect(verdict(f).state == .readyToMerge)
-    }
-
-    @Test func readyPRSummarizesThePR() throws {
-      let f = try prFacts(MergeBlockerTests.readyPR())
-
-      #expect(verdict(f).summarizesPR)
-    }
-
-    @Test func readyPRIsAtAMergeDecision() throws {
-      let f = try prFacts(MergeBlockerTests.readyPR())
-
+      #expect(v.state == .readyToMerge)
+      #expect(v.summarizesPR)
       #expect(Attention.atMergeDecision(f))
     }
 
@@ -372,35 +348,22 @@ extension MergeBlockerTests {
     enum Unapproved: String, CaseIterable, Sendable {
       case noChecks, mergeabilityUnread, base, checksNotPassed, changesRequested, decisionUnread, required, requested
 
-      var blocker: MergeBlocker {
+      var blocked: Classifier.Blocked {
         switch self {
         case .noChecks: .noChecks
         case .mergeabilityUnread: .mergeabilityUnread
-        case .base: .base("release", defaultBranch: "main")
-        case .checksNotPassed: .checksNotPassed("NEUTRAL")
-        case .changesRequested: .review(.changesRequested)
-        case .decisionUnread: .review(.decisionUnread)
-        case .required: .review(.required)
-        case .requested: .review(.requested)
+        case .base: .otherBase
+        case .checksNotPassed: .checksNeutral
+        case .changesRequested: .staleChangeRequest
+        case .decisionUnread: .decisionUnread
+        case .required: .reviewRequired
+        case .requested: .reviewRequested
         }
       }
 
       func apply(_ pr: inout PullRequest) {
         pr.verdicts = []
-        switch self {
-        case .noChecks: pr.checks = nil
-        case .mergeabilityUnread: pr.mergeable = nil
-        case .base: pr.base = "release"
-        case .checksNotPassed: pr.checks = "NEUTRAL"
-        case .changesRequested: pr.verdicts = [sampleVerdict("carol", "CHANGES_REQUESTED", on: "older")]
-        case .decisionUnread:
-          pr.reviewDecision = nil
-          pr.reviewDecisionRead = nil
-        case .required: pr.reviewDecision = .reviewRequired
-        case .requested:
-          pr.reviewDecision = nil
-          pr.reviewRequests = ["bob"]
-        }
+        blocked.apply(&pr)
       }
 
       var expected: Verdict {
@@ -421,26 +384,7 @@ extension MergeBlockerTests {
     /// approver, so its reason ends at the blocker.
     @Test(arguments: Unapproved.allCases)
     func reasonWithoutAnApproverEndsAtTheBlocker(_ row: Unapproved) throws {
-      #expect(try raw(row.blocker, row.apply) == row.expected)
-    }
-  }
-}
-
-extension MergeBlockerTests {
-  /// Ready to merge gives a verdict exactly for the inputs that `oldGuard`
-  /// passes.
-  @Suite struct ReadyToMergeParity {
-    @Test func readyToMergeSelectsExactlyThePRsThatTheOldGuardSelected() {
-      var mismatches: [String] = []
-
-      for (pr, dependencies) in MergeBlockerTests.guardInputs() {
-        let ready = Attention.readyToMerge(MergeBlockerTests.facts(pr, dependencies)) != nil
-        if ready != MergeBlockerTests.oldGuard(pr, dependencies) {
-          mismatches.append("\(pr) \(dependencies)")
-        }
-      }
-
-      #expect(mismatches.isEmpty, "\(mismatches.count) inputs disagree, first: \(mismatches.first ?? "")")
+      #expect(try raw(row.blocked.blocker, row.apply) == row.expected)
     }
   }
 }

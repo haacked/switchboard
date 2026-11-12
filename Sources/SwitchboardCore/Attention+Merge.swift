@@ -94,11 +94,12 @@ extension Attention {
     } else {
       options.insert(TriageOption(label: "\(method.verb) #\(pr.number)", action: .merge, recommended: true), at: 0)
     }
-    var verdict = Verdict(
+    let merge = mergeSummary(facts)
+    return Verdict(
       state: .readyToMerge, reason: oneLine(reason, max: 200), kind: .approval, options: options,
-      callouts: facts.mergeError.map { [Callout(kind: .warning, title: "The last merge failed", body: $0)] } ?? [])
-    verdict.addMergeSummary(facts)
-    return verdict
+      callouts: (facts.mergeError.map { [Callout(kind: .warning, title: "The last merge failed", body: $0)] } ?? [])
+        + merge.callouts,
+      summary: merge.text, summarizesPR: true)
   }
 
   /// Whether the session's PR is at a merge decision: the rule for its open
@@ -166,16 +167,5 @@ extension Attention {
       }
     }
     return callouts
-  }
-}
-
-extension Verdict {
-  /// Makes this the Ready to merge verdict's card: its summary says what the
-  /// PR does, and the pause callouts follow its own.
-  mutating func addMergeSummary(_ facts: SessionFacts) {
-    let merge = Attention.mergeSummary(facts)
-    summary = merge.text
-    callouts += merge.callouts
-    summarizesPR = true
   }
 }

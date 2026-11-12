@@ -1,7 +1,6 @@
 import Foundation
 
 /// The first condition that keeps a PR out of Ready to merge.
-/// `Attention.mergeBlocker` returns nil for a PR that is ready to merge.
 enum MergeBlocker: Equatable, Sendable {
   case draft, conflict, dependency
   case queue(TrunkQueueState)
@@ -32,10 +31,10 @@ enum ReviewGap: Equatable, Sendable {
 
 extension Attention {
   /// The first condition that `pr` fails, checked in a fixed order. nil
-  /// means the PR is ready to merge: it is not
-  /// a draft, GitHub reports it mergeable, its checks passed, it targets the
-  /// default branch or the default branch is unknown, review is satisfied,
-  /// Trunk reports no queue state for it, and no dependency holds it.
+  /// means the PR is ready to merge: it is not a draft, GitHub reports it
+  /// mergeable, its checks passed, it targets the default branch or the
+  /// default branch is unknown, review is satisfied, Trunk reports no queue
+  /// state for it, and no dependency holds it.
   static func mergeBlocker(_ pr: PullRequest, _ facts: SessionFacts) -> MergeBlocker? {
     if pr.draft { return .draft }
     if pr.mergeable == .conflicting { return .conflict }
@@ -59,8 +58,7 @@ extension Attention {
     }
     if pr.checksRunning { return .checksRunning }
     switch pr.mergeable {
-    case .mergeable: break
-    case .conflicting: return .conflict
+    case .mergeable, .conflicting: break
     case .unknown: return .mergeabilityUnknown
     case nil: return .mergeabilityUnread
     }

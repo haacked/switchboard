@@ -7,7 +7,7 @@ import Testing
 /// mergeable, its checks passed, no review required, and a repository that
 /// the poller read has no `.trunk` folder and a base branch without a merge
 /// queue.
-private func readyPR(
+func readyPR(
   draft: Bool = false, headSha: String = samplePRHead, base: String = "main", defaultBranch: String? = "main",
   mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [],
   checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil,
