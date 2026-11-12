@@ -33,6 +33,8 @@ struct Blocking: SuiteTrait, TestTrait, TestScoping {
   ) async throws {
     guard testCase != nil else { return try await function() }
     await slots.acquire()
+    let start = ContinuousClock.now
+    defer { Blocking.report(test, held: ContinuousClock.now - start) }
     do {
       try await Blocking.$holdsSlot.withValue(true) { try await run(function) }
     } catch {
@@ -40,6 +42,15 @@ struct Blocking: SuiteTrait, TestTrait, TestScoping {
       throw error
     }
     await slots.release()
+  }
+
+  /// Prints how long a test held its slot. Swift Testing's durations include
+  /// the wait for a slot. bin/shard-weights sums these lines by suite to
+  /// balance bin/test's shards. A single write keeps the line whole among the
+  /// other output of the test process.
+  private static func report(_ test: Test, held: Duration) {
+    let line = "slot-seconds \(String(format: "%.3f", held / .seconds(1))) \(test.id)\n"
+    FileHandle.standardOutput.write(Data(line.utf8))
   }
 
   /// Like Swift Testing's time limit, this records an issue when the limit
