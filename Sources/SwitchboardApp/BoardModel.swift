@@ -574,7 +574,6 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  func open(_ id: String) { perform("open", ["session": .string(id)]) }
   /// Starts the session's shell pane, or ends it. sbd keeps a closed shell closed until this opens it.
   func setShellOpen(_ id: String, _ open: Bool) {
     perform("shell", ["session": .string(id), "open": .bool(open)])
@@ -1083,12 +1082,6 @@ final class BoardModel: ObservableObject {
   /// Puts `repo` first in `knownRepos` and drops any other row with its path.
   private func moveToFront(_ repo: KnownRepo) {
     knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
-  }
-
-  /// Asks sbd for the session's tmux targets. It blocks, so it runs off the
-  /// main thread.
-  nonisolated func terminals(_ id: String) -> Result<Terminals, Error> {
-    Result { try Client().terminals(id) }
   }
 
   /// The Claude sessions that the import sheet offers. It blocks, so it runs

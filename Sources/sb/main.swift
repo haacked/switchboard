@@ -62,7 +62,9 @@ let usage = """
                                   where the user sends or cancels it
     send --pending N [--timeout S] wait up to S seconds (default 60) for the user's
                                   decision on group message N
-    open <session>                resume the session if its claude is stopped
+    open <session> [--terminals]  resume the session if its claude is stopped.
+                                  --terminals also starts the panes and adds
+                                  their tmux targets to the answer
     stop <session>                stop the session's claude
     resume <session> [--prompt P] resume the session's claude
     done <session>, undone <session>
@@ -513,10 +515,9 @@ func hook() -> Never {
 func attach(_ a: Args) -> Never {
   let id = a.session("attach")
   let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
-  _ = call("open", ["session": .string(id)])
-  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let terminals: Terminals
-  do { terminals = try client.terminals(id) } catch { die("\(error)") }
+  do { terminals = try client.open(id) } catch { die("\(error)") }
+  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let command = terminals.attachCommand(pane)
   let argv = command.map { strdup($0) } + [nil]
   execv(command[0], argv)
@@ -691,7 +692,7 @@ case "manager":
 case "get", "show":
   sessionCommand("get", a)
 case "open":
-  sessionCommand("open", a)
+  sessionCommand("open", a, extra: a.switches.contains("--terminals") ? ["terminals": true] : [:])
 case "stop":
   sessionCommand("stop", a)
 case "resume":
