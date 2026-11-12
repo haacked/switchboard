@@ -79,9 +79,9 @@ final class BoardModel: ObservableObject {
   @Published var showingTerminal = false {
     didSet { navigate() }
   }
-  /// The places the user went, for Back, Forward, and the History list. Only `BoardModel+History` changes it.
+  /// The places the user went, for Back, Forward, and Recent Places. Only `BoardModel+History` changes it.
   @Published var history = NavHistory(start: NavLocation(place: .inbox(nil), terminal: false))
-  @Published var showingHistory = false
+  @Published var showingRecentPlaces = false
   var navigating = false
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.

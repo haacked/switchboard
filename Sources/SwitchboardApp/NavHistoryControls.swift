@@ -14,9 +14,9 @@ struct NavHistoryControls: View {
         model.goForward()
       }
       button("Recent Places", "clock", help: "Recent places (⌘Y)", id: "nav-history", enabled: model.hasRecentPlaces) {
-        model.showingHistory.toggle()
+        model.showingRecentPlaces.toggle()
       }
-      .popover(isPresented: $model.showingHistory, arrowEdge: .bottom) { RecentPlacesList() }
+      .popover(isPresented: $model.showingRecentPlaces, arrowEdge: .bottom) { RecentPlacesList() }
     }
     .labelStyle(.iconOnly)
     .buttonStyle(.borderless)
@@ -32,7 +32,7 @@ struct NavHistoryControls: View {
   }
 }
 
-/// The History popover: the recent places, newest first.
+/// The Recent Places popover, newest first.
 private struct RecentPlacesList: View {
   @EnvironmentObject var model: BoardModel
 
@@ -102,7 +102,6 @@ enum NavMouse {
 
   /// Goes back or forward, and reports whether it used the event. It uses a back or forward event even
   /// when there is nowhere to go, so a terminal under the pointer never gets the button.
-  @discardableResult
   static func handle(_ event: NSEvent, _ model: BoardModel) -> Bool {
     let deltaX = event.type == .swipe ? event.deltaX : 0
     let buttonNumber = event.type == .otherMouseDown ? event.buttonNumber : 0

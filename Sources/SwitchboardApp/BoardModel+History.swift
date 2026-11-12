@@ -88,11 +88,7 @@ extension BoardModel {
 
   var canGoBack: Bool { history.canGo(.back, resolve: resolver()) }
   var canGoForward: Bool { history.canGo(.forward, resolve: resolver()) }
-  /// The History list has a row exactly when Back or Forward has somewhere to go.
-  var hasRecentPlaces: Bool {
-    let resolve = resolver()
-    return history.canGo(.back, resolve: resolve) || history.canGo(.forward, resolve: resolve)
-  }
+  var hasRecentPlaces: Bool { !recentPlaces.isEmpty }
 
   func goBack() { go(.back) }
   func goForward() { go(.forward) }
@@ -104,12 +100,12 @@ extension BoardModel {
     navigate(.replace) { restore(place) }
   }
 
-  /// The places that the History list offers, newest first.
+  /// The places that Recent Places offers, newest first.
   var recentPlaces: [NavLocation] { history.recent(resolve: resolver()) }
 
-  /// Goes to a place from the History list, as a new navigation.
+  /// Goes to a place from Recent Places, as a new navigation.
   func go(to place: NavLocation) {
-    showingHistory = false
+    showingRecentPlaces = false
     guard let place = resolver()(place) else { return }
     navigate { restore(place) }
   }
@@ -129,7 +125,7 @@ extension BoardModel {
     }
   }
 
-  /// The History list's text for a place.
+  /// The Recent Places text for a place.
   func label(for location: NavLocation) -> String {
     let name: (String?) -> String? = { self.summary($0)?.name }
     let text: String

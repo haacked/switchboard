@@ -36,4 +36,38 @@ import Testing
     #expect(
       NavMouse.direction(type: input.type, buttonNumber: input.buttonNumber, deltaX: input.deltaX) == input.expected)
   }
+
+  /// A press of AppKit button `button` with no window, which matches the test process's missing Switchboard window.
+  private func sideButtonPress(_ button: Int) throws -> NSEvent {
+    let event = try #require(
+      NSEvent.mouseEvent(
+        with: .otherMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+        eventNumber: 0, clickCount: 1, pressure: 1))
+    let cg = try #require(event.cgEvent)
+    cg.setIntegerValueField(.mouseEventButtonNumber, value: Int64(button))
+    return try #require(NSEvent(cgEvent: cg))
+  }
+
+  @Test func aSideButtonDoesNothingWhileASheetShows() throws {
+    let model = appliedModel(["a", "b"].map { needsItem($0) })
+    model.selection = "a"
+    model.selection = "b"
+    model.showingNew = true
+
+    #expect(!NavMouse.handle(try sideButtonPress(3), model))
+    #expect(model.selection == "b")
+
+    model.showingNew = false
+
+    #expect(NavMouse.handle(try sideButtonPress(3), model))
+    #expect(model.selection == "a")
+  }
+
+  /// The terminal under the pointer must never get a side button, even when there is nowhere to go.
+  @Test func aSideButtonWithNowhereToGoIsStillUsed() throws {
+    let model = appliedModel([needsItem("a")])
+    #expect(!model.canGoForward)
+
+    #expect(NavMouse.handle(try sideButtonPress(4), model))
+  }
 }

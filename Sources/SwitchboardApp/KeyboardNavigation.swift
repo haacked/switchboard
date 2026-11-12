@@ -16,10 +16,12 @@ enum NavShortcuts {
   /// An unshifted ⌘[ sends "[", so it can't match Previous Session's "{".
   static let back = KeyboardShortcut("[", modifiers: .command)
   static let forward = KeyboardShortcut("]", modifiers: .command)
-  static let showHistory = KeyboardShortcut("y", modifiers: .command)
+  static let showRecentPlaces = KeyboardShortcut("y", modifiers: .command)
 
   /// `bin/test-gui shell` sends these in order. Search Sessions is last, because it opens a sheet.
-  static let all = [nextSession, previousSession, focusList, focusTerminal, back, forward, showHistory, searchSessions]
+  static let all = [
+    nextSession, previousSession, focusList, focusTerminal, back, forward, showRecentPlaces, searchSessions,
+  ]
 }
 
 enum BoardDirection: Equatable {

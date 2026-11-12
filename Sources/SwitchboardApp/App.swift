@@ -68,8 +68,8 @@ struct SwitchboardApp: App {
           Button("Forward") { model.goForward() }
             .keyboardShortcut(NavShortcuts.forward)
             .disabled(!model.canGoForward)
-          Button("Show Recent Places") { model.showingHistory.toggle() }
-            .keyboardShortcut(NavShortcuts.showHistory)
+          Button("Show Recent Places") { model.showingRecentPlaces.toggle() }
+            .keyboardShortcut(NavShortcuts.showRecentPlaces)
             .disabled(!model.hasRecentPlaces)
           Button("Move Focus to List") { model.requestListFocus() }
             .keyboardShortcut(NavShortcuts.focusList)

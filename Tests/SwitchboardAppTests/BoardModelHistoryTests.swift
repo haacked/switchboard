@@ -640,7 +640,9 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
 
   // MARK: The button state agrees with the action
 
-  /// The Risk 1 shapes, each built through the model, with whether Back and Forward have somewhere to go.
+  /// Histories in which Back or Forward must skip an entry it cannot show: a removed session or Inbox item, a
+  /// session the org filter hides, or an entry equal to the current place. Each shape is built through the model
+  /// and states whether Back and Forward have somewhere to go.
   enum HistoryShape: String, CaseIterable, Sendable {
     case launch, cursorAtTheEnd, cursorInTheMiddle, removedBehind, removedAhead, equalBehindAfterASession,
       equalBehindWithNothingElse, aXaWithXRemoved, filterHiddenBehind, filterShowsItAgain, removedInboxItemBehind,
@@ -782,5 +784,12 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
     #expect(can == shape.canGoForward)
     #expect(can == (model.location != before))
     #expect(model.history.current == model.location)
+  }
+
+  @Test(arguments: HistoryShape.allCases)
+  func recentPlacesHasARowExactlyWhenBackOrForwardHasSomewhereToGo(_ shape: HistoryShape) throws {
+    let model = try shape.build()
+
+    #expect(model.hasRecentPlaces == (shape.canGoBack || shape.canGoForward))
   }
 }

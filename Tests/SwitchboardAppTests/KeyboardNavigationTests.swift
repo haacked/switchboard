@@ -447,7 +447,7 @@ import Testing
       #expect(Press(NavShortcuts.searchSessions) == Press("k"))
       #expect(Press(NavShortcuts.back) == Press("["))
       #expect(Press(NavShortcuts.forward) == Press("]"))
-      #expect(Press(NavShortcuts.showHistory) == Press("y"))
+      #expect(Press(NavShortcuts.showRecentPlaces) == Press("y"))
     }
   }
 }
