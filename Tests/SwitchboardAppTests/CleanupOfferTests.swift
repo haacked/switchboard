@@ -65,10 +65,6 @@ func cleanupSession(
   }
 }
 
-struct Refusal: Error, CustomStringConvertible {
-  var description: String
-}
-
 @MainActor
 @Suite struct BoardModelCleanup {
   func model(_ send: @escaping @Sendable (String, [String: JSON]) throws -> JSON) -> BoardModel {
