@@ -319,11 +319,6 @@ public struct Terminals: Codable, Equatable, Sendable {
     self.shell = shell
   }
 
-  /// The terminals in the answer to an `open` request that asked for them.
-  public init(opened: JSON) throws {
-    self = try JSONCoding.convert(opened["terminals"] ?? .null, to: Terminals.self)
-  }
-
   /// The command that attaches a terminal to one of the two panes.
   public func attachCommand(_ pane: Pane) -> [String] {
     [tmux, "-S", socket, "attach-session", "-t", "=\(pane == .claude ? claude : shell)"]

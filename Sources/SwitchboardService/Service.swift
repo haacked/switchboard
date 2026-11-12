@@ -364,10 +364,8 @@ public final class Service {
     case "open":
       let id = try lookup(args)
       if claudeState(id) == .stopped { try launch(id, prompt: nil) }
-      guard args["terminals"]?.bool == true else { return try JSON(encoding: summary(id)) }
-      var opened = try JSON(encoding: summary(id)).object ?? [:]
-      opened["terminals"] = try JSON(encoding: terminals(id))
-      return .object(opened)
+      if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
+      return try JSON(encoding: summary(id))
     case "send":
       let id = try lookup(args)
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }

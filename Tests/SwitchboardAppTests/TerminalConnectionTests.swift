@@ -25,27 +25,12 @@ private final class ConnectionLog: @unchecked Sendable {
       if case .request(let id) = $0 { id } else { nil }
     }
   }
-
-  /// The sleeps before each request, one list per request.
-  var sleepsBeforeRequests: [[Duration]] {
-    var result: [[Duration]] = []
-    var current: [Duration] = []
-    for entry in entries {
-      switch entry {
-      case .sleep(let duration): current.append(duration)
-      case .request:
-        result.append(current)
-        current = []
-      }
-    }
-    return result
-  }
 }
 
-/// A connection whose sleeps return at once, or block on `block`, and whose requests answer from `answer`.
+/// A connection whose requests answer from `answer`. A sleep returns at once unless `block` returns true.
 @MainActor
 private func makeConnection(
-  _ log: ConnectionLog, block: @escaping @Sendable (Duration) -> Bool = { _ in false },
+  _ log: ConnectionLog, block: @escaping @Sendable () -> Bool = { false },
   answer: @escaping @Sendable (Int) throws -> Terminals = { _ in sample }
 ) -> TerminalConnection {
   let count = Counter()
@@ -56,7 +41,7 @@ private func makeConnection(
     },
     sleep: { duration in
       log.append(.sleep(duration))
-      if block(duration) { try await Task.sleep(for: .seconds(60)) }
+      if block() { try await Task.sleep(for: .seconds(60)) }
     })
 }
 
@@ -68,15 +53,14 @@ private func makeConnection(
 
     await connection.connect("a", live: live)
 
-    #expect(log.requests == ["a"])
-    #expect(log.sleepsBeforeRequests == [[live ? .milliseconds(150) : .milliseconds(800)]])
+    #expect(log.entries == [.sleep(live ? .milliseconds(150) : .milliseconds(800)), .request("a")])
     #expect(connection.terminals == sample)
   }
 
   /// Moving through the sidebar cancels the connection of each session it passes.
   @Test(arguments: [true, false]) func cancellingDuringTheRestSendsNoRequest(live: Bool) async {
     let log = ConnectionLog()
-    let connection = makeConnection(log, block: { _ in true })
+    let connection = makeConnection(log, block: { true })
     let task = Task { await connection.connect("a", live: live) }
     await settle { !log.entries.isEmpty }
 
@@ -89,7 +73,7 @@ private func makeConnection(
 
   @Test func cancellingDuringARetryWaitStopsTheRetries() async {
     let log = ConnectionLog()
-    let connection = makeConnection(log, block: { _ in !log.requests.isEmpty }, answer: { _ in throw Boom() })
+    let connection = makeConnection(log, block: { !log.requests.isEmpty }, answer: { _ in throw Boom() })
     let task = Task { await connection.connect("a", live: true) }
     await settle { log.entries.count == 3 }
 
@@ -109,8 +93,8 @@ private func makeConnection(
 
     await connection.connect("a", live: live)
 
-    #expect(log.requests == ["a", "a"])
-    #expect(log.sleepsBeforeRequests.last == [.seconds(1)])
+    let rest: Duration = live ? .milliseconds(150) : .milliseconds(800)
+    #expect(log.entries == [.sleep(rest), .request("a"), .sleep(.seconds(1)), .request("a")])
     #expect(connection.terminals == sample)
   }
 

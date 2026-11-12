@@ -2,8 +2,8 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-/// `sb open --terminals` opens the session and returns its tmux targets in the same request, so the app
-/// makes one request for a stopped session.
+/// `sb open --terminals` opens the session and returns its tmux targets in the same request. The app
+/// then makes one request for a stopped session.
 @Suite(.blocking(timeLimit: .seconds(120))) struct OpenTerminalsTests {
   func live(_ sbd: Instance) throws -> SessionSummary {
     let s = try sbd.new(prompt: "hello")
@@ -20,18 +20,16 @@ import Testing
     try sbd.events(id, after: mark).filter { ["started", "resumed"].contains($0.kind) }.count
   }
 
-  @Test(arguments: [true, false]) func returnsTheSummaryAndTheTerminalsOfTheTerminalsRequest(live: Bool) throws {
+  @Test(arguments: [true, false]) func returnsTheTerminalsOfTheTerminalsRequest(live: Bool) throws {
     let sbd = try Instance()
     let s = try live ? self.live(sbd) : stopped(sbd)
 
     let text = try sbd.sb("open", s.id, "--terminals", "--json")
 
-    #expect(try JSONCoding.decode(SessionSummary.self, from: text).id == s.id)
-    let terminals = try Terminals(opened: JSONCoding.decode(JSON.self, from: text))
-    #expect(try sbd.client.terminals(s.id) == terminals)
+    #expect(try sbd.client.terminals(s.id) == JSONCoding.decode(Terminals.self, from: text))
   }
 
-  /// A dead Claude pane stays in tmux, and a missing one makes `terminals` start claude too.
+  /// A dead Claude pane stays in tmux. A missing one makes `terminals` start claude too.
   @Test(arguments: [false, true]) func resumesAStoppedClaudeOnce(paneMissing: Bool) throws {
     let sbd = try Instance()
     let s = try stopped(sbd)

@@ -11,13 +11,13 @@ final class TerminalConnection: ObservableObject {
   typealias Sleep = @Sendable (Duration) async throws -> Void
 
   /// The selection rests this long on a stopped session before the
-  /// connection opens it, so moving through the sidebar resumes no claude
-  /// that it passes.
+  /// connection opens it. Moving through the sidebar therefore resumes no
+  /// claude that it passes.
   static let stoppedRest: Duration = .milliseconds(800)
   /// The rest before opening a live session. sbd reads every process to
-  /// answer an open, and the terminal then attaches a tmux client. The rest is
-  /// longer than the default key repeat interval of about 90 ms, so a held
-  /// arrow key opens no session that it passes.
+  /// answer an open. The terminal then attaches a tmux client. The rest is
+  /// longer than the default key repeat interval of about 90 ms. A held arrow
+  /// key therefore opens no session that it passes.
   static let liveRest: Duration = .milliseconds(150)
   static let retryWait: Duration = .seconds(1)
 
