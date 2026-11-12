@@ -12,7 +12,7 @@ enum MergeBlocker: Equatable, Sendable {
   case noChecks
   /// The checks rollup holds a value other than SUCCESS, FAILURE, ERROR,
   /// PENDING, or EXPECTED.
-  case checksNotPassed(String)
+  case unrecognizedChecks(String)
   case base(String, defaultBranch: String)
   case review(ReviewGap)
 }
@@ -65,7 +65,7 @@ extension Attention {
     switch pr.checks {
     case "SUCCESS": break
     case nil: return .noChecks
-    case let checks?: return .checksNotPassed(checks)
+    case let checks?: return .unrecognizedChecks(checks)
     }
     return nil
   }

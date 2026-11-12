@@ -81,10 +81,10 @@ extension MergeBlockerTests {
         case .mergeabilityUnknown: .mergeabilityUnknown
         case .mergeabilityUnread: .mergeabilityUnread
         case .noChecks: .noChecks
-        case .checksNeutral: .checksNotPassed("NEUTRAL")
-        case .checksSkipped: .checksNotPassed("SKIPPED")
-        case .checksEmpty: .checksNotPassed("")
-        case .checksLowercaseSuccess: .checksNotPassed("success")
+        case .checksNeutral: .unrecognizedChecks("NEUTRAL")
+        case .checksSkipped: .unrecognizedChecks("SKIPPED")
+        case .checksEmpty: .unrecognizedChecks("")
+        case .checksLowercaseSuccess: .unrecognizedChecks("success")
         case .otherBase: .base("release", defaultBranch: "main")
         case .defaultBranchInAnotherCase: .base("Main", defaultBranch: "main")
         case .staleChangeRequest: .review(.changesRequested)

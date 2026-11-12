@@ -346,14 +346,14 @@ extension MergeBlockerTests {
     }
 
     enum Unapproved: String, CaseIterable, Sendable {
-      case noChecks, mergeabilityUnread, base, checksNotPassed, changesRequested, decisionUnread, required, requested
+      case noChecks, mergeabilityUnread, base, unrecognizedChecks, changesRequested, decisionUnread, required, requested
 
       var blocked: Classifier.Blocked {
         switch self {
         case .noChecks: .noChecks
         case .mergeabilityUnread: .mergeabilityUnread
         case .base: .otherBase
-        case .checksNotPassed: .checksNeutral
+        case .unrecognizedChecks: .checksNeutral
         case .changesRequested: .staleChangeRequest
         case .decisionUnread: .decisionUnread
         case .required: .reviewRequired
@@ -371,7 +371,7 @@ extension MergeBlockerTests {
         case .noChecks: Verdict(state: .needsYou, reason: "no checks ran on #42")
         case .mergeabilityUnread: Verdict(state: .waiting, reason: "sbd has not read whether #42 can merge")
         case .base: Verdict(state: .needsYou, reason: "#42 targets release, not main")
-        case .checksNotPassed: Verdict(state: .needsYou, reason: "checks on #42 report neutral")
+        case .unrecognizedChecks: Verdict(state: .needsYou, reason: "checks on #42 report neutral")
         case .changesRequested: Verdict(state: .waiting, reason: "#42 waits on carol to review again")
         case .decisionUnread: Verdict(state: .waiting, reason: "can't merge #42 yet")
         case .required: Verdict(state: .waiting, reason: "#42 waits on a required review")

@@ -82,17 +82,18 @@ extension Attention {
         callouts: [Callout(kind: .warning, title: "Depot CI failed on \(n)", body: failure)])
     }
     if pr.inMergeQueue == true { return Verdict(state: .waiting, reason: "\(n) is in the merge queue") }
-    if let v = readyToMerge(facts) { return v }
-    guard pr.isApproved, let blocker = mergeBlocker(pr, facts) else { return nil }
+    guard let blocker = mergeBlocker(pr, facts) else { return readyToMerge(pr, facts) }
+    guard pr.isApproved else { return nil }
     return approvedNotReady(blocker, pr, facts)
   }
 
   /// The verdict for an approved PR that `blocker` keeps out of Ready to
-  /// merge. The reason names the blocker, then the approvers. A blocker that
-  /// ends without the user, such as running checks or a reviewer, keeps the
-  /// session Waiting. Failed checks, a non-default base, no checks, and checks
-  /// that report another value need the user. A PR that waits on another PR
-  /// or that Trunk queued gets no verdict here.
+  /// merge. The reason names the blocker. A reason for failed checks, a wrong
+  /// base, a review gap, no checks, or unrecognized checks then names the
+  /// approvers. A blocker that ends without the user, such as running checks
+  /// or a reviewer, keeps the session Waiting. Failed checks, a non-default
+  /// base, no checks, and checks that report another value need the user. A
+  /// PR that waits on another PR or that Trunk queued gets no verdict here.
   static func approvedNotReady(_ blocker: MergeBlocker, _ pr: PullRequest, _ facts: SessionFacts) -> Verdict? {
     let n = "#\(pr.number)"
     let approvers = approvedBy(pr, after: ";")
@@ -131,7 +132,7 @@ extension Attention {
       return Verdict(state: .waiting, reason: "sbd has not read whether \(n) can merge")
     case .noChecks:
       return Verdict(state: .needsYou, reason: oneLine("no checks ran on \(n)\(approvers)"))
-    case .checksNotPassed(let checks):
+    case .unrecognizedChecks(let checks):
       return Verdict(state: .needsYou, reason: oneLine("checks on \(n) report \(checks.lowercased())\(approvers)"))
     }
   }
