@@ -397,6 +397,43 @@ private let unreadable: [(name: String, bytes: Data)] = [
     }
   }
 
+  /// The spool's folder is a link to a folder elsewhere that holds a spool. The drop refuses, and the folder that
+  /// the link leads to stays as it was.
+  @Test(.timeLimit(.minutes(1)))
+  func aSpoolFolderThatIsALinkIsRefusedAndTheFolderThatItLeadsToStaysAsItWas() throws {
+    try withBench { b in
+      let target = "\(b.home)/elsewhere"
+      try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+      let all = line(1) + line(2)
+      try all.write(to: URL(fileURLWithPath: "\(target)/spool.jsonl"))
+      let link = "\(b.home)/linked"
+      try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: target)
+
+      let r = try runCommand(
+        b.python, [b.shim, "spool-drop", String(line(1).count), sha256(line(1))],
+        env: ["PATH": "/usr/bin:/bin", "HOME": b.home, "SB_HOME": link], timeout: 30)
+
+      #expect(r.status != 0)
+      #expect(FileManager.default.contents(atPath: "\(target)/spool.jsonl") == all)
+      #expect(try FileManager.default.contentsOfDirectory(atPath: target) == ["spool.jsonl"])
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aSpoolFolderThatIsAFileIsRefusedAndKeepsTheFile() throws {
+    try withBench { b in
+      let file = "\(b.home)/not-a-folder"
+      try Data("keep\n".utf8).write(to: URL(fileURLWithPath: file))
+
+      let r = try runCommand(
+        b.python, [b.shim, "spool-drop", String(line(1).count), sha256(line(1))],
+        env: ["PATH": "/usr/bin:/bin", "HOME": b.home, "SB_HOME": file], timeout: 30)
+
+      #expect(r.status != 0)
+      #expect(FileManager.default.contents(atPath: file) == Data("keep\n".utf8))
+    }
+  }
+
   // MARK: Arguments and errors
 
   @Test(

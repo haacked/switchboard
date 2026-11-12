@@ -273,6 +273,10 @@ final class GitHubPoller {
     tracked[s.id] = t
   }
 
+  /// The git config keys that `GitHub.branchKey` reads, as a pattern of `git config --get-regexp`.
+  static let branchKeyConfig =
+    #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
+
   /// Reading the HEAD file and the config's modification time costs less
   /// than running git, so git runs only when either changed. A folder outside
   /// git is checked again once per idle interval.
@@ -304,8 +308,7 @@ final class GitHubPoller {
       // The worktrees of a repo share its config, so git reads it once per poll.
       let repo = SitePath(common, at: site)
       if configs[repo] == nil {
-        let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
-        configs[repo] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", pattern], at: site) ?? "")
+        configs[repo] = GitHub.gitConfig(git(cwd, ["config", "--get-regexp", Self.branchKeyConfig], at: site) ?? "")
       }
       key = GitHub.branchKey(branch: branch, config: configs[repo]!) { remote in
         // A remote's HEAD is a symbolic ref, which git never packs.

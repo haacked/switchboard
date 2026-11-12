@@ -12,11 +12,14 @@ struct PaneStop {
 extension Service {
   /// Records every process below the session's panes, closes the shell pane,
   /// and sends SIGTERM to claude. It runs on the state queue, after `install`
-  /// of a fresh snapshot, because it reads the panes' processes from it.
+  /// of a fresh snapshot, because it reads the panes' processes from it. It
+  /// throws for a session on a host whose snapshot sbd can't read, because it
+  /// would then find no process to wait for.
   func beginPaneStop(_ id: String) throws -> PaneStop {
+    try requireRead(id)
     let pids = [Pane.claude, .shell].compactMap { paneRow(id, $0) }.filter { !$0.dead }.map(\.pid)
     let processes = Processes.descendants(of: pids.filter(Processes.isValidPid), in: processChildren(of: id))
-    try site(of: id).terminals().kill(paneName(id, .shell))
+    try closePane(id, .shell, at: site(of: id))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {
       try stopClaude(id, pid)
@@ -39,7 +42,7 @@ extension Service {
     if let pid = stop.claudePid, try !waitForExit([pid], seconds: 5, at: site).isEmpty {
       throw APIError("\(session.id)'s claude has not exited. Run `\(command)` again once it has.")
     }
-    try site.terminals().kill(paneName(session.id, .claude))
+    try closePane(session.id, .claude, at: site)
     let deadline = Date().addingTimeInterval(5)
     let running = try waitForExit(stop.processes, seconds: deadline.timeIntervalSinceNow, at: site)
     var users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
@@ -48,14 +51,27 @@ extension Service {
       users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     }
     guard !running.isEmpty || !users.isEmpty else { return }
-    let commands = Dictionary(
-      uniqueKeysWithValues: Processes.byParent(on: site.machine).values.joined().map { ($0.pid, $0.command) })
+    // `Processes.byParent` runs this Mac's form of ps, so a host's processes come from its batched read.
+    let rows =
+      site.hostName == nil
+      ? Processes.byParent(on: site.machine)
+      : (try? site.readSnapshot(claudeProgram: claudeProgram(for: session)))?.children ?? [:]
+    let commands = Dictionary(uniqueKeysWithValues: rows.values.joined().map { ($0.pid, $0.command) })
     let named =
       running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
       + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
       "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )
+  }
+
+  /// Closes the session's pane at the site. On a host, it throws unless the host answered that the pane is
+  /// gone, because `TerminalHost.kill` reads a close that got no answer as done.
+  func closePane(_ id: String, _ pane: Pane, at site: any SessionSite) throws {
+    let name = paneName(id, pane)
+    let terminals = try site.terminals()
+    guard site.hostName != nil else { return terminals.kill(name) }
+    try site.confirmed("the close of \(name)") { _ in try terminals.close(name) }
   }
 
   /// Waits up to `seconds` for every pid to exit at the site. Returns the pids that still run.

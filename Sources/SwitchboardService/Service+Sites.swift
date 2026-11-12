@@ -18,7 +18,8 @@ extension Service {
   }
 
   /// Writes the session's `claude.sh` in its launcher folder at the site. For a site that names a host, the
-  /// write runs on the host, and nothing is written on this Mac.
+  /// write runs on the host, and nothing is written on this Mac. There it refuses, and writes nothing, when
+  /// `.sb`, `.sb/sessions`, or the launcher folder is a link.
   func writeLauncher(_ script: String, for id: String, at site: any SessionSite) throws {
     let dir = try site.sessionFolder(id)
     guard site.hostName != nil else {
@@ -27,7 +28,17 @@ extension Service {
       return
     }
     try site.confirmed("the write of claude.sh") { machine in
-      let write = #"umask 077; mkdir -p "$1" && cat >"$1/claude.sh.new" && mv "$1/claude.sh.new" "$1/claude.sh""#
+      let write = #"""
+        s=${1%/*}
+        for d in "${s%/*}" "$s" "$1"; do
+          if [ -L "$d" ]; then
+            printf '%s is a link, so sbd wrote no claude.sh\n' "$d" >&2
+            exit 4
+          fi
+        done
+        umask 077
+        mkdir -p "$1" && rm -f "$1/claude.sh.new" && cat >"$1/claude.sh.new" && mv "$1/claude.sh.new" "$1/claude.sh"
+        """#
       let r = try machine.run("/bin/sh", ["-c", write, "sb", dir], env: nil, input: Data(script.utf8), timeout: nil)
       guard r.status == 0 else {
         throw APIError("can't write \(dir)/claude.sh: \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")

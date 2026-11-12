@@ -81,6 +81,9 @@ public final class Service {
   var starting: Set<String> = []
   /// The sessions whose PR `merge` is merging.
   var merging: Set<String> = []
+  /// The sessions on a host whose `rm` stopped them. Nothing launches them again, because sbd closes no pane on
+  /// a host after it forgets the session.
+  var removing: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
   /// The sessions whose decision list `decision-submit` is sending.
@@ -1031,9 +1034,11 @@ public final class Service {
     // Claude Code does not attach the images of a prompt that starts it, so
     // a message with images waits for a paste.
     let attaches = Attachments.split(text, folder: home.attachmentsFolder(id)) != nil
-    if launchesWithPrompt, claudeState(id) == .stopped, entries[id]!.pending.isEmpty, !attaches, hasRoom() {
-      // A missing folder is the usual reason startClaude throws, so the check comes before `sent` is stored.
-      try requireFolder(entries[id]!.session)
+    if launchesWithPrompt, claudeState(id) == .stopped, entries[id]!.pending.isEmpty, !attaches,
+      hasRoom(onHost: entries[id]!.session.host)
+    {
+      // startClaude's checks come before `sent` is stored, so a start that they refuse stores no message.
+      _ = try requireStartable(id)
       try recordSent(id, text, .resumed, byUser: byUser)
       try startClaude(id, prompt: text)
       return .resumed
@@ -1272,6 +1277,12 @@ public final class Service {
   /// left alone and the call succeeds. The call refuses a session with an open to-do
   /// before anything stops, unless `resolve` names each open to-do. A to-do
   /// that arrives later keeps the session, even after its worktree is gone.
+  /// For a session on a host, rm waits for the host, then runs every check and
+  /// git command there on one connection, and refuses before the next command
+  /// once one got no answer. It refuses while sbd can't read the session's
+  /// claude there, and it closes the host's panes from the host's answers
+  /// before it forgets the session. A session whose host config.json no longer
+  /// lists is forgotten only when its claude stopped on record.
   func remove(_ args: JSON) throws -> JSON {
     let resolving = try resolveArgument(args)
     let removesWorktree = args["worktree"]?.bool == true
@@ -1287,71 +1298,97 @@ public final class Service {
       (removesWorktree ? ["--worktree"] : []) + (removesBranch ? ["--delete-branch"] : [])
       + (removesRemoteBranch ? ["--delete-remote-branch"] : [])
     do {
-      let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
+      let (session, pr, sharedWith, mayRun): (Session, PullRequest?, String?, Bool) = try queue.sync {
         let id = try lookup(args)
         // The start would otherwise leave its new worktree behind.
         guard !starting.contains(id) else { throw APIError("\(id) is starting") }
         guard !merging.contains(id) else { throw APIError("\(id) is merging its PR") }
         try checkTodos(id, resolving: resolving)
         let entry = entries[id]!
-        return (entry.session, entry.facts.pr, sharedSession(entry.session))
+        return (entry.session, entry.facts.pr, sharedSession(entry.session), mayRunClaude(entry))
       }
       let site = self.site(for: session)
-      let folderGone = !site.machine.exists(session.cwd)
-      var (repo, branch, supacode) = try checkRemoval(
-        session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
-        branch: removesBranch)
-      // The branch's git config is deleted with the branch, so the remote is read first.
-      // A local branch that is already gone still has its remote branch checked.
-      let remoteTarget: (repo: String, remote: String, branch: String)? = {
-        guard removesRemoteBranch, let repo, let name = branch?.name ?? session.branch else { return nil }
-        return (repo, trackedRemote(repo, name, at: site), name)
-      }()
-      let fresh = buildSnapshot()
-      let stop: PaneStop? = try queue.sync {
-        guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
-          !merging.contains(session.id)
-        else {
-          throw APIError("\(session.id) changed while it was being removed")
-        }
-        // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
-        try store.checkDeletable(session: session.id, resolving: checkTodos(session.id, resolving: resolving))
-        install(fresh)
-        if removesWorktree { return try beginPaneStop(session.id) }
-        if case .running(let pid) = claudeState(session.id) { try stopClaude(session.id, pid) }
-        return nil
+      if site is UnlistedSite {
+        return try removeFromUnlistedHost(
+          session, resolving: resolving, worktree: removesWorktree, mayRunClaude: mayRun, site: site)
       }
-      if let stop {
-        try finishPaneStop(session, stop, command: "sb rm --worktree")
-        (repo, branch, supacode) = try checkRemoval(
-          session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
-          branch: removesBranch)
-      }
-      // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
-      // folder's path through a symlink, so it gets the path that it lists for the worktree.
-      if let repo {
-        let listed = folderGone ? try worktreeEntry(repo, holding: session.cwd, at: site)?.path : session.cwd
-        if let listed { try removeWorktree(repo, listed, at: site) }
-      }
+      try awaitSite(site)
+      defer { queue.sync { _ = removing.remove(session.id) } }
+      var repo: String?
+      var branch: (name: String, tip: String)?
+      var worktreeRemoved = false
       var branchRemoved = false
       var branchError: Error?
-      if let repo, let branch {
-        do {
-          branchRemoved = try deleteBranch(repo, branch, pr: pr, inMain: supacode, at: site)
-        } catch {
-          branchError = error
-        }
-      }
       var remoteRemoved = false
       var remoteError: Error?
-      if let target = remoteTarget, branchError == nil, !branchExists(target.repo, target.branch, at: site),
-        let pr = mergedPR(pr, of: target.branch)
-      {
-        do {
-          remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: pr, at: site)
-        } catch {
-          remoteError = error
+      do {
+        // On a host, every check and every git command runs on one connection, and the scope's machine refuses
+        // each command once one got no answer.
+        try site.scoped("the removal of \(session.id)") { scope in
+          let at = scope.site
+          // Only a removal of the worktree reads the answer, so a plain rm asks a host nothing about the folder.
+          let folderGone = removesWorktree || session.host == nil ? try folderIsGone(session.cwd, at: at) : false
+          var supacode: Bool
+          var proven: PullRequest?
+          (repo, branch, supacode, proven) = try checkRemoval(
+            session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+            branch: removesBranch, at: at)
+          // The branch's git config is deleted with the branch, so the remote is read first.
+          // A local branch that is already gone still has its remote branch checked.
+          let remoteTarget: (repo: String, remote: String, branch: String)? = {
+            guard removesRemoteBranch, let repo, let name = branch?.name ?? session.branch else { return nil }
+            return (repo, trackedRemote(repo, name, at: at), name)
+          }()
+          let fresh = try freshSnapshot(of: session)
+          let stop: PaneStop? = try queue.sync {
+            guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
+              !merging.contains(session.id)
+            else {
+              throw APIError("\(session.id) changed while it was being removed")
+            }
+            // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
+            try store.checkDeletable(
+              session: session.id, resolving: checkTodos(session.id, resolving: resolving), onHost: session.host)
+            install(fresh, of: session)
+            try scope.require()
+            if session.host != nil { removing.insert(session.id) }
+            if removesWorktree { return try beginPaneStop(session.id) }
+            try stopForRemoval(session, at: site)
+            return nil
+          }
+          if let stop {
+            try finishPaneStop(session, stop, command: "sb rm --worktree")
+            (repo, branch, supacode, proven) = try checkRemoval(
+              session, pr: pr, sharedWith: sharedWith, folderGone: folderGone, worktree: removesWorktree,
+              branch: removesBranch, at: at)
+          }
+          // Prune would also drop the records of other worktrees whose folders are missing. Git can't resolve a missing
+          // folder's path through a symlink, so it gets the path that it lists for the worktree.
+          if let repo {
+            let listed = folderGone ? try worktreeEntry(repo, holding: session.cwd, at: at)?.path : session.cwd
+            if let listed { try removeWorktree(repo, listed, at: at) }
+            worktreeRemoved = true
+          }
+          if let repo, let branch {
+            do {
+              branchRemoved = try deleteBranch(repo, branch, pr: proven, inMain: supacode, at: at)
+            } catch {
+              branchError = error
+            }
+          }
+          if let target = remoteTarget, branchError == nil, let merged = mergedPR(proven, of: target.branch) {
+            do {
+              if try branchIsGone(target.repo, target.branch, at: at) {
+                remoteRemoved = try deleteRemoteBranch(target.repo, target.remote, target.branch, pr: merged, at: at)
+              }
+            } catch {
+              remoteError = error
+            }
+          }
         }
+      } catch  where worktreeRemoved {
+        // Each step after the worktree's removal keeps its own error. This one came after the last answer.
+        logLine("rm \(session.id): \(error)")
       }
       try queue.sync {
         // A follow-up can start between the two steps.
@@ -1374,7 +1411,8 @@ public final class Service {
         } else if let remoteError {
           stayed = " It kept the remote branch: \(remoteError)"
         }
-        let terminals = try site.terminals()
+        // The removal closed a host's panes before this, from answers of the host.
+        let terminals = session.host == nil ? try site.terminals() : nil
         do {
           try forgetSession(session.id, resolving: resolving)
         } catch var error as OpenTodoError {
@@ -1384,14 +1422,11 @@ public final class Service {
         } catch let error where !removed.isEmpty {
           throw APIError("\(kept): \(error)\(stayed)")
         }
-        terminals.kill(paneName(session.id, .claude))
-        terminals.kill(paneName(session.id, .shell))
+        terminals?.kill(paneName(session.id, .claude))
+        terminals?.kill(paneName(session.id, .shell))
         try detachPlans { $0.session == session.id }
       }
-      // FileManager deletes on this Mac, so only this Mac's site names a folder for it.
-      if site.hostName == nil, let folder = try? site.sessionFolder(session.id) {
-        try? FileManager.default.removeItem(atPath: folder)
-      }
+      removeSessionFolder(session.id, at: site)
       if let branchError, let branch {
         let remote = removesRemoteBranch ? " It also kept the remote branch." : ""
         throw APIError("Removed \(session.id) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
@@ -1415,37 +1450,40 @@ public final class Service {
   /// tip. The branch is nil when the folder and the branch are both gone, and
   /// when Supacode locked the worktree and origin/main doesn't contain the tip.
   /// `supacode` is true when Supacode locked the worktree.
+  /// The checks run git and read the folder at `site`. They count the PR only as
+  /// `provenPR` finds it, and return that PR for the steps after them.
   func checkRemoval(
-    _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool
-  ) throws -> (repo: String?, branch: (name: String, tip: String)?, supacode: Bool) {
-    guard worktree else { return (nil, nil, false) }
-    // The checks below read git and the folder with no proof that the host answered.
-    if let host = session.host {
-      throw APIError("sbd can't remove a worktree on \(host) yet. Remove \(session.id) without the worktree.")
-    }
+    _ session: Session, pr: PullRequest?, sharedWith: String?, folderGone: Bool, worktree: Bool, branch: Bool,
+    at site: any SessionSite
+  ) throws -> (repo: String?, branch: (name: String, tip: String)?, supacode: Bool, pr: PullRequest?) {
+    guard worktree else { return (nil, nil, false, pr) }
+    let pr = try provenPR(pr, of: session, in: folderGone ? session.repo ?? session.cwd : session.cwd, at: site)
     let merged = pr?.state == .merged
     if folderGone {
-      let repo = try checkGoneWorktree(session, mergedPR: merged)
-      return (repo, branch ? try checkGoneBranchIsMerged(repo, session, pr: pr) : nil, false)
+      let repo = try checkGoneWorktree(session, mergedPR: merged, at: site)
+      return (repo, branch ? try checkGoneBranchIsMerged(repo, session, pr: pr, at: site) : nil, false, pr)
     }
     let (repo, supacode) = try checkWorktreeIsLossless(
-      session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
-    guard branch else { return (repo, nil, supacode) }
-    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
+      session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false, at: site)
+    guard branch else { return (repo, nil, supacode, pr) }
+    let checked =
+      supacode ? try supacodeBranch(session, at: site) : try checkBranchIsMerged(session, pr: pr, at: site)
+    return (repo, checked, supacode, pr)
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
   /// gone, because the session started from a linked worktree that was later removed, this returns the
   /// one known main checkout that still lists the session's worktree.
-  private func worktreeRepo(_ session: Session) throws -> String {
+  private func worktreeRepo(_ session: Session, at site: any SessionSite) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
         "\(session.id) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
-    let site = self.site(for: session)
     if site.machine.isFolder(repo) { return repo }
-    let folders = queue.sync { entries.values.map(\.session).flatMap { [$0.repo, $0.cwd].compactMap { $0 } } }
+    let folders = queue.sync {
+      entries.values.map(\.session).filter { $0.host == session.host }.flatMap { [$0.repo, $0.cwd].compactMap { $0 } }
+    }
     var mains: [String] = []
     var seen: [String] = []
     for folder in folders
@@ -1467,9 +1505,8 @@ public final class Service {
   /// Returns the session's repo for a session whose folder is gone, or throws when sbd made no
   /// worktree for it, git keeps the worktree locked, or the worktree's HEAD has commits that are on
   /// no pushed branch. Removing the worktree's record drops the only ref to such commits.
-  private func checkGoneWorktree(_ session: Session, mergedPR: Bool) throws -> String {
-    let repo = try worktreeRepo(session)
-    let site = self.site(for: session)
+  private func checkGoneWorktree(_ session: Session, mergedPR: Bool, at site: any SessionSite) throws -> String {
+    let repo = try worktreeRepo(session, at: site)
     guard let entry = try worktreeEntry(repo, holding: session.cwd, at: site) else { return repo }
     if entry.locked { throw lockedError(session.cwd) }
     // git lists the zero OID when the worktree's HEAD names a ref that no longer exists. Commits made there
@@ -1499,10 +1536,9 @@ public final class Service {
 
   /// `checkBranchIsMerged` for a session whose folder is gone: the branch is read from the repo.
   /// A branch that is already gone leaves nothing to delete, so it returns nil.
-  private func checkGoneBranchIsMerged(_ repo: String, _ session: Session, pr: PullRequest?) throws -> (
-    name: String, tip: String
-  )? {
-    let site = self.site(for: session)
+  private func checkGoneBranchIsMerged(
+    _ repo: String, _ session: Session, pr: PullRequest?, at site: any SessionSite
+  ) throws -> (name: String, tip: String)? {
     guard let name = session.branch, branchExists(repo, name, at: site) else { return nil }
     let branch = (name: name, tip: try gitOutput(repo, ["rev-parse", "refs/heads/\(name)"], at: site))
     try recheckBranch(repo, branch.name, pr: pr, ignoring: session.cwd, at: site)
@@ -1536,8 +1572,10 @@ public final class Service {
   /// Returns the session's branch and its tip, or throws unless the worktree has the branch
   /// checked out and the tip is the head of the session's merged PR. A branch with no merged PR may
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
-  func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
-    let (branch, tip) = try checkedOutBranch(session)
+  func checkBranchIsMerged(
+    _ session: Session, pr: PullRequest?, at site: any SessionSite
+  ) throws -> (name: String, tip: String) {
+    let (branch, tip) = try checkedOutBranch(session, at: site)
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
@@ -1546,8 +1584,7 @@ public final class Service {
   }
 
   /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
-  func checkedOutBranch(_ session: Session) throws -> (name: String, tip: String) {
-    let site = self.site(for: session)
+  func checkedOutBranch(_ session: Session, at site: any SessionSite) throws -> (name: String, tip: String) {
     guard let branch = session.branch,
       try gitOutput(session.cwd, ["branch", "--show-current"], at: site) == branch
     else {
@@ -1557,7 +1594,7 @@ public final class Service {
   }
 
   /// The PR when it merged `branch`, or nil.
-  private func mergedPR(_ pr: PullRequest?, of branch: String) -> PullRequest? {
+  func mergedPR(_ pr: PullRequest?, of branch: String) -> PullRequest? {
     guard let pr, pr.state == .merged, pr.head == branch else { return nil }
     return pr
   }
@@ -1624,24 +1661,24 @@ public final class Service {
   /// Returns the session's repo and whether Supacode locked the worktree, or
   /// throws unless the session's folder is a linked worktree of the repo that
   /// `new` made it from, no other session runs in it, git doesn't lock it
-  /// unless the lock is Supacode's and sbd can find supacode, it has no
+  /// unless the lock is Supacode's, the folder is on this Mac, and sbd can
+  /// find supacode, it has no
   /// uncommitted file and no file whose change git status
   /// skips, and HEAD is on a remote branch. With a merged PR, HEAD may instead
   /// be on a local branch, because a squash merge leaves the commits on no
   /// remote branch and `worktree remove` keeps the branch. `worktree remove`
   /// deletes ignored files. With `onlyBuildOutputIgnored`, an ignored file that
   /// is not build output or in `cleanupDeletes` also refuses. Any git failure
-  /// refuses the removal.
+  /// refuses the removal. git runs at `site`.
   func checkWorktreeIsLossless(
-    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool
+    _ session: Session, mergedPR: Bool, sharedWith: String?, onlyBuildOutputIgnored: Bool, at site: any SessionSite
   ) throws -> (repo: String, supacode: Bool) {
-    let repo = try worktreeRepo(session)
+    let repo = try worktreeRepo(session, at: site)
     if let sharedWith {
       throw APIError(
         "\(sharedWith) also runs in \(session.cwd). Remove that session first, or remove this one without the worktree."
       )
     }
-    let site = self.site(for: session)
     guard
       let entry = try worktreeEntries(repo, at: site).dropFirst().first(where: {
         try site.samePath($0.path, session.cwd)
@@ -1658,7 +1695,7 @@ public final class Service {
     if onlyBuildOutputIgnored { try requireOnlyBuildOutputIgnored(session.cwd, ignored: status.ignored) }
     try requireNoUnpushedCommits(
       in: session.cwd, at: "HEAD", mergedPR: mergedPR, subject: session.cwd, at: site)
-    if entry.lockedBySupacode { _ = try supacodeExecutable() }
+    if entry.lockedBySupacode { try requireSupacode(for: session.cwd, at: site) }
     return (repo, entry.lockedBySupacode)
   }
 
@@ -1941,7 +1978,7 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason }
+    if e.queuedSince != nil { out.reason = queuedReason(onHost: e.session.host) }
     if let host = s.host {
       out.host = host
       out.link = hostLinks[host]?.status.state

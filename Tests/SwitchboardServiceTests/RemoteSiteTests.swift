@@ -489,6 +489,21 @@ private func withSite(
 /// Whether the error is `HostUnread` for mini.
 private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.hostName == "mini" }
 
+/// Puts a link to `target` at `path`, after it moves what is at `path` to `keeping`. It creates `target` and the
+/// folder that holds `path` when they are missing.
+func replaceWithLink(_ path: String, to target: String, keeping: String) throws {
+  let files = FileManager.default
+  try files.createDirectory(atPath: target, withIntermediateDirectories: true)
+  try files.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+  if files.fileExists(atPath: path) { try files.moveItem(atPath: path, toPath: keeping) }
+  try files.createSymbolicLink(atPath: path, withDestinationPath: target)
+}
+
+/// The paths inside the folder, sorted.
+func paths(inside folder: String) throws -> [String] {
+  try FileManager.default.subpathsOfDirectory(atPath: folder).sorted()
+}
+
 // MARK: Setup
 
 @Suite struct RemoteSiteSetupTests {
@@ -629,6 +644,64 @@ private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.host
       try b.ready()
 
       #expect(kindOfFile(at: "\(b.boxHome)/.sb/agent.sock") == nil)
+    }
+  }
+
+  /// A link at one of the box's folders would lead setup's writes, and its chmod, into the folder that it leads to.
+  @Test(.timeLimit(.minutes(1)), arguments: [".sb", ".sb/bin", ".sb/sessions"])
+  func aLinkAtOneOfTheBoxesFoldersFailsSetupAndChangesNothingWhereItLeads(linked: String) throws {
+    try withSite { b in
+      let target = "\(b.home)/elsewhere"
+      try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+      try Data("keep\n".utf8).write(to: URL(fileURLWithPath: "\(target)/canary"))
+      chmod(target, 0o755)
+      try replaceWithLink("\(b.boxHome)/\(linked)", to: target, keeping: "\(b.home)/moved")
+      try b.bench.connect()
+
+      #expect(throws: (any Error).self) { try b.site.prepare() }
+
+      #expect(b.site.setupError?.contains("is a link") == true, "\(b.site.setupError ?? "nil")")
+      #expect(try paths(inside: target) == ["canary"])
+      let attributes = try FileManager.default.attributesOfItem(atPath: target)
+      #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o755)
+    }
+  }
+
+  /// The hook write runs after setup on each connect. A link that appears at the box's folder or its `bin` in
+  /// between would lead the writes of the shim and the settings into the folder that it leads to.
+  @Test(.timeLimit(.minutes(1)), arguments: [".sb", ".sb/bin"])
+  func theHookWriteRefusesALinkAtTheBoxesFolderAndWritesNothingWhereItLeads(linked: String) throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let target = "\(b.home)/elsewhere"
+      try FileManager.default.createDirectory(
+        atPath: linked == ".sb" ? "\(target)/bin" : target, withIntermediateDirectories: true)
+      let before = try paths(inside: target)
+      try replaceWithLink("\(facts.home)/\(linked)", to: target, keeping: "\(b.home)/moved")
+
+      let r = try b.site.machine.run(
+        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}"], env: nil, input: nil,
+        timeout: 20)
+
+      #expect(r.status == 1, "\(r.stderr)")
+      #expect(try paths(inside: target) == before)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theHookWriteRefusesABinThatIsAFileAndLeavesTheFileAsItWas() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let bin = "\(facts.folder)/bin"
+      try FileManager.default.removeItem(atPath: bin)
+      try Data("keep\n".utf8).write(to: URL(fileURLWithPath: bin))
+
+      let r = try b.site.machine.run(
+        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}"], env: nil, input: nil,
+        timeout: 20)
+
+      #expect(r.status == 1, "\(r.stderr)")
+      #expect(FileManager.default.contents(atPath: bin) == Data("keep\n".utf8))
     }
   }
 
@@ -846,16 +919,6 @@ private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.host
       #expect { try b.site.terminals() } throws: { isUnread($0) }
       #expect { try b.site.git() } throws: { isUnread($0) }
       #expect { try b.site.sessionFolder("s1") } throws: { isUnread($0) }
-    }
-  }
-
-  @Test(.timeLimit(.minutes(1)))
-  func aliveAndFolderUsersAreNotAvailableUntilStageFive() throws {
-    try withSite { b in
-      try b.ready()
-
-      #expect { try b.site.alive([1]) } throws: { "\($0)".contains("not available until stage 5") }
-      #expect { try b.site.folderUsers(b.home) } throws: { "\($0)".contains("not available until stage 5") }
     }
   }
 
@@ -1976,6 +2039,40 @@ private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.host
       #expect(b.sent.runs.dropFirst(before).map(\.timeout) == [600])
     }
   }
+
+  /// A command waits for the host's shell while a long one runs, as the tick's reads wait behind a `git worktree
+  /// remove`. Its deadline passes before it is sent, so it got no answer, and the link stays on its connection.
+  @Test(.timeLimit(.minutes(1)))
+  func aCommandWhoseDeadlinePassesBehindALongOneThrowsHostUnreadAndKeepsTheConnection() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let started = "\(b.home)/long-started"
+      let lock = NSLock()
+      var long: Result<CommandResult, any Error>?
+      let finished = DispatchSemaphore(value: 0)
+      Thread.detachNewThread {
+        let r = Result {
+          try b.site.machine.run(
+            "/bin/sh", ["-c", #": >"$1"; sleep 6; echo long"#, "sb", started], env: nil, input: nil, timeout: 30)
+        }
+        lock.withLock { long = r }
+        finished.signal()
+      }
+      try #require(waitUntil(seconds: 20) { FileManager.default.fileExists(atPath: started) })
+
+      #expect {
+        try b.site.confirmed("a short command") {
+          try $0.run("/bin/echo", ["short"], env: nil, input: nil, timeout: 0.5)
+        }
+      } throws: { isUnread($0) }
+
+      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(try lock.withLock { long }?.get().stdout == "long\n")
+      #expect(b.link.status.state == .connected)
+      #expect(b.link.status.connection == facts.epoch)
+      #expect(try b.site.confirmed("the next command") { try $0.run("/bin/echo", ["next"]) }.stdout == "next\n")
+    }
+  }
 }
 
 // MARK: The service's sites
@@ -2189,6 +2286,519 @@ private func session(_ id: String, host: String?) -> Session {
         #expect(!FileManager.default.fileExists(atPath: home.sessionFolder("s1")))
         #expect(!FileManager.default.fileExists(atPath: "\(b.boxHome)/.sb/sessions/s1"))
       }
+    }
+  }
+}
+
+// MARK: Processes on the host, for a removal
+
+/// `alive` and `folderUsers` read the host's processes while sbd waits for a remote session's panes to stop before
+/// it removes the worktree. Each answers only from a command that the host answered on the current connection. A
+/// failed read never answers "exited" or "no users", because either one lets the removal go on.
+///
+/// These tests assume that both members run `/bin/sh -c` on the host, so that the bench's `script-status` file ends
+/// them.
+@Suite struct RemoteSiteProcessTests {
+  /// Puts this Mac's lsof on the box's PATH, which holds only `box-bin`, /usr/bin, and /bin. macOS keeps lsof in
+  /// /usr/sbin.
+  private func addLsof(_ b: SiteBench) throws {
+    let path = "\(b.home)/box-bin/lsof"
+    try Data("#!/bin/sh\nexec /usr/sbin/lsof \"$@\"\n".utf8).write(to: URL(fileURLWithPath: path))
+    chmod(path, 0o755)
+  }
+
+  private func exitedPid() throws -> Int {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+    try p.run()
+    p.waitUntilExit()
+    return Int(p.processIdentifier)
+  }
+
+  /// A `sleep` whose working folder is `folder`. The box is this Mac.
+  private func sleeper(in folder: String) throws -> Process {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    p.arguments = ["30"]
+    p.currentDirectoryURL = URL(fileURLWithPath: folder)
+    try p.run()
+    return p
+  }
+
+  private func folder(_ b: SiteBench) throws -> String {
+    let path = "\(b.home)/work"
+    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+    return path
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aliveNamesThePidsThatStillRunOnTheHost() throws {
+    try withSite { b in
+      try b.ready()
+      let running = try b.tree()
+      let gone = try exitedPid()
+
+      let alive = try b.site.alive([running.child, running.pane, gone])
+
+      #expect(alive == [running.child, running.pane])
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aliveOfNoPidsIsEmpty() throws {
+    try withSite { b in
+      try b.ready()
+
+      #expect(try b.site.alive([]).isEmpty)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aliveAnswersAsThisMacDoes() throws {
+    try withSite { b in
+      try b.ready()
+      let running = try b.tree()
+      let gone = try exitedPid()
+      let pids: Set<Int> = [running.child, running.pane, gone, Int(getpid())]
+
+      // `MacSite.alive` is this filter.
+      #expect(try b.site.alive(pids) == pids.filter(Processes.exists))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aliveSendsOneCommandWithATimeout() throws {
+    try withSite { b in
+      try b.ready()
+      let running = try b.tree()
+      let before = b.sent.runs.count
+
+      _ = try b.site.alive([running.child, running.pane])
+
+      let runs = Array(b.sent.runs.dropFirst(before))
+      #expect(runs.count == 1, "\(runs)")
+      #expect(runs.allSatisfy { $0.timeout != nil })
+      #expect(b.sent.calls.filter { $0.hasPrefix("signal") }.isEmpty, "alive signalled through the machine")
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)), arguments: ["a dropped link", "script-status 143", "a connection whose setup has not run"])
+  func aliveThatGotNoAnswerThrowsHostUnread(shape: String) throws {
+    try withSite(scripts: shape.hasPrefix("script")) { b in
+      try b.ready()
+      let running = try b.tree()
+      switch shape {
+      case "a dropped link":
+        let master = try #require(b.bench.masters().last)
+        b.bench.drop(master)
+        try b.bench.waitFor(.unreachable)
+      case "a connection whose setup has not run":
+        try b.reconnect()
+      default:
+        try b.set("script-status", String(shape.split(separator: " ")[1]))
+      }
+
+      #expect { try b.site.alive([running.child]) } throws: { isUnread($0) }
+    }
+  }
+
+  /// An `alive` that answered an empty set from a failed command would say that every process exited.
+  @Test(.timeLimit(.minutes(1)), arguments: [1, 2, 126, 127])
+  func aliveWhoseCommandFailedThrows(status: Int) throws {
+    try withSite(scripts: true) { b in
+      try b.ready()
+      let running = try b.tree()
+      try b.set("script-status", String(status))
+
+      #expect(throws: (any Error).self) { try b.site.alive([running.child]) }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func folderUsersFindsAProcessWhoseWorkingFolderIsInTheFolderOnTheHost() throws {
+    try withSite { b in
+      try b.ready()
+      try addLsof(b)
+      let folder = try folder(b)
+      let user = try sleeper(in: folder)
+      defer { user.terminate() }
+      try b.bench.wait("lsof to list the sleeper") {
+        Processes.using(folder).contains { $0.pid == Int(user.processIdentifier) }
+      }
+
+      let users = try b.site.folderUsers(folder)
+
+      let found = try #require(users.first { $0.pid == Int(user.processIdentifier) })
+      #expect(found.use == .workingFolder)
+      #expect(users.allSatisfy { $0.pid != Int(getpid()) })
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func folderUsersOfAFolderThatNoProcessUsesIsEmpty() throws {
+    try withSite { b in
+      try b.ready()
+      try addLsof(b)
+
+      #expect(try b.site.folderUsers(try folder(b)).isEmpty)
+    }
+  }
+
+  /// The bench's box is macOS, with no /proc, and its PATH has no lsof unless a test adds one.
+  @Test(.timeLimit(.minutes(1)))
+  func folderUsersOnAHostWithNeitherProcNorLsofThrowsThatItCantCheck() throws {
+    try withSite { b in
+      try b.ready()
+      let folder = try folder(b)
+
+      #expect { try b.site.folderUsers(folder) } throws: {
+        "\($0)".contains("can't check which processes use \(folder) on mini")
+      }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func folderUsersWhoseScriptSaysItCantCheckThrowsThatItCantCheck() throws {
+    try withSite(scripts: true) { b in
+      try b.ready()
+      try addLsof(b)
+      let folder = try folder(b)
+      try b.set("script-status", "97")
+
+      #expect { try b.site.folderUsers(folder) } throws: {
+        "\($0)".contains("can't check which processes use \(folder) on mini")
+      }
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)), arguments: ["a dropped link", "script-status 143", "a connection whose setup has not run"])
+  func folderUsersThatGotNoAnswerThrowsHostUnread(shape: String) throws {
+    try withSite(scripts: shape.hasPrefix("script")) { b in
+      try b.ready()
+      try addLsof(b)
+      let folder = try folder(b)
+      switch shape {
+      case "a dropped link":
+        let master = try #require(b.bench.masters().last)
+        b.bench.drop(master)
+        try b.bench.waitFor(.unreachable)
+      case "a connection whose setup has not run":
+        try b.reconnect()
+      default:
+        try b.set("script-status", String(shape.split(separator: " ")[1]))
+      }
+
+      #expect { try b.site.folderUsers(folder) } throws: { isUnread($0) }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: [1, 2, 127])
+  func folderUsersWhoseScriptFailedThrows(status: Int) throws {
+    try withSite(scripts: true) { b in
+      try b.ready()
+      try addLsof(b)
+      let folder = try folder(b)
+      try b.set("script-status", String(status))
+
+      #expect(throws: (any Error).self) { try b.site.folderUsers(folder) }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func folderUsersRunsWithATimeout() throws {
+    try withSite { b in
+      try b.ready()
+      try addLsof(b)
+      let before = b.sent.runs.count
+
+      _ = try b.site.folderUsers(try folder(b))
+
+      let runs = Array(b.sent.runs.dropFirst(before))
+      #expect(!runs.isEmpty)
+      #expect(runs.allSatisfy { $0.timeout != nil })
+    }
+  }
+}
+
+// MARK: The session's launcher folder on the host
+
+/// After sbd forgets a remote session, it removes the session's launcher folder on the host with `rm -rf`, only for
+/// a path that equals `<home>/.sb/sessions/<id>` with an id that matches `^s[a-z0-9]+$`. Each refusal leaves every
+/// folder in place.
+///
+/// These tests assume `RemoteSite.removeSessionFolder(_ path:, of id:)`.
+@Suite struct RemoteSessionFolderRemovalTests {
+  /// Creates the folder with a file in it and returns the file.
+  @discardableResult
+  private func filled(_ folder: String) throws -> String {
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    let file = "\(folder)/claude.sh"
+    try Data("exec claude\n".utf8).write(to: URL(fileURLWithPath: file))
+    return file
+  }
+
+  private func exists(_ path: String) -> Bool { FileManager.default.fileExists(atPath: path) }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theLauncherFolderOfTheSessionIsRemovedAndNoOtherOne() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let sessions = "\(facts.folder)/sessions"
+      try filled("\(sessions)/s1abc")
+      let other = try filled("\(sessions)/s2xyz")
+
+      try b.site.removeSessionFolder("\(sessions)/s1abc", of: "s1abc")
+
+      #expect(!exists("\(sessions)/s1abc"))
+      #expect(exists(other))
+      #expect(exists(sessions))
+      #expect(b.sent.runs.allSatisfy { $0.timeout != nil })
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aLauncherFolderThatIsAlreadyGoneIsNoError() throws {
+    try withSite { b in
+      let facts = try b.ready()
+
+      try b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc")
+
+      #expect(exists("\(facts.folder)/sessions"))
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "", "s", "S1", "s1/x", "s1/..", "../x", "..", ".", "-rf", "s1\n", "s1 ", " s1", "x1", "s-1", "s_1", "s1.", "s1*",
+      "s1abc/../s2xyz", "sé1",
+    ])
+  func anIdThatIsNotASessionIdIsRefusedAndRemovesNothing(id: String) throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let sessions = "\(facts.folder)/sessions"
+      var canaries = [
+        try filled("\(sessions)/s1abc"), try filled("\(sessions)/s2xyz"), try filled("\(sessions)/s1"),
+        try filled("\(facts.folder)/x"), try filled("\(facts.home)/x"),
+      ]
+      let path = "\(sessions)/\(id)"
+      if let file = try? filled(path) { canaries.append(file) }
+
+      #expect(throws: (any Error).self) { try b.site.removeSessionFolder(path, of: id) }
+
+      for canary in canaries { #expect(exists(canary), "\(canary)") }
+      #expect(exists(sessions))
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "the box's Switchboard folder", "the sessions folder", "the box's home", "another session's folder",
+      "a folder of the id outside sessions", "a path through a dot-dot", "a relative path", "a path with a tilde",
+      "this Mac's launcher folder of the session",
+    ])
+  func aPathOtherThanTheSessionsOwnFolderIsRefusedAndRemovesNothing(shape: String) throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let sessions = "\(facts.folder)/sessions"
+      var canaries = [try filled("\(sessions)/s1abc"), try filled("\(sessions)/s2xyz")]
+      let path: String
+      switch shape {
+      case "the box's Switchboard folder": path = facts.folder
+      case "the sessions folder": path = sessions
+      case "the box's home": path = facts.home
+      case "another session's folder": path = "\(sessions)/s2xyz"
+      case "a folder of the id outside sessions": path = "\(facts.folder)/other/s1abc"
+      case "a path through a dot-dot": path = "\(sessions)/s1abc/../s2xyz"
+      case "a relative path": path = "sessions/s1abc"
+      case "a path with a tilde": path = "~/.sb/sessions/s1abc"
+      default: path = "\(b.home)/sessions/s1abc"
+      }
+      for folder in ["\(facts.folder)/other/s1abc", "\(facts.home)/sessions/s1abc", "\(b.home)/sessions/s1abc"] {
+        canaries.append(try filled(folder))
+      }
+
+      #expect(throws: (any Error).self) { try b.site.removeSessionFolder(path, of: "s1abc") }
+
+      for canary in canaries { #expect(exists(canary), "\(canary)") }
+    }
+  }
+
+  /// `rm -rf` of a link removes the link. The folder that it points at, here one outside the box's Switchboard
+  /// folder, keeps its files whether sbd refuses or removes the link.
+  @Test(.timeLimit(.minutes(1)))
+  func aLauncherFolderThatIsALinkNeverRemovesWhatItPointsAt() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let precious = try filled("\(b.home)/precious")
+      try FileManager.default.createDirectory(atPath: "\(facts.folder)/sessions", withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(
+        atPath: "\(facts.folder)/sessions/s1abc", withDestinationPath: "\(b.home)/precious")
+
+      try? b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc")
+
+      #expect(exists(precious))
+    }
+  }
+
+  /// `.sb` or `.sb/sessions` is a link to a folder elsewhere that holds a folder of the session's id. The removal
+  /// refuses, and that folder keeps its files.
+  @Test(.timeLimit(.minutes(1)), arguments: [".sb", ".sb/sessions"])
+  func aLinkAboveTheLauncherFolderIsRefusedAndRemovesNothingWhereItLeads(linked: String) throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let target = "\(b.home)/elsewhere"
+      let precious = try filled(linked == ".sb" ? "\(target)/sessions/s1abc" : "\(target)/s1abc")
+      try replaceWithLink("\(facts.home)/\(linked)", to: target, keeping: "\(b.home)/moved")
+
+      #expect(throws: (any Error).self) {
+        try b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc")
+      }
+
+      #expect(exists(precious))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aSessionsFolderThatIsAFileIsRefusedAndKeepsTheFile() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let sessions = "\(facts.folder)/sessions"
+      try FileManager.default.removeItem(atPath: sessions)
+      try Data("keep\n".utf8).write(to: URL(fileURLWithPath: sessions))
+
+      #expect(throws: (any Error).self) { try b.site.removeSessionFolder("\(sessions)/s1abc", of: "s1abc") }
+
+      #expect(FileManager.default.contents(atPath: sessions) == Data("keep\n".utf8))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aSessionsFolderThatIsGoneIsNoError() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      try FileManager.default.removeItem(atPath: "\(facts.folder)/sessions")
+
+      try b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theRemovalThrowsHostUnreadWhenTheLinkDroppedAndRemovesNothing() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let file = try filled("\(facts.folder)/sessions/s1abc")
+      let master = try #require(b.bench.masters().last)
+      b.bench.drop(master)
+      try b.bench.waitFor(.unreachable)
+
+      #expect { try b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc") } throws: {
+        isUnread($0)
+      }
+
+      #expect(exists(file))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theRemovalThrowsHostUnreadOnAConnectionWhoseSetupHasNotRunAndRemovesNothing() throws {
+    try withSite { b in
+      let facts = try b.ready()
+      let file = try filled("\(facts.folder)/sessions/s1abc")
+      try b.reconnect()
+
+      #expect { try b.site.removeSessionFolder("\(facts.folder)/sessions/s1abc", of: "s1abc") } throws: {
+        isUnread($0)
+      }
+
+      #expect(exists(file))
+    }
+  }
+}
+
+// MARK: One scope of a removal
+
+/// A removal runs its checks and its git commands in one `scoped` call. The scope's machine refuses each command
+/// once a command of the scope got no answer or the link left the scope's connection, so no command, a destructive
+/// one included, runs on what a missing answer or a later connection would decide.
+@Suite struct RemoteSiteScopeTests {
+  @Test(.timeLimit(.minutes(1)))
+  func aScopeWhoseCommandsWereAnsweredReturnsTheBodysResult() throws {
+    try withSite { b in
+      try b.ready()
+
+      let out = try b.site.scoped("a test") { scope in
+        try scope.require()
+        return try scope.site.machine.run("/bin/echo", ["hi"]).stdout
+      }
+
+      #expect(out == "hi\n")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCommandAfterOneThatGotNoAnswerIsNotSentAndTheScopeThrowsHostUnread() throws {
+    try withSite(scripts: true) { b in
+      try b.ready()
+      try b.set("script-status", "143")
+      var refused = false
+      var sentAfter = 0
+
+      #expect {
+        try b.site.scoped("a test") { scope in
+          _ = try scope.site.machine.run("/bin/sh", ["-c", "true"])
+          let before = b.sent.runs.count
+          do {
+            _ = try scope.site.machine.run("/bin/echo", ["hi"])
+          } catch {
+            refused = isUnread(error)
+          }
+          #expect(!scope.site.machine.exists("/"), "a file read after a missing answer read as an answer")
+          sentAfter = b.sent.runs.count - before + b.sent.calls.count
+        }
+      } throws: { isUnread($0) }
+
+      #expect(refused)
+      #expect(sentAfter == 0, "the scope sent \(sentAfter) commands after one got no answer")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aScopeWhoseLinkReconnectedRefusesTheNextCommandAndThrowsHostUnread() throws {
+    try withSite { b in
+      try b.ready()
+      var refused = false
+
+      #expect {
+        try b.site.scoped("a test") { scope in
+          try b.reconnect()
+          _ = try b.site.prepare()
+          do {
+            _ = try scope.site.machine.run("/bin/echo", ["hi"])
+          } catch {
+            refused = isUnread(error)
+          }
+          #expect(throws: (any Error).self) { try scope.require() }
+        }
+      } throws: { isUnread($0) }
+
+      #expect(refused, "a command ran on a connection that the scope did not begin on")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aScopeOnAConnectionWhoseSetupHasNotRunThrowsBeforeItsBodyRuns() throws {
+    try withSite { b in
+      try b.ready()
+      try b.reconnect()
+      var ran = false
+
+      #expect { try b.site.scoped("a test") { _ in ran = true } } throws: { isUnread($0) }
+
+      #expect(!ran)
     }
   }
 }

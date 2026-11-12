@@ -126,9 +126,10 @@ enum BoxShim {
     def spool_drop(arguments):
         """Removes the first <count> bytes of the spool and returns True, or removes nothing and returns False.
 
-        It removes them only when, under the spool lock, the file starts with <count> bytes whose SHA-256 is
-        <digest> and those bytes are whole spool lines. The file is replaced in one rename, so a drop that ends
-        early leaves the file from before or the file without the bytes.
+        It removes them only when the spool's folder is a folder and not a link, and when, under the spool lock,
+        the file starts with <count> bytes whose SHA-256 is <digest> and those bytes are whole spool lines. The
+        file is replaced in one rename, so a drop that ends early leaves the file from before or the file without
+        the bytes.
         """
         if len(arguments) != 2:
             return False
@@ -137,6 +138,9 @@ enum BoxShim {
             return False
         count = int(count)
         home = os.environ.get("SB_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # A link at the folder would move the rewrite and the rename into the folder that it leads to.
+        if os.path.islink(home) or not os.path.isdir(home):
+            return False
         path = os.path.join(home, "spool.jsonl")
         if not os.path.isfile(path):
             return False

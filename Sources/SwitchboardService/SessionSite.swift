@@ -32,6 +32,11 @@ protocol SessionSite: AnyObject {
   /// connected and every command that `body` sent got an answer from the host. It throws `HostUnread`
   /// otherwise. On this Mac it runs `body`.
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T
+  /// Runs `body` with a scope whose site sends its commands on one connection. On a remote site, the scope's
+  /// `require` throws `HostUnread` unless every command of the scope got an answer and the link is still on the
+  /// connection that the scope began on. The scope's machine refuses each command once `require` would throw,
+  /// and the call throws then too. On this Mac, the scope's site is the site and `require` does nothing.
+  func scoped<T>(_ what: String, _ body: (SiteScope) throws -> T) throws -> T
   /// The panes and the processes, from one read. It throws when tmux can't list the panes.
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot
   /// The pids that still run.
@@ -45,6 +50,20 @@ protocol SessionSite: AnyObject {
   func folderGone(_ path: String) throws -> Bool
   /// Sends SIGTERM to the session's claude, which runs below the pane's process.
   func stopClaude(_ pid: Int, below pane: Int, program: String) throws
+}
+
+/// The site of one `scoped` call and its check.
+struct SiteScope {
+  let site: any SessionSite
+  let require: () throws -> Void
+}
+
+extension SessionSite {
+  /// A scope whose site is a `CheckedSite` of one `confirmed` call. Its `require` checks nothing before the
+  /// call ends.
+  func scoped<T>(_ what: String, _ body: (SiteScope) throws -> T) throws -> T {
+    try confirmed(what) { machine in try body(SiteScope(site: CheckedSite(self, machine: machine), require: {})) }
+  }
 }
 
 /// A path at one site. A host can hold the same path as this Mac, so what sbd remembers about a path belongs
@@ -104,6 +123,10 @@ final class MacSite: SessionSite {
   func sessionFolder(_ id: String) throws -> String { home.sessionFolder(id) }
 
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { try body(machine) }
+
+  func scoped<T>(_ what: String, _ body: (SiteScope) throws -> T) throws -> T {
+    try body(SiteScope(site: self, require: {}))
+  }
 
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot {
     var s = Service.Snapshot()
@@ -237,6 +260,7 @@ final class CheckedSite: SessionSite {
   func worktreeRoot() throws -> String { try base.worktreeRoot() }
   func sessionFolder(_ id: String) throws -> String { try base.sessionFolder(id) }
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { try base.confirmed(what, body) }
+  func scoped<T>(_ what: String, _ body: (SiteScope) throws -> T) throws -> T { try base.scoped(what, body) }
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot {
     try base.readSnapshot(claudeProgram: claudeProgram)
   }

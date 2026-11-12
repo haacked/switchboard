@@ -435,29 +435,29 @@ private func withReadyService(
     return pr
   }
 
-  /// The cleanup checks read git and the folder with no proof that the host answered, so cleanup refuses first.
+  /// The cleanup checks read the folder on the host, and the host answers that it is gone, so cleanup refuses
+  /// and records nothing.
   @Test(.timeLimit(.minutes(1)))
-  func cleanupRefusesASessionOnAHostAndSendsTheHostNothing() throws {
-    try withReadyService { b, service, facts in
+  func cleanupRefusesASessionWhoseFolderTheHostReportsGone() throws {
+    try withReadyService { _, service, facts in
       var session = remoteSession("s1", cwd: "\(facts.home)/work")
       session.repo = "\(facts.home)/repo"
       session.branch = "feature"
       var entry = Service.Entry(session: session)
       entry.facts.pr = merged()
       service.queue.sync { service.entries["s1"] = entry }
-      let sentBefore = b.bench.logText
+      let gone = "\(facts.home)/work is gone. `sb rm --worktree` removes the session and the worktree's record."
 
       let blocker = service.cleanupBlocker("s1", pr: merged())
-      #expect(blocker == "sbd can't clean up a worktree on mini yet.")
+      #expect(blocker == gone)
       do {
         _ = try service.cleanup(["session": "s1"])
-        Issue.record("cleanup ran for a session on a host")
+        Issue.record("cleanup ran for a session whose folder is gone on its host")
       } catch {
-        #expect("\(error)" == "sbd can't clean up a worktree on mini yet.", "\(error)")
+        #expect("\(error)" == gone, "\(error)")
       }
 
       #expect(service.queue.sync { service.entries["s1"]?.facts.cleanedUp } == nil)
-      #expect(b.bench.logText == sentBefore)
     }
   }
 
@@ -814,6 +814,385 @@ private struct CannedMachine: Machine {
       let link = try #require(service.hostLinks["mini"])
 
       #expect(throws: (any Error).self) { try link.forward(remote: "/tmp/a.sock", local: "/tmp/b.sock") }
+    }
+  }
+}
+
+// MARK: Removal and cleanup
+
+/// A `Service` like `withReadyService`'s, whose box runs git through a wrapper. The wrapper exits 143 with no output,
+/// as a command that its timeout ended does, for a run whose arguments hold the text of the home's `git-end-word`
+/// file. It runs git otherwise. Setup finds the wrapper, so it is in place before setup runs.
+private func withRemovalService(_ body: (SiteBench, Service, BoxFacts) throws -> Void) throws {
+  try withBench { b in
+    let path = "\(b.home)/box-bin/git"
+    let script = """
+      #!/bin/sh
+      d=\(shellQuote(b.home))
+      if [ -f "$d/git-end-word" ]; then
+        case " $* " in *"$(cat "$d/git-end-word")"*) exit 143 ;; esac
+      fi
+      exec /usr/bin/git "$@"
+
+      """
+    try Data(script.utf8).write(to: URL(fileURLWithPath: path))
+    chmod(path, 0o755)
+    let host: [String: JSON] = [
+      "kind": "ssh", "destination": .string(LinkBench.destination), "tmux": .string("\(b.home)/fake-tmux"),
+      "claude": "/usr/bin/true",
+    ]
+    try withHostService(hosts: ["mini": .object(host)], ssh: "\(b.home)/ssh-wrapper") { service, home in
+      try FileManager.default.createDirectory(atPath: "\(home.path)/ssh-stub/home", withIntermediateDirectories: true)
+      let link = try #require(service.hostLinks["mini"])
+      link.connect()
+      #expect(waitUntil(seconds: 10) { link.status.state == .connected }, "\(link.status)")
+      let facts = try #require(service.remoteSites["mini"]).prepare()
+      #expect(facts.git.hasSuffix("/box-bin/git"), "setup did not find the box's git wrapper: \(facts.git)")
+      try body(b, service, facts)
+    }
+  }
+}
+
+/// Holds the session in the service, with the host's snapshot installed on a connection whose reconcile finished,
+/// so the session does not read `.unknown`.
+private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts, snapshot: Service.Snapshot = .init())
+{
+  service.queue.sync {
+    service.entries[entry.session.id] = entry
+    var read = snapshot
+    read.taken = nowMs()
+    read.connection = facts.epoch
+    service.reconciledOn["mini"] = facts.epoch
+    service.install(read, onHost: "mini")
+  }
+}
+
+/// The cleanup checks of a session on a host run on the host. Each check that gets no answer blocks the cleanup,
+/// though its empty output would read as a pass: an empty `git status` reads as a clean folder.
+@Suite struct RemoteCleanupCheckTests {
+  /// A repo on the box on main, and a linked worktree of it on `topic` with one commit, which a merged PR has at
+  /// its head. The commit is on no remote, which the merged PR allows.
+  private func addSession(_ service: Service, _ facts: BoxFacts) throws {
+    let repo = "\(facts.home)/repo"
+    try makeRepo(repo)
+    try sh(
+      "git checkout -q main && git worktree add -q -b topic ../topic-tree && cd ../topic-tree"
+        + " && git commit -q --allow-empty -m work", in: repo)
+    let tree = "\(facts.home)/topic-tree"
+    let tip = try runCommand("/usr/bin/git", ["-C", tree, "rev-parse", "HEAD"]).stdout
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    var session = remoteSession("s1", cwd: tree)
+    session.repo = repo
+    session.branch = "topic"
+    var entry = Service.Entry(session: session)
+    entry.facts.pr = PullRequest(
+      id: "PR_1", number: 7, url: "https://github.com/mac/repo/pull/7", repo: "mac/repo", state: .merged,
+      head: "topic", headSha: tip)
+    hold(entry, in: service, facts)
+  }
+
+  private func blocker(_ service: Service) -> String? {
+    guard let pr = service.queue.sync(execute: { service.entries["s1"]?.facts.pr }) else { return "no PR" }
+    return service.cleanupBlocker("s1", pr: pr)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCleanWorktreeOnTheHostWhosePRMergedHasNoBlocker() throws {
+    try withRemovalService { _, service, facts in
+      try addSession(service, facts)
+
+      #expect(blocker(service) == nil)
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "status --porcelain", "ls-files -v", "rev-list --count", "worktree list", "branch --show-current",
+      "rev-parse HEAD",
+    ])
+  func aCheckThatGotNoAnswerBlocksTheCleanup(word: String) throws {
+    try withRemovalService { b, service, facts in
+      try addSession(service, facts)
+      try b.set("git-end-word", word)
+
+      #expect(blocker(service) != nil, "cleanup could run though `git \(word)` got no answer")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aDroppedLinkBlocksTheCleanupWithTheHostsName() throws {
+    try withRemovalService { _, service, facts in
+      try addSession(service, facts)
+      service.hostLinks["mini"]?.disconnect()
+
+      let reason = try #require(blocker(service))
+
+      #expect(reason.contains("mini"), "\(reason)")
+    }
+  }
+
+  /// A host's folder is not gone because a check got no answer.
+  @Test(.timeLimit(.minutes(1)))
+  func aFolderCheckThatGotNoAnswerDoesNotReportTheFolderGone() throws {
+    try withRemovalService { b, service, facts in
+      try addSession(service, facts)
+      try b.set("script-status", "143")
+
+      let reason = try #require(blocker(service))
+
+      #expect(!reason.contains("is gone"), "\(reason)")
+    }
+  }
+}
+
+/// The pane stop of a remote session's removal: sbd signals only the session's claude, waits for the session's
+/// processes on the host, and refuses when the host does not answer.
+@Suite struct RemotePaneStopTests {
+  /// A remote session whose Claude pane runs `command` below it, and whose host snapshot names that child as the
+  /// session's claude. The host's claude is `/usr/bin/true`, so a `sleep` child is not claude.
+  private func addSession(
+    _ b: SiteBench, _ service: Service, _ facts: BoxFacts, running command: String = "sleep 300"
+  ) throws -> (Session, SiteBench.Tree) {
+    let tree = try b.tree(command)
+    try b.setPanes([("s1-claude", tree.pane, false)])
+    let folder = "\(facts.home)/work"
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    let session = remoteSession("s1", cwd: folder)
+    var read = Service.Snapshot()
+    read.panes["s1-claude"] = PaneRow(pid: tree.pane, dead: false, clients: 0)
+    read.claudePids["s1"] = tree.child
+    read.children = [tree.pane: [ProcessRow(pid: tree.child, ppid: tree.pane, pgid: tree.pane, command: command)]]
+    hold(Service.Entry(session: session), in: service, facts, snapshot: read)
+    return (session, tree)
+  }
+
+  /// Puts this Mac's lsof on the box's PATH. macOS keeps lsof in /usr/sbin.
+  private func addLsof(_ b: SiteBench) throws {
+    let path = "\(b.home)/box-bin/lsof"
+    try Data("#!/bin/sh\nexec /usr/sbin/lsof \"$@\"\n".utf8).write(to: URL(fileURLWithPath: path))
+    chmod(path, 0o755)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theStopOfTheRemovalSignalsNoProcessThatIsNotTheSessionsClaude() throws {
+    try withReadyService { b, service, facts in
+      let (_, tree) = try addSession(b, service, facts)
+
+      _ = try? service.queue.sync { try service.beginPaneStop("s1") }
+
+      #expect(b.stillRuns(tree.child))
+      #expect(b.runs(tree.pane))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theWaitForTheSessionsProcessesThrowsHostUnreadWhenTheLinkDroppedAndSignalsNothing() throws {
+    try withReadyService { b, service, facts in
+      let (session, tree) = try addSession(b, service, facts)
+      service.hostLinks["mini"]?.disconnect()
+
+      #expect {
+        try service.finishPaneStop(
+          session, PaneStop(claudePid: nil, processes: [tree.child]), command: "sb rm --worktree")
+      } throws: { isUnread($0) }
+
+      #expect(b.stillRuns(tree.child))
+    }
+  }
+
+  /// sbd waits 5 s for the session's processes, then refuses and leaves them running.
+  @Test(.timeLimit(.minutes(1)))
+  func theWaitRefusesWhileAProcessOfTheSessionStillRunsOnTheHostAndLeavesItRunning() throws {
+    try withReadyService { b, service, facts in
+      try addLsof(b)
+      let (session, tree) = try addSession(b, service, facts)
+
+      #expect {
+        try service.finishPaneStop(
+          session, PaneStop(claudePid: nil, processes: [tree.child]), command: "sb rm --worktree")
+      } throws: { "\($0)".contains("still run") }
+
+      #expect(b.stillRuns(tree.child))
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theWaitReturnsOnceTheSessionsProcessesExitedAndNoProcessUsesTheFolder() throws {
+    try withReadyService { b, service, facts in
+      try addLsof(b)
+      let (session, tree) = try addSession(b, service, facts)
+      kill(pid_t(tree.child), SIGKILL)
+      try b.bench.waitForExit(Int32(tree.child))
+
+      try service.finishPaneStop(
+        session, PaneStop(claudePid: nil, processes: [tree.child]), command: "sb rm --worktree")
+    }
+  }
+
+  /// The box has neither /proc nor lsof, so sbd can't tell whether a process still writes to the folder.
+  @Test(.timeLimit(.minutes(1)))
+  func theWaitRefusesWhenTheHostCantCheckWhichProcessesUseTheFolder() throws {
+    try withReadyService { b, service, facts in
+      let (session, tree) = try addSession(b, service, facts)
+      kill(pid_t(tree.child), SIGKILL)
+      try b.bench.waitForExit(Int32(tree.child))
+
+      #expect {
+        try service.finishPaneStop(
+          session, PaneStop(claudePid: nil, processes: [tree.child]), command: "sb rm --worktree")
+      } throws: { "\($0)".contains("can't check which processes use \(session.cwd) on mini") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theWaitRefusesWhileAProcessThatTheSessionDidNotStartUsesTheFolderOnTheHost() throws {
+    try withReadyService { b, service, facts in
+      try addLsof(b)
+      let (session, tree) = try addSession(b, service, facts)
+      kill(pid_t(tree.child), SIGKILL)
+      try b.bench.waitForExit(Int32(tree.child))
+      let user = Process()
+      user.executableURL = URL(fileURLWithPath: "/bin/sleep")
+      user.arguments = ["30"]
+      user.currentDirectoryURL = URL(fileURLWithPath: session.cwd)
+      try user.run()
+      defer { user.terminate() }
+
+      #expect {
+        try service.finishPaneStop(
+          session, PaneStop(claudePid: nil, processes: [tree.child]), command: "sb rm --worktree")
+      } throws: { "\($0)".contains(String(user.processIdentifier)) }
+
+      #expect(user.isRunning)
+    }
+  }
+}
+
+/// A removal closes a remote session's panes from answers of the host. `TerminalHost.kill` reads a close that got
+/// no answer as done, so the removal never uses it for a pane on a host.
+@Suite struct RemotePaneCloseTests {
+  /// A host whose tmux answers `kill-session` as the file `kill` in the folder says: `gone` prints tmux's own
+  /// "can't find session", `ended` exits 143 with no output, as a command that its timeout ended does.
+  private func withKillTmux(_ body: (Service, String) throws -> Void) throws {
+    let folder = try makeShortTempFolder()
+    defer { try? FileManager.default.removeItem(atPath: folder) }
+    let kill = shellQuote("\(folder)/kill")
+    let script = """
+      #!/bin/sh
+      case " $* " in
+      *" kill-session "*)
+        case $(cat \(kill) 2>/dev/null) in
+        gone) echo "can't find session: nope" >&2; exit 1 ;;
+        ended) exit 143 ;;
+        esac
+        ;;
+      esac
+      exit 0
+
+      """
+    try Data(script.utf8).write(to: URL(fileURLWithPath: "\(folder)/tmux"))
+    chmod("\(folder)/tmux", 0o755)
+    try withReadyService(host: ["tmux": .string("\(folder)/tmux")]) { _, service, facts in
+      service.queue.sync { service.entries["s1"] = Service.Entry(session: remoteSession("s1", cwd: facts.home)) }
+      try body(service, folder)
+    }
+  }
+
+  private func close(_ service: Service) throws {
+    try service.queue.sync { try service.closePane("s1", .claude, at: try service.site(of: "s1")) }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aPaneThatTmuxClosedOrNeverHadIsClosed() throws {
+    try withKillTmux { service, folder in
+      try close(service)
+      try Data("gone".utf8).write(to: URL(fileURLWithPath: "\(folder)/kill"))
+      try close(service)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCloseThatGotNoAnswerThrows() throws {
+    try withKillTmux { service, folder in
+      try Data("ended".utf8).write(to: URL(fileURLWithPath: "\(folder)/kill"))
+
+      #expect(throws: (any Error).self) { try close(service) }
+    }
+  }
+}
+
+/// A remote session that `rm` stopped and has not forgotten yet. sbd launches nothing for it, because sbd closes no
+/// pane on a host after it forgets the session.
+@Suite struct RemoteRemovingTests {
+  private func addSession(_ service: Service, _ facts: BoxFacts, queuedSince: Int64? = nil) throws {
+    let cwd = "\(facts.home)/work"
+    try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+    var entry = Service.Entry(session: remoteSession("s1", cwd: cwd))
+    entry.queuedSince = queuedSince
+    hold(entry, in: service, facts)
+  }
+
+  private func launcher(_ facts: BoxFacts) -> String { "\(facts.folder)/sessions/s1/claude.sh" }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aMessageToASessionThatRmIsRemovingLaunchesNothingAndStoresNoMessage() throws {
+    try withReadyService { _, service, facts in
+      try addSession(service, facts)
+      service.queue.sync { _ = service.removing.insert("s1") }
+
+      #expect { try service.queue.sync { try service.send("s1", "hello") } } throws: {
+        "\($0)".contains("is being removed")
+      }
+
+      #expect(!FileManager.default.fileExists(atPath: launcher(facts)))
+      let sent = try service.queue.sync { try service.store.events(session: "s1").filter { $0.kind == "sent" } }
+      #expect(sent.isEmpty)
+      #expect(service.queue.sync { service.entries["s1"]?.pending.isEmpty } == true)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aQueuedStartOfASessionThatRmIsRemovingKeepsItsPlaceAndLaunchesNothing() throws {
+    try withReadyService { _, service, facts in
+      try addSession(service, facts, queuedSince: 1_000)
+      service.queue.sync { _ = service.removing.insert("s1") }
+
+      service.queue.sync { service.runQueuedStarts(now: nowMs()) }
+
+      #expect(!FileManager.default.fileExists(atPath: launcher(facts)))
+      #expect(service.queue.sync { service.entries["s1"]?.queuedSince } == 1_000)
+    }
+  }
+
+  /// The host gives no answer to the start's commands. It may answer later, so the start keeps its place.
+  @Test(.timeLimit(.minutes(1)))
+  func aQueuedStartThatTheHostGaveNoAnswerKeepsItsPlace() throws {
+    try withReadyService { b, service, facts in
+      try addSession(service, facts, queuedSince: 1_000)
+      try b.set("script-status", "143")
+
+      service.queue.sync { service.runQueuedStarts(now: nowMs()) }
+
+      #expect(!FileManager.default.fileExists(atPath: launcher(facts)))
+      #expect(service.queue.sync { service.entries["s1"]?.queuedSince } == 1_000)
+    }
+  }
+}
+
+/// A link at the box's folder, its `sessions`, or a launcher folder would lead the write of claude.sh into the
+/// folder that it leads to.
+@Suite struct RemoteLauncherLinkTests {
+  @Test(.timeLimit(.minutes(1)), arguments: [".sb", ".sb/sessions", ".sb/sessions/s1"])
+  func theLauncherWriteRefusesALinkAndWritesNothingWhereItLeads(linked: String) throws {
+    try withReadyService { b, service, facts in
+      let target = "\(b.home)/elsewhere"
+      try replaceWithLink("\(facts.home)/\(linked)", to: target, keeping: "\(b.home)/moved")
+      let site = try #require(service.remoteSites["mini"])
+
+      #expect(throws: (any Error).self) { try service.writeLauncher("exec claude\n", for: "s1", at: site) }
+
+      #expect(try paths(inside: target).isEmpty)
     }
   }
 }

@@ -11,6 +11,17 @@ extension Service {
     JSON.parse(reason.trimmingCharacters(in: .whitespaces))?["owner"]?.string == "supacode"
   }
 
+  /// Throws unless Supacode can delete the worktree at `path`: the site is this Mac, where Supacode runs, and
+  /// sbd can find supacode.
+  func requireSupacode(for path: String, at site: any SessionSite) throws {
+    if let host = site.hostName {
+      throw APIError(
+        "Supacode locked \(path) on \(host), and Supacode runs on this Mac, so sbd can't delete it. Unlock it with `git worktree unlock` on \(host) first."
+      )
+    }
+    _ = try supacodeExecutable()
+  }
+
   /// The supacode program, or throws when sbd can't find it.
   func supacodeExecutable() throws -> String {
     guard let path = findExecutable(config.supacode) else {
@@ -31,6 +42,7 @@ extension Service {
       _ = try gitOutput(repo, ["worktree", "remove", path], at: site)
       return
     }
+    try requireSupacode(for: entry.path, at: site)
     let kept: (name: String, tip: String, config: [(String, String)])? = try {
       guard let name = entry.branch, let tip = entry.head else { return nil }
       return (name, tip, try branchConfig(repo, name, at: site))
@@ -78,9 +90,9 @@ extension Service {
   /// It is nil, so the branch stays, unless origin/main contains the tip. A
   /// squash merge leaves the tip outside origin/main. Throws when the
   /// worktree doesn't have the session's branch checked out.
-  func supacodeBranch(_ session: Session) throws -> (name: String, tip: String)? {
-    let branch = try checkedOutBranch(session)
-    return isInMain(session.cwd, branch.tip, at: site(for: session)) ? branch : nil
+  func supacodeBranch(_ session: Session, at site: any SessionSite) throws -> (name: String, tip: String)? {
+    let branch = try checkedOutBranch(session, at: site)
+    return isInMain(session.cwd, branch.tip, at: site) ? branch : nil
   }
 
   /// Deletes the checked branch once the worktree is gone, by the rule that

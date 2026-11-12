@@ -85,9 +85,11 @@ extension Service {
   /// The one function that deletes a session record. It refuses unless
   /// `resolving` names exactly the session's open to-dos. It records each of
   /// them in `resolved_todos` in the same transaction as the delete. A
-  /// failed delete leaves them open. It runs on the state queue.
+  /// failed delete leaves them open. For a session on a host, the same
+  /// transaction records it in `removed_host_sessions`, so the spool cut may
+  /// remove its leftover lines. It runs on the state queue.
   func forgetSession(_ id: String, resolving: Set<String>) throws {
-    try store.delete(session: id, resolving: checkTodos(id, resolving: resolving))
+    try store.delete(session: id, resolving: checkTodos(id, resolving: resolving), onHost: entries[id]?.session.host)
     entries[id] = nil
     hostEvents[id] = nil
   }

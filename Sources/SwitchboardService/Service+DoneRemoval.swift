@@ -61,10 +61,8 @@ extension Service {
         return .failure(skipped)
       case .success(let t):
         do {
-          let checked = try checkRemoval(
-            t.session, pr: t.pr, sharedWith: t.sharedWith,
-            folderGone: !site(for: t.session).machine.exists(t.session.cwd), worktree: t.worktree,
-            branch: t.branch)
+          // `checkRemoval` checks nothing for a removal that keeps the worktree.
+          let checked = t.worktree ? try removalCheck(t) : (repo: nil, branch: nil, supacode: false, pr: t.pr)
           return .success(
             .init(
               id: id, name: t.session.name, pr: t.pr?.number, worktree: t.worktree ? t.session.cwd : nil,
@@ -83,6 +81,20 @@ extension Service {
       }
     }
     return plan
+  }
+
+  /// `rm`'s checks of the target's worktree, run at the session's site on one connection after sbd waited for a
+  /// host.
+  private func removalCheck(_ t: DoneTarget) throws -> (
+    repo: String?, branch: (name: String, tip: String)?, supacode: Bool, pr: PullRequest?
+  ) {
+    let site = self.site(for: t.session)
+    try awaitSite(site)
+    return try site.scoped("the removal check of \(t.session.id)") { scope in
+      try checkRemoval(
+        t.session, pr: t.pr, sharedWith: t.sharedWith, folderGone: try folderIsGone(t.session.cwd, at: scope.site),
+        worktree: t.worktree, branch: t.branch, at: scope.site)
+    }
   }
 
   private struct DoneTarget {

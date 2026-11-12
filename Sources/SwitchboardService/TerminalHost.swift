@@ -263,6 +263,17 @@ final class TerminalHost {
     _ = try? run(["kill-session", "-t", "=\(name)"])
   }
 
+  /// Closes the pane's tmux session. A session or a server that is already gone counts as closed. Any other
+  /// failure throws.
+  func close(_ name: String) throws {
+    do {
+      try run(["kill-session", "-t", "=\(name)"])
+    } catch let error
+      where TerminalHost.isNoServer(error) || "\(error)".hasPrefix("tmux kill-session: can't find session")
+    {
+    }
+  }
+
   /// Pastes `text` with bracketed paste, then `attachments` as a paste of its
   /// own, then presses Enter. Claude Code attaches the images of a paste that
   /// holds only image paths, and leaves paths inside other text as text. It

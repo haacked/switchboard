@@ -290,7 +290,8 @@ private struct Lifecycle {
     #expect(real(cwd).hasPrefix(real("\(sbd.boxHome)/trees") + "/"), "\(cwd)")
   }
 
-  /// The checks of a worktree removal read git with no proof that the host answered, so sbd refuses it.
+  /// The checks of a worktree removal run on the host. The box repo has no remote, so its commits are on no pushed
+  /// branch, and sbd refuses as it does on this Mac.
   @Test func removingTheWorktreeOfARemoteSessionIsRefusedAndRemovesNothing() throws {
     let sbd = try Instance.remote()
     try sbd.makeBoxRepo()
@@ -301,7 +302,7 @@ private struct Lifecycle {
     let r = try sbd.run("rm", id, "--worktree")
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("sbd can't remove a worktree on mini yet"), "\(r.stderr)")
+    #expect(r.stderr.contains("not on a pushed branch"), "\(r.stderr)")
     #expect(FileManager.default.fileExists(atPath: cwd))
     #expect(try sbd.git(cwd, "branch", "--show-current") == "haacked/remote")
     #expect(try sbd.client.sessions().map(\.id) == [id])

@@ -1113,3 +1113,255 @@ extension Instance {
   /// The session's events of the kind, oldest first.
   func events(_ id: String, kind: String) throws -> [Event] { try events(id).filter { $0.kind == kind } }
 }
+
+/// Removal on a host: a box repo whose pushes reach a bare repo on the box, a box git that a test can hold or end,
+/// and what a removal can change on the box, in the store, and in sbd.
+extension Instance {
+  /// The GitHub repo of the recorded PRs.
+  static let posthogURL = "https://github.com/PostHog/posthog.git"
+  /// The head branch of the recorded PR 122953 in PostHog/posthog.
+  static let mergedBranch = "haacked/cdp-dlq-breaker-counts-lookups"
+
+  /// The config.json keys that point sbd's poller at the fake. The poller runs only when a test polls.
+  static func gitHubConfig(_ github: FakeGitHub) -> [String: JSON] {
+    [
+      "github": ["gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url), "pollSeconds": 0],
+      "tickSeconds": 1,
+    ]
+  }
+
+  /// A sbd with the host `mini` whose box runs git through `installBoxGit`. The box's git must be in place before
+  /// the first session on the host, because setup finds it once per connection.
+  static func remoteForRemoval(host extra: [String: JSON] = [:], config settings: [String: JSON] = [:]) throws
+    -> Instance
+  {
+    let sbd = try remote(host: extra, config: settings, boxBin: true)
+    try sbd.installBoxGit()
+    return sbd
+  }
+
+  /// A repo under the box's home whose origin is `url`. git sends its pushes and fetches to a bare repo under the
+  /// box's home, which holds main. The poller reads `url` from the config, so it looks up GitHub's PRs for it.
+  @discardableResult
+  func makeBoxRepoWithOrigin(_ name: String = "sb-box-repo", url: String = Instance.posthogURL) throws -> (
+    repo: String, origin: String
+  ) {
+    let repo = try Repos.create("\(boxHome)/\(name)", origin: url)
+    let origin = "\(boxHome)/\(name)-origin.git"
+    try git(boxHome, "init", "-q", "--bare", origin)
+    try git(repo, "config", "url.\(origin).insteadOf", url)
+    try git(repo, "push", "-q", "origin", "main")
+    return (repo, origin)
+  }
+
+  /// A remote session in a worktree that sbd made on the box.
+  struct BoxSession {
+    var id: String
+    var claudeSessionId: String
+    var cwd: String
+    /// The claude of its first launch.
+    var pid: Int
+    /// The repo that the worktree belongs to.
+    var repo: String
+  }
+
+  /// Starts a session on mini in a new worktree of `~/<folder>` on `branch`, and waits for the first reply, which
+  /// reaches sbd through the box's hooks.
+  func startBoxWorktree(
+    _ folder: String = "sb-box-repo", branch: String = "haacked/remote", prompt: String = "hello"
+  ) throws -> BoxSession {
+    let summary = try newOnHost("~/\(folder)", "--branch", branch, "--prompt", prompt)
+    let id = try self.id(of: summary)
+    let s = try waitFor(id, "the first reply on the box", timeout: 30) {
+      $0.lastReply == "Done: \(prompt)" && $0.claudePid != nil
+    }
+    return BoxSession(
+      id: id, claudeSessionId: s.claudeSessionId, cwd: s.cwd, pid: try #require(s.claudePid),
+      repo: "\(boxHome)/\(folder)")
+  }
+
+  /// The sessions of `host` that the store lists in `removed_host_sessions`. sqlite3 reads the file without
+  /// writing to it, so the read can't contend with sbd's writes.
+  func removedHostSessions(_ host: String = "mini") throws -> [String] {
+    let r = try runCommand(
+      "/usr/bin/sqlite3",
+      ["-readonly", home.database, "SELECT id FROM removed_host_sessions WHERE host = '\(host)' ORDER BY id"])
+    guard r.status == 0 else { throw TestError(description: "sqlite3 read removed_host_sessions: \(r.stderr)") }
+    return r.stdout.split(separator: "\n").map(String.init)
+  }
+
+  /// The session's launcher folder on the box.
+  func boxSessionFolder(_ id: String) -> String { "\(boxSB)/sessions/\(id)" }
+
+  /// The calls on this Mac's machine that name the remote session, its folder, the box, or its claude's pid in a
+  /// signal or a process check.
+  func macCalls(for s: BoxSession) throws -> [MachineCall] {
+    let named = try macCalls(holding: namesOfRemoteSession(s.id, cwd: s.cwd) + [s.claudeSessionId])
+    let signalled = try machineCalls().filter {
+      ($0.has("signal") || $0.has("stopClaude") || $0.has("alive") || $0.has("folderUsers")) && $0.has(String(s.pid))
+    }
+    return named + signalled
+  }
+
+  // MARK: What a removal changes
+
+  /// What a removal of a remote session can change: sbd's sessions, the box's panes and claude, the session's
+  /// `stopped` events, the worktree's files, the repo's worktrees and branches, the origin's branches, the
+  /// session's launcher folder on the box, and the store's removed host sessions.
+  struct RemovalState: Equatable, CustomStringConvertible {
+    var sessions: [String]
+    var boxPanes: [String]
+    var claudeRuns: Bool
+    /// nil once sbd no longer holds the session.
+    var stopped: Int?
+    /// nil when the folder is gone.
+    var worktreeFiles: [String]?
+    var worktrees: String
+    var branches: String
+    var originBranches: String
+    var sessionFolder: Bool
+    var removed: [String]
+
+    var description: String {
+      """
+      sessions \(sessions), panes \(boxPanes), claude runs \(claudeRuns), stopped \(String(describing: stopped)), \
+      files \(String(describing: worktreeFiles)), worktrees \(worktrees), branches \(branches), \
+      origin \(originBranches), launcher folder \(sessionFolder), removed \(removed)
+      """
+    }
+
+    /// The same state without what stopping claude changes, for a refusal that comes after the stop.
+    var withoutClaude: RemovalState {
+      var s = self
+      s.claudeRuns = false
+      s.stopped = nil
+      s.boxPanes = s.boxPanes.filter { !$0.hasSuffix("-claude") && !$0.hasSuffix("-shell") }
+      return s
+    }
+  }
+
+  func removalState(_ s: BoxSession, origin: String? = nil) throws -> RemovalState {
+    let git = { (dir: String, args: [String]) -> String in
+      (try? runCommand("/usr/bin/git", ["-C", dir] + args).stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        ?? "?"
+    }
+    return RemovalState(
+      sessions: try client.sessions().map(\.id).sorted(), boxPanes: try boxTmuxSessions(), claudeRuns: runs(s.pid),
+      stopped: (try? events(s.id, kind: "stopped"))?.count,
+      worktreeFiles: (try? FileManager.default.contentsOfDirectory(atPath: s.cwd))?.sorted(),
+      worktrees: git(s.repo, ["worktree", "list", "--porcelain"]), branches: git(s.repo, ["branch", "--list", "-v"]),
+      originBranches: origin.map { git($0, ["branch", "--list", "-v"]) } ?? "",
+      sessionFolder: FileManager.default.fileExists(atPath: boxSessionFolder(s.id)), removed: try removedHostSessions())
+  }
+
+  // MARK: The box's git
+
+  private func boxGitFile(_ gate: String, _ suffix: String) -> String { "\(home.path)/box-git-\(gate).\(suffix)" }
+
+  /// Writes a `git` into `boxBin` that runs `/usr/bin/git` unless a test holds or ends it.
+  ///
+  /// While `holdBoxGit` is on, a run whose arguments hold its text passes the first `skipping` such runs. Each run
+  /// after them marks that it waits and waits until `releaseBoxGit`. While `endBoxGit` is on, a run whose arguments
+  /// hold its text prints nothing and exits 143, as a command that its timeout ended does. With `whenMissing`, it
+  /// does that only when git would answer that the ref does not exist. After a `worktree remove` that succeeds, it
+  /// runs the snippet of `afterBoxWorktreeRemoval`.
+  func installBoxGit() throws {
+    try FileManager.default.createDirectory(atPath: boxBin, withIntermediateDirectories: true)
+    let hold = { (suffix: String) in shellQuote(self.boxGitFile("hold", suffix)) }
+    let end = { (suffix: String) in shellQuote(self.boxGitFile("end", suffix)) }
+    let script = """
+      #!/bin/sh
+      args=" $* "
+      if [ -e \(hold("on")) ]; then
+        word=$(/bin/cat \(hold("word")))
+        case $args in
+        *"$word"*)
+          n=$(/bin/cat \(hold("count")) 2>/dev/null || echo 0)
+          n=$((n + 1))
+          echo "$n" >\(hold("count"))
+          skip=$(/bin/cat \(hold("skip")) 2>/dev/null || echo 0)
+          if [ "$n" -gt "$skip" ]; then
+            : >\(hold("waiting"))
+            while [ -e \(hold("on")) ]; do /bin/sleep 0.05; done
+          fi
+          ;;
+        esac
+      fi
+      if [ -e \(end("on")) ]; then
+        word=$(/bin/cat \(end("word")))
+        case $args in
+        *"$word"*)
+          if [ -e \(end("missing")) ] && /usr/bin/git "$@" >/dev/null 2>&1; then exec /usr/bin/git "$@"; fi
+          : >\(end("ended"))
+          exit 143
+          ;;
+        esac
+      fi
+      after=\(shellQuote(boxGitFile("after-remove", "sh")))
+      case $args in
+      *" worktree remove "*)
+        if [ -f "$after" ]; then
+          /usr/bin/git "$@" || exit $?
+          /bin/sh "$after"
+          exit 0
+        fi
+        ;;
+      esac
+      exec /usr/bin/git "$@"
+
+      """
+    try script.write(toFile: "\(boxBin)/git", atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/git")
+  }
+
+  /// Holds each run of the box's git whose arguments hold `word`, after the first `skipping` of them.
+  func holdBoxGit(_ word: String, skipping: Int = 0) throws {
+    for suffix in ["count", "waiting"] { try? FileManager.default.removeItem(atPath: boxGitFile("hold", suffix)) }
+    try word.write(toFile: boxGitFile("hold", "word"), atomically: true, encoding: .utf8)
+    try String(skipping).write(toFile: boxGitFile("hold", "skip"), atomically: true, encoding: .utf8)
+    FileManager.default.createFile(atPath: boxGitFile("hold", "on"), contents: nil)
+  }
+
+  /// Whether a run of the box's git waits at the hold, or waited there since `holdBoxGit`.
+  var boxGitHeld: Bool { FileManager.default.fileExists(atPath: boxGitFile("hold", "waiting")) }
+
+  func releaseBoxGit() throws { try FileManager.default.removeItem(atPath: boxGitFile("hold", "on")) }
+
+  /// Ends each run of the box's git whose arguments hold `word` with status 143 and no output.
+  func endBoxGit(_ word: String, whenMissing: Bool = false) throws {
+    try? FileManager.default.removeItem(atPath: boxGitFile("end", "ended"))
+    try word.write(toFile: boxGitFile("end", "word"), atomically: true, encoding: .utf8)
+    if whenMissing { FileManager.default.createFile(atPath: boxGitFile("end", "missing"), contents: nil) }
+    FileManager.default.createFile(atPath: boxGitFile("end", "on"), contents: nil)
+  }
+
+  /// Whether the box's git ended a run since `endBoxGit`.
+  var boxGitEnded: Bool { FileManager.default.fileExists(atPath: boxGitFile("end", "ended")) }
+
+  func stopEndingBoxGit() throws {
+    try? FileManager.default.removeItem(atPath: boxGitFile("end", "missing"))
+    try FileManager.default.removeItem(atPath: boxGitFile("end", "on"))
+  }
+
+  /// Runs the shell snippet on the box after each `git worktree remove` that succeeds, as a commit or a checkout
+  /// that lands right after the removal does.
+  func afterBoxWorktreeRemoval(_ snippet: String) throws {
+    try snippet.write(toFile: boxGitFile("after-remove", "sh"), atomically: true, encoding: .utf8)
+  }
+
+  // MARK: Processes on the box
+
+  /// Starts `sleep` with its working folder in `folder`, as a program that the user left running on the box does.
+  /// The box is this Mac, so it is a process here.
+  func startProcess(in folder: String, seconds: Int = 60) throws -> Process {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    p.arguments = [String(seconds)]
+    p.currentDirectoryURL = URL(fileURLWithPath: folder)
+    p.standardInput = FileHandle.nullDevice
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try p.run()
+    return p
+  }
+}

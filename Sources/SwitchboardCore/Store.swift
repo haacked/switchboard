@@ -39,25 +39,28 @@ public final class Store {
 
   /// Deletes the session's record, events, and snapshot, and records the
   /// resolved to-dos, in one transaction. A failure leaves all of it as it was.
-  public func delete(session id: String, resolving todos: [ResolvedTodo] = []) throws {
-    try transaction { try deleteRows(session: id, resolving: todos) }
+  /// For a session on `host`, the same transaction records it in
+  /// `removed_host_sessions`.
+  public func delete(session id: String, resolving todos: [ResolvedTodo] = [], onHost host: String? = nil) throws {
+    try transaction { try deleteRows(session: id, resolving: todos, onHost: host) }
   }
 
-  /// Throws when `delete(session:resolving:)` hits an abort or a constraint, a
+  /// Throws when `delete(session:resolving:onHost:)` hits an abort or a constraint, a
   /// read-only connection, or a write lock held past the busy timeout. It runs
   /// the same statements in a transaction that it rolls back. It does not see
   /// a failure that only the commit causes.
-  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo]) throws {
+  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo], onHost host: String? = nil) throws {
     try exec("BEGIN IMMEDIATE")
     defer { try? exec("ROLLBACK") }
-    try deleteRows(session: id, resolving: todos)
+    try deleteRows(session: id, resolving: todos, onHost: host)
   }
 
-  private func deleteRows(session id: String, resolving todos: [ResolvedTodo]) throws {
+  private func deleteRows(session id: String, resolving todos: [ResolvedTodo], onHost host: String?) throws {
     for todo in todos { try insert(todo) }
     try run("DELETE FROM sessions WHERE id = ?", [id])
     try run("DELETE FROM events WHERE session = ?", [id])
     try run("DELETE FROM snapshots WHERE session = ?", [id])
+    if let host { try recordRemovedHostSession(id, host: host) }
   }
 
   /// Saves the session and records the resolved to-do, in one transaction.

@@ -58,7 +58,7 @@ struct BoxFacts: Equatable {
 
 /// Gives a timeout to each `run` that names none, so no command reaches a host without one.
 struct TimedMachine: Machine {
-  /// `git worktree add` checks out a whole repo.
+  /// `git worktree add` checks out a whole repo, and `git worktree remove` deletes one.
   static let worktreeAddSeconds = 600.0
 
   private let base: any Machine
@@ -72,10 +72,10 @@ struct TimedMachine: Machine {
   func run(
     _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
   ) throws -> CommandResult {
-    let addsWorktree = zip(args, args.dropFirst()).contains { $0 == "worktree" && $1 == "add" }
+    let changesWorktree = zip(args, args.dropFirst()).contains { $0 == "worktree" && ($1 == "add" || $1 == "remove") }
     return try base.run(
       executable, args, env: env, input: input,
-      timeout: timeout ?? (addsWorktree ? Self.worktreeAddSeconds : fallback))
+      timeout: timeout ?? (changesWorktree ? Self.worktreeAddSeconds : fallback))
   }
 
   func read(_ path: String, from offset: UInt64, count: Int?) -> Data? { base.read(path, from: offset, count: count) }
@@ -86,6 +86,36 @@ struct TimedMachine: Machine {
   func list(_ folder: String) -> [String] { base.list(folder) }
   func createFolder(_ path: String) throws { try base.createFolder(path) }
   func signal(_ pid: Int, _ signal: Int32) { base.signal(pid, signal) }
+}
+
+/// A machine of one `scoped` call. Each member first runs the scope's `require`. A `run` throws its error, and
+/// every other member sends nothing and returns what a host that gave no answer returns.
+private struct ScopedMachine: Machine {
+  let base: any Machine
+  let require: @Sendable () throws -> Void
+
+  private var allowed: Bool { (try? require()) != nil }
+
+  func run(
+    _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
+  ) throws -> CommandResult {
+    try require()
+    return try base.run(executable, args, env: env, input: input, timeout: timeout)
+  }
+
+  func read(_ path: String, from offset: UInt64, count: Int?) -> Data? {
+    allowed ? base.read(path, from: offset, count: count) : nil
+  }
+  func size(_ path: String) -> UInt64? { allowed ? base.size(path) : nil }
+  func exists(_ path: String) -> Bool { allowed && base.exists(path) }
+  func isFolder(_ path: String) -> Bool { allowed && base.isFolder(path) }
+  func modified(_ path: String) -> Date? { allowed ? base.modified(path) : nil }
+  func list(_ folder: String) -> [String] { allowed ? base.list(folder) : [] }
+  func createFolder(_ path: String) throws {
+    try require()
+    try base.createFolder(path)
+  }
+  func signal(_ pid: Int, _ signal: Int32) { if allowed { base.signal(pid, signal) } }
 }
 
 /// Holds the first error of the commands of one `confirmed` call that got no answer.
@@ -259,7 +289,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
 
   /// Prints the facts, then creates the box's folders, writes tmux.conf, and points agent.sock at the
   /// connection's agent. `$1` is the host's `tmux` key or empty, and `$2` is the text of tmux.conf. It creates
-  /// nothing under a home that `BoxFacts.parse` refuses.
+  /// nothing under a home that `BoxFacts.parse` refuses. It exits 1, and changes nothing, when `.sb`, `.sb/bin`,
+  /// or `.sb/sessions` is a link.
   private static let setupScript = #"""
     set -f
     find_tool() {
@@ -289,9 +320,15 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     case $HOME in *'
     '*) exit 0 ;; esac
     sb=$HOME/.sb
+    for d in "$sb" "$sb/bin" "$sb/sessions"; do
+      if [ -L "$d" ]; then
+        printf '%s is a link. Switchboard keeps its files on the host in a folder that is not a link\n' "$d" >&2
+        exit 1
+      fi
+    done
     umask 077
     mkdir -p "$sb/bin" "$sb/sessions" && chmod 700 "$sb" "$sb/bin" "$sb/sessions" || exit 1
-    printf %s "$2" >"$sb/tmux.conf.new" && mv "$sb/tmux.conf.new" "$sb/tmux.conf" || exit 1
+    rm -f "$sb/tmux.conf.new" && printf %s "$2" >"$sb/tmux.conf.new" && mv "$sb/tmux.conf.new" "$sb/tmux.conf" || exit 1
     if [ -n "$SSH_AUTH_SOCK" ]; then
       ln -sfn "$SSH_AUTH_SOCK" "$sb/agent.sock" || exit 1
     elif [ -L "$sb/agent.sock" ]; then
@@ -301,8 +338,15 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
 
   /// Writes the shim and the hook settings when their text differs, then removes a socket file that an
   /// earlier forward left at `sbd.sock`. `$1` is the box's folder, `$2` the shim, and `$3` the settings. It
-  /// exits 4, and removes nothing, when `sbd.sock` exists and is not a socket.
-  private static let hookScript = #"""
+  /// exits 1, and writes nothing, when the box's folder or its `bin` is a link or not a folder. It exits 4, and
+  /// removes nothing, when `sbd.sock` exists and is not a socket.
+  static let hookScript = #"""
+    for d in "$1" "$1/bin"; do
+      if [ -L "$d" ] || [ ! -d "$d" ]; then
+        printf '%s is a link or not a folder, so Switchboard wrote nothing there\n' "$d" >&2
+        exit 1
+      fi
+    done
     umask 077
     put() {
       if [ -f "$1" ] && [ ! -L "$1" ] && [ "$(cat "$1"; printf x)" = "${2}x" ]; then return 0; fi
@@ -409,12 +453,28 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     let epoch = try current().facts.epoch
     let check = AnswerCheck()
     let result = Result { try body(RemoteSite.timed(link, check: check, tap: tap)) }
+    try requireAnswered(what, check: check, epoch: epoch)
+    return try result.get()
+  }
+
+  func scoped<T>(_ what: String, _ body: (SiteScope) throws -> T) throws -> T {
+    let epoch = try current().facts.epoch
+    let check = AnswerCheck()
+    let require: @Sendable () throws -> Void = { [self] in try requireAnswered(what, check: check, epoch: epoch) }
+    let machine = ScopedMachine(base: RemoteSite.timed(link, check: check, tap: tap), require: require)
+    let result = Result { try body(SiteScope(site: CheckedSite(self, machine: machine), require: require)) }
+    try require()
+    return try result.get()
+  }
+
+  /// Throws `HostUnread` when a command got no answer or the link left the connection `epoch`. The link's
+  /// counter only grows, so a link that is on `epoch` now was on it since `epoch` began.
+  private func requireAnswered(_ what: String, check: AnswerCheck, epoch: Int) throws {
     if let failure = check.failure { throw unread("\(what) got no answer (\(failure))") }
     let status = link.status
     guard status.state == .connected, status.connection == epoch else {
       throw unread(status.error ?? "the link dropped during \(what)")
     }
-    return try result.get()
   }
 
   /// The fields of an answer that prints a NUL after each field. It throws for an answer that does not end
@@ -507,14 +567,43 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     }
   }
 
+  /// Lists every pid on the host, then a line `done`. `ps` lists another user's process, which `kill -0` can't
+  /// tell from one that exited.
+  private static let aliveScript = "ps -A -o pid= && echo done"
+
+  /// The pids that still run on the host, from one list of its processes. It throws unless the list ends as
+  /// `aliveScript` ends it, so a list that its timeout cut never reads as an exit.
   func alive(_ pids: Set<Int>) throws -> Set<Int> {
-    _ = try current()
-    throw APIError("a check of the processes on \(name) is not available until stage 5")
+    try confirmed("the check of the processes") { machine in
+      let r = try machine.run(
+        "/bin/sh", ["-c", Self.aliveScript], env: nil, input: nil, timeout: Self.commandSeconds)
+      let lines = r.stdout.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+      guard r.status == 0, lines.last == "done" else {
+        throw APIError("the check of the processes on \(name) failed: \(Self.problem(r))")
+      }
+      return pids.intersection(lines.dropLast().compactMap { Int($0) })
+    }
   }
 
+  /// The status with which `folderUsersScript` says that it can't check, such as on a host with neither /proc
+  /// nor lsof.
+  static let cantCheckStatus: Int32 = 97
+
+  /// The processes on the host that use the folder, as `Processes.using` defines a use. It throws when the
+  /// host can't check, so a missing answer never reads as no users.
   func folderUsers(_ folder: String) throws -> [FolderUser] {
-    _ = try current()
-    throw APIError("a check of the processes that use a folder on \(name) is not available until stage 5")
+    try confirmed("the check of the processes that use \(folder)") { machine in
+      let r = try machine.run(
+        "/bin/sh", ["-c", Self.folderUsersScript, "sb", folder, "/proc"], env: nil, input: nil,
+        timeout: Self.fallbackSeconds)
+      if r.status == Self.cantCheckStatus {
+        throw APIError("can't check which processes use \(folder) on \(name): \(Self.problem(r))")
+      }
+      guard r.status == 0 else {
+        throw APIError("the check of the processes that use \(folder) on \(name) failed: \(Self.problem(r))")
+      }
+      return try Self.parseFolderUsers(Data(r.stdout.utf8))
+    }
   }
 
   // MARK: Paths
