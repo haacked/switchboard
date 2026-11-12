@@ -17,7 +17,7 @@ import Testing
 
   deinit { try? FileManager.default.removeItem(atPath: folder) }
 
-  /// Writes the data to a file in the test's folder and returns its path.
+  /// Writes the data, or a 1×1 PNG when there is none, to a file in the test's folder and returns its path.
   func file(_ name: String, _ data: Data? = nil) throws -> String {
     let path = "\(folder)/\(name)"
     try (data ?? Self.png).write(to: URL(fileURLWithPath: path))

@@ -584,6 +584,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(listed.count == 3 && listed.allSatisfy { !$0.running && $0.status == nil })
     let result = try sbd.client.importSessions(pids.map { "p\($0)" }, stop: pids.map { "p\($0)" })
     #expect(result.refused.isEmpty && result.imported.count == 3)
+    #expect(Processes.exists(sbd.sbdPid))
     _ = try sbd.client.call("ping")
   }
 
