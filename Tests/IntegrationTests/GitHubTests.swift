@@ -657,27 +657,13 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
-  /// A session on a branch without a PR keeps the PR that its conversation
-  /// linked in a repo that no remote names, also after `/clear` and a restart
-  /// of sbd.
-  @Test func keepsALinkedPRFromARepoThatNoRemoteNamesAfterClearAndARestart() throws {
-    let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
-    let s = try sbd.sessionWithAForeignPRLink()
-    #expect(github.lookedUp.contains("PostHog/posthog:haacked/no-pr-yet"))
-    try sbd.clear(s)
-    sbd.stopSbd()
-    try sbd.startSbd()
-    try sbd.poll(all: true)
-    #expect(try sbd.get(s.id).pr?.number == 189)
-  }
-
   /// A session can open its PR from another repo's checkout, so its own
   /// folder's branch has no PR. The linked PR's merge moves it to Done.
   @Test func aMergedPRLinkedFromAnotherReposCheckoutMovesTheSessionToDone() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.sessionWithAForeignPRLink()
+    #expect(github.lookedUp.contains("PostHog/posthog:haacked/no-pr-yet"))
     #expect(try sbd.get(s.id).state != .done)
 
     github.change(189) { $0["state"] = "MERGED" }
@@ -693,7 +679,7 @@ extension FakeGitHub {
   }
 
   @Test(arguments: [false, true])
-  func keepsAForeignPRWhileHEADIsDetached(restart: Bool) throws {
+  func keepsALinkedPRWhileHEADIsDetached(restart: Bool) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.sessionWithAForeignPRLink()

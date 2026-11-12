@@ -589,6 +589,13 @@ public enum GitHub {
     return values
   }
 
+  /// The name that `branch`'s `merge` config gives its upstream branch,
+  /// without `refs/heads/`, or nil when the config names none.
+  public static func upstreamName(of branch: String, config: [String: String]) -> String? {
+    let heads = "refs/heads/"
+    return config["branch.\(branch).merge"].map { String($0.dropFirst($0.hasPrefix(heads) ? heads.count : 0)) }
+  }
+
   /// The key of the branch's PR, as `git pr` finds it: the PR from the
   /// branch's upstream name in gh's base repo, whose head repository belongs
   /// to the owner of the branch's push remote. `config` holds the git config
@@ -598,8 +605,7 @@ public enum GitHub {
   public static func branchKey(branch: String, config: [String: String], remoteHead: (String) -> String?) -> PRKey? {
     let b = "branch.\(branch)"
     var push = config["\(b).pushremote"] ?? config["remote.pushdefault"] ?? config["\(b).remote"] ?? "origin"
-    let heads = "refs/heads/"
-    var upstream = config["\(b).merge"].map { String($0.dropFirst($0.hasPrefix(heads) ? heads.count : 0)) } ?? branch
+    var upstream = upstreamName(of: branch, config: config) ?? branch
     // "." means that the branch tracks a local branch.
     if push == "." {
       push = "origin"

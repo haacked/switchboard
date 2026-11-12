@@ -96,8 +96,9 @@ final class GitHubPoller {
     var lookedUp: Int64?
     /// The branches that HEAD's reflog shows the folder had checked out, each
     /// by its local name and by the upstream name that its `merge` config
-    /// gives, read again when HEAD changes. It is empty when the reflog can't
-    /// be read.
+    /// gives. The poller reads it again when HEAD moves to a branch. It keeps
+    /// the last value while HEAD is detached. It is empty when the reflog
+    /// can't be read.
     var checkedOut: Set<String> = []
   }
 
@@ -299,25 +300,22 @@ final class GitHubPoller {
     if let branch { b.name = branch }
     if let branch, let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
-      // git exits 1 when no key matches.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
-        let r = try? machine.run(service.git, ["-C", cwd, "config", "--get-regexp", pattern])
-        if let r, r.status <= 1 {
+        if let r = try? machine.run(service.git, ["-C", cwd, "config", "--get-regexp", pattern]) {
           configs[common] = GitHub.gitConfig(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
         }
       }
-      key = GitHub.branchKey(branch: branch, config: configs[common] ?? [:]) { remote in
+      let config = configs[common] ?? [:]
+      key = GitHub.branchKey(branch: branch, config: config) { remote in
         // A remote's HEAD is a symbolic ref, which git never packs.
         read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
           GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
         }
       }
+      let local = b.gitDir.flatMap { read("\($0)/logs/HEAD") }.map(GitHub.checkedOutBranches) ?? []
+      b.checkedOut = local.union(local.compactMap { GitHub.upstreamName(of: $0, config: config) })
     }
-    let config = b.commonDir.flatMap { configs[$0] } ?? [:]
-    let local = b.gitDir.flatMap { read("\($0)/logs/HEAD") }.map(GitHub.checkedOutBranches) ?? []
-    b.checkedOut = local.union(
-      local.compactMap { config["branch.\($0).merge"].flatMap { GitHub.branch(head: "ref: \($0)") } })
     if key != b.key {
       b.key = key
       b.prId = nil
@@ -595,7 +593,7 @@ final class GitHubPoller {
       // the folder unread, which stays unsafe.
       var info = stat()
       let gone = dirty == nil && stat(s.cwd, &info) != 0 && errno == ENOENT
-      // The checks run 8 git commands. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
+      // The checks run 8 git commands, or 9 in a worktree that Supacode locked. `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
       let checked: CleanupStatus? =
         dirty != 0 || pr.state != .merged
         ? nil

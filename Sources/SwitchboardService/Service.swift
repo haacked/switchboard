@@ -1275,7 +1275,11 @@ public final class Service {
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false)
     guard branch else { return (repo, nil, supacode) }
-    return (repo, supacode ? try supacodeBranch(session) : try checkBranchIsMerged(session, pr: pr), supacode)
+    return (
+      repo,
+      supacode ? try supacodeBranch(session, try checkedOutBranch(session)) : try checkBranchIsMerged(session, pr: pr),
+      supacode
+    )
   }
 
   /// The session's repo, or throws when sbd made no worktree for the session. When the repo folder is
@@ -1424,9 +1428,7 @@ public final class Service {
     _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil,
     on machine: any Machine
   ) throws {
-    guard let pr = mergedPR(pr, of: branch) else {
-      throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
-    }
+    let pr = try requireMergedPR(pr, of: branch)
     guard branchExists(repo, branch, on: machine) else { throw APIError("\(branch) no longer exists.") }
     try requireTip(
       try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"], on: machine), of: branch, inMerged: pr)

@@ -104,8 +104,9 @@ extension Service {
     guard supacode else { return (repo, try checkBranchIsMerged(session, pr: pr), false) }
     // A PR that the transcript linked from another checkout can be merged
     // while the session's own branch has none.
-    _ = try requireMergedPR(pr, of: try checkedOutBranch(session).name)
-    return (repo, try supacodeBranch(session), true)
+    let branch = try checkedOutBranch(session)
+    _ = try requireMergedPR(pr, of: branch.name)
+    return (repo, supacodeBranch(session, branch), true)
   }
 
   /// Throws for a follow-up that hasn't started, and for a session whose
