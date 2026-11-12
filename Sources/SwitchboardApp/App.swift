@@ -31,36 +31,36 @@ struct SwitchboardApp: App {
       CommandGroup(after: .newItem) {
         // A sheet blocks the window's buttons but not the menu bar. Without
         // the check, a menu command opens a second sheet over the first.
-        Button("New Session…") { model.showingNew = true }
+        Button("New Session…") { model.track(.newSession) { model.showingNew = true } }
           .keyboardShortcut("n")
           .disabled(model.presentingSheet)
-        Button("Import Sessions…") { model.showingImport = true }
+        Button("Import Sessions…") { model.track(.importSessions) { model.showingImport = true } }
           .keyboardShortcut("i", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
-        Button("New Group") { model.startNewGroup() }
+        Button("New Group") { model.track(.newGroup) { model.startNewGroup() } }
           .keyboardShortcut("g", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
       }
       CommandMenu("Session") {
         let acknowledgeTarget = model.acknowledgeTarget
-        Button("Next Needing You") { model.selectNextNeedingYou() }
+        Button("Next Needing You") { model.track(.nextNeedingYou) { model.selectNextNeedingYou() } }
           .keyboardShortcut("j")
-        Button("Open Manager") { model.openManager() }
+        Button("Open Manager") { model.track(.openManager) { model.openManager() } }
           .keyboardShortcut("m", modifiers: [.command, .shift])
-        Button("Show Inbox") { model.show(.inbox) }
+        Button("Show Inbox") { model.track(.showInbox) { model.show(.inbox) } }
           .keyboardShortcut("1")
-        Button("Show Board") { model.show(.board) }
+        Button("Show Board") { model.track(.showBoard) { model.show(.board) } }
           .keyboardShortcut("2")
-        Button("Filter by Org…") { model.showingOrgFilter.toggle() }
+        Button("Filter by Org…") { model.track(.filterByOrg) { model.showingOrgFilter.toggle() } }
           .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
         Divider()
         Group {
-          Button("Search Sessions…") { model.showingSearch = true }
+          Button("Search Sessions…") { model.track(.searchSessions) { model.showingSearch = true } }
             .keyboardShortcut(NavShortcuts.searchSessions)
-          Button("Next Session") { model.selectAdjacentSession(by: 1) }
+          Button("Next Session") { model.track(.nextSession) { model.selectAdjacentSession(by: 1) } }
             .keyboardShortcut(NavShortcuts.nextSession)
-          Button("Previous Session") { model.selectAdjacentSession(by: -1) }
+          Button("Previous Session") { model.track(.previousSession) { model.selectAdjacentSession(by: -1) } }
             .keyboardShortcut(NavShortcuts.previousSession)
           Button("Back") { model.goBack() }
             .keyboardShortcut(NavShortcuts.back)
@@ -68,34 +68,36 @@ struct SwitchboardApp: App {
           Button("Forward") { model.goForward() }
             .keyboardShortcut(NavShortcuts.forward)
             .disabled(!model.canGoForward)
-          Button("Show Recent Places") { model.showingRecentPlaces.toggle() }
+          Button("Show Recent Places") { model.track(.recentPlaces) { model.showingRecentPlaces.toggle() } }
             .keyboardShortcut(NavShortcuts.showRecentPlaces)
             .disabled(!model.hasRecentPlaces)
-          Button("Move Focus to List") { model.requestListFocus() }
+          Button("Move Focus to List") { model.track(.focusList) { model.requestListFocus() } }
             .keyboardShortcut(NavShortcuts.focusList)
-          Button("Move Focus to Terminal") { model.focusTerminal() }
+          Button("Move Focus to Terminal") { model.track(.focusTerminal) { model.focusTerminal() } }
             .keyboardShortcut(NavShortcuts.focusTerminal)
             .disabled(!model.canFocusTerminal)
         }
         .disabled(model.presentingSheet)
         Divider()
-        Button("Stop Claude") { model.selection.map(model.stop) }
+        Button("Stop Claude") { model.track(.stop) { _ = model.selection.map(model.stop) } }
           .keyboardShortcut(".", modifiers: [.command])
           .disabled(model.selected?.live != true)
-        Button("Resume Claude") { model.selection.map(model.resume) }
+        Button("Resume Claude") { model.track(.resume) { _ = model.selection.map(model.resume) } }
           .keyboardShortcut("r", modifiers: [.command, .shift])
           .disabled(model.selected == nil || model.selected?.live == true || model.selected?.runsClaude == false)
         Button(model.selected?.shellClosed == true ? "Open Shell" : "Close Shell") {
-          if let s = model.selected { model.setShellOpen(s.id, s.shellClosed == true) }
+          model.track(.toggleShell) { if let s = model.selected { model.setShellOpen(s.id, s.shellClosed == true) } }
         }
         .disabled(model.selected?.hasTerminals != true)
         Button(model.selected?.markedDone == true ? "Mark Not Done" : "Mark Done") {
-          if let s = model.selected { model.setDone(s.id, !s.markedDone) }
+          model.track(.toggleDone) { if let s = model.selected { model.setDone(s.id, !s.markedDone) } }
         }
         .keyboardShortcut("d", modifiers: [.command, .shift])
         .disabled(model.selected == nil)
         Button(acknowledgeTarget?.acknowledgeTitle ?? "Acknowledge") {
-          if let s = model.acknowledgeTarget { model.acknowledge(s.id, undo: s.acknowledged == true) }
+          model.track(.acknowledge) {
+            if let s = model.acknowledgeTarget { model.acknowledge(s.id, undo: s.acknowledged == true) }
+          }
         }
         .keyboardShortcut("a", modifiers: [.command, .shift])
         .disabled(acknowledgeTarget?.canAcknowledge != true)

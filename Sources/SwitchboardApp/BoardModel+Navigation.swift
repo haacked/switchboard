@@ -26,7 +26,7 @@ extension BoardModel {
     showingSearch = false
     guard let session = board.first(where: { $0.id == id }) else { return }
     if session.kind == .work { collapsed.remove(session.state) }
-    selection = id
+    withNavVia("search") { selection = id }
     requestListFocus()
   }
 

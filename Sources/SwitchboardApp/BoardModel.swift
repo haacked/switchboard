@@ -85,6 +85,7 @@ final class BoardModel: ObservableObject {
   @Published var history = NavHistory(start: NavLocation(place: .inbox(nil), terminal: false))
   @Published var showingRecentPlaces = false
   var navigating = false
+  var activity = ActivityState()
   /// The last reply of the sessions the Inbox showed, read from their
   /// transcripts, by session id.
   @Published var replies: [String: String] = [:]
@@ -342,6 +343,7 @@ final class BoardModel: ObservableObject {
     if Bundle.main.bundleIdentifier != nil {
       UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
+    observeActivity()
     refresh()
     timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refresh() }
@@ -363,7 +365,10 @@ final class BoardModel: ObservableObject {
       let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
       let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
       let usage = readUsage ? try? client.usage() : nil
+      let activity = readFollowups ? try? client.call("activity", ["counts": false], as: ActivityStatus.self) : nil
       Task { @MainActor in
+        if let activity { self.activityEnabled(activity.enabled) }
+        self.flushActivity()
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
@@ -464,6 +469,7 @@ final class BoardModel: ObservableObject {
           if failed == nil { self.actionError = nil }
           then?(value)
         case .failure(let error):
+          self.recordError(op, error)
           if let failed { failed(error) } else { self.actionError = "\(op): \(error)" }
         }
         finally?()
@@ -549,8 +555,9 @@ final class BoardModel: ObservableObject {
   /// Opens the most recent Manager conversation, or starts the first one, and
   /// selects it. With `new`, it starts a conversation, which its first prompt names.
   func openManager(new: Bool = false) {
+    let via = activity.navVia
     perform("manager", new ? ["new": true] : [:]) { value in
-      if let id = value["id"]?.string { self.selectUnlisted(id) }
+      if let id = value["id"]?.string { self.withNavVia(via) { self.selectUnlisted(id) } }
     }
   }
 
@@ -574,7 +581,10 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  func open(_ id: String) { perform("open", ["session": .string(id)]) }
+  func open(_ id: String) {
+    beginTerminalWait(id)
+    perform("open", ["session": .string(id)])
+  }
   /// Starts the session's shell pane, or ends it. sbd keeps a closed shell closed until this opens it.
   func setShellOpen(_ id: String, _ open: Bool) {
     perform("shell", ["session": .string(id), "open": .bool(open)])
@@ -712,7 +722,7 @@ final class BoardModel: ObservableObject {
   /// file name and the image's bytes.
   func send(_ id: String, _ text: String, images: [(name: String, data: Data)] = [], sent: (() -> Void)? = nil) {
     guard sending.insert(id).inserted else { return }
-    var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    var args: [String: JSON] = ["session": .string(id), "text": .string(text), "via": "field"]
     if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
     perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
@@ -722,7 +732,7 @@ final class BoardModel: ObservableObject {
 
   /// Selects the session and brings its window forward, opening the window first when it is closed.
   func reveal(_ id: String) {
-    selection = id
+    withNavVia("notification") { selection = id }
     showWindow?()
   }
 
@@ -1088,7 +1098,14 @@ final class BoardModel: ObservableObject {
   /// Asks sbd for the session's tmux targets. It blocks, so it runs off the
   /// main thread.
   nonisolated func terminals(_ id: String) -> Result<Terminals, Error> {
-    Result { try Client().terminals(id) }
+    let result = Result { try Client().terminals(id) }
+    Task { @MainActor in
+      switch result {
+      case .success: self.terminalsAttached(id)
+      case .failure(let error): self.recordError("terminals", error)
+      }
+    }
+    return result
   }
 
   /// The Claude sessions that the import sheet offers. It blocks, so it runs

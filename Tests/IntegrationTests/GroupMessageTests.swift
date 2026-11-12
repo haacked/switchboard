@@ -292,6 +292,18 @@ import Testing
     #expect(try sent(s.sbd, s.b.id) == ["Rebase on main."])
   }
 
+  /// The activity log counts only messages that the user wrote, so a message that Claude wrote stays out of it.
+  @Test func anApprovedMessageThatClaudeWroteIsNotLoggedAsTheUsers() throws {
+    let s = try setup()
+    try s.sbd.sb("activity", "on")
+    let id = try open(s)
+
+    try decide(s.sbd, .app, s.sender.id, id, allow: true)
+
+    #expect(try pending(s.sbd, id).sent)
+    #expect(try s.sbd.activityRows().filter { $0.kind == "send" }.isEmpty)
+  }
+
   @Test(arguments: Decider.allCases) func allowClosesTheCardAndTellsTheSenderNothing(_ how: Decider) throws {
     let s = try setup()
     let id = try open(s)

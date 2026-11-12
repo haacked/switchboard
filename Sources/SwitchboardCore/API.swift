@@ -23,6 +23,8 @@ public struct Response: Codable, Sendable {
 
 /// An error that sbd, sb, or the store reports with its message.
 public struct APIError: Error, CustomStringConvertible {
+  /// The message of the error that a call throws when sbd closes the socket before it answers.
+  public static let closed = "sbd closed the connection"
   public let description: String
   public init(_ description: String) { self.description = description }
 }
@@ -263,7 +265,7 @@ public final class Client: Sendable {
     let line = try JSONCoding.encode(Request(op: op, args: .object(args))) + "\n"
     try UnixSocket.write(fd, Data(line.utf8))
     var reader = UnixSocket.LineReader(fd: fd)
-    guard let reply = try reader.next() else { throw APIError("sbd closed the connection") }
+    guard let reply = try reader.next() else { throw APIError(APIError.closed) }
     let response = try JSONCoding.decoder.decode(Response.self, from: reply)
     guard response.ok else { throw APIError(response.error ?? "sbd failed") }
     return response.result ?? .null

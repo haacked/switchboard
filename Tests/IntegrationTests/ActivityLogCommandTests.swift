@@ -78,7 +78,7 @@ extension Instance {
 
     #expect(try sbd.triggers(s.id) == ["open", "send", "resume"])
     #expect([open, send, resume].allSatisfy { $0.count == 1 && $0.userCaused && $0.maxMs >= 0 })
-    #expect(try sbd.activityStatus().events == 3)
+    #expect(try sbd.activityRows().filter { $0.kind == "resume.ready" }.count == 3)
   }
 
   @Test func aStartThatQueuedBehindTheCapKeepsItsTrigger() throws {
