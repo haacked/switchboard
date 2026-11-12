@@ -21,8 +21,6 @@ extension SessionSummary {
 
   var mergeButtonLabel: String { "\(mergeVerb) \(prOfSession)" }
 
-  var nudgeButtonLabel: String { "Copy a nudge for \(prOfSession)" }
-
   func mergeBaseButtonLabel(base: String) -> String { "Merge \(base) into \(prOfSession)" }
 
   /// The Ready to merge sessions that Merge All merges or enqueues from this
