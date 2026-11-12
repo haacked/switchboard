@@ -8,14 +8,20 @@ cd "$(dirname "$0")/.."
 source bin/lib/install-guard.sh
 dest="$HOME/Applications/Switchboard.app"
 case "${1:-}" in
-  --force) ;;
-  "") require_newer_than_installed "$dest" HEAD ;;
+  --force) force=1 ;;
+  "")
+    force=0
+    require_newer_than_installed "$dest" HEAD
+    ;;
   *)
     echo "Usage: bin/install [--force]" >&2
     exit 2
     ;;
 esac
 app=$(bin/bundle | tee /dev/stderr | tail -1)
+# Another session can install a build while this one builds, so the guard runs
+# again before the replace.
+if [ "$force" = 0 ]; then require_newer_than_installed "$dest" HEAD; fi
 mkdir -p "$HOME/Applications" "$HOME/.local/bin"
 rm -rf "$dest"
 cp -R "$app" "$dest"

@@ -160,4 +160,17 @@ private final class GuardRepo {
     #expect(r.status == 2)
     #expect(r.stderr.contains("Usage: \(script) [--force]"), "\(r.stderr)")
   }
+
+  @Test func installRefusesBeforeItBuilds() throws {
+    let repo = try GuardRepo()
+    try repo.install(commit: nil, dirty: nil)
+    var env = ProcessInfo.processInfo.environment
+    env["HOME"] = repo.repos.root
+    let path = Instance.root.appendingPathComponent("bin/install").path
+
+    let r = try runCommand("/bin/bash", [path], env: env, timeout: 30)
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("records no build commit"), "\(r.stderr)")
+  }
 }
