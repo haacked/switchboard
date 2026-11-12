@@ -563,6 +563,7 @@ import Testing
     try sbd.advanceClock(1)
     try sbd.advanceClock(11_000)
     try sbd.waitFor("the 10 s fallback") { try sbd.events(c.id, after: mark).contains { $0.kind == "running" } }
+    let before = launches(sbd, c).count
 
     try sbd.sb("manager", "mcp", c.id, "add", "grafana")
     try sbd.advanceClock(1)
@@ -571,6 +572,8 @@ import Testing
     #expect(try !sbd.events(c.id, after: mark).contains { $0.kind == "stopped" })
     try FileManager.default.removeItem(atPath: hold)
     try sbd.waitFor(c.id, "the reply to next", timeout: 30) { $0.lastReply == "Done: next" }
+    _ = try launch(sbd, c, after: before)
+    #expect(serverNames(try scriptArgs(sbd, c.id)) == ["grafana", "switchboard"])
   }
 
   @Test func aSendDuringTheRelaunchLeavesALaterStopStopped() throws {

@@ -72,10 +72,11 @@ import Testing
     var job = idle("job")
     job.lastJobSeen = 1000
     let claudes = [
-      idle("card", events: [event("PermissionRequest", 1, tool("Bash", ["command": "x"]))]),
+      idle("card", events: [sendPending()]),
+      idle("deferred", events: questionTurn() + [event("deferred", 4, ["card": 3]), event("Stop", 5)]),
       idle("agent", events: [event("SubagentStart", 1, ["agent_id": "a1"])]), job, idle("free"),
     ]
-    #expect(policy.capOrder(claudes, now: 1000 + StopPolicy.capJobGraceMs - 1) == ["free"])
-    #expect(policy.capOrder(claudes, now: 1000 + StopPolicy.capJobGraceMs).sorted() == ["free", "job"])
+    #expect(policy.capOrder(claudes, now: 1000 + StopPolicy.capJobGraceMs - 1).sorted() == ["deferred", "free"])
+    #expect(policy.capOrder(claudes, now: 1000 + StopPolicy.capJobGraceMs).sorted() == ["deferred", "free", "job"])
   }
 }
