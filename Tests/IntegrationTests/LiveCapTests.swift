@@ -297,7 +297,7 @@ extension Instance {
     FileManager.default.createFile(atPath: "\(sbd.home.path)/report", contents: nil)
     try sbd.waitFor("the turn that reports the job") { try sbd.events(a.id).filter { $0.kind == "Stop" }.count == 2 }
 
-    // Service.jobReportMs is 5 s.
+    // StopPolicy.jobReportMs is 5 s.
     try sbd.advanceClock(5_000)
     #expect(try !sbd.capStops(a.id).isEmpty)
     try sbd.waitFor("b's start after a exits", timeout: 20) {
