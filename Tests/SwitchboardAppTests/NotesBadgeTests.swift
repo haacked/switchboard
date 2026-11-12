@@ -4,24 +4,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// A plain note, or a to-do when `kind` is `.todo`. A nil `kind` is a row that an older sbd stored.
-func noteFixture(_ id: String, _ text: String, kind: Note.Kind? = .note, resolved: Bool = false, t: Int64 = 0) -> Note {
-  var n = Note(id: id, text: text, by: .you, t: t, kind: kind)
-  if resolved { n.resolved = Note.Resolution(t: t + 1, by: .you, how: "resolved") }
-  return n
-}
-
-func todoFixture(_ id: String, _ text: String, resolved: Bool = false) -> Note {
-  noteFixture(id, text, kind: .todo, resolved: resolved)
-}
-
-func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "s1") -> SessionSummary {
-  SessionSummary(
-    id: id, name: "fix", cwd: "/worktrees/posthog/haacked/fix", repo: "/repos/posthog", branch: "haacked/fix",
-    claudeSessionId: "c", state: state, reason: "", since: 0, lastActivity: 0, live: false, claudePid: nil,
-    attached: false, lastReply: nil, waits: [], notes: notes)
-}
-
 @Suite struct NotesBadgeVisibility {
   @Test func hidesTheIconWhenTheSessionHasNoNotes() {
     #expect(NotesBadge(notedSession([])) == nil)

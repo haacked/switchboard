@@ -81,8 +81,8 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     self.signedOut = signedOut
   }
 
-  /// The percent of the `session` limit, or 0 when the reading has none.
-  public var sessionPercent: Double { limits.first(where: \.isSession)?.percent ?? 0 }
+  /// The percent of the `session` limit, or nil when the reading has none.
+  public var sessionPercent: Double? { limits.first(where: \.isSession)?.percent }
 
   /// The highest percent among the limits other than `session`, or 0 when there are none.
   public var weeklyPercent: Double { limits.filter { !$0.isSession }.map(\.percent).max() ?? 0 }
@@ -115,11 +115,18 @@ public enum UsageBudget: Equatable, Sendable {
 }
 
 public enum Usage {
+  /// Whether an account on `plan` has a 5-hour session limit. `plan` is the
+  /// `planDisplayName` that claude records in .claude.json. Ultra plans have
+  /// none. An unknown plan counts as having one.
+  public static func hasSessionLimit(plan: String?) -> Bool {
+    plan?.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare("Ultra") != .orderedSame
+  }
+
   /// The limits in a response from the usage endpoint. It reads `limits`, or
   /// the older `five_hour` and `seven_day` fields when `limits` is missing.
   /// An account with no open 5-hour window reports no session limit, so this
-  /// adds one at 0%.
-  public static func parse(_ data: Data) throws -> [UsageLimit] {
+  /// adds one at 0% when `plan` has a session limit.
+  public static func parse(_ data: Data, plan: String? = nil) throws -> [UsageLimit] {
     guard let root = try? JSONCoding.decoder.decode(JSON.self, from: data), root.object != nil else {
       throw APIError("the usage endpoint answered something other than a JSON object")
     }
@@ -134,7 +141,7 @@ public enum Usage {
           resetsAt: window["resets_at"]?.string.flatMap(Transcript.milliseconds))
       }
     }
-    if !limits.contains(where: \.isSession) {
+    if hasSessionLimit(plan: plan), !limits.contains(where: \.isSession) {
       limits.insert(UsageLimit(kind: "session", label: label("session", scope: nil), percent: 0), at: 0)
     }
     return limits
