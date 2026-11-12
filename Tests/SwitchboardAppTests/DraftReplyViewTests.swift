@@ -160,6 +160,37 @@ let everyDraftPost: [DraftPost] = [
     #expect(DraftReplyView.mode(for: targetedDraft(post)).showsUserText == shows)
   }
 
+  // MARK: The app's own post
+
+  /// sbd's `posting` state arrives one refresh after the press, so the app's request locks the field first.
+  @Test(arguments: [DraftPost.ready(replyTarget), .failed(replyTarget, error: "HTTP 422")])
+  func theAppsOwnPostLocksAPostableDraft(_ post: DraftPost) {
+    #expect(DraftReplyView.mode(for: targetedDraft(post), posting: true) == .posting)
+  }
+
+  /// A refresh can bring sbd's outcome before the app's request ends.
+  @Test func theAppsOwnPostLeavesAnOutcomeThatSbdRecorded() {
+    let url = "https://github.com/PostHog/charts/pull/18303#discussion_r2002"
+    let posted = targetedDraft(.posted(replyTarget, url: url, text: "Thanks."))
+    let unknown = targetedDraft(.unknown(replyTarget, error: "HTTP 502"))
+
+    #expect(DraftReplyView.mode(for: posted, posting: true) == .posted(text: "Thanks.", url: url))
+    #expect(DraftReplyView.mode(for: unknown, posting: true) == .unknown(error: "HTTP 502", thread: replyTarget.url))
+  }
+
+  @Test(arguments: ["", "\n\n", "  \r\n  ", "\r\n\r\n"])
+  func postIsOffWhileTheFieldHasOnlyBlankLines(_ text: String) {
+    #expect(!DraftReplyView.postEnabled(.editable(error: nil), text: text))
+  }
+
+  @Test func postIsOnForAPostableDraftWithText() {
+    #expect(DraftReplyView.postEnabled(.editable(error: nil), text: "a"))
+  }
+
+  @Test func postIsOffForADraftThatCantPostWhateverItsText() {
+    #expect(!DraftReplyView.postEnabled(.checking, text: "a"))
+  }
+
   // MARK: Which drafts get a Post button
 
   /// Only the session's own card names a target. A summarizer draft could carry a target copied from quoted text.
