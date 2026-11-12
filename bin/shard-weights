@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Rebuilds Tests/shard-weights, which bin/test --shards reads, from the output
+# of a test run. Each integration test prints a "slot-seconds" line with how
+# long it held its slot (Tests/IntegrationTests/Blocking.swift). The script
+# sums those lines by suite and writes one "<seconds> <suite>" line for each
+# suite, the slowest first.
+#
+#   gh run view <run-id> --log --job <job-id> | bin/shard-weights
+#   bin/shard-weights shard-0.log shard-1.log
+#
+# Take the log from a CI run of bin/test --shards. Every shard of that run
+# shares one machine and one load. The weights then compare suites fairly.
+set -euo pipefail
+out="$(dirname "$0")/../Tests/shard-weights"
+weights=$(sed -n -E 's/.*slot-seconds ([0-9.]+) ([^ /]+)\/.*/\1 \2/p' "$@" |
+  awk '{ sum[$2] += $1 } END { for (s in sum) printf "%d %s\n", sum[s] + 0.5, s }' |
+  sort -k1,1rn -k2,2)
+if [ -z "$weights" ]; then
+  echo "bin/shard-weights: the input has no slot-seconds lines" >&2
+  exit 1
+fi
+printf '%s\n' "$weights" >"$out"
+echo "bin/shard-weights: wrote $(grep -c . "$out") suites to Tests/shard-weights"
