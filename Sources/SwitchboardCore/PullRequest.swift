@@ -272,14 +272,14 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// "changes requested by X and Y", or "changes requested" when GitHub's
   /// decision requests changes that no verdict names. nil when nobody requests changes.
-  public var changesRequestedLine: String? {
+  var changesRequestedLine: String? {
     if !changesRequestedBy.isEmpty { return "changes requested by \(Attention.names(changesRequestedBy))" }
     return reviewDecision == .changesRequested ? "changes requested" : nil
   }
 
   /// "CI failed", "conflicts with <base>", or the change request, whichever
   /// comes first. nil when none of them holds the PR.
-  public var holdLine: String? {
+  var holdLine: String? {
     if ciFailed { return "CI failed" }
     if mergeable == .conflicting { return "conflicts with \(base)" }
     return changesRequestedLine
