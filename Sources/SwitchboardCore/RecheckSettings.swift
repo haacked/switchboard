@@ -20,6 +20,9 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
     acknowledged: 3600,
   ]
 
+  /// Ten years. A larger value would overflow Int64 when sbd converts it to ms.
+  public static let maxSeconds = 10 * 365 * 86400
+
   /// Seconds by key. Every key in `defaults` has a value.
   public private(set) var seconds = RecheckSettings.defaults
 
@@ -38,8 +41,9 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
         logLine("skipping recheckSeconds.\(key): it is not a wait kind with a recheck time or \(Self.acknowledged)")
         continue
       }
-      guard let n = value.int, n > 0 else {
-        logLine("skipping recheckSeconds.\(key): its value must be a positive whole number of seconds")
+      guard let n = value.int, n > 0, n <= Self.maxSeconds else {
+        logLine(
+          "skipping recheckSeconds.\(key): its value must be a whole number of seconds from 1 to \(Self.maxSeconds)")
         continue
       }
       seconds[key] = n

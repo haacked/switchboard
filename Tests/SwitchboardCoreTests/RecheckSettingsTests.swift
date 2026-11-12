@@ -55,6 +55,13 @@ extension RecheckSettingsTests {
       #expect(try configWith(recheck: #"{"acknowledged": 120}"#).recheck.acknowledgedMs == 120_000)
     }
 
+    @Test func largestValueIsKept() throws {
+      let c = try configWith(recheck: #"{"ci": 315360000, "acknowledged": 315360000}"#)
+
+      #expect(c.recheck.seconds["ci"] == RecheckSettings.maxSeconds)
+      #expect(c.recheck.acknowledgedMs == 315_360_000_000)
+    }
+
     @Test func goodEntriesApplyBesideABadOne() throws {
       let c = try configWith(recheck: #"{"ci": "x", "review": 100}"#)
 
@@ -97,7 +104,9 @@ extension RecheckSettingsTests {
       #expect(c.idleStopSeconds == 77)
     }
 
-    @Test(arguments: ["\"60\"", "0", "-1", "-7200", "1.5", "7199.9", "1e19", "null", "true", "{}", "[60]"])
+    @Test(arguments: [
+      "\"60\"", "0", "-1", "-7200", "1.5", "7199.9", "315360001", "1e16", "1e18", "1e19", "null", "true", "{}", "[60]",
+    ])
     func entryThatIsNotAPositiveWholeNumberKeepsItsDefault(_ value: String) throws {
       let c = try configWith(recheck: #"{"ci": \#(value)}"#)
 
@@ -105,7 +114,7 @@ extension RecheckSettingsTests {
       #expect(c.idleStopSeconds == 77)
     }
 
-    @Test(arguments: ["\"60\"", "0", "-1", "1.5"])
+    @Test(arguments: ["\"60\"", "0", "-1", "1.5", "1e16"])
     func badAcknowledgedEntryKeepsAnHour(_ value: String) throws {
       #expect(try configWith(recheck: #"{"acknowledged": \#(value)}"#).recheck.acknowledgedMs == 3_600_000)
     }

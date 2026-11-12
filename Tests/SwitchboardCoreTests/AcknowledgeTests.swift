@@ -655,6 +655,21 @@ enum AcknowledgedItem: String, CaseIterable, Sendable {
   }
 }
 
+/// A session whose CI wait went overdue, and an `ack` of the overdue reason at its recheck time.
+private struct OverdueWaitAck {
+  let reason = "CI on #1: still open after 2 h"
+  let ackAt: Int64 = 2 * 3_600_000
+  let session: Session
+  let facts: SessionFacts
+
+  init() throws {
+    var wait = waitOn(.ci, pr: Wait.PullRequest(number: 1))
+    wait.recheck = ackAt
+    session = withWaits([wait])
+    facts = SwitchboardCoreTests.facts(turn("Done.") + [try ackEvent(ackAt, .needsYou, reason)])
+  }
+}
+
 extension AcknowledgeTests {
   @Suite struct AcknowledgmentRecheck {
     @Test(arguments: AcknowledgedItem.allCases)
@@ -764,6 +779,25 @@ extension AcknowledgeTests {
 
       #expect(v.reason == "the deploy of #42")
       #expect(v.state == .waiting)
+      #expect(!v.acknowledged)
+    }
+
+    @Test func acknowledgedOverdueWaitIsWaitingAMillisecondBeforeItsRecheck() throws {
+      let o = try OverdueWaitAck()
+
+      let v = verdict(o.facts, o.session, at: o.ackAt + acknowledgedMs - 1)
+
+      #expect(v.state == .waiting)
+      #expect(v.acknowledged)
+    }
+
+    @Test func acknowledgedOverdueWaitNeedsYouAgainAtItsRecheck() throws {
+      let o = try OverdueWaitAck()
+
+      let v = verdict(o.facts, o.session, at: o.ackAt + acknowledgedMs)
+
+      #expect(v.state == .needsYou)
+      #expect(v.reason == expired(o.reason, acknowledgedAt: o.ackAt))
       #expect(!v.acknowledged)
     }
 

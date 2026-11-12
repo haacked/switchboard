@@ -574,9 +574,6 @@ import Testing
 extension WaitTests {
   static let dayMs: Int64 = 24 * hourMs
 
-  /// The real time in ms. A new sbd's clock reads it until a test moves the clock.
-  static func wallMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
-
   /// An idle session with a review wait on its own PR, whose claude has stopped.
   func stoppedWithAReviewWait(_ sbd: Instance) throws -> SessionSummary {
     let s = try idleSession(sbd)
@@ -825,22 +822,22 @@ extension WaitTests {
   func legacySession(_ sbd: Instance) throws -> (session: SessionSummary, loaded: ClosedRange<Int64>) {
     let s = try sbd.new(name: "old")
     sbd.stopSbd()
-    let fiveDaysAgo = WaitTests.wallMs() - 5 * WaitTests.dayMs
+    let fiveDaysAgo = nowMs() - 5 * WaitTests.dayMs
     do {
       let store = try Store(path: sbd.home.database)
       var session = try #require(try store.sessions().first { $0.id == s.id })
       session.waits = [
         Wait(id: "wci", kind: .ci, created: fiveDaysAgo),
         Wait(id: "wmanual", kind: .manual, note: "ask Alex", created: fiveDaysAgo, then: .notify),
-        Wait(id: "wdate", kind: .date, until: WaitTests.wallMs() + 10 * WaitTests.dayMs, created: fiveDaysAgo),
+        Wait(id: "wdate", kind: .date, until: nowMs() + 10 * WaitTests.dayMs, created: fiveDaysAgo),
         Wait(
-          id: "wuntil", kind: .manual, until: WaitTests.wallMs() + 10 * WaitTests.dayMs, note: "ask Ana",
+          id: "wuntil", kind: .manual, until: nowMs() + 10 * WaitTests.dayMs, note: "ask Ana",
           created: fiveDaysAgo, then: .notify),
       ]
       session.waitNote = "CI on #12"
       try store.save(session)
     }
-    let before = WaitTests.wallMs()
+    let before = nowMs()
     try sbd.startSbd()
     return (s, before...(try sbd.now()))
   }
