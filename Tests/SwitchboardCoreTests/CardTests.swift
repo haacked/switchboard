@@ -435,7 +435,7 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
 
   /// The held requests end with sbd, but a group message waits in the event log.
   @Test func aRestartOfSbdKeepsASendCard() {
-    var replay = SessionReplay.replaying(permissionTurn() + [sendPending()], session: session())
+    var replay = SessionReplay.replaying(fetchTurn() + [sendPending()], session: session())
 
     replay.restarted()
 
