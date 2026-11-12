@@ -120,10 +120,7 @@ import Testing
     let sbd = try Instance(idleStopSeconds: 1)
     let (s, hold, mark) = try heldResume(sbd)
     let pid = try sbd.get(s.id).claudePid
-    // Each clock request runs a tick. The first tick notes the held claude. The second passes its 10 s.
-    try sbd.advanceClock(1)
-    try sbd.advanceClock(11_000)
-    try sbd.waitFor("the 10 s fallback") { try sbd.events(s.id, after: mark).contains { $0.kind == "running" } }
+    try sbd.passUnreportedFallback(s.id, after: mark)
     sleep(2)
     #expect(try !sbd.events(s.id, after: mark).contains { $0.kind == "stopped" })
     #expect(try sbd.get(s.id).claudePid == pid)

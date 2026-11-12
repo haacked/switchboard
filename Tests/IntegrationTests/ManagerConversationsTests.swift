@@ -560,9 +560,7 @@ import Testing
     let mark = try #require(try sbd.events(c.id).last?.id)
     try sbd.sb("send", c.id, "next")
     try sbd.waitFor(c.id, "the held claude") { $0.claudePid != nil }
-    try sbd.advanceClock(1)
-    try sbd.advanceClock(11_000)
-    try sbd.waitFor("the 10 s fallback") { try sbd.events(c.id, after: mark).contains { $0.kind == "running" } }
+    try sbd.passUnreportedFallback(c.id, after: mark)
     let before = launches(sbd, c).count
 
     try sbd.sb("manager", "mcp", c.id, "add", "grafana")

@@ -336,6 +336,18 @@ final class Instance {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
   }
 
+  /// Moves the clock until the tick records `running` for a claude that has
+  /// not sent SessionStart. Each clock request runs a tick. A tick that sees
+  /// the claude as still starting restarts its 10 s, so one step can miss.
+  /// The steps stay under the 60 s that a launch's prompt counts as on its way.
+  func passUnreportedFallback(_ id: String, after mark: Int64) throws {
+    for _ in 0..<4 {
+      try advanceClock(11_000)
+      if try events(id, after: mark).contains(where: { $0.kind == "running" }) { return }
+    }
+    throw TestError(description: "the tick never recorded running for \(id)")
+  }
+
   /// Moves the clock past `idleStopSeconds` and waits until the session's claude stops.
   func passIdleStop(_ id: String) throws {
     try advanceClock(Int64(idleStopSeconds + 1) * 1000)
