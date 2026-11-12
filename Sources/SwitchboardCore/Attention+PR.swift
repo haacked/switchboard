@@ -26,8 +26,9 @@ extension Attention {
 
   /// The rules for an open PR of a session whose turn has ended: a merged
   /// base, a conflict, requested changes, a removal from Trunk's queue, a
-  /// failed Depot job outside Trunk's queue, a PR ready to merge, and an
-  /// approval.
+  /// failed Depot job outside Trunk's queue, a PR ready to merge, and what
+  /// keeps an approved PR from merging. Only Ready to merge asks the user to
+  /// merge or enqueue the PR.
   static func openPR(_ facts: SessionFacts) -> Verdict? {
     guard let pr = facts.pr, pr.state == .open else { return nil }
     let n = "#\(pr.number)"
@@ -87,12 +88,15 @@ extension Attention {
   }
 
   /// The verdict for an approved PR that `blocker` keeps out of Ready to
-  /// merge. Running checks and an uncomputed mergeability end on their own,
-  /// so the session waits outside Ready to merge and the Inbox. Failed checks
-  /// need someone to fix them. A PR that waits on another PR or that Trunk
-  /// queued gets no verdict here. Every other blocker asks the user to merge.
+  /// merge. The reason names the blocker, then the approvers. A blocker that
+  /// ends without the user, such as running checks or a reviewer, keeps the
+  /// session Waiting. Failed checks, a non-default base, no checks, and checks
+  /// that report another value need the user. A PR that waits on another PR
+  /// or that Trunk queued gets no verdict here. No verdict asks the user to
+  /// merge.
   static func approvedNotReady(_ blocker: MergeBlocker, _ pr: PullRequest, _ facts: SessionFacts) -> Verdict? {
     let n = "#\(pr.number)"
+    let approvers = approvedBy(pr, after: ";")
     switch blocker {
     // `isApproved` excludes a draft, and `openPR` returns on a conflict first.
     case .draft, .conflict:
@@ -107,17 +111,33 @@ extension Attention {
     case .checksFailed:
       return Verdict(
         state: .needsYou,
-        reason: oneLine("fix the checks on \(n)\(approvedBy(pr, after: ";"))"),
+        reason: oneLine("fix the checks on \(n)\(approvers)"),
         options: [ask("Fix the checks", "Fix the failing checks on \(n).")])
+    case .base(let base, let defaultBranch):
+      return Verdict(state: .needsYou, reason: oneLine("\(n) targets \(base), not \(defaultBranch)\(approvers)"))
+    case .review(.changesRequested):
+      return Verdict(
+        state: .waiting, reason: oneLine("\(n) waits on \(names(pr.changesRequestedBy)) to review again\(approvers)"))
+    // The reason does not name GitHub's review rule, because `readyForReview`
+    // appends that the rule was not read.
+    case .review(.decisionUnread):
+      return Verdict(state: .waiting, reason: oneLine("can't merge \(n) yet\(approvers)"))
+    case .review(.required):
+      return Verdict(state: .waiting, reason: oneLine("\(n) waits on a required review\(approvers)"))
+    case .review(.requested):
+      let reviewers = BoardColumn.reviewers(facts)
+      let from = reviewers.isEmpty ? "" : " from \(names(reviewers))"
+      return Verdict(state: .waiting, reason: oneLine("review requested\(from) on \(n)\(approvers)"))
     case .checksRunning:
       return Verdict(state: .waiting, reason: "checks running on \(n)")
     case .mergeabilityUnknown:
       return Verdict(state: .waiting, reason: "GitHub is still checking whether \(n) can merge")
-    case .mergeabilityUnread, .noChecks, .checksNotPassed, .base, .review:
-      var verdict = Verdict(
-        state: .needsYou, reason: oneLine("\(facts.mergeMethod.verb.lowercased()) \(n)\(approvedBy(pr))"))
-      verdict.addMergeSummary(facts)
-      return verdict
+    case .mergeabilityUnread:
+      return Verdict(state: .waiting, reason: "sbd has not read whether \(n) can merge")
+    case .noChecks:
+      return Verdict(state: .needsYou, reason: oneLine("no checks ran on \(n)\(approvers)"))
+    case .checksNotPassed(let checks):
+      return Verdict(state: .needsYou, reason: oneLine("checks on \(n) report \(checks.lowercased())\(approvers)"))
     }
   }
 

@@ -102,8 +102,7 @@ extension Attention {
   }
 
   /// Whether the session's PR is at a merge decision: the rule for its open
-  /// PR asks the user to merge or enqueue it. The poller reads the PR's merge
-  /// details only then.
+  /// PR is Ready to merge. The poller reads the PR's merge details only then.
   public static func atMergeDecision(_ facts: SessionFacts) -> Bool {
     openPR(facts)?.summarizesPR == true
   }
@@ -111,8 +110,9 @@ extension Attention {
   /// The merge card's Summary and the callouts that should give the user
   /// pause. The Summary says what the PR does, from the model's brief at the
   /// PR's head or else the description's gist, then the PR's size, approvals,
-  /// and checks. Text from the PR is escaped, because the card draws the
-  /// Summary as Markdown and anyone who can open a PR wrote it.
+  /// and checks. Only Ready to merge builds it, so the PR's checks passed.
+  /// Text from the PR is escaped, because the card draws the Summary as
+  /// Markdown and anyone who can open a PR wrote it.
   static func mergeSummary(_ facts: SessionFacts) -> (text: String, callouts: [Callout]) {
     guard let pr = facts.pr else { return ("", []) }
     let details = pr.mergeDetails
@@ -121,8 +121,7 @@ extension Attention {
       parts.append("\(d.changedFiles) \(d.changedFiles == 1 ? "file" : "files"), +\(d.additions) -\(d.deletions).")
     }
     parts.append(pr.approvers.isEmpty ? "No review required." : "Approved by \(names(pr.approvers)).")
-    // Both merge verdicts refuse running and failed checks.
-    parts.append(pr.checks == nil ? "No checks ran." : "Checks passed.")
+    parts.append("Checks passed.")
     if facts.mergeMethod == .unknown {
       parts.append("sbd can't tell how \(pr.repo) merges, so merge it on GitHub.")
     }
@@ -171,8 +170,8 @@ extension Attention {
 }
 
 extension Verdict {
-  /// Makes this a verdict that asks the user to merge or enqueue the PR: its
-  /// summary says what the PR does, and the pause callouts follow its own.
+  /// Makes this the Ready to merge verdict's card: its summary says what the
+  /// PR does, and the pause callouts follow its own.
   mutating func addMergeSummary(_ facts: SessionFacts) {
     let merge = Attention.mergeSummary(facts)
     summary = merge.text

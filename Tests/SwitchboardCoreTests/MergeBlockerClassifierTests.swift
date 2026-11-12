@@ -108,7 +108,10 @@ extension MergeBlockerTests {
     enum Precedence: String, CaseIterable, Sendable {
       case draftBeforeConflict, conflictBeforeDependency, dependencyBeforeQueue, queueBeforeFailedChecks
       case failedChecksBeforeBase, failedChecksBeforeReview, mergeabilityUnknownBeforeNoChecks
-      case failedChecksBeforeMergeabilityUnknown, runningChecksBeforeMergeabilityUnknown, mergeabilityUnknownBeforeBase
+      case failedChecksBeforeMergeabilityUnknown, runningChecksBeforeMergeabilityUnknown, baseBeforeMergeabilityUnknown
+      case baseBeforeReview, baseBeforeRunningChecks, reviewBeforeRunningChecks, reviewBeforeMergeabilityUnknown
+      case baseBeforeNoChecks, reviewBeforeNoChecks, mergeabilityUnreadBeforeNoChecks, reviewBeforeMergeabilityUnread
+      case baseBeforeChecksNotPassed
 
       func facts() throws -> SessionFacts {
         var dependencies: [Dependency] = []
@@ -142,9 +145,39 @@ extension MergeBlockerTests {
           case .runningChecksBeforeMergeabilityUnknown:
             pr.checks = "PENDING"
             pr.mergeable = .unknown
-          case .mergeabilityUnknownBeforeBase:
+          case .baseBeforeMergeabilityUnknown:
             pr.mergeable = .unknown
             pr.base = "release"
+          case .baseBeforeReview:
+            pr.base = "release"
+            pr.reviewDecision = nil
+            pr.reviewRequests = ["bob"]
+          case .baseBeforeRunningChecks:
+            pr.base = "release"
+            pr.checks = "PENDING"
+          case .reviewBeforeRunningChecks:
+            pr.reviewDecision = nil
+            pr.reviewRequests = ["bob"]
+            pr.checks = "PENDING"
+          case .reviewBeforeMergeabilityUnknown:
+            pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+            pr.mergeable = .unknown
+          case .baseBeforeNoChecks:
+            pr.base = "release"
+            pr.checks = nil
+          case .reviewBeforeNoChecks:
+            pr.reviewDecision = nil
+            pr.reviewDecisionRead = nil
+            pr.checks = nil
+          case .mergeabilityUnreadBeforeNoChecks:
+            pr.mergeable = nil
+            pr.checks = nil
+          case .reviewBeforeMergeabilityUnread:
+            pr.reviewDecision = .reviewRequired
+            pr.mergeable = nil
+          case .baseBeforeChecksNotPassed:
+            pr.base = "release"
+            pr.checks = "NEUTRAL"
           }
         }
         return try prFacts(pr, then: [try dependenciesEvent(3, dependencies)])
@@ -158,7 +191,15 @@ extension MergeBlockerTests {
         case .queueBeforeFailedChecks: .queue(.unknown)
         case .failedChecksBeforeBase, .failedChecksBeforeReview, .failedChecksBeforeMergeabilityUnknown: .checksFailed
         case .runningChecksBeforeMergeabilityUnknown: .checksRunning
-        case .mergeabilityUnknownBeforeNoChecks, .mergeabilityUnknownBeforeBase: .mergeabilityUnknown
+        case .mergeabilityUnknownBeforeNoChecks: .mergeabilityUnknown
+        case .baseBeforeMergeabilityUnknown, .baseBeforeReview, .baseBeforeRunningChecks, .baseBeforeNoChecks,
+          .baseBeforeChecksNotPassed:
+          .base("release", defaultBranch: "main")
+        case .reviewBeforeRunningChecks: .review(.requested)
+        case .reviewBeforeMergeabilityUnknown: .review(.changesRequested)
+        case .reviewBeforeNoChecks: .review(.decisionUnread)
+        case .reviewBeforeMergeabilityUnread: .review(.required)
+        case .mergeabilityUnreadBeforeNoChecks: .mergeabilityUnread
         }
       }
     }

@@ -367,8 +367,8 @@ public struct Verdict: Equatable, Sendable {
   public var callouts: [Callout] = []
   /// The card's summary for a rule that has more to say than its reason.
   public var summary: String?
-  /// True for the verdicts that ask the user to merge or enqueue the PR,
-  /// whose summary says what the PR does.
+  /// True for the Ready to merge verdict, the only one that asks the user to
+  /// merge or enqueue the PR. Its summary says what the PR does.
   public var summarizesPR = false
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }

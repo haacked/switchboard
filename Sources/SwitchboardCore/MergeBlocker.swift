@@ -41,7 +41,22 @@ extension Attention {
     if pr.mergeable == .conflicting { return .conflict }
     if facts.dependencies.contains(where: \.holds) { return .dependency }
     if let queue = pr.queue { return .queue(queue) }
+    // The user must act on failed checks and a wrong base, so they come before
+    // a review, running checks, and mergeability. Mergeability comes before
+    // no checks, because both are common for a few seconds after a push, and
+    // that pair must keep the PR out of Needs you.
     if pr.checksFailed { return .checksFailed }
+    if let defaultBranch = pr.defaultBranch, pr.base != defaultBranch {
+      return .base(pr.base, defaultBranch: defaultBranch)
+    }
+    if !pr.reviewSatisfied {
+      if !pr.changesRequestedBy.isEmpty { return .review(.changesRequested) }
+      switch pr.needsReview {
+      case nil: return .review(.decisionUnread)
+      case true?: return .review(.required)
+      case false?: return .review(.requested)
+      }
+    }
     if pr.checksRunning { return .checksRunning }
     switch pr.mergeable {
     case .mergeable: break
@@ -53,17 +68,6 @@ extension Attention {
     case "SUCCESS": break
     case nil: return .noChecks
     case let checks?: return .checksNotPassed(checks)
-    }
-    if let defaultBranch = pr.defaultBranch, pr.base != defaultBranch {
-      return .base(pr.base, defaultBranch: defaultBranch)
-    }
-    if !pr.reviewSatisfied {
-      if !pr.changesRequestedBy.isEmpty { return .review(.changesRequested) }
-      switch pr.needsReview {
-      case nil: return .review(.decisionUnread)
-      case true?: return .review(.required)
-      case false?: return .review(.requested)
-      }
     }
     return nil
   }

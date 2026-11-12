@@ -105,6 +105,9 @@ extension MergeBlockerTests {
       case baseWithFailedChecks, reviewRequestedWithRunningChecks, holdingDependencyWithFailedChecks
       case trunkSubmittedWithFailedChecks
       case runningChecksWithMergeabilityUnknown, failedChecksWithMergeabilityUnknown, mergeabilityUnknownWithBase
+      case baseWithReviewRequested, reviewRequestedFromACodeOwnerTeam
+      case baseWithNoChecks, reviewRequestedWithMergeabilityUnknown, mergeabilityUnreadWithNoChecks
+      case staleChangeRequestWithRunningChecks
 
       func apply(_ pr: inout PullRequest) {
         switch self {
@@ -148,37 +151,84 @@ extension MergeBlockerTests {
         case .mergeabilityUnknownWithBase:
           pr.mergeable = .unknown
           pr.base = "release"
+        case .baseWithReviewRequested:
+          pr.base = "release"
+          pr.reviewDecision = nil
+          pr.reviewRequests = ["bob"]
+        case .reviewRequestedFromACodeOwnerTeam:
+          pr.reviewDecision = nil
+          pr.codeOwnerRequests = ["@acme/owners"]
+          pr.reviewRequests = ["owners", "bob"]
+        case .baseWithNoChecks:
+          pr.base = "release"
+          pr.checks = nil
+        case .reviewRequestedWithMergeabilityUnknown:
+          pr.reviewDecision = nil
+          pr.reviewRequests = ["bob"]
+          pr.mergeable = .unknown
+        case .mergeabilityUnreadWithNoChecks:
+          pr.mergeable = nil
+          pr.checks = nil
+        case .staleChangeRequestWithRunningChecks:
+          pr.verdicts.append(sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"))
+          pr.checks = "PENDING"
         }
       }
 
-      var state: AttentionState {
+      static let targetsRelease = "#42 targets release, not main; approved by alice"
+      static let reviewRequestedFromBob = "review requested from bob on #42; approved by alice; #42 needs no review"
+
+      var expected: Verdict {
         switch self {
-        case .mergeabilityUnknownWithNoChecks, .baseWithRunningChecks, .reviewRequestedWithRunningChecks,
-          .holdingDependencyWithFailedChecks, .runningChecksWithMergeabilityUnknown, .mergeabilityUnknownWithBase:
-          .waiting
-        default: .needsYou
+        case .noChecks: Verdict(state: .needsYou, reason: "no checks ran on #42; approved by alice")
+        case .mergeabilityUnread, .mergeabilityUnreadWithNoChecks:
+          Verdict(state: .waiting, reason: "sbd has not read whether #42 can merge; #42 approved")
+        case .base, .baseWithRunningChecks, .mergeabilityUnknownWithBase, .baseWithReviewRequested, .baseWithNoChecks:
+          Verdict(state: .needsYou, reason: Self.targetsRelease)
+        case .decisionUnread:
+          Verdict(
+            state: .waiting, reason: "can't merge #42 yet; approved by alice; #42: GitHub's review rule not read yet")
+        case .reviewRequested, .reviewRequestedWithRunningChecks, .reviewRequestedWithMergeabilityUnknown:
+          Verdict(state: .waiting, reason: Self.reviewRequestedFromBob)
+        case .staleChangeRequest, .staleChangeRequestWithRunningChecks:
+          Verdict(state: .waiting, reason: "#42 waits on carol to review again; approved by alice; #42 approved")
+        case .unrecognizedChecks: Verdict(state: .needsYou, reason: "checks on #42 report neutral; approved by alice")
+        case .queueUnknownWithFailedChecks:
+          Verdict(state: .needsYou, reason: "check whether Trunk queued #42; its queue status did not load")
+        case .mergeabilityUnknownWithNoChecks:
+          Verdict(state: .waiting, reason: "GitHub is still checking whether #42 can merge; #42 approved")
+        case .runningChecksWithMergeabilityUnknown:
+          Verdict(state: .waiting, reason: "checks running on #42; #42 approved")
+        case .baseWithFailedChecks, .failedChecksWithMergeabilityUnknown:
+          Verdict(state: .needsYou, reason: "fix the checks on #42; approved by alice")
+        case .holdingDependencyWithFailedChecks: Verdict(state: .waiting, reason: "waits on #7; #42 approved")
+        case .trunkSubmittedWithFailedChecks:
+          Verdict(state: .needsYou, reason: "read its last reply and decide what's next")
+        case .reviewRequestedFromACodeOwnerTeam:
+          Verdict(
+            state: .waiting,
+            reason: "review requested from @acme/owners and bob on #42; approved by alice; #42 needs no review")
         }
       }
 
-      var reason: String {
+      /// Whether the approved rule gives the verdict for a blocker that only
+      /// says what blocks the merge: no checks, an unread mergeability, a
+      /// non-default base, a review gap, or a checks value outside the known
+      /// ones.
+      var namesTheBlockerOnly: Bool {
         switch self {
         case .noChecks, .mergeabilityUnread, .base, .decisionUnread, .reviewRequested, .staleChangeRequest,
-          .unrecognizedChecks:
-          "merge #42, approved by alice"
-        case .queueUnknownWithFailedChecks: "check whether Trunk queued #42; its queue status did not load"
-        case .mergeabilityUnknownWithNoChecks, .mergeabilityUnknownWithBase:
-          "GitHub is still checking whether #42 can merge; #42 approved"
-        case .baseWithRunningChecks, .runningChecksWithMergeabilityUnknown: "checks running on #42; #42 approved"
-        case .baseWithFailedChecks, .failedChecksWithMergeabilityUnknown: "fix the checks on #42; approved by alice"
-        case .reviewRequestedWithRunningChecks: "checks running on #42; #42 needs no review"
-        case .holdingDependencyWithFailedChecks: "waits on #7; #42 approved"
-        case .trunkSubmittedWithFailedChecks: "read its last reply and decide what's next"
+          .unrecognizedChecks, .baseWithRunningChecks, .reviewRequestedWithRunningChecks, .mergeabilityUnknownWithBase,
+          .baseWithReviewRequested, .reviewRequestedFromACodeOwnerTeam, .baseWithNoChecks,
+          .reviewRequestedWithMergeabilityUnknown, .mergeabilityUnreadWithNoChecks,
+          .staleChangeRequestWithRunningChecks:
+          true
+        case .queueUnknownWithFailedChecks, .mergeabilityUnknownWithNoChecks, .baseWithFailedChecks,
+          .holdingDependencyWithFailedChecks, .trunkSubmittedWithFailedChecks, .runningChecksWithMergeabilityUnknown,
+          .failedChecksWithMergeabilityUnknown:
+          false
         }
       }
-
-      /// The rows that reach the approved rule's fallthrough, which asks the
-      /// user to merge.
-      var summarizesPR: Bool { reason == "merge #42, approved by alice" }
 
       func facts() throws -> SessionFacts {
         let dependencies = self == .holdingDependencyWithFailedChecks ? [MergeBlockerTests.holdingDependency] : []
@@ -190,22 +240,27 @@ extension MergeBlockerTests {
 
     @Test(arguments: Row.allCases)
     func approvedPRThatCantMergeHasTheState(_ row: Row) throws {
-      #expect(verdict(try row.facts()).state == row.state)
+      #expect(verdict(try row.facts()).state == row.expected.state)
     }
 
     @Test(arguments: Row.allCases)
     func approvedPRThatCantMergeHasTheReason(_ row: Row) throws {
-      #expect(verdict(try row.facts()).reason == row.reason)
+      #expect(verdict(try row.facts()).reason == row.expected.reason)
     }
 
     @Test(arguments: Row.allCases)
-    func approvedPRThatCantMergeSummarizesThePROnlyAtTheFallthrough(_ row: Row) throws {
-      #expect(verdict(try row.facts()).summarizesPR == row.summarizesPR)
+    func approvedPRThatCantMergeDoesNotSummarizeThePR(_ row: Row) throws {
+      #expect(!verdict(try row.facts()).summarizesPR)
     }
 
     @Test(arguments: Row.allCases)
-    func approvedPRThatCantMergeIsAtAMergeDecisionOnlyAtTheFallthrough(_ row: Row) throws {
-      #expect(Attention.atMergeDecision(try row.facts()) == row.summarizesPR)
+    func approvedPRThatCantMergeHasNoSummary(_ row: Row) throws {
+      #expect(verdict(try row.facts()).summary == nil)
+    }
+
+    @Test(arguments: Row.allCases)
+    func approvedPRThatCantMergeIsNotAtAMergeDecision(_ row: Row) throws {
+      #expect(!Attention.atMergeDecision(try row.facts()))
     }
 
     @Test(arguments: Row.allCases)
@@ -213,10 +268,160 @@ extension MergeBlockerTests {
       #expect(Attention.readyToMerge(try row.facts()) == nil)
     }
 
+    @Test(arguments: Row.allCases.filter(\.namesTheBlockerOnly))
+    func approvedPRThatCantMergeOffersNoOption(_ row: Row) throws {
+      #expect(verdict(try row.facts()).options.isEmpty)
+    }
+
+    @Test(arguments: Row.allCases.filter(\.namesTheBlockerOnly))
+    func approvedPRThatCantMergeHasNoCallout(_ row: Row) throws {
+      #expect(verdict(try row.facts()).callouts.isEmpty)
+    }
+
     @Test func readyPRIsReadyToMerge() throws {
       let f = try prFacts(MergeBlockerTests.readyPR())
 
       #expect(verdict(f).state == .readyToMerge)
+    }
+
+    @Test func readyPRSummarizesThePR() throws {
+      let f = try prFacts(MergeBlockerTests.readyPR())
+
+      #expect(verdict(f).summarizesPR)
+    }
+
+    @Test func readyPRIsAtAMergeDecision() throws {
+      let f = try prFacts(MergeBlockerTests.readyPR())
+
+      #expect(Attention.atMergeDecision(f))
+    }
+
+    /// `BoardColumn.reviewers` keeps the code owner form of a team that both
+    /// lists name. The code owner row relies on it.
+    @Test func codeOwnerRowAsksTheTeamOnce() throws {
+      let f = try Row.reviewRequestedFromACodeOwnerTeam.facts()
+
+      #expect(BoardColumn.reviewers(f) == ["@acme/owners", "bob"])
+    }
+
+    @Test func staleChangeRequestsNameEachReviewer() throws {
+      let pr = MergeBlockerTests.readyPR {
+        $0.verdicts += [
+          sampleVerdict("dave", "CHANGES_REQUESTED", on: "older"),
+          sampleVerdict("carol", "CHANGES_REQUESTED", on: "older"),
+        ]
+      }
+
+      #expect(
+        verdict(try prFacts(pr))
+          == Verdict(
+            state: .waiting, reason: "#42 waits on carol and dave to review again; approved by alice; #42 approved"))
+    }
+
+    @Test(arguments: [("SKIPPED", "skipped"), ("STALE", "stale")])
+    func checksOutsideTheKnownValuesNameTheValue(_ checks: String, _ shown: String) throws {
+      let f = try prFacts(MergeBlockerTests.readyPR { $0.checks = checks })
+
+      #expect(
+        verdict(f) == Verdict(state: .needsYou, reason: "checks on #42 report \(shown); approved by alice"))
+    }
+
+    /// `oneLine` cuts the reason at 70 characters, so a long list of
+    /// approvers loses its tail and the blocker stays whole.
+    @Test func longApproverListKeepsTheBlocker() throws {
+      let pr = MergeBlockerTests.readyPR {
+        $0.base = "release"
+        $0.verdicts = ["alice", "bob", "carol", "dave", "erin"].map { sampleVerdict($0, "APPROVED") }
+      }
+
+      let reason = verdict(try prFacts(pr)).reason
+
+      #expect(reason == "#42 targets release, not main; approved by alice and bob and carol an…")
+    }
+  }
+}
+
+extension MergeBlockerTests {
+  /// The verdict that the approved rule returns for each blocker, before
+  /// `Attention.evaluate` appends why the PR is not in Ready for review.
+  /// These cover the shapes that `evaluate` can't reach.
+  @Suite struct ApprovedRuleRawReason {
+    private func raw(_ blocker: MergeBlocker, _ edit: (inout PullRequest) -> Void = { _ in }) throws -> Verdict {
+      let f = try prFacts(MergeBlockerTests.readyPR(edit))
+      let pr = try #require(f.pr)
+      return try #require(Attention.approvedNotReady(blocker, pr, f))
+    }
+
+    /// `PullRequest.status` reads GitHub's REVIEW_REQUIRED decision first,
+    /// so an approved PR never has this gap.
+    @Test func requiredReviewWaitsOnIt() throws {
+      #expect(
+        try raw(.review(.required))
+          == Verdict(state: .waiting, reason: "#42 waits on a required review; approved by alice"))
+    }
+
+    @Test func reviewRequestWithoutANamedReviewerNamesNobody() throws {
+      let v = try raw(.review(.requested)) {
+        $0.reviewDecision = nil
+        $0.reviewRequests = []
+      }
+
+      #expect(v == Verdict(state: .waiting, reason: "review requested on #42; approved by alice"))
+    }
+
+    enum Unapproved: String, CaseIterable, Sendable {
+      case noChecks, mergeabilityUnread, base, checksNotPassed, changesRequested, decisionUnread, required, requested
+
+      var blocker: MergeBlocker {
+        switch self {
+        case .noChecks: .noChecks
+        case .mergeabilityUnread: .mergeabilityUnread
+        case .base: .base("release", defaultBranch: "main")
+        case .checksNotPassed: .checksNotPassed("NEUTRAL")
+        case .changesRequested: .review(.changesRequested)
+        case .decisionUnread: .review(.decisionUnread)
+        case .required: .review(.required)
+        case .requested: .review(.requested)
+        }
+      }
+
+      func apply(_ pr: inout PullRequest) {
+        pr.verdicts = []
+        switch self {
+        case .noChecks: pr.checks = nil
+        case .mergeabilityUnread: pr.mergeable = nil
+        case .base: pr.base = "release"
+        case .checksNotPassed: pr.checks = "NEUTRAL"
+        case .changesRequested: pr.verdicts = [sampleVerdict("carol", "CHANGES_REQUESTED", on: "older")]
+        case .decisionUnread:
+          pr.reviewDecision = nil
+          pr.reviewDecisionRead = nil
+        case .required: pr.reviewDecision = .reviewRequired
+        case .requested:
+          pr.reviewDecision = nil
+          pr.reviewRequests = ["bob"]
+        }
+      }
+
+      var expected: Verdict {
+        switch self {
+        case .noChecks: Verdict(state: .needsYou, reason: "no checks ran on #42")
+        case .mergeabilityUnread: Verdict(state: .waiting, reason: "sbd has not read whether #42 can merge")
+        case .base: Verdict(state: .needsYou, reason: "#42 targets release, not main")
+        case .checksNotPassed: Verdict(state: .needsYou, reason: "checks on #42 report neutral")
+        case .changesRequested: Verdict(state: .waiting, reason: "#42 waits on carol to review again")
+        case .decisionUnread: Verdict(state: .waiting, reason: "can't merge #42 yet")
+        case .required: Verdict(state: .waiting, reason: "#42 waits on a required review")
+        case .requested: Verdict(state: .waiting, reason: "review requested from bob on #42")
+        }
+      }
+    }
+
+    /// A PR that GitHub approved without an APPROVED verdict names no
+    /// approver, so its reason ends at the blocker.
+    @Test(arguments: Unapproved.allCases)
+    func reasonWithoutAnApproverEndsAtTheBlocker(_ row: Unapproved) throws {
+      #expect(try raw(row.blocker, row.apply) == row.expected)
     }
   }
 }

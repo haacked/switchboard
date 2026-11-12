@@ -229,8 +229,9 @@ extension Instance {
     let r = try sbd.run(["merge", s.id])
 
     #expect(got.state == .needsYou)
-    #expect(got.reason == "merge #18303, approved by stamphog")
+    #expect(got.reason == "#18303 targets release, not main; approved by stamphog")
     #expect(r.status != 0)
+    #expect(r.stderr.contains("#18303 targets release, not main; approved by stamphog"))
     #expect(sbd.ghMerges().isEmpty)
   }
 
