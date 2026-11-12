@@ -752,7 +752,7 @@ extension Instance {
 
     #expect(result["error"] != nil)
     #expect(github.restRequests(to: DeployPollerTests.statePath).count == 1)
-    #expect(github.requests.dropFirst(mark).contains { $0.kind == "status" && $0.ids.contains(id) })
+    #expect(github.readStatus(of: id, since: mark))
     let recorded = try sbd.events(s.id).filter { $0.id > lastEvent && $0.kind == "pr" }
     #expect(recorded.last?.data["pr"]?["title"]?.string == "a new title")
     #expect(recorded.allSatisfy { ($0.data["pr"]?["codeOwners"] ?? .null) != .null })

@@ -564,7 +564,34 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 
   @Test(arguments: [(30_000, false), (299_999, false), (300_000, true), (300_001, true)] as [(Int64, Bool)])
   func settledPRIsDueAfterTheIdleInterval(_ elapsed: Int64, _ due: Bool) {
-    #expect(isDue(samplePR(checks: "SUCCESS"), polledAgo: elapsed) == due)
+    #expect(isDue(samplePR(checks: "SUCCESS", reviewDecisionRead: true), polledAgo: elapsed) == due)
+  }
+
+  @Test(
+    arguments: [
+      (samplePR(reviewDecision: .reviewRequired, checks: "SUCCESS", reviewDecisionRead: true), 30_000),
+      (samplePR(reviewDecision: .changesRequested, checks: "SUCCESS", reviewDecisionRead: true), 30_000),
+      (
+        samplePR(verdicts: [sampleVerdict("alex", "CHANGES_REQUESTED")], checks: "SUCCESS", reviewDecisionRead: true),
+        30_000
+      ),
+      (samplePR(checks: "SUCCESS", reviewRequests: ["alex"], reviewDecisionRead: true), 30_000),
+      (samplePR(checks: "SUCCESS"), 30_000),
+      (samplePR(reviewDecision: .approved, checks: "SUCCESS", reviewDecisionRead: true), 300_000),
+      (
+        samplePR(reviewDecision: .approved, checks: "SUCCESS", reviewRequests: ["alex"], reviewDecisionRead: true),
+        300_000
+      ),
+      (samplePR(draft: true, reviewDecision: .reviewRequired, checks: "SUCCESS", reviewDecisionRead: true), 300_000),
+      (samplePR(state: .merged, reviewDecision: .reviewRequired, checks: "SUCCESS", reviewDecisionRead: true), 300_000),
+      (
+        samplePR(state: .closed, reviewDecision: .changesRequested, checks: "SUCCESS", reviewDecisionRead: true),
+        300_000
+      ),
+    ] as [(PullRequest, Int64)])
+  func prIsDueAfterThePendingIntervalOnlyWhileItAwaitsAReview(_ pr: PullRequest, _ interval: Int64) {
+    #expect(!isDue(pr, polledAgo: interval - 1))
+    #expect(isDue(pr, polledAgo: interval))
   }
 
   @Test(arguments: [(30_000, false), (300_000, true)] as [(Int64, Bool)])

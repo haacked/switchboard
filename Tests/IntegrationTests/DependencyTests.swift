@@ -206,9 +206,13 @@ private func body(_ github: FakeGitHub, _ text: String) {
   @Test func retargetReadBeforeTheBaseMergeStillResumesTheSession() throws {
     let github = try FakeGitHub()
     stack(github)
-    // A settled base polls only at the idle interval. The dependent PR's
-    // UNKNOWN mergeability keeps it due at every poll.
-    github.change(122953) { $0["mergeable"] = "MERGEABLE" }
+    // A settled base, mergeable and approved, polls only at the idle
+    // interval. The dependent PR's UNKNOWN mergeability keeps it due at every
+    // poll.
+    github.change(122953) {
+      $0["mergeable"] = "MERGEABLE"
+      $0["reviewDecision"] = "APPROVED"
+    }
     let sbd = try Instance.withGitHub(github)
     _ = try sbd.session(in: posthog, branch: baseBranch, folder: "base")
     let top = try sbd.session(in: posthog, branch: dependentBranch, folder: "top")

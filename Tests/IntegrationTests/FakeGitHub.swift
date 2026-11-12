@@ -175,6 +175,11 @@ final class FakeGitHub {
   /// The REST requests to `path`, whatever their query.
   func restRequests(to path: String) -> [RESTRequest] { restRequests.filter { $0.path == path } }
 
+  /// Whether a status request after the first `since` GraphQL requests read the PR with this node id.
+  func readStatus(of id: String, since: Int = 0) -> Bool {
+    requests.dropFirst(since).contains { $0.kind == "status" && $0.ids.contains(id) }
+  }
+
   static func recorded(_ name: String) throws -> [JSON] {
     let text = try String(contentsOfFile: "\(fixtures)/\(name)", encoding: .utf8)
     return JSON.parse(text)?["data"]?["nodes"]?.array ?? []

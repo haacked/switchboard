@@ -495,6 +495,27 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
+  @Test func prThatWaitsOnReviewPollsUntilItIsApproved() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    // #122953's checks passed and its review decision is REVIEW_REQUIRED.
+    github.change(122953) { $0["mergeable"] = "MERGEABLE" }
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    let id = try #require(github.pr(122953)["id"]?.string)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.status == .reviewRequired)
+
+    github.change(122953) { $0["reviewDecision"] = "APPROVED" }
+    let waiting = github.requests.count
+    try sbd.poll()
+    #expect(github.readStatus(of: id, since: waiting))
+    #expect(try sbd.get(s.id).pr?.status == .approved)
+
+    let approved = github.requests.count
+    try sbd.poll()
+    #expect(!github.readStatus(of: id, since: approved))
+  }
+
   @Test func readsPendingPRsAndChangedCommentsAgain() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
