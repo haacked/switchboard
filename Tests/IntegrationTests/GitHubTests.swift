@@ -452,9 +452,6 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 18303)
   }
 
-  /// A PR that waits on review polls at the pending interval, so its
-  /// approval shows at the next poll. Once approved, it polls at the idle
-  /// interval.
   @Test func prThatWaitsOnReviewPollsUntilItIsApproved() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
@@ -462,21 +459,18 @@ extension FakeGitHub {
     github.change(122953) { $0["mergeable"] = "MERGEABLE" }
     let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
     let id = try #require(github.pr(122953)["id"]?.string)
-    let readsPR = { (since: Int) in
-      github.requests.dropFirst(since).contains { $0.kind == "status" && $0.ids.contains(id) }
-    }
     try sbd.poll()
     #expect(try sbd.get(s.id).pr?.status == .reviewRequired)
 
     github.change(122953) { $0["reviewDecision"] = "APPROVED" }
     let waiting = github.requests.count
     try sbd.poll()
-    #expect(readsPR(waiting))
+    #expect(github.readStatus(of: id, since: waiting))
     #expect(try sbd.get(s.id).pr?.status == .approved)
 
     let approved = github.requests.count
     try sbd.poll()
-    #expect(!readsPR(approved))
+    #expect(!github.readStatus(of: id, since: approved))
   }
 
   @Test func readsPendingPRsAndChangedCommentsAgain() throws {

@@ -285,8 +285,7 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
     try sbd.poll()
 
-    let read = github.requests.dropFirst(before).contains { $0.kind == "status" && $0.ids.contains(id) }
-    #expect(read == (source != .neither))
+    #expect(github.readStatus(of: id, since: before) == (source != .neither))
   }
 
   @Test func aQueueWaitResumesTheSessionWithTrunksLabelAndDescription() throws {
