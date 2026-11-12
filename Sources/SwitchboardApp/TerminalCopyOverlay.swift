@@ -33,7 +33,8 @@ final class TerminalCopyOverlay: NSResponder {
   private var blocks: [TerminalBlock] = []
   private var shown: TerminalBlock?
   private var fetching = false
-  private var fetchQueued = false
+  private var fetchRequested = false
+  private var pendingFetch: Task<Void, Never>?
   private var lastFetch: ContinuousClock.Instant?
   private var copiedUntil: ContinuousClock.Instant?
 
@@ -67,6 +68,7 @@ final class TerminalCopyOverlay: NSResponder {
     if let monitor { NSEvent.removeMonitor(monitor) }
     monitor = nil
     host.terminal.setProcessOutputHandler(nil)
+    pendingFetch?.cancel()
     if let trackingArea { host.removeTrackingArea(trackingArea) }
     trackingArea = nil
     button.removeFromSuperview()
@@ -140,46 +142,40 @@ final class TerminalCopyOverlay: NSResponder {
 
   private func rematch() { blocks = TerminalBlocks.find(rows: rows, sources: sources) }
 
-  /// Reads the transcript at most once per `fetchInterval`. A request that arrives during a read or inside the
-  /// interval runs once the read or the interval ends. The transcript gets a reply's last lines as the screen
-  /// settles. No later screen change would ask for them.
+  /// Reads the transcript at most once per `fetchInterval`. A request inside the interval runs when the interval
+  /// ends, and a request during a read runs one interval after that read. The transcript gets a reply's last
+  /// lines as the screen settles. No later screen change would ask for them.
   private func fetchIfStale() {
     if fetching {
-      fetchQueued = true
+      fetchRequested = true
       return
     }
-    if let lastFetch {
-      let wait = Self.fetchInterval - (ContinuousClock.now - lastFetch)
-      if wait > .zero {
-        guard !fetchQueued else { return }
-        fetchQueued = true
-        Task { @MainActor [weak self] in
-          try? await Task.sleep(for: wait)
-          self?.runQueuedFetch()
-        }
-        return
+    guard pendingFetch == nil else { return }
+    let wait = lastFetch.map { Self.fetchInterval - (ContinuousClock.now - $0) } ?? .zero
+    if wait > .zero {
+      pendingFetch = Task { @MainActor [weak self] in
+        try? await Task.sleep(for: wait)
+        guard let self, !Task.isCancelled else { return }
+        pendingFetch = nil
+        if pointer != nil { fetchIfStale() }
       }
+      return
     }
     fetching = true
     loadBlockSources { [weak self] sources in
       guard let self else { return }
       fetching = false
       lastFetch = ContinuousClock.now
-      if fetchQueued {
-        // The read that just finished may predate the request, so the queued one waits out a full interval.
-        fetchQueued = false
+      if sources != self.sources {
+        self.sources = sources
+        rematch()
+        place()
+      }
+      if fetchRequested {
+        fetchRequested = false
         fetchIfStale()
       }
-      guard sources != self.sources else { return }
-      self.sources = sources
-      rematch()
-      place()
     }
-  }
-
-  private func runQueuedFetch() {
-    fetchQueued = false
-    if pointer != nil { fetchIfStale() }
   }
 
   /// Shows the button on the block under the pointer, or hides it.
