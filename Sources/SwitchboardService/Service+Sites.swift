@@ -182,13 +182,18 @@ extension Service {
       try remote.awaitReady(seconds: seconds)
       // A host reconciled on this connection skips the host's queue, so a request never waits behind a spool cut.
       if let host = remote.hostName, let reconciles = hostQueues[host],
-        !queue.sync(execute: { reconciledOn[host] != nil && reconciledOn[host] == remote.facts?.epoch })
+        !queue.sync(execute: { isReconciled(host, on: remote.facts?.epoch) })
       {
         try reconciles.sync { try reconcile(host) }
       }
     } else {
       try site.requireReady()
     }
+  }
+
+  /// Whether a reconcile finished on the host's connection `connection`. It runs on the state queue.
+  func isReconciled(_ host: String, on connection: Int?) -> Bool {
+    connection != nil && reconciledOn[host] == connection
   }
 
   /// A fresh snapshot of the host, read off the state queue.
@@ -219,7 +224,7 @@ extension Service {
         site.link.connect()
       }
       // One read of the status decides both, so the reason below is the one of the state that was judged.
-      let read = status.state == .connected && reconciledOn[host] == status.connection
+      let read = status.state == .connected && isReconciled(host, on: status.connection)
       if !read {
         let waits =
           status.state == .connected ? "sbd has not read it since it connected" : "its link is \(status.state.rawValue)"

@@ -265,16 +265,12 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
 
   /// Appends a spool line that sbd never received on the socket, as a hook does while the forward is down.
   private func appendUnreceivedLine(_ sbd: Instance, session: String, marker: String) throws -> String {
-    let line =
-      JSON.object([
-        "v": 1, "id": .string(Instance.eventId(ns: Instance.clockNs())), "session": .string(session),
-        "payload": Instance.probePayload(marker),
-      ]).text + "\n"
+    let line = spoolLine(id: Instance.eventId(ns: Instance.clockNs()), session: session, marker: marker)
     let handle = try #require(FileHandle(forWritingAtPath: sbd.boxSpool))
     try handle.seekToEnd()
-    try handle.write(contentsOf: Data(line.utf8))
+    try handle.write(contentsOf: line)
     try handle.close()
-    return line
+    return String(decoding: line, as: UTF8.self)
   }
 
   /// Keeps the link up, spools hooks that sbd records from the socket and one that it never received, and lets

@@ -50,7 +50,7 @@ extension Service {
     do {
       let facts = try site.prepare()
       connection = facts.epoch
-      if queue.sync(execute: { reconciledOn[host] == facts.epoch }) { return }
+      if queue.sync(execute: { isReconciled(host, on: facts.epoch) }) { return }
       try reconcileSpool(host, site, facts)
       try reconcileTurns(host, site, facts)
       try reconcileTranscripts(host, site)
@@ -91,6 +91,7 @@ extension Service {
     let text = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     guard r.status == 0, let data = text.isEmpty ? Data() : Data(base64Encoded: text, options: .ignoreUnknownCharacters)
     else { throw APIError("can't read \(path) on \(host): \(r.problem)") }
+    // The script refuses a larger file before it prints, but the file can grow between `wc` and `head`.
     guard data.count <= spoolLimitBytes else { throw oversizedSpool(path, host) }
     return data
   }
