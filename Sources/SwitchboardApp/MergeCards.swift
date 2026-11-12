@@ -2,13 +2,6 @@ import SwiftUI
 import SwitchboardCore
 
 extension SessionSummary {
-  /// Whether sbd can merge or enqueue the session's PR: it is Ready to merge
-  /// and sbd knows how its repository merges.
-  var canMerge: Bool {
-    guard state == .readyToMerge, let method = pr?.mergeMethod else { return false }
-    return method != .unknown
-  }
-
   var enqueues: Bool { pr?.mergeMethod?.enqueues == true }
 
   /// The base branch of the session's open PR while the PR conflicts with

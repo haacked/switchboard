@@ -301,8 +301,3 @@ struct SessionView: View {
     .background(.bar)
   }
 }
-
-extension SessionSummary {
-  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
-  var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
-}
