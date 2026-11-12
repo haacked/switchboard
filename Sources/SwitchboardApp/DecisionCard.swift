@@ -51,6 +51,13 @@ struct DecisionCard: View {
     }
   }
 
+  /// Whether the item's Details holds this card's call, so the card can
+  /// leave it out. An item from an older sbd has no call in its Details, and
+  /// its card then shows the call.
+  static func detailsHoldCall(cardSession: String, cardRef: String, of item: TriageItem, session: String) -> Bool {
+    cardSession == session && cardRef == item.ref && item.details.toolInput != nil
+  }
+
   /// Whether the card shows its summary and its callouts as two columns
   /// when it is wide enough. A card without either one keeps a single stack.
   static func splitsSummary(_ item: TriageItem) -> Bool {
@@ -84,13 +91,13 @@ struct DecisionCard: View {
       MergeBatch(sessions: session.readyToMergeSessions(all: model.sessions))
     }
     if item.source == .card {
-      // Every other card shows its whole tool call, which an approval needs to see.
+      // An approval needs to see the whole tool call. A card leaves it out only when the item's Details shows it.
       let cards = Card.inbox(session, all: model.sessions)
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
-      // Details holds the call and message text of the item's own card only.
       ForEach(cards) {
         CardView(
-          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref)
+          card: $0, draft: model.draft(for: $0),
+          compact: Self.detailsHoldCall(cardSession: $0.session, cardRef: $0.ref, of: item, session: session.id))
       }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
