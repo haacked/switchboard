@@ -43,7 +43,9 @@ enum RemoteShellProtocol {
   /// ends in time. A `sleep` that the subshell ran itself would run on for the whole timeout
   /// after every command, because ending a subshell does not end its child. The `sleep` sends
   /// stderr to /dev/null before it opens the FIFO, because bash reports an open that a signal
-  /// interrupts.
+  /// interrupts. The subshell creates `$sb_d/t` before it ends the program. A program that
+  /// exits 0 on the signal, as a tmux client does, then still answers with 143, so a command
+  /// that its timeout ended never reads as one that succeeded.
   ///
   /// `sb_emit` runs one `wc` on both files from inside `$sb_d`, so the words of its output are
   /// `<stdout bytes> o <stderr bytes> e <sum> total` whatever the folder's name holds.
@@ -71,12 +73,16 @@ enum RemoteShellProtocol {
       sb_w=
       if [ -n "$sb_t" ]; then
         sleep "$sb_t" 2>/dev/null >"$sb_d/f" & sb_k=$!
-        ( read sb_z <"$sb_d/f"; kill -TERM "$sb_c"; sleep 2; kill -KILL "$sb_c" ) >/dev/null 2>&1 & sb_w=$!
+        ( read sb_z <"$sb_d/f"; : >"$sb_d/t"; kill -TERM "$sb_c"; sleep 2; kill -KILL "$sb_c" ) >/dev/null 2>&1 & sb_w=$!
       fi
       wait "$sb_c" 2>/dev/null; sb_x=$?
       if [ -n "$sb_w" ]; then
         kill "$sb_w" 2>/dev/null; wait "$sb_w" 2>/dev/null
         kill "$sb_k" 2>/dev/null; wait "$sb_k" 2>/dev/null
+        if [ -e "$sb_d/t" ]; then
+          rm -f "$sb_d/t" || exit 97
+          [ "$sb_x" -ne 0 ] || sb_x=143
+        fi
       fi
       sb_emit "$sb_n" "$sb_x"
       rm -f "$sb_d/i" "$sb_d/o" "$sb_d/e" || exit 97
@@ -178,6 +184,11 @@ enum RemoteShellProtocol {
 
   // The file scripts. Each is the argv of one command, and the path is an argv word.
 
+  /// The status with which a file script answers no: the file is missing, is not of the kind that the script
+  /// reads, or can't be read. No tool that a script runs exits with it, so a tool's own failure, a shell that
+  /// can't run the script, and a timeout each give another status.
+  static let noStatus: Int32 = 3
+
   private static func script(_ text: String, _ arguments: [String]) -> [String] {
     ["/bin/sh", "-c", text, "sb"] + arguments
   }
@@ -187,31 +198,35 @@ enum RemoteShellProtocol {
   }
 
   /// It refuses anything but a regular file before it opens it, so a FIFO can't block the shell.
-  /// `head -c 0` fails on macOS, so a count of 0 has its own branch.
+  /// `head -c 0` fails on macOS, so a count of 0 has its own branch. A shell ends with its own status when
+  /// `exec` can't open the file, so the script checks that it can read the file first.
   static func read(_ path: String, from offset: UInt64, count: Int?) -> [String] {
     let start = offset >= UInt64(Int64.max) ? Int64.max : Int64(offset) + 1
     return script(
-      #"[ -f "$1" ] || exit 1; exec <"$1" || exit 1; if [ "$3" = all ]; then exec tail -c "+$2"; "#
+      #"[ -f "$1" ] && [ -r "$1" ] || exit \#(noStatus); exec <"$1"; "#
+        + #"if [ "$3" = all ]; then exec tail -c "+$2"; "#
         + #"elif [ "$3" -eq 0 ]; then exit 0; else tail -c "+$2" | head -c "$3"; fi"#,
       [path, String(start), count.map { String($0) } ?? "all"])
   }
 
   static func size(_ path: String, _ format: StatFormat) -> [String] {
-    script(#"[ -f "$1" ] && [ -r "$1" ] || exit 1; exec stat -L \#(statArguments(format)) -- "$1""#, [path])
+    script(
+      #"[ -f "$1" ] && [ -r "$1" ] || exit \#(noStatus); exec stat -L \#(statArguments(format)) -- "$1""#, [path])
   }
 
-  static func exists(_ path: String) -> [String] { script(#"[ -e "$1" ]"#, [path]) }
+  static func exists(_ path: String) -> [String] { script(#"[ -e "$1" ] || exit \#(noStatus)"#, [path]) }
 
-  static func isFolder(_ path: String) -> [String] { script(#"[ -d "$1" ]"#, [path]) }
+  static func isFolder(_ path: String) -> [String] { script(#"[ -d "$1" ] || exit \#(noStatus)"#, [path]) }
 
   static func modified(_ path: String, _ format: StatFormat) -> [String] {
-    script(#"exec stat \#(statArguments(format)) -- "$1""#, [path])
+    script(
+      #"[ -e "$1" ] || [ -L "$1" ] || exit \#(noStatus); exec stat \#(statArguments(format)) -- "$1""#, [path])
   }
 
   /// Prints each name in the folder with a NUL after it.
   static func list(_ folder: String) -> [String] {
     script(
-      #"cd -- "$1" 2>/dev/null || exit 1; for f in * .*; do case $f in .|..) continue;; esac; "#
+      #"cd -- "$1" 2>/dev/null || exit \#(noStatus); for f in * .*; do case $f in .|..) continue;; esac; "#
         + #"[ -e "$f" ] || [ -L "$f" ] || continue; printf '%s\0' "$f"; done"#,
       [folder])
   }

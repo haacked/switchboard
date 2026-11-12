@@ -17,15 +17,16 @@ extension Service {
   /// request marks the event `allowed`. It captures the screens off the state
   /// queue.
   func closeGoneDialogs() {
-    let due: [(id: String, pane: String)] = queue.sync {
+    let due: [(id: String, pane: String, site: any SessionSite)] = queue.sync {
       entries.keys.sorted().compactMap { id in
         guard entries[id]?.facts.cards.contains(where: DialogWatch.watches) == true, case .running = claudeState(id)
         else { return nil }
-        return (id, paneName(id, .claude))
+        guard let site = try? site(of: id) else { return nil }
+        return (id, paneName(id, .claude), site)
       }
     }
     guard !due.isEmpty else { return }
-    let screens = due.map { ($0.id, try? host.screen($0.pane)) }
+    let screens = due.map { ($0.id, try? $0.site.screen($0.pane)) }
     queue.sync {
       for case (let id, let screen?) in screens {
         guard let cards = entries[id]?.facts.cards, let left = entries[id]?.dialogs.check(cards, screen: screen)
@@ -45,7 +46,7 @@ extension Service {
     let (pane, dialog) = try shownDialog(card)
     switch answer {
     case .yes: try pick("Yes", card, pane, dialog, ClaudeScreen.isYes, key: "Up")
-    case .escape: try host.press(pane, ["Escape"])
+    case .escape: try site(of: card.session).terminals().press(pane, ["Escape"])
     }
   }
 
@@ -82,9 +83,10 @@ extension Service {
   /// dialog that still shows. This runs on the state queue.
   func dialogClosed(_ card: Card) -> Bool {
     let pane = paneName(card.session, .claude)
+    guard let site = try? site(of: card.session) else { return false }
     let deadline = Date() + 3
     while true {
-      if let screen = try? host.screen(pane), ClaudeScreen.dialog(screen) == nil { return true }
+      if let screen = try? site.screen(pane), ClaudeScreen.dialog(screen) == nil { return true }
       if Date() >= deadline { return false }
       usleep(100_000)
     }
@@ -97,10 +99,11 @@ extension Service {
   private func pick(
     _ name: String, _ card: Card, _ pane: String, _ dialog: [String], _ wanted: (String) -> Bool, key: String
   ) throws {
+    let terminals = try site(of: card.session).terminals()
     let deadline = Date() + 1
     var item = ClaudeScreen.highlighted(dialog)
     while let current = item, !wanted(current), Date() < deadline {
-      try host.press(pane, [key])
+      try terminals.press(pane, [key])
       repeat {
         usleep(50_000)
         item = cardDialog(card, pane).flatMap(ClaudeScreen.highlighted)
@@ -109,12 +112,12 @@ extension Service {
     guard let item, wanted(item) else {
       throw APIError("can't pick \(name) in card \(card.id)'s dialog. Answer it in the terminal")
     }
-    try host.press(pane, ["Enter"])
+    try terminals.press(pane, ["Enter"])
   }
 
   /// The lines of the card's dialog, or nil when the screen doesn't show it.
   private func cardDialog(_ card: Card, _ pane: String) -> [String]? {
-    guard let screen = try? host.screen(pane), let dialog = ClaudeScreen.dialog(screen),
+    guard let screen = try? site(of: card.session).screen(pane), let dialog = ClaudeScreen.dialog(screen),
       ClaudeScreen.shows(card, dialog)
     else { return nil }
     return dialog

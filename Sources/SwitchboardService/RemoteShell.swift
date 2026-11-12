@@ -101,17 +101,19 @@ final class RemoteShell: @unchecked Sendable {
   /// What the shell answered in the handshake, or nil before the handshake.
   var ready: RemoteShellProtocol.Ready? { state.withLock { handshake } }
 
-  /// Runs one command. Only one runs at a time. It throws when the shell is closed, when it has
-  /// not answered the handshake, and when `RemoteShellProtocol.request` refuses the command.
-  /// Those throws send nothing and leave the shell as it was. It also throws when the shell
-  /// closes before the whole answer arrives, when the answer breaks the framing, and when
-  /// `deadline` seconds pass. Each of those throws also closes the shell.
+  /// Runs one command. Only one runs at a time. The `deadline` seconds count from the call, so they
+  /// include the wait for an earlier command. It throws when the shell is closed, when it has not
+  /// answered the handshake, when `RemoteShellProtocol.request` refuses the command, and when the
+  /// deadline passes before the command is sent. Those throws send nothing and leave the shell as
+  /// it was. It also throws when the shell closes before the whole answer arrives, when the answer
+  /// breaks the framing, and when the deadline passes after the command was sent. Each of those
+  /// throws also closes the shell.
   func run(_ argv: [String], env: [String: String]?, input: Data?, timeout: Double?, deadline: Double?) throws
     -> RemoteResult
   {
     let limit = deadline.map { Date().addingTimeInterval($0) }
     do {
-      return try commands.withLock {
+      return try holdingCommands(until: limit) {
         try state.withLock {
           if closed { throw APIError("the host's shell is closed") }
           if handshake == nil { throw APIError("the host's shell has not answered the handshake") }
@@ -120,7 +122,13 @@ final class RemoteShell: @unchecked Sendable {
           seq: seq + 1, argv: argv, env: env, input: input, timeout: timeout)
         seq += 1
         state.withLock { awaitingAnswer = true }
-        try send(request, until: limit)
+        do {
+          try send(request, until: limit)
+        } catch let unsent as APIError {
+          seq -= 1
+          state.withLock { awaitingAnswer = false }
+          throw unsent
+        }
         let line = try take(until: limit) { unread in
           if let newline = unread.prefix(RemoteShellProtocol.maxLineBytes + 1).firstIndex(of: UInt8(ascii: "\n")) {
             return newline - unread.startIndex + 1
@@ -143,6 +151,16 @@ final class RemoteShell: @unchecked Sendable {
       end(failure.reason)
       throw APIError(failure.reason)
     }
+  }
+
+  private static let notSent = APIError(
+    "the host's shell ran another command until the deadline, so sbd did not send this one")
+
+  /// Runs `body` while it holds `commands`. It throws, and runs nothing, when the lock is not free before `limit`.
+  private func holdingCommands<T>(until limit: Date?, _ body: () throws -> T) throws -> T {
+    guard commands.lock(before: limit ?? .distantFuture) else { throw Self.notSent }
+    defer { commands.unlock() }
+    return try body()
   }
 
   /// Ends the process. A command in flight throws. The process gets SIGTERM when it still runs
@@ -256,11 +274,16 @@ final class RemoteShell: @unchecked Sendable {
     }
   }
 
+  /// Writes `data` to the shell. When the deadline passes before the first byte is written, it throws `notSent`
+  /// and leaves the shell open. When the deadline passes after part of `data` was written, it throws `Broken`.
   private func send(_ data: Data, until limit: Date?) throws {
     let descriptor = writer
     var sent = 0
     while sent < data.count {
-      if let limit, Date() >= limit { throw Broken(reason: "the host did not take the command before the deadline") }
+      if let limit, Date() >= limit {
+        if sent == 0 { throw Self.notSent }
+        throw Broken(reason: "the host did not take the command before the deadline")
+      }
       let (count, code): (Int, Int32) = input.withLock {
         guard inputOpen else { return (-1, EBADF) }
         let count = data.withUnsafeBytes { write(descriptor, $0.baseAddress! + sent, $0.count - sent) }
