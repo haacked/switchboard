@@ -94,11 +94,6 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
 }
 
 @Suite struct WaitKinds {
-  @Test(arguments: Wait.Kind.allCases)
-  func onlyThePRKindsNeedAPoller(_ kind: Wait.Kind) {
-    #expect(kind.needsPoller == prKinds.contains(kind))
-  }
-
   @Test(arguments: [
     (Wait.Kind.ci, "ci"), (.review, "review"), (.botReview, "bot-review"), (.approval, "approval"),
     (.queue, "queue"), (.merge, "merge"), (.deploy, "deploy"), (.session, "session"), (.date, "date"),

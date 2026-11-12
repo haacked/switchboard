@@ -155,11 +155,14 @@ new_session() {
   wait_for 30 screen_has_stub || check=stub fail "the stand-in claude never drew its screen"
 }
 
-# What the stand-in receives, in order: a b c, Return, Ctrl-C, Option-b, Up,
+# What the stand-in receives, in order: a b c, Return, Shift-Return, Option-Return, Ctrl-C, Option-b, Up,
 # Down, Left, Backspace, Escape, Tab, Shift-Tab, x, a dead key followed by e
-# (é), and a bracketed paste of two lines. Marked text and modifier keys on
-# their own send nothing. Shift-Tab is ESC [ Z. A pasted newline is a line feed.
-expected="61 62 63 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 1b 5b 5a 78 c3 a9 1b 5b 32 30 30 7e"
+# (é), Shift-Return while marked text is set, and a bracketed paste of two lines.
+# Marked text and modifier keys on their own send nothing. Shift-Tab is ESC [ Z.
+# A pasted newline is a line feed. Shift-Return in the Claude pane is ESC CR, as
+# Option-Return is, so Claude Code inserts a new line. While marked text is set,
+# Shift-Return goes to SwiftTerm. No input method takes it here, so SwiftTerm sends CR.
+expected="61 62 63 0d 1b 0d 1b 0d 03 1b 62 1b 5b 41 1b 5b 42 1b 5b 44 7f 1b 09 1b 5b 5a 78 c3 a9 0d 1b 5b 32 30 30 7e"
 expected+=" 70 61 73 74 65 20 6c 69 6e 65 20 6f 6e 65 0a 70 61 73 74 65 20 6c 69 6e 65 20 74 77 6f 0a 1b 5b 32 30 31 7e"
 
 check_terminal() {

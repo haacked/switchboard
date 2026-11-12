@@ -74,7 +74,8 @@ public enum ActivityKinds {
 
 /// The app's commands that the activity log names.
 public enum ActivityCommand: String, CaseIterable, Sendable {
-  case newSession, importSessions, newGroup, nextNeedingYou, openManager, showInbox, showBoard, filterByOrg
+  case newSession, newSessionInGroup, importSessions, newGroup, nextNeedingYou, openManager, showInbox, showBoard,
+    filterByOrg
   case searchSessions, nextSession, previousSession, back, forward, recentPlaces, focusList, focusTerminal
   case stop, resume, toggleShell, toggleDone, acknowledge
 

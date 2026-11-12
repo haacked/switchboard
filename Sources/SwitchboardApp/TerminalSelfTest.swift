@@ -127,8 +127,9 @@ enum TerminalSelfTest {
   }
 
   /// Marked text, a dead key, and modifier keys on their own. The checks that read the pane's state log a
-  /// result here. What reaches the program shows in `sb screen`: é (c3 a9) after the dead key, and, for a
-  /// program that asked for the Kitty keyboard protocol's "report all keys" level, the modifier events.
+  /// result here. What reaches the program shows in `sb screen`: é (c3 a9) after the dead key, SwiftTerm's CR for
+  /// a Shift-Return during marked text, and, for a program that asked for the Kitty keyboard protocol's "report
+  /// all keys" level, the modifier events.
   ///
   /// Synthetic key events reach the input context, but they don't start a dead key, because the keyboard
   /// layout's state machine only runs for events from the keyboard. So the check starts the composition
@@ -154,6 +155,12 @@ enum TerminalSelfTest {
     key(pane, "é", "e", code: code(for: "e"))
     log("dead key then e: composing \(pane.hasMarkedText())")
     await pause()
+
+    pane.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0), replacementRange: none)
+    key(pane, "\r", code: 36, mods: .shift)
+    await pause()
+    log("shift-return while composing: composing \(pane.hasMarkedText())")
+    pane.unmarkText()
 
     modifier(pane, code: 0x38, flags: .shift)
     modifier(pane, code: 0x38, flags: [])
@@ -218,6 +225,10 @@ enum TerminalSelfTest {
     key(pane, "\r", code: 36)
     await pause()
     log("typed abc, return")
+    key(pane, "\r", code: 36, mods: .shift)
+    key(pane, "\r", code: 36, mods: .option)
+    await pause()
+    log("shift-return, option-return")
     key(pane, "\u{03}", "c", code: code(for: "c"), mods: .control)
     await pause()
     log("ctrl-c")

@@ -668,7 +668,7 @@ extension Instance {
 
     try sbd.sb("plan", "artifact", "read", id)
 
-    try sbd.waitFor("the new copy", fetch: { try sbd.planSummary(id) }, until: { $0.copyStale == false })
+    _ = try sbd.waitFor("the new copy", fetch: { try sbd.planSummary(id) }, until: { $0.copyStale == false })
   }
 
   @Test func planWithNoCopyIsStale() throws {

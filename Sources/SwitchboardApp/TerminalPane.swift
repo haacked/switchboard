@@ -11,6 +11,12 @@ struct TerminalPane: NSViewRepresentable {
   /// The terminal takes keyboard focus once it is in a window, then calls `onFocus`.
   var takesFocus = false
   var onFocus: (() -> Void)? = nil
+  /// When true, Shift+Return sends ESC CR, which Claude Code reads as a new line in its prompt. Leave it false
+  /// for a shell, where Shift+Return sends CR and runs the command.
+  var newlineOnShiftReturn = false
+  /// Reads the blocks of the session's recent assistant messages for the copy button over quotes and code blocks. A pane
+  /// without one shows no copy button.
+  var loadBlockSources: BlockSourcesLoader? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator(onExit: onExit) }
 
@@ -33,9 +39,12 @@ struct TerminalPane: NSViewRepresentable {
   func updateNSView(_ view: PaddedTerminalView, context: Context) {
     view.onFocus = onFocus
     view.focusWhenInWindow = takesFocus
+    view.terminal.newlineOnShiftReturn = newlineOnShiftReturn
+    view.showCopyButtons(loadBlockSources)
   }
 
   static func dismantleNSView(_ view: PaddedTerminalView, coordinator: Coordinator) {
+    view.showCopyButtons(nil)
     view.terminal.terminate()
   }
 
@@ -89,6 +98,19 @@ final class PaddedTerminalView: NSView {
     focusIfAsked()
   }
 
+  private(set) var copyOverlay: TerminalCopyOverlay?
+
+  /// Starts the copy button over quotes and code blocks with `loadBlockSources`, or stops it when that is nil. A
+  /// running overlay keeps the loader it started with, because SwiftUI passes a new closure on every update.
+  func showCopyButtons(_ loadBlockSources: BlockSourcesLoader?) {
+    if let loadBlockSources {
+      if copyOverlay == nil { copyOverlay = TerminalCopyOverlay(host: self, loadBlockSources: loadBlockSources) }
+    } else {
+      copyOverlay?.stop()
+      copyOverlay = nil
+    }
+  }
+
   private func focusIfAsked() {
     guard focusWhenInWindow, let window, window.makeFirstResponder(terminal) else { return }
     focusWhenInWindow = false
@@ -103,6 +125,7 @@ final class PaddedTerminalView: NSView {
 
   override func resizeSubviews(withOldSize oldSize: NSSize) {
     placeTerminal()
+    copyOverlay?.scheduleRefresh()
   }
 
   private func placeTerminal() {

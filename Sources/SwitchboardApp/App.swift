@@ -31,9 +31,15 @@ struct SwitchboardApp: App {
       CommandGroup(after: .newItem) {
         // A sheet blocks the window's buttons but not the menu bar. Without
         // the check, a menu command opens a second sheet over the first.
-        Button("New Session…") { model.track(.newSession) { model.showingNew = true } }
+        Button("New Session…") { model.track(.newSession) { model.openNewSession() } }
           .keyboardShortcut("n")
           .disabled(model.presentingSheet)
+        let newSessionGroup = model.newSessionGroup
+        Button(newSessionGroup.map { "New Session in \($0.name)…" } ?? "New Session in Group…") {
+          model.track(.newSessionInGroup) { model.openNewSession(group: newSessionGroup?.id) }
+        }
+        .keyboardShortcut("n", modifiers: [.command, .shift])
+        .disabled(model.presentingSheet || newSessionGroup == nil)
         Button("Import Sessions…") { model.track(.importSessions) { model.showingImport = true } }
           .keyboardShortcut("i", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)

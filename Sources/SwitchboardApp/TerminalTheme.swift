@@ -56,8 +56,26 @@ struct TerminalTheme {
   }
 }
 
-/// A SwiftTerm view that recolors itself when the app or system switches between light and dark.
+/// A SwiftTerm view that recolors itself when the app or system switches between light and dark. With
+/// `newlineOnShiftReturn` set, Shift+Return sends ESC CR instead of CR.
 final class ThemedTerminalView: LocalProcessTerminalView {
+  /// Shift+Return sends `TerminalReturnKey.newline` instead of CR.
+  var newlineOnShiftReturn = false
+
+  // SwiftTerm's keyDown is not open. Without the kitty keyboard protocol, it passes Return to
+  // interpretKeyEvents, which it does not override. Its doCommand then sends CR.
+  override func interpretKeyEvents(_ eventArray: [NSEvent]) {
+    if newlineOnShiftReturn, let event = eventArray.first, eventArray.count == 1, event.type == .keyDown,
+      TerminalReturnKey.sendsNewline(
+        keyCode: event.keyCode, modifiers: event.modifierFlags, composing: hasMarkedText(),
+        kittyKeyboard: !keyboardEnhancementFlags.isEmpty)
+    {
+      send(TerminalReturnKey.newline)
+      return
+    }
+    super.interpretKeyEvents(eventArray)
+  }
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     TerminalTheme(appearance: effectiveAppearance).apply(to: self)

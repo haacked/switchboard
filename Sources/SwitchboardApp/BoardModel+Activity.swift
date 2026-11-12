@@ -193,7 +193,7 @@ extension BoardModel {
   // MARK: Terminal waits
 
   /// Starts timing how long the session's terminals take to become usable: the terminals have attached and
-  /// claude is live. `open` calls it once the selection rests. While claude isn't live, it asks sbd for the
+  /// claude is live. The connection calls it once the selection rests. While claude isn't live, it asks sbd for the
   /// session every 200 ms, for at most `terminalWaitLimitMs`.
   func beginTerminalWait(_ id: String) {
     guard activity.enabled == true, activity.terminalWaits[id] == nil else { return }
@@ -213,6 +213,14 @@ extension BoardModel {
       }
     }
     activity.terminalWaits[id] = wait
+  }
+
+  /// Times the session's terminal wait from a `TerminalConnection`'s progress.
+  func terminalObserver(_ id: String) -> TerminalConnection.Observer {
+    TerminalConnection.Observer(
+      opening: { [weak self] in self?.beginTerminalWait(id) },
+      opened: { [weak self] in self?.terminalsAttached(id) },
+      failed: { [weak self] in self?.recordError("open", $0) })
   }
 
   func terminalsAttached(_ id: String) {

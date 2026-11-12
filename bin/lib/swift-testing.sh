@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Sets `args` to the flags that swift needs to find Swift Testing in the
-# active developer directory. bin/test and bin/test-gui source it.
+# active developer directory, and defines build_tests. bin/test, bin/test-gui,
+# and CI source it.
 #
 # The Command Line Tools' build system can leave out the folder that holds
 # Swift Testing's macro plugin. SwiftPM's native build system, the default
@@ -34,4 +35,8 @@ require_swift_testing() {
   echo "The developer directory $dev has no Testing.framework." >&2
   echo "Install one of them, then select it with xcode-select -s or DEVELOPER_DIR." >&2
   exit 1
+}
+
+build_tests() {
+  swift build --build-tests ${args[@]+"${args[@]}"}
 }

@@ -362,7 +362,7 @@ import Testing
     }
 
     /// macOS sends arrow keys with the numeric pad and function flags set.
-    @Test(arguments: mapped, [EventModifiers.capsLock, .numericPad, .function, [.numericPad, .function]])
+    @Test(arguments: mapped, [EventModifiers.capsLock, .numericPad, .functionKey, [.numericPad, .functionKey]])
     func flagsOtherThanTheFourChangeNothing(_ mapping: (KeyEquivalent, NavAction), _ modifiers: EventModifiers) {
       #expect(NavKey.action(mapping.0, modifiers: modifiers) == mapping.1)
     }
