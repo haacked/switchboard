@@ -729,6 +729,16 @@ extension Instance {
   /// Lets the stub connect again and waits for the link.
   func restoreLink(_ name: String = "mini") throws {
     try clearSSHStub("refuse")
+    try connectHost(name)
+  }
+
+  /// The config.json key that makes a request that needs a host wait 2 s for the host's link, in place of 15 s.
+  /// A test that drops the link and expects a request to fail sets it.
+  static let shortHostWait: [String: JSON] = ["hostWaitSeconds": 2]
+
+  /// Connects the host's link and waits for it. A sbd with `shortHostWait` connects first, so its first request
+  /// that needs the host does not have to connect within the short wait.
+  func connectHost(_ name: String = "mini") throws {
     try sb("host", "connect", name)
     try waitForLink(name, .connected)
   }

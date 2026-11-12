@@ -121,13 +121,16 @@ public enum Spool {
 /// Holds a session's arriving events for a short window and releases them lowest id first. An event leaves
 /// only after it waited the window, and never ahead of a held event with a lower id.
 public struct HostEventOrder {
-  /// How long an event waits for an earlier one that is still on its way.
+  /// How long an event waits for an earlier one that is still on its way, unless a test sets another window.
   public static let windowMs: Int64 = 250
 
+  public let windowMs: Int64
   private var held: [HostEventID: Int64] = [:]
   private var lastReleased: HostEventID?
 
-  public init() {}
+  public init(windowMs: Int64 = HostEventOrder.windowMs) {
+    self.windowMs = windowMs
+  }
 
   /// Whether the buffer holds the id.
   public func holds(_ id: HostEventID) -> Bool { held[id] != nil }
@@ -144,7 +147,7 @@ public struct HostEventOrder {
   public mutating func due(now: Int64) -> [HostEventID] {
     var out: [HostEventID] = []
     for id in held.keys.sorted() {
-      guard let arrived = held[id], now - arrived >= Self.windowMs else { break }
+      guard let arrived = held[id], now - arrived >= windowMs else { break }
       out.append(id)
     }
     release(out)

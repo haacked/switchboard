@@ -151,15 +151,15 @@ extension Service {
     return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: seen)
   }
 
-  /// An interactive login shell gives claude the user's PATH and shell functions. The Claude pane starts claude
-  /// with these flags.
+  /// An interactive login shell gives claude the user's PATH and shell functions. The Claude pane and
+  /// `agentRows(at:)` both start claude with these flags, so both find the same claude.
   static let claudeShellFlags = ["-l", "-i", "-c"]
 
-  /// The rows of `claude agents --json` on a host, under the host's Claude login. The host's login shell runs
-  /// claude, as the Claude pane does, so the shell's PATH finds it. The shell prints a token first, and the
-  /// rows are what follows the token's line, so the output of a login file is not read as rows. claude gets
-  /// the environment of a pane's program and nothing from sbd's. It throws `HostUnread` unless the host
-  /// answered the run.
+  /// The rows of `claude agents --json` on a host, under the host's Claude login. The host's shell runs claude
+  /// with `claudeShellFlags`, as the Claude pane does. The shell prints a token first, and the rows are what
+  /// follows the token's line, so the output of a login or rc file is not read as rows. claude gets the
+  /// environment of a pane's program and nothing from sbd's. It throws `HostUnread` unless the host answered
+  /// the run.
   func agentRows(at site: RemoteSite, seen: Int64, timeout: Double) throws -> [ClaudeSession] {
     let host = site.config.name
     let token = "sb-agents-\(UUID().uuidString)"
@@ -167,7 +167,7 @@ extension Service {
     let r = try site.confirmed("claude agents") { machine in
       guard let facts = site.facts else { throw HostUnread(hostName: host, why: "setup has not run") }
       return try machine.run(
-        facts.shell, ["-lc", "printf '%s\\n' \(token); exec \(claude) agents --json"],
+        facts.shell, Service.claudeShellFlags + ["printf '%s\\n' \(token); exec \(claude) agents --json"],
         env: RemoteSite.environment(for: facts), input: nil, timeout: timeout)
     }
     guard r.status == 0, let mark = r.stdout.range(of: token + "\n") else {

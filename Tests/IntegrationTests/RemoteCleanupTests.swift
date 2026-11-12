@@ -20,11 +20,13 @@ extension Instance {
 @Suite(.blocking(timeLimit: .seconds(180))) struct RemoteCleanupTests {
   /// A remote session in a worktree on the branch of PR 122953, after a commit. GitHub reports the PR in `state`
   /// with that commit as its head, and the poller has read it. With `url`, the box repo pushes to another GitHub
-  /// repo, so the poller finds no PR for the branch.
-  private func finishedOnBox(_ github: FakeGitHub, state: String = "MERGED") throws -> (
-    Instance, Instance.BoxSession, String
-  ) {
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+  /// repo, so the poller finds no PR for the branch. With `shortHostWait`, a request waits 2 s for the link.
+  private func finishedOnBox(_ github: FakeGitHub, state: String = "MERGED", shortHostWait: Bool = false) throws
+    -> (Instance, Instance.BoxSession, String)
+  {
+    let wait = shortHostWait ? Instance.shortHostWait : [:]
+    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github).merging(wait) { $1 })
+    if shortHostWait { try sbd.connectHost() }
     let (_, origin) = try sbd.makeBoxRepoWithOrigin()
     let s = try sbd.startBoxWorktree(branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
@@ -241,7 +243,7 @@ extension Instance {
 
   @Test func cleanupWithTheLinkDownRefusesWithTheReasonAndChangesNothing() throws {
     let github = try FakeGitHub()
-    let (sbd, s, origin) = try finishedOnBox(github)
+    let (sbd, s, origin) = try finishedOnBox(github, shortHostWait: true)
     try sbd.dropLinkAndRefuse(refusal)
 
     try expectRefusal(sbd, s, origin: origin, saying: ["mini is not connected"])
@@ -274,6 +276,7 @@ extension Instance {
 
     let cleanup = try BackgroundSb(sbd, ["cleanup", s.id, "--json"])
     try sbd.waitFor("the check after the stop to reach the box's git", timeout: 45) { sbd.boxGitHeld }
+    #expect(!sbd.runs(s.pid), "the held check ran before claude stopped")
     try sbd.dropLinkAndRefuse(refusal)
     try sbd.releaseBoxGit()
     let r = cleanup.result()

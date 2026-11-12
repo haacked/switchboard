@@ -22,8 +22,9 @@ struct BoxFacts: Equatable {
   var folder: String { "\(home)/.sb" }
 
   /// Reads the setup script's answer: the home, tmux, git, python3, the shell, the user, the locale, and the
-  /// clock in ns, with a NUL after each. It throws for an answer that is cut short, for a home that is empty, not
-  /// absolute, or holds a newline, and for a host that lacks a tool.
+  /// clock in ns, with a NUL after each. The shell is empty when the host's `shell` key is not an absolute path to
+  /// an executable file there. It throws for an answer that is cut short, for a home that is empty, not absolute,
+  /// or holds a newline, for a host that lacks a tool, and for such a `shell` key.
   static func parse(_ answer: Data, epoch: Int, host: HostConfig, now: Int64) throws -> BoxFacts {
     let f = try RemoteSite.fields(answer, count: 8, of: "the setup answer of \(host.name)")
     let home = f[0]
@@ -40,6 +41,11 @@ struct BoxFacts: Equatable {
         throw APIError("\(host.name) reports \(name) at \"\(path)\", which is not absolute")
       }
       tools.append(path)
+    }
+    if let shell = host.shell, f[4].isEmpty {
+      throw APIError(
+        "\(host.name)'s shell key names \"\(shell)\", which is not an absolute path to an executable file on \(host.name)"
+      )
     }
     let clock = f[7]
     guard !clock.isEmpty, clock.utf8.allSatisfy({ $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9") }),
@@ -263,15 +269,26 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
   }
 
   /// Connects the link and waits up to `seconds` for setup to finish on a connection. It throws the reason when
-  /// the link is still down then, and at once when setup fails.
+  /// the link is still down then. A setup that fails while its connection stays up throws at once. A setup that
+  /// got no answer because its connection dropped runs again on the next connection, until the deadline.
   func awaitReady(seconds: Double) throws {
     link.connect()
     let deadline = Date().addingTimeInterval(seconds)
     while true {
       let status = link.status
       if status.state == .connected {
-        try prepare()
-        return
+        do {
+          try prepare()
+          return
+        } catch {
+          // A command reports a dropped link before the link's status does.
+          let dropped =
+            error is HostUnread ? waitToLeave(status.connection, until: deadline) : hasLeft(status.connection)
+          guard dropped else { throw error }
+          // Only the service's tick polls the link, so the next connection starts here.
+          link.connect()
+          continue
+        }
       }
       if Date() >= deadline {
         // A retry clears the link's error while it runs. The last failure still holds the cause.
@@ -282,10 +299,26 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     }
   }
 
+  private func hasLeft(_ connection: Int) -> Bool {
+    let status = link.status
+    return status.state != .connected || status.connection != connection
+  }
+
+  /// Waits until the link is no longer connected on `connection`. It returns false when the deadline passes first.
+  private func waitToLeave(_ connection: Int, until deadline: Date) -> Bool {
+    while !hasLeft(connection) {
+      if Date() >= deadline { return false }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return true
+  }
+
   /// Prints the facts, then creates the box's folders, writes tmux.conf, and points agent.sock at the
-  /// connection's agent. `$1` is the host's `tmux` key or empty, and `$2` is the text of tmux.conf. It creates
-  /// nothing under a home that `BoxFacts.parse` refuses. It exits 1, and changes nothing, when `.sb`, `.sb/bin`,
-  /// or `.sb/sessions` is a link.
+  /// connection's agent. `$1` is the host's `tmux` key or empty, `$2` is the text of tmux.conf, and `$3` is the
+  /// host's `shell` key or empty. The shell that it prints is `$3` when that is an absolute path to an executable
+  /// file, empty when it is not, and $SHELL when `$3` is empty. It creates nothing under a home that
+  /// `BoxFacts.parse` refuses. It exits 1, and changes nothing, when `.sb`, `.sb/bin`, or `.sb/sessions` is a
+  /// link.
   private static let setupScript = #"""
     set -f
     find_tool() {
@@ -310,7 +343,12 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     python=$(find_tool python3)
     clock=
     if [ -n "$python" ]; then clock=$("$python" -c 'import time; print(time.time_ns())' 2>/dev/null); fi
-    printf '%s\0' "$HOME" "$(find_tool "${1:-tmux}")" "$(find_tool git)" "$python" "$SHELL" "$(id -un)" "$LANG" "$clock"
+    sh=$SHELL
+    if [ -n "$3" ]; then
+      sh=
+      case $3 in /*) if [ -f "$3" ] && [ -x "$3" ]; then sh=$3; fi ;; esac
+    fi
+    printf '%s\0' "$HOME" "$(find_tool "${1:-tmux}")" "$(find_tool git)" "$python" "$sh" "$(id -un)" "$LANG" "$clock"
     case $HOME in /*) ;; *) exit 0 ;; esac
     case $HOME in *'
     '*) exit 0 ;; esac
@@ -378,8 +416,8 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     let r: CommandResult
     do {
       r = try machine.run(
-        "/bin/sh", ["-c", Self.setupScript, "sb", config.tmux ?? "", TerminalHost.configText], env: nil, input: nil,
-        timeout: Self.setupSeconds)
+        "/bin/sh", ["-c", Self.setupScript, "sb", config.tmux ?? "", TerminalHost.configText, config.shell ?? ""],
+        env: nil, input: nil, timeout: Self.setupSeconds)
     } catch {
       throw unread("setup got no answer: \(error)")
     }

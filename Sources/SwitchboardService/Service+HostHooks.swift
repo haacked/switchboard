@@ -11,8 +11,10 @@ struct HostEventStamp {
 
 /// The hook events of one session on a host that wait for their turn in id order.
 struct HostEventBuffer {
-  var order = HostEventOrder()
+  var order: HostEventOrder
   var payloads: [HostEventID: JSON] = [:]
+
+  init(windowMs: Int64) { order = HostEventOrder(windowMs: windowMs) }
 
   mutating func add(_ id: HostEventID, _ payload: JSON, at now: Int64) {
     order.add(id, at: now)
@@ -52,8 +54,8 @@ extension Service {
   /// that connection, the hook waits for the reconcile. An event whose id sbd holds or recorded is answered
   /// and skipped.
   /// A hook that waits for an answer is applied at once, after the session's waiting events with lower ids,
-  /// and holds its request when it opened a card. Any other hook waits `HostEventOrder.windowMs` for events
-  /// with lower ids and is answered at once.
+  /// and holds its request when it opened a card. Any other hook waits `hostEventWindowMs` for events with
+  /// lower ids and is answered at once.
   func handleHostHook(_ args: JSON, from host: String, hookGone: @escaping () -> Bool) throws -> Response {
     // The forward is up from the end of setup, before the reconcile has read the spool. A hook that arrives
     // then would be applied ahead of the earlier events that wait in the spool. So the reconcile runs first.
@@ -82,7 +84,7 @@ extension Service {
       guard let id = args["id"]?.string.flatMap(HostEventID.init) else {
         throw APIError("a hook from \(host) needs an event id")
       }
-      var buffer = hostEvents[session.id] ?? HostEventBuffer()
+      var buffer = hostEvents[session.id] ?? HostEventBuffer(windowMs: hostEventWindowMs)
       if try store.hasHostEvent(id) || buffer.order.holds(id) { return ([:], nil) }
       if buffer.order.isLate(id) {
         logLine("host \(host): the hook event \(id) of \(session.id) is late. sbd applied a later one first")
@@ -90,7 +92,7 @@ extension Service {
       buffer.add(id, payload, at: Service.uptimeMs())
       guard HostHook.waits(payload) else {
         hostEvents[session.id] = buffer
-        queue.asyncAfter(deadline: .now() + .milliseconds(Int(HostEventOrder.windowMs) + 1)) { [self] in
+        queue.asyncAfter(deadline: .now() + .milliseconds(Int(buffer.order.windowMs) + 1)) { [self] in
           releaseHostEvents(session.id)
         }
         return ([:], nil)

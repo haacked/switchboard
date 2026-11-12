@@ -174,12 +174,12 @@ extension Service {
 
   // MARK: Hosts
 
-  /// Connects the session's host, waits up to `seconds` for its site to be ready, and then runs the reconcile
-  /// unless it finished on this connection. It throws the reason when the host is still not ready or the
-  /// reconcile did not finish, and does nothing for a session on this Mac. It runs off the state queue.
-  func awaitSite(_ site: any SessionSite, seconds: Double = 15) throws {
+  /// Connects the session's host, waits up to `Config.hostWaitSeconds` for its site to be ready, and then runs
+  /// the reconcile unless it finished on this connection. It throws the reason when the host is still not ready
+  /// or the reconcile did not finish, and does nothing for a session on this Mac. It runs off the state queue.
+  func awaitSite(_ site: any SessionSite) throws {
     if let remote = site as? RemoteSite {
-      try remote.awaitReady(seconds: seconds)
+      try remote.awaitReady(seconds: config.hostWaitSeconds)
       // A host reconciled on this connection skips the host's queue, so a request never waits behind a spool cut.
       if let host = remote.hostName, let reconciles = hostQueues[host],
         !queue.sync(execute: { isReconciled(host, on: remote.facts?.epoch) })

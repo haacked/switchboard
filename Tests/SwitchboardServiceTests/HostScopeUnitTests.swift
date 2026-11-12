@@ -40,10 +40,11 @@ private let twoHosts: [String: JSON] = [
   "other": ["kind": "ssh", "destination": "haacked@other.local"],
 ]
 
-/// A service that holds a local session `l1`, mini's `m1`, and other's `o1`.
-private func withSessions(_ body: (Service) throws -> Void) throws {
+/// A service that holds a local session `l1`, mini's `m1`, and other's `o1`. Its order window is `windowMs`.
+private func withSessions(windowMs: Int64 = 20, _ body: (Service) throws -> Void) throws {
   try withHostService(hosts: twoHosts) { service, _ in
     service.queue.sync {
+      service.hostEventWindowMs = windowMs
       service.entries["l1"] = Service.Entry(session: session("l1", host: nil, name: "local"))
       service.entries["m1"] = Service.Entry(session: session("m1", host: "mini", name: "l1"))
       service.entries["o1"] = Service.Entry(session: session("o1", host: "other", name: "m1"))
@@ -57,8 +58,13 @@ extension Service {
   fileprivate func logged() throws -> [Event] { try queue.sync { try store.events() } }
 }
 
-/// Waits out the order window, so an event that sbd took is in the log.
-private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.windowMs) / 1000 + 0.3) }
+/// Waits until every event that the service took has left the order window, so the event is in the log.
+private func settle(_ service: Service) {
+  let left = waitUntil(seconds: 10) {
+    service.queue.sync { service.hostEvents.values.allSatisfy { $0.payloads.isEmpty } }
+  }
+  #expect(left, "an event stayed in the order window")
+}
 
 /// The scope of a request whose origin is a host: it changes nothing unless it is a hook for a session that sbd
 /// holds on that host. The origin is the socket's, and nothing in the request can change it.
@@ -70,9 +76,9 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
 
       let first = service.handle(hook(session: "m1", payload("own"), id: id), origin: .remote("mini"))
       let second = service.handle(hook(session: "m1", payload("changed"), id: id), origin: .remote("mini"))
-      settle()
+      settle(service)
       let third = service.handle(hook(session: "m1", payload("again"), id: id), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       #expect(first.ok && second.ok && third.ok)
       let recorded = try service.logged()
@@ -103,7 +109,7 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
         #expect(!answer.ok, "\(kind)")
         #expect(answer.error?.contains("that session is not on \(host)") == true, "\(answer.error ?? "")")
       }
-      settle()
+      settle(service)
 
       let recorded = try service.logged()
       #expect(recorded.isEmpty)
@@ -121,9 +127,10 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
     try withSessions { service in
       let onOther = service.handle(hook(session: "m1", payload("by-name")), origin: .remote("other"))
       let onMini = service.handle(hook(session: "l1", payload("by-name")), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       #expect(!onOther.ok && !onMini.ok)
+      #expect(service.queue.sync { service.held.isEmpty && service.hostEvents.isEmpty })
       let recorded = try service.logged()
       #expect(recorded.isEmpty)
     }
@@ -148,10 +155,11 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
       let clock = nowMs()
 
       let answer = service.handle(Request(op: op, args: args), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       #expect(!answer.ok)
       #expect(answer.error?.contains("can only be a hook") == true, "\(answer.error ?? "")")
+      #expect(service.queue.sync { service.held.isEmpty && service.hostEvents.isEmpty })
       let recorded = try service.logged()
       #expect(recorded.isEmpty)
       #expect(service.queue.sync { service.entries.keys.sorted() } == ["l1", "m1", "o1"])
@@ -173,9 +181,10 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
   ) throws {
     try withSessions { service in
       let answer = service.handle(hook(session: "m1", sent, id: id), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       #expect(!answer.ok)
+      #expect(service.queue.sync { service.held.isEmpty && service.hostEvents.isEmpty })
       let recorded = try service.logged()
       #expect(recorded.isEmpty)
     }
@@ -205,7 +214,7 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
       let id = eventId()
 
       let answer = service.handle(hook(session: "m1", Self.forged(kind), id: id), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       #expect(!answer.ok)
       #expect(answer.error?.contains("needs the name of a claude hook") == true, "\(answer.error ?? "")")
@@ -253,10 +262,10 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
     try withSessions { service in
       let id = eventId()
       _ = service.handle(hook(session: "m1", payload("first"), id: id), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       let answer = service.handle(hook(session: "o1", payload("second"), id: id), origin: .remote("other"))
-      settle()
+      settle(service)
 
       #expect(answer.ok)
       let recorded = try service.logged()
@@ -281,10 +290,11 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
   /// A session that sbd forgets while its event waits in the order window gets no event.
   @Test(.timeLimit(.minutes(1)))
   func anEventOfASessionThatWasRemovedInTheOrderWindowIsNotRecorded() throws {
-    try withSessions { service in
+    // The removal must land inside the window, so the test keeps the window of sbd.
+    try withSessions(windowMs: HostEventOrder.windowMs) { service in
       let answer = service.handle(hook(session: "m1", payload("gone")), origin: .remote("mini"))
       service.queue.sync { service.entries["m1"] = nil }
-      settle()
+      settle(service)
 
       #expect(answer.ok)
       let recorded = try service.logged()
@@ -301,7 +311,7 @@ private func settle() { Thread.sleep(forTimeInterval: Double(HostEventOrder.wind
       _ = service.handle(hook(session: "m1", payload("time"), id: eventId(ns)), origin: .remote("mini"))
       _ = service.handle(
         hook(session: "m1", payload("max"), id: eventId(UInt64.max, suffix: "ffff")), origin: .remote("mini"))
-      settle()
+      settle(service)
 
       let recorded = try service.logged().filter { $0.kind == "Notification" }
       #expect(recorded.count == 2)

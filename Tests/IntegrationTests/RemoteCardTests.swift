@@ -216,7 +216,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
   }
 
   @Test func allowingACardWhileTheLinkIsDownFailsWithTheReasonAndKeepsTheCard() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let (s, _) = try asking(sbd, "perm touch x")
     try sbd.dropLinkAndRefuse(refusal)
 

@@ -509,6 +509,12 @@ private func withReadyService(
 
   private static let noAccount = "mini names no account in config.json, so its quota can't be checked"
 
+  /// A quota that only `account` has spent.
+  private struct SpentFor: QuotaBudget {
+    let account: String
+    func hasBudget(account: String) -> Bool { account != self.account }
+  }
+
   @Test(.timeLimit(.minutes(1)))
   func autoContinueSkipsASessionWhoseHostNamesNoAccount() throws {
     try withReadyService(config: ["claudeConfigDirs": []]) { _, service, facts in
@@ -531,7 +537,10 @@ private func withReadyService(
     try withReadyService(
       host: ["account": .string(account)], config: ["claudeConfigDirs": [.string(account)]]
     ) { _, service, facts in
-      #expect(blocker(service, facts) != Self.noAccount)
+      let resolved = try service.queue.sync { try service.resolveAccount(account) }
+      service.quota = SpentFor(account: resolved)
+
+      #expect(blocker(service, facts) == "no quota left for \(resolved)")
     }
   }
 
@@ -996,7 +1005,9 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
     try withReadyService { b, service, facts in
       let (_, tree) = try addSession(b, service, facts)
 
-      _ = try? service.queue.sync { try service.beginPaneStop("s1", ancestry: nil, command: "sb rm --worktree") }
+      #expect {
+        try service.queue.sync { try service.beginPaneStop("s1", ancestry: nil, command: "sb rm --worktree") }
+      } throws: { "\($0)".contains("the claude process changed") }
 
       #expect(b.stillRuns(tree.child))
       #expect(b.runs(tree.pane))
@@ -1241,6 +1252,53 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
       #expect(throws: (any Error).self) { try service.writeLauncher("exec claude\n", for: "s1", at: site) }
 
       #expect(try paths(inside: target).isEmpty)
+    }
+  }
+}
+
+/// The turn check runs `claude agents` on the host through the shell that starts the Claude pane, with the same
+/// flags, so both find the same claude.
+@Suite struct RemoteTurnCheckShellTests {
+  /// A box whose bash finds `sb-rc-claude` only through `.bashrc`, as Ubuntu's `.profile` and `.bashrc` give an
+  /// nvm or npm claude. `.bashrc` returns early unless the shell is interactive, and then runs `rcOutput`.
+  private func writeRcFiles(_ home: String, rcOutput: String) throws {
+    try FileManager.default.createDirectory(atPath: "\(home)/rc-bin", withIntermediateDirectories: true)
+    let claude = "\(home)/rc-bin/sb-rc-claude"
+    try Data(
+      """
+      #!/bin/sh
+      [ "$1" = agents ] || exit 2
+      echo '[{"sessionId":"u-s1","cwd":"/w","status":"idle"}]'
+
+      """.utf8
+    ).write(to: URL(fileURLWithPath: claude))
+    chmod(claude, 0o755)
+    try Data("if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n".utf8)
+      .write(to: URL(fileURLWithPath: "\(home)/.bash_profile"))
+    try Data(
+      """
+      case $- in *i*) ;; *) return ;; esac
+      \(rcOutput)
+      PATH=$HOME/rc-bin:$PATH
+
+      """.utf8
+    ).write(to: URL(fileURLWithPath: "\(home)/.bashrc"))
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "", #"echo '[{"sessionId":"u-rc","cwd":"/"}]'; echo 'Welcome to mini'; printf 'no newline'"#,
+    ])
+  func aRemoteTurnCheckFindsTheClaudeThatOnlyTheInteractiveRcFilePutsOnThePath(rcOutput: String) throws {
+    try withReadyService(host: ["shell": "/bin/bash", "claude": "sb-rc-claude"]) { _, service, facts in
+      try writeRcFiles(facts.home, rcOutput: rcOutput)
+      let site = try #require(service.remoteSites["mini"])
+
+      let rows = try service.agentRows(at: site, seen: 1, timeout: 15)
+
+      #expect(rows.map(\.id) == ["u-s1"])
+      #expect(rows.first?.status == "idle")
     }
   }
 }

@@ -170,7 +170,7 @@ extension Service {
     for (name, lines) in Dictionary(grouping: lines, by: \.session).sorted(by: { $0.key < $1.key }) {
       do {
         let session = try hostSession(["session": .string(name)], on: host)
-        var buffer = hostEvents[session.id] ?? HostEventBuffer()
+        var buffer = hostEvents[session.id] ?? HostEventBuffer(windowMs: hostEventWindowMs)
         for line in lines where try !store.hasHostEvent(line.id) { buffer.add(line.id, line.payload, at: 0) }
         let due = buffer.flush()
         hostEvents[session.id] = buffer

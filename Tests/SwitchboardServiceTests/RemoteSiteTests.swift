@@ -73,6 +73,12 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
     #expect(facts.shell == "/usr/bin/fish")
   }
 
+  @Test func aShellKeyThatSetupFoundNoExecutableForIsRefused() throws {
+    #expect {
+      try parse(setupAnswer(shell: ""), host: try miniHost(["shell": "/bin/zhs"]))
+    } throws: { "\($0)".contains("mini's shell key names \"/bin/zhs\"") }
+  }
+
   @Test func aHostWithNoShellRunsBinSh() throws {
     #expect(try parse(setupAnswer(shell: "")).shell == "/bin/sh")
   }
@@ -737,6 +743,88 @@ func paths(inside folder: String) throws -> [String] {
       #expect(b.site.facts == nil)
       #expect(b.site.setupError?.contains(tmuxInstall) == true, "\(b.site.setupError ?? "nil")")
       #expect(b.link.status.state == .connected)
+    }
+  }
+
+  /// The `shell` key starts every Claude pane on the host, so setup refuses one that can't start there.
+  @Test(.timeLimit(.minutes(1)), arguments: ["/nonexistent/sb/zsh", "/etc/hosts", "/bin", "zsh", "bin/sh"])
+  func aShellKeyThatIsNotAnAbsolutePathToAnExecutableFileFailsSetupWithTheKeyAndTheHost(shell: String) throws {
+    try withSite(host: ["shell": .string(shell)]) { b in
+      try b.bench.connect()
+      let refusal = "mini's shell key names \"\(shell)\", which is not an absolute path to an executable file on mini"
+
+      #expect { try b.site.prepare() } throws: { "\($0)".contains(refusal) }
+
+      #expect(b.site.facts == nil)
+      #expect(b.site.setupError?.contains(refusal) == true, "\(b.site.setupError ?? "nil")")
+      #expect(b.link.status.state == .connected)
+    }
+  }
+
+  /// Makes the next setup wait in the box's `id` until the test removes the home's `setup-gate`. The setup has
+  /// reached the box when the home holds `setup-waiting`. Each later setup runs at once.
+  private func holdNextSetup(_ b: SiteBench) throws {
+    try b.set("setup-gate", "")
+    try b.set("hold-setup", "")
+    let path = "\(b.home)/box-bin/id"
+    try Data(
+      """
+      #!/bin/sh
+      d=\(shellQuote(b.home))
+      if [ -f "$d/hold-setup" ]; then
+        rm -f "$d/hold-setup"
+        : >"$d/setup-waiting"
+        while [ -f "$d/setup-gate" ]; do /bin/sleep 0.05; done
+      fi
+      exec /usr/bin/id "$@"
+
+      """.utf8
+    ).write(to: URL(fileURLWithPath: path))
+    chmod(path, 0o755)
+  }
+
+  /// The link drops while setup runs. The link connects again, and setup runs on the new connection, well within
+  /// the wait.
+  @Test(.timeLimit(.minutes(1)))
+  func aLinkThatDropsDuringSetupIsReadyOnTheNextConnectionWithinTheWait() throws {
+    try withSite { b in
+      try holdNextSetup(b)
+      defer { try? FileManager.default.removeItem(atPath: "\(b.home)/setup-gate") }
+      let first = try b.bench.connect()
+      let connection = b.link.status.connection
+      let lock = NSLock()
+      var outcome: Result<Void, any Error>?
+      let finished = DispatchSemaphore(value: 0)
+      let started = Date()
+      Thread.detachNewThread {
+        let r = Result { try b.site.awaitReady(seconds: 15) }
+        lock.withLock { outcome = r }
+        finished.signal()
+      }
+      try #require(waitUntil(seconds: 20) { FileManager.default.fileExists(atPath: "\(b.home)/setup-waiting") })
+
+      b.bench.drop(first)
+
+      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(throws: Never.self) { try lock.withLock { outcome }?.get() }
+      #expect(Date().timeIntervalSince(started) < 15)
+      #expect(b.bench.masters().count >= 2)
+      #expect(b.site.facts?.epoch == b.link.status.connection)
+      #expect(b.site.facts?.epoch != connection)
+    }
+  }
+
+  /// A setup that fails while its connection stays up fails at once and does not wait out the deadline.
+  @Test(.timeLimit(.minutes(1)))
+  func aSetupThatFailsWhileTheLinkStaysUpFailsAtOnce() throws {
+    try withSite(host: ["tmux": "/nonexistent/sb/tmux"]) { b in
+      try b.bench.connect()
+      let started = Date()
+
+      #expect { try b.site.awaitReady(seconds: 15) } throws: { "\($0)".contains(tmuxInstall) }
+
+      #expect(Date().timeIntervalSince(started) < 7)
+      #expect(b.bench.masters().count == 1)
     }
   }
 

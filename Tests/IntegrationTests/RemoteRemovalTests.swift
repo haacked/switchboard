@@ -267,7 +267,8 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   }
 
   @Test func plainRmWithTheLinkDownRefusesWithTheReasonAndKeepsTheSessionAndItsClaude() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try sbd.liveOnHost()
     try sbd.dropLinkAndRefuse(refusal)
 
@@ -624,7 +625,8 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   // MARK: The link
 
   @Test func aLinkThatDroppedBeforeTheRemovalRefusesWithTheReasonAndRemovesNothing() throws {
-    let sbd = try Instance.remoteForRemoval()
+    let sbd = try Instance.remoteForRemoval(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let (s, origin) = try cleanWorktree(sbd)
     try sbd.dropLinkAndRefuse(refusal)
 
@@ -775,7 +777,8 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   }
 
   @Test func rmDoneWithTheLinkDownSkipsTheRemoteSessionWithTheReasonAndRemovesTheLocalOne() throws {
-    let sbd = try Instance.remoteForRemoval()
+    let sbd = try Instance.remoteForRemoval(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let localRepo = try sbd.repoWithOrigin()
     let local = try sbd.worktreeSession(localRepo, branch: "haacked/local")
     let (s, origin) = try cleanWorktree(sbd)
@@ -850,7 +853,8 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
 
   /// A folder that the host did not answer for is not gone, so sbd never drops the worktree's record for it.
   @Test func aGoneWorktreeWithTheLinkDownIsRefusedAndKeepsItsRecord() throws {
-    let sbd = try Instance.remoteForRemoval()
+    let sbd = try Instance.remoteForRemoval(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let (s, origin) = try cleanWorktree(sbd)
     try FileManager.default.removeItem(atPath: s.cwd)
     try sbd.dropLinkAndRefuse(refusal)

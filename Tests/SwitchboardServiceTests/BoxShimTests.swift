@@ -8,15 +8,16 @@ import Testing
 private final class ShimRun {
   let process = Process()
   private let output = Pipe()
+  private let stdin = Pipe()
   private let ended = DispatchSemaphore(value: 0)
   let started = Date()
   private(set) var finished: Date?
 
-  init(python: String, shim: String, arguments: [String], environment: [String: String], input: Data) throws {
+  /// A nil `input` leaves stdin open until `send` writes it.
+  init(python: String, shim: String, arguments: [String], environment: [String: String], input: Data?) throws {
     process.executableURL = URL(fileURLWithPath: python)
     process.arguments = [shim] + arguments
     process.environment = environment
-    let stdin = Pipe()
     process.standardInput = stdin
     process.standardOutput = output
     process.standardError = FileHandle.nullDevice
@@ -25,6 +26,11 @@ private final class ShimRun {
       ended.signal()
     }
     try process.run()
+    if let input { try send(input) }
+  }
+
+  /// Writes the payload to stdin and closes it.
+  func send(_ input: Data) throws {
     stdin.fileHandleForWriting.write(input)
     try stdin.fileHandleForWriting.close()
   }
@@ -92,8 +98,9 @@ private final class ShimBench {
   var spoolPath: String { "\(home)/spool.jsonl" }
   var spool: Data { FileManager.default.contents(atPath: spoolPath) ?? Data() }
 
-  /// Starts `sb-shim hook` with the payload on stdin. A nil session leaves `SB_SESSION_ID` out.
-  func hook(_ payload: Data, session: String? = "s1", sbHome: String?? = nil) throws -> ShimRun {
+  /// Starts `sb-shim hook` with the payload on stdin. A nil payload leaves stdin open for `ShimRun.send`. A nil
+  /// session leaves `SB_SESSION_ID` out.
+  func hook(_ payload: Data?, session: String? = "s1", sbHome: String?? = nil) throws -> ShimRun {
     var env = ["PATH": "/usr/bin:/bin", "HOME": home]
     if let session { env["SB_SESSION_ID"] = session }
     if let folder = sbHome ?? .some(home) { env["SB_HOME"] = folder }
@@ -372,7 +379,9 @@ private let noListener: [(socket: ShimBench.Socket, kind: String, tool: String?)
   }
 
   /// Each line is longer than a pipe's atomic write, so a shim that wrote in pieces or without the lock would
-  /// mix two lines.
+  /// mix two lines. A shim makes its id under the lock, so a shim without the lock could also append its line
+  /// behind a line with a later id. Every shim starts and waits for its stdin, and the test then writes every
+  /// stdin at once, so the shims spool at the same time.
   @Test(.timeLimit(.minutes(2)), arguments: [2, 12])
   func shimsThatRunAtOnceLeaveOneWholeLineEach(count: Int) throws {
     try withBench(.missing) { b in
@@ -380,7 +389,8 @@ private let noListener: [(socket: ShimBench.Socket, kind: String, tool: String?)
         payload("PostToolUse", tool: "Bash", ["tool_response": .string(String(repeating: "\(n % 10)", count: 200_000))])
       }
 
-      let runs = try sent.enumerated().map { n, one in try b.hook(one, session: "s\(n)") }
+      let runs = try (0..<count).map { n in try b.hook(nil, session: "s\(n)") }
+      DispatchQueue.concurrentPerform(iterations: count) { n in try? runs[n].send(Data(sent[n].text.utf8)) }
       let results = runs.map { $0.wait(30) }
 
       #expect(results.allSatisfy { $0?.status == 0 }, "\(results.map { $0?.status })")
@@ -391,6 +401,7 @@ private let noListener: [(socket: ShimBench.Socket, kind: String, tool: String?)
       #expect(parsed.complete == data.count)
       try #require(parsed.lines.count == count)
       #expect(Set(parsed.lines.map(\.id)).count == count, "two shims made the same id")
+      #expect(parsed.lines.map(\.id) == parsed.lines.map(\.id).sorted(), "a line is behind a line with a later id")
       for line in parsed.lines {
         let n = try #require(Int(line.session.dropFirst()))
         #expect(line.payload == sent[n], "the line of s\(n) holds another shim's payload")

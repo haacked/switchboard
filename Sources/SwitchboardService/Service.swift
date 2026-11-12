@@ -113,6 +113,8 @@ public final class Service {
   var held: [Int64: HeldRequest] = [:]
   /// The hook events of each session on a host that wait for their turn in id order, by session id.
   var hostEvents: [String: HostEventBuffer] = [:]
+  /// The order window of each new buffer in `hostEvents`. Only tests change it.
+  var hostEventWindowMs = HostEventOrder.windowMs
   /// When sbd last pruned the recorded ids of the hosts' events.
   var hostEventsPruned: Int64 = 0
   let triageJobs: OperationQueue = {

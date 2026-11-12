@@ -6,7 +6,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
 
 /// A remote session while sbd can't read its host. sbd decides nothing about the session from a read that the host
 /// did not answer: it records no `exited`, starts no claude, signals nothing, and reports no folder gone. A request
-/// that needs the host waits up to 15 s for it, so each refused request here takes that long.
+/// that needs the host waits for its link. The tests whose request is refused set `Instance.shortHostWait`, so
+/// that request fails after 2 s.
 @Suite(.blocking(timeLimit: .seconds(180))) struct RemoteLinkGuardTests {
   private struct Running {
     var id: String
@@ -134,7 +135,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
   // MARK: Requests while the link is down
 
   @Test func stopWithTheLinkDownFailsWithTheReasonAndSignalsNothing() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.dropLinkAndRefuse(refusal)
     let before = try lastEvent(sbd, s.id)
@@ -151,7 +153,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
 
   @Test(arguments: ["resume", "open"])
   func aLaunchWithTheLinkDownFailsWithTheReasonAndStartsNothing(verb: String) throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "claude to stop on the box") { $0.claudePid == nil }
@@ -172,7 +175,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
   /// A check on this Mac would pass, and an unanswered check on the host reads as "missing".
   @Test(arguments: ["resume", "open"])
   func aFolderThatExistsOnTheBoxIsNotReportedGoneWhileTheLinkIsDown(verb: String) throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "claude to stop on the box") { $0.claudePid == nil }
@@ -189,7 +193,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
   }
 
   @Test func screenWithTheLinkDownFailsWithTheReason() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.dropLinkAndRefuse(refusal)
 
@@ -204,7 +209,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
   // MARK: After the reconnect
 
   @Test func stopWorksAfterTheLinkReconnects() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.dropLinkAndRefuse(refusal)
     let refused = try sbd.run("stop", s.id)
@@ -221,7 +227,8 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
 
   @Test(arguments: ["resume", "open"])
   func aLaunchWorksAfterTheLinkReconnectsAndResumesTheConversation(verb: String) throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    try sbd.connectHost()
     let s = try start(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "claude to stop on the box") { $0.claudePid == nil }
