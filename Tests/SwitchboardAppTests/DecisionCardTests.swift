@@ -100,6 +100,40 @@ import Testing
     #expect(Set(labels).count == labels.count)
     #expect(labels.allSatisfy { !$0.isEmpty })
   }
+
+  /// The two options of a Ready to merge card with PR #98, as `Attention.readyToMerge` builds them.
+  @Test func theReadyToMergeOptionsReadDifferentlyAndEachNameThePR() {
+    let merge = TriageOption(label: "Merge #98", action: .merge, recommended: true)
+    let acknowledge = TriageOption(label: "Acknowledge", action: .dismiss)
+
+    #expect(merge.accessibilityLabel(pr: 98) == "Merge #98")
+    #expect(acknowledge.accessibilityLabel(pr: 98) == "Acknowledge, #98")
+  }
+
+  /// An option that acts on the PR names it once, after its visible label.
+  /// Only a merge says "merge". "#980" holds the text "#98" but names another PR.
+  @Test(arguments: [
+    (TriageAction.dismiss, "Acknowledge", "Acknowledge, #98"),
+    (.dismiss, "Acknowledge #98", "Acknowledge #98"),
+    (.dismiss, "Acknowledge #980", "Acknowledge #980, #98"),
+    (.dismiss, "Acknowledge PR98", "Acknowledge PR98, #98"),
+    (.requestReview, "Request review", "Request review, #98"),
+    (.merge, "Acknowledge PR98", "Acknowledge PR98, merge #98"),
+    (.merge, "Done with #98", "Done with #98"),
+  ])
+  func anOptionThatActsOnThePRNamesIt(_ action: TriageAction, _ text: String, _ expected: String) {
+    #expect(TriageOption(label: text, action: action).accessibilityLabel(pr: 98) == expected)
+  }
+
+  @Test(arguments: [TriageAction.dismiss, .requestReview])
+  func anOptionThatActsOnThePRWithoutAPRReadsAsItsLabel(_ action: TriageAction) {
+    #expect(TriageOption(label: "Acknowledge", action: action).accessibilityLabel(pr: nil) == "Acknowledge")
+  }
+
+  @Test(arguments: TriageAction.allCases.filter { !$0.needsClick })
+  func anOptionThatDoesNotActOnThePRReadsExactlyAsItsLabel(_ action: TriageAction) {
+    #expect(TriageOption(label: "Skip", action: action).accessibilityLabel(pr: 98) == "Skip")
+  }
 }
 
 @Suite struct DecisionCardEffect {

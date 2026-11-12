@@ -13,15 +13,17 @@ extension SessionSummary {
 
   var mergeVerb: String { (pr?.mergeMethod ?? .merge).verb }
 
-  var prRef: String { pr.map { "#\($0.number)" } ?? "the PR" }
+  var prRef: String { pr?.numberLabel ?? "the PR" }
 
-  /// Names the PR and the session in a card button's VoiceOver label. Each
-  /// card on the Board shows the same buttons, so the label tells them apart.
+  /// The PR and the session that a card button's VoiceOver label names.
+  /// Every Board card shows the same buttons, and these names tell them apart.
   var prOfSession: String { "\(prRef) of \(name)" }
 
   var mergeButtonLabel: String { "\(mergeVerb) \(prOfSession)" }
 
   var nudgeButtonLabel: String { "Copy a nudge for \(prOfSession)" }
+
+  func mergeBaseButtonLabel(base: String) -> String { "Merge \(base) into \(prOfSession)" }
 
   /// The Ready to merge sessions that Merge All merges or enqueues from this
   /// session's card: this one first, then the others, oldest first.
@@ -122,7 +124,7 @@ struct MergeBaseButton: View {
     .buttonStyle(.borderless)
     .foregroundStyle(.secondary)
     .disabled(model.sending.contains(session.id))
-    .accessibilityLabel("Merge \(base) into \(session.name)")
+    .accessibilityLabel(session.mergeBaseButtonLabel(base: base))
     .help("Ask the session to merge origin/\(base) in, resolve the conflicts, and push")
   }
 }
