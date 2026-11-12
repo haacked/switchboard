@@ -58,25 +58,16 @@ func draftStateLine(_ draft: InboxDraft, session: String) -> String? {
   case .unresolved(let error):
     return "Can't read the comment on GitHub: \(error). Check again: sb draft check \(session) \(draft.number)"
   case .ready(let target):
-    return "Replies to @\(target.author) \(place(of: target)). Post it: sb draft post \(session) \(draft.number)"
+    return "Replies to @\(target.author) \(target.place). Post it: sb draft post \(session) \(draft.number)"
   case .posting:
     return "Posting to GitHub…"
   case .posted(_, let url, _):
     return "Posted: \(url)"
   case .failed(let target, let error):
     return
-      "Didn't post: \(error). It replies to @\(target.author) \(place(of: target)). Post it again: sb draft post \(session) \(draft.number)"
+      "Didn't post: \(error). It replies to @\(target.author) \(target.place). Post it again: sb draft post \(session) \(draft.number)"
   case .unknown(_, let error):
     return
       "sbd can't tell whether GitHub got the reply: \(error). Check: sb draft check \(session) \(draft.number)"
-  }
-}
-
-/// Where the reply goes, as in "on a.swift line 3".
-private func place(of target: ResolvedTarget) -> String {
-  switch (target.path, target.line) {
-  case (let path?, let line?): "on \(path) line \(line)"
-  case (let path?, nil): "on \(path)"
-  case (nil, _): target.target.kind == .review ? "on their review" : "in the PR conversation"
   }
 }

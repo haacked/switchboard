@@ -154,6 +154,15 @@ public struct ResolvedTarget: Codable, Equatable, Sendable {
       excerpt: oneLine(comment["body"]?.string ?? "", max: Self.excerptLength), url: url)
   }
 
+  /// Where the reply goes, as in "on a.swift line 3".
+  public var place: String {
+    switch (path, line) {
+    case (let path?, let line?): "on \(path) line \(line)"
+    case (let path?, nil): "on \(path)"
+    case (nil, _): target.kind == .review ? "on their review" : "in the PR conversation"
+    }
+  }
+
   /// Whether a reply to `other` goes where a reply to this target goes. Two
   /// replies in one review thread share their root.
   public func sameThread(as other: ResolvedTarget) -> Bool {

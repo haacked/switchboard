@@ -400,6 +400,94 @@ import Testing
     #expect(reloaded.draft(for: "b").text == "for b")
   }
 
+  // MARK: replyKey(session:ref:number:) and replyKeys(_:)
+
+  /// A session whose item has one draft per state in `posts`, numbered from 1.
+  func replying(_ id: String, ref: String = "summary:1", source: TriageSource = .session, _ posts: [DraftPost])
+    -> SessionSummary
+  {
+    var s = needsItem(id)
+    let drafts = posts.enumerated().map { i, post in targetedDraft(post, number: i + 1) }
+    s.triage = TriageItem(title: "Reply", kind: .review, summary: "", drafts: drafts, source: source, ref: ref)
+    return s
+  }
+
+  @Test func aReplyKeySurvivesSaveAndLoad() {
+    let key = MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 2)
+    let drafts = MessageDrafts(folder: folder)
+    drafts.draft(for: key).text = "Thanks, fixed in abc123.\n\n@ann does this read better?"
+
+    drafts.saveNow()
+    let reloaded = MessageDrafts(folder: folder)
+
+    #expect(reloaded.draft(for: key).text == "Thanks, fixed in abc123.\n\n@ann does this read better?")
+  }
+
+  @Test func replyKeysForDifferentNumbersRefsAndSessionsDiffer() {
+    let keys = [
+      MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 1),
+      MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 2),
+      MessageDrafts.replyKey(session: "s1", ref: "summary:4", number: 1),
+      MessageDrafts.replyKey(session: "s2", ref: "summary:3", number: 1),
+    ]
+
+    #expect(Set(keys).count == keys.count)
+  }
+
+  /// A reply key never equals the session's message key or an Other answer key.
+  @Test func aReplyKeyDiffersFromTheOtherKindsOfKey() {
+    let reply = MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 2)
+
+    #expect(reply != MessageDrafts.key(for: needsItem("s1")))
+    #expect(reply != MessageDrafts.otherAnswerKey(session: "s1", ref: "summary:3", decision: 2))
+  }
+
+  @Test(arguments: [
+    DraftPost.checking, .unresolved(error: "gh timed out"), .ready(replyTarget), .posting(replyTarget),
+    .unknown(replyTarget, error: "HTTP 502"), .failed(replyTarget, error: "HTTP 422"),
+  ])
+  func replyKeysCoverADraftThatCanStillShowTheField(_ post: DraftPost) {
+    let keys = MessageDrafts.replyKeys([replying("s1", [post])])
+
+    #expect(keys == [MessageDrafts.replyKey(session: "s1", ref: "summary:1", number: 1)])
+  }
+
+  @Test(arguments: [
+    DraftPost.copyOnly(reason: nil), .copyOnly(reason: "it has no fragment"),
+    .posted(replyTarget, url: "https://github.com/PostHog/charts/pull/18303#discussion_r2002", text: "Thanks."),
+  ])
+  func replyKeysLeaveOutACopyOnlyOrPostedDraft(_ post: DraftPost) {
+    #expect(MessageDrafts.replyKeys([replying("s1", [post])]).isEmpty)
+  }
+
+  @Test(arguments: [TriageSource.card, .rule, .summary, .fallback])
+  func replyKeysLeaveOutTheDraftsOfAnItemThatIsNotTheSessionsCard(_ source: TriageSource) {
+    #expect(MessageDrafts.replyKeys([replying("s1", source: source, [.ready(replyTarget)])]).isEmpty)
+  }
+
+  @Test func replyKeysCoverEachDraftOfEachSessionUnderItsItemsRef() {
+    let sessions = [
+      replying("s1", ref: "summary:3", [.ready(replyTarget), .posted(replyTarget, url: "u", text: "t"), .checking]),
+      replying("s2", ref: "stop:9", [.failed(replyTarget, error: "HTTP 422")]),
+    ]
+
+    let keys = MessageDrafts.replyKeys(sessions)
+
+    #expect(
+      keys == [
+        MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 1),
+        MessageDrafts.replyKey(session: "s1", ref: "summary:3", number: 3),
+        MessageDrafts.replyKey(session: "s2", ref: "stop:9", number: 1),
+      ])
+  }
+
+  @Test func replyKeysOfASessionWithoutAnItemAreEmpty() {
+    var s = needsItem("s1")
+    s.triage = nil
+
+    #expect(MessageDrafts.replyKeys([s]).isEmpty)
+  }
+
   // MARK: saveNow() and loading
 
   @Test(arguments: [
