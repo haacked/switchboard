@@ -2,9 +2,6 @@ import SwiftUI
 import SwitchboardCore
 
 extension SessionSummary {
-  /// Whether the user can acknowledge the session's item, or undo that.
-  var canAcknowledge: Bool { acknowledged == true || AttentionState.inbox.contains(state) }
-
   /// The title of the button or menu item that acknowledges the item or undoes that.
   var acknowledgeTitle: String { acknowledged == true ? "Undo Acknowledge" : "Acknowledge" }
 

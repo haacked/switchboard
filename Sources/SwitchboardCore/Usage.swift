@@ -36,6 +36,8 @@ public struct UsageLimit: Codable, Equatable, Sendable {
   /// `normal`, `warning`, or `critical`, when the endpoint reports one.
   public var severity: String?
 
+  public var isSession: Bool { kind == "session" }
+
   /// Whether the limit is at `limit` percent or more. A limit whose reset is
   /// at or before `now` counts as unused, because the reading can be older
   /// than the reset.
@@ -78,6 +80,12 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     self.error = error
     self.signedOut = signedOut
   }
+
+  /// The percent of the `session` limit, or 0 when the reading has none.
+  public var sessionPercent: Double { limits.first(where: \.isSession)?.percent ?? 0 }
+
+  /// The highest percent among the limits other than `session`, or 0 when there are none.
+  public var weeklyPercent: Double { limits.filter { !$0.isSession }.map(\.percent).max() ?? 0 }
 
   /// Whether the last read failed and no earlier reading has limits to show.
   public var failedWithoutLimits: Bool { limits.isEmpty && error != nil }
@@ -126,7 +134,7 @@ public enum Usage {
           resetsAt: window["resets_at"]?.string.flatMap(Transcript.milliseconds))
       }
     }
-    if !limits.contains(where: { $0.kind == "session" }) {
+    if !limits.contains(where: \.isSession) {
       limits.insert(UsageLimit(kind: "session", label: label("session", scope: nil), percent: 0), at: 0)
     }
     return limits

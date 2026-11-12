@@ -65,10 +65,10 @@ struct AccountMenu: View {
   /// highest weekly percent.
   static func label(_ row: AccountRow?) -> String {
     guard let row else { return "Account" }
-    guard let limits = row.usage?.limits, !limits.isEmpty else { return row.account.name }
-    let session = limits.first { $0.kind == "session" }?.percent ?? 0
-    let week = limits.filter { $0.kind != "session" }.map(\.percent).max() ?? 0
-    return "\(row.account.name) · 5h \(Int(session.rounded()))% · wk \(Int(week.rounded()))%"
+    guard let usage = row.usage, !usage.limits.isEmpty else { return row.account.name }
+    let session = Int(usage.sessionPercent.rounded())
+    let week = Int(usage.weeklyPercent.rounded())
+    return "\(row.account.name) · 5h \(session)% · wk \(week)%"
   }
 
   static func limitRow(_ limit: UsageLimit, now: Int64 = nowMs()) -> String {
