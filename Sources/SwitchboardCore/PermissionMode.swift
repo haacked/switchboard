@@ -9,6 +9,13 @@ public enum PermissionMode {
   /// What a card tells the user before they approve with auto mode.
   public static let autoModeNote = "auto mode: Claude's classifier decides further permissions"
 
+  /// The mode that a launch of `session` passes with `--permission-mode`, or
+  /// nil for none. `resume` says whether the launch resumes a transcript.
+  /// `lastReported` is the mode that claude or the last launch reported.
+  public static func forLaunch(_ session: Session, resume: Bool, lastReported: String?) -> String? {
+    session.autoMode == true ? auto : nil
+  }
+
   /// The mode as Claude Code's status line names it. Its payloads call manual mode `default`.
   public static func title(_ mode: String) -> String {
     switch mode {

@@ -863,7 +863,8 @@ public final class Service {
     if let model = session.model { args += ["--model", model] }
     args += config.claudeArgs
     // After claudeArgs, so that the session's mode wins over a global one.
-    if session.autoMode == true { args += ["--permission-mode", PermissionMode.auto] }
+    let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
+    if let mode { args += ["--permission-mode", mode] }
     if !config.triage.systemPrompt.isEmpty { args += ["--append-system-prompt", config.triage.systemPrompt] }
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
@@ -895,7 +896,7 @@ public final class Service {
       id, resume ? "resumed" : "started",
       [
         "prompt": prompt.map(JSON.string) ?? .null, "mcp": mcpListening,
-        "permission_mode": session.autoMode == true ? .string(PermissionMode.auto) : .null,
+        "permission_mode": mode.map(JSON.string) ?? .null,
       ])
   }
 

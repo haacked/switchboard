@@ -29,7 +29,8 @@ import Testing
   @Test func factsFollowTheMainSessionsMode() {
     #expect(facts(turn("default")).permissionMode == "default")
     // A subagent's hook doesn't change the main session's mode.
-    let sub = event("PreToolUse", 4, tool("Bash", ["command": "ls"], agent: "a1").merging(["permission_mode": "plan"]) { $1 })
+    let sub = event(
+      "PreToolUse", 4, tool("Bash", ["command": "ls"], agent: "a1").merging(["permission_mode": "plan"]) { $1 })
     #expect(facts(turn("default") + [sub]).permissionMode == "default")
     let answered = event("answered", 4, ["card": 3, "behavior": "allow", "permission_mode": "auto"])
     #expect(facts(turn("default") + [answered]).permissionMode == "auto")
@@ -55,6 +56,18 @@ import Testing
     #expect(PermissionMode.title("default") == "manual")
     #expect(PermissionMode.title("acceptEdits") == "accept edits")
     #expect(PermissionMode.title("auto") == "auto")
+  }
+
+  @Test func aLaunchPassesAutoModeOnlyForAnAutoModeSession() {
+    var session = Session(id: "s1", name: "s", cwd: "/tmp", claudeSessionId: "c", created: 0)
+    for resume in [false, true] {
+      session.autoMode = true
+      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: "default") == "auto")
+      session.autoMode = false
+      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: "auto") == nil)
+      session.autoMode = nil
+      #expect(PermissionMode.forLaunch(session, resume: resume, lastReported: nil) == nil)
+    }
   }
 
   @Test func aConfigWithoutAutoModeStartsSessionsInAutoMode() throws {
