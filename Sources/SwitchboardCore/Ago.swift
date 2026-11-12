@@ -1,4 +1,4 @@
-/// How long ago `ms` was, in the largest whole unit: "12s", "5m", "3h", or "2d". A time in the future prints "0s".
+/// How long ago `ms` was, in the largest whole unit: "12s", "5m", "3h", or "2d". For a time in the future, it returns "0s".
 public func ago(_ ms: Int64, now: Int64 = nowMs()) -> String {
   let s = max(0, (now - ms) / 1000)
   if s < 60 { return "\(s)s" }
