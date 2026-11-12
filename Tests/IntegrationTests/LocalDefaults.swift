@@ -7,6 +7,10 @@ extension Transcript {
   static func find(_ sessionId: String, account: String, cwd: String) -> String? {
     find(sessionId, account: account, cwd: cwd, on: LocalMachine())
   }
+
+  static func messages(_ path: String, limit: Int) -> [ChatMessage] {
+    messages(path, limit: limit, on: LocalMachine())
+  }
 }
 
 extension Processes {

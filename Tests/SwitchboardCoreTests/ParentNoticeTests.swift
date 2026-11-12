@@ -141,6 +141,30 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
     #expect(line(other[2], other[3]) == "fix (s1): opened PR #28")
   }
 
+  func session(_ id: String, state: AttentionState) -> SessionSummary {
+    SessionSummary(
+      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "why \(id)",
+      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+  }
+
+  @Test func theStartDigestListsEachSessionUnderItsState() {
+    let text = ParentDigest.startText([session("b", state: .working), session("a", state: .needsYou)], inbox: [])
+    #expect(
+      text == """
+        Switchboard: the sessions as this conversation starts.
+        \(AttentionState.needsYou.title):
+        - a (a): why a
+        \(AttentionState.working.title):
+        - b (b): why b
+        """)
+  }
+
+  @Test func theStartDigestOfAnEmptyBoardSaysSo() {
+    #expect(
+      ParentDigest.startText([], inbox: [])
+        == "Switchboard: the sessions as this conversation starts.\nThere are no other sessions.")
+  }
+
   @Test func listsTheLinesThenTheCounts() {
     let text = ParentDigest.text(["a (s1): done"], elsewhere: BoardCounts(needsYou: 2, readyToMerge: 1))
     #expect(
@@ -160,7 +184,7 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
   }
 
   @Test func answersTheHookWithTheTextAsAdditionalContext() {
-    let output = ParentDigest.hookOutput("t")
+    let output = ParentDigest.hookOutput("t", event: "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["hookEventName"] == "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["additionalContext"] == "t")
   }

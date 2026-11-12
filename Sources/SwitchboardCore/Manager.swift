@@ -1,8 +1,26 @@
 import Foundation
 
-/// The Manager is one interactive session that manages the others through `sb`.
+/// A Manager conversation is an interactive session that manages the others
+/// through `sb`. Every conversation shares one folder and its CLAUDE.md.
 public enum Manager {
   public static let name = "Manager"
+  /// The name of a conversation that started without a name or a prompt,
+  /// until its first prompt names it.
+  public static let untitled = "New conversation"
+  static let maxNameLength = 40
+
+  /// Orders conversations newest activity first, as `sb manager ls` and the sidebar list them.
+  public static func newestFirst(_ a: SessionSummary, _ b: SessionSummary) -> Bool {
+    (a.lastActivity, a.created ?? 0) > (b.lastActivity, b.created ?? 0)
+  }
+
+  /// The first non-empty line of the prompt, cut to 40 characters.
+  public static func name(fromPrompt prompt: String) -> String {
+    let line =
+      prompt.split(whereSeparator: \.isNewline).lazy
+      .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+    return line.isEmpty ? untitled : String(line.prefix(maxNameLength))
+  }
 
   /// The CLAUDE.md that sbd keeps in the Manager's folder. It is a prompt for
   /// a model, so it stays short, and every `sb` command in it exists.
@@ -10,6 +28,8 @@ public enum Manager {
     # Manager
 
     You manage the user's Claude Code sessions through `sb`. Each other session works in its own folder or worktree. You start them, watch them, and clean up after them. You do not edit their code yourself.
+
+    You are one of the user's Manager conversations. Each conversation is its own session in this folder, and the sessions it starts are its children. The context of your first prompt lists every session by state, and the open Inbox items.
 
     ## Rules
 
@@ -39,6 +59,12 @@ public enum Manager {
     A session you start with `sb new` has you as its parent. Switchboard sends you no message when it changes. Instead, the context of a prompt can list what changed since your last turn: each session you started that opened a PR, moved to Needs you or Ready to merge, or reached Done, and how many other sessions are in Needs you and Ready to merge. It lists nothing when nothing changed. Run `sb get` on a session before you act on it.
 
     When the user asks you to follow a session through, such as "remove it when it merges" or "tell me when it's done", set a `session` wait on it with `sb wait`. A wait resumes you with a message that starts with `Switchboard:`.
+
+    To start a session and hear when it reaches a state, pass `wait` to the `spawn` tool, such as `wait: done`. It sets the wait in the same call, so you need no separate `sb wait`.
+
+    ## MCP servers
+
+    This conversation loads no MCP server other than `switchboard`, unless the user added one. When a task needs a tool you lack, such as Grafana, Slack, or a database, do not work around it with `sb`, `curl`, or another session. Run `sb manager mcp $SB_SESSION_ID` to see the servers the user can add. Then end your turn and ask the user to run `sb manager mcp <id> add <server>`, or `sb manager mcp <id> --all` for a claude.ai connector such as Slack, with your id from `$SB_SESSION_ID` in place of `<id>`. When your turn ends, claude restarts with the server and resumes this conversation.
 
     ## Testing branches together
 

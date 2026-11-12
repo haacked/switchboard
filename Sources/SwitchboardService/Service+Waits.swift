@@ -110,12 +110,20 @@ extension Service {
   }
 
   /// v0.1 stored a free-text wait in `waitNote`. This turns it into a manual
-  /// wait.
+  /// wait. A Manager from before Manager conversations loads only the
+  /// switchboard MCP server from its next launch. `mcpScoped` records that
+  /// switch, so a later change to the full setup stays.
   func upgraded(_ session: Session) throws -> Session {
-    guard let note = session.waitNote else { return session }
     var s = session
-    s.waitNote = nil
-    s.waits = (s.waits ?? []) + [Wait(id: shortId("w"), kind: .manual, note: note, created: s.created, then: .notify)]
+    if let note = s.waitNote {
+      s.waitNote = nil
+      s.waits = (s.waits ?? []) + [Wait(id: shortId("w"), kind: .manual, note: note, created: s.created, then: .notify)]
+    }
+    if s.manager == true, s.mcpScoped != true {
+      s.mcp = []
+      s.mcpScoped = true
+    }
+    guard s != session else { return session }
     try store.save(s)
     return s
   }

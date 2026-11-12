@@ -14,6 +14,7 @@ func sendCommand(_ a: Args) {
   let text = words.joined(separator: " ")
   if text.isEmpty && paths.isEmpty { die("send needs text") }
   var args: [String: JSON] = ["session": .string(a.session("send")), "text": .string(text)]
+  if author == .claude, let from = ProcessInfo.processInfo.environment["SB_SESSION_ID"] { args["from"] = .string(from) }
   if !paths.isEmpty {
     var total = 0
     do { try Attachments.checkMessage(count: paths.count, total: 0) } catch { die("\(error)") }

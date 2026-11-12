@@ -19,12 +19,14 @@ let usage = """
                                   remote host H of config.json, in a folder
                                   there that is absolute or starts with ~
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
-        [--base REF] [--model M] [--account A] [--no-auto]
+        [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
                                   start a session on a new branch B in a new
                                   worktree of R, which is owner/name, a name, or
                                   a folder. Inside a session, that session is
                                   its parent. --followup adds it unstarted.
-                                  --after makes it ready when PR N of R merges
+                                  --after makes it ready when PR N of R merges.
+                                  --wait, inside a session, resumes that session
+                                  once the new one reaches STATE, such as done
     account                       list the Claude accounts and the active one
     account use <name|folder> [--move | --new-only]
                                   run new sessions under this account. --move
@@ -34,8 +36,21 @@ let usage = """
                                   move the sessions whose claude is stopped
     usage                         show each account's use of its 5-hour and
                                   weekly limits, and when each resets
-    manager                       start the Manager, a session that manages the others,
-                                  or open it
+    manager [<conv>] [<text>]     open a Manager conversation, a session that manages
+                                  the others: the one named by id or name, else the
+                                  most recent, starting one the first time. With
+                                  text, send it a message
+    manager new [--name N] [<text>]
+                                  start a conversation. Without --name, its first
+                                  prompt names it
+    manager ls                    list the conversations, newest activity first
+    manager <conv> --log          the conversation's last messages
+    manager mcp <conv> [add <server>… | rm <server>… | --all | --none]
+                                  show or change the MCP servers that the
+                                  conversation loads besides switchboard. A new
+                                  conversation loads none. --all loads the full
+                                  setup, which a claude.ai connector needs. A change
+                                  restarts its claude, after the turn when one runs
     get <session>                 show one session
     send <session> <text>         send a message: paste it, queue it, or resume with it
     send <session> --image <path> [--image <path>…] [<text>]
@@ -308,7 +323,7 @@ struct Args {
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
-      "--plan", "--text",
+      "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
     ]).union(waitFlags.keys)
     var rest = argv
@@ -550,7 +565,8 @@ func events(_ a: Args) -> Never {
         let detail =
           e.data["tool_name"]?.string ?? e.data["prompt"]?.string ?? e.data["last_assistant_message"]?.string ?? e.data[
             "text"]?.string ?? ""
-        print("\(e.id)  \(e.session)  \(e.kind)  \(oneLine(detail, max: 80))".printable)
+        let from = e.data["from"]?.string.map { "from \($0): " } ?? ""
+        print("\(e.id)  \(e.session)  \(e.kind)  \(from)\(oneLine(detail, max: 80))".printable)
       }
       since = Int(e.id)
     }
@@ -682,8 +698,7 @@ case "account", "accounts":
 case "usage":
   usageCommand(a)
 case "manager":
-  let result = call("manager", timeout: 300)
-  if a.json { printJSON(result) } else { printSession(summary(result)) }
+  manager(a)
 case "get", "show":
   sessionCommand("get", a)
 case "open":
