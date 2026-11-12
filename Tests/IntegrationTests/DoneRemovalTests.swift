@@ -161,6 +161,34 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(try s.sbd.branchExists(s.repo, RecordedPR.cohort.branch))
   }
 
+  /// A merged PR that the transcript linked from another repo makes the
+  /// session Done, but only a merged PR of the session's own branch lets
+  /// removal delete the branch. A PR whose head has the branch's name in
+  /// another repo fails on its head commit.
+  @Test(arguments: [
+    (nil as String?, "has no merged PR"), ("haacked/no-pr-yet", "has commits that are not in its merged PR"),
+  ])
+  func skipsADoneSessionWhoseMergedPRIsFromAnotherRepo(_ head: String?, _ refusal: String) throws {
+    let s = try Setup()
+    let foreign = try s.sbd.worktreeSession(s.repo, branch: "haacked/no-pr-yet")
+    try s.sbd.commit(foreign.cwd, "unpushed.txt")
+    let tip = try s.sbd.git(foreign.cwd, "rev-parse", "HEAD")
+    try s.sbd.link(foreign, "haacked/review-code", 189)
+    s.github.change(189) {
+      $0["state"] = "MERGED"
+      if let head { $0["headRefName"] = .string(head) }
+    }
+    try s.pollUntilDone(foreign)
+
+    let result = try parse(try s.sbd.rmDone("--worktree", "--yes", "--json"))
+
+    #expect(removed(result).isEmpty)
+    let reason = try #require(skip(result["skipped"], foreign.id)?["reason"]?.string)
+    #expect(reason.contains(refusal), Comment(rawValue: reason))
+    #expect(FileManager.default.fileExists(atPath: foreign.cwd))
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/haacked/no-pr-yet") == tip)
+  }
+
   @Test func skipsALockedWorktreeAndRemovesTheRest() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()
@@ -847,6 +875,23 @@ private func calls(_ log: String) -> [String] {
     let reason = try #require(skip(result["skipped"], s.id)?["reason"]?.string, Comment(rawValue: result.text))
     #expect(reason.contains("uncommitted"), Comment(rawValue: reason))
     #expect(try sbd.intact(s))
+    #expect(calls(log).isEmpty)
+  }
+
+  @Test func cleanupRefusesAWorktreeThatSupacodeLockedWhenItsMergedPRIsFromAnotherRepo() throws {
+    let s = try Setup()
+    let session = try s.sbd.worktreeSession(s.repo, branch: "haacked/no-pr-yet")
+    try s.sbd.link(session, "haacked/review-code", 189)
+    s.github.change(189) { $0["state"] = "MERGED" }
+    try s.pollUntilDone(session)
+    let log = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, session.cwd)
+
+    let r = try s.sbd.run(["cleanup", session.id, "--json"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("has no merged PR"), Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
     #expect(calls(log).isEmpty)
   }
 

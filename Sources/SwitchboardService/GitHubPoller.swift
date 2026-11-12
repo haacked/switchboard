@@ -94,15 +94,6 @@ final class GitHubPoller {
     var prId: String?
     /// When the poller last looked the key up. nil until the first lookup.
     var lookedUp: Int64?
-    /// The lowercased owner/name of each GitHub remote in the repo's config.
-    /// It is empty outside git, until git first reads the config, and for a
-    /// repo with no GitHub remote. A failed read keeps the remotes of the
-    /// last good read.
-    var repositories: Set<String> = []
-
-    /// Whether a PR in `repo` can be the session's: one of the repo's
-    /// remotes names it, or no GitHub remote is known.
-    func allows(_ repo: String) -> Bool { repositories.isEmpty || repositories.contains(repo.lowercased()) }
   }
 
   /// The session's transcript and the PR of its last pr-link line.
@@ -255,25 +246,7 @@ final class GitHubPoller {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
-    let repositories = t.branch.repositories
     refreshBranch(&t.branch, cwd: s.cwd, on: s.machine, all: all, now: now, configs: &shared.configs)
-    // A link that the old remotes refused can count under the new ones. A
-    // link that they allowed may not. The poller reads the transcript again
-    // from its start. It keeps a link that the new remotes still allow,
-    // because a link from before `/clear` is not in the current transcript.
-    if t.branch.repositories != repositories {
-      t.transcript.offset = 0
-      if case .number(let repo, _)? = t.transcript.link, !t.branch.allows(repo) {
-        t.transcript.link = nil
-        t.transcript.prId = nil
-        t.transcript.lookedUp = false
-      }
-    }
-    if let id = t.recordedPRId, let repo = prs[id]?.pr.repo ?? s.facts.pr.flatMap({ $0.id == id ? $0.repo : nil }),
-      !t.branch.allows(repo)
-    {
-      t.recordedPRId = nil
-    }
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
     // another.
@@ -289,9 +262,7 @@ final class GitHubPoller {
       t.transcript.folder = nil
       t.transcript.path = nil
     }
-    readTranscript(
-      &t.transcript, configDir: s.configDir, cwd: s.cwd, on: s.machine, projects: &shared.projects,
-      accepting: t.branch.allows)
+    readTranscript(&t.transcript, configDir: s.configDir, cwd: s.cwd, on: s.machine, projects: &shared.projects)
     tracked[s.id] = t
   }
 
@@ -321,9 +292,9 @@ final class GitHubPoller {
     var key = head != nil ? b.key : nil
     let branch = head.flatMap { GitHub.branch(head: $0) }
     if let branch { b.name = branch }
-    if let common = b.commonDir {
+    if let branch, let common = b.commonDir {
       // The worktrees of a repo share its config, so git reads it once per poll.
-      // git exits 1 when no key matches. A read that fails in another way keeps the last known remotes.
+      // git exits 1 when no key matches.
       if configs[common] == nil {
         let pattern = #"^(remote\..*\.(url|gh-resolved)|remote\.pushdefault|branch\..*\.(pushremote|remote|merge))$"#
         let r = try? machine.run(service.git, ["-C", cwd, "config", "--get-regexp", pattern])
@@ -331,14 +302,10 @@ final class GitHubPoller {
           configs[common] = GitHub.gitConfig(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
         }
       }
-      let config = configs[common] ?? [:]
-      if configs[common] != nil { b.repositories = GitHub.repositories(config: config) }
-      if let branch {
-        key = GitHub.branchKey(branch: branch, config: config) { remote in
-          // A remote's HEAD is a symbolic ref, which git never packs.
-          read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
-            GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
-          }
+      key = GitHub.branchKey(branch: branch, config: configs[common] ?? [:]) { remote in
+        // A remote's HEAD is a symbolic ref, which git never packs.
+        read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
+          GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
         }
       }
     }
@@ -358,7 +325,7 @@ final class GitHubPoller {
   /// looks only in the cwd's folder and that one.
   private func readTranscript(
     _ t: inout Transcript, configDir: String, cwd: String, on machine: any Machine,
-    projects: inout [String: [String]], accepting: (String) -> Bool
+    projects: inout [String: [String]]
   ) {
     if t.path == nil {
       let known = t.folder
@@ -372,7 +339,7 @@ final class GitHubPoller {
     guard let path = t.path, let size = machine.size(path), size != UInt64(t.offset) else { return }
     if size < UInt64(t.offset) { t.offset = 0 }
     guard let data = machine.read(path, from: UInt64(t.offset), count: nil), !data.isEmpty else { return }
-    let (link, consumed) = GitHub.lastPRLink(in: data, accepting: accepting)
+    let (link, consumed) = GitHub.lastPRLink(in: data)
     t.offset += consumed
     if let link, link != t.link {
       t.link = link
@@ -472,7 +439,8 @@ final class GitHubPoller {
       // A linked or recorded PR from another branch of the branch's repo
       // belongs to the session's earlier work. It no longer counts once
       // GitHub answers that the current branch has no PR. A PR in another
-      // repo that a remote names, such as a fork's upstream, still counts.
+      // repo still counts, because a session can open a PR from another
+      // repo's checkout.
       if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
         let earlier = { (id: String?) -> Bool in
           guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
@@ -638,17 +606,13 @@ final class GitHubPoller {
           changed = true
         }
       }
-    } else if let pr = s.facts.pr {
-      let noRemoteNamesIt = !t.branch.allows(pr.repo)
-      let branchHasNoPR =
-        t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp)
-      // A session without a branch, as in a folder outside git or with HEAD
-      // detached, keeps its PR only while its remotes are unknown or one of
-      // them names the PR's repo.
-      if noRemoteNamesIt || branchHasNoPR {
-        event(s.id, "pr", ["pr": .null, "comments": []])
-        changed = true
-      }
+    } else if s.facts.pr != nil, t.branch.key != nil, t.branch.lookedUp != nil,
+      t.transcript.link == nil || t.transcript.lookedUp
+    {
+      // GitHub answered that the branch has no PR. Without a branch, as in a
+      // folder outside git, the session keeps the PR that it had.
+      event(s.id, "pr", ["pr": .null, "comments": []])
+      changed = true
     }
     return changed
   }

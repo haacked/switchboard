@@ -1381,11 +1381,16 @@ public final class Service {
   /// hold the only copy of the work, and a commit made after the merge is in no PR.
   func checkBranchIsMerged(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String) {
     let (branch, tip) = try checkedOutBranch(session)
+    try requireTip(tip, of: branch, inMerged: try requireMergedPR(pr, of: branch))
+    return (branch, tip)
+  }
+
+  /// The PR, or throws unless it merged `branch`.
+  func requireMergedPR(_ pr: PullRequest?, of branch: String) throws -> PullRequest {
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    try requireTip(tip, of: branch, inMerged: pr)
-    return (branch, tip)
+    return pr
   }
 
   /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
