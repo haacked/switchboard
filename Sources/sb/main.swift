@@ -164,10 +164,13 @@ let usage = """
                                   also switches the session to auto mode, where
                                   Claude's classifier decides further
                                   permissions. A prompt from manual or accept
-                                  edits mode offers it
+                                  edits mode offers it. On a folder trust
+                                  prompt, it trusts the folder
     deny [--card N] <session> [message]
                                   deny it. With a message, Claude reads it and
-                                  goes on. Without one, the turn stops.
+                                  goes on. Without one, the turn stops. On a
+                                  folder trust prompt, it exits claude and
+                                  keeps the message that started it
     answer [--card N] <session> <answer>...
                                   answer the session's question, one answer per
                                   question in order. Separate the labels of a
@@ -423,8 +426,9 @@ func printSession(_ s: SessionSummary) {
     print(
       "  issue:   \(issue.label(from: s.pr?.repo)) (\(issue.via.title))\(issue.url.map { "  \($0)" } ?? "")".printable)
   }
-  if let p = s.pipeline {
-    print("  stage:   \(p.stage.title) \(ago(p.since))\(p.blocker.map { "; \($0)" } ?? "")".printable)
+  if let b = s.board {
+    let back = b.back.map { "; \($0.text)" } ?? ""
+    print("  column:  \(b.column.title) \(ago(b.since))\(b.line.map { "; \($0)" } ?? "")\(back)".printable)
   }
   if let owners = s.pr?.codeOwners { print("  owners:  \(owners.text(separator: "; "))".printable) }
   if let run = s.pr?.depot { print("  depot:   \(run.line)".printable) }

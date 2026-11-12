@@ -266,8 +266,12 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
     let github = try FakeGitHub()
     let sbd = try Instance.withTrunk(github)
     _ = try posthogSession(sbd)
-    // #122953's recorded mergeability is UNKNOWN, which makes it pending on its own.
-    github.change(122953) { $0["mergeable"] = "MERGEABLE" }
+    // #122953's recorded mergeability is UNKNOWN, which makes it pending on its own. Its recorded
+    // review decision also keeps it on the pending interval, so the test approves it.
+    github.change(122953) {
+      $0["mergeable"] = "MERGEABLE"
+      $0["reviewDecision"] = "APPROVED"
+    }
     switch source {
     case .comments: try queue(github)
     case .trunk:
@@ -281,8 +285,7 @@ private let notLoggedIn = "\u{1B}[1m\u{1B}[31m✖ User not logged in: please run
 
     try sbd.poll()
 
-    let read = github.requests.dropFirst(before).contains { $0.kind == "status" && $0.ids.contains(id) }
-    #expect(read == (source != .neither))
+    #expect(github.readStatus(of: id, since: before) == (source != .neither))
   }
 
   @Test func aQueueWaitResumesTheSessionWithTrunksLabelAndDescription() throws {

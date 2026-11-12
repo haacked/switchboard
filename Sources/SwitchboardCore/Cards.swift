@@ -9,6 +9,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case question
     /// A message to several sessions, which waits for the user to send or cancel it.
     case send
+    /// Claude Code's workspace trust dialog, which shows before claude starts
+    /// in a folder that its account does not trust.
+    case trust
   }
 
   /// The id of the PermissionRequest event that opened the card.
@@ -82,8 +85,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a
-  /// deferred question, or a group message, which only a decision closes.
-  public var outlivesTurn: Bool { deferred || kind == .send }
+  /// deferred question, or a group message, which only a decision closes. A
+  /// trust card stays until claude starts or the trust is answered.
+  public var outlivesTurn: Bool { deferred || kind == .send || kind == .trust }
 
   /// What the user does with the card, in the words of the session's attention reason.
   public var reason: String {
@@ -91,6 +95,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case .permission: "approve \(summary)"
     case .question: "answer: \(summary)"
     case .send: "confirm \(summary)"
+    case .trust: "trust the folder \((summary as NSString).abbreviatingWithTildeInPath)"
     }
   }
 
@@ -103,7 +108,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case .permission:
       FileCall(self) != nil
         || tool == "Bash" && input["command"]?.string?.contains(where: { !$0.isWhitespace }) == true
-    case .send: false
+    case .send, .trust: false
     }
   }
 
@@ -243,7 +248,31 @@ public enum Decision: Equatable, Sendable {
   }
 }
 
+extension Card {
+  /// The card for Claude Code's trust dialog, from a `trust_dialog` event. Its
+  /// summary and cwd are the folder that the dialog shows. Its input holds
+  /// the prompt that the launch carried, which Exit keeps for the next start.
+  init(trustDialog event: Event) {
+    let folder = event.data["folder"]?.string ?? ""
+    id = event.id
+    session = event.session
+    kind = .trust
+    tool = "trust"
+    summary = folder
+    input = event.data["prompt"]?.string.map { ["prompt": .string($0)] } ?? [:]
+    questions = []
+    since = event.t
+    deferred = false
+    hookClosed = false
+    send = nil
+    cwd = folder
+  }
+}
+
 extension SessionFacts {
+  /// The open card for Claude Code's trust dialog.
+  public var trustCard: Card? { cards.first { $0.kind == .trust } }
+
   /// Opens, closes, and defers cards. The table in the answer cards plan
   /// lists what each event does.
   mutating func applyCards(_ event: Event, userPrompt: Bool) {
@@ -258,11 +287,21 @@ extension SessionFacts {
     case "send_decided":
       guard let card else { return }
       cards.remove(at: card)
+    case "trust_closed":
+      exitedAtTrust = true
+      if let card { cards.remove(at: card) }
+    case "trust_dialog":
+      trustLaunch = d["launch"]?.int.map(Int64.init)
+      if trustCard == nil { cards.append(Card(trustDialog: event)) }
+    case "SessionStart":
+      cards.removeAll { $0.kind == .trust }
     case "PostToolUse" where !event.fromSubagent, "PostToolUseFailure" where !event.fromSubagent:
       cards.removeAll { !$0.outlivesTurn && $0.isCall(tool, d["tool_input"]) }
     case "answered":
       guard let card else { return }
       let answered = cards.remove(at: card)
+      // A trust card's deny is Exit, which `trust_closed` records.
+      if answered.kind == .trust { return }
       closePrompt(answered)
       // Claude Code sends no hook after the Escape that sbd typed.
       if d["interrupted"]?.bool == true {

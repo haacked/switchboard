@@ -490,3 +490,158 @@ func sendDecided(_ card: Int64, _ decision: String, t: Int64 = 20) -> Event {
     #expect(restarted([question]) == [question])
   }
 }
+
+/// A `trust_dialog` event 5, as sbd records it when it reads Claude Code's
+/// workspace trust dialog off the screen, so its card's id is 5. A nil
+/// prompt is recorded as null, as for a launch without a prompt.
+func trustDialog(
+  id: Int64 = 5, t: Int64 = 3, folder: String = "/w/repo", prompt: String? = "hello", launch: Int64 = 1
+) -> Event {
+  Event(
+    id: id, session: "s1", t: t, kind: "trust_dialog",
+    data: ["folder": .string(folder), "prompt": prompt.map(JSON.string) ?? .null, "launch": .number(Double(launch))])
+}
+
+/// The `trust_closed` event that keeps the launch's prompt after claude
+/// exited at the trust dialog.
+func trustClosed(_ card: Int64 = 5, prompt: String? = "hello", t: Int64 = 6) -> Event {
+  var data: [String: JSON] = ["card": .number(Double(card))]
+  if let prompt { data["prompt"] = .string(prompt) }
+  return Event(id: card + 1, session: "s1", t: t, kind: "trust_closed", data: .object(data))
+}
+
+/// A launch that stopped at the trust dialog: sbd started claude with the
+/// prompt at t = 1, recorded `running` without a SessionStart, and read the
+/// dialog for that launch.
+func trustLaunch(folder: String = "/w/repo", prompt: String? = "hello") -> [Event] {
+  [
+    event("started", 1, ["prompt": prompt.map(JSON.string) ?? .null]), event("running", 2),
+    trustDialog(folder: folder, prompt: prompt, launch: 1),
+  ]
+}
+
+/// The card that a `trust_dialog` event opens for the folder.
+func trustCard(_ folder: String = "/w/repo") -> Card { facts(trustLaunch(folder: folder)).cards[0] }
+
+@Suite struct TrustCards {
+  @Test func aTrustDialogOpensATrustCard() throws {
+    let card = try #require(facts(trustLaunch()).cards.first)
+
+    #expect(card.id == 5)
+    #expect(card.session == "s1")
+    #expect(card.kind == .trust)
+    #expect(card.tool == "trust")
+    #expect(card.summary == "/w/repo")
+    #expect(card.cwd == "/w/repo")
+    #expect(card.since == 3)
+    #expect(!card.deferred)
+  }
+
+  @Test(arguments: ["hello", "null", "  42  ", "Say \"hi\"\nthen\tstop", ""])
+  func aTrustCardKeepsTheLaunchPromptExactly(_ prompt: String) {
+    #expect(facts(trustLaunch(prompt: prompt)).cards.first?.input == ["prompt": .string(prompt)])
+  }
+
+  @Test func aTrustCardOfALaunchWithoutAPromptHasAnEmptyInput() {
+    #expect(facts(trustLaunch(prompt: nil)).cards.first?.input == [:])
+  }
+
+  @Test func aTrustDialogOpensOneCard() {
+    let f = facts(trustLaunch() + [trustDialog(id: 8, t: 4)])
+
+    #expect(f.cards.map(\.id) == [5])
+  }
+
+  /// A second launch's dialog while the first launch's card is open opens no second card.
+  @Test func aLaterLaunchsDialogOpensNoSecondCard() {
+    let f = facts(trustLaunch() + [event("started", 7, ["prompt": .null]), trustDialog(id: 9, t: 8, launch: 7)])
+
+    #expect(f.cards.filter { $0.kind == .trust }.count == 1)
+  }
+
+  @Test func sessionStartClosesTheTrustCard() {
+    let f = facts(trustLaunch() + [sendPending(), event("SessionStart", 11)])
+
+    #expect(f.cards.map(\.kind) == [.send])
+  }
+
+  @Test(arguments: turnEnds)
+  func theTrustCardOutlivesStoppedAndExited(_ end: Event) {
+    #expect(facts(trustLaunch() + [end]).cards.map(\.kind) == [.trust])
+  }
+
+  @Test func theTrustCardOutlivesTheTurn() {
+    #expect(trustCard().outlivesTurn)
+  }
+
+  @Test func trustClosedClosesIt() {
+    #expect(facts(trustLaunch() + [trustClosed(5)]).cards.isEmpty)
+  }
+
+  @Test func trustClosedForAnotherCardLeavesIt() {
+    #expect(facts(trustLaunch() + [trustClosed(99)]).cards.map(\.id) == [5])
+  }
+
+  /// Exit typed in the terminal, `sb stop`, and a crash record only
+  /// `trust_closed`, with no `answered` before it.
+  @Test func trustClosedSetsExitedAtTrust() {
+    #expect(facts(trustLaunch() + [trustClosed(5)]).exitedAtTrust)
+  }
+
+  @Test func anOpenTrustCardIsNotAnExit() {
+    #expect(!facts(trustLaunch()).exitedAtTrust)
+  }
+
+  /// The deny and `endTurn` handling of `answered` is for tool prompts. A
+  /// turn that runs, which a trust card never has in practice, shows
+  /// whether the answer touched it.
+  @Test(arguments: [
+    ["card": 5, "behavior": "deny"] as [String: JSON], ["card": 5, "behavior": "deny", "interrupted": true],
+    ["card": 5, "behavior": "allow"], ["card": 5, "behavior": "deny", "message": "no"],
+  ])
+  func answeringATrustCardLeavesTheTurnAlone(_ answer: [String: JSON]) {
+    let make = tool("Bash", ["command": "make"], id: "m1")
+    let f = facts(
+      [event("UserPromptSubmit", 0, ["prompt": "go"]), event("PreToolUse", 1, make)] + [trustDialog()]
+        + [event("answered", 4, answer)])
+
+    #expect(f.cards.isEmpty)
+    #expect(f.turnRunning)
+    #expect(f.runningTool?.id == "m1")
+  }
+
+  @Test func answeringATrustCardLeavesAnOpenPermissionAlone() {
+    let f = facts(
+      permissionTurn() + [trustDialog(id: 7, t: 3)] + [event("answered", 4, ["card": 7, "behavior": "deny"])])
+
+    #expect(f.cards.map(\.id) == [3])
+    #expect(f.openPermission != nil)
+    #expect(f.turnRunning)
+  }
+
+  @Test func theTrustCardSurvivesARestart() {
+    var replay = SessionReplay.replaying(permissionTurn() + trustLaunch(), session: session())
+
+    replay.restarted()
+
+    #expect(replay.facts.trustCard != nil)
+    #expect(replay.facts.trustCard?.hookClosed == false)
+  }
+
+  @Test func aTrustCardIsNotFindable() {
+    let card = trustCard()
+
+    #expect(!card.findable)
+    #expect(!DialogWatch.watches(card))
+  }
+
+  @Test func aTrustCardOffersNoAutoMode() {
+    #expect(!trustCard().offersAutoMode)
+  }
+
+  @Test func aTrustCardSurvivesEncoding() throws {
+    let card = trustCard()
+
+    #expect(try JSONCoding.decode(Card.self, from: try JSONCoding.encode(card)) == card)
+  }
+}

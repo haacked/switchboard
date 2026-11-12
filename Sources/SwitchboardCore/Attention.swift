@@ -49,6 +49,16 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var lastLaunch: Int64?
   /// When claude last ended, stopped, or exited.
   public var lastExit: Int64?
+  /// The prompt that the last launch passed to claude, if any.
+  public var lastLaunchPrompt: String?
+  /// The launch whose trust dialog opened a trust card. sbd opens one card
+  /// per launch.
+  public var trustLaunch: Int64?
+  /// Whether claude exited at the workspace trust dialog since its last launch.
+  public var exitedAtTrust = false
+  /// Whether the main session sent any hook since the last launch. Claude
+  /// sends none while the trust dialog shows.
+  public var hookSinceLaunch = false
   /// Background jobs that run under claude, as the last `job` event counted
   /// them. A job sends no hooks, so sbd's tick finds it in the process list.
   public var jobs = 0
@@ -142,8 +152,13 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var submittedDecisionsMessage: String?
   /// Whether the last accepted submit's message reached claude, or nil before any submit.
   public var decisionsDelivery: DecisionsDelivery?
-  /// When the PR entered its pipeline stage. `notePipeline` sets it.
-  public var pipelineSince: Int64?
+  /// When the PR entered its board column, or when the session's PR last
+  /// changed. `noteBoard` sets it.
+  public var boardSince: Int64?
+  /// The PR's last move back on the board. It clears when the PR gets back to
+  /// the column it left, or when the session's PR changes or goes away.
+  /// `noteBoard` sets it.
+  public var boardBack: BoardMove?
   /// Set from a `link_down` until the next `link_up`: sbd can't read the session's host, so the events that
   /// would update these facts are not arriving.
   public var unread: UnreadHost?
@@ -180,6 +195,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let fromSubagent = event.fromSubagent
     let tool = d["tool_name"]?.string ?? ""
     if !fromSubagent, let mode = d["permission_mode"]?.string { permissionMode = mode }
+    if !fromSubagent, SessionFacts.hookKinds.contains(event.kind) { hookSinceLaunch = true }
     switch event.kind {
     case "SessionStart":
       live = true
@@ -193,6 +209,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       docket.apply(d)
     case "started", "resumed":
       lastLaunch = event.t
+      lastLaunchPrompt = d["prompt"]?.string
+      exitedAtTrust = false
+      hookSinceLaunch = false
       permissionMode = d["permission_mode"]?.string
     case "imported":
       // The transcript's last line, not the import, is the session's last activity.
@@ -285,7 +304,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       if let id = d["agent_id"]?.string { subagents.remove(id) }
     case "pr":
       let next = d["pr"].flatMap { try? JSONCoding.convert($0, to: PullRequest.self) }
-      notePipeline(from: pr, to: next, at: event.t)
+      noteBoard(from: pr, to: next, at: event.t)
       pr = next
       if let number = next?.number { prNumbers.insert(number) }
       if pr?.ready == true { readySince = readySince ?? event.t } else { readySince = nil }
@@ -432,6 +451,10 @@ public enum Attention {
     if let unread = facts.unread { return unreadVerdict(session, facts, unread, stateOf: stateOf) }
     if let card = facts.cards.first {
       return Verdict(state: .needsYou, reason: oneLine(card.reason))
+    }
+    if facts.exitedAtTrust {
+      return Verdict(
+        state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
     if let p = facts.openPermission {
       return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))

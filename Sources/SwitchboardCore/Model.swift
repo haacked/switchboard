@@ -261,12 +261,12 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the session has no shell pane, because its shell exited or
   /// the user closed it.
   public var shellClosed: Bool?
-  /// The PR's stage on the merge board. Nil for the Manager, a group chat,
+  /// The session's place on the board. Nil for the Manager, a group chat,
   /// and a docket row.
-  public var pipeline: Pipeline?
+  public var board: BoardPlacement?
   /// The GitHub issues that the session works on, first the one the tile
   /// shows. nil when no source names one, for every session that has no
-  /// `pipeline`, and for a follow-up that hasn't started.
+  /// `board`, and for a follow-up that hasn't started.
   public var issues: [SessionIssue]?
   /// The remote host that the session runs on, or nil for this Mac.
   public var host: String?

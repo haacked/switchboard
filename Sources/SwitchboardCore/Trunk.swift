@@ -49,6 +49,13 @@ public enum TrunkQueueState: String, Codable, Sendable {
   /// Whether Trunk holds the PR: submitted, or added to the queue. Trunk can
   /// still drop a submitted PR, and `trunk merge status` reports it.
   public var isHeld: Bool { self == .submitted || isQueued }
+
+  /// The queue state for a PR's line, such as "Trunk testing", or nil when no
+  /// queue holds it. Trunk's own label, such as "Cancelled", wins over sbd's state.
+  static func phrase(_ queue: TrunkQueueState?, label: String?, inMergeQueue: Bool?) -> String? {
+    if let queue, queue != .unknown { return "Trunk \((label ?? queue.rawValue).lowercased())" }
+    return inMergeQueue == true ? "in the merge queue" : nil
+  }
 }
 
 /// What `trunk merge status <N>` prints about a pull request: a header and a

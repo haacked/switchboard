@@ -89,9 +89,15 @@ extension Service {
   /// The branch to delete with a worktree that Supacode locked, and its tip.
   /// It is nil, so the branch stays, unless origin/main contains the tip. A
   /// squash merge leaves the tip outside origin/main. Throws when the
-  /// worktree doesn't have the session's branch checked out.
-  func supacodeBranch(_ session: Session, at site: any SessionSite) throws -> (name: String, tip: String)? {
+  /// worktree doesn't have the session's branch checked out, and when `pr`
+  /// merged but is not the branch's own PR.
+  func supacodeBranch(
+    _ session: Session, pr: PullRequest?, at site: any SessionSite
+  ) throws -> (name: String, tip: String)? {
     let branch = try checkedOutBranch(session, at: site)
+    // A PR that the transcript linked from another checkout can be merged
+    // while the session's own branch has none.
+    if pr?.state == .merged { _ = try requireMergedPR(pr, of: branch.name) }
     return isInMain(session.cwd, branch.tip, at: site) ? branch : nil
   }
 

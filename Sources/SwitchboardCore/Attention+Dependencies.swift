@@ -26,9 +26,6 @@ extension Attention {
     guard let pr = facts.pr, pr.state == .open, let dependency = facts.dependencies.first(where: \.holds),
       classify(facts.lastReply ?? "") == .other
     else { return nil }
-    let label = dependency.label(from: pr.repo)
-    return Verdict(
-      state: .waiting,
-      reason: oneLine(dependency.state == .merged ? "waits on the deploy of \(label)" : "waits on \(label)"))
+    return Verdict(state: .waiting, reason: oneLine(dependency.waitLine(from: pr.repo)))
   }
 }

@@ -39,6 +39,7 @@ extension Instance {
     #expect(row["state"]?.string == "waiting")
     #expect(row["reason"]?.string == AcknowledgeTests.readTheReply)
     #expect(row["acknowledged"]?.bool == true)
+    #expect(row["board"]?["holder"]?.string == "you")
   }
 
   @Test func acknowledgedSessionLeavesTheInbox() throws {

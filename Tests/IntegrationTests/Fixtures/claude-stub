@@ -92,6 +92,9 @@
 # --resume fails when no transcript exists, and --session-id fails when one
 # does. Without CLAUDE_CONFIG_DIR, claude would use the user's ~/.claude, so
 # the stub uses $SB_HOME/claude instead.
+# While $SB_HOME/ask-trust exists, it shows Claude Code's workspace trust
+# dialog before SessionStart, unless the account's .claude.json trusts the
+# folder. See trust_dialog.
 # With STUB_HOOKS=off it runs no hooks, as when every hook fails.
 # Each run appends one record to $SB_HOME/stub-calls.log in one write:
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK and the arguments, split by tabs. A NUL
@@ -224,6 +227,7 @@ rule=─────────────────────────
 
 # draw <cursor>: prints the dialog with ❯ on item <cursor>, as Claude Code
 # draws it: a rule, the head lines, the menu, and a footer that offers Esc.
+# A caller can set $footer to replace the footer's text.
 # It goes to stderr, because a caller captures stdout.
 draw() {
   local i=0 item
@@ -233,7 +237,7 @@ draw() {
       [ "$i" = "$1" ] && printf ' ❯ %s\n' "$item" || printf '   %s\n' "$item"
       i=$((i + 1))
     done
-    printf ' %s\n' "Esc to cancel"
+    printf ' %s\n' "${footer:-Esc to cancel}"
   } >&2
 }
 
@@ -349,6 +353,57 @@ dialog() {
   case $answer in "terminal esc" | '') [ -n "$hook_pid" ] && kill "$hook_pid" ;; esac
   rm -f "$out" "$term"
   printf '%s' "$answer"
+}
+
+# trust_dialog: Claude Code's workspace trust dialog, which shows before
+# SessionStart in a folder whose real path the account's .claude.json does
+# not trust. Its lines are shorter than the pane, so erase can count them.
+# It highlights "No, exit" first. Enter on "Yes, I trust this
+# folder" returns. Enter on "No, exit", a lone Escape, or a closed terminal
+# exits with no hook. It writes no trust, so a test can tell sbd's write
+# from claude's.
+trust_dialog() {
+  local c rest cursor=0 trusted='' head items footer="Enter to confirm · Esc to cancel"
+  trust_head
+  items=("No, exit" "Yes, I trust this folder")
+  stty -icanon -echo
+  draw 0
+  while IFS= read -r -s -n1 c; do
+    case $c in
+    $'\e')
+      rest=''
+      IFS= read -r -s -n2 -t 1 rest
+      case $rest in
+      '[A' | OA) cursor=0 ;;
+      '[B' | OB) cursor=1 ;;
+      *) break ;;
+      esac
+      erase
+      trust_head
+      draw "$cursor"
+      ;;
+    '')
+      [ "$cursor" = 1 ] && trusted=1
+      break
+      ;;
+    esac
+  done
+  [ -n "$trusted" ] || exit 0
+  erase
+  stty icanon echo
+}
+
+# trust_head: the trust dialog's lines above its menu. The folder is the
+# text of $SB_HOME/trust-folder while that file exists, so a test can make
+# the dialog name another folder than the card's.
+trust_head() {
+  local folder
+  folder=$(cat "$SB_HOME/trust-folder" 2>/dev/null) || folder=$(pwd -P)
+  head=(" Accessing workspace:" "" " $folder" ""
+    " Quick safety check: Is this a project you created or one you trust?"
+    " (Like your own code, a well-known open source project, or work from"
+    " your team). If not, take a moment to review what's in this folder first."
+    "" " Claude Code'll be able to read, edit, and execute files here." "" " Security guide" "")
 }
 
 # vars <prompt> <reply> [command]: the values that fill a step's placeholders.
@@ -701,6 +756,12 @@ case $source:$found in
 startup:yes) echo "Error: Session ID $session is already in use." && exit 1 ;;
 resume:no) echo "No conversation found with session ID: $session" && exit 1 ;;
 esac
+# Before the trap, so that SIGTERM at the dialog ends the stub with no hook,
+# as it ends claude before its SessionStart.
+if [ -e "$SB_HOME/ask-trust" ] &&
+  ! jq -e --arg k "$(pwd -P)" '.projects[$k].hasTrustDialogAccepted == true' "$config_dir/.claude.json" >/dev/null 2>&1; then
+  trust_dialog
+fi
 trap 'trap "" TERM; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0

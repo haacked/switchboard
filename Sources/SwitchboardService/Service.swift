@@ -965,9 +965,12 @@ public final class Service {
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
-    // MCP servers, `claudeArgs`, or triage nudge of this Mac.
+    // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
-    if local { moveToGroupAccount(id) }
+    if local {
+      moveToGroupAccount(id)
+      trustOwnFolder(id)
+    }
     let session = entries[id]!.session
     let resume = try hasTranscript(session)
     var args = [claudeCommand(for: session)]
@@ -1518,7 +1521,8 @@ public final class Service {
       session, mergedPR: merged, sharedWith: sharedWith, onlyBuildOutputIgnored: false, at: site)
     guard branch else { return (repo, nil, supacode, pr) }
     let checked =
-      supacode ? try supacodeBranch(session, at: site) : try checkBranchIsMerged(session, pr: pr, at: site)
+      supacode
+      ? try supacodeBranch(session, pr: pr, at: site) : try checkBranchIsMerged(session, pr: pr, at: site)
     return (repo, checked, supacode, pr)
   }
 
@@ -1627,11 +1631,16 @@ public final class Service {
     _ session: Session, pr: PullRequest?, at site: any SessionSite
   ) throws -> (name: String, tip: String) {
     let (branch, tip) = try checkedOutBranch(session, at: site)
+    try requireTip(tip, of: branch, inMerged: try requireMergedPR(pr, of: branch))
+    return (branch, tip)
+  }
+
+  /// The PR, or throws unless it merged `branch`.
+  func requireMergedPR(_ pr: PullRequest?, of branch: String) throws -> PullRequest {
     guard let pr = mergedPR(pr, of: branch) else {
       throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
     }
-    try requireTip(tip, of: branch, inMerged: pr)
-    return (branch, tip)
+    return pr
   }
 
   /// The session's branch and its tip, or throws unless the session's worktree has that branch checked out.
@@ -1664,9 +1673,7 @@ public final class Service {
     _ repo: String, _ branch: String, pr: PullRequest?, ignoring path: String? = nil,
     at site: any SessionSite
   ) throws {
-    guard let pr = mergedPR(pr, of: branch) else {
-      throw APIError("\(branch) has no merged PR, so it may hold the only copy of the work. Keep the branch.")
-    }
+    let pr = try requireMergedPR(pr, of: branch)
     guard branchExists(repo, branch, at: site) else { throw APIError("\(branch) no longer exists.") }
     try requireTip(
       try gitOutput(repo, ["rev-parse", "refs/heads/\(branch)"], at: site), of: branch, inMerged: pr)
@@ -1919,6 +1926,8 @@ public final class Service {
           if shouldStop(id, now: now, pid: pid) { try? stop(id, reason: "idle for \(idleStopMs(id) / 1000) s") }
         case .stopped:
           entries[id]?.unreportedSince = nil
+          // Exit typed in the terminal, a stop, or a crash ends claude at the trust dialog.
+          if let card = entries[id]?.facts.trustCard { closeTrust(card) }
           if live { record(id, "exited") }
           // A message sent while claude exited waits in `pending` for a launch.
           // A claude that dies before its SessionStart isn't launched again,
@@ -1953,6 +1962,7 @@ public final class Service {
     }
     endIdleTurns()
     closeGoneDialogs()
+    noteTrustDialogs()
   }
 
   func shouldStop(_ id: String, now: Int64, pid: Int) -> Bool {
@@ -1967,13 +1977,14 @@ public final class Service {
   }
 
   /// Whether the session's claude sits idle with nothing that a stop would
-  /// lose: no turn, prompt, queued or in-flight message, or background job,
-  /// and no terminal on screen. The idle stop and the live cap both need it.
+  /// lose: no turn, prompt, trust dialog, queued or in-flight message, or
+  /// background job, and no terminal on screen. The idle stop and the live cap both need it.
   func isQuiet(_ id: String, pid: Int, now: Int64) -> Bool {
     guard let e = entries[id] else { return false }
     let f = e.facts
     return f.live && !f.turnRunning && f.openPermission == nil && f.openQuestion == nil
-      && !e.messageWaiting(now: now) && !attached(id) && backgroundJobs(pid, in: processChildren(of: id)) == 0
+      && f.trustCard == nil && !e.messageWaiting(now: now) && !attached(id)
+      && backgroundJobs(pid, in: processChildren(of: id)) == 0
   }
 
   // MARK: Summaries
@@ -2040,14 +2051,16 @@ public final class Service {
       if let error = remoteSites[host]?.setupError { out.reason = error }
     }
     out.shellClosed = s.shellClosed
-    if s.kind == .work && s.docket == nil {
-      out.pipeline = Pipeline(e.facts, created: s.created)
-      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
-    }
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
     if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
+    if s.kind == .work && s.docket == nil {
+      out.board = BoardColumn.place(
+        state: verdict.state, acknowledged: verdict.acknowledged, stateSince: out.since, waits: s.waits ?? [],
+        facts: e.facts, created: s.created)
+      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+    }
     return out
   }
 

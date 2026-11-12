@@ -445,6 +445,9 @@ import Testing
       #expect(Press(NavShortcuts.focusList) == Press("l"))
       #expect(Press(NavShortcuts.focusTerminal) == Press("t"))
       #expect(Press(NavShortcuts.searchSessions) == Press("k"))
+      #expect(Press(NavShortcuts.back) == Press("["))
+      #expect(Press(NavShortcuts.forward) == Press("]"))
+      #expect(Press(NavShortcuts.showRecentPlaces) == Press("y"))
     }
   }
 }

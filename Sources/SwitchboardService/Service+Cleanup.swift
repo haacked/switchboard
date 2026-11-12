@@ -127,7 +127,8 @@ extension Service {
     let (repo, supacode) = try checkWorktreeIsLossless(
       session, mergedPR: true, sharedWith: sharedWith, onlyBuildOutputIgnored: true, at: site)
     let branch =
-      supacode ? try supacodeBranch(session, at: site) : try checkBranchIsMerged(session, pr: proven, at: site)
+      supacode
+      ? try supacodeBranch(session, pr: proven, at: site) : try checkBranchIsMerged(session, pr: proven, at: site)
     return (repo, branch, supacode, proven)
   }
 
