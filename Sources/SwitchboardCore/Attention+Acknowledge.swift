@@ -17,6 +17,13 @@ public struct Acknowledgment: Codable, Equatable, Sendable {
   public init(_ verdict: Verdict, _ facts: SessionFacts) {
     self.init(state: verdict.state, reason: verdict.reason, head: facts.pr?.headSha)
   }
+
+  /// Whether this acknowledgment is of the verdict for a session with these
+  /// facts: the state, the reason, and the PR's head commit are the ones that
+  /// the user saw.
+  public func covers(_ verdict: Verdict, _ facts: SessionFacts) -> Bool {
+    state == verdict.state && reason == verdict.reason && head == facts.pr?.headSha
+  }
 }
 
 /// The cards, the permission prompt, and the question that wait on the user.
@@ -59,7 +66,7 @@ extension Attention {
   /// waits, parent notices, and auto-continue, read `evaluate`'s verdict. An
   /// acknowledgment therefore changes nothing that sbd does.
   public static func shown(_ verdict: Verdict, _ facts: SessionFacts) -> Verdict {
-    guard AttentionState.inbox.contains(verdict.state), facts.acknowledgment == Acknowledgment(verdict, facts) else {
+    guard AttentionState.inbox.contains(verdict.state), facts.acknowledgment?.covers(verdict, facts) == true else {
       return verdict
     }
     var out = verdict

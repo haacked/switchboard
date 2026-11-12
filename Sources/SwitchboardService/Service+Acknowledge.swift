@@ -14,7 +14,7 @@ extension Service {
     }
     let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
     if args["undo"]?.bool == true {
-      guard Attention.shown(verdict, e.facts).acknowledged else {
+      guard shown(id, verdict).acknowledged else {
         throw APIError("\(e.session.name) isn't acknowledged")
       }
       record(id, "unack")
@@ -28,10 +28,17 @@ extension Service {
   /// unless the user already acknowledged it.
   func acknowledge(_ id: String, _ verdict: Verdict) throws {
     let e = entries[id]!
-    guard !Attention.shown(verdict, e.facts).acknowledged else { return }
+    guard !shown(id, verdict).acknowledged else { return }
     guard AttentionState.inbox.contains(verdict.state) else {
       throw APIError("\(e.session.name) isn't in the Inbox: \(verdict.reason)")
     }
     record(id, "ack", try JSON(encoding: Acknowledgment(verdict, e.facts)))
+  }
+
+  /// The verdict that the app and `sb` show for `id`, given the verdict that
+  /// `evaluate` gave. Every caller goes through here, so the acknowledgment
+  /// rules read the same settings everywhere.
+  func shown(_ id: String, _ verdict: Verdict) -> Verdict {
+    Attention.shown(verdict, entries[id]!.facts)
   }
 }
