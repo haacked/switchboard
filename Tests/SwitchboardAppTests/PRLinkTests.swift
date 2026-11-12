@@ -2,15 +2,15 @@ import AppKit
 import SwiftUI
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
 /// The URLs that a hosted view passed to the `openURL` environment action.
-final class OpenedURLs: @unchecked Sendable {
-  private let lock = NSLock()
-  private var opened: [URL] = []
-  var urls: [URL] { lock.withLock { opened } }
-  func append(_ url: URL) { lock.withLock { opened.append(url) } }
+final class OpenedURLs: Sendable {
+  private let opened = OSAllocatedUnfairLock<[URL]>(initialState: [])
+  var urls: [URL] { opened.withLock { $0 } }
+  func append(_ url: URL) { opened.withLock { $0.append(url) } }
 }
 
 /// One accessibility element of a hosted view.
