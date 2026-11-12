@@ -17,18 +17,16 @@
 set -euo pipefail
 root="$(dirname "$0")/.."
 out="$root/Tests/shard-weights"
-weights=$(sed -n -E 's/.*slot-seconds ([0-9.]+) ([^ /]+)\/.*/\1 \2/p' "$@" |
-  awk '{ sum[$2] += $1 } END { for (s in sum) printf "%d %s\n", sum[s] + 0.5, s }' |
-  sort -k1,1rn -k2,2)
-if [ -z "$weights" ]; then
+sums=$(sed -n -E 's/.*slot-seconds ([0-9.]+) ([^ /]+)\/.*/\1 \2/p' "$@")
+if [ -z "$sums" ]; then
   echo "bin/shard-weights: the input has no slot-seconds lines" >&2
   exit 1
 fi
-suites=$(cd "$root" && source bin/lib/swift-testing.sh &&
-  swift build --build-tests ${args[@]+"${args[@]}"} >&2 &&
-  swift test list --skip-build | grep '^IntegrationTests\.' | cut -d/ -f1 | sort -u)
-weights=$( { printf '%s\n' "$weights"
-  comm -13 <(awk '{ print $2 }' <<<"$weights" | sort) - <<<"$suites" | sed 's/^/0 /'; } |
+weights=$( { printf '%s\n' "$sums"
+  (cd "$root" && source bin/lib/swift-testing.sh &&
+    swift build --build-tests ${args[@]+"${args[@]}"} >&2 &&
+    swift test list --skip-build | awk -F/ '/^IntegrationTests\./ { print "0 " $1 }'); } |
+  awk '{ sum[$2] += $1 } END { for (s in sum) printf "%d %s\n", sum[s] + 0.5, s }' |
   sort -k1,1rn -k2,2)
 printf '%s\n' "$weights" >"$out"
 echo "bin/shard-weights: wrote $(grep -c . "$out") suites to Tests/shard-weights"
