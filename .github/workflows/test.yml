@@ -71,17 +71,18 @@ jobs:
       - run: brew install tmux
       - run: tmux -V
       - run: sysctl -n hw.ncpu hw.memsize && uptime
-      # Runs bin/test's build command with its flags, so bin/test finds the
-      # build up to date. A warning in Sources fails the job. The test targets
-      # still have warnings, so the check leaves them out. The check also
-      # skips dependency checkouts, which sit under .build.
-      - name: Build without warnings in Sources
+      # Runs bin/test's build command. bin/test then finds the build up to date.
+      # A warning in Sources or Tests fails the job. A warning inside a macro
+      # expansion, such as an @Test's arguments, prints without a path. The
+      # check therefore also matches lines that start with "macro expansion".
+      # The check skips dependency checkouts, which sit under .build.
+      - name: Build without warnings in Sources and Tests
         shell: bash
         run: |
           source bin/lib/swift-testing.sh
-          swift build --build-tests ${args[@]+"${args[@]}"} 2>&1 | tee "$RUNNER_TEMP/build.log"
-          if grep -E '/Sources/[^:]+:[0-9]+:[0-9]+: warning:' "$RUNNER_TEMP/build.log" | grep -v '/\.build/'; then
-            echo "::error::The build has warnings in Sources."
+          build_tests 2>&1 | tee "$RUNNER_TEMP/build.log"
+          if grep -E '/(Sources|Tests)/[^:]+:[0-9]+:[0-9]+: warning:|^macro expansion [^:]+:[0-9]+:[0-9]+: warning:' "$RUNNER_TEMP/build.log" | grep -v '/\.build/'; then
+            echo "::error::The build has warnings in Sources or Tests."
             exit 1
           fi
       - run: bin/test --shards 4

@@ -16,13 +16,6 @@ extension GitHubPoller {
     var tried: Int64?
   }
 
-  /// A REST answer with its status, ETag, and JSON.
-  struct RESTReply {
-    var status: Int
-    var etag: String?
-    var json: JSON?
-  }
-
   static let maxWriteAttempts = 3
 
   // MARK: Reads
@@ -309,29 +302,5 @@ extension GitHubPoller {
       let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
     else { throw APIError("GitHub sent no content for \(what)") }
     return (String(decoding: data, as: UTF8.self), sha)
-  }
-
-  private func failure(_ reply: RESTReply, _ what: String) -> APIError {
-    APIError("GitHub answered \(reply.status) for \(what): \(GitHub.message(reply.json))")
-  }
-
-  /// Sends one REST request. A request with `etag` gets a 304 when nothing changed.
-  private func rest(
-    _ method: String, _ path: String, query: [String: String] = [:], etag: String? = nil, body: JSON? = nil,
-    stats: inout Stats
-  ) throws -> RESTReply {
-    var req = try apiRequest(path)
-    if !query.isEmpty, let url = req.url, var c = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-      c.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
-      req.url = c.url
-    }
-    req.httpMethod = method
-    if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
-    if let body {
-      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      req.httpBody = Data(body.text.utf8)
-    }
-    let (status, headers, _, json) = try send(req, stats: &stats)
-    return RESTReply(status: status, etag: headers["etag"], json: json)
   }
 }

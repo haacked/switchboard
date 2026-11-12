@@ -164,24 +164,27 @@ struct DocketVerdictCase: Sendable, CustomTestStringConvertible {
 
 @Suite struct DocketRefs {
   @Test(arguments: [
-    ("https://github.com/o/r/pull/12", "o/r#12"),
-    ("https://github.com/o/r/pull/12/", "o/r#12"),
-    ("https://github.com/o/r/pull/12/files", "o/r#12"),
-    ("https://github.com/o/r/pull/12/commits/abc123", "o/r#12"),
-    ("https://github.com/PostHog/posthog/pull/41234", "PostHog/posthog#41234"),
-    ("https://github.com/o/r/pull/12?notification_referrer_id=x", "o/r#12"),
-    ("https://github.com/o/r/pull/12#discussion_r1", "o/r#12"),
-    ("https://www.github.com/o/r/pull/12", "o/r#12"),
-    ("github.com/o/r/pull/12", "o/r#12"),
-    ("o/r#12", "o/r#12"),
-    ("o/r/pull/12", "o/r#12"),
-    ("o/r.git#12", "o/r#12"),
-    ("  o/r#12 ", "o/r#12"),
-    ("12", "d/x#12"),
-    ("#12", "d/x#12"),
+    ("https://github.com/o/r/pull/12", "o", "r", 12),
+    ("https://github.com/o/r/pull/12/", "o", "r", 12),
+    ("https://github.com/o/r/pull/12/files", "o", "r", 12),
+    ("https://github.com/o/r/pull/12/commits/abc123", "o", "r", 12),
+    ("https://github.com/PostHog/posthog/pull/41234", "PostHog", "posthog", 41234),
+    ("https://github.com/o/r/pull/12?notification_referrer_id=x", "o", "r", 12),
+    ("https://github.com/o/r/pull/12#discussion_r1", "o", "r", 12),
+    ("https://www.github.com/o/r/pull/12", "o", "r", 12),
+    ("github.com/o/r/pull/12", "o", "r", 12),
+    ("o/r#12", "o", "r", 12),
+    ("o/r/pull/12", "o", "r", 12),
+    ("o/r.git#12", "o", "r", 12),
+    ("  o/r#12 ", "o", "r", 12),
+    ("12", "d", "x", 12),
+    ("#12", "d", "x", 12),
   ])
-  func readsWhatDocketReads(_ input: String, _ expected: String) {
-    #expect(DocketRef(input, defaultRepo: "d/x")?.text == expected)
+  func readsWhatDocketReads(_ input: String, _ org: String, _ repo: String, _ number: Int) {
+    let ref = DocketRef(input, defaultRepo: "d/x")
+    #expect(ref?.org == org)
+    #expect(ref?.repo == repo)
+    #expect(ref?.number == number)
   }
 
   @Test(arguments: [

@@ -56,6 +56,7 @@ final class Instance {
   }
 
   let home: Home
+  let idleStopSeconds: Int
   let client: Client
   /// The CLAUDE_CONFIG_DIR that sbd inherits, or nil for Claude's default
   /// account.
@@ -86,6 +87,7 @@ final class Instance {
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
+    self.idleStopSeconds = idleStopSeconds
     var template = Array("/tmp/sbt.XXXXXX".utf8CString)
     guard let dir = mkdtemp(&template) else { throw TestError(description: "mkdtemp failed") }
     let path = String(cString: dir)
@@ -332,6 +334,24 @@ final class Instance {
   /// due waits only when no shared MCP server is starting.
   func advanceClock(_ ms: Int64) throws {
     _ = try client.call("clock", ["advance": .number(Double(ms))])
+  }
+
+  /// Moves the clock until the tick records `running` for a claude that has
+  /// not sent SessionStart. Each clock request runs a tick. A tick that sees
+  /// the claude as still starting restarts its 10 s, so one step can miss.
+  /// The steps stay under the 60 s that a launch's prompt counts as on its way.
+  func passUnreportedFallback(_ id: String, after mark: Int64) throws {
+    for _ in 0..<4 {
+      try advanceClock(11_000)
+      if try events(id, after: mark).contains(where: { $0.kind == "running" }) { return }
+    }
+    throw TestError(description: "the tick never recorded running for \(id)")
+  }
+
+  /// Moves the clock past `idleStopSeconds` and waits until the session's claude stops.
+  func passIdleStop(_ id: String) throws {
+    try advanceClock(Int64(idleStopSeconds + 1) * 1000)
+    try waitFor(id, "the idle stop", timeout: 10) { !$0.live }
   }
 
   /// sbd's clock, in ms since the epoch.
@@ -1005,7 +1025,8 @@ extension Instance {
       try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/\(name)")
     }
     var programs = Instance.gatedPrograms
-    programs["python3"] = try #require(findExecutable("python3"), "python3 is not installed")
+    let python = try #require(findExecutable("python3"), "python3 is not installed")
+    programs["python3"] = python
     for (name, path) in programs {
       try write(
         name,
@@ -1070,7 +1091,8 @@ extension Instance {
     case .transcript:
       let id = try #require(claudeSessionId, "the transcript gate needs a conversation")
       word = "\(id).jsonl"
-      file = try #require(boxTranscripts(id).first, "no transcript of \(id) on the box")
+      let transcript = try #require(boxTranscripts(id).first, "no transcript of \(id) on the box")
+      file = transcript
     case .agents: break
     }
     if let word { try word.write(toFile: boxGateFile(gate, "word"), atomically: true, encoding: .utf8) }

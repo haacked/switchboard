@@ -14,6 +14,10 @@ func usageFixture(_ name: String) throws -> Data {
 
 func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageFixture(name)) }
 
+/// A legacy response with no open 5-hour window.
+let legacyWithoutASession = Data(
+  #"{"five_hour": null, "seven_day": {"utilization": 75.0, "resets_at": "2026-11-04T19:59:59.752373+00:00"}}"#.utf8)
+
 @Suite struct UsageParseTests {
   @Test func aResponseWithASessionWindowListsEachLimit() throws {
     let limits = try parsedUsage("with-session")
@@ -61,10 +65,7 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
   }
 
   @Test func aLegacyResponseWithNoFiveHourWindowGetsAnUnusedSession() throws {
-    let data = Data(
-      #"{"five_hour": null, "seven_day": {"utilization": 75.0, "resets_at": "2026-11-04T19:59:59.752373+00:00"}}"#.utf8)
-
-    let limits = try Usage.parse(data)
+    let limits = try Usage.parse(legacyWithoutASession)
 
     #expect(limits.map(\.kind) == ["session", "weekly_all"])
     #expect(limits.map(\.percent) == [0, 75])
@@ -86,6 +87,40 @@ func parsedUsage(_ name: String) throws -> [UsageLimit] { try Usage.parse(usageF
   @Test(arguments: ["not json", "<html><body>502 Bad Gateway</body></html>", ""])
   func aBodyThatIsNotJSONThrows(_ body: String) {
     #expect(throws: (any Error).self) { try Usage.parse(Data(body.utf8)) }
+  }
+}
+
+/// The usage endpoint reports no 5-hour session for an Ultra plan, so parse
+/// adds the unused session only for plans that have one.
+@Suite struct UsagePlanTests {
+  @Test(arguments: ["Ultra", "ultra", " Ultra "])
+  func anUltraPlanHasNoSessionLimit(_ plan: String) {
+    #expect(!Usage.hasSessionLimit(plan: plan))
+  }
+
+  @Test(arguments: [nil, "", "Pro", "Max", "Team", "Ultrafast", "Not Ultra"] as [String?])
+  func everyOtherPlanHasASessionLimit(_ plan: String?) {
+    #expect(Usage.hasSessionLimit(plan: plan))
+  }
+
+  @Test func anUltraResponseWithoutASessionListsOnlyTheWeeks() throws {
+    #expect(try Usage.parse(usageFixture("no-session"), plan: "Ultra").map(\.kind) == ["weekly_all", "weekly_scoped"])
+    #expect(try Usage.parse(legacyWithoutASession, plan: "Ultra").map(\.kind) == ["weekly_all"])
+  }
+
+  @Test func anUltraResponseKeepsASessionThatTheEndpointReports() throws {
+    let limits = try Usage.parse(usageFixture("with-session"), plan: "Ultra")
+
+    #expect(limits.map(\.kind) == ["session", "weekly_all", "weekly_scoped"])
+    #expect(limits.map(\.percent) == [47, 20, 0])
+  }
+
+  @Test func anotherPlanGetsAnUnusedSessionFirst() throws {
+    #expect(
+      try Usage.parse(usageFixture("no-session"), plan: "Pro").map(\.kind) == [
+        "session", "weekly_all", "weekly_scoped",
+      ])
+    #expect(try Usage.parse(legacyWithoutASession, plan: "Pro").map(\.kind) == ["session", "weekly_all"])
   }
 }
 

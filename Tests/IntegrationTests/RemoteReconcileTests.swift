@@ -100,7 +100,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     // A link that is down retries, so it reads `connecting` during each attempt.
     let row = try sbd.waitFor(
       "sb ls to name the unreachable link",
-      fetch: { try JSON.parse(try sbd.sb("ls", "--json"))?.array?.first { $0["id"]?.string == s.id } },
+      fetch: { JSON.parse(try sbd.sb("ls", "--json"))?.array?.first { $0["id"]?.string == s.id } },
       until: { $0["link"] == "unreachable" })
     let after = try sbd.get(s.id)
     #expect(after.state == before.state)

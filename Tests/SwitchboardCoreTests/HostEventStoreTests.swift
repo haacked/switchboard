@@ -39,7 +39,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
   @Test func theSameIdASecondTimeStoresNothing() throws {
     try withStore { store, _ in
       let id = try eventId(clock)
-      try store.append(stop(n: 1), hostEvent: id, host: "mini")
+      _ = try store.append(stop(n: 1), hostEvent: id, host: "mini")
 
       let again = try store.append(stop(n: 2), hostEvent: id, host: "mini")
 
@@ -52,7 +52,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
   @Test func theSameIdFromAnotherHostOrForAnotherSessionStoresNothing() throws {
     try withStore { store, _ in
       let id = try eventId(clock)
-      try store.append(stop("s1"), hostEvent: id, host: "mini")
+      _ = try store.append(stop("s1"), hostEvent: id, host: "mini")
 
       #expect(try store.append(stop("s2"), hostEvent: id, host: "mini") == nil)
       #expect(try store.append(stop("s1"), hostEvent: id, host: "other") == nil)
@@ -64,7 +64,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
   @Test func anIdRecordedByOneConnectionIsADuplicateForTheNext() throws {
     try withStore { store, path in
       let id = try eventId(clock)
-      try store.append(stop(), hostEvent: id, host: "mini")
+      _ = try store.append(stop(), hostEvent: id, host: "mini")
 
       let reopened = try Store(path: path)
 
@@ -75,8 +75,8 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
 
   @Test func idsThatDifferOnlyInTheirLastPartAreTwoEvents() throws {
     try withStore { store, _ in
-      try store.append(stop(n: 1), hostEvent: try eventId(clock, pid: 7, "00aa"), host: "mini")
-      try store.append(stop(n: 2), hostEvent: try eventId(clock, pid: 7, "00ab"), host: "mini")
+      _ = try store.append(stop(n: 1), hostEvent: try eventId(clock, pid: 7, "00aa"), host: "mini")
+      _ = try store.append(stop(n: 2), hostEvent: try eventId(clock, pid: 7, "00ab"), host: "mini")
 
       #expect(try store.events(session: "s1").count == 2)
     }
@@ -89,7 +89,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
       // The events insert aborts after the id's insert has already run.
       try ResolvedTodoStoreTests.block("INSERT", on: "events", in: path)
 
-      #expect(throws: (any Error).self) { try store.append(stop(), hostEvent: id, host: "mini") }
+      #expect(throws: (any Error).self) { _ = try store.append(stop(), hostEvent: id, host: "mini") }
 
       #expect(try !store.hasHostEvent(id))
       #expect(try store.events().isEmpty)
@@ -117,7 +117,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
       let old = try eventId(clock - 25 * hour)
       let kept = try eventId(clock - 23 * hour)
       let newest = try eventId(clock)
-      for id in [old, kept, newest] { try store.append(stop(), hostEvent: id, host: "mini") }
+      for id in [old, kept, newest] { _ = try store.append(stop(), hostEvent: id, host: "mini") }
 
       try store.pruneHostEvents(host: "mini", nowNs: clock + 2 * hour)
 
@@ -131,8 +131,8 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
   @Test func pruningOneHostKeepsTheIdsOfAnother() throws {
     try withStore { store, _ in
       let othersOld = try eventId(clock - 48 * hour, pid: 9)
-      try store.append(stop(), hostEvent: othersOld, host: "other")
-      try store.append(stop(), hostEvent: try eventId(clock), host: "mini")
+      _ = try store.append(stop(), hostEvent: othersOld, host: "other")
+      _ = try store.append(stop(), hostEvent: try eventId(clock), host: "mini")
 
       try store.pruneHostEvents(host: "mini", nowNs: clock)
 
@@ -145,9 +145,9 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
     try withStore { store, _ in
       let recent = try eventId(clock - hour)
       let old = try eventId(clock - 25 * hour)
-      try store.append(stop(), hostEvent: recent, host: "mini")
-      try store.append(stop(), hostEvent: old, host: "mini")
-      try store.append(stop(), hostEvent: try eventId(UInt64.max, pid: 1, "ffff"), host: "mini")
+      _ = try store.append(stop(), hostEvent: recent, host: "mini")
+      _ = try store.append(stop(), hostEvent: old, host: "mini")
+      _ = try store.append(stop(), hostEvent: try eventId(UInt64.max, pid: 1, "ffff"), host: "mini")
 
       try store.pruneHostEvents(host: "mini", nowNs: clock)
 
@@ -160,7 +160,7 @@ private func stop(_ session: String = "s1", n: Int = 0) -> Event {
     try withStore { store, _ in
       try store.pruneHostEvents(host: "mini", nowNs: clock)
       let early = try eventId(5)
-      try store.append(stop(), hostEvent: early, host: "mini")
+      _ = try store.append(stop(), hostEvent: early, host: "mini")
 
       try store.pruneHostEvents(host: "mini", nowNs: clock)
 

@@ -8,16 +8,20 @@ let usage = """
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--no-auto] [--host H]
+        [--model M] [--account A] [--group G] [--no-auto] [--host H]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
-                                  --name. It runs under the account A, else its
-                                  parent's, else the active account. It starts
-                                  in auto mode unless --no-auto or the autoMode
-                                  setting is false. --host runs it on the
-                                  remote host H of config.json, in a folder
-                                  there that is absolute or starts with ~
+                                  --name. It joins the group G, else its
+                                  parent's group. It runs under the group's
+                                  account, else the account A, else its
+                                  parent's, else the active account. It fails
+                                  when the group has an account and A names
+                                  another. It starts in auto mode unless
+                                  --no-auto or the autoMode setting is false.
+                                  --host runs it on the remote host H of
+                                  config.json, in a folder there that is
+                                  absolute or starts with ~
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
         [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
                                   start a session on a new branch B in a new
@@ -64,7 +68,9 @@ let usage = """
                                   where the user sends or cancels it
     send --pending N [--timeout S] wait up to S seconds (default 60) for the user's
                                   decision on group message N
-    open <session>                resume the session if its claude is stopped
+    open <session> [--terminals]  resume the session if its claude is stopped.
+                                  --terminals also starts the panes and prints
+                                  their tmux targets as JSON
     stop <session>                stop the session's claude
     resume <session> [--prompt P] resume the session's claude
     done <session>, undone <session>
@@ -522,10 +528,9 @@ func attach(_ a: Args) -> Never {
   if let host = summary(call("get", ["session": .string(id)])).host {
     die("\(id) runs on \(host), and sb attach can't reach a session on a host yet")
   }
-  _ = call("open", ["session": .string(id)])
-  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let terminals: Terminals
-  do { terminals = try client.terminals(id) } catch { die("\(error)") }
+  do { terminals = try client.open(id) } catch { die("\(error)") }
+  if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
   let command = terminals.attachCommand(pane)
   let argv = command.map { strdup($0) } + [nil]
   execv(command[0], argv)
@@ -688,7 +693,8 @@ case "new":
     worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
-    account: a.values["--account"], autoMode: a.switches.contains("--no-auto") ? false : nil, host: host)
+    account: a.values["--account"], group: a.values["--group"],
+    autoMode: a.switches.contains("--no-auto") ? false : nil, host: host)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":
@@ -702,7 +708,11 @@ case "manager":
 case "get", "show":
   sessionCommand("get", a)
 case "open":
-  sessionCommand("open", a)
+  if a.switches.contains("--terminals") {
+    printJSON(call("open", ["session": .string(a.session("open")), "terminals": true]))
+  } else {
+    sessionCommand("open", a)
+  }
 case "stop":
   sessionCommand("stop", a)
 case "resume":

@@ -104,7 +104,6 @@ import Testing
   static let control = comment(
     "trunk-io[bot]", edited: false, "<!-- Trunk Merge -->\nMerging to `master` in this repository is managed by Trunk.")
   static let testing = comment("trunk-io[bot]", "⏳ Running tests in the merge queue")
-  static let deploy = comment("deployment-status-posthog[bot]", "Running tests")
 
   static func mergeable(_ mergeable: Mergeable?, id: String = "a", head: String = "h1") -> PullRequest {
     PullRequest(id: id, number: 1, url: "", repo: "a/b", headSha: head, mergeable: mergeable)

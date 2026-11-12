@@ -30,14 +30,6 @@ public struct Wait: Codable, Equatable, Sendable {
     case date
     case manual
 
-    /// True for the kinds that a poller resolves. sbd resolves the others.
-    public var needsPoller: Bool {
-      switch self {
-      case .session, .date, .manual: false
-      default: true
-      }
-    }
-
     /// The `wait` request's fields that this kind reads.
     var fields: Set<String> {
       switch self {
