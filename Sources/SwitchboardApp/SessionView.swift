@@ -55,7 +55,7 @@ struct SessionView: View {
     .onDisappear { [model, id = session.id] in model.releaseTerminalFocus(id) }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if session.hasTerminals { await connection.connect(session.id, model: model) }
+      if session.hasTerminals { await connection.connect(session.id, live: session.live) }
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
   }

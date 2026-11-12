@@ -6,40 +6,51 @@ import SwitchboardCore
 /// tmux targets.
 @MainActor
 final class TerminalConnection: ObservableObject {
-  struct Delays {
-    /// How long the selection rests before the connection opens the session.
-    var rest: Duration = .milliseconds(800)
-    var retry: Duration = .seconds(1)
-  }
+  /// Opens a session in sbd and returns its terminals. It blocks.
+  typealias Request = @Sendable (String) throws -> Terminals
+  typealias Sleep = @Sendable (Duration) async throws -> Void
+
+  /// The selection rests this long on a stopped session before the
+  /// connection opens it, so moving through the sidebar resumes no claude
+  /// that it passes.
+  static let stoppedRest: Duration = .milliseconds(800)
+  /// The rest before opening a live session. sbd reads every process to
+  /// answer an open, and the terminal then attaches a tmux client. The rest is
+  /// longer than the default key repeat interval of about 90 ms, so a held
+  /// arrow key opens no session that it passes.
+  static let liveRest: Duration = .milliseconds(150)
+  static let retryWait: Duration = .seconds(1)
 
   @Published private(set) var terminals: Terminals?
   @Published private(set) var error: String?
-  let delays: Delays
+  private let request: Request
+  private let sleep: Sleep
 
-  init(delays: Delays = Delays()) { self.delays = delays }
+  init(
+    request: @escaping Request = { try Client().open($0) },
+    sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
+  ) {
+    self.request = request
+    self.sleep = sleep
+  }
 
   /// Runs until the terminals arrive, the tries run out, or the task is cancelled.
-  func connect(_ id: String, model: BoardModel) async {
-    // Opening a session resumes a stopped claude. The selection has to rest
-    // first, so moving through the sidebar resumes nothing on the way.
-    try? await Task.sleep(for: delays.rest)
+  func connect(_ id: String, live: Bool) async {
+    try? await sleep(live ? Self.liveRest : Self.stoppedRest)
     if Task.isCancelled { return }
-    let send = model.send
+    let request = request
     // The request can fail while sbd restarts, so it retries for 10 s.
     for _ in 0..<10 {
-      let result = await Task.detached {
-        Result { try Terminals(opened: send("open", ["session": .string(id), "terminals": true])) }
-      }.value
+      let result = await Task.detached { Result { try request(id) } }.value
       if Task.isCancelled { return }
       switch result {
       case .success(let terminals):
         self.terminals = terminals
-        model.refresh(followups: true)
         return
       case .failure(let error):
         self.error = "\(error)"
       }
-      try? await Task.sleep(for: delays.retry)
+      try? await sleep(Self.retryWait)
       if Task.isCancelled { return }
     }
   }
