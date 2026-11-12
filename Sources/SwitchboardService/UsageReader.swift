@@ -84,11 +84,11 @@ final class UsageReader: @unchecked Sendable {
   }
 
   private func read(_ folder: String, name: String) -> AccountUsage {
-    let login = oauthAccount(folder)
-    var usage = AccountUsage(name: name, folder: folder, email: login?["emailAddress"]?.string)
+    let account = oauthAccount(folder)
+    var usage = AccountUsage(name: name, folder: folder, email: account?["emailAddress"]?.string)
     do {
       let token = try accessToken(folder)
-      usage.limits = try Usage.parse(try fetch(token), plan: login?["planDisplayName"]?.string)
+      usage.limits = try Usage.parse(try fetch(token), plan: account?["planDisplayName"]?.string)
       usage.checked = nowMs()
     } catch {
       usage.fail(with: error)
@@ -180,7 +180,7 @@ final class UsageReader: @unchecked Sendable {
     return data
   }
 
-  /// The login that claude records in the account's .claude.json.
+  /// The account that claude records in the folder's .claude.json.
   private func oauthAccount(_ folder: String) -> JSON? {
     let json = FileManager.default.contents(atPath: ClaudeAccount.configFile(folder)).flatMap {
       try? JSONCoding.decoder.decode(JSON.self, from: $0)
