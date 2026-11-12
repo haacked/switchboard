@@ -97,7 +97,7 @@ struct SessionView: View {
           }
           TerminalPane(
             command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
-            onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) },
+            onFocus: { [model, id = session.id] in model.releaseTerminalFocus(id) }, newlineOnShiftReturn: true,
             loadBlockSources: { [model, id = session.id] done in model.loadBlockSources(id, then: done) })
         }
         .frame(minWidth: SessionView.claudeMinWidth, idealWidth: 760)
@@ -301,9 +301,4 @@ struct SessionView: View {
     .padding(.vertical, 3)
     .background(.bar)
   }
-}
-
-extension SessionSummary {
-  /// False for a follow-up that hasn't started, a docket row, and a session whose worktree cleanup removed.
-  var hasTerminals: Bool { runsClaude && cleanup?.state != .removed }
 }
