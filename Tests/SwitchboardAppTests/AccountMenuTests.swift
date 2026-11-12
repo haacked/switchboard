@@ -225,7 +225,7 @@ final class OpLog: @unchecked Sendable {
     #expect(model.switchingAccount?.switches == false)
   }
 
-  static let refusal = "b is not signed in; run `CLAUDE_CONFIG_DIR=/b claude` and /login"
+  nonisolated static let refusal = "b is not signed in; run `CLAUDE_CONFIG_DIR=/b claude` and /login"
 
   /// A model whose sbd refuses `account-use` and `account-move` as it refuses a signed-out account.
   func refusingModel(_ log: OpLog) -> BoardModel {

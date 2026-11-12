@@ -130,7 +130,7 @@ import Testing
   }
 
   /// macOS sends arrow keys with the numeric pad and function flags set.
-  @Test(arguments: [EventModifiers(), .numericPad, .function, [.numericPad, .function]])
+  @Test(arguments: [EventModifiers(), .numericPad, .functionKey, [.numericPad, .functionKey]])
   func downAndSpaceOpenItEmpty(_ modifiers: EventModifiers) {
     #expect(RepoPickerList.opens(.downArrow, modifiers: modifiers) == "")
     #expect(RepoPickerList.opens(.space, modifiers: modifiers) == "")
@@ -146,7 +146,7 @@ import Testing
       withCommandOptionOrControl.map { (key, $0) }
     }
     + keysThatTypeNothing.flatMap { key in
-      [EventModifiers(), .shift, .capsLock, [.numericPad, .function]].map { (key, $0) }
+      [EventModifiers(), .shift, .capsLock, [.numericPad, .functionKey]].map { (key, $0) }
     }
 
   @Test(arguments: leftAlone)

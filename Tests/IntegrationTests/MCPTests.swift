@@ -297,7 +297,7 @@ extension Instance {
     chmod(sbd.home.mcpFolder, 0o700)
     // This moves sbd's clock past the backoff, so the next tick starts the server.
     try sbd.advanceClock(60_000)
-    try sbd.waitForRunning("grafana")
+    _ = try sbd.waitForRunning("grafana")
   }
 
   @Test func keepsServersAcrossARestartOfSbdUnlessTheirConfigChanged() throws {

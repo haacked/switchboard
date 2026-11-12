@@ -52,7 +52,7 @@ func tempFolder() throws -> String {
     let store = try Store(path: "\(dir)/sb.db")
     var ran = false
 
-    try store.transaction {
+    _ = try store.transaction {
       #expect(throws: (any Error).self) { try store.transaction { ran = true } }
     }
 

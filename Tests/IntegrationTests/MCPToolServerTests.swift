@@ -1104,7 +1104,7 @@ final class MCPClient {
     let member = try idle(sbd, name: "member")
     let outside = try idle(sbd, name: "outside")
     let g = try addGroup(sbd, "Flags", member.id)
-    try sbd.waitFor("both in triage", fetch: { try triaged(sbd) }) { Set($0) == [member.id, outside.id] }
+    _ = try sbd.waitFor("both in triage", fetch: { try triaged(sbd) }) { Set($0) == [member.id, outside.id] }
     let mcp = try MCPClient(sbd, group: g.id)
 
     let listed = try mcp.call("triage").decode([SessionSummary].self)
