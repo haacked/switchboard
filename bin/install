@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # Installs Switchboard: the app in ~/Applications, sb in ~/.local/bin, and sbd
 # as a launchd agent that starts at login. `sb service uninstall` removes the
-# agent.
+# agent. It refuses a checkout whose HEAD lacks commits of origin/main unless
+# --force is given.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source bin/lib/install-guard.sh
+case "${1:-}" in
+  --force) ;;
+  "") require_current_main ;;
+  *)
+    echo "Usage: bin/install [--force]" >&2
+    exit 2
+    ;;
+esac
 app=$(bin/bundle | tee /dev/stderr | tail -1)
 dest="$HOME/Applications/Switchboard.app"
 mkdir -p "$HOME/Applications" "$HOME/.local/bin"
