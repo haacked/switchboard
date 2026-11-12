@@ -120,7 +120,7 @@ import Testing
     let sbd = try Instance(idleStopSeconds: 1)
     let (s, hold, mark) = try heldResume(sbd)
     let pid = try sbd.get(s.id).claudePid
-    // Each clock request runs a tick. The first tick notes the held claude, and the second passes its 10 s.
+    // Each clock request runs a tick. The first tick notes the held claude. The second passes its 10 s.
     try sbd.advanceClock(1)
     try sbd.advanceClock(11_000)
     try sbd.waitFor("the 10 s fallback") { try sbd.events(s.id, after: mark).contains { $0.kind == "running" } }
@@ -131,12 +131,13 @@ import Testing
     try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: #1190 to merge: #1190 merged." }
   }
 
-  /// A claude whose SessionStart never comes, as when its hook fails, still stops once it can no longer be starting.
+  /// A claude whose hook fails never sends SessionStart. It still stops once its prompt no longer counts as on its way.
   @Test func aClaudeWithNoSessionStartStopsAfterStartingMs() throws {
     let sbd = try Instance(idleStopSeconds: 1)
     let (s, _, mark) = try heldResume(sbd)
     try sbd.advanceClock(1)
-    try sbd.advanceClock(StopPolicy.startingMs)
+    // Service.startingMs is 60 s.
+    try sbd.advanceClock(60_000)
     try sbd.waitFor("the stop") { try sbd.events(s.id, after: mark).contains { $0.kind == "stopped" } }
   }
 

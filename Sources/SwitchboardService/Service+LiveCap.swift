@@ -71,7 +71,7 @@ extension Service {
   private func stoppable(now: Int64) -> [String] {
     let running = entries.values.compactMap { e -> StopPolicy.Claude? in
       guard case .running(let pid) = claudeState(e.session.id) else { return nil }
-      return stopInput(e, pid: pid, now: now)
+      return stopInput(e, jobs: backgroundJobs(pid), now: now)
     }
     return stopPolicy.capOrder(running, now: now)
   }

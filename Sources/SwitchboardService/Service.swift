@@ -61,9 +61,13 @@ public final class Service {
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
 
-    /// Whether a message is queued for the session or on its way.
+    /// Whether a message is queued for the session or on its way. A launch's
+    /// prompt stays on its way until SessionStart, for up to `startingMs`.
     func messageWaiting(now: Int64) -> Bool {
-      !pending.isEmpty || inFlight.map { now - $0 < Service.inFlightMs } == true
+      guard pending.isEmpty else { return true }
+      guard let sent = inFlight else { return false }
+      let starting = !facts.startedSinceLaunch && now - (facts.lastLaunch ?? 0) < Service.startingMs
+      return starting || now - sent < Service.inFlightMs
     }
 
     var dialogs = DialogWatch()
@@ -79,6 +83,13 @@ public final class Service {
 
   /// How long a message counts as in flight without its UserPromptSubmit.
   static let inFlightMs: Int64 = 10_000
+  /// How long a running claude with no SessionStart may run before the tick
+  /// counts it as live, because its hook may have failed.
+  static let unreportedMs: Int64 = 10_000
+  /// How long after its launch a claude with no SessionStart may still be
+  /// starting. The tick counts it as live after `unreportedMs`, but a slow
+  /// start has not read its launch's prompt yet.
+  static let startingMs: Int64 = 60_000
   /// How long sbd keeps a lookup that found no repo before it reads the folder again.
   static let checkoutRetryMs: Int64 = 60_000
 
@@ -1705,7 +1716,7 @@ public final class Service {
           if live || entries[id]?.facts.startedSinceLaunch == true {
             entries[id]?.unreportedSince = nil
           } else if let since = entries[id]?.unreportedSince {
-            if now - since > 10_000 {
+            if now - since > Service.unreportedMs {
               record(id, "running")
               entries[id]?.unreportedSince = nil
             }
@@ -1716,7 +1727,7 @@ public final class Service {
           if jobs > 0 { entries[id]?.lastJobSeen = now }
           // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
-          if let e = entries[id], stopPolicy.idleStopDue(stopInput(e, pid: pid, now: now), now: now) {
+          if let e = entries[id], stopPolicy.idleStopDue(stopInput(e, jobs: jobs, now: now), now: now) {
             try? stop(id, reason: "idle for \(config.idleStopSeconds) s")
           }
         case .stopped:
@@ -1761,9 +1772,9 @@ public final class Service {
   var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
 
   /// The session's running claude, as the stop rules see it.
-  func stopInput(_ e: Entry, pid: Int, now: Int64) -> StopPolicy.Claude {
+  func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
     StopPolicy.Claude(
-      session: e.session, facts: e.facts, lastJobSeen: e.lastJobSeen, jobs: backgroundJobs(pid),
+      session: e.session, facts: e.facts, lastJobSeen: e.lastJobSeen, jobs: jobs,
       messageWaiting: e.messageWaiting(now: now), attached: attached(e.session.id))
   }
 
