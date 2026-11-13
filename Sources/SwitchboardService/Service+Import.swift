@@ -66,7 +66,10 @@ extension Service {
     chosen.removeAll { stuck[$0.session.id] != nil }
     let sessions = withGitFacts(chosen.map(\.session))
     let tails = concurrentMap(sessions) { s in
-      Transcript.find(s.id, account: s.account, cwd: s.cwd).map { Transcript.tail($0) } ?? TranscriptTail()
+      Transcript.find(s.id, account: s.account, cwd: s.cwd, on: mac.machine).map {
+        Transcript.tail($0, on: mac.machine)
+      }
+        ?? TranscriptTail()
     }
     var imported: [SessionSummary] = []
     try queue.sync {
@@ -91,7 +94,7 @@ extension Service {
     let accounts = self.accounts
     let listed = try listAgents(accounts, now: now)
     return queue.sync {
-      let owned = Set(entries.values.map(\.session.claudeSessionId))
+      let owned = Set(macConversations.map(\.claudeSessionId))
       let ids = Set(listed.map(\.id))
       remember(listed, owned: owned, ids: ids, now: now)
       return listed + exitedSessions(owned: owned, ids: ids, accounts: Set(accounts))
@@ -115,7 +118,7 @@ extension Service {
           throw APIError(
             "\(account) holds no Claude account (no .claude.json). Check claudeConfigDirs in \(home.config)")
         }
-        return try agentRows(claude, account: account, seen: now)
+        return try agentRows(claude, account: account, seen: now, on: mac.machine)
       }
     }
     var byId: [String: ClaudeSession] = [:]
@@ -137,7 +140,7 @@ extension Service {
   /// a claude that hangs fails the call.
   /// claude and the account's folder are on `machine`.
   func agentRows(
-    _ claude: String, account: String, seen: Int64, timeout: Double? = nil, on machine: any Machine = LocalMachine()
+    _ claude: String, account: String, seen: Int64, timeout: Double? = nil, on machine: any Machine
   ) throws -> [ClaudeSession] {
     var env = ProcessInfo.processInfo.environment
     ClaudeAccount.apply(account, to: &env)
@@ -146,6 +149,35 @@ extension Service {
       throw APIError("claude agents failed for \(account): \(oneLine(r.stderr, max: 200))")
     }
     return try ClaudeSession.list(fromAgents: r.stdout, account: account, seen: seen)
+  }
+
+  /// An interactive login shell gives claude the user's PATH and shell functions. The Claude pane and
+  /// `agentRows(at:)` both start claude with these flags, so both find the same claude.
+  static let claudeShellFlags = ["-l", "-i", "-c"]
+
+  /// The rows of `claude agents --json` on a host, under the host's Claude login. The host's shell runs claude
+  /// with `claudeShellFlags`, as the Claude pane does. The shell prints a token first, and the rows are what
+  /// follows the token's line, so the output of a login or rc file is not read as rows. claude gets the
+  /// environment of a pane's program and nothing from sbd's. It throws `HostUnread` unless the host answered
+  /// the run. An interactive shell ignores SIGTERM, so the host's timeout ends a slow rc file only with the
+  /// SIGKILL `RemoteSite.killGraceSeconds` later. The local deadline leaves room for that, because an answer
+  /// after the deadline drops the link.
+  func agentRows(at site: RemoteSite, seen: Int64, timeout: Double) throws -> [ClaudeSession] {
+    let host = site.config.name
+    let token = "sb-agents-\(UUID().uuidString)"
+    let claude = shellQuote(claudeCommand(onHost: host))
+    let slack = RemoteSite.deadlineSlack + RemoteSite.killGraceSeconds
+    let r = try site.confirmed("claude agents", slack: slack) { machine in
+      guard let facts = site.facts else { throw HostUnread(hostName: host, why: "setup has not run") }
+      return try machine.run(
+        facts.shell, Service.claudeShellFlags + ["printf '%s\\n' \(token); exec \(claude) agents --json"],
+        env: RemoteSite.environment(for: facts), input: nil, timeout: timeout)
+    }
+    guard r.status == 0, let mark = r.stdout.range(of: token + "\n") else {
+      throw APIError("claude agents failed on \(host): \(oneLine(r.stderr, max: 200))")
+    }
+    return try ClaudeSession.list(
+      fromAgents: String(r.stdout[mark.upperBound...]), account: Service.hostAccount(host), seen: seen)
   }
 
   /// Remembers the listed sessions that Switchboard doesn't own, and forgets
@@ -193,7 +225,7 @@ extension Service {
     guard !running.isEmpty else { return [:] }
     let snapshot: Snapshot
     do {
-      snapshot = try buildSnapshot(reading: host.checkedPanes)
+      snapshot = try mac.readSnapshot(claudeProgram: claudeProgram)
     } catch {
       return Dictionary(
         uniqueKeysWithValues: running.map {
@@ -309,13 +341,17 @@ extension Service {
     return .success(c)
   }
 
+  /// The sessions whose conversation is one of this Mac's. A session on a host names a conversation of that
+  /// host, and the host's SessionStart hook chooses the id. It owns no conversation that import lists.
+  private var macConversations: [Session] { entries.values.map(\.session).filter { $0.host == nil } }
+
   /// A Switchboard session whose conversation `id` names. `id` is a Claude
   /// session id, or a prefix that only one conversation has. A `/clear` or
   /// `/resume` in a pane can switch a session to another session's
   /// conversation. Two sessions can then hold one conversation, and this
   /// returns either of them.
   private func owner(of id: String) -> String? {
-    let owners = entries.values.map(\.session).filter { $0.claudeSessionId.hasPrefix(id) }
+    let owners = macConversations.filter { $0.claudeSessionId.hasPrefix(id) }
     return Set(owners.map(\.claudeSessionId)).count == 1 ? owners.first?.id : nil
   }
 
@@ -363,7 +399,7 @@ extension Service {
   /// none of them.
   private func gitFacts(_ cwd: String) -> (repo: String?, branch: String?, worktree: Bool) {
     let args = ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD"]
-    let lines = (try? gitOutput(cwd, args))?.split(separator: "\n").map(String.init) ?? []
+    let lines = (try? gitOutput(cwd, args, at: mac))?.split(separator: "\n").map(String.init) ?? []
     guard lines.count == 3 else { return (nil, nil, false) }
     let (gitDir, commonDir, head) = (lines[0], lines[1], lines[2])
     return (Service.repoName(commonDir: commonDir), head == "HEAD" ? nil : head, gitDir != commonDir)

@@ -1,22 +1,17 @@
 import SwiftUI
 import SwitchboardCore
 
-/// See SessionViewState for why this isn't `@State`.
-final class DocketViewState: ObservableObject {
-  @Published var removal: TodoDeletion?
-  @Published var log: [Event] = []
-}
-
 /// A docket row, which has no terminal: its review's state and the log of
 /// what sbd read from docket, newest first.
 struct DocketView: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let docket: DocketSummary
-  @StateObject private var ui = DocketViewState()
+  @State private var removal: TodoDeletion?
+  @State private var log: [Event] = []
 
   private var isConfirmingRemove: Binding<Bool> {
-    Binding(get: { ui.removal != nil }, set: { if !$0 { ui.removal = nil } })
+    Binding(get: { removal != nil }, set: { if !$0 { removal = nil } })
   }
 
   var body: some View {
@@ -42,7 +37,7 @@ struct DocketView: View {
               ? "Mark the row not done. sbd asks docket about it again"
               : "Mark the row done. It leaves the Inbox, and sbd stops asking docket about it")
         Button(role: .destructive) {
-          ui.removal = TodoDeletion(session)
+          removal = TodoDeletion(session)
         } label: {
           Image(systemName: "trash")
         }
@@ -59,7 +54,7 @@ struct DocketView: View {
       Divider()
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 4) {
-          ForEach(ui.log.reversed(), id: \.id) { event in
+          ForEach(log.reversed(), id: \.id) { event in
             HStack(alignment: .firstTextBaseline, spacing: 8) {
               Text(ago(event.t) + " ago").foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
               InlineText(plain: DocketView.line(event.data)).textSelection(.enabled)
@@ -72,7 +67,7 @@ struct DocketView: View {
     }
     .padding(16)
     .task(id: docket) { await loadLog() }
-    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: ui.removal) { todos in
+    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
       Text(todos.message(before: "docket keeps the review. Open docket to abandon it."))
@@ -96,6 +91,6 @@ struct DocketView: View {
     let events = await Task.detached {
       (try? client.call("events", ["session": .string(id)], as: [Event].self)) ?? []
     }.value
-    ui.log = events.filter { $0.kind == "docket" }
+    log = events.filter { $0.kind == "docket" }
   }
 }

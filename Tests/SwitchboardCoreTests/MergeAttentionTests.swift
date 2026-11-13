@@ -7,7 +7,7 @@ import Testing
 /// mergeable, its checks passed, no review required, and a repository that
 /// the poller read has no `.trunk` folder and a base branch without a merge
 /// queue.
-private func readyPR(
+func readyPR(
   draft: Bool = false, headSha: String = samplePRHead, base: String = "main", defaultBranch: String? = "main",
   mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil, verdicts: [Review] = [],
   checks: String? = "SUCCESS", mergedBase: Int? = nil, queue: TrunkQueueState? = nil, reviewRequests: [String]? = nil,
@@ -635,22 +635,6 @@ extension MergeAttentionTests {
       #expect(shownSummary(v)?.contains("ready to merge") == false)
     }
 
-    @Test func approvedPRWithoutChecksNeedsYouWithTheSummary() throws {
-      let v = verdict(try summaryFacts(approvedPR(checks: nil)))
-
-      #expect(v == Verdict(state: .needsYou, reason: "merge #42, approved by stamphog"))
-      #expect(shownSummary(v) == "\(gist)\n\n4 files, +315 -208. Approved by stamphog. No checks ran.")
-      #expect(v.summarizesPR)
-    }
-
-    @Test func approvedPRStackedOnAnotherBranchNeedsYouWithTheSummary() throws {
-      let v = verdict(try summaryFacts(approvedPR(base: "haacked/parent")))
-
-      #expect(v.state == .needsYou)
-      #expect(shownSummary(v) == "\(gist)\n\n\(approvedFacts)")
-      #expect(v.summarizesPR)
-    }
-
     @Test(arguments: [
       ("review required", readyPR(reviewDecision: .reviewRequired)),
       ("conflict", approvedPR(mergeable: .conflicting)),
@@ -658,6 +642,8 @@ extension MergeAttentionTests {
       ("checks running", approvedPR(checks: "PENDING")),
       ("draft", readyPR(draft: true, reviewDecision: .approved, verdicts: [sampleVerdict("stamphog", "APPROVED")])),
       ("changes requested", readyPR(reviewDecision: .changesRequested)),
+      ("approved, no checks", approvedPR(checks: nil)),
+      ("approved, stacked on another branch", approvedPR(base: "haacked/parent")),
     ])
     func otherVerdictsDoNotSummarizeThePR(_ label: String, _ pr: PullRequest) throws {
       let v = verdict(try summaryFacts(pr))
@@ -720,12 +706,6 @@ extension MergeAttentionTests {
       let v = verdict(try summaryFacts(details: nil, then: [briefEvent(4, text: briefText)]))
 
       #expect(shownSummary(v) == "\(briefText)\n\nApproved by stamphog. Checks passed.")
-    }
-
-    @Test func briefOnTheNeedsYouMergeCardReplacesTheGist() throws {
-      let v = verdict(try summaryFacts(approvedPR(checks: nil), then: [briefEvent(4, text: briefText)]))
-
-      #expect(shownSummary(v) == "\(briefText)\n\n4 files, +315 -208. Approved by stamphog. No checks ran.")
     }
   }
 }
@@ -881,14 +861,6 @@ extension MergeAttentionTests {
 
       #expect(verdict(f).callouts.count <= TriageCard.maxCallouts)
     }
-
-    @Test func needsYouMergeCardHasThePauseCallouts() throws {
-      let details = mergeDetails(threads: 2, openThreads: 2)
-
-      let v = verdict(try summaryFacts(approvedPR(checks: nil), details: details))
-
-      #expect(v.callouts.map(\.title) == ["2 open review threads"])
-    }
   }
 }
 
@@ -996,12 +968,12 @@ extension MergeAttentionTests {
       ("ready, nobody approved", readyPR(), true),
       ("ready, approved", approvedPR(), true),
       ("ready, merge method unknown", readyPR(trunkConfig: nil, mergeQueue: nil), true),
-      ("approved, no checks", approvedPR(checks: nil), true),
+      ("approved, no checks", approvedPR(checks: nil), false),
       (
         "approved without a decision, a review request open",
-        readyPR(verdicts: [sampleVerdict("stamphog", "APPROVED")], reviewRequests: ["bob"]), true
+        readyPR(verdicts: [sampleVerdict("stamphog", "APPROVED")], reviewRequests: ["bob"]), false
       ),
-      ("approved, stacked on another branch", approvedPR(base: "haacked/parent"), true),
+      ("approved, stacked on another branch", approvedPR(base: "haacked/parent"), false),
       ("under review", readyPR(reviewDecision: .reviewRequired), false),
       ("review requested, nobody approved", readyPR(reviewRequests: ["bob"]), false),
       ("no checks, nobody approved", readyPR(checks: nil), false),

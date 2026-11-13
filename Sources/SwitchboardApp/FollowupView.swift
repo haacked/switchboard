@@ -1,21 +1,16 @@
 import SwiftUI
 import SwitchboardCore
 
-/// See SessionViewState for why this isn't `@State`.
-final class FollowupViewState: ObservableObject {
-  @Published var removal: TodoDeletion?
-}
-
 /// A follow-up that hasn't started: its prompt, where it came from, and the
 /// button that makes its worktree and starts claude.
 struct FollowupView: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
   let followup: Followup
-  @StateObject private var ui = FollowupViewState()
+  @State private var removal: TodoDeletion?
 
   private var isConfirmingRemove: Binding<Bool> {
-    Binding(get: { ui.removal != nil }, set: { if !$0 { ui.removal = nil } })
+    Binding(get: { removal != nil }, set: { if !$0 { removal = nil } })
   }
 
   var body: some View {
@@ -35,7 +30,7 @@ struct FollowupView: View {
         if followup.repository != nil { StartButton(session: session, inFolder: true) }
         Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
         Button(role: .destructive) {
-          ui.removal = TodoDeletion(session)
+          removal = TodoDeletion(session)
         } label: {
           Image(systemName: "trash")
         }
@@ -78,7 +73,7 @@ struct FollowupView: View {
       }
     }
     .padding(16)
-    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: ui.removal) { todos in
+    .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Follow-up"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
       Text(todos.message(before: "An import of Followups.md won't add it again."))

@@ -81,8 +81,13 @@ public enum UnixSocket {
     /// such as a request with an image, then takes one scan.
     var scanned = 0
     var chunk = [UInt8](repeating: 0, count: 65536)
+    /// The most bytes that a line may hold, or nil for no limit.
+    let maxLineBytes: Int?
 
-    public init(fd: Int32) { self.fd = fd }
+    public init(fd: Int32, maxLineBytes: Int? = nil) {
+      self.fd = fd
+      self.maxLineBytes = maxLineBytes
+    }
 
     /// The next line, without its newline, or nil at the end of the stream.
     public mutating func next() throws -> Data? {
@@ -94,6 +99,7 @@ public enum UnixSocket {
           return line
         }
         scanned = buffer.count
+        if let maxLineBytes, scanned > maxLineBytes { throw APIError("a line holds more than \(maxLineBytes) bytes") }
         let n = read(fd, &chunk, chunk.count)
         if n == 0 {
           guard !buffer.isEmpty else { return nil }
