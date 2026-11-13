@@ -232,13 +232,11 @@ public final class Service {
 
   public var tickSeconds: Double { config.tickSeconds }
 
-  /// Loads the sessions, rebuilds their facts and queued messages from the
-  /// event log, and writes the hook settings that every session's claude gets.
-  /// It records `delivered` or `delivery_unknown` for each message whose
+  /// Loads the sessions and rebuilds their facts and queued messages from the
+  /// event log. It records `delivered` or `delivery_unknown` for each message whose
   /// paste may have reached claude. Its last step queues the pastes of each
   /// running claude's queued messages on the state queue.
   public func load() throws {
-    try writeClaudeSettings()
     loadChosenAccount()
     loadAutoContinue()
     try store.pruneSnapshots()
@@ -1007,7 +1005,8 @@ public final class Service {
     var args = [claudeCommand(for: session)]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     if local {
-      args += ["--settings", home.claudeSettings]
+      try writeClaudeSettings(id)
+      args += ["--settings", home.claudeSettings(id)]
       args += launchMCPArgs(id, session)
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
@@ -2090,14 +2089,18 @@ public final class Service {
 
   // MARK: Settings
 
-  /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
-  /// with no output when sbd is down, so the session shows no hook errors.
-  private func writeClaudeSettings() throws {
+  /// Writes the --settings file of a local session's claude. A claude that an
+  /// earlier sbd started reads <SB_HOME>/claude-settings.json. sbd leaves that
+  /// file in place. Its hooks keep working until that claude's next launch.
+  private func writeClaudeSettings(_ id: String) throws {
+    try FileManager.default.createDirectory(atPath: home.sessionFolder(id), withIntermediateDirectories: true)
     let text = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
-    try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
+    try text.write(toFile: home.claudeSettings(id), atomically: true, encoding: .utf8)
   }
 
-  /// The text of a settings file that runs `command` for every hook that sbd reads.
+  /// The text of a settings file that runs `command` for every hook that sbd
+  /// reads. Every hook runs `sb hook`, which forwards the payload to sbd. It
+  /// exits 0 with no output when sbd is down, so the session shows no hook errors.
   static func hookSettings(command: String) -> String {
     var hooks: [String: JSON] = [:]
     for event in SessionFacts.hookKinds {
