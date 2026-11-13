@@ -1819,6 +1819,7 @@ public final class Service {
       out.triage = shown.item
       let details = Triage.details(for: out)
       out.triage?.details = details
+      if let callout = Triage.branchCallout(for: out) { out.triage?.callouts.append(callout) }
       out.decisions = shown.decisions
       if shown.decisionsSent { out.decisionsSent = true }
     }

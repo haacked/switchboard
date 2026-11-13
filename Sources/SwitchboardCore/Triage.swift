@@ -538,15 +538,28 @@ public enum Triage {
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
-  /// The reply's closing section as the summary, with no options.
+  /// The reply's closing section as the summary. An offer's title starts
+  /// with its verb, and an offer that a yes or no answers gets Yes and No.
+  /// Neither is the main option, because the offer can be a delete.
   static func fallbackItem(_ reply: String, _ verdict: Verdict) -> TriageItem {
-    let kind: TriageKind
-    switch Attention.classify(reply) {
-    case .question: kind = .question
-    case .offer: kind = .approval
-    case .other: kind = .info
+    let summary = closingSection(reply)
+    // This test matches `Attention.classify`. It runs here because the title needs the sentence before the question.
+    if let asked = Attention.lastQuestion(reply), Attention.offerPrefix(asked.question) != nil {
+      let options =
+        OfferText.isYesNo(asked.question)
+        ? ["Yes", "No"].map { TriageOption(label: $0, action: .send, message: $0) } : []
+      return TriageItem(
+        title: OfferText.title(question: asked.question, previous: asked.previous), kind: .approval,
+        summary: summary, options: options, source: .fallback)
     }
-    return TriageItem(title: title(verdict.reason), kind: kind, summary: closingSection(reply), source: .fallback)
+    switch Attention.classify(reply) {
+    case .question:
+      return TriageItem(title: title(verdict.reason), kind: .question, summary: summary, source: .fallback)
+    case .offer(let step):
+      return TriageItem(title: title(step), kind: .approval, summary: summary, source: .fallback)
+    case .other:
+      return TriageItem(title: title(verdict.reason), kind: .info, summary: summary, source: .fallback)
+    }
   }
 
   /// A fallback summary lists at most this many items of a list.

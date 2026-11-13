@@ -501,14 +501,23 @@ public enum Attention {
   /// next step that the paragraph announces.
   public static func classify(_ reply: String) -> ReplyKind {
     if let q = lastQuestion(reply)?.question {
-      let lower = q.lowercased()
-      return offerStarts.contains(where: { lower.hasPrefix($0) }) ? .offer(q) : .question(q)
+      return offerPrefix(q) != nil ? .offer(q) : .question(q)
     }
     let parts = lastParagraph(reply).map { sentences($0) } ?? []
     if let s = parts.first(where: { s in nextStepPhrases.contains { s.lowercased().contains($0) } }) {
       return .offer(s)
     }
     return .other
+  }
+
+  /// The longest entry of `offerStarts` that the sentence starts with,
+  /// matched without regard to case and followed by whitespace. "Should it be
+  /// renamed?" has none, because "should i" ends inside a word there.
+  public static func offerPrefix(_ sentence: String) -> String? {
+    let lower = sentence.lowercased()
+    return offerStarts.filter { start in
+      lower.hasPrefix(start) && lower.dropFirst(start.count).first?.isWhitespace == true
+    }.max { $0.count < $1.count }
   }
 
   /// The last question in the reply's last paragraph, and the sentence before

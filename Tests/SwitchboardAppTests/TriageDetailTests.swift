@@ -75,3 +75,41 @@ import Testing
     #expect(TriageDetail.prLink(for: session(waitsToStart: false)) == nil)
   }
 }
+
+/// The header names the PR's branch when the folder is on another one (D13).
+@Suite struct TriageDetailPRHead {
+  func session(branch: String?, head: String) -> SessionSummary {
+    var s = needsItem("a")
+    s.branch = branch
+    s.pr = PRSummary(PullRequest(id: "PR_5", number: 5, url: "https://github.com/o/r/pull/5", repo: "o/r", head: head))
+    return s
+  }
+
+  @Test func linkNamesTheHeadWhenItDiffersFromTheFoldersBranch() throws {
+    let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x-v2", head: "haacked/x")))
+
+    #expect(link.head == "haacked/x")
+  }
+
+  @Test func linkHasNoHeadWhenItIsTheFoldersBranch() throws {
+    let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x", head: "haacked/x")))
+
+    #expect(link.head == nil)
+  }
+
+  @Test func linkHasNoHeadWhenThePRDoesNotNameOne() throws {
+    let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x-v2", head: "")))
+
+    #expect(link.head == nil)
+  }
+
+  @Test func aDocketRowLinksWithoutAHead() throws {
+    var s = session(branch: "haacked/x-v2", head: "haacked/x")
+    s.cwd = ""
+    s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
+
+    let link = try #require(TriageDetail.prLink(for: s))
+
+    #expect(link.head == nil)
+  }
+}

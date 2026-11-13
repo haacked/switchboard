@@ -317,6 +317,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var status: PRStatus
   /// The branch that the PR merges into.
   public var base: String?
+  /// The PR's own branch. nil in a summary from before sbd recorded it.
+  public var head: String?
   public var checks: String?
   public var mergeable: Mergeable?
   public var queue: TrunkQueueState?
@@ -349,6 +351,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     state = pr.state
     status = pr.status
     base = pr.base
+    head = pr.head.isEmpty ? nil : pr.head
     checks = pr.checks
     mergeable = pr.mergeable
     queue = pr.queue
@@ -361,6 +364,12 @@ public struct PRSummary: Codable, Equatable, Sendable {
     approvedAt = pr.approvedAt
     inMergeQueue = pr.inMergeQueue
     codeOwners = CodeOwnerStatus(pr)
+  }
+
+  /// The PR's branch when it differs from `branch`, the folder's branch.
+  public func otherBranch(than branch: String?) -> String? {
+    guard let head, let branch, head != branch else { return nil }
+    return head
   }
 
   /// Where a merge queue holds the PR, for the session's tiles, or nil when

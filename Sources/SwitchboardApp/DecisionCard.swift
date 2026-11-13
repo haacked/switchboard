@@ -57,6 +57,12 @@ struct DecisionCard: View {
     !item.summary.isEmpty && !item.callouts.isEmpty
   }
 
+  /// Whether the Action says that the item has no summary: a fallback item
+  /// whose reply gave no closing section.
+  static func showsMissingSummary(_ item: TriageItem) -> Bool {
+    item.source == .fallback && item.summary.isEmpty
+  }
+
   private func summary(_ text: String) -> some View {
     MarkdownView(text: text)
   }
@@ -98,7 +104,7 @@ struct DecisionCard: View {
       // A message would only queue behind the open dialog.
       Text("Claude Code's dialog waits in the terminal. Open the Terminal to answer it.")
         .foregroundStyle(.secondary)
-    } else if item.source == .fallback {
+    } else if Self.showsMissingSummary(item) {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
     // A Ready to merge card offers Acknowledge as one of its options.

@@ -6,15 +6,18 @@ extension Instance {
   /// A private sbd whose poller asks `github`, with the stub gh. Polls run
   /// only when a test asks, unless `pollSeconds` starts the poller's timer.
   /// These tests need no fast process checks, so sbd ticks once a second
-  /// instead of running ps five times a second.
-  static func withGitHub(_ github: FakeGitHub, pollSeconds: Double = 0) throws -> Instance {
-    try Instance(config: [
+  /// instead of running ps five times a second. `extra` adds other config keys.
+  static func withGitHub(
+    _ github: FakeGitHub, pollSeconds: Double = 0, config extra: [String: JSON] = [:]
+  ) throws -> Instance {
+    let config: [String: JSON] = [
       "github": [
         "gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url),
         "pollSeconds": .number(pollSeconds),
       ],
       "tickSeconds": 1,
-    ])
+    ]
+    return try Instance(config: config.merging(extra) { $1 })
   }
 
   /// The sessions' Claude config folder, which sbd inherits.
@@ -794,5 +797,153 @@ extension FakeGitHub {
     #expect(after.pr?.number == 18303)
     #expect(after.reason == "#18303 is ready to merge, approved by stamphog")
     #expect(github.requests.count == count)
+  }
+
+  // MARK: The session's PR on another branch
+
+  /// PostHog/charts#18303, whose head is `charts18303`.
+  static let charts18303 = "haacked/cdp-dlq-runbook-lookup-step"
+  static let charts18303Id = "PR_kwDOJsIKrs8AAAABKhgNxg"
+
+  /// A session on #18303's branch whose transcript links #18303, after a
+  /// poll that found it. The folder then switches to `-v2`, and a poll hides
+  /// the PR.
+  func sessionThatLeftItsPR(_ sbd: Instance) throws -> SessionSummary {
+    let s = try sbd.session(in: "PostHog/charts", branch: Self.charts18303)
+    try sbd.link(s, "PostHog/charts", 18303)
+    try sbd.poll()
+    guard try sbd.get(s.id).pr?.number == 18303 else { throw TestError(description: "the poll did not find #18303") }
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "\(Self.charts18303)-v2")
+    try sbd.poll()
+    return s
+  }
+
+  /// Makes a commit on `-v2` and makes it #18303's head, as a push would.
+  func pushFromV2(_ github: FakeGitHub, _ s: SessionSummary) throws {
+    let sha = try Repos.commit(s.cwd, "work on v2")
+    github.change(18303) { $0["headRefOid"] = .string(sha) }
+  }
+
+  @Test func keepsAnEarlierPRWhoseHeadThisFolderMade() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sessionThatLeftItsPR(sbd)
+    #expect(try sbd.get(s.id).pr == nil)
+
+    try pushFromV2(github, s)
+    try sbd.poll(all: true)
+
+    let after = try sbd.get(s.id)
+    #expect(after.pr?.number == 18303)
+    #expect(after.branch == "\(Self.charts18303)-v2")
+  }
+
+  @Test func keepsAnEarlierPRWhoseHeadThisFolderMadeAcrossARestart() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sessionThatLeftItsPR(sbd)
+    try pushFromV2(github, s)
+    try sbd.poll(all: true)
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
+  /// The folder made the PR's head on the PR's branch, then `checkout -b`
+  /// started `-v2` there. The folder made no commit after the switch.
+  @Test func hidesAnEarlierPRWhoseHeadIsTheSwitchCommit() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/charts", branch: Self.charts18303)
+    let tip = try Repos.commit(s.cwd, "work on the PR's branch")
+    github.change(18303) { $0["headRefOid"] = .string(tip) }
+    try sbd.link(s, "PostHog/charts", 18303)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "\(Self.charts18303)-v2")
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr == nil)
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  @Test func aMergedEarlierPRThatThisFolderMadeMovesTheSessionToDone() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sessionThatLeftItsPR(sbd)
+    try pushFromV2(github, s)
+    try sbd.poll(all: true)
+
+    github.change(18303) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).state == .done)
+  }
+
+  /// A hidden PR stays in the poller's reads, so it polls at the idle rate
+  /// like any other PR and not on every poll.
+  @Test func pollsAHiddenPRAtTheIdleRate() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sessionThatLeftItsPR(sbd)
+    #expect(try sbd.get(s.id).pr == nil)
+    try sbd.advanceClock(300_000)
+    let mark = github.requests.count
+
+    try sbd.poll()
+    try sbd.poll()
+
+    let reads = github.requests.dropFirst(mark).filter { $0.kind == "status" && $0.ids.contains(Self.charts18303Id) }
+    #expect(reads.count == 1)
+  }
+
+  @Test func dropsAMergedEarlierPRThatThisFolderDidNotMake() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.link(s, "PostHog/posthog", 122953)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr == nil)
+
+    let sha = try Repos.commit(s.cwd, "work on no-pr-yet")
+    github.change(122953) { $0["headRefOid"] = .string(sha) }
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr == nil)
+  }
+
+  /// The plan's example, end to end: the folder on `-v2` made #18303's head,
+  /// and its reply offers to delete `-v2` while no summary exists.
+  @Test func anOfferToDeleteTheBranchNamesItAndThePRsBranch() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github, config: ["triage": ["perHour": 0]])
+    // A draft PR gives no PR rule, so the reply decides the session's item.
+    github.change(18303) { $0["isDraft"] = true }
+    let s = try sessionThatLeftItsPR(sbd)
+    try pushFromV2(github, s)
+    try sbd.poll(all: true)
+    let reply = try String(contentsOfFile: offerDeleteBranchReply, encoding: .utf8)
+      .replacingOccurrences(of: "haacked/round-trip-drop-old-bounds-v2", with: "\(Self.charts18303)-v2")
+      .replacingOccurrences(of: "haacked/round-trip-drop-old-bounds", with: Self.charts18303)
+    try reply.write(toFile: "\(sbd.home.path)/offer-delete-branch.md", atomically: true, encoding: .utf8)
+
+    try sbd.sb("send", s.id, "reply offer-delete-branch")
+
+    let after = try sbd.waitFor(s.id, "the offer") { $0.lastReply?.contains("Do you want me to delete it?") == true }
+    let item = try #require(after.triage)
+    #expect(item.title == "Delete the branch \(Self.charts18303)-v2?")
+    #expect(item.options.map(\.label) == ["Yes", "No"])
+    #expect(after.pr?.number == 18303)
+    #expect(after.pr?.head == Self.charts18303)
+    #expect(item.callouts.contains { $0.title == "#18303 uses \(Self.charts18303)" })
   }
 }
