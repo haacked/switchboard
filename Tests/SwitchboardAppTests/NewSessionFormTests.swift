@@ -202,4 +202,22 @@ import Testing
 
     #expect(r.account == nil)
   }
+
+  @Test func theRequestOfANewTaskNamesTheConversationAsParent() throws {
+    let form = NewSessionView.Form(parent: "m")
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: []))
+
+    #expect(request.parent == "m")
+  }
+
+  @Test func theRequestWithoutAParentNamesNone() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: []))
+
+    #expect(request.parent == nil)
+  }
 }
