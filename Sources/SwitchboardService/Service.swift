@@ -651,7 +651,8 @@ public final class Service {
       try nameConversation(id, prompt: payload["prompt"]?.string)
       let digestText = digest(id, now: event.t)
       if let digestText { record(id, "digest", ["text": .string(digestText)]) }
-      let context = [digestText, repliesNotice(id)].compactMap { $0 }
+      // A host's hook answer never reaches claude, so a host session keeps its replies unheard.
+      let context = [digestText, stamp == nil ? repliesNotice(id) : nil].compactMap { $0 }
       if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
