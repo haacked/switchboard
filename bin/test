@@ -31,7 +31,7 @@ shards() {
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
   build_tests
   local list total i pattern matched=0 patterns=()
-  list=$(swift test list --skip-build | grep /)
+  list=$(list_tests)
   total=$(grep -c . <<<"$list")
   # Each integration suite, slowest first, goes to the shard with the least
   # time so far. Tests/shard-weights gives each suite's seconds.
