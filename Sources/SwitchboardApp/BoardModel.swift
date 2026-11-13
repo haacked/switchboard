@@ -3,10 +3,11 @@ import Foundation
 import SwitchboardCore
 import UserNotifications
 
-/// The two views that the detail pane shows while no session is selected.
+/// The views that the detail pane shows while no session is selected.
 enum MainView {
   case inbox
   case board
+  case issues
 }
 
 /// The app's view of sbd. It polls `ls` once a second, because sbd keeps
@@ -328,7 +329,7 @@ final class BoardModel: ObservableObject {
   /// True while the sidebar has no rows and sbd answers.
   var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil }
 
-  /// The Inbox or the Board while no session is selected, else nil.
+  /// The main view while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
 
   /// The focused Inbox session while it exists, else the first item. A session
@@ -1113,7 +1114,7 @@ final class BoardModel: ObservableObject {
     Result { try Client().importSessions(refs, stop: stop) }
   }
 
-  /// Clears the selected session and shows the Inbox or the Board.
+  /// Clears the selected session and shows a main view.
   func show(_ view: MainView) {
     navigate {
       selection = nil

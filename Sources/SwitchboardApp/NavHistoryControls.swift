@@ -63,6 +63,7 @@ private struct RecentPlacesList: View {
     switch place.place {
     case .inbox: Image(systemName: "tray")
     case .board: Image(systemName: "square.grid.3x3")
+    case .issues: Image(systemName: "smallcircle.filled.circle")
     case .session(let id):
       Circle().fill(model.summary(id)?.state.color ?? .gray).frame(width: 8, height: 8)
     }

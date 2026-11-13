@@ -6,6 +6,7 @@ struct NavLocation: Hashable {
     /// The Inbox with its current item.
     case inbox(String?)
     case board
+    case issues
     case session(String)
   }
 
@@ -29,8 +30,11 @@ extension BoardModel {
     if let selection {
       return NavLocation(place: .session(selection), terminal: showingTerminal && summary(selection)?.chat != nil)
     }
-    if mainView == .board { return NavLocation(place: .board, terminal: false) }
-    return NavLocation(place: .inbox(currentInboxItem), terminal: showingTerminal)
+    switch mainView {
+    case .board: return NavLocation(place: .board, terminal: false)
+    case .issues: return NavLocation(place: .issues, terminal: false)
+    case .inbox: return NavLocation(place: .inbox(currentInboxItem), terminal: showingTerminal)
+    }
   }
 
   /// The session or follow-up `id`, whatever the org filter says.
@@ -45,8 +49,8 @@ extension BoardModel {
     let first = triage.first?.id
     return { location in
       switch location.place {
-      case .board:
-        return NavLocation(place: .board, terminal: false)
+      case .board, .issues:
+        return NavLocation(place: location.place, terminal: false)
       case .inbox(let item):
         let current = item.flatMap { inbox.contains($0) ? $0 : nil } ?? first
         return NavLocation(place: .inbox(current), terminal: location.terminal)
@@ -122,6 +126,8 @@ extension BoardModel {
       inboxJumps += 1
     case .board:
       show(.board)
+    case .issues:
+      show(.issues)
     }
   }
 
@@ -131,6 +137,7 @@ extension BoardModel {
     let text: String
     switch location.place {
     case .board: text = "Board"
+    case .issues: text = "Issues"
     case .inbox(let item): text = name(item).map { "Inbox: \($0)" } ?? "Inbox"
     case .session(let id): text = name(id) ?? id
     }

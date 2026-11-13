@@ -75,6 +75,21 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
     #expect(model.history.current == model.location)
   }
 
+  @Test func backFromIssuesReturnsToTheBoardAndForwardReturnsToIssues() {
+    let model = threeSessions()
+    model.show(.board)
+    model.show(.issues)
+    #expect(model.history.current == at(.issues))
+    #expect(model.label(for: at(.issues)) == "Issues")
+
+    model.goBack()
+    #expect(model.mainView == .board)
+
+    model.goForward()
+    #expect(model.mainView == .issues)
+    #expect(model.history.current == model.location)
+  }
+
   /// `openFromBoard` calls `show(.inbox)` and then writes `inboxFocus`. The nested batches record once.
   @Test func aBoardCardForAnInboxItemAddsOneInboxEntry() {
     let model = threeSessions()

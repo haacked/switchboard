@@ -111,6 +111,7 @@ struct ContentView: View {
           switch model.mainView {
           case .inbox: InboxView()
           case .board: BoardView()
+          case .issues: IssuesView()
           }
         }
       }
@@ -131,10 +132,11 @@ struct ContentView: View {
         Picker("View", selection: viewChoice) {
           Text("Inbox (\(model.triage.count))").tag(MainView?.some(.inbox))
           Text("Board").tag(MainView?.some(.board))
+          Text("Issues").tag(MainView?.some(.issues))
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .help("Show the Inbox (⌘1) or the Board (⌘2)")
+        .help("Show the Inbox (⌘1), the Board (⌘2), or Issues (⌘3)")
       }
       ToolbarItem(placement: .navigation) { OrgFilterMenu() }
       ToolbarItem { ManagerButton() }
@@ -156,6 +158,7 @@ struct ContentView: View {
         .help("Start a session (⌘N)")
       }
     }
+    .removingToolbarTitle()
     .confirmationDialog(
       "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
       presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
@@ -176,6 +179,14 @@ struct ContentView: View {
     .sheet(isPresented: isShowingDoneRemoval) {
       if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
     }
+  }
+}
+
+extension View {
+  /// The window title takes about 190 pt of the toolbar. Without it, a 1024 pt wide window shows the
+  /// three-segment picker and more of the toolbar's buttons before the overflow menu. macOS 14 keeps the title.
+  @ViewBuilder func removingToolbarTitle() -> some View {
+    if #available(macOS 15, *) { toolbar(removing: .title) } else { self }
   }
 }
 
