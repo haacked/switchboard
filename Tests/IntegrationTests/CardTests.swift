@@ -95,11 +95,27 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
 
   @Test func subscribesClaudeToEveryHookAndHoldsThePermissionRequestForADay() throws {
     let sbd = try Instance()
-    let settings = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings, encoding: .utf8)))
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
+    let settings = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings(s.id), encoding: .utf8)))
     let timeout = { (event: String) in settings["hooks"]?[event]?.array?.first?["hooks"]?.array?.first?["timeout"] }
     #expect(timeout("PermissionRequest") == .number(Double(Card.holdSeconds)))
     #expect(timeout("Stop") == 30)
     #expect(Set(settings["hooks"]?.object?.keys.map { $0 } ?? []) == Set(SessionFacts.hookKinds))
+  }
+
+  @Test func keepsTheSharedSettingsFileThatClaudesFromAnEarlierSbdRead() throws {
+    let sbd = try Instance()
+    let shared = "\(sbd.home.path)/claude-settings.json"
+    let earlier = #"{"hooks":{"Stop":[]}}"#
+    try earlier.write(toFile: shared, atomically: true, encoding: .utf8)
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
+
+    #expect(try String(contentsOfFile: shared, encoding: .utf8) == earlier)
   }
 
   @Test func answersTwoQuestionsWithTheChosenLabels() throws {
