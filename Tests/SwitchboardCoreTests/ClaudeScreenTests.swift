@@ -748,6 +748,138 @@ func writeRestartCard(restarted: Bool = true) throws -> Card {
   }
 }
 
+@Suite struct TypingRefusal {
+  /// A question whose question text is the command that perm-open shows.
+  static func touchQuestion() -> Card {
+    let questions: JSON = [
+      "questions": [["question": .string(capturedCommand), "options": [["label": "a"], ["label": "b"]]]]
+    ]
+    return facts(promptTurn(ask(questions), ask(questions, id: nil))).cards[0]
+  }
+
+  /// A question card, a permission dialog that shows one of its marks, and that mark.
+  static func questionMarksInPermissionDialogs() throws -> [(Card, [String], String)] {
+    let scrolled = try #require(ClaudeScreen.dialog(try DialogWatchChecks().editWithItsTopScrolledOff()))
+    return [
+      (DialogWatchChecks.gammaQuestion(), try dialog("edit-open"), "gamma"),
+      (DialogWatchChecks.gammaQuestion(), scrolled, "gamma"),
+      (touchQuestion(), try dialog("perm-open"), capturedCommand),
+    ]
+  }
+
+  @Test func aQuestionCardIsNotShownByAPermissionDialogThatHoldsItsMark() throws {
+    for (card, lines, mark) in try TypingRefusal.questionMarksInPermissionDialogs() {
+      try #require(card.marks.contains(mark))
+      try #require(lines.contains { $0.contains(mark) })
+      #expect(!ClaudeScreen.shows(card, lines))
+    }
+  }
+
+  @Test func aQuestionCardIsStillShownByItsOwnDialog() throws {
+    #expect(ClaudeScreen.shows(fruitCard(), try dialog("q-open")))
+  }
+
+  static func doesNotShow(_ id: Int64) -> String {
+    "the terminal doesn't show card \(id)'s dialog. Answer it in the terminal"
+  }
+
+  static func scrolledOff(_ id: Int64) -> String {
+    "the top of card \(id)'s dialog scrolled off the terminal, so sbd can't check which call it answers. "
+      + "Make the terminal taller, or answer it there"
+  }
+
+  static func cantMatch(_ id: Int64) -> String {
+    "the terminal shows a dialog that sbd can't match to card \(id), such as one whose path the pane cuts. "
+      + "Widen the terminal, or answer it there"
+  }
+
+  @Test func theWholeDialogIsNotRefused() throws {
+    #expect(ClaudeScreen.typingRefusal(try writeRestartCard(), screen: try screenFixture("write-restart")) == nil)
+  }
+
+  @Test(arguments: ["write-restart-tall", "write-restart-narrow"])
+  func aDialogWhoseTopScrolledOffIsRefusedAsScrolledOff(_ fixture: String) throws {
+    let card = try writeRestartCard()
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try screenFixture(fixture))
+
+    #expect(refusal == TypingRefusal.scrolledOff(card.id))
+  }
+
+  @Test func aDialogWhosePathThePaneCutsIsRefusedAsUnmatched() throws {
+    let card = try writeRestartCard()
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try screenFixture("write-restart-cut-path"))
+
+    #expect(refusal == TypingRefusal.cantMatch(card.id))
+  }
+
+  @Test(arguments: ["write-restart-after-esc", nil] as [String?])
+  func aScreenWithoutTheDialogIsRefusedAsNotShown(_ fixture: String?) throws {
+    let card = try writeRestartCard()
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try fixture.map(screenFixture))
+
+    #expect(refusal == TypingRefusal.doesNotShow(card.id))
+  }
+
+  @Test func eachCauseGetsItsOwnRefusal() throws {
+    let card = try writeRestartCard()
+    let fixtures = ["write-restart-after-esc", "write-restart-tall", "write-restart-cut-path"]
+
+    let refusals = try fixtures.map { try #require(ClaudeScreen.typingRefusal(card, screen: try screenFixture($0))) }
+
+    #expect(Set(refusals).count == fixtures.count)
+  }
+
+  @Test func anEditDialogWhoseTopScrolledOffIsRefusedAsScrolledOff() throws {
+    let card = editCard()
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try DialogWatchChecks().editWithItsTopScrolledOff())
+
+    #expect(refusal == TypingRefusal.scrolledOff(card.id))
+  }
+
+  @Test(arguments: [" rm other.txt", " touch SB8002\n84.txt"])
+  func anotherCommandsWholeDialogIsRefusedAsUnmatched(_ lines: String) throws {
+    let card = bashCard(capturedCommand)
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try otherCommandsScreen(lines))
+
+    #expect(refusal == TypingRefusal.cantMatch(card.id))
+  }
+
+  @Test func aQuestionCardIsRefusedOnAPermissionDialogThatHoldsItsMark() throws {
+    let card = DialogWatchChecks.gammaQuestion()
+
+    let refusal = ClaudeScreen.typingRefusal(card, screen: try screenFixture("edit-open"))
+
+    #expect(refusal == TypingRefusal.cantMatch(card.id))
+  }
+
+  /// A card and a screen, captured or redrawn by `DialogWatchChecks.screen`.
+  static let shapes: [(Card, String)] = [
+    (bashCard(capturedCommand), "perm-open"), (bashCard(capturedCommand), "perm-open-other"),
+    (bashCard(capturedCommand), "edit-open"), (bashCard(capturedCommand), "perm-after-yes"),
+    (bashCard("rm other.txt"), "perm-open-other"), (editCard(), "edit-open"), (editCard(), "edit-down"),
+    (editCard(), "edit-open-top-scrolled-off"), (editCard(), "edit-multi"), (editCard(), "edit-after-esc"),
+    (createCard(), "write-open"), (readCard(), "read-open"), (fruitCard(), "q-open"), (fruitCard(), "perm-open"),
+    (DialogWatchChecks.gammaQuestion(), "edit-open"), (DialogWatchChecks.gammaQuestion(), "edit-open-top-scrolled-off"),
+    (TypingRefusal.touchQuestion(), "perm-open"),
+  ]
+
+  /// sbd types only when `typingRefusal` is nil, and `shows` is the typing guard.
+  @Test(arguments: shapes)
+  func theRefusalIsNilExactlyWhenTheDialogShowsTheCard(_ shape: (Card, String)) throws {
+    let screen = try DialogWatchChecks().screen(shape.1)
+    let shown = ClaudeScreen.dialog(screen).map { ClaudeScreen.shows(shape.0, $0) } ?? false
+
+    let refusal = ClaudeScreen.typingRefusal(shape.0, screen: screen)
+
+    #expect((refusal == nil) == shown)
+  }
+}
+
 @Suite struct FileCardCwd {
   @Test(arguments: [capturedCwd, nil] as [String?])
   func aCardKeepsItsRequestsCwd(_ cwd: String?) {

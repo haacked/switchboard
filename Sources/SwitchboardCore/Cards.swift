@@ -285,19 +285,51 @@ extension Card {
   }
 }
 
+/// Why a card left while Claude Code's prompt for it stayed open.
+public enum CardGone: Codable, Equatable, Sendable {
+  /// The card's hook closed, and sbd can't find its dialog on the screen.
+  case unreadable
+  /// `DialogWatch` saw the dialog leave without Yes or a pick.
+  case dialogLeft
+}
+
 extension SessionFacts {
   /// The open card for Claude Code's trust dialog.
   public var trustCard: Card? { cards.first { $0.kind == .trust } }
 
+  /// Why the open prompt has no card, which the Inbox item says in its
+  /// summary. It is nil while the session has a card or no open prompt.
+  public var cardlessPromptReason: String? {
+    guard cards.isEmpty, openPermission != nil || openQuestion != nil else { return nil }
+    if openPermission?.tool == Attention.notificationPromptTool {
+      return "Claude Code didn't send Switchboard this prompt's tool call, so Switchboard has no card for it. "
+        + "Answer it in the terminal."
+    }
+    switch cardGone {
+    case .unreadable:
+      return "Claude Code stopped waiting on Switchboard for this prompt. That happens when sbd restarts, when the "
+        + "request times out, or when the prompt is answered in the terminal. Switchboard can't read this tool's "
+        + "dialog on the screen. If the dialog still shows, answer it in the terminal."
+    case .dialogLeft:
+      return "The dialog left the terminal without an answer from Switchboard, as No or Escape in the terminal does. "
+        + "Open the Terminal to see where the session stands."
+    case nil:
+      return "Switchboard has no card for this prompt. Answer it in the terminal."
+    }
+  }
+
   /// Opens, closes, and defers cards. The table in the answer cards plan
   /// lists what each event does.
   mutating func applyCards(_ event: Event, userPrompt: Bool) {
+    // A cause explains only the prompt that lost its card.
+    defer { if openPermission == nil && openQuestion == nil { cardGone = nil } }
     let d = event.data
     let tool = d["tool_name"]?.string ?? ""
     let card = d["card"]?.int.flatMap { id in cards.firstIndex { $0.id == Int64(id) } }
     switch event.kind {
     case "PermissionRequest" where !event.fromSubagent:
       cards.append(Card(event))
+      cardGone = nil
     case "send_pending":
       if let card = Card(groupMessage: event) { cards.append(card) }
     case "send_decided":
@@ -344,7 +376,7 @@ extension SessionFacts {
       // Escape leave the prompt open until the turn ends.
       guard let card else { return }
       let closed = cards.remove(at: card)
-      if d["allowed"]?.bool == true { closePrompt(closed) }
+      if d["allowed"]?.bool == true { closePrompt(closed) } else { cardGone = .dialogLeft }
     case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.outlivesTurn }
@@ -364,6 +396,8 @@ extension SessionFacts {
       cards[index].hookClosed = true
     } else {
       cards.remove(at: index)
+      // A restart closes hooks outside `applyCards`, so this checks the open prompt itself.
+      if openPermission != nil || openQuestion != nil { cardGone = .unreadable }
     }
   }
 

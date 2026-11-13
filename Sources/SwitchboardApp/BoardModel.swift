@@ -100,6 +100,8 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
+  /// sbd's refusal of the last answer of each card, by card id. The card shows it.
+  @Published var cardErrors: [Int64: String] = [:]
   /// Sessions whose merge is on its way to sbd. Their buttons stay disabled
   /// until sbd replies, so a second click can't merge again.
   @Published var merging: Set<String> = []
@@ -733,6 +735,8 @@ final class BoardModel: ObservableObject {
     _ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil, extra: AllowExtra? = nil
   ) {
     guard answering.insert(card.id).inserted else { return }
+    // A second refusal with the same text then still announces itself.
+    cardErrors[card.id] = nil
     var args: [String: JSON] = ["session": .string(card.session), "card": .number(Double(card.id))]
     if let behavior { args["behavior"] = .string(behavior) }
     if let extra { args[extra.argument] = true }
@@ -743,10 +747,12 @@ final class BoardModel: ObservableObject {
     perform(
       "answer", args,
       then: { result in
+        self.actionError = nil
         guard card.kind == .send, let sent = try? JSONCoding.convert(result, to: GroupSend.self) else { return }
         let failed = (sent.deliveries ?? []).compactMap { d in d.error.map { "\(d.session): \($0)" } }
         if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
       },
+      failed: { self.cardErrors[card.id] = "\($0)" },
       finally: { self.answering.remove(card.id) })
   }
 

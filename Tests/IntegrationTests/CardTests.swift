@@ -362,6 +362,23 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch w" && $0.cards.isEmpty }
   }
 
+  /// The restart ends the held hook. sbd can't read a WebFetch dialog on the
+  /// screen, so the card goes while Claude Code's dialog still waits. The
+  /// Inbox item says why it has no card.
+  @Test func explainsAPromptWhoseCardWentWhenSbdRestarts() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "fetch https://example.com")
+    let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    #expect(asked.cards.map(\.tool) == ["WebFetch"])
+    sbd.stopSbd()
+    try sbd.startSbd()
+    let after = try sbd.waitFor(s.id, "the prompt without a card") { $0.cards.isEmpty && $0.openPrompt }
+    #expect(after.triage?.summary.contains("can't read this tool's dialog") == true)
+    #expect(after.triage?.title.contains("WebFetch") == true)
+    let shown = try JSON.parse(sbd.sb("get", "--json", s.id))
+    #expect(shown?["triage"]?["summary"]?.string?.contains("can't read this tool's dialog") == true)
+  }
+
   /// The restart ends the held hook while the pane is too short for the
   /// dialog's title and path. sbd can't match the dialog to the card then,
   /// so the card stays, and sbd types its answer once the pane shows the
@@ -381,7 +398,9 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     #expect(try !sbd.screen(s.id).contains(" Edit file"))
     #expect(try sbd.get(s.id).cards.map(\.hookClosed) == [true])
     #expect(try !sbd.events(s.id).contains { $0.kind == "dialog_closed" })
-    #expect(try sbd.run("allow", s.id).status != 0)
+    let refused = try sbd.run("allow", s.id)
+    #expect(refused.status != 0)
+    #expect(refused.stderr.contains("scrolled off the terminal"))
     #expect(try sbd.cards().count == 1)
     try sbd.resize(s.id, rows: 50)
     try sbd.waitFor("the whole Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }

@@ -67,14 +67,13 @@ extension Service {
     }
   }
 
-  /// The card's pane and the lines of its dialog. It throws when the screen
-  /// doesn't show the card's dialog, because keys would answer another.
+  /// The card's pane and the lines of its dialog. It throws why when the
+  /// screen doesn't show the card's dialog, because keys would answer another.
   private func shownDialog(_ card: Card) throws -> (pane: String, dialog: [String]) {
     let pane = paneName(card.session, .claude)
-    guard case .running = claudeState(card.session), let dialog = cardDialog(card, pane) else {
-      throw APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
-    }
-    return (pane, dialog)
+    var screen: String?
+    if case .running = claudeState(card.session) { screen = try? host.screen(pane) }
+    return (pane, try ClaudeScreen.typingDialog(card, screen: screen))
   }
 
   /// Waits up to 3 s for the card's session to show no dialog, and returns
@@ -114,9 +113,6 @@ extension Service {
 
   /// The lines of the card's dialog, or nil when the screen doesn't show it.
   private func cardDialog(_ card: Card, _ pane: String) -> [String]? {
-    guard let screen = try? host.screen(pane), let dialog = ClaudeScreen.dialog(screen),
-      ClaudeScreen.shows(card, dialog)
-    else { return nil }
-    return dialog
+    try? ClaudeScreen.typingDialog(card, screen: try? host.screen(pane))
   }
 }

@@ -90,14 +90,16 @@ struct DecisionCard: View {
       // Details holds the call and message text of the item's own card only.
       ForEach(cards) {
         CardView(
-          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref)
+          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref,
+          offersTerminal: true)
       }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
-      // A message would only queue behind the open dialog.
-      Text("Claude Code's dialog waits in the terminal. Open the Terminal to answer it.")
-        .foregroundStyle(.secondary)
+      // A message would only queue behind the open dialog. The Summary says why the prompt has no card.
+      Button("Open Terminal") { model.openInboxTerminal() }
+        .help("Show the session's Claude terminal in place of its summary")
+        .disabled(!session.runsClaude)
     } else if item.source == .fallback {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }

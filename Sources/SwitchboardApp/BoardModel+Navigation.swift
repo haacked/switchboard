@@ -80,6 +80,12 @@ extension BoardModel {
     terminalFocus = target.id
   }
 
+  /// Shows the current Inbox item's terminal in the Inbox's right pane and puts keyboard focus in it.
+  func openInboxTerminal() {
+    showingTerminal = true
+    focusTerminal()
+  }
+
   /// Clears the terminal focus request while it still names `id`.
   func releaseTerminalFocus(_ id: String) {
     if terminalFocus == id { terminalFocus = nil }

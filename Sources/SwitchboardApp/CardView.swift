@@ -18,18 +18,29 @@ struct CardView: View {
   /// Leaves out the tool call and the group message's text and targets,
   /// which the Inbox's Details section shows.
   var compact = false
+  /// Offers Open Terminal beside a hook-closed card's caption. The Inbox
+  /// shows the session's summary in place of its terminal.
+  var offersTerminal = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if card.hookClosed {
-        Label(
-          card.kind == .permission
-            ? "Claude Code stopped waiting on Switchboard. Your answer is typed into the terminal."
-            : "Claude Code stopped waiting on Switchboard. Answering cancels the terminal's question and sends your answers as a message.",
-          systemImage: "keyboard"
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline) {
+          Label(
+            card.kind == .permission
+              ? "Claude Code stopped waiting on Switchboard. Your answer is typed into the terminal."
+              : "Claude Code stopped waiting on Switchboard. Answering cancels the terminal's question and sends your answers as a message.",
+            systemImage: "keyboard"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          if offersTerminal {
+            Spacer(minLength: 8)
+            Button("Open Terminal") { model.openInboxTerminal() }
+              .controlSize(.small)
+              .help("Show the session's Claude terminal in place of its summary")
+          }
+        }
       }
       switch card.kind {
       case .permission: permission
@@ -37,6 +48,15 @@ struct CardView: View {
       case .send: groupMessage
       case .trust: trust
       }
+      if let error = model.cardErrors[card.id] {
+        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+          .fixedSize(horizontal: false, vertical: true)
+          .textSelection(.enabled)
+      }
+    }
+    // A refused answer leaves the card as it was, so VoiceOver would say nothing.
+    .onChange(of: model.cardErrors[card.id]) {
+      if let error = model.cardErrors[card.id] { AccessibilityNotification.Announcement(error).post() }
     }
     .disabled(model.answering.contains(card.id))
     .padding(12)
