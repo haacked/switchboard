@@ -19,7 +19,7 @@
 # each path selects.
 select_tests() {
   local graph changed found name type dir excludes deps e ex excluded
-  local all= sources= whole=" " seen=" " suites=() tests file line missing=
+  local all= sources= whole_targets=" " seen=" " suites=() tests file line missing=
   # One line per target: name, type, folder, excluded folders, and the targets
   # it depends on, with lists joined by commas.
   graph=$(jq -r '.targets[] | [
@@ -30,11 +30,11 @@ select_tests() {
     ] | @tsv' <<<"$1") || return 1
 
   add_test_file() {
-    case $whole in *" $1 "*) return ;; esac
+    case $whole_targets in *" $1 "*) return ;; esac
     case $seen in *" $3 "*) return ;; esac
     seen+="$3 "
     line=$(test_file_selection "$1" "$2" "$3")
-    if [[ $line == target* ]]; then whole+="$1 "; else suites+=("$line"); fi
+    if [[ $line == target* ]]; then whole_targets+="$1 "; else suites+=("$line"); fi
   }
 
   while IFS= read -r changed; do
@@ -73,7 +73,7 @@ select_tests() {
 
   tests=$(awk -F'\t' '$2 == "test" { print $1 }' <<<"$graph")
   if [ -n "$sources" ]; then
-    whole+="$(awk -F'\t' -v changed="$sources" '
+    whole_targets+="$(awk -F'\t' -v changed="$sources" '
       { type[$1] = $2; deps[$1] = $5 }
       END {
         n = split(changed, c, " ")
@@ -93,7 +93,7 @@ select_tests() {
     # Tests that pass made-up paths such as "/tmp/x/Sources" do neither.
     while IFS=$'\t' read -r name type dir excludes deps; do
       [ "$type" = test ] || continue
-      case $whole in *" $name "*) continue ;; esac
+      case $whole_targets in *" $name "*) continue ;; esac
       while IFS= read -r file; do
         [ -n "$file" ] || continue
         echo "bin/test: $file reads Sources/ at run time" >&2
@@ -104,17 +104,17 @@ select_tests() {
   fi
 
   for name in $tests; do
-    case $whole in *" $name "*) ;; *) missing=1 ;; esac
+    case $whole_targets in *" $name "*) ;; *) missing=1 ;; esac
   done
   if [ -z "$missing" ]; then
     echo all
     return
   fi
   {
-    for name in $whole; do echo "target $name"; done
+    for name in $whole_targets; do echo "target $name"; done
     for line in ${suites[@]+"${suites[@]}"}; do
       read -r _ name _ <<<"$line"
-      case $whole in *" $name "*) ;; *) echo "$line" ;; esac
+      case $whole_targets in *" $name "*) ;; *) echo "$line" ;; esac
     done
   } | sort -u
 }
@@ -137,6 +137,20 @@ test_file_selection() {
   count=$(grep -c '@Test' "$file" || true)
   [ "$count" -gt 0 ] || { whole "it declares no tests"; return; }
   grep -q '^@Test' "$file" && { whole "it declares a test outside a type"; return; }
+  # The declaration parse below reads only lines in column 0. A `#if` can hide
+  # an indented declaration from it. A line such as `extension [K: V]` or
+  # `func ==` has no name for it to read.
+  if awk '
+    /^#if/ { bad = 1 }
+    /^[A-Za-z@]/ && !/^import / {
+      if (match($0, /(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]+[A-Za-z_][A-Za-z0-9_.]*/)) next
+      if (/^@/ && !/(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]/) next
+      bad = 1
+    }
+    END { exit !bad }' "$file"; then
+    whole "it has a top-level line that the selector cannot read"
+    return
+  fi
   # Prints "<kind> <name> <private>" for each top-level declaration. A line
   # that starts in column 0 with a letter or an attribute is top level.
   decls=$(awk '
@@ -205,7 +219,7 @@ test_filters() {
     case $kind in
     target) echo "^$target\\." ;;
     suites)
-      [ -n "$list" ] || list=$(list_tests)
+      [ -n "$list" ] || list=$(list_tests) || true
       pattern="^$target\\.(${names// /|})/"
       matched=$(grep -c -E "$pattern" <<<"$list" || true)
       if [ "$matched" -ge "$count" ]; then

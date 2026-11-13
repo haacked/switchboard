@@ -134,9 +134,10 @@ if [ "${1:-}" = --claude ]; then
   fi
 fi
 
-# Sets `run` to build the tests and filter them to the selection. Leaves it
-# empty, which runs every test, when it cannot work out the changed files or
-# the package's targets. Exits when no test can read a changed file.
+# Builds the tests and sets `run` to the swift test arguments that filter them
+# to the selection. Leaves `run` empty, which runs every test, when it cannot
+# work out the changed files or the package's targets. Exits when no test can
+# read a changed file.
 targeted() {
   source bin/lib/test-selection.sh
   local base changed json selection filter

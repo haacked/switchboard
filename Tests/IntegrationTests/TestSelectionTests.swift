@@ -563,6 +563,28 @@ private let wholeTargetCases: [SelectionCase] =
       change: { try $0.edit("Tests/IntegrationTests/FxShoutTests.swift") },
       filters: [wholeTarget("IntegrationTests")]),
     SelectionCase(
+      name: "extension of a type the parse cannot name whose member another suite uses",
+      files: [
+        "Tests/IntegrationTests/FxTallyTests.swift":
+          "import Testing\n\nextension [String: Int] {\n  var fxTotal: Int { values.reduce(0, +) }\n}\n\nstruct FxTallyTests {\n  @Test func totals() { #expect([\"a\": 1].fxTotal == 1) }\n}\n",
+        "Tests/IntegrationTests/FxSumTests.swift":
+          "import Testing\n\nstruct FxSumTests {\n  @Test func sums() { #expect([\"b\": 2].fxTotal == 2) }\n}\n",
+      ],
+      listing: ["IntegrationTests.FxTallyTests/totals()", "IntegrationTests.FxSumTests/sums()"],
+      change: { try $0.edit("Tests/IntegrationTests/FxTallyTests.swift") },
+      filters: [wholeTarget("IntegrationTests")]),
+    SelectionCase(
+      name: "helper under #if that another suite uses",
+      files: [
+        "Tests/IntegrationTests/FxPlatformTests.swift":
+          "import Testing\n\n#if os(macOS)\n  func fxPlatformHelper() -> Int { 1 }\n#endif\n\nstruct FxPlatformTests {\n  @Test func runs() { #expect(fxPlatformHelper() == 1) }\n}\n",
+        "Tests/IntegrationTests/FxPlatformUserTests.swift":
+          "import Testing\n\nstruct FxPlatformUserTests {\n  @Test func uses() { #expect(fxPlatformHelper() == 1) }\n}\n",
+      ],
+      listing: ["IntegrationTests.FxPlatformTests/runs()", "IntegrationTests.FxPlatformUserTests/uses()"],
+      change: { try $0.edit("Tests/IntegrationTests/FxPlatformTests.swift") },
+      filters: [wholeTarget("IntegrationTests")]),
+    SelectionCase(
       name: "deleted test file", change: { try $0.delete("Tests/SwitchboardServiceTests/FxServiceTests.swift") },
       filters: [wholeTarget("SwitchboardServiceTests")]),
     SelectionCase(
@@ -614,6 +636,13 @@ private let listingFallbackCases: [SelectionCase] = [
     change: { repo in
       try repo.edit("Tests/SwitchboardServiceTests/FxServiceTests.swift")
       repo.listing.removeAll { $0.hasPrefix("SwitchboardServiceTests.FxServiceTests/") }
+    },
+    filters: [wholeTarget("SwitchboardServiceTests")]),
+  SelectionCase(
+    name: "listing is empty, so list_tests fails",
+    change: { repo in
+      try repo.edit("Tests/SwitchboardServiceTests/FxServiceTests.swift")
+      repo.listing = []
     },
     filters: [wholeTarget("SwitchboardServiceTests")]),
   SelectionCase(
@@ -781,7 +810,7 @@ private func selectionLines(_ output: String) -> Set<String> {
 
     #expect(run.result.status == 0, "\(run.result.stderr)")
     #expect(!run.invocations.contains { $0.first == "test" }, "\(run.invocations)")
-    #expect(!run.result.stderr.isEmpty)
+    #expect(run.result.stderr.contains("bin/test --all runs every test"), "\(run.result.stderr)")
   }
 
   @Test func rootMarkdownBesideATestChangeRunsTheSuite() throws {

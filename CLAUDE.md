@@ -21,7 +21,7 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 
 ## Tests
 
-CI runs the full suite on every push, in the `swift-test` and `gui-test` jobs. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
+CI runs the full suite on every push to a PR, in the `swift-test` and `gui-test` jobs. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
 
 - Before you push, run `bin/test`. With no arguments it runs only the tests that your changes against `origin/main` can affect, and it prints what it picked and why. Never run bare `swift test`, which runs every test and ignores the selection.
 - After you push, wait for `swift-test` and `gui-test`, then fix what they report. The `ci-monitor` step of `/go` does the waiting.
