@@ -101,7 +101,7 @@ import Testing
 
   // MARK: Moving sessions
 
-  func move(_ sbd: Instance, _ extra: String...) throws -> AccountMove {
+  @discardableResult func move(_ sbd: Instance, _ extra: String...) throws -> AccountMove {
     try JSONCoding.decode(AccountMove.self, from: try sbd.sb(["account", "move", "--json", "B"] + extra))
   }
 

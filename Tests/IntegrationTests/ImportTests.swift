@@ -584,7 +584,8 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(listed.count == 3 && listed.allSatisfy { !$0.running && $0.status == nil })
     let result = try sbd.client.importSessions(pids.map { "p\($0)" }, stop: pids.map { "p\($0)" })
     #expect(result.refused.isEmpty && result.imported.count == 3)
-    #expect(try sbd.client.call("ping") != nil)
+    #expect(Processes.exists(sbd.sbdPid))
+    _ = try sbd.client.call("ping")
   }
 
   @Test func stopImportsASessionThatTwoAccountsListWithOnePid() throws {
@@ -1051,7 +1052,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     let tree = try sbd.addWorktree(try sbd.makeRepo("switchboard"), "haacked/one")
     let id = newId()
     try sbd.writeAgents("A", [agent(id, cwd: tree, name: "board-one", job: "00000001")])
-    try sbd.client.importSessions([id])
+    _ = try sbd.client.importSessions([id])
 
     let r = try sbd.run("import", "--repo", "switchboard")
 

@@ -60,11 +60,14 @@ public struct NewSession: Codable, Sendable {
   public var group: String?
   /// Whether claude starts in auto mode. Without it, `Config.autoMode` decides.
   public var autoMode: Bool?
+  /// The remote host to run on, by its name in config.json. `path` is then a folder on that host, absolute or
+  /// starting with `~`, which the host resolves.
+  public var host: String?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
     prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil, group: String? = nil,
-    autoMode: Bool? = nil
+    autoMode: Bool? = nil, host: String? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -77,6 +80,7 @@ public struct NewSession: Codable, Sendable {
     self.account = account
     self.group = group
     self.autoMode = autoMode
+    self.host = host
   }
 }
 
@@ -287,6 +291,11 @@ public final class Client: Sendable {
 
   public func terminals(_ id: String) throws -> Terminals {
     try call("terminals", ["session": .string(id)], as: Terminals.self)
+  }
+
+  /// Opens the session, which resumes a stopped claude, and returns its terminals.
+  public func open(_ id: String) throws -> Terminals {
+    try call("open", ["session": .string(id), "terminals": true], as: Terminals.self)
   }
 
   public func importable(all: Bool = false, repo: String? = nil) throws -> ImportList {

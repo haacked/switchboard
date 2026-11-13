@@ -299,6 +299,19 @@ import Testing
     #expect(try sbd.get(a.id).group == nil)
   }
 
+  /// `sb new --group` names a group that does not exist, so it fails and starts no session.
+  @Test func sbNewWithAnUnknownGroupFailsAndCreatesNothing() throws {
+    let sbd = try Instance()
+    _ = try add(sbd, "Flags")
+    let before = Set(try sbd.client.sessions().map(\.id))
+
+    let r = try sbd.run(["new", "--json", "--group", "Nope", sbd.work])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("Nope"), "\(r.stderr)")
+    #expect(Set(try sbd.client.sessions().map(\.id)) == before)
+  }
+
   // MARK: rm
 
   @Test func rmDeletesTheGroupAndLeavesItsMembersUngrouped() throws {

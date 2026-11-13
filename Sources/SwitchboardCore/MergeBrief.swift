@@ -7,12 +7,6 @@ public struct MergeBrief: Codable, Equatable, Sendable {
   public var head: String
   public var text: String
 
-  public init(pr: Int, head: String, text: String) {
-    self.pr = pr
-    self.head = head
-    self.text = text
-  }
-
   /// The kind of the event that records a brief, a failure, or a skip.
   public static let event = "mergeBrief"
   static let maxText = 600

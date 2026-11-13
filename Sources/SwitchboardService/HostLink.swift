@@ -21,6 +21,11 @@ final class HostLink: @unchecked Sendable {
     var failures: Int
     var retryAt: Int64?
     var error: String?
+    /// Why the link last failed. A retry clears `error` while it runs and keeps this, so the cause of a drop
+    /// stays known between attempts. It is nil while the link is `connected` or `disconnected`.
+    var lastFailure: String?
+    /// How many times the link has become `connected`. It names one connection.
+    var connection = 0
   }
 
   /// An attempt fails when this long passes before the handshake and the control socket check.
@@ -56,6 +61,8 @@ final class HostLink: @unchecked Sendable {
   /// writes them.
   private var started: RemoteShell?
   private var controlPath: String?
+  /// The control path of the current connection. The lock guards it.
+  private var connectedControlPath: String?
 
   init(config: HostConfig, destination: String, ssh: String, home: Home, now: @escaping @Sendable () -> Int64) {
     self.config = config
@@ -71,6 +78,32 @@ final class HostLink: @unchecked Sendable {
 
   /// The host's machine. Its commands fail at once while the link is not `connected`.
   var machine: SSHMachine { SSHMachine { [self] in try shell() } }
+
+  /// The host's machine with a local deadline `slack` seconds after each command's timeout. It reports each
+  /// command that got no answer to `check`.
+  func machine(slack: Double, check: AnswerCheck?) -> SSHMachine {
+    SSHMachine(shell: { [self] in try shell() }, deadlineSlack: slack, check: check)
+  }
+
+  /// The ControlPath of the current connection's ssh master, or nil while the link is not `connected`.
+  var resolvedControlPath: String? { lock.withLock { current.state == .connected ? connectedControlPath : nil } }
+
+  /// Asks the current connection's ssh master to forward the socket at `remote` on the host to the socket at
+  /// `local` on this Mac. The forward lasts as long as the connection. It throws ssh's text when the master
+  /// or the host refuses, and for a path that holds a colon, which ssh reads as the end of the path.
+  func forward(remote: String, local: String) throws {
+    guard let path = resolvedControlPath else {
+      throw APIError("\(config.name) is not connected, so sbd can't forward its socket")
+    }
+    for end in [remote, local] where end.contains(":") || !end.hasPrefix("/") {
+      throw APIError("ssh can't forward the socket \(end): its path must be absolute and hold no colon")
+    }
+    let r = try runCommand(
+      ssh,
+      ["-T", "-O", "forward", "-R", "\(remote):\(local)", "-o", Self.controlPathOption(path), "--", destination],
+      timeout: Self.helperSeconds)
+    guard r.status == 0 else { throw Self.failure("the socket forward to \(config.name)", r) }
+  }
 
   /// The open shell. It throws unless the link is `connected`.
   func shell() throws -> RemoteShell {
@@ -100,7 +133,7 @@ final class HostLink: @unchecked Sendable {
     let shell: RemoteShell? = lock.withLock {
       guard current.state != .disconnected else { return nil }
       generation += 1
-      current = Status(state: .disconnected, since: now(), failures: 0)
+      current = Status(state: .disconnected, since: now(), failures: 0, connection: current.connection)
       defer { open = nil }
       return open
     }
@@ -146,6 +179,7 @@ final class HostLink: @unchecked Sendable {
     current.since = time
     current.retryAt = time + retryDelayMs(failuresInARow: current.failures)
     current.error = reason
+    current.lastFailure = reason
     generation += 1
     defer { open = nil }
     return open
@@ -217,7 +251,10 @@ final class HostLink: @unchecked Sendable {
     lock.withLock {
       guard attempt == generation, current.state == .connecting else { return }
       current.state = .connected
+      current.lastFailure = nil
       current.since = now()
+      current.connection += 1
+      connectedControlPath = controlPath
     }
   }
 
@@ -358,7 +395,6 @@ final class HostLink: @unchecked Sendable {
   }
 
   private static func failure(_ what: String, _ r: CommandResult) -> APIError {
-    let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-    return APIError(text.isEmpty ? "\(what) exited with status \(r.status)" : "\(what) failed: \(text)")
+    APIError("\(what) failed: \(r.problem)")
   }
 }

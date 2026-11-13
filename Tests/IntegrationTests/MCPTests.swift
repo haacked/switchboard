@@ -69,8 +69,11 @@ extension Instance {
         "grafana": Instance.stubServer("grafana"), "posthog-db": Instance.stubServer("posthog-db", type: "sse"),
       ]
     ])
-    let s = try sbd.new(prompt: "mcp grafana")
+    // A server that listens more than 10 s after its start misses the
+    // launch. aLaunchWaitsForAServerThatIsStarting covers that wait.
     let grafana = try sbd.waitForRunning("grafana")
+    let db = try sbd.waitForRunning("posthog-db")
+    let s = try sbd.new(prompt: "mcp grafana")
     try sbd.waitFor(s.id, "the call to grafana") { $0.lastReply == "MCP grafana: grafana \(grafana.pid!)" }
     #expect(
       sbd.stubArgs().first
@@ -79,7 +82,6 @@ extension Instance {
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["grafana", "posthog-db"])
 
     try sbd.sb("send", s.id, "mcp posthog-db")
-    let db = try sbd.waitForRunning("posthog-db")
     try sbd.waitFor(s.id, "the call to posthog-db") { $0.lastReply == "MCP posthog-db: posthog-db \(db.pid!)" }
     #expect(grafana.type == .http && grafana.url.hasSuffix("/mcp"))
     #expect(db.type == .sse && db.url.hasSuffix("/sse"))
@@ -98,6 +100,35 @@ extension Instance {
     let s = try gate.open(sbd) { try sbd.new(prompt: "mcp slow") }
     try sbd.waitFor(s.id, "the call to slow") { $0.lastReply?.hasPrefix("MCP slow: slow ") == true }
     #expect(try sbd.events(s.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
+  }
+
+  @Test func theStatusCountsTheRequestsThatWaitForAStartingServer() throws {
+    let gate = try MCPGate(open: true)
+    let sbd = try Instance(config: ["mcpServers": ["slow": Instance.stubServer("slow", gate: gate)]])
+    // sbd waits for a starting server for 10 s from the server's start. The
+    // restart starts that window just before the launches, not at sbd's start.
+    try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
+    let launches = ["a", "b"].map { name in Outcome.detached { try sbd.new(prompt: "hello", name: name) } }
+    try sbd.waitForServer("slow", "both launches to wait for slow", timeout: 30) { $0.waiting == 2 }
+    let listed = try JSONCoding.decode([MCPServerStatus].self, from: sbd.sb("mcp", "--json")).first
+    #expect(listed?.state == .starting && listed?.waiting == 2)
+    try gate.open()
+    for launch in launches {
+      #expect(launch.done.wait(timeout: .now() + 30) == .success)
+      _ = try launch.result?.get()
+    }
+    let running = try sbd.waitForRunning("slow")
+    #expect(running.waiting == 0)
+
+    // The clock passes the start window while the port stays closed. The
+    // request then stops counting the server without seeing it listen.
+    try sbd.restartServer(running, behind: gate)
+    let late = Outcome.detached { try sbd.new(prompt: "hello", name: "c") }
+    try sbd.waitForServer("slow", "the launch to wait for slow", timeout: 30) { $0.waiting == 1 }
+    try sbd.advanceClock(11_000)
+    #expect(late.done.wait(timeout: .now() + 30) == .success)
+    _ = try late.result?.get()
+    #expect(try sbd.mcpServers().first?.waiting == 0)
   }
 
   @Test func aSendToALiveSessionDoesNotWaitForAStartingServer() throws {
@@ -149,7 +180,7 @@ extension Instance {
     try sbd.waitFor(a.id, "a's first reply") { $0.lastReply == "Done: hello" }
     try sbd.waitFor(b.id, "b's first reply") { $0.lastReply == "Done: hello" }
     try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
-    try sbd.waitFor(a.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(a.id)
     try sbd.restartServer(try sbd.waitForRunning("slow"), behind: gate)
     // `done` doesn't launch claude itself. The tick resolves the wait and
     // launches it, but not while the server starts. `clock` runs a tick.
@@ -297,7 +328,7 @@ extension Instance {
     chmod(sbd.home.mcpFolder, 0o700)
     // This moves sbd's clock past the backoff, so the next tick starts the server.
     try sbd.advanceClock(60_000)
-    try sbd.waitForRunning("grafana")
+    _ = try sbd.waitForRunning("grafana")
   }
 
   @Test func keepsServersAcrossARestartOfSbdUnlessTheirConfigChanged() throws {

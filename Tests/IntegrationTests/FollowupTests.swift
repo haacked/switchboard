@@ -18,7 +18,12 @@ func failure(_ sbd: Instance, _ op: String, _ args: [String: JSON]) -> String {
 
 /// What a request on another thread returned.
 final class Outcome<T>: @unchecked Sendable {
-  var result: Result<T, Error>?
+  private let lock = NSLock()
+  private var stored: Result<T, Error>?
+  var result: Result<T, Error>? {
+    get { lock.withLock { stored } }
+    set { lock.withLock { stored = newValue } }
+  }
   let done = DispatchSemaphore(value: 0)
 
   /// Runs the body on a thread of its own, because the global queue gets no
@@ -150,7 +155,7 @@ final class Outcome<T>: @unchecked Sendable {
     }
     let restarted = try sbd.restartServer(slow, behind: gate)
     try FileManager.default.removeItem(atPath: hold)
-    _ = try gate.open(sbd, after: started, sentAt: Date())
+    _ = try gate.open(sbd, after: started)
     try sbd.waitFor(f.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
     #expect(try sbd.events(f.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
   }

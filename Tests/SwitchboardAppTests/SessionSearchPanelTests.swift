@@ -24,7 +24,7 @@ import Testing
   }
 
   /// macOS sends arrow keys with the numeric pad and function flags set.
-  @Test(arguments: mapped, [EventModifiers.capsLock, .numericPad, .function, [.numericPad, .function]])
+  @Test(arguments: mapped, [EventModifiers.capsLock, .numericPad, .functionKey, [.numericPad, .functionKey]])
   func flagsOtherThanTheFourChangeNothing(
     _ mapping: (KeyEquivalent, SearchPanelKeys.Action), _ modifiers: EventModifiers
   ) {
@@ -72,14 +72,6 @@ import Testing
 private func workSession(_ id: String, state: AttentionState = .working) -> SessionSummary {
   var s = needsItem(id, state: state)
   s.triage = nil
-  return s
-}
-
-/// A follow-up that has not started. It shows in the sidebar's Not started section, which starts collapsed.
-private func unstartedFollowup(_ id: String) -> SessionSummary {
-  var s = needsItem(id, state: .notStarted)
-  s.followup = Followup(prompt: "p")
-  s.cwd = ""
   return s
 }
 

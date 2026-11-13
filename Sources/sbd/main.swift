@@ -34,18 +34,22 @@ if flock(lockFile, LOCK_EX | LOCK_NB) != 0 {
   fail("can't lock \(home.lock): \(UnixSocket.errnoText())")
 }
 
+// A client that disconnects mid-reply raises SIGPIPE, which would end sbd. A host's shim does that for most
+// hooks, and the hosts' sockets take requests from the moment they listen.
+signal(SIGPIPE, SIG_IGN)
+
 let service: Service
 let server: Server
 do {
   service = try Service(home: home, sbPath: siblingExecutable("sb"))
   try service.load()
+  // The hosts' sockets listen before sbd's own, so a client that reaches sbd finds them.
+  HostServer.start(service: service)
   server = try Server(service: service)
 } catch {
   fail("\(error)")
 }
 
-// A client that disconnects mid-reply raises SIGPIPE, which would end sbd.
-signal(SIGPIPE, SIG_IGN)
 var signals: [DispatchSourceSignal] = []
 for sig in [SIGTERM, SIGINT] {
   signal(sig, SIG_IGN)

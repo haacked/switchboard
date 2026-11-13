@@ -32,4 +32,21 @@ public enum KnownRepos {
       return an != bn ? an < bn : a.path < b.path
     }
   }
+
+  /// The repository that the New Session sheet selects for `group`: the one whose path is the checkout of the
+  /// most work sessions in the group. A tie goes to the one that comes first in `known`. When no session in the
+  /// group has a checkout in `known`, or `group` is nil, it is the first of `known`.
+  public static func preferred(_ known: [KnownRepo], group: String?, sessions: [SessionSummary]) -> KnownRepo? {
+    guard let group else { return known.first }
+    var counts: [String: Int] = [:]
+    for s in sessions where s.group == group && s.kind == .work {
+      if let checkout = s.checkout { counts[checkout, default: 0] += 1 }
+    }
+    var best: (repo: KnownRepo, count: Int)?
+    for repo in known {
+      let count = counts[repo.path, default: 0]
+      if count > (best?.count ?? 0) { best = (repo, count) }
+    }
+    return best?.repo ?? known.first
+  }
 }

@@ -182,7 +182,8 @@ extension GitHubPoller {
           guard let deploy = c["commit"]?["message"]?.string.flatMap(ChartsDeployCommit.init(message:)) else {
             return false
           }
-          return deploy.app == service && deploy.commit == commit && Wait.sameRepository(deploy.repository, repository)
+          return deploy.app == service && deploy.commit == commit
+            && Dependencies.sameRepo(deploy.repository, repository)
         })?["sha"]?.string
     }
     guard let sha = deploys.chartsCommits[key] else { return nil }
@@ -192,14 +193,5 @@ extension GitHubPoller {
     let found = (id: id, url: run["html_url"]?.string ?? "")
     deploys.runs[sha] = found
     return found
-  }
-
-  /// Sends a REST GET and returns its JSON. Anything but a 200 is an error.
-  private func get(_ path: String, stats: inout Stats) throws -> JSON {
-    let (status, _, _, json) = try send(try apiRequest(path), stats: &stats)
-    guard status == 200, let json else {
-      throw APIError("GitHub answered \(status) for \(path) \(GitHub.message(json))")
-    }
-    return json
   }
 }

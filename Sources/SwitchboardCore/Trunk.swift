@@ -20,7 +20,7 @@ public enum TrunkQueueState: String, Codable, Sendable {
   /// waited too long to become mergeable, or someone cancelled it.
   case removed
   /// sbd couldn't read the body of every trunk-io comment, so it can't tell
-  /// the state. Only `TrunkComments.state` gives it.
+  /// the state. Only `TrunkComments.change` gives it.
   case unknown
 
   /// Whether Trunk has added the PR to its queue. false when sbd can't tell.
@@ -86,27 +86,7 @@ public struct TrunkTimeline: Equatable, Sendable {
     case unrecognized(String)
   }
 
-  public var number: Int
-  public var title: String
-  public var author: String
-  /// The PR's page on app.trunk.io.
-  public var url: String?
   public var entries: [Entry]
-
-  /// The newest entry's state. A PR submitted again after a removal ends
-  /// with the entries of its new run.
-  public var state: TrunkQueueState? { entries.last?.state }
-
-  /// Whether the newest run queues the stack that this PR tops. Trunk queues
-  /// a stack under its top PR. The newest entry that names its subject
-  /// decides, because entries such as "Tests ran on" name none.
-  public var isStack: Bool {
-    for e in entries.reversed() {
-      if e.text.hasPrefix("Stack ") || e.text.hasPrefix("This stack ") { return true }
-      if e.text.hasPrefix("Pull request ") || e.text.hasPrefix("This pull request ") { return false }
-    }
-    return false
-  }
 
   /// Parses the output of `trunk merge status <N>`. Trunk prints times in
   /// UTC without a year. Each time gets the latest year that doesn't put it
@@ -119,10 +99,10 @@ public struct TrunkTimeline: Equatable, Sendable {
     if trimmed.hasPrefix("✖ Item for merge queue instance not found") { return .notFound }
     if trimmed.hasPrefix("✖ Please run 'trunk init'") { return .notSetUp }
     guard let start = lines.firstIndex(where: { $0.hasPrefix("#") }),
-      let header = match(lines[start], headerPattern), let number = Int(header[0])
+      match(lines[start], headerPattern) != nil
     else { return .unrecognized(trimmed) }
 
-    var timeline = TrunkTimeline(number: number, title: header[1], author: header[2], entries: [])
+    var timeline = TrunkTimeline(entries: [])
     // trunk pads each line of its table to the table's width, except the
     // output's last line. The most common length is the width, because a
     // character that takes two code points makes its line longer.
@@ -130,12 +110,10 @@ public struct TrunkTimeline: Equatable, Sendable {
     let lengths = Dictionary(grouping: lines[firstRow...].map(\.unicodeScalars.count)) { $0 }.mapValues(\.count)
     let width = lengths.max { ($0.value, $0.key) < ($1.value, $1.key) }?.key ?? 0
     var brokeMidLink = false
-    for line in lines[(start + 1)...] {
+    for line in lines[(start + 1)...] where match(line, learnMorePattern) == nil {
       let content = line.trimmingCharacters(in: .whitespaces)
       let full = line.unicodeScalars.count == width && line.last != " "
-      if let url = match(line, learnMorePattern) {
-        timeline.url = url[0]
-      } else if let row = match(line, rowPattern), let time = time(row[0], now: now) {
+      if let row = match(line, rowPattern), let time = time(row[0], now: now) {
         let text = row[3].trimmingCharacters(in: .whitespaces)
         timeline.entries.append(Entry(time: time, label: row[2], state: state(label: row[2], mark: row[1]), text: text))
         brokeMidLink = breaksLink(text, full: full, continuing: false)
@@ -165,8 +143,8 @@ public struct TrunkTimeline: Equatable, Sendable {
       .replacingOccurrences(of: "\r", with: "")
   }
 
-  static let headerPattern = regex(#"^#(\d+) (.*) \(([^()]*)\)\s*$"#)
-  static let learnMorePattern = regex(#"^ Learn more at (\S+)"#)
+  static let headerPattern = regex(#"^#\d+ .* \([^()]*\)\s*$"#)
+  static let learnMorePattern = regex(#"^ Learn more at \S"#)
   /// A timeline row: the time, an optional ✖ or ✔ mark, the label, and the
   /// first line of the description.
   static let rowPattern = regex(#"^ (\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\s+(?:([✖✔]) )?(\S+(?: \S+)*?)(?:\s{2,}(.*))?$"#)
@@ -219,13 +197,15 @@ public struct TrunkTimeline: Equatable, Sendable {
 public enum TrunkComments {
   public static let author = "trunk-io[bot]"
 
-  /// The queue state that an open PR's trunk-io comments show, or nil when
-  /// none names one or the PR isn't open. A merged stack's lower PRs keep
+  /// The newest queue state that an open PR's trunk-io comments show, and
+  /// the time it counts from as an ISO 8601 string. It is nil when none
+  /// names a state or the PR isn't open. A merged stack's lower PRs keep
   /// Trunk's "queued" replies, so only an open PR's state says whether Trunk
-  /// holds it. The state is `.unknown` when the body of a trunk-io comment
-  /// didn't load. A login must end in `[bot]`, which GitHub forbids in a
-  /// user's login, so no user can pass for Trunk. GraphQL leaves the suffix
-  /// out, and the poller adds it for an author whose `__typename` is `Bot`.
+  /// holds it. The state is `.unknown`, with no time, when the body of a
+  /// trunk-io comment didn't load. A login must end in `[bot]`, which GitHub
+  /// forbids in a user's login, so no user can pass for Trunk. GraphQL
+  /// leaves the suffix out, and the poller adds it for an author whose
+  /// `__typename` is `Bot`.
   ///
   /// Trunk posts a control comment on each PR and edits that comment in place
   /// into the queue status. Its first line names the state. Trunk posts
@@ -237,12 +217,6 @@ public enum TrunkComments {
   /// The newest comment that names a state wins. A status counts from its
   /// last edit and a reply from its creation. Comments with the same time
   /// count in the order given.
-  public static func state(of pr: PullRequest, _ comments: [PRComment]) -> TrunkQueueState? {
-    change(of: pr, comments)?.state
-  }
-
-  /// The newest state and the time it counts from, an ISO 8601 string. The time
-  /// is nil for `.unknown`, which means a trunk-io comment's body didn't load.
   public static func change(of pr: PullRequest, _ comments: [PRComment]) -> (state: TrunkQueueState, at: String?)? {
     guard pr.state == .open else { return nil }
     var newest: (state: TrunkQueueState, at: String)?

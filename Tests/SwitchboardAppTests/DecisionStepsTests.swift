@@ -19,28 +19,6 @@ private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
     answers: answered.map { DecisionAnswer(number: $0, labels: ["Yes"]) })
 }
 
-@MainActor
-private final class Field {
-  var text: String
-  init(_ text: String) { self.text = text }
-  var binding: Binding<String> { Binding(get: { self.text }, set: { self.text = $0 }) }
-}
-
-/// A model whose requests wait until the test signals the semaphore. The
-/// counter counts the requests that reach sbd.
-@MainActor
-private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
-  let model = offlineModel()
-  let release = DispatchSemaphore(value: 0)
-  let requests = Counter()
-  model.send = { _, _ in
-    requests.increment()
-    release.wait()
-    return .null
-  }
-  return (model, release, requests)
-}
-
 // MARK: Which step Next, Back, and an answer go to
 
 @Suite struct DecisionStepsNavigation {
@@ -256,7 +234,7 @@ private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
     let folder = "\(NSTemporaryDirectory())decision-drafts-\(UUID().uuidString)"
     defer { try? FileManager.default.removeItem(atPath: folder) }
     _ = NSApplication.shared
-    let client = Client(home: Home(path: NSTemporaryDirectory() + "no-sbd-" + UUID().uuidString))
+    let client = offlineClient()
     let first = BoardModel(client: client, draftsFolder: folder)
     first.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "Call it task"
     await settle {

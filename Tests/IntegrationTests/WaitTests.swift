@@ -26,7 +26,7 @@ import Testing
     let s = try idleSession(sbd)
     let waiting = try decode(sbd.sb("wait", "--json", s.id, "CI", "on", "#12"))
     #expect(waiting.state == .waiting)
-    #expect(waiting.reason == "CI on #12")
+    #expect(waiting.reason.hasPrefix("CI on #12 (recheck "))
     #expect(waiting.waits.map(\.kind) == [.manual])
     #expect(waiting.waits.map(\.by) == [.you])
     let cleared = try decode(sbd.sb("wait", "--json", s.id, "--clear"))
@@ -52,8 +52,7 @@ import Testing
       sbd.sb("wait", "--json", s.id, "--kind", "date", "--until", "1h", "--note", "check the dashboard"))
     #expect(waiting.state == .waiting)
     #expect(waiting.reason.hasPrefix("until "))
-    // idleStopSeconds is 600, so only the open wait stops it this soon.
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     let resumed = try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply?.hasPrefix("Done: Switchboard:") == true }
     #expect(resumed.lastReply?.hasSuffix(": the time came. Your note: check the dashboard.") == true)
@@ -62,12 +61,23 @@ import Testing
     #expect(try sbd.events(s.id).map(\.kind).contains("wait-resolved"))
   }
 
+  @Test func aSessionWithAnOpenWaitStaysLiveUntilTheIdleStop() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    try sbd.advanceClock(Int64(sbd.idleStopSeconds - 10) * 1000)
+    sleep(1)
+    #expect(try sbd.get(s.id).live)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "stopped" })
+    try sbd.passIdleStop(s.id)
+  }
+
   @Test func aWaitResolvedWhileClaudeExitsStillResumesTheSession() throws {
     let sbd = try Instance()
     // `send` waits up to 5 s for an exiting claude, so a 7 s exit outlasts it.
     let s = try lingeringSession(sbd, seconds: 7)
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     // The stub runs for 7 s after the stop, so the resolution meets a claude that is exiting.
     #expect(try sbd.get(s.id).claudePid != nil)
     try sbd.sb("wait", s.id, "--resolve", "#1190 merged")
@@ -81,18 +91,58 @@ import Testing
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 3)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     try sbd.waitFor(s.id, "the resumed turn", timeout: 30) {
       $0.lastReply?.hasPrefix("Done: Switchboard: until ") == true
     }
   }
 
+  /// A session with two waits whose claude stopped. The stub holds its next
+  /// start before SessionStart until `hold` is removed.
+  /// `mark` is the id of the last event before the resume.
+  func heldResume(_ sbd: Instance) throws -> (session: SessionSummary, hold: String, mark: Int64) {
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
+    let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
+    try sbd.waitFor(s.id, "the stop", timeout: 10) { $0.claudePid == nil }
+    let hold = "\(sbd.home.path)/hold-start"
+    FileManager.default.createFile(atPath: hold, contents: nil)
+    let mark = try #require(try sbd.events(s.id).last?.id)
+    try sbd.sb("wait", s.id, "--id", waiting.waits[0].id, "--resolve", "#1190 merged")
+    try sbd.waitFor(s.id, "the held claude") { $0.claudePid != nil }
+    return (s, hold, mark)
+  }
+
+  /// After 10 s with no SessionStart, sbd counts a claude as live, because
+  /// its hook may have failed. That claude's prompt has not arrived yet.
+  @Test func aClaudeThatStartsSlowlyIsNotStoppedBeforeItsPromptArrives() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, hold, mark) = try heldResume(sbd)
+    let pid = try sbd.get(s.id).claudePid
+    try sbd.passUnreportedFallback(s.id, after: mark)
+    sleep(2)
+    #expect(try !sbd.events(s.id, after: mark).contains { $0.kind == "stopped" })
+    #expect(try sbd.get(s.id).claudePid == pid)
+    try FileManager.default.removeItem(atPath: hold)
+    try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: Switchboard: #1190 to merge: #1190 merged." }
+  }
+
+  /// A claude whose hook fails never sends SessionStart. It still stops once its prompt no longer counts as on its way.
+  @Test func aClaudeWithNoSessionStartStopsAfterStartingMs() throws {
+    let sbd = try Instance(idleStopSeconds: 1)
+    let (s, _, mark) = try heldResume(sbd)
+    try sbd.advanceClock(1)
+    // Service.startingMs is 60 s.
+    try sbd.advanceClock(60_000)
+    try sbd.waitFor("the stop") { try sbd.events(s.id, after: mark).contains { $0.kind == "stopped" } }
+  }
+
   @Test func aClaudeThatIsExitingAfterItsSessionEndedStaysNotLive() throws {
     let sbd = try Instance()
     let s = try lingeringSession(sbd, seconds: 8)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     // A tick sees the exiting claude first. Then the clock passes the 10 s that a claude may run without a SessionStart.
     sleep(1)
     try sbd.advanceClock(15_000)
@@ -106,6 +156,7 @@ import Testing
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h", "--then", "notify")
+    try sbd.passIdleStop(s.id)
     try sbd.waitFor("the stop's SessionEnd", timeout: 10) {
       try sbd.events(s.id).contains { $0.kind == "SessionEnd" }
     }
@@ -127,7 +178,7 @@ import Testing
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
     try sbd.sb("done", s.id)
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(2 * WaitTests.hourMs)
     sleep(1)
     let after = try sbd.get(s.id)
@@ -177,7 +228,7 @@ import Testing
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex", "--until", "1d")
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live }
+    try sbd.passIdleStop(s.id)
     try sbd.advanceClock(25 * WaitTests.hourMs)
     let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
     #expect(due.reason == "ask Alex: time to recheck")
@@ -271,7 +322,7 @@ import Testing
     let after = try sbd.get(s.id)
     #expect(after.waits.map(\.kind) == [.manual])
     #expect(after.waits.map(\.note) == ["CI on #12"])
-    #expect(after.reason == "CI on #12")
+    #expect(after.reason.hasPrefix("CI on #12 (recheck "))
   }
 
   // MARK: To-dos
@@ -516,5 +567,337 @@ import Testing
     try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
     try sbd.advanceClock(16 * 60 * 1000)
     try sbd.waitFor(s.id, "the idle stop", timeout: 5) { !$0.live }
+  }
+}
+
+/// Recheck times, and the outcomes of a session wait whose target can't reach the wanted state.
+extension WaitTests {
+  static let dayMs: Int64 = 24 * hourMs
+
+  /// An idle session with a review wait on its own PR, whose claude has stopped.
+  func stoppedWithAReviewWait(_ sbd: Instance) throws -> SessionSummary {
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
+    try sbd.passIdleStop(s.id)
+    return try sbd.get(s.id)
+  }
+
+  static let overdueReview = "a review from alex on the session's PR: still open after 1 d"
+
+  @Test func aReviewWaitRechecksADayAfterItWasSet() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+
+    let set = try decode(sbd.sb("wait", "--json", s.id, "--kind", "review", "--who", "alex"))
+
+    let wait = try #require(set.waits.first)
+    #expect(wait.recheck == wait.created + WaitTests.dayMs)
+    #expect(try sbd.get(s.id).waits.first?.recheck == wait.recheck)
+  }
+
+  @Test(arguments: [
+    ["--kind", "date", "--until", "1h"], ["--kind", "manual", "--note", "ask Alex", "--until", "1h"],
+  ])
+  func aWaitWithItsOwnTimeGetsNoRecheck(_ flags: [String]) throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+
+    try sbd.sb(["wait", s.id] + flags)
+
+    #expect(try sbd.get(s.id).waits.map(\.recheck) == [nil])
+  }
+
+  @Test func aReviewWaitPastItsRecheckNeedsYouAndStaysOpen() throws {
+    let sbd = try Instance()
+    let s = try stoppedWithAReviewWait(sbd)
+
+    try sbd.advanceClock(25 * WaitTests.hourMs)
+
+    let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+    #expect(due.reason == WaitTests.overdueReview)
+    #expect(due.waits.map(\.kind) == [.review])
+  }
+
+  @Test func anOverdueWaitRecordsNoResolutionAndSendsNothing() throws {
+    let sbd = try Instance()
+    let s = try stoppedWithAReviewWait(sbd)
+    let sent = try sbd.count("sent", of: s.id)
+    let runs = sbd.stubArgs().count
+
+    try sbd.advanceClock(25 * WaitTests.hourMs)
+
+    try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+    #expect(try sbd.count("wait-resolved", of: s.id) == 0)
+    #expect(try sbd.count("sent", of: s.id) == sent)
+    #expect(sbd.stubArgs().count == runs)
+  }
+
+  /// The poller's resolution of an overdue wait resumes the session as it would before the recheck time.
+  @Test func anOverdueWaitThatResolvesResumesTheSession() throws {
+    let sbd = try Instance()
+    let s = try stoppedWithAReviewWait(sbd)
+    try sbd.advanceClock(25 * WaitTests.hourMs)
+    let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+    let wait = try #require(due.waits.first)
+
+    _ = try sbd.client.call(
+      "resolve-wait", ["session": .string(s.id), "wait": .string(wait.id), "outcome": "alex approved"])
+
+    let resumed = try sbd.waitFor(s.id, "the resumed turn") {
+      $0.lastReply == "Done: Switchboard: a review from alex on the session's PR: alex approved."
+    }
+    #expect(resumed.waits.isEmpty)
+    #expect(try sbd.count("wait-resolved", of: s.id) == 1)
+  }
+
+  @Test func onlyTheOverdueOfTwoWaitsIsNamed() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
+    try sbd.passIdleStop(s.id)
+
+    try sbd.advanceClock(3 * WaitTests.hourMs)
+
+    let due = try sbd.waitFor(s.id, "the CI recheck") { $0.state == .needsYou }
+    #expect(due.reason == "CI on the session's PR: still open after 2 h")
+    #expect(due.waits.map(\.kind) == [.ci, .review])
+  }
+
+  @Test func waitsBeforeTheirRecheckStayWaitingWithTheirLines() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    try sbd.sb("wait", s.id, "--kind", "review", "--who", "alex")
+    try sbd.passIdleStop(s.id)
+
+    try sbd.advanceClock(WaitTests.hourMs)
+
+    let after = try sbd.get(s.id)
+    #expect(after.state == .waiting)
+    #expect(after.reason == "CI on the session's PR; a review from alex on the session's PR")
+  }
+
+  @Test func aManualWaitWithoutUntilRechecksAfterADay() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex")
+    try sbd.passIdleStop(s.id)
+
+    try sbd.advanceClock(25 * WaitTests.hourMs)
+
+    let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+    #expect(due.reason == "ask Alex: time to recheck")
+    #expect(due.waits.isEmpty)
+    #expect(sbd.stubArgs().count == 1)
+  }
+
+  @Test func aManualWaitWithoutUntilStaysOpenBeforeItsRecheck() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex")
+
+    try sbd.advanceClock(23 * WaitTests.hourMs)
+
+    let after = try sbd.get(s.id)
+    #expect(after.state == .waiting)
+    #expect(after.waits.map(\.note) == ["ask Alex"])
+  }
+
+  @Test func recheckSecondsInTheConfigSetTheManualRecheck() throws {
+    let sbd = try Instance(config: ["recheckSeconds": ["manual": 60]])
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex")
+    try sbd.advanceClock(30_000)
+    #expect(try sbd.get(s.id).state == .waiting)
+
+    try sbd.advanceClock(31_000)
+
+    let due = try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+    #expect(due.reason == "ask Alex: time to recheck")
+    #expect(due.waits.isEmpty)
+  }
+
+  @Test func clearingAnOverdueWaitReturnsTheSessionToItsReply() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "offer it")
+    try sbd.waitFor(s.id, "the offer") { $0.state == .canContinue }
+    try sbd.sb("wait", s.id, "--kind", "ci")
+    try sbd.passIdleStop(s.id)
+    try sbd.advanceClock(3 * WaitTests.hourMs)
+    try sbd.waitFor(s.id, "the recheck") { $0.state == .needsYou }
+
+    let cleared = try decode(sbd.sb("wait", "--json", s.id, "--clear"))
+
+    #expect(cleared.state == .canContinue)
+    #expect(cleared.waits.isEmpty)
+  }
+
+  /// An overdue session wait still resolves, and resumes the waiter, when its target gets there.
+  @Test func anOverdueSessionWaitResumesTheWaiterWhenTheTargetIsDone() throws {
+    let sbd = try Instance(config: ["recheckSeconds": ["session": 60]])
+    let a = try idleSession(sbd, name: "a")
+    let b = try idleSession(sbd, name: "b")
+    try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
+    try sbd.advanceClock(61_000)
+    let due = try sbd.waitFor(a.id, "the recheck") { $0.state == .needsYou }
+    #expect(due.reason == "b to reach Done: still open after 1 min")
+    #expect(due.waits.count == 1)
+
+    try sbd.sb("done", b.id)
+
+    let resumed = try sbd.waitFor(a.id, "the resumed turn") {
+      $0.lastReply == "Done: Switchboard: b to reach Done: it did."
+    }
+    #expect(resumed.waits.isEmpty)
+  }
+
+  /// A session marked done keeps its waits, so its manual wait is not removed at its recheck.
+  @Test func aDoneSessionKeepsItsManualWaitPastItsRecheck() throws {
+    let sbd = try Instance()
+    let s = try idleSession(sbd)
+    try sbd.sb("wait", s.id, "--kind", "manual", "--note", "ask Alex")
+    try sbd.sb("done", s.id)
+
+    try sbd.advanceClock(25 * WaitTests.hourMs)
+    sleep(1)
+
+    let after = try sbd.get(s.id)
+    #expect(after.state == .done)
+    #expect(after.waits.count == 1)
+    #expect(try sbd.count("wait-resolved", of: s.id) == 0)
+  }
+
+  @Test func removingTheTargetOfASessionWaitResumesTheWaiter() throws {
+    let sbd = try Instance()
+    let a = try idleSession(sbd, name: "a")
+    let b = try idleSession(sbd, name: "b")
+    try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
+
+    try sbd.sb("rm", b.id)
+
+    let resumed = try sbd.waitFor(a.id, "the resumed turn") {
+      $0.lastReply == "Done: Switchboard: b to reach Done: it was removed."
+    }
+    #expect(resumed.waits.isEmpty)
+  }
+
+  @Test func aSessionWaitForReadyForReviewEndsWhenTheTargetIsMarkedDone() throws {
+    let sbd = try Instance()
+    let a = try idleSession(sbd, name: "a")
+    let b = try idleSession(sbd, name: "b")
+    try sbd.sb("wait", a.id, "--kind", "session", "--target", "b", "--state", "ready_for_review")
+    #expect(try sbd.get(a.id).reason == "b to reach Ready for review")
+
+    try sbd.sb("done", b.id)
+
+    let resumed = try sbd.waitFor(a.id, "the resumed turn") {
+      $0.lastReply == "Done: Switchboard: b to reach Ready for review: it reached Done first."
+    }
+    #expect(resumed.waits.isEmpty)
+  }
+
+  /// The session recheck is raised above the 2 days that make the target Stale.
+  @Test func aSessionWaitEndsWhenTheTargetGoesStale() throws {
+    let sbd = try Instance(config: ["recheckSeconds": ["session": 432_000]])
+    let a = try idleSession(sbd, name: "a")
+    let b = try idleSession(sbd, name: "b")
+    try sbd.sb("wait", a.id, "--kind", "session", "--target", "b")
+    try sbd.sb("stop", b.id)
+    // SessionEnd is a hook, so it is the target's last activity.
+    try sbd.waitFor("b's SessionEnd", timeout: 10) { try sbd.events(b.id).contains { $0.kind == "SessionEnd" } }
+
+    try sbd.advanceClock(2 * WaitTests.dayMs + WaitTests.hourMs)
+
+    let resumed = try sbd.waitFor(a.id, "the resumed turn") {
+      $0.lastReply == "Done: Switchboard: b to reach Done: it went stale."
+    }
+    #expect(resumed.waits.isEmpty)
+  }
+
+  // Waits that an older sbd stored get a recheck time that counts from the load.
+
+  /// A session whose waits an older sbd stored without recheck times, and the
+  /// span of real time in which the new sbd loaded them.
+  func legacySession(_ sbd: Instance) throws -> (session: SessionSummary, loaded: ClosedRange<Int64>) {
+    let s = try sbd.new(name: "old")
+    sbd.stopSbd()
+    let fiveDaysAgo = nowMs() - 5 * WaitTests.dayMs
+    do {
+      let store = try Store(path: sbd.home.database)
+      var session = try #require(try store.sessions().first { $0.id == s.id })
+      session.waits = [
+        Wait(id: "wci", kind: .ci, created: fiveDaysAgo),
+        Wait(id: "wmanual", kind: .manual, note: "ask Alex", created: fiveDaysAgo, then: .notify),
+        Wait(id: "wdate", kind: .date, until: nowMs() + 10 * WaitTests.dayMs, created: fiveDaysAgo),
+        Wait(
+          id: "wuntil", kind: .manual, until: nowMs() + 10 * WaitTests.dayMs, note: "ask Ana",
+          created: fiveDaysAgo, then: .notify),
+      ]
+      session.waitNote = "CI on #12"
+      try store.save(session)
+    }
+    let before = nowMs()
+    try sbd.startSbd()
+    return (s, before...(try sbd.now()))
+  }
+
+  func storedWait(_ id: String, of s: SessionSummary, in sbd: Instance) throws -> Wait {
+    try #require(try sbd.get(s.id).waits.first { $0.id == id })
+  }
+
+  @Test(arguments: [("wci", WaitTests.hourMs * 2), ("wmanual", WaitTests.dayMs)])
+  func aLegacyWaitRechecksItsDefaultAfterTheLoad(_ id: String, _ defaultMs: Int64) throws {
+    let sbd = try Instance()
+    let (s, loaded) = try legacySession(sbd)
+
+    let wait = try storedWait(id, of: s, in: sbd)
+    // A manual wait gets its recheck time as its until.
+    let recheck = try #require(wait.kind == .manual ? wait.until : wait.recheck)
+
+    #expect(recheck >= loaded.lowerBound + defaultMs)
+    #expect(recheck <= loaded.upperBound + defaultMs)
+  }
+
+  @Test(arguments: ["wdate", "wuntil"])
+  func aLegacyWaitWithItsOwnTimeGetsNoRecheck(_ id: String) throws {
+    let sbd = try Instance()
+    let (s, _) = try legacySession(sbd)
+
+    #expect(try storedWait(id, of: s, in: sbd).recheck == nil)
+  }
+
+  /// `upgraded` turns the v0.1 note into a manual wait and stamps it in the same load.
+  @Test func aV01WaitNoteGetsARecheckInTheSameLoad() throws {
+    let sbd = try Instance()
+    let (s, loaded) = try legacySession(sbd)
+
+    let converted = try #require(try sbd.get(s.id).waits.first { $0.note == "CI on #12" })
+
+    let recheck = try #require(converted.until)
+    #expect(recheck >= loaded.lowerBound + WaitTests.dayMs)
+    #expect(recheck <= loaded.upperBound + WaitTests.dayMs)
+  }
+
+  @Test func legacyWaitsStayOpenAfterTheFirstTick() throws {
+    let sbd = try Instance()
+    let (s, _) = try legacySession(sbd)
+
+    try sbd.advanceClock(1000)
+
+    let after = try sbd.get(s.id)
+    #expect(after.state == .waiting)
+    #expect(after.waits.count == 5)
+  }
+
+  @Test func anotherStartKeepsTheRecheckTimes() throws {
+    let sbd = try Instance()
+    let (s, _) = try legacySession(sbd)
+    let stamped = try sbd.get(s.id).waits
+
+    sbd.stopSbd()
+    try sbd.startSbd()
+
+    #expect(try sbd.get(s.id).waits == stamped)
   }
 }
