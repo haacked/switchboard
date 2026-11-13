@@ -639,9 +639,9 @@ extension Instance {
     #expect(try sbd.capStops(c.id).isEmpty)
   }
 
-  /// Only an open or a terminal makes a session the last viewed. If a
-  /// message counted, a would be the last viewed and v would stop.
-  @Test func aMessageDoesNotMakeASessionTheLastViewed() throws {
+  /// Only `open` or `live-next` makes a session the one opened last. If a
+  /// message counted, a would be the one opened last and v would stop.
+  @Test func aMessageDoesNotMakeASessionTheOneOpenedLast() throws {
     let sbd = try instance(cap: 2)
     let v = try idleSession(sbd, name: "v")
     let a = try idleSession(sbd, name: "a")
@@ -656,11 +656,15 @@ extension Instance {
     #expect(try sbd.get(v.id).claudePid == v.claudePid)
   }
 
-  /// The session is off screen before the start queues, so only the last-viewed rule keeps it.
-  @Test func theLastViewedSessionIsNotStopped() throws {
+  /// The session is off screen before the start queues, so only the opened-last rule keeps it.
+  @Test func theSessionOpenedLastIsNotStopped() throws {
     let sbd = try instance(cap: 1)
     let a = try idleSession(sbd, name: "a")
     try sbd.sb("open", a.id)
+    // A refused open records nothing, so a stays the session opened last.
+    let f = try JSONCoding.decode(
+      SessionSummary.self, from: try sbd.sb("followup", "add", "--json", "--repo", "acme/widgets", "Fix the cache."))
+    #expect(failure(sbd, "open", ["session": .string(f.id)]).contains("hasn't started"))
     let detach = try sbd.attach(a.id)
     try sbd.waitFor(a.id, "a on screen") { $0.attached }
     detach()
@@ -762,12 +766,15 @@ extension Instance {
     #expect(try !sbd.capStops(idle.id).isEmpty)
   }
 
-  /// The user's real switch: x was on screen, so x is the last viewed until
-  /// the open marks y viewed. A jump before that mark finds no session to stop.
+  /// The user's real switch: x was opened last until the open of y moves
+  /// `lastOpened` to y. A launch before that move would find no session to stop.
   @Test func switchingFromAnIdleSessionStopsIt() throws {
     let sbd = try jumpInstance(cap: 1)
     let y = try stoppedSession(sbd, name: "y", ticking: true)
-    let (x, detach) = try onScreenSession(sbd, name: "x", ticking: true)
+    let x = try idleSession(sbd, name: "x", ticking: true)
+    try sbd.sb("open", x.id)
+    let detach = try sbd.attach(x.id)
+    try waitFor(sbd, x.id, "x on screen", ticking: true) { $0.attached }
     detach()
     try waitFor(sbd, x.id, "x off screen", ticking: true) { !$0.attached }
 
@@ -778,8 +785,7 @@ extension Instance {
   }
 
   /// The app sends the open while x is still on screen, then shows y's dead
-  /// pane and leaves x. The tick then stops x for y, because y is the session
-  /// the user opened last.
+  /// pane and leaves x. The tick then stops x for y once x leaves the screen.
   @Test func aSwitchStopsTheSessionLeftOnceItLeavesTheScreen() throws {
     let sbd = try jumpInstance(cap: 1)
     let y = try stoppedSession(sbd, name: "y", ticking: true)
@@ -851,13 +857,17 @@ extension Instance {
     #expect(try [first, second, jumped, background].map { try sbd.capStops($0.id).count } == [1, 1, 0, 0])
   }
 
+  /// The app's Start Now appears only on a queued session, so the jump moves a
+  /// start that already waits behind an older one.
   @Test func aJumpWithNothingToStopWaitsAtTheFront() throws {
     let sbd = try jumpInstance(cap: 1)
-    let jumped = try stoppedSession(sbd, name: "jumped", ticking: true)
     let (a, detach) = try onScreenSession(sbd, name: "a", ticking: true)
     defer { detach() }
     let background = try sbd.new(prompt: "hello", name: "background")
     try waitForQueued(sbd, background.id, cap: 1)
+    let jumped = try sbd.new(prompt: "hello", name: "jumped")
+    try waitForQueued(sbd, jumped.id, cap: 1)
+    #expect(try sbd.liveIds("queued") == [background.id, jumped.id])
 
     try sbd.sb("live", "--next", jumped.id)
 

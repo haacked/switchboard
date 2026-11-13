@@ -118,9 +118,10 @@ extension Service {
   }
 
   /// Records that the user opened the session now, and starts a stopped one
-  /// ahead of every queued start. The record comes before the start, so the
-  /// cap may stop the session that the user left. It refuses a session that
-  /// can't start before it records anything.
+  /// ahead of every queued start. It moves `lastOpened` to this session before
+  /// it launches, so the session opened before it loses its protection, and
+  /// this launch may stop it to make room. It refuses a session that can't
+  /// start before it records anything.
   func openSession(_ id: String) throws {
     let stopped = claudeState(id) == .stopped
     if stopped { _ = try requireStartable(id) }

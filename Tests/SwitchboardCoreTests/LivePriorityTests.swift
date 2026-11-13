@@ -167,6 +167,7 @@ private func config(livePriority json: String) throws -> Config {
     value("an array holding a number", "[3]"),
     value("an array holding an empty string", #"[""]"#),
     value("an array holding a string with two slashes", #"["a/b/c"]"#),
+    value("an array holding an org with a space", #"["Post Hog"]"#),
     value("an array holding an array", #"[["PostHog"]]"#),
     value("an array holding null", "[null]"),
     value("a number before a valid entry", #"[3, "PostHog"]"#, kept: ["PostHog"]),

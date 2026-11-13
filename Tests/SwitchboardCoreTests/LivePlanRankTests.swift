@@ -283,7 +283,9 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
 
   // MARK: Slot counts
 
-  /// Each input that Risk 1 of the plan lists, and one input that mixes every kind of start.
+  /// Inputs where slot counting can go wrong: jumps with and without a free
+  /// slot, exiting claudes, MCP servers starting, a cap below the live count,
+  /// and one input that mixes every kind of start.
   static let slotInputs: [PlanInput] = [
     input("nothing queued", cap: 2, live: running("a", "b"), queued: [], candidates: ["a", "b"]),
     input("a jump with a free slot", cap: 2, live: running("a"), queued: [start("j", since: 1, jumped: 1)]),

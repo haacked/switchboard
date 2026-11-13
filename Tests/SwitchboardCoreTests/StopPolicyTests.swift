@@ -147,7 +147,7 @@ import Testing
     #expect(policy.capOrder(claudes, now: 10_000) == ["plain", "job"])
   }
 
-  @Test func theCapNeverStopsTheSessionViewedLast() {
+  @Test func theCapNeverStopsTheSessionOpenedLast() {
     var last = idle("last", start: 0, rank: 0)
     last.openedLast = true
     let claudes = [last, idle("other", start: 500, rank: 3, lastViewed: 9_000)]
@@ -155,7 +155,7 @@ import Testing
     #expect(policy.capOrder(claudes, now: 10_000) == ["other"])
   }
 
-  @Test func theSessionViewedLastIsNotStoppedWithoutPriorityEither() {
+  @Test func theSessionOpenedLastIsNotStoppedWithoutPriorityEither() {
     var last = idle("last", start: 0)
     last.openedLast = true
 
