@@ -106,7 +106,8 @@ import Testing
     let s = try JSONCoding.decode(
       SessionSummary.self, from: try sbd.sb("new", "--json", "--no-auto", "--prompt", "hello", sbd.work))
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
-    #expect(sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- hello"])
+    #expect(
+      sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello"])
     #expect(try sbd.get(s.id).permissionMode == "default")
   }
 
