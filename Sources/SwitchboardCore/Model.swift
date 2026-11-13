@@ -140,6 +140,16 @@ public enum SessionKind: String, Codable, Sendable {
     self = manager == true ? .manager : chat != nil ? .chat : .work
   }
 
+  /// Whether the app shows a session of this kind as a chat. `chat-log`
+  /// reads only these kinds, because a work session's transcript can hold
+  /// what its user never meant to show in the chat pane.
+  public var showsAsChat: Bool {
+    switch self {
+    case .work: false
+    case .manager, .chat: true
+    }
+  }
+
   /// How a message names a session of this kind, or nil for a work session.
   public var label: String? {
     switch self {
