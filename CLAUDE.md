@@ -36,5 +36,5 @@ Every session in this repo follows the `/go --yolo` workflow. Don't stop to ask 
 
 - When the PR conflicts with main or falls behind it, merge `origin/main` into the branch, resolve the conflicts, run the tests, push, and continue. Don't ask first.
 - Never rebase a pushed branch, and never force-push.
-- When `/go` is done and CI is green, merge with `gh pr merge <n> --merge --match-head-commit <sha>`, where `<sha>` is the head commit that CI passed on. Never use `--admin` or `--auto`.
-- If the merge command is refused, say so in one line and stop. Don't try another way to merge. The Manager merges finished Switchboard PRs.
+- When `/go` is done, its merge gate passed, and CI is green, merge with `gh pr merge <n> --merge --match-head-commit <sha>`, where `<sha>` is the head commit that CI passed on. Never use `--admin` or `--auto`.
+- If the merge gate or the merge command refuses, say so in one line and stop. Don't try another way to merge. The Manager merges finished Switchboard PRs.
