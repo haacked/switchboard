@@ -140,13 +140,15 @@ struct ResendDecisions: View {
 }
 
 extension TriageOption {
-  /// What VoiceOver reads for the option's button. It names the action, and a
-  /// merge also names its PR.
+  /// What VoiceOver reads for the option's button. An option that acts on
+  /// the PR also names the PR, because several cards show the same option.
+  /// The label starts with the visible text, because Voice Control matches a
+  /// spoken name against it.
   func accessibilityLabel(pr: Int?) -> String {
-    guard action == .merge, let pr, label.range(of: "#\(pr)(?![0-9])", options: .regularExpression) == nil else {
+    guard action.needsClick, let pr, label.range(of: "#\(pr)(?![0-9])", options: .regularExpression) == nil else {
       return label
     }
-    return "\(label), merge #\(pr)"
+    return action == .merge ? "\(label), merge #\(pr)" : "\(label), #\(pr)"
   }
 
   /// Whether the option's box shows `effect` under its description. A

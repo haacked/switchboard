@@ -4,14 +4,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// The chat of group `group`, whose triage item is a decision.
-func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) -> SessionSummary {
-  var s = needsItem(id, state: state)
-  s.chat = group
-  s.kind = .chat
-  return s
-}
-
 @MainActor
 @Suite struct BoardModelChats {
   @Test func theSidebarLeavesOutAChatWhateverItsState() {
@@ -52,6 +44,28 @@ func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) ->
 
     #expect(sent.op == "chat")
     #expect(sent.args == ["group": "g1"])
+  }
+
+  @Test func loadChatLogAsksForTheSessionsLog() async {
+    let sent = await firstRequest { $0.loadChatLog("c") }
+
+    #expect(sent.op == "chat-log")
+    #expect(sent.args == ["session": "c"])
+  }
+
+  @Test func loadBlockSourcesAsksForClaudesMessagesOnly() async {
+    let sent = await firstRequest { $0.loadBlockSources("w") { _ in } }
+
+    #expect(sent.op == "chat-log")
+    #expect(
+      sent.args == ["session": "w", "role": "assistant", "limit": .number(Double(BoardModel.blockSourceMessageCount))])
+  }
+
+  @Test func loadChatLogAsksForAManagerConversationsLog() async {
+    let sent = await firstRequest { $0.loadChatLog("m") }
+
+    #expect(sent.op == "chat-log")
+    #expect(sent.args == ["session": "m"])
   }
 
   @Test func openChatSelectsAChatThatExistsWithoutAskingSbd() {

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Builds the package in debug mode with the Swift Testing flags that bin/test
+# uses, so the two share one build. Arguments go to swift build, such as
+# --build-tests or --product sb. bin/lib/swiftpm waits for a machine-wide
+# build slot and caps compile jobs.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source bin/lib/swift-testing.sh
+exec bin/lib/swiftpm build ${args[@]+"${args[@]}"} "$@"

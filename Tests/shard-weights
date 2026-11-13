@@ -2,7 +2,6 @@
 482 IntegrationTests.GroupTests
 446 IntegrationTests.WorktreeCleanupTests
 440 IntegrationTests.ManagerConversationsTests
-414 IntegrationTests.MCPToolServerTests
 386 IntegrationTests.RemovalWaitTests
 362 IntegrationTests.DoneRemovalTests
 319 IntegrationTests.GroupMessageTests
@@ -18,6 +17,7 @@
 168 IntegrationTests.SpawnTests
 162 IntegrationTests.PlanTests
 157 IntegrationTests.CardTests
+152 IntegrationTests.MCPScopedSessionTests
 146 IntegrationTests.PollerWaitTests
 144 IntegrationTests.TrunkPollerTests
 143 IntegrationTests.ManagerTests
@@ -36,6 +36,7 @@
 113 IntegrationTests.MCPTests
 106 IntegrationTests.PlanFollowupTests
 106 IntegrationTests.RepoListTests
+104 IntegrationTests.MCPScopedToolTests
 104 IntegrationTests.ReadyForReviewTests
 98 IntegrationTests.AttachmentTests
 96 IntegrationTests.ChatTests
@@ -48,7 +49,9 @@
 74 IntegrationTests.DecideTests
 72 IntegrationTests.DocketTests
 71 IntegrationTests.BoardColumnTests
+68 IntegrationTests.MCPGroupToolTests
 66 IntegrationTests.DepotTests
+65 IntegrationTests.MCPSessionToolTests
 63 IntegrationTests.RepoCheckoutTests
 52 IntegrationTests.HostTests
 50 IntegrationTests.AutoModeTests
@@ -60,6 +63,7 @@
 30 IntegrationTests.OrgDerivationTests
 27 IntegrationTests.SignedOutAccountTests
 24 IntegrationTests.CleanupTests
+24 IntegrationTests.MCPProtocolTests
 24 IntegrationTests.MeasureTests
 23 IntegrationTests.AutoBranchSessionTests
 19 IntegrationTests.TriageMessageTests
