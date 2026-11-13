@@ -179,16 +179,6 @@ private final class GuardRepo {
     #expect(r.stdout == "\(installed)\n")
   }
 
-  @Test func theChangesStartAtHeadWithNoInstalledApp() throws {
-    let repo = try GuardRepo()
-    let head = try repo.head()
-
-    let r = try repo.changelogStart()
-
-    #expect(r.status == 0, "\(r.stderr)")
-    #expect(r.stdout == "\(head)\n")
-  }
-
   @Test func theChangesStartAtHeadWhenTheRevisionLacksTheInstalledCommit() throws {
     let repo = try GuardRepo()
     try repo.git("switch", "-q", "-c", "a")
@@ -214,7 +204,7 @@ private final class GuardRepo {
     #expect(r.stdout == "\(head)\n")
   }
 
-  @Test func theChangesStartAtHeadNotTheRevisionWithNoInstalledApp() throws {
+  @Test func theChangesStartAtHeadWithNoInstalledApp() throws {
     let repo = try GuardRepo()
     let head = try repo.head()
     try repo.git("switch", "-q", "-c", "ahead")
