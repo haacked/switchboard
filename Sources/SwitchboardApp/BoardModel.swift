@@ -58,7 +58,9 @@ final class BoardModel: ObservableObject {
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
   var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
-  func openNewSession(group: String? = nil) { newSession = NewSessionRequest(group: group) }
+  func openNewSession(group: String? = nil, parent: String? = nil) {
+    newSession = NewSessionRequest(group: group, parent: parent)
+  }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox {
     didSet { navigate() }
@@ -93,8 +95,10 @@ final class BoardModel: ObservableObject {
   /// The newest events of the sessions whose card details the Inbox showed,
   /// oldest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
-  /// Each group chat's last messages, by group id, read while its pane shows.
+  /// Each chat's last messages, by session id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
+  /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
+  @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -894,17 +898,54 @@ final class BoardModel: ObservableObject {
 
   nonisolated static let recentEventCount = 10
 
-  /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
-  func loadChatLog(_ group: String) {
-    let client = client
+  /// Reads the session's chat messages from its transcript, which can be large, so off the main thread.
+  func loadChatLog(_ session: String) {
+    let send = send
     poller.async {
-      let messages = try? client.call("chat-log", ["group": .string(group)], as: [ChatMessage].self)
+      let messages = try? JSONCoding.convert(
+        send("chat-log", ["session": .string(session)]), to: [ChatMessage].self)
       Task { @MainActor in
         // A failed first read shows an empty log, so the pane stops showing that it is loading.
-        if let messages = messages ?? (self.chatLogs[group] == nil ? [] : nil), self.chatLogs[group] != messages {
-          self.chatLogs[group] = messages
+        if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
+          self.chatLogs[session] = messages
         }
       }
+    }
+  }
+
+  /// Reads which MCP servers the conversation can load. A failed read keeps the last answer and shows no error.
+  func loadMCPServers(_ session: String) {
+    let send = send
+    poller.async {
+      guard let answer = try? send("manager-mcp", ["session": .string(session)]) else { return }
+      Task { @MainActor in self.storeMCPAnswer(answer, for: session) }
+    }
+  }
+
+  enum MCPChange {
+    case add(String)
+    case remove(String)
+    case all, none
+
+    var args: [String: JSON] {
+      switch self {
+      case .add(let name): ["add": [.string(name)]]
+      case .remove(let name): ["rm": [.string(name)]]
+      case .all: ["all": true]
+      case .none: ["none": true]
+      }
+    }
+  }
+
+  func changeMCPServers(_ session: String, _ change: MCPChange) {
+    perform("manager-mcp", change.args.merging(["session": .string(session)]) { $1 }) {
+      self.storeMCPAnswer($0, for: session)
+    }
+  }
+
+  private func storeMCPAnswer(_ value: JSON, for session: String) {
+    if let answer = try? JSONCoding.convert(value, to: ManagerMCPAnswer.self), mcpAnswers[session] != answer {
+      mcpAnswers[session] = answer
     }
   }
 
@@ -923,12 +964,17 @@ final class BoardModel: ObservableObject {
   /// Reads the blocks of the session's recent assistant messages for the copy buttons in its Claude terminal.
   /// A failed read gives no blocks, so a quote's button copies the screen's text.
   func loadBlockSources(_ session: String, then done: @escaping @MainActor @Sendable (BlockSources) -> Void) {
-    let client = client
+    let send = send
     poller.async {
-      let messages = try? client.call(
-        "chat-log", ["session": .string(session), "limit": .number(Double(Self.blockSourceMessageCount))],
-        as: [ChatMessage].self)
-      let sources = BlockSources(messages: (messages ?? []).filter { $0.role == .assistant }.reversed().map(\.text))
+      let messages = try? JSONCoding.convert(
+        send(
+          "chat-log",
+          [
+            "session": .string(session), "role": .string(ChatMessage.Role.assistant.rawValue),
+            "limit": .number(Double(Self.blockSourceMessageCount)),
+          ]),
+        to: [ChatMessage].self)
+      let sources = BlockSources(messages: (messages ?? []).reversed().map(\.text))
       Task { @MainActor in done(sources) }
     }
   }
