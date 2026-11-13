@@ -173,12 +173,10 @@ extension Service {
       applyMCPChanges(now: nowMs())
     }
     let session = entries[id]!.session
-    return [
-      "session": .string(id), "name": .string(session.name),
-      "servers": session.mcp.map { .array($0.map(JSON.string)) } ?? .null,
-      "available": .array(available.keys.sorted().map(JSON.string)),
-      "pending": .bool(entries[id]?.mcpRelaunch != nil),
-    ]
+    return try JSON(
+      encoding: ManagerMCPAnswer(
+        session: id, name: session.name, servers: session.mcp, available: available.keys.sorted(),
+        pending: entries[id]?.mcpRelaunch != nil))
   }
 
   /// Relaunches each claude whose MCP servers changed while it ran, once it

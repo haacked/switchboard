@@ -24,8 +24,8 @@ if [ -z "$sums" ]; then
 fi
 weights=$( { printf '%s\n' "$sums"
   (cd "$root" && source bin/lib/swift-testing.sh &&
-    swift build --build-tests ${args[@]+"${args[@]}"} >&2 &&
-    swift test list --skip-build | awk -F/ '/^IntegrationTests\./ { print "0 " $1 }'); } |
+    build_tests >&2 &&
+    list_tests | awk -F/ '/^IntegrationTests\./ { print "0 " $1 }'); } |
   awk '{ sum[$2] += $1 } END { for (s in sum) printf "%d %s\n", sum[s] + 0.5, s }' |
   sort -k1,1rn -k2,2)
 printf '%s\n' "$weights" >"$out"

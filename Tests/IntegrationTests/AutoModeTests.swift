@@ -23,7 +23,7 @@ import Testing
     let (sbd, s, card) = try asked()
     #expect(s.permissionMode == "default")
     #expect(card.permissionMode == "default")
-    #expect(card.offersAutoMode)
+    #expect(card.offers(.autoMode))
     #expect(try sbd.sb("cards", s.id).contains("approve Bash, --auto offered"))
   }
 
@@ -43,7 +43,7 @@ import Testing
     try sbd.sb("send", s.id, "perm touch y")
     let next = try sbd.waitFor(s.id, "the next card") { !$0.cards.isEmpty }
     #expect(next.cards.first?.permissionMode == "auto")
-    #expect(next.cards.first?.offersAutoMode == false)
+    #expect(next.cards.first?.offers(.autoMode) == false)
     #expect(throws: TestError.self) { try sbd.sb("allow", "--auto", s.id) }
     try sbd.sb("allow", s.id)
     try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Ran touch y" }
@@ -87,7 +87,7 @@ import Testing
 
   @Test func autoIsRefusedAfterTheHookCloses() throws {
     let (sbd, s) = try timedOut("perm touch x")
-    #expect(try sbd.get(s.id).cards.first?.offersAutoMode == false)
+    #expect(try sbd.get(s.id).cards.first?.offers(.autoMode) == false)
     #expect(throws: TestError.self) { try sbd.sb("allow", "--auto", s.id) }
     #expect(try sbd.get(s.id).cards.count == 1)
   }
@@ -98,7 +98,7 @@ import Testing
     let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     #expect(sbd.stubArgs().first?.hasSuffix("--permission-mode auto -- perm touch x") == true)
     #expect(asked.permissionMode == "auto")
-    #expect(asked.cards.first?.offersAutoMode == false)
+    #expect(asked.cards.first?.offers(.autoMode) == false)
   }
 
   @Test func noAutoStartsASessionWithoutAMode() throws {
@@ -106,7 +106,8 @@ import Testing
     let s = try JSONCoding.decode(
       SessionSummary.self, from: try sbd.sb("new", "--json", "--no-auto", "--prompt", "hello", sbd.work))
     try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: hello" }
-    #expect(sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- hello"])
+    #expect(
+      sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello"])
     #expect(try sbd.get(s.id).permissionMode == "default")
   }
 
@@ -160,7 +161,8 @@ extension GroupMessageTests {
     let card = try open(s)
     #expect(throws: APIError.self) {
       try s.sbd.client.call(
-        "answer", ["session": .string(s.sender.id), "card": .number(Double(card)), "behavior": "allow", "autoMode": true])
+        "answer",
+        ["session": .string(s.sender.id), "card": .number(Double(card)), "behavior": "allow", "autoMode": true])
     }
     #expect(try sent(s.sbd, s.a.id).isEmpty)
     #expect(try s.sbd.get(s.sender.id).cards.count == 1)
