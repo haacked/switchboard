@@ -178,7 +178,7 @@ private final class SelectionRepo {
   var listing: [String]
   var buildStatus: Int32 = 0
   var testStatus: Int32 = 0
-  var dumpPackage: String?
+  var dumpPackage: String
 
   init(files: [String: String] = [:], listing extraListing: [String] = [], originMain: Bool = true) throws {
     repos = try Repos()
@@ -186,6 +186,7 @@ private final class SelectionRepo {
     stubBin = "\(repos.root)/stub-bin"
     log = "\(repos.root)/swift.log"
     packagePath = "\(repos.root)/package.json"
+    dumpPackage = "cat \(shellQuote(packagePath)); exit 0"
     developer = try FakeDeveloperDir(folders: [FakeDeveloperDir.xcodeFramework])
     listingPath = "\(repos.root)/listing.txt"
     listing = baselineListing + extraListing
@@ -266,7 +267,6 @@ private final class SelectionRepo {
 
   func run(_ args: [String]) throws -> SelectionRun {
     try (listing.joined(separator: "\n") + "\n").write(toFile: listingPath, atomically: true, encoding: .utf8)
-    let dumpCommand = dumpPackage ?? "cat \(shellQuote(packagePath)); exit 0"
     try writeExecutable(
       "\(stubBin)/swift",
       """
@@ -280,7 +280,7 @@ private final class SelectionRepo {
         esac
         prev=$arg
       done
-      if [ $dump = 1 ]; then \(dumpCommand); fi
+      if [ $dump = 1 ]; then \(dumpPackage); fi
       case ${1:-} in
         test) if [ $list = 1 ]; then cat \(shellQuote(listingPath)); exit 0; fi; exit \(testStatus) ;;
         build) exit \(buildStatus) ;;

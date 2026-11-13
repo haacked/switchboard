@@ -140,7 +140,7 @@ select_tests() {
 # adds. Last, they cannot when another file of the target names one of the
 # file's non-private top-level names other than as "extension <name>".
 test_file_selection() {
-  local target=$1 dir=$2 file=$3 count decls suites files others names used
+  local target=$1 dir=$2 file=$3 count decls suites files others names used extended
   whole() {
     echo "bin/test: $file: $1, so all of $target runs" >&2
     echo "target $target"
@@ -172,7 +172,7 @@ test_file_selection() {
     whole "it has a top-level line that the selector cannot read"
     return
   fi
-  suites=$(awk '$1 ~ /^(struct|class|enum|actor|extension)$/ { print $2 }' <<<"$decls" | sort -u | tr '\n' ' ')
+  suites=$(awk '$1 ~ /^(struct|class|enum|actor|extension)$/ { print $2 }' <<<"$decls" | sort -u | paste -sd' ' -)
   [ -n "$suites" ] || { whole "it declares no type"; return; }
 
   files=$(find "$dir" -name '*.swift' | sort)
@@ -182,15 +182,15 @@ test_file_selection() {
   # indented extension therefore counts to the end of its file, and the larger
   # count can only widen the selection.
   if [ -n "$others" ]; then
-    local alt=${suites% }
-    count=$((count + $(tr '\n' '\0' <<<"$others" |
-      xargs -0 awk -v re="(^|[^A-Za-z0-9_])extension[ ]+([A-Za-z_][A-Za-z0-9_]*[.])?(${alt// /|})([^A-Za-z0-9_]|$)" '
+    extended=$(tr '\n' '\0' <<<"$others" |
+      xargs -0 awk -v re="(^|[^A-Za-z0-9_])extension[ ]+([A-Za-z_][A-Za-z0-9_]*[.])?(${suites// /|})([^A-Za-z0-9_]|$)" '
         FNR == 1 { inside = 0 }
         $0 ~ re { inside = 1 }
         inside && /@Test/ { n++ }
         /^}/ { inside = 0 }
         END { print n + 0 }' |
-      awk '{ s += $1 } END { print s + 0 }')))
+      awk '{ s += $1 } END { print s + 0 }')
+    count=$((count + extended))
   fi
   names=$(awk '$3 == 0 { print $2 }' <<<"$decls" | sort -u)
   used=$(
@@ -225,8 +225,8 @@ test_file_selection() {
   extends*) whole "it extends ${used#extends }, which $target does not declare" ;;
   uses*) whole "another file uses its ${used#uses }" ;;
   *)
-    echo "bin/test: $file: runs ${suites% }" >&2
-    echo "suites $target $count ${suites% }"
+    echo "bin/test: $file: runs $suites" >&2
+    echo "suites $target $count $suites"
     ;;
   esac
 }
