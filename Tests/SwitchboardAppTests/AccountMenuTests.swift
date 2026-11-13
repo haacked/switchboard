@@ -1,6 +1,7 @@
 import Foundation
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
@@ -156,11 +157,10 @@ import Testing
   }
 }
 
-final class OpLog: @unchecked Sendable {
-  private let lock = NSLock()
-  private var ops: [String] = []
-  var value: [String] { lock.withLock { ops } }
-  func append(_ op: String) { lock.withLock { ops.append(op) } }
+final class OpLog: Sendable {
+  private let ops = OSAllocatedUnfairLock<[String]>(initialState: [])
+  var value: [String] { ops.withLock { $0 } }
+  func append(_ op: String) { ops.withLock { $0.append(op) } }
 }
 
 @MainActor
