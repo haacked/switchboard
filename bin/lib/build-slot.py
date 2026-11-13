@@ -236,6 +236,12 @@ def wait_for_slot(queue, seq, slots, poll):
         print(f"build-slot: got a build slot after {waited}", file=sys.stderr, flush=True)
 
 
+def cannot_run(command, error):
+    """Reports a command that failed to start and returns the shell's status for it."""
+    print(f"build-slot: {command[0]}: {error.strerror}", file=sys.stderr)
+    return 127 if error.errno == errno.ENOENT else 126
+
+
 def exit_status(returncode):
     return 128 - returncode if returncode < 0 else returncode
 
@@ -256,8 +262,7 @@ class Child:
         try:
             self.process = subprocess.Popen(command, env=env, close_fds=True)
         except OSError as error:
-            print(f"build-slot: {command[0]}: {error.strerror}", file=sys.stderr)
-            return 127 if error.errno == errno.ENOENT else 126
+            return cannot_run(command, error)
         return exit_status(self.process.wait())
 
 
@@ -275,8 +280,7 @@ def main(argv):
         try:
             os.execvp(argv[0], argv)
         except OSError as error:
-            print(f"build-slot: {argv[0]}: {error.strerror}", file=sys.stderr)
-            return 127 if error.errno == errno.ENOENT else 126
+            return cannot_run(argv, error)
 
     child = Child()
     for signum in SIGNALS:
