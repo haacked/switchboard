@@ -163,13 +163,7 @@ private func boardCard(
       "the top of card 3's dialog scrolled off the terminal, so sbd can't check which call it answers. "
       + "Make the terminal taller, or answer it there"
 
-    func card(_ id: Int64) throws -> Card {
-      let json: JSON = [
-        "id": .number(Double(id)), "session": "a", "kind": "permission", "tool": "Bash", "summary": "`ls`",
-        "input": [:], "questions": [], "since": 0, "deferred": false, "hookClosed": true,
-      ]
-      return try JSONCoding.convert(json, to: Card.self)
-    }
+    func card(_ id: Int64) throws -> Card { try permissionCard(id, session: "a", hookClosed: true) }
 
     /// A model whose first answer of card 3 sbd refused.
     func refusedModel() async throws -> BoardModel {

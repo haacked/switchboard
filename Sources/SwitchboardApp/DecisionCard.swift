@@ -97,9 +97,7 @@ struct DecisionCard: View {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog. The Summary says why the prompt has no card.
-      Button("Open Terminal") { model.openInboxTerminal() }
-        .help("Show the session's Claude terminal in place of its summary")
-        .disabled(!session.runsClaude)
+      OpenTerminalButton().disabled(!session.runsClaude)
     } else if item.source == .fallback {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
@@ -122,19 +120,47 @@ struct ResendDecisions: View {
       )
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
-      if let error = model.decisionErrors[session.id] {
-        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
-      }
+      RefusalLabel(refusal: model.decisionErrors[session.id])
       Button("Send again") { model.resendDecisions(session.id) }
         .disabled(model.deciding.contains("\(session.id)/resend"))
         .accessibilityLabel("Send the answers again")
         .accessibilityHint("Sends the same answers once more. The session may get them twice.")
     }
-    // A refused resend leaves the button as it was, so VoiceOver would say nothing.
-    .onChange(of: model.decisionErrors[session.id]) {
-      if let error = model.decisionErrors[session.id] { AccessibilityNotification.Announcement(error).post() }
+    .announcesRefusal(model.decisionErrors[session.id])
+  }
+}
+
+/// Shows the Inbox session's Claude terminal in place of its summary.
+struct OpenTerminalButton: View {
+  @EnvironmentObject var model: BoardModel
+
+  var body: some View {
+    Button("Open Terminal") { model.openInboxTerminal() }
+      .help("Show the session's Claude terminal in place of its summary")
+  }
+}
+
+/// sbd's refusal of the user's last action, in red, or nothing without one.
+/// The stack that holds it calls `announcesRefusal`, because a view gets no
+/// `onChange` when it first appears.
+struct RefusalLabel: View {
+  let refusal: String?
+
+  var body: some View {
+    if let refusal {
+      Label(refusal, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
+        .textSelection(.enabled)
+    }
+  }
+}
+
+extension View {
+  /// Has VoiceOver read each new refusal. A refused action leaves the view as
+  /// it was, so VoiceOver would say nothing.
+  func announcesRefusal(_ refusal: String?) -> some View {
+    onChange(of: refusal) {
+      if let refusal { AccessibilityNotification.Announcement(refusal).post() }
     }
   }
 }

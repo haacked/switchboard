@@ -55,10 +55,12 @@ public enum ClaudeScreen {
   /// lost its top lines to the pane's height. The trust dialog shows only a
   /// folder, so any other trust dialog gets the plain refusal.
   public static func typingDialog(_ card: Card, screen: String?) throws -> [String] {
-    let notShown = APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
-    guard let screen, let dialog = dialog(screen) else { throw notShown }
+    func notShown() -> APIError {
+      APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
+    }
+    guard let screen, let dialog = dialog(screen) else { throw notShown() }
     if shows(card, dialog) { return dialog }
-    if card.kind == .trust { throw notShown }
+    if card.kind == .trust { throw notShown() }
     guard let top = dialog.first, isRule(top) else {
       throw APIError(
         "the top of card \(card.id)'s dialog scrolled off the terminal, so sbd can't check which call it answers. "
@@ -67,17 +69,6 @@ public enum ClaudeScreen {
     throw APIError(
       "the terminal shows a dialog that sbd can't match to card \(card.id), such as one whose path the pane cuts. "
         + "Widen the terminal, or answer it there")
-  }
-
-  /// Why sbd may not type into the card's dialog on the screen, or nil when
-  /// it may.
-  public static func typingRefusal(_ card: Card, screen: String?) -> String? {
-    do {
-      _ = try typingDialog(card, screen: screen)
-      return nil
-    } catch {
-      return "\(error)"
-    }
   }
 
   /// The lines between the Bash dialog's two dashed rules, and the card's
@@ -264,13 +255,15 @@ public struct DialogWatch: Equatable, Sendable {
   public mutating func check(_ open: [Card], screen: String) -> [Int64] {
     let dialog = ClaudeScreen.dialog(screen)
     let watched = open.filter(DialogWatch.watches)
+    let claims = watched.map { card in dialog.map { ClaudeScreen.mayShow(card, $0) } ?? false }
+    let claimed = claims.contains(true)
     var next: [Int64: Sighting] = [:]
     var left: [Int64] = []
-    for card in watched {
+    for (card, mayShow) in zip(watched, claims) {
       var s = sightings[card.id] ?? Sighting()
-      if let dialog, ClaudeScreen.mayShow(card, dialog) {
+      if mayShow {
         s = Sighting(seen: true, misses: 0)
-      } else if let dialog, !watched.contains(where: { ClaudeScreen.mayShow($0, dialog) }) {
+      } else if dialog != nil, !claimed {
         s.misses = 0
       } else {
         s.misses += 1

@@ -20,16 +20,17 @@ import Testing
     if let suggestions {
       try suggestions.text.write(toFile: "\(sbd.home.path)/suggestions.json", atomically: true, encoding: .utf8)
     }
-    try "alpha\nbeta\n".write(toFile: "\(sbd.work)/notes.txt", atomically: true, encoding: .utf8)
-    let s = try sbd.new(prompt: "edit notes.txt beta BETA")
-    let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    let asked = try sbd.newEdit()
     return (sbd, asked, try #require(asked.cards.first))
   }
 
-  /// Waits for the stub to make the edit.
-  @discardableResult
-  func edited(_ sbd: Instance, _ id: String) throws -> SessionSummary {
-    try sbd.waitFor(id, "the edit's reply") { $0.lastReply?.hasPrefix("Edited") == true && $0.cards.isEmpty }
+  /// Expects the session's card to be open still, with no answer recorded or sent to the hook.
+  func expectNothingAnswered(_ sbd: Instance, _ s: SessionSummary, sourceLocation: SourceLocation = #_sourceLocation)
+    throws
+  {
+    #expect(try sbd.get(s.id).cards.count == 1, sourceLocation: sourceLocation)
+    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" }, sourceLocation: sourceLocation)
+    #expect(sbd.permissionAnswers(s.claudeSessionId).isEmpty, sourceLocation: sourceLocation)
   }
 
   @Test func aCardWithSuggestionsOffersAlways() throws {
@@ -65,7 +66,7 @@ import Testing
     let answer = try JSON.parse(sbd.sb("allow", "--always", "--json", s.id))
 
     #expect(answer?["delivery"]?.string == "hook")
-    let after = try edited(sbd, s.id)
+    let after = try sbd.waitForEdit(s.id)
     let decision = try #require(sbd.permissionAnswers(s.claudeSessionId).last)
     #expect(decision["behavior"] == "allow")
     #expect(decision["updatedPermissions"] == Self.suggestions)
@@ -78,7 +79,7 @@ import Testing
 
     try sbd.sb("allow", "--always", s.id)
 
-    try edited(sbd, s.id)
+    try sbd.waitForEdit(s.id)
     let answered = try sbd.events(s.id).filter { $0.kind == "answered" }
     #expect(answered.count == 1)
     #expect(answered.first?.data["card"] == .number(Double(card.id)))
@@ -91,7 +92,7 @@ import Testing
 
     try sbd.sb("allow", s.id)
 
-    try edited(sbd, s.id)
+    try sbd.waitForEdit(s.id)
     let decision = try #require(sbd.permissionAnswers(s.claudeSessionId).last)
     #expect(decision["behavior"] == "allow")
     #expect(decision["updatedPermissions"] == nil)
@@ -103,7 +104,7 @@ import Testing
 
     try sbd.sb("allow", "--auto", s.id)
 
-    try edited(sbd, s.id)
+    try sbd.waitForEdit(s.id)
     let decision = try #require(sbd.permissionAnswers(s.claudeSessionId).last)
     #expect(decision["updatedPermissions"] == [["type": "setMode", "mode": "auto", "destination": "session"]])
   }
@@ -123,9 +124,7 @@ import Testing
 
     #expect(refused.status != 0)
     #expect(refused.stderr.contains("card \(card.id)'s request offered no always-allow rule. Allow it without always"))
-    #expect(try sbd.get(s.id).cards.count == 1)
-    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
-    #expect(sbd.permissionAnswers(s.claudeSessionId).isEmpty)
+    try expectNothingAnswered(sbd, s)
   }
 
   @Test func refusesAlwaysForSuggestionsItCantDescribe() throws {
@@ -143,8 +142,7 @@ import Testing
     #expect(
       refused.stderr.contains(
         "card \(card.id)'s always-allow rule is one Switchboard can't describe, so sbd won't apply it"))
-    #expect(try sbd.get(s.id).cards.count == 1)
-    #expect(sbd.permissionAnswers(s.claudeSessionId).isEmpty)
+    try expectNothingAnswered(sbd, s)
   }
 
   /// An app that read the card before sbd's check still can't apply the rule.
@@ -156,9 +154,7 @@ import Testing
       try sbd.client.call("answer", ["session": .string(s.id), "behavior": "allow", "always": true])
     }
 
-    #expect(try sbd.get(s.id).cards.count == 1)
-    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
-    #expect(sbd.permissionAnswers(s.claudeSessionId).isEmpty)
+    try expectNothingAnswered(sbd, s)
   }
 
   @Test func refusesAlwaysAfterTheHookTimesOut() throws {
@@ -174,8 +170,7 @@ import Testing
     #expect(
       refused.stderr.contains(
         "card \(card.id)'s hook closed, so sbd can't save the always-allow rule. Allow it without always"))
-    #expect(try sbd.get(s.id).cards.count == 1)
-    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
+    try expectNothingAnswered(sbd, s)
   }
 
   @Test func refusesAutoWithAlways() throws {
@@ -186,11 +181,8 @@ import Testing
 
     #expect(refused.status != 0)
     #expect(refused.stderr.contains("card \(card.id): pick one of autoMode and always"))
-    let after = try sbd.get(s.id)
-    #expect(after.cards.count == 1)
-    #expect(after.permissionMode == "default")
-    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
-    #expect(sbd.permissionAnswers(s.claudeSessionId).isEmpty)
+    #expect(try sbd.get(s.id).permissionMode == "default")
+    try expectNothingAnswered(sbd, s)
   }
 
   @Test func alwaysIsRefusedWithADeny() throws {
@@ -200,8 +192,7 @@ import Testing
       try sbd.client.call("answer", ["session": .string(s.id), "behavior": "deny", "always": true])
     }
 
-    #expect(try sbd.get(s.id).cards.count == 1)
-    #expect(try !sbd.events(s.id).contains { $0.kind == "answered" })
+    try expectNothingAnswered(sbd, s)
   }
 }
 

@@ -100,7 +100,8 @@ extension Service {
     let id = card.session
     let extras = AllowExtra.allCases.filter { args[$0.argument]?.bool == true }
     if extras.count > 1 { throw APIError("card \(card.id): pick one of \(englishList(extras.map(\.argument)))") }
-    for extra in extras {
+    let extra = extras.first
+    if let extra {
       guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
         throw APIError("card \(card.id): \(extra.argument) goes only with a behavior of allow")
       }
@@ -145,9 +146,9 @@ extension Service {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
-        if extras.contains(.autoMode) { data["permission_mode"] = .string(PermissionMode.auto) }
-        if extras.contains(.always) { data["always"] = true }
-        reply = (.allow(updatedInput: nil, permissions: extras.flatMap(card.permissions)), .yes)
+        if extra == .autoMode { data["permission_mode"] = .string(PermissionMode.auto) }
+        if extra == .always { data["always"] = true }
+        reply = (.allow(updatedInput: nil, permissions: extra.map(card.permissions) ?? []), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
       case "deny":
@@ -162,11 +163,11 @@ extension Service {
     // checks again first.
     if let request = held[card.id], !request.hookGone() {
       request.resolve(reply.decision.hookOutput)
-      if extras.contains(.autoMode) { try update(id) { $0.autoMode = true } }
+      if extra == .autoMode { try update(id) { $0.autoMode = true } }
       return answered("hook")
     }
     // The hook can close after the check above.
-    if let extra = extras.first { throw refused(card.hookClosedRefusal(extra), extra) }
+    if let extra { throw refused(card.hookClosedRefusal(extra), extra) }
     guard !card.deferred else {
       throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
     }

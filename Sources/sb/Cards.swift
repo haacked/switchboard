@@ -24,9 +24,10 @@ func cards(_ a: Args) {
       "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")\(card.hookClosed ? ", hook closed" : "")"
     if card.kind == .permission {
       // `allow` approves the whole call, so the whole call prints.
-      out("\(head)  approve \(card.tool)\(card.offeredExtras.map { ", \($0.flag) offered" }.joined())")
+      let extras = card.offeredExtras
+      out("\(head)  approve \(card.tool)\(extras.map { ", \($0.flag) offered" }.joined())")
       for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
-      for extra in card.offeredExtras {
+      for extra in extras {
         if let note = card.note(extra) { out("      \(extra.flag): \(note)") }
       }
       continue

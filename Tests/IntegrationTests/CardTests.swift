@@ -25,6 +25,19 @@ extension Instance {
     guard let pid = stubPid("held-hook.pid") else { return false }
     return kill(pid, 0) == 0
   }
+
+  /// A new session whose stub asks to edit notes.txt, once its card is open.
+  func newEdit() throws -> SessionSummary {
+    try "alpha\nbeta\n".write(toFile: "\(work)/notes.txt", atomically: true, encoding: .utf8)
+    let s = try new(prompt: "edit notes.txt beta BETA")
+    return try waitFor(s.id, "the card") { !$0.cards.isEmpty }
+  }
+
+  /// Waits for the stub to make the edit that `newEdit` asked for.
+  @discardableResult
+  func waitForEdit(_ id: String) throws -> SessionSummary {
+    try waitFor(id, "the edit's reply") { $0.lastReply?.hasPrefix("Edited") == true && $0.cards.isEmpty }
+  }
 }
 
 /// A session whose card's PermissionRequest hook timed out while the
@@ -385,9 +398,7 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
   /// whole dialog again.
   @Test func keepsAnEditCardWhoseDialogTopScrolledOffWhenSbdRestarts() throws {
     let sbd = try Instance()
-    try "alpha\nbeta\n".write(toFile: "\(sbd.work)/notes.txt", atomically: true, encoding: .utf8)
-    let s = try sbd.new(prompt: "edit notes.txt beta BETA")
-    try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    let s = try sbd.newEdit()
     try sbd.waitFor("the Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }
     try sbd.resize(s.id, rows: 8)
     try sbd.waitFor("the dialog's title to scroll off") { try !sbd.screen(s.id).contains(" Edit file") }
@@ -406,7 +417,7 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     try sbd.waitFor("the whole Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }
     let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
     #expect(answer?["delivery"]?.string == "terminal")
-    try sbd.waitFor(s.id, "the edit's reply") { $0.lastReply?.hasPrefix("Edited") == true && $0.cards.isEmpty }
+    try sbd.waitForEdit(s.id)
     #expect(try String(contentsOfFile: "\(sbd.work)/notes.txt", encoding: .utf8) == "alpha\nBETA\n")
   }
 }
