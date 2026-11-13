@@ -108,7 +108,10 @@ enum NavMouse {
     guard let direction = direction(type: event.type, buttonNumber: buttonNumber, deltaX: deltaX),
       !model.presentingSheet, event.window === NSApp.switchboardWindow
     else { return false }
-    model.go(direction)
+    model.go(direction, input: input(event.type))
     return true
   }
+
+  /// The activity log's name for the input that a back or forward event came from.
+  static func input(_ type: NSEvent.EventType) -> String { type == .swipe ? "swipe" : "mouse-button" }
 }

@@ -49,10 +49,15 @@ struct SessionView: View {
       .padding(8)
     }
     // A request that no terminal took would otherwise take focus the next time this session shows.
-    .onDisappear { [model, id = session.id] in model.releaseTerminalFocus(id) }
+    .onDisappear { [model, id = session.id] in
+      model.releaseTerminalFocus(id)
+      model.endTerminalWait(id)
+    }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
-      if session.hasTerminals { await connection.connect(session.id, live: session.live) }
+      if session.hasTerminals {
+        await connection.connect(session.id, live: session.live, observer: model.terminalObserver(session.id))
+      }
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
   }

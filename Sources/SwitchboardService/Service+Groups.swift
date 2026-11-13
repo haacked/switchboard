@@ -257,6 +257,7 @@ extension Service {
     guard confirmed.sorted() == targets.map(\.id).sorted() else {
       throw APIError("the sessions to send to changed since they were confirmed. List them again, and confirm again")
     }
+    recordSendActivity(nil, text, via: "group", nil, targets: targets.count)
     return GroupSend(group: id, targets: list, sent: true, deliveries: deliver(text, to: targets.map(\.id)))
   }
 

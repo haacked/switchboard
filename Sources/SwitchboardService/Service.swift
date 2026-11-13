@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwitchboardCore
 
@@ -178,6 +179,8 @@ public final class Service {
   var activityOn = false
   /// When sbd last deleted activity rows past their retention.
   var activityPruned: Int64 = 0
+  /// The key that hashes message text for the activity log. sbd reads or makes it at the first hash.
+  var activityKey: SymmetricKey?
   /// The most claude processes that may run at once. `sb live --set` changes it.
   var liveCap: Int
   var quota: any QuotaBudget = UnlimitedBudget()
@@ -472,7 +475,10 @@ public final class Service {
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
       // A sender that sbd no longer knows, or the session itself, goes unrecorded.
       let from = (try? lookup(["session": args["from"] ?? .null])).flatMap { $0 == id ? nil : $0 }
-      return ["delivery": .string(try send(id, text, trigger: from == nil ? .send : .session, from: from).rawValue)]
+      let delivery = try send(id, text, trigger: from == nil ? .send : .session, from: from)
+      // A send that names any sender, even the target or a removed session, comes from inside Claude.
+      if args["from"] == nil { recordSendActivity(id, text, via: Self.sendVia(args["via"]?.string), delivery) }
+      return ["delivery": .string(delivery.rawValue)]
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "stop":
@@ -555,6 +561,8 @@ public final class Service {
       return try activityReport(args)
     case "activity-clear":
       return try activityClear()
+    case "activity-record":
+      return try activityRecord(args)
     case "live":
       return try liveRequest(args)
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",

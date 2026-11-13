@@ -57,11 +57,12 @@ extension Service {
     let session = JSON.string(id)
     switch option.action {
     case .send:
-      return Request(op: "send", args: ["session": session, "text": .string(option.message ?? option.label)])
+      return Request(
+        op: "send", args: ["session": session, "text": .string(option.message ?? option.label), "via": "option"])
     case .reply:
       let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       guard !text.isEmpty else { throw APIError("\(option.label) needs the text to send") }
-      return Request(op: "send", args: ["session": session, "text": .string(text)])
+      return Request(op: "send", args: ["session": session, "text": .string(text), "via": "inbox"])
     case .merge:
       return Request(op: "merge", args: ["session": session])
     case .dismiss:

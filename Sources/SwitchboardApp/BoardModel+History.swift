@@ -84,6 +84,7 @@ extension BoardModel {
     case .replace: updated.replace(location)
     }
     if updated != history { history = updated }
+    noteNavigation(mode)
   }
 
   var canGoBack: Bool { history.canGo(.back, resolve: resolver()) }
@@ -93,11 +94,17 @@ extension BoardModel {
   func goBack() { go(.back) }
   func goForward() { go(.forward) }
 
-  func go(_ direction: NavDirection) {
-    let resolve = resolver()
-    guard let i = history.target(direction, resolve: resolve), let place = resolve(history.entries[i]) else { return }
-    history.move(to: i)
-    navigate(.replace) { restore(place) }
+  /// The menu, the toolbar, the mouse buttons, and swipes all call this to go back or forward. `input` names
+  /// the input when the caller holds the event, as the mouse and swipe handler does.
+  func go(_ direction: NavDirection, input: String? = nil) {
+    track(direction == .back ? .back : .forward, input: input) {
+      let resolve = resolver()
+      guard let i = history.target(direction, resolve: resolve), let place = resolve(history.entries[i]) else {
+        return
+      }
+      history.move(to: i)
+      navigate(.replace) { restore(place) }
+    }
   }
 
   /// The places that Recent Places offers, newest first.
@@ -107,7 +114,7 @@ extension BoardModel {
   func go(to place: NavLocation) {
     showingRecentPlaces = false
     guard let place = resolver()(place) else { return }
-    navigate { restore(place) }
+    withNavVia("recent") { navigate { restore(place) } }
   }
 
   private func restore(_ location: NavLocation) {

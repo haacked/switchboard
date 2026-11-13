@@ -17,7 +17,7 @@
 # attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
 # It also presses mouse buttons 4 and 5 and checks that they go back and forward
-# between two selected sessions.
+# between two selected sessions, and that the activity log records them.
 # Last it drops sets of files on the message field of a session, the Inbox, and
 # a group chat through the app's DropSelfTest, and checks the chips, the
 # errors, and the images that sbd received from the field's send.
@@ -496,15 +496,32 @@ check_shell() {
   [ "$rest" = "k ran Search Sessions…" ] || fail "the navigation shortcuts did not run their menu items: $nav"
   end_app
 
-  # Mouse buttons 4 and 5 go back and forward through the sessions the user selected.
+  # Mouse buttons 4 and 5 go back and forward through the sessions the user selected. The activity log
+  # records them as Back and Forward from a mouse button.
+  sb activity on >/dev/null
   start_app "$work"
   app select "$manager" >/dev/null
   shows() { [ "$(app where)" = "session(\"$1\")" ]; }
   wait_for 5 shows "$manager" || fail "selecting the Manager did not show it: $(app where)"
+  # The activity log records a place once it stays on screen for 1 s.
+  sleep 1.2
   [ "$(app mouse 3)" = posted ] || fail "the app could not post mouse button 4"
   wait_for 5 shows "$work" || fail "mouse button 4 did not go back to the work session: $(app where)"
+  sleep 1.2
   [ "$(app mouse 4)" = posted ] || fail "the app could not post mouse button 5"
   wait_for 5 shows "$manager" || fail "mouse button 5 did not go forward to the Manager: $(app where)"
+  # The app sends its events every 5 s, and a place counts after 1 s on screen.
+  logged_mouse_nav() {
+    sb activity report --json | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+cmds = {c["name"]: c["vias"] for c in r["commands"]}
+nav = {n["name"] for n in r["navigation"]}
+sys.exit(0 if cmds.get("back", {}).get("mouse-button") and cmds.get("forward", {}).get("mouse-button")
+         and {"back", "forward"} <= nav else 1)'
+  }
+  wait_for 30 logged_mouse_nav || fail "the activity log did not record the mouse buttons: $(sb activity report)"
+  sb activity off >/dev/null
   end_app
   save_shots
   echo "ok: shell (close button, exit, Ctrl-D, menu, relaunch, switch, reopen; Manager, work, Inbox, chat; mouse back and forward)"

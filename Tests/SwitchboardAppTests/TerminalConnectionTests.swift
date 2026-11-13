@@ -57,6 +57,39 @@ private func makeConnection(
     #expect(connection.terminals == sample)
   }
 
+  @Test func theObserverHearsTheOpeningEachFailureAndTheArrival() async {
+    let log = ConnectionLog()
+    let connection = makeConnection(
+      log,
+      answer: { n in
+        if n == 1 { throw Boom() }
+        return sample
+      })
+    var heard: [String] = []
+    let observer = TerminalConnection.Observer(
+      opening: { heard.append("opening \(log.requests.count)") }, opened: { heard.append("opened") },
+      failed: { heard.append("failed \(type(of: $0))") })
+
+    await connection.connect("a", live: true, observer: observer)
+
+    #expect(heard == ["opening 0", "failed Boom", "opened"])
+  }
+
+  @Test func cancellingDuringTheRestTellsTheObserverNothing() async {
+    let log = ConnectionLog()
+    let connection = makeConnection(log, block: { true })
+    var heard = false
+    let task = Task {
+      await connection.connect("a", live: false, observer: .init(opening: { heard = true }, opened: { heard = true }))
+    }
+    await settle { !log.entries.isEmpty }
+
+    task.cancel()
+    await task.value
+
+    #expect(!heard)
+  }
+
   /// Moving through the sidebar cancels the connection of each session it passes.
   @Test(arguments: [true, false]) func cancellingDuringTheRestSendsNoRequest(live: Bool) async {
     let log = ConnectionLog()

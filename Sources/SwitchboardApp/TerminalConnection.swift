@@ -21,6 +21,14 @@ final class TerminalConnection: ObservableObject {
   static let liveRest: Duration = .milliseconds(150)
   static let retryWait: Duration = .seconds(1)
 
+  /// What a connection tells its owner as it goes: it starts the request after the rest, the terminals
+  /// arrived, or a try failed. The activity log times the wait from these.
+  struct Observer {
+    var opening: () -> Void = {}
+    var opened: () -> Void = {}
+    var failed: (Error) -> Void = { _ in }
+  }
+
   @Published private(set) var terminals: Terminals?
   @Published private(set) var error: String?
   private let request: Request
@@ -35,9 +43,10 @@ final class TerminalConnection: ObservableObject {
   }
 
   /// Runs until the terminals arrive, the tries run out, or the task is cancelled.
-  func connect(_ id: String, live: Bool) async {
+  func connect(_ id: String, live: Bool, observer: Observer = Observer()) async {
     try? await sleep(live ? Self.liveRest : Self.stoppedRest)
     if Task.isCancelled { return }
+    observer.opening()
     let request = request
     // The request can fail while sbd restarts, so it retries for 10 s.
     for _ in 0..<10 {
@@ -46,9 +55,11 @@ final class TerminalConnection: ObservableObject {
       switch result {
       case .success(let terminals):
         self.terminals = terminals
+        observer.opened()
         return
       case .failure(let error):
         self.error = "\(error)"
+        observer.failed(error)
       }
       try? await sleep(Self.retryWait)
       if Task.isCancelled { return }
