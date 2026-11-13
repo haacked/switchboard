@@ -11,8 +11,8 @@ struct NavLocation: Hashable {
   }
 
   var place: Place
-  /// Whether the place shows the session's terminal instead of its overview. Only the Inbox and a chat
-  /// have a Terminal toggle, so it is false everywhere else.
+  /// Whether the place shows the session's terminal instead of its overview. Only the Inbox, a chat,
+  /// and a Manager conversation have a Terminal toggle. It is false everywhere else.
   var terminal: Bool
 }
 
@@ -28,7 +28,8 @@ extension BoardModel {
   /// What the window shows now.
   var location: NavLocation {
     if let selection {
-      return NavLocation(place: .session(selection), terminal: showingTerminal && summary(selection)?.chat != nil)
+      return NavLocation(
+        place: .session(selection), terminal: showingTerminal && summary(selection)?.kind.showsAsChat == true)
     }
     switch mainView {
     case .board: return NavLocation(place: .board, terminal: false)
@@ -43,7 +44,7 @@ extension BoardModel {
   /// Maps a location to the place it shows now, or nil when its session is removed or the org filter hides
   /// it. A hidden session counts as unavailable, because selecting it would widen the filter.
   func resolver() -> (NavLocation) -> NavLocation? {
-    let shown = Dictionary(board.map { ($0.id, $0.chat != nil) }, uniquingKeysWith: { a, _ in a })
+    let shown = Dictionary(board.map { ($0.id, $0.kind.showsAsChat) }, uniquingKeysWith: { a, _ in a })
     let pending = pendingSelection
     let inbox = Set(sessions.map(\.id))
     let first = triage.first?.id
@@ -118,7 +119,7 @@ extension BoardModel {
     switch location.place {
     case .session(let id):
       selection = id
-      if summary(id)?.chat != nil { showingTerminal = location.terminal }
+      if summary(id)?.kind.showsAsChat == true { showingTerminal = location.terminal }
     case .inbox(let item):
       show(.inbox)
       inboxFocus = item

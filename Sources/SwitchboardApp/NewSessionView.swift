@@ -13,6 +13,8 @@ struct NewSessionRequest: Identifiable {
   var prompt: String?
   /// The issue that the session works on.
   var issue: IssueRef?
+  /// The id of the Manager conversation that starts the new session, from its pane's New Task button.
+  var parent: String?
 }
 
 /// The new session sheet: a repository, a branch for a new worktree, and an optional first prompt.
@@ -32,15 +34,18 @@ struct NewSessionView: View {
     private let repoName: String?
     /// The issue that the session works on.
     let issue: IssueRef?
+    /// The id of the conversation that starts the session, or nil for none.
+    let parent: String?
     /// The last offer, which a group change selects from again.
     private var offered: (repos: [KnownRepo]?, sessions: [SessionSummary]) = (nil, [])
 
-    convenience init(group: String? = nil) {
-      self.init(NewSessionRequest(group: group))
+    convenience init(group: String? = nil, parent: String? = nil) {
+      self.init(request: NewSessionRequest(group: group, parent: parent))
     }
 
-    init(_ request: NewSessionRequest) {
+    init(request: NewSessionRequest) {
       group = request.group
+      parent = request.parent
       repoName = request.repo
       issue = request.issue
       branch = request.branch ?? ""
@@ -81,8 +86,8 @@ struct NewSessionView: View {
       }
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
-        prompt: optional(prompt), account: groupAccount(groups) == nil ? optional(account) : nil, group: group,
-        issue: issue)
+        prompt: optional(prompt), parent: parent, account: groupAccount(groups) == nil ? optional(account) : nil,
+        group: group, issue: issue)
     }
   }
 
@@ -95,13 +100,17 @@ struct NewSessionView: View {
   @State private var worktree: Bool
 
   init(request: NewSessionRequest) {
-    _form = StateObject(wrappedValue: Form(request))
+    _form = StateObject(wrappedValue: Form(request: request))
     _worktree = State(initialValue: request.branch != nil || UserDefaults.standard.bool(forKey: "createWorktree"))
   }
 
   var body: some View {
+    let parentSession = form.parent.flatMap(model.summary)
     VStack(alignment: .leading, spacing: 12) {
-      Text("New Session").font(.title2.bold())
+      VStack(alignment: .leading, spacing: 2) {
+        Text("New Session").font(.title2.bold())
+        if let parentSession { Text("Started by \(parentSession.name)").foregroundStyle(.secondary) }
+      }
       SwiftUI.Form {
         LabeledContent("Repository") {
           RepoPicker(selection: Binding(get: { form.repo }, set: { form.pick($0) }))
@@ -131,7 +140,7 @@ struct NewSessionView: View {
             .help("This group runs its sessions under this account")
         } else if model.accounts.count > 1 {
           Picker("Account", selection: $form.account) {
-            Text("Active (\(model.activeAccount?.name ?? "default"))").tag("")
+            Text(Self.defaultAccountLabel(parent: parentSession, active: model.activeAccount)).tag("")
             ForEach(model.accounts) { Text($0.name).tag($0.folder) }
           }
         }
@@ -165,11 +174,21 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    if let session = form.request(worktree: worktree, groups: model.groups) { model.create(session) }
+    if let session = form.request(worktree: worktree, groups: model.groups) {
+      model.create(session)
+    }
+  }
+
+  /// sbd runs a session that names no account under its parent's account, or else under the active one.
+  static func defaultAccountLabel(parent: SessionSummary?, active: AccountInfo?) -> String {
+    guard let parent else { return "Active (\(active?.name ?? "default"))" }
+    guard let account = parent.account else { return "Same as \(parent.name)" }
+    return "Same as \(parent.name) (\(ClaudeAccount.name(account)))"
   }
 }
 
 /// Asks for a folder, or returns nil when the user cancels.
+@MainActor
 func chooseFolder(message: String? = nil, at start: String? = nil) -> String? {
   let panel = NSOpenPanel()
   panel.canChooseDirectories = true

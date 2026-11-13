@@ -161,7 +161,7 @@ private let rows = [
 @Suite struct NewSessionFormIssueTests {
   @Test func requestNamesTheRepoBranchPromptAndIssue() {
     let form = NewSessionView.Form(
-      NewSessionRequest(
+      request: NewSessionRequest(
         group: nil, repo: "Acme/Ledger", branch: "robin/1-issue-1", prompt: "/go --yolo x",
         issue: IssueRef(repo: "acme/ledger", number: 1)))
     form.offer([

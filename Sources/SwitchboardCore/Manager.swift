@@ -22,6 +22,15 @@ public enum Manager {
     return line.isEmpty ? untitled : String(line.prefix(maxNameLength))
   }
 
+  /// Names a conversation's MCP servers for the user. `nil` is the full setup.
+  public static func serversText(_ servers: [String]?) -> String {
+    guard let servers else { return "every MCP server (the full setup)" }
+    return servers.isEmpty ? "switchboard only" : "switchboard, " + servers.joined(separator: ", ")
+  }
+
+  /// What `sb manager mcp` and the server menu say while a change waits for claude to relaunch.
+  public static let relaunchPendingText = "Claude restarts with them when its turn ends."
+
   /// The CLAUDE.md that sbd keeps in the Manager's folder. It is a prompt for
   /// a model, so it stays short, and every `sb` command in it exists.
   public static let guide = """
@@ -70,4 +79,33 @@ public enum Manager {
 
     Start a session in a new worktree from the base with `sb new`, merge the branches there with git, and run the tests. Its merge commits are on no remote, so remove that session with `sb rm` and then `git worktree remove --force <cwd>` when you finish.
     """
+}
+
+/// sbd's answer to `manager-mcp`.
+public struct ManagerMCPAnswer: Codable, Equatable, Sendable {
+  public var session: String
+  public var name: String
+  /// The servers besides switchboard, or nil for the full setup. It encodes nil as null.
+  public var servers: [String]?
+  /// The servers that a list can name.
+  public var available: [String]
+  /// True until claude relaunches with the stored servers.
+  public var pending: Bool
+
+  public init(session: String, name: String, servers: [String]?, available: [String], pending: Bool) {
+    self.session = session
+    self.name = name
+    self.servers = servers
+    self.available = available
+    self.pending = pending
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(session, forKey: .session)
+    try container.encode(name, forKey: .name)
+    try container.encode(servers, forKey: .servers)
+    try container.encode(available, forKey: .available)
+    try container.encode(pending, forKey: .pending)
+  }
 }

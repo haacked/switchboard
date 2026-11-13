@@ -89,10 +89,10 @@ extension BoardModel {
     if terminalFocus == id { terminalFocus = nil }
   }
 
-  /// A chat shows its terminal only while the Terminal toggle is on. A request for a hidden terminal would
+  /// A chat pane shows its terminal only while the Terminal toggle is on. A request for a hidden terminal would
   /// take focus later, when the user turns the toggle on.
   private func showsClaudeTerminal(_ session: SessionSummary) -> Bool {
-    session.hasTerminals && !session.waitsToStart && (session.kind != .chat || showingTerminal)
+    session.hasTerminals && !session.waitsToStart && (!session.kind.showsAsChat || showingTerminal)
   }
 }
 

@@ -11,7 +11,8 @@ import Testing
     #expect(done.state == .needsYou)
     #expect(done.reason == "read its last reply and decide what's next")
     #expect(
-      sbd.stubArgs().first == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- hello there")
+      sbd.stubArgs().first
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello there")
     try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
     #expect(try sbd.sb("screen", s.id).contains("⏺ Done: hello there"))
   }
@@ -129,7 +130,8 @@ import Testing
     // A message that starts with a dash reaches claude as the prompt.
     #expect(try sbd.sb("send", s.id, "- fix A") == "resumed\n")
     try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: - fix A" }
-    #expect(sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- - fix A")
+    #expect(
+      sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- - fix A")
   }
 
   @Test func startsAConversationThatClaudeLeftBeforeItsFirstPromptWithItsId() throws {
@@ -141,7 +143,8 @@ import Testing
 
     #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
     try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
-    #expect(sbd.stubArgs().last == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- begin")
+    #expect(
+      sbd.stubArgs().last == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- begin")
   }
 
   @Test func restartsClaudeWithoutTheVariablesThatItsTmuxSessionKeptFromAnEarlierStart() throws {
@@ -303,7 +306,9 @@ import Testing
     let s = try sbd.new(prompt: "first\nsecond")
     try sbd.waitFor(s.id, "claude") { $0.live }
     #expect(
-      sbd.stubArgs() == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- first\nsecond"])
+      sbd.stubArgs() == [
+        "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- first\nsecond"
+      ])
   }
 
   @Test func resumesTheConversationThatClearStarted() throws {
@@ -392,7 +397,7 @@ import Testing
     try expectMultilineAsOnePrompt(sbd, s, after: "hello")
     #expect(
       sbd.stubArgs().last
-        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- \(Self.multiline)")
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- \(Self.multiline)")
   }
 
   @Test func keepsASessionRunningWhileATerminalIsAttached() throws {

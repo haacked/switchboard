@@ -103,10 +103,10 @@ extension BoardModel {
 
   /// Reads the issue list off the main thread with `op`, which answers one.
   private func readIssues(_ op: String, _ args: [String: JSON] = [:]) {
-    let client = client
+    let send = send
     issueWork.async {
-      let list = try? client.call(op, args, as: IssueList.self, timeout: 120)
-      Task { @MainActor in self.apply(issueList: list) }
+      let reply = try? send(op, args)
+      Task { @MainActor in if let reply { self.apply(issueReply: reply) } }
     }
   }
 
