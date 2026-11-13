@@ -4,7 +4,7 @@ import Testing
 
 /// A developer folder for one test, built from empty files and folders at the
 /// paths that bin/lib/swift-testing.sh checks. Its path has a space in it.
-private final class FakeDeveloperDir {
+final class FakeDeveloperDir {
   let root: String
   let path: String
 

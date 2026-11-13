@@ -450,7 +450,8 @@ A session's open PR can wait on other PRs, and `sb get` lists each one on a `dep
 
 ```
 swift build
-bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
+bin/test            # the unit and integration tests that the files changed against origin/main can affect; prints what it picked and why
+bin/test --all      # every unit test, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/test-gui        # runs the app in a hidden window, checks the bytes its terminal sends, that sessions survive an app relaunch, message drafts, and drops on the message field; needs a logged-in Mac session
 bin/test-gui drops  # runs only the named checks: terminal, relaunch, drafts, drops
