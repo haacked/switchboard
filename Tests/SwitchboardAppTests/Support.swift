@@ -3,17 +3,17 @@ import SwiftTerm
 import SwiftUI
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
-final class Counter: @unchecked Sendable {
-  private let lock = NSLock()
-  private var count = 0
-  var value: Int { lock.withLock { count } }
+final class Counter: Sendable {
+  private let count = OSAllocatedUnfairLock(initialState: 0)
+  var value: Int { count.withLock { $0 } }
   @discardableResult func increment() -> Int {
-    lock.withLock {
-      count += 1
-      return count
+    count.withLock {
+      $0 += 1
+      return $0
     }
   }
 }

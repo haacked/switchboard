@@ -46,6 +46,28 @@ import Testing
     #expect(sent.args == ["group": "g1"])
   }
 
+  @Test func loadChatLogAsksForTheSessionsLog() async {
+    let sent = await firstRequest { $0.loadChatLog("c") }
+
+    #expect(sent.op == "chat-log")
+    #expect(sent.args == ["session": "c"])
+  }
+
+  @Test func loadBlockSourcesAsksForClaudesMessagesOnly() async {
+    let sent = await firstRequest { $0.loadBlockSources("w") { _ in } }
+
+    #expect(sent.op == "chat-log")
+    #expect(
+      sent.args == ["session": "w", "role": "assistant", "limit": .number(Double(BoardModel.blockSourceMessageCount))])
+  }
+
+  @Test func loadChatLogAsksForAManagerConversationsLog() async {
+    let sent = await firstRequest { $0.loadChatLog("m") }
+
+    #expect(sent.op == "chat-log")
+    #expect(sent.args == ["session": "m"])
+  }
+
   @Test func openChatSelectsAChatThatExistsWithoutAskingSbd() {
     let model = appliedModel([chatItem("c", group: "g1"), needsItem("a")])
     let sent = Counter()

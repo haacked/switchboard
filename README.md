@@ -39,6 +39,7 @@ Everything in the app also works from `sb`, and every command takes `--json`:
 ```
 sb new ~/dev/myrepo --branch haacked/fix-thing --prompt "Fix the flaky test in foo_test.py"
 sb new ~/dev/myrepo --worktree --name "Fix the flaky test"   # names the branch itself
+sb new '~/dev/myrepo' --host devbox --branch haacked/fix-thing  # runs it on the remote host devbox of config.json; the quotes keep ~ for the host
 sb spawn --repo PostHog/posthog --branch haacked/flag-cache --prompt "Cache flag lookups."
 sb ls
 sb send <session> "Yes, push it."
@@ -74,7 +75,7 @@ sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
 sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
 sb host                      # the remote hosts in config.json and each host's ssh link
-sb host connect <host>       # opens the host's ssh link and keeps it open; an open link keeps a devbox running
+sb host connect <host>       # opens the host's ssh link, keeps it open, and sets up ~/.sb there (needs tmux, git, python3); an open link keeps a devbox running
 sb host disconnect <host>    # closes the host's ssh link
 sb repo                      # the repositories that the New Session sheet offers, most recently used first
 sb repo add <path>           # adds the repository that holds the folder; a worktree adds its main checkout
@@ -324,7 +325,7 @@ A chosen option sends its label, with "(your recommendation)" when the reply rec
 
 ### Live cap
 
-`sbd` runs at most `liveCap` claude processes at once (default 10, top level in `config.json`). A start past the cap queues, and `sb ls` shows `queued: N of N live` as its reason. When a slot frees, the oldest queued start runs, and a message or prompt sent to a queued session is delivered after its start. While starts wait, `sbd` stops idle sessions to make room: sessions in Done or with an open wait first, then the one idle longest. `sb live` lists the live and the queued sessions, and `sb live --set N` changes the cap at once, with no restart, and saves it in `config.json`.
+`sbd` runs at most `liveCap` claude processes at once (default 10, top level in `config.json`). A start past the cap queues, and `sb ls` shows `queued: N of N live` as its reason. When a slot frees, the oldest queued start runs, and a message or prompt sent to a queued session is delivered after its start. While starts wait, `sbd` stops idle sessions to make room: sessions in Done or with an open wait first, then the one idle longest. `sb live` lists the live and the queued sessions, and `sb live --set N` changes the cap at once, with no restart, and saves it in `config.json`. Each remote host has its own cap: its `liveCap` key, else the top-level `liveCap`. A host's sessions count only against its cap, and a start on a host stops idle sessions only on that host. `sb live` prints a line for each host that has a session, and `sb live --json` lists them under `hosts`, each with its `host`, `cap`, `live`, and `queued`. `sb live --set N` changes only this Mac's cap.
 
 ### Follow-ups
 
@@ -448,8 +449,9 @@ A session's open PR can wait on other PRs, and `sb get` lists each one on a `dep
 ## Develop
 
 ```
-swift build
-bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
+bin/build           # swift build with bin/test's flags; extra arguments go to swift build
+bin/test            # the tests that the files changed against origin/main can affect, leaving IntegrationTests to CI for source changes; prints what it picked and why
+bin/test --all      # every unit test, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/test-gui        # runs the app in a hidden window, checks the bytes its terminal sends, that sessions survive an app relaunch, message drafts, and drops on the message field; needs a logged-in Mac session
 bin/test-gui drops  # runs only the named checks: terminal, relaunch, drafts, drops
@@ -459,6 +461,8 @@ bin/fmt             # formats Sources, Tests and Package.swift with swift format
 bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
 ```
+
+`bin/build`, `bin/test`, `bin/bundle`, and the builds in `bin/test-gui`, `bin/measure`, and `bin/shard-weights` wait for a machine-wide build slot (`bin/lib/build-slot`), so many worktrees can build without overloading the CPU. At most 3 hold a slot at once, and the rest wait in the order they arrived and print `waiting for a build slot (N ahead)`. A slot frees when its holder exits, even from `kill -9`. Each compiling `swift build` and `swift test` runs with `--jobs 4`, or the CPU count when that is lower (`bin/lib/swiftpm`). `SB_BUILD_SLOTS` sets the slot count, and `0` turns the queue off. `SB_BUILD_JOBS` sets the job count, and `0` lets SwiftPM start one job per core. `SB_BUILD_SLOTS_DIR` moves the queue's folder from `~/Library/Caches/Switchboard/build-slots`. That folder must hold only the queue's files, because the helper deletes its own stale temp files there and overwrites its `mutex` and `counter` files.
 
 Integration suites declare `.blocking(timeLimit:)` in place of `.timeLimit`. Each test waits for a free slot without holding a thread, and its time limit starts once it has the slot. The slots run one test fewer than there are CPUs at once, which keeps one of Swift's pool threads free for async tests. A test that starts a private `sbd` in a suite without the trait records an issue. App tests build `BoardModel` with `offlineModel()`, whose client finds no `sbd`, so a test never reads the sessions of the `sbd` you run.
 

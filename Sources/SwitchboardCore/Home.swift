@@ -19,7 +19,6 @@ public struct Home: Sendable {
   public var database: String { "\(path)/sb.db" }
   public var tmuxSocket: String { "\(path)/tmux.sock" }
   public var tmuxConfig: String { "\(path)/tmux.conf" }
-  public var claudeSettings: String { "\(path)/claude-settings.json" }
   public var config: String { "\(path)/config.json" }
   /// The folder of the account that `sb account use` chose, or no file.
   public var activeAccount: String { "\(path)/account" }
@@ -43,9 +42,19 @@ public struct Home: Sendable {
 
   /// Where sbd writes a session's launcher script.
   public func sessionFolder(_ id: String) -> String { "\(path)/sessions/\(id)" }
+  /// The calls on this Mac's machine and site, which sbd writes when config.json sets `machineLog`.
+  public var machineLog: String { "\(path)/mac-machine.log" }
   /// Where sbd keeps copies of the images sent to a session. Removing the
   /// session removes its session folder, and these with it.
   public func attachmentsFolder(_ id: String) -> String { "\(sessionFolder(id))/attachments" }
+  /// The --settings file that the session's claude gets.
+  public func claudeSettings(_ id: String) -> String { "\(sessionFolder(id))/claude-settings.json" }
+
+  /// The folder of the sockets that sbd listens on for its remote hosts.
+  public var hostsFolder: String { "\(path)/hosts" }
+  /// The socket that sbd listens on for the requests of a remote host. An ssh forward connects the host's
+  /// `~/.sb/sbd.sock` to it.
+  public func hostSocket(_ host: String) -> String { "\(hostsFolder)/\(host)/sbd.sock" }
 
   public func create() throws {
     try FileManager.default.createDirectory(
@@ -95,6 +104,10 @@ public struct Config: Codable, Equatable, Sendable {
   /// `hold-delivered`, each paste waits before sbd records `delivered`. Only
   /// tests set it.
   public var testClock = false
+  /// Makes sbd append every call on this Mac's machine and site to `Home.machineLog`. Only tests set it.
+  public var machineLog = false
+  /// How long a request that needs a remote host waits for the host's link. Only tests change it.
+  public var hostWaitSeconds: Double = 15
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
   public var mcpServers: [String: MCPServer] = [:]
@@ -138,7 +151,9 @@ public struct Config: Codable, Equatable, Sendable {
 
   enum CodingKeys: String, CodingKey {
     case claude, idleStopSeconds, liveCap, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs, autoMode, env
-    case testClock, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile, cleanupDeletes, supacode
+    case testClock, machineLog, hostWaitSeconds, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
+      cleanupDeletes,
+      supacode
     case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
     case recheck = "recheckSeconds"
   }
@@ -158,6 +173,8 @@ public struct Config: Codable, Equatable, Sendable {
     autoMode = try c.decodeIfPresent(Bool.self, forKey: .autoMode) ?? d.autoMode
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
+    machineLog = try c.decodeIfPresent(Bool.self, forKey: .machineLog) ?? d.machineLog
+    hostWaitSeconds = try c.decodeIfPresent(Double.self, forKey: .hostWaitSeconds) ?? d.hostWaitSeconds
     // This skips a server that doesn't decode, such as a stdio one copied from
     // a Claude config. Throwing would make sbd ignore all of config.json.
     for (name, value) in try c.decodeIfPresent([String: JSON].self, forKey: .mcpServers) ?? [:] {

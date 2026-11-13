@@ -194,7 +194,7 @@ extension PullRequest {
   /// The Depot run of the open PR's head commit when it has a failure, while
   /// GitHub's rollup doesn't show that every check passed.
   public var depotFailure: DepotRun? {
-    guard state == .open, checks != "SUCCESS", let run = headDepot, run.hasFailure else { return nil }
+    guard state == .open, !checksPassed, let run = headDepot, run.hasFailure else { return nil }
     return run
   }
 

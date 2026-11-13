@@ -8,7 +8,7 @@ let usage = """
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--group G] [--no-auto]
+        [--model M] [--account A] [--group G] [--no-auto] [--host H]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
@@ -18,7 +18,10 @@ let usage = """
                                   parent's, else the active account. It fails
                                   when the group has an account and A names
                                   another. It starts in auto mode unless
-                                  --no-auto or the autoMode setting is false
+                                  --no-auto or the autoMode setting is false.
+                                  --host runs it on the remote host H of
+                                  config.json, in a folder there that is
+                                  absolute or starts with ~
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
         [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
                                   start a session on a new branch B in a new
@@ -288,8 +291,11 @@ let usage = """
                                   next step on their own, or show what holds
                                   each one back. Off by default
     live [--set N]                list the sessions whose claude runs and the
-                                  starts that queue behind the cap. --set changes
-                                  the cap and saves it in config.json
+                                  starts that queue behind the cap, for this Mac
+                                  and for each remote host, whose own cap is its
+                                  liveCap key, else the top-level liveCap. --set
+                                  changes this Mac's cap and saves it in
+                                  config.json
     service install|uninstall|status
     version
 
@@ -321,7 +327,7 @@ struct Args {
   init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
-      "--since",
+      "--since", "--host",
       "--id", "--resolve", "--rm", "--card",
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
@@ -504,7 +510,7 @@ func hook() -> Never {
   guard let session = env["SB_SESSION_ID"], let payload = try? JSONCoding.decoder.decode(JSON.self, from: input) else {
     exit(0)
   }
-  // The timeout stays below the 30 s hook timeout in claude-settings.json. A
+  // The timeout stays below the 30 s hook timeout in the session's claude-settings.json. A
   // PermissionRequest waits for its card's answer until Claude Code's own
   // timeout ends the hook.
   let held = payload["hook_event_name"]?.string == "PermissionRequest"
@@ -520,6 +526,10 @@ func hook() -> Never {
 func attach(_ a: Args) -> Never {
   let id = a.session("attach")
   let pane: Pane = a.switches.contains("--shell") ? .shell : .claude
+  // The tmux server of a session on a host is on that host, so this terminal can't attach to its socket.
+  if let host = summary(call("get", ["session": .string(id)])).host {
+    die("\(id) runs on \(host), and sb attach can't reach a session on a host yet")
+  }
   let terminals: Terminals
   do { terminals = try client.open(id) } catch { die("\(error)") }
   if pane == .shell { _ = call("shell", ["session": .string(id), "open": .bool(true)]) }
@@ -677,14 +687,16 @@ case "ls", "list":
   }
 case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
-  let folder = URL(fileURLWithPath: path.expandingTilde).path
+  // With --host, the folder is on the host, which resolves its ~. sb passes it as typed.
+  let host = a.values["--host"]
+  let folder = host == nil ? URL(fileURLWithPath: path.expandingTilde).path : path
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
     worktree: a.switches.contains("--worktree"),
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
     account: a.values["--account"], group: a.values["--group"],
-    autoMode: a.switches.contains("--no-auto") ? false : nil)
+    autoMode: a.switches.contains("--no-auto") ? false : nil, host: host)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":

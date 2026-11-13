@@ -1,23 +1,12 @@
 import Foundation
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardService
 
 private func write(_ text: String, to path: String) throws {
   try Data(text.utf8).write(to: URL(fileURLWithPath: path))
-}
-
-private final class CurrentShell: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value: RemoteShell
-
-  init(_ shell: RemoteShell) { value = shell }
-
-  var shell: RemoteShell {
-    get { lock.withLock { value } }
-    set { lock.withLock { value = newValue } }
-  }
 }
 
 @Suite struct SSHMachineTests {
@@ -280,12 +269,13 @@ private final class CurrentShell: @unchecked Sendable {
     let first = try TestShell.start("/bin/sh")
     let second = try TestShell.start("/bin/sh")
     defer { second.shell.close() }
-    let current = CurrentShell(first.shell)
-    let machine = SSHMachine(shell: { current.shell })
+    let current = OSAllocatedUnfairLock(initialState: first.shell)
+    let machine = SSHMachine(shell: { current.withLock { $0 } })
     #expect(try machine.run("/bin/echo", ["one"]).stdout == "one\n")
 
     first.shell.close()
-    current.shell = second.shell
+    let next = second.shell
+    current.withLock { $0 = next }
 
     #expect(try machine.run("/bin/echo", ["two"]).stdout == "two\n")
   }

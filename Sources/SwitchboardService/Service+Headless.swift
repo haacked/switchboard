@@ -1,5 +1,6 @@
 import Foundation
 import SwitchboardCore
+import os
 
 /// One-shot `claude -p` turns that sbd runs for itself, such as the triage
 /// summary and the plan update.
@@ -38,9 +39,9 @@ extension Service {
     p.standardOutput = stdout
     p.standardError = FileHandle.nullDevice
     try p.run()
-    let timedOut = Flag()
+    let timedOut = OSAllocatedUnfairLock(initialState: false)
     let limit = DispatchWorkItem {
-      timedOut.set()
+      timedOut.withLock { $0 = true }
       p.terminate()
     }
     DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: limit)
@@ -49,7 +50,7 @@ extension Service {
     let output = stdout.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
     limit.cancel()
-    if timedOut.isSet { throw APIError("timed out after \(Int(timeout)) s") }
+    if timedOut.withLock({ $0 }) { throw APIError("timed out after \(Int(timeout)) s") }
     guard p.terminationStatus == 0 else {
       throw APIError(
         "claude exited with status \(p.terminationStatus): \(oneLine(String(decoding: output, as: UTF8.self), max: 200))"
@@ -57,11 +58,4 @@ extension Service {
     }
     return String(decoding: output, as: UTF8.self)
   }
-}
-
-private final class Flag: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value = false
-  var isSet: Bool { lock.withLock { value } }
-  func set() { lock.withLock { value = true } }
 }

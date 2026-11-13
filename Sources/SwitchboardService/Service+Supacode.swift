@@ -11,6 +11,17 @@ extension Service {
     JSON.parse(reason.trimmingCharacters(in: .whitespaces))?["owner"]?.string == "supacode"
   }
 
+  /// Throws unless Supacode can delete the worktree at `path`: the site is this Mac, where Supacode runs, and
+  /// sbd can find supacode.
+  func requireSupacode(for path: String, at site: any SessionSite) throws {
+    if let host = site.hostName {
+      throw APIError(
+        "Supacode locked \(path) on \(host), and Supacode runs on this Mac, so sbd can't delete it. Unlock it with `git worktree unlock` on \(host) first."
+      )
+    }
+    _ = try supacodeExecutable()
+  }
+
   /// The supacode program, or throws when sbd can't find it.
   func supacodeExecutable() throws -> String {
     guard let path = findExecutable(config.supacode) else {
@@ -26,16 +37,17 @@ extension Service {
   /// worktree's branch when its `deleteBranchOnDeleteWorktree` setting is on.
   /// sbd's checks decide whether the branch goes, so a branch that Supacode
   /// deleted comes back at the tip and with the config that it had.
-  func removeWorktree(_ repo: String, _ path: String, on machine: any Machine) throws {
-    guard let entry = try worktreeEntry(repo, at: path, on: machine), entry.lockedBySupacode else {
-      _ = try gitOutput(repo, ["worktree", "remove", path], on: machine)
+  func removeWorktree(_ repo: String, _ path: String, at site: any SessionSite) throws {
+    guard let entry = try worktreeEntry(repo, holding: path, at: site), entry.lockedBySupacode else {
+      _ = try gitOutput(repo, ["worktree", "remove", path], at: site)
       return
     }
+    try requireSupacode(for: entry.path, at: site)
     let kept: (name: String, tip: String, config: [(String, String)])? = try {
       guard let name = entry.branch, let tip = entry.head else { return nil }
-      return (name, tip, try branchConfig(repo, name, on: machine))
+      return (name, tip, try branchConfig(repo, name, at: site))
     }()
-    // Supacode runs on this Mac, not on `machine`.
+    // Supacode runs on this Mac, not at `site`.
     let result = try runCommand(
       try supacodeExecutable(), ["worktree", "delete", "--worktree", Self.supacodeID(entry.path), "--background"],
       timeout: 200)
@@ -44,22 +56,22 @@ extension Service {
       throw APIError(
         "supacode couldn't delete the worktree \(entry.path): \(output.isEmpty ? "exit \(result.status)" : output)")
     }
-    guard try worktreeEntry(repo, at: path, on: machine) == nil else {
+    guard try worktreeEntry(repo, holding: path, at: site) == nil else {
       throw APIError("supacode reported that it deleted \(entry.path), but git still lists the worktree.")
     }
-    if let kept, !branchExists(repo, kept.name, on: machine) {
+    if let kept, !branchExists(repo, kept.name, at: site) {
       // The empty old value makes git refuse when the ref exists.
-      _ = try gitOutput(repo, ["update-ref", "refs/heads/\(kept.name)", kept.tip, ""], on: machine)
+      _ = try gitOutput(repo, ["update-ref", "refs/heads/\(kept.name)", kept.tip, ""], at: site)
       for (key, value) in kept.config {
-        _ = try? gitOutput(repo, ["config", "--local", "--add", key, value], on: machine)
+        _ = try? gitOutput(repo, ["config", "--local", "--add", key, value], at: site)
       }
     }
   }
 
   /// The repo's own config entries for the branch, in the order git lists them.
-  private func branchConfig(_ repo: String, _ branch: String, on machine: any Machine) throws -> [(String, String)] {
+  private func branchConfig(_ repo: String, _ branch: String, at site: any SessionSite) throws -> [(String, String)] {
     let prefix = "branch.\(branch)."
-    return try gitOutput(repo, ["config", "--local", "-z", "--list"], on: machine).split(separator: "\0").compactMap {
+    return try gitOutput(repo, ["config", "--local", "-z", "--list"], at: site).split(separator: "\0").compactMap {
       entry in
       let parts = entry.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
       guard let key = parts.first, key.hasPrefix(prefix) else { return nil }
@@ -79,22 +91,24 @@ extension Service {
   /// squash merge leaves the tip outside origin/main. Throws when the
   /// worktree doesn't have the session's branch checked out, and when `pr`
   /// merged but is not the branch's own PR.
-  func supacodeBranch(_ session: Session, pr: PullRequest?) throws -> (name: String, tip: String)? {
-    let branch = try checkedOutBranch(session)
+  func supacodeBranch(
+    _ session: Session, pr: PullRequest?, at site: any SessionSite
+  ) throws -> (name: String, tip: String)? {
+    let branch = try checkedOutBranch(session, at: site)
     // A PR that the transcript linked from another checkout can be merged
     // while the session's own branch has none.
     if pr?.state == .merged { _ = try requireMergedPR(pr, of: branch.name) }
-    return isInMain(session.cwd, branch.tip, on: machine(for: session)) ? branch : nil
+    return isInMain(session.cwd, branch.tip, at: site) ? branch : nil
   }
 
   /// Deletes the checked branch once the worktree is gone, by the rule that
   /// checked it: `deleteBranchInMain` when `supacodeBranch` checked it, and
   /// otherwise `deleteMergedBranch`. Returns false when the branch stays.
   func deleteBranch(
-    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, inMain: Bool, on machine: any Machine
+    _ repo: String, _ branch: (name: String, tip: String), pr: PullRequest?, inMain: Bool, at site: any SessionSite
   ) throws -> Bool {
-    if inMain { return try deleteBranchInMain(repo, branch, on: machine) }
-    try deleteMergedBranch(repo, branch, pr: pr, on: machine)
+    if inMain { return try deleteBranchInMain(repo, branch, at: site) }
+    try deleteMergedBranch(repo, branch, pr: pr, at: site)
     return true
   }
 
@@ -102,12 +116,12 @@ extension Service {
   /// gone, when origin/main still contains its tip and no worktree has it
   /// checked out. Returns false when the branch stays.
   func deleteBranchInMain(
-    _ repo: String, _ branch: (name: String, tip: String), on machine: any Machine
+    _ repo: String, _ branch: (name: String, tip: String), at site: any SessionSite
   ) throws -> Bool {
-    guard branchExists(repo, branch.name, on: machine) else { throw APIError("\(branch.name) no longer exists.") }
-    guard isInMain(repo, branch.tip, on: machine) else { return false }
-    try requireNotCheckedOut(repo, branch.name, on: machine)
-    try deleteBranchRef(repo, branch, on: machine)
+    guard branchExists(repo, branch.name, at: site) else { throw APIError("\(branch.name) no longer exists.") }
+    guard isInMain(repo, branch.tip, at: site) else { return false }
+    try requireNotCheckedOut(repo, branch.name, at: site)
+    try deleteBranchRef(repo, branch, at: site)
     return true
   }
 }
