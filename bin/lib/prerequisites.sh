@@ -15,10 +15,9 @@ switchboard_setting() {
 check_prerequisites() {
   # bin/update runs the check, then runs bin/install, which would run it again.
   [ -z "${SB_PREREQUISITES_CHECKED:-}" ] || return 0
-  # sbd runs under launchd, whose PATH holds only the system folders. sbd's
-  # findExecutable also searches the folders before them. A tool that only this
-  # shell's PATH has does not pass, because sbd can't find it. SB_TOOL_FOLDERS
-  # lets a test replace the added folders.
+  # The check searches only where sbd searches: launchd's PATH, which holds
+  # only the system folders, plus the folders that findExecutable adds.
+  # SB_TOOL_FOLDERS lets a test replace the added folders.
   local PATH="${SB_TOOL_FOLDERS:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin}:/usr/bin:/bin:/usr/sbin:/sbin"
   local missing=() tmux gh claude
   tmux=$(switchboard_setting tmux tmux)
