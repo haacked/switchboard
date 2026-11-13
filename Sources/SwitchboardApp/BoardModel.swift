@@ -163,7 +163,7 @@ final class BoardModel: ObservableObject {
   /// What the user typed in each message field and has not sent.
   private let messageDrafts: MessageDrafts
 
-  let client: Client
+  private let client: Client
   /// Sends one request to sbd. Tests replace it.
   lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
     try client.call(op, args, timeout: 300)
@@ -894,6 +894,14 @@ final class BoardModel: ObservableObject {
 
   nonisolated static let recentEventCount = 10
 
+  /// Reads the session's events of `kind` among the newest that sbd returns by default, off the main thread.
+  func loadEvents(_ session: String, kind: String) async -> [Event] {
+    let client = client
+    return await Task.detached {
+      ((try? client.call("events", ["session": .string(session)], as: [Event].self)) ?? []).filter { $0.kind == kind }
+    }.value
+  }
+
   /// Reads the chat's messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ group: String) {
     let client = client
@@ -1106,11 +1114,11 @@ final class BoardModel: ObservableObject {
   /// The Claude sessions that the import sheet offers. It blocks, so it runs
   /// off the main thread.
   nonisolated func importable(all: Bool, repo: String?) -> Result<ImportList, Error> {
-    Result { try Client().importable(all: all, repo: repo) }
+    Result { try client.importable(all: all, repo: repo) }
   }
 
   nonisolated func importSessions(_ refs: [String], stop: [String]) -> Result<ImportResult, Error> {
-    Result { try Client().importSessions(refs, stop: stop) }
+    Result { try client.importSessions(refs, stop: stop) }
   }
 
   /// Clears the selected session and shows the Inbox or the Board.

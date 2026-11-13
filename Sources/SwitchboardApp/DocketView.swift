@@ -86,11 +86,6 @@ struct DocketView: View {
   }
 
   private func loadLog() async {
-    let client = model.client
-    let id = session.id
-    let events = await Task.detached {
-      (try? client.call("events", ["session": .string(id)], as: [Event].self)) ?? []
-    }.value
-    log = events.filter { $0.kind == "docket" }
+    log = await model.loadEvents(session.id, kind: "docket")
   }
 }
