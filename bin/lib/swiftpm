@@ -3,5 +3,25 @@
 # The scripts in bin/ run every compiling swift build and swift test through
 # it. `swift test list` and `--show-bin-path` compile nothing and call swift
 # directly.
+#
+# It waits for a machine-wide build slot (bin/lib/build-slot) unless its
+# caller already holds one. It passes --jobs so that one build leaves cores for
+# the other builds that hold a slot. SB_BUILD_JOBS sets the count. The default
+# is 4, or the CPU count when that is lower. SB_BUILD_JOBS=0 passes no
+# --jobs, and SwiftPM then starts one job per core.
 set -euo pipefail
-exec swift "$@"
+[ $# -ge 1 ] || { echo "usage: bin/lib/swiftpm build|test [arguments…]" >&2; exit 2; }
+"${0%/*}/build-slot" --check || exec "${0%/*}/build-slot" -- "$0" "$@"
+jobs=${SB_BUILD_JOBS:-}
+if [ -z "$jobs" ]; then
+  cpus=$(sysctl -n hw.activecpu)
+  jobs=$((cpus < 4 ? cpus : 4))
+fi
+if ! [[ $jobs =~ ^[0-9]+$ ]]; then
+  echo "bin/lib/swiftpm: SB_BUILD_JOBS must be a whole number, not '$jobs'" >&2
+  exit 2
+fi
+sub=$1
+shift
+if [ "$jobs" -eq 0 ]; then exec swift "$sub" "$@"; fi
+exec swift "$sub" --jobs "$jobs" "$@"

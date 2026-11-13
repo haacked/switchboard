@@ -4,9 +4,12 @@
 # some of your Claude quota. With --shards N, it splits the integration tests
 # across N swift test processes and runs the other tests in one more, all at
 # once, then runs MeasureTests alone. bin/lib/swift-testing.sh sets the flags
-# that swift needs to find Swift Testing.
+# that swift needs to find Swift Testing. The whole run, shards included,
+# holds one machine-wide build slot (bin/lib/build-slot). Each swift test caps
+# its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
 source bin/lib/swift-testing.sh
 require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such

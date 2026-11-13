@@ -63,7 +63,12 @@ fi
 
 source bin/lib/swift-testing.sh
 echo "Building…"
-build_output=$(bin/lib/swiftpm build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
+# Only the build holds a build slot. The slot is taken outside the log
+# redirect, so the slot's waiting lines still reach the terminal.
+build_log=.build/gui-test/build.log
+mkdir -p "${build_log%/*}"
+bin/lib/build-slot bash -c 'exec bin/lib/swiftpm build "$@" >"$0" 2>&1' "$build_log" ${args[@]+"${args[@]}"} ||
+  { cat "$build_log" >&2; exit 1; }
 bin_dir=$(swift build --show-bin-path)
 
 # The folder is under /tmp, because a Unix socket path can't exceed 103 bytes.
