@@ -107,12 +107,9 @@ import Testing
 
   @Test func aSessionInAWorktreeOfABareRepoGetsNoMemoryFolder() throws {
     let sbd = try instance()
-    let bare = "\(sbd.home.path)/bare.git"
-    try sbd.git(sbd.home.path, "init", "-q", "--bare", bare)
-    let seed = try sbd.makeRepo("seed")
-    try sbd.git(seed, "push", "-q", bare, "main")
-    let tree = "\(sbd.home.path)/trees/bare/main"
-    try sbd.git(bare, "worktree", "add", "-q", tree, "main")
+    _ = try sbd.repoWithOrigin()
+    let tree = "\(sbd.home.path)/trees/origin/main"
+    try sbd.git("\(sbd.home.path)/origin.git", "worktree", "add", "-q", tree, "main")
 
     let s = try start(sbd, in: tree)
 

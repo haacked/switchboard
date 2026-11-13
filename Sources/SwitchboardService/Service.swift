@@ -112,9 +112,10 @@ public final class Service {
   var checkouts: [SitePath: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<SitePath> = []
-  /// The main checkout that names the auto-memory folder of each local session folder in a git repo. A folder
-  /// stays in its repo, so sbd keeps the answer. A folder outside git can become a repo, so sbd doesn't keep it.
-  var memoryCheckouts: [String: String] = [:]
+  /// The main checkout that names the auto-memory folder of each local session folder in a git repo, or nil
+  /// for a folder in a bare repo. A folder stays in its repo, so sbd keeps the answer. A folder outside git can
+  /// become a repo, so sbd doesn't keep it.
+  var memoryCheckouts: [String: String?] = [:]
   /// The owner/name that the origin remote of each checkout names on GitHub,
   /// or nil when it names none, with the time of the lookup. sbd reads a
   /// checkout without one again after `checkoutRetryMs`.
@@ -2118,14 +2119,17 @@ public final class Service {
   /// nil when git can't name the main checkout of a repository, such as a bare one. `newSession` and
   /// `rememberRepo` cache the main checkout before the first launch. This runs git on the state queue at the
   /// first launch in a folder that neither cached, such as one from before sbd restarted, and at each launch
-  /// in a folder outside git or in a worktree of a bare repository.
+  /// in a folder outside git.
   private func memoryBase(_ s: Session) -> String? {
     if let known = memoryCheckouts[s.cwd] { return known }
     if let main = try? mainCheckout(of: s.cwd) {
       memoryCheckouts[s.cwd] = main
       return main
     }
-    if (try? gitOutput(s.cwd, ["rev-parse", "--git-dir"], at: mac)) != nil { return nil }
+    if (try? gitOutput(s.cwd, ["rev-parse", "--git-dir"], at: mac)) != nil {
+      memoryCheckouts[s.cwd] = .some(nil)
+      return nil
+    }
     return (try? mac.realPath(s.cwd)) ?? s.cwd
   }
 
