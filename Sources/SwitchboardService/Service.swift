@@ -112,6 +112,9 @@ public final class Service {
   var checkouts: [SitePath: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<SitePath> = []
+  /// The main checkout that names the auto-memory folder of each local session folder in a git repo. A folder
+  /// stays in its repo, so sbd keeps the answer. A folder outside git can become a repo, so sbd doesn't keep it.
+  var memoryCheckouts: [String: String] = [:]
   /// The owner/name that the origin remote of each checkout names on GitHub,
   /// or nil when it names none, with the time of the lookup. sbd reads a
   /// checkout without one again after `checkoutRetryMs`.
@@ -174,6 +177,9 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
+  /// True once a SessionStart showed that claude names its project folders in a way `ClaudeFolder.name` doesn't
+  /// reproduce. Launches then leave out `autoMemoryDirectory` until sbd restarts.
+  var memoryPinOff = false
   /// The most claude processes that may run at once. `sb live --set` changes it.
   var liveCap: Int
   var quota: any QuotaBudget = UnlimitedBudget()
@@ -609,6 +615,7 @@ public final class Service {
       // the next resume has to open.
       let current = payload["session_id"]?.string ?? session.claudeSessionId
       if current != session.claudeSessionId { try update(id) { $0.claudeSessionId = current } }
+      checkFolderRule(session, payload)
       // claude reads a launch's prompt after SessionStart, and a slow start
       // can outlast the in-flight window. The window starts again here.
       if entries[id]?.inFlight != nil { entries[id]?.inFlight = event.t }
@@ -2093,21 +2100,54 @@ public final class Service {
   /// file in place. Its hooks keep working until that claude's next launch.
   private func writeClaudeSettings(_ id: String) throws {
     try FileManager.default.createDirectory(atPath: home.sessionFolder(id), withIntermediateDirectories: true)
-    let text = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
-    try text.write(toFile: home.claudeSettings(id), atomically: true, encoding: .utf8)
+    var settings = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
+    if !memoryPinOff, let base = memoryBase(entries[id]!.session) {
+      settings["autoMemoryDirectory"] = .string(ClaudeFolder.memoryDirectory(base))
+    }
+    try JSON.object(settings).text.write(toFile: home.claudeSettings(id), atomically: true, encoding: .utf8)
   }
 
-  /// The text of a settings file that runs `command` for every hook that sbd
+  /// The folder that claude names a local session's auto-memory folder after: the main checkout of the git
+  /// repository that holds the session's folder, or the folder's real path when no repository holds it. It is
+  /// nil when git can't name the main checkout of a repository, such as a bare one. It runs git on the state
+  /// queue at the first launch in a folder of a repo, and at each launch in a folder outside git.
+  private func memoryBase(_ s: Session) -> String? {
+    if let known = memoryCheckouts[s.cwd] { return known }
+    if let main = try? mainCheckout(of: s.cwd) {
+      memoryCheckouts[s.cwd] = main
+      return main
+    }
+    if (try? gitOutput(s.cwd, ["rev-parse", "--git-dir"], at: mac)) != nil { return nil }
+    return (try? mac.realPath(s.cwd)) ?? s.cwd
+  }
+
+  /// Turns memory pinning off when claude started a conversation of a local session in a folder that
+  /// `ClaudeFolder.name` doesn't give for its cwd. A resumed conversation keeps the folder it started in,
+  /// so only a new one shows how claude names folders. It checks how claude names a folder, not which
+  /// folder claude names the memory folder after.
+  private func checkFolderRule(_ session: Session, _ payload: JSON) {
+    guard !memoryPinOff, session.host == nil, ["startup", "clear"].contains(payload["source"]?.string),
+      let transcript = payload["transcript_path"]?.string
+    else { return }
+    let cwd = payload["cwd"]?.string ?? session.cwd
+    guard !ClaudeFolder.holds(transcript, startedIn: cwd, realPath: try? mac.realPath(cwd)) else { return }
+    memoryPinOff = true
+    logLine(
+      "stops pinning auto-memory: claude put a conversation that started in \(cwd) in \(transcript), not in \(ClaudeFolder.name(cwd))"
+    )
+  }
+
+  /// The settings that run `command` for every hook that sbd
   /// reads. Every hook runs `sb hook`, which forwards the payload to sbd. It
   /// exits 0 with no output when sbd is down, so the session shows no hook errors.
-  static func hookSettings(command: String) -> String {
+  static func hookSettings(command: String) -> [String: JSON] {
     var hooks: [String: JSON] = [:]
     for event in SessionFacts.hookKinds {
       let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
       let handler: JSON = ["type": "command", "command": .string(command), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]
     }
-    return JSON.object(["hooks": .object(hooks)]).text
+    return ["hooks": .object(hooks)]
   }
 }
 

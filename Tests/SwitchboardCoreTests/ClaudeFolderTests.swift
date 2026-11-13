@@ -36,6 +36,18 @@ struct ClaudeFolderTests {
         + "-tdf4r9")
   }
 
+  @Test func namesTheMemoryFolderUnderTheDefaultAccountWithATilde() {
+    #expect(ClaudeFolder.memoryDirectory("/Users/me/dev/my.app") == "~/.claude/projects/-Users-me-dev-my-app/memory")
+  }
+
+  @Test func holdsATranscriptInTheFolderNamedAfterTheCwdOrItsRealPath() {
+    let transcript = "/Users/me/.claude-max/projects/-private-tmp-work/abc.jsonl"
+    #expect(ClaudeFolder.holds(transcript, startedIn: "/private/tmp/work", realPath: nil))
+    #expect(ClaudeFolder.holds(transcript, startedIn: "/tmp/work", realPath: "/private/tmp/work"))
+    #expect(!ClaudeFolder.holds(transcript, startedIn: "/tmp/work", realPath: "/tmp/work"))
+    #expect(!ClaudeFolder.holds(transcript, startedIn: "/private/tmp/work/sub", realPath: nil))
+  }
+
   @Test func findLooksInTheFolderNamedAfterALongOrNonASCIICwdWithoutListingFolders() throws {
     let dir = try tempFolder()
     defer { try? FileManager.default.removeItem(atPath: dir) }

@@ -242,6 +242,17 @@ public enum ClaudeFolder {
     return "\(name)-\(String(javaHash(units).magnitude, radix: 36))"
   }
 
+  /// The auto-memory folder of the repository or folder at `base`. It keeps `~/` for claude to expand on the
+  /// machine where it runs.
+  public static func memoryDirectory(_ base: String) -> String { "~/.claude/projects/\(name(base))/memory" }
+
+  /// Whether `transcript` sits in the folder that `name` gives for `cwd` or for its real path. claude
+  /// names the folder of a conversation that it starts after the cwd it starts in.
+  public static func holds(_ transcript: String, startedIn cwd: String, realPath: String?) -> Bool {
+    let folder = ((transcript as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    return [cwd, realPath].compactMap { $0 }.contains { name($0) == folder }
+  }
+
   private static func isLetterOrDigit(_ unit: UInt16) -> Bool {
     (0x30...0x39).contains(unit) || (0x41...0x5A).contains(unit) || (0x61...0x7A).contains(unit)
   }
