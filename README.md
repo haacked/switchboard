@@ -22,7 +22,7 @@ bin/install
 bin/start
 ```
 
-`bin/install` first checks for `tmux` and `gh` and lists the command that installs each one it can't find. It warns when `claude` isn't on PATH or `gh` isn't signed in. Then it builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
+`bin/install` first checks for `tmux` and `gh` and lists the command that installs each one it can't find. It looks only in the folders where `sbd` looks: the system folders, `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. For a tool elsewhere, set its full path in `config.json`. It warns when it can't find `claude` or `gh` isn't signed in. Then it builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
 
 `bin/start` opens the installed app. `bin/update` quits the app, fast-forwards this checkout to `origin/main`, runs `bin/install`, and opens the app again. It refuses, with the app still running, when the checkout is not on main, has uncommitted changes, or cannot fast-forward. Quitting the app leaves `sbd` and your sessions running.
 

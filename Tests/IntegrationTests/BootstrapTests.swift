@@ -9,8 +9,11 @@ private class StubMachine {
   var home: String { "\(root)/home" }
   var stubs: String { "\(root)/stubs" }
   var fallback: String { "\(root)/fallback" }
-  /// SB_TOOL_FOLDERS keeps check_prerequisites from finding the real tools in Homebrew's folders.
-  var env: [String: String] { ["HOME": home, "PATH": "\(stubs):/usr/bin:/bin", "SB_TOOL_FOLDERS": fallback] }
+  /// check_prerequisites searches SB_TOOL_FOLDERS instead of PATH, so the stubs go there too. SB_TOOL_FOLDERS also
+  /// keeps the check from finding the real tools in Homebrew's folders.
+  var env: [String: String] {
+    ["HOME": home, "PATH": "\(stubs):/usr/bin:/bin", "SB_TOOL_FOLDERS": "\(stubs):\(fallback)"]
+  }
 
   init(tools: [String]) throws {
     repos = try Repos()
@@ -124,6 +127,17 @@ private final class NewMachine: StubMachine {
     #expect(machine.calls.isEmpty)
   }
 
+  @Test func aGitRepoWithoutBinInstallIsRefused() throws {
+    let machine = try NewMachine()
+    try Repos.create(machine.checkout)
+
+    let r = try machine.bootstrap()
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("isn't a Switchboard checkout"), "\(r.stderr)")
+    #expect(machine.calls.isEmpty)
+  }
+
   @Test func missingCommandLineToolsAreRefusedBeforeCloning() throws {
     let machine = try NewMachine()
     try machine.stub("xcode-select", "exit 2")
@@ -173,9 +187,11 @@ private final class NewMachine: StubMachine {
   static let tools = ["tmux", "gh", "claude"]
   static var helper: String { Instance.root.appendingPathComponent("bin/lib/prerequisites.sh").path }
 
-  private func check(_ machine: StubMachine, _ body: String = "check_prerequisites") throws -> CommandResult {
+  private func check(
+    _ machine: StubMachine, _ body: String = "check_prerequisites", env: [String: String]? = nil
+  ) throws -> CommandResult {
     let script = "set -euo pipefail\nsource \(shellQuote(Self.helper))\n\(body)"
-    return try runCommand("/bin/bash", ["-c", script], env: machine.env, timeout: 30)
+    return try runCommand("/bin/bash", ["-c", script], env: env ?? machine.env, timeout: 30)
   }
 
   private func writeConfig(_ machine: StubMachine, _ json: String) throws {
@@ -220,6 +236,21 @@ private final class NewMachine: StubMachine {
     #expect(r.stderr == "")
   }
 
+  /// sbd runs under launchd, whose PATH lacks the folders that this shell's PATH adds.
+  @Test func aToolOnlyOnThisShellsPathIsRefused() throws {
+    let machine = try StubMachine(tools: ["gh", "claude"])
+    let elsewhere = "\(machine.root)/elsewhere"
+    try writeScript("\(elsewhere)/tmux", "exit 0")
+    var env = machine.env
+    env["PATH"] = "\(elsewhere):\(env["PATH"] ?? "")"
+
+    let r = try check(machine, env: env)
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("brew install tmux"), "\(r.stderr)")
+    #expect(r.stderr.contains("config.json"), "\(r.stderr)")
+  }
+
   /// sbd runs the tools that config.json names, so a tool there passes even when PATH doesn't have it.
   @Test func theToolsThatConfigJsonNamesPass() throws {
     let machine = try StubMachine(tools: [])
@@ -257,16 +288,18 @@ private final class NewMachine: StubMachine {
     #expect(calls == "gh\n")
   }
 
-  /// The swift stub fails loudly, so bin/install fails with the wrong message if it skips the check. Without the
-  /// check, bin/update refuses for another reason, such as the branch.
+  /// The swift stub fails loudly, so bin/install fails with the wrong message if it skips the check. The osascript
+  /// stub records each call, so bin/update fails the test if it asks about or quits the app before the check.
   @Test(arguments: ["bin/install", "bin/update"]) func aScriptChecksBeforeItBuildsOrQuitsTheApp(script: String) throws {
     let machine = try StubMachine(tools: ["gh", "claude"])
     try machine.stub("swift", "echo 'swift ran' >&2; exit 99")
+    try machine.stub("osascript", "echo osascript >>\"$HOME/osascript-calls\"; echo false")
 
     let r = try runCommand(Instance.root.appendingPathComponent(script).path, [], env: machine.env, timeout: 30)
 
     #expect(r.status == 1)
     #expect(r.stderr.contains("brew install tmux"), "\(r.stderr)")
     #expect(!r.stderr.contains("swift ran"), "\(r.stderr)")
+    #expect(!FileManager.default.fileExists(atPath: "\(machine.home)/osascript-calls"))
   }
 }

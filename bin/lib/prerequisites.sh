@@ -15,16 +15,17 @@ switchboard_setting() {
 check_prerequisites() {
   # bin/update runs the check, then runs bin/install, which would run it again.
   [ -z "${SB_PREREQUISITES_CHECKED:-}" ] || return 0
-  # sbd's findExecutable also searches these folders, so a tool there works
-  # even when this shell's PATH lacks them, as on a new Mac before Homebrew's
-  # shellenv runs. SB_TOOL_FOLDERS lets a test replace them.
-  local PATH="$PATH:${SB_TOOL_FOLDERS:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin}"
+  # sbd runs under launchd, whose PATH holds only the system folders. sbd's
+  # findExecutable also searches the folders before them. A tool that only this
+  # shell's PATH has does not pass, because sbd can't find it. SB_TOOL_FOLDERS
+  # lets a test replace the added folders.
+  local PATH="${SB_TOOL_FOLDERS:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin}:/usr/bin:/bin:/usr/sbin:/sbin"
   local missing=() tmux gh claude
   tmux=$(switchboard_setting tmux tmux)
   gh=$(switchboard_setting github.gh gh)
   claude=$(switchboard_setting claude claude)
-  command -v "$tmux" >/dev/null || missing+=("$tmux: run brew install tmux")
-  command -v "$gh" >/dev/null || missing+=("$gh: run brew install gh")
+  command -v "$tmux" >/dev/null || missing+=("$tmux: run brew install tmux, or set \"tmux\" in config.json")
+  command -v "$gh" >/dev/null || missing+=("$gh: run brew install gh, or set \"github.gh\" in config.json")
   if [ ${#missing[@]} -gt 0 ]; then
     echo "Switchboard needs:" >&2
     printf '  %s\n' "${missing[@]}" >&2
