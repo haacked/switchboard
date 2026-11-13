@@ -443,7 +443,7 @@ public enum Triage {
 
   /// Whether the session waits on a prompt that only the user can answer:
   /// a card that blocks it, or a Claude Code dialog that is open without a card.
-  public static func blockingPrompt(cards: [Card], openPrompt: Bool) -> Bool {
+  public static func hasBlockingPrompt(cards: [Card], openPrompt: Bool) -> Bool {
     openPrompt || cards.contains { blocks($0.kind) }
   }
 
@@ -686,7 +686,7 @@ public enum Triage {
   public static func inInbox(_ s: SessionSummary) -> Bool {
     switch s.kind.inboxItems {
     case .all: true
-    case .blockingPrompts: s.triage != nil && blockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
+    case .blockingPrompts: s.triage != nil && hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
     }
   }
 

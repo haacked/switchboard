@@ -61,9 +61,7 @@ let inboxShapes: [InboxShape] = [
   InboxShape(
     name: "a send card and an exit at the trust dialog",
     events: {
-      [Event(id: 1, session: "s1", t: 0, kind: "send_pending", data: .object(sendPendingData()))] + trustLaunch() + [
-        trustClosed(5)
-      ]
+      [TriageConversations.earlySend] + trustLaunch() + [trustClosed(5)]
     },
     work: true, conversation: false),
   InboxShape(

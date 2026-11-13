@@ -165,7 +165,7 @@ import Testing
       as [[Card.Kind]],
     [false, true])
   func blockingPromptReadsCardKindsAndTheOpenPrompt(_ kinds: [Card.Kind], _ openPrompt: Bool) {
-    let blocks = Triage.blockingPrompt(cards: kinds.map(Self.card), openPrompt: openPrompt)
+    let blocks = Triage.hasBlockingPrompt(cards: kinds.map(Self.card), openPrompt: openPrompt)
 
     #expect(blocks == (openPrompt || kinds.contains { $0 != .send }))
   }
