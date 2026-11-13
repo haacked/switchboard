@@ -11,16 +11,17 @@ extension Service {
     let folder = (path.expandingTilde as NSString).standardizingPath
     guard folder.hasPrefix("/"), isDirectory(folder) else { throw APIError("no folder \(path)") }
     // The first worktree that git lists is the main checkout.
-    guard let main = (try? worktreeEntries(folder))?.first?.path else {
+    guard let main = (try? worktreeEntries(folder, at: mac))?.first?.path else {
       throw APIError("\(path) isn't in a git repository")
     }
     // A bare repository lists itself first and has no working tree.
-    if (try? gitOutput(main, ["rev-parse", "--is-bare-repository"])) == "true" {
+    if (try? gitOutput(main, ["rev-parse", "--is-bare-repository"], at: mac)) == "true" {
       throw APIError("\(path) is in a bare repository, which has no checkout to run in")
     }
     // A repository whose git folder is outside its checkout lists that git folder first.
-    guard let top = try? gitOutput(main, ["rev-parse", "--show-toplevel"]), samePath(top, main),
-      let real = realPath(main)
+    guard let top = try? gitOutput(main, ["rev-parse", "--show-toplevel"], at: mac),
+      (try? mac.samePath(top, main)) == true,
+      let real = try? mac.realPath(main)
     else { throw APIError("the main checkout of \(path) is gone: \(main)") }
     return real
   }
@@ -30,7 +31,7 @@ extension Service {
   /// resolves to a main checkout is left out.
   func knownRepos() throws -> [KnownRepo] {
     let candidates: [(folder: String, used: Int64?)] = try queue.sync {
-      let sessions = entries.values.map(\.session).filter { $0.kind == .work && !$0.cwd.isEmpty }
+      let sessions = entries.values.map(\.session).filter { $0.kind == .work && $0.host == nil && !$0.cwd.isEmpty }
       return sessions.map { (checkout($0) ?? $0.cwd, $0.created) }
         + (try store.knownRepos()).map { ($0.path, $0.used) }
         + config.repos.values.map { ($0, nil) }
@@ -66,6 +67,6 @@ extension Service {
   }
 
   private func repoName(_ path: String) -> String {
-    githubRepository(path) ?? (path as NSString).lastPathComponent
+    githubRepository(path, at: mac) ?? (path as NSString).lastPathComponent
   }
 }

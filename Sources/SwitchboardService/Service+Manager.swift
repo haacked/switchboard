@@ -191,7 +191,8 @@ extension Service {
       switch (claudeState(id), phase) {
       case (.running(let pid), .pending):
         // A stop would lose a background job's result or an open trust dialog.
-        guard canTakeNotice(e, now: now), !e.facts.exiting, backgroundJobs(pid) == 0, e.facts.trustCard == nil
+        guard canTakeNotice(e, now: now), !e.facts.exiting,
+          backgroundJobs(pid, in: processChildren(of: id)) == 0, e.facts.trustCard == nil
         else { continue }
         entries[id]?.mcpRelaunch = .stopping
         try? stop(id, reason: "its MCP servers changed")
@@ -224,7 +225,7 @@ extension Service {
 
   /// Makes the folder a git repo. It writes the guide to CLAUDE.md when the file differs.
   func writeGuide(_ guide: String, in folder: String) throws {
-    if !isDirectory("\(folder)/.git") { _ = try gitOutput(folder, ["init", "-q"]) }
+    if !isDirectory("\(folder)/.git") { _ = try gitOutput(folder, ["init", "-q"], at: mac) }
     let path = "\(folder)/CLAUDE.md"
     if (try? String(contentsOfFile: path, encoding: .utf8)) != guide {
       try guide.write(toFile: path, atomically: true, encoding: .utf8)

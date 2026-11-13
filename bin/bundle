@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Builds build/Switchboard.app in release mode. Contents/MacOS holds the app,
 # sbd, and sb, because the app and sb find their siblings there. The bundle is
-# signed ad hoc, which is enough to run it on this Mac.
+# signed ad hoc, which is enough to run it on this Mac. Info.plist records the
+# commit it built, which bin/install compares before it replaces an app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source bin/lib/install-guard.sh
+commit=$(git rev-parse HEAD)
+dirty=false
+if [ -n "$(git status --porcelain)" ]; then dirty=true; fi
 swift build -c release
 bin=$(swift build -c release --show-bin-path)
 version=$("$bin/sb" version | awk '{print $2}')
@@ -27,6 +32,8 @@ cat >"$app/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$version</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>$build_commit_key</key><string>$commit</string>
+  <key>$build_dirty_key</key><$dirty/>
 </dict>
 </plist>
 PLIST

@@ -24,6 +24,12 @@ public struct HostConfig: Codable, Equatable, Sendable {
   public var account: String?
   public var autoStart: Bool
   public var linkIdleSeconds: Int
+  /// The claude command on the host, as the top-level `claude` key names it on this Mac.
+  public var claude: String?
+  /// The tmux program on the host.
+  public var tmux: String?
+  /// The shell that the host's panes run.
+  public var shell: String?
 
   private static let regions = ["us-east-1", "eu-central-1"]
 
@@ -90,6 +96,9 @@ public struct HostConfig: Codable, Equatable, Sendable {
     let region = try string("region")
     let worktreeRoot = try string("worktreeRoot")
     let account = try string("account")
+    let claude = try string("claude")
+    let tmux = try string("tmux")
+    let shell = try string("shell")
     let liveCap = try int("liveCap")
     let linkIdleSeconds = try int("linkIdleSeconds")
     let autoStart = try bool("autoStart")
@@ -148,6 +157,9 @@ public struct HostConfig: Codable, Equatable, Sendable {
     if let liveCap, liveCap < 1 { throw APIError("its liveCap must be at least 1") }
     if let linkIdleSeconds, linkIdleSeconds < 1 { throw APIError("its linkIdleSeconds must be at least 1") }
     if account?.isEmpty == true { throw APIError("its account can't be empty") }
+    for (key, value) in [("claude", claude), ("tmux", tmux), ("shell", shell)] where value?.isEmpty == true {
+      throw APIError("its \(key) can't be empty")
+    }
 
     self.name = name
     self.kind = kind
@@ -161,6 +173,9 @@ public struct HostConfig: Codable, Equatable, Sendable {
     self.account = account
     self.autoStart = autoStart ?? true
     self.linkIdleSeconds = linkIdleSeconds ?? 1800
+    self.claude = claude
+    self.tmux = tmux
+    self.shell = shell
   }
 
   private static let lowercaseAndDigits = "abcdefghijklmnopqrstuvwxyz0123456789"

@@ -99,6 +99,8 @@ public struct Session: Codable, Equatable, Sendable {
   /// Set by `sb issue`. It replaces the issues that sbd finds in the PR body
   /// and the branch name.
   public var issue: IssueRef?
+  /// The name of the remote host that the session runs on, as config.json lists it. Nil means this Mac.
+  public var host: String?
   /// The MCP servers that a Manager conversation loads besides switchboard,
   /// by name. Nil launches claude with the full setup, as for every other
   /// session. An empty list loads only switchboard.
@@ -285,6 +287,10 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// shows. nil when no source names one, for every session that has no
   /// `board`, and for a follow-up that hasn't started.
   public var issues: [SessionIssue]?
+  /// The remote host that the session runs on, or nil for this Mac.
+  public var host: String?
+  /// The state of the host's link, or nil for a session on this Mac and for a host that has no link.
+  public var link: LinkState?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,
@@ -321,12 +327,15 @@ public struct Terminals: Codable, Equatable, Sendable {
   public var socket: String
   public var claude: String
   public var shell: String
+  /// The remote host that holds the tmux server and its socket. Nil means this Mac.
+  public var host: String?
 
-  public init(tmux: String, socket: String, claude: String, shell: String) {
+  public init(tmux: String, socket: String, claude: String, shell: String, host: String? = nil) {
     self.tmux = tmux
     self.socket = socket
     self.claude = claude
     self.shell = shell
+    self.host = host
   }
 
   /// The command that attaches a terminal to one of the two panes.

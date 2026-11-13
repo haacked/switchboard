@@ -13,7 +13,6 @@ struct NewSessionRequest: Identifiable {
 
 /// The new session sheet: a repository, a branch for a new worktree, and an optional first prompt.
 struct NewSessionView: View {
-  /// See SessionViewState for why this isn't `@State`.
   final class Form: ObservableObject {
     @Published private(set) var repo: KnownRepo?
     /// The user chose `repo`, so a newer list does not replace it.

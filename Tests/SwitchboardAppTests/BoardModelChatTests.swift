@@ -4,14 +4,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// The chat of group `group`, whose triage item is a decision.
-func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) -> SessionSummary {
-  var s = needsItem(id, state: state)
-  s.chat = group
-  s.kind = .chat
-  return s
-}
-
 @MainActor
 @Suite struct BoardModelChats {
   @Test func theSidebarLeavesOutAChatWhateverItsState() {

@@ -81,7 +81,7 @@ extension Service {
         }
         id = chat
       }
-      return (transcriptFinder(id), self.machine(of: id))
+      return (transcriptFinder(id), try site(of: id).machine)
     }
     let limit = args["limit"]?.int ?? 50
     let messages = findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? []

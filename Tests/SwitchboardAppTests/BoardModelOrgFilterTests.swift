@@ -5,38 +5,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// A work session in its own folder whose remotes sbd has read, or not read when `read` is nil.
-func orgSession(
-  _ id: String, _ repository: String?, read: Bool? = true, state: AttentionState = .working, group: String? = nil
-) -> SessionSummary {
-  var s = needsItem(id, state: state)
-  s.cwd = "/r/\(id)"
-  s.repo = "/r/\(id)"
-  s.repository = repository
-  s.repositoryRead = read
-  s.group = group
-  return s
-}
-
-/// A follow-up that has not started.
-func unstartedFollowup(_ id: String, _ repository: String?) -> SessionSummary {
-  var s = needsItem(id, state: .notStarted)
-  s.cwd = ""
-  s.followup = Followup(prompt: "p", repository: repository)
-  return s
-}
-
-/// A model like `offlineModel`, built with an org filter and an optional store for it.
-@MainActor
-func orgFilterModel(_ filter: OrgFilter = OrgFilter(), store: UserDefaults? = nil) -> BoardModel {
-  _ = NSApplication.shared
-  return BoardModel(
-    client: Client(home: Home(path: NSTemporaryDirectory() + "no-sbd-" + UUID().uuidString)), orgFilterStore: store,
-    orgFilter: filter)
-}
-
-let posthogOnly = OrgFilter(keys: ["posthog"])
-
 /// A filter and the ids of `BoardModelOrgFilterTests.list` and `.followups` that it shows.
 struct FilterShape: Sendable, CustomTestStringConvertible {
   var filter: OrgFilter

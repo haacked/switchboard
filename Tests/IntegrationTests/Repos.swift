@@ -27,7 +27,8 @@ final class Repos {
     let hold = "\(root)/checkout-hold"
     FileManager.default.createFile(atPath: hold, contents: nil)
     let hook = "\(repo)/.git/hooks/post-checkout"
-    try "#!/bin/sh\n: > '\(hold).held'\ni=0\nwhile [ -e '\(hold)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
+    try
+      "#!/bin/sh\n: > '\(hold).held'\ni=0\nwhile [ -e '\(hold)' ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done\n"
       .write(toFile: hook, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
     return hold
@@ -37,14 +38,31 @@ final class Repos {
   @discardableResult
   static func create(_ dir: String, origin: String? = nil) throws -> String {
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-    let commit = [
-      "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m",
-      "first",
-    ]
-    for args in [["init", "-q", "-b", "main"], commit] + (origin.map { [["remote", "add", "origin", $0]] } ?? []) {
-      let r = try runCommand("/usr/bin/git", ["-C", dir] + args)
-      guard r.status == 0 else { throw TestError(description: "git \(args): \(r.stderr)") }
-    }
+    try git(dir, "init", "-q", "-b", "main")
+    try commit(dir, "first")
+    if let origin { try git(dir, "remote", "add", "origin", origin) }
     return dir
+  }
+
+  /// Runs git in `dir` and returns its trimmed output. It throws when git fails.
+  @discardableResult
+  static func git(_ dir: String, _ args: String...) throws -> String {
+    try git(dir, args)
+  }
+
+  @discardableResult
+  static func git(_ dir: String, _ args: [String]) throws -> String {
+    let r = try runCommand("/usr/bin/git", ["-C", dir] + args)
+    guard r.status == 0 else { throw TestError(description: "git \(args.joined(separator: " ")) failed: \(r.stderr)") }
+    return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// Makes an empty commit in `dir` and returns its sha.
+  @discardableResult
+  static func commit(_ dir: String, _ message: String) throws -> String {
+    try git(
+      dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty",
+      "-m", message)
+    return try git(dir, "rev-parse", "HEAD")
   }
 }
