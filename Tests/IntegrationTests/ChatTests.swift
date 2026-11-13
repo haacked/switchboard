@@ -361,4 +361,18 @@ import Testing
 
     #expect(log.map(\.text) == ["second", "Done: second"])
   }
+
+  @Test(arguments: ChatName.allCases) func chatLogNamingTheChatSessionReadsWhatChatLogForTheGroupReads(
+    _ how: ChatName
+  ) throws {
+    let sbd = try Instance()
+    let flags = try addGroup(sbd, "Flags")
+    let c = try replied(sbd, "Flags", "hello")
+
+    let bySession = try sbd.client.call("chat-log", ["session": .string(name(c, how))], as: [ChatMessage].self)
+    let byGroup = try sbd.client.call("chat-log", ["group": .string(flags.id)], as: [ChatMessage].self)
+
+    #expect(bySession.map { "\($0.role): \($0.text)" } == ["user: hello", "assistant: Done: hello"])
+    #expect(bySession == byGroup)
+  }
 }

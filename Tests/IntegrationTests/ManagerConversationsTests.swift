@@ -215,15 +215,117 @@ import Testing
     #expect(try sbd.get(target.id).lastReply == "Done: hello")
   }
 
-  @Test func chatLogReadsAnySessionThatSessionNames() throws {
+  // MARK: chat-log with session
+
+  /// How a `chat-log` request names a session: its id, a unique prefix of its id, or its name.
+  enum SessionRef: CaseIterable { case id, idPrefix, name }
+
+  func ref(_ s: SessionSummary, _ how: SessionRef) -> String {
+    switch how {
+    case .id: s.id
+    case .idPrefix: String(s.id.prefix(s.id.count - 1))
+    case .name: s.name
+    }
+  }
+
+  func chatLog(_ sbd: Instance, _ args: [String: JSON]) throws -> [String] {
+    try JSONCoding.convert(sbd.client.call("chat-log", args), to: [ChatMessage].self).map { "\($0.role): \($0.text)" }
+  }
+
+  static let refusal = "is not a Manager conversation or a group chat"
+
+  @Test(arguments: SessionRef.allCases) func chatLogRefusesAWorkSessionAndNamesIt(_ how: SessionRef) throws {
     let sbd = try Instance()
-    let work = try sbd.new(prompt: "hello", name: "work")
+    _ = try newConversation(sbd, name: "Cache work")
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
     try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
 
-    let log = try JSONCoding.convert(
-      sbd.client.call("chat-log", ["session": .string(work.id)]), to: [ChatMessage].self)
+    let error = failure(sbd, "chat-log", ["session": .string(ref(work, how))])
 
-    #expect(log.map { "\($0.role): \($0.text)" } == ["user: hello", "assistant: Done: hello"])
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+    #expect(error.contains("Payroll keys"), Comment(rawValue: error))
+  }
+
+  @Test func chatLogWithManagerFalseRefusesAWorkSession() throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let error = failure(sbd, "chat-log", ["session": .string(work.id), "manager": false])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+  }
+
+  @Test(arguments: SessionRef.allCases) func chatLogForClaudesMessagesReadsAWorkSession(_ how: SessionRef) throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let log = try chatLog(sbd, ["session": .string(ref(work, how)), "role": "assistant"])
+
+    #expect(log == ["assistant: Done: hello"])
+  }
+
+  @Test func chatLogForTheUsersMessagesRefusesAWorkSession() throws {
+    let sbd = try Instance()
+    let work = try sbd.new(prompt: "hello", name: "Payroll keys")
+    try sbd.waitFor(work.id, "its reply") { $0.lastReply == "Done: hello" }
+
+    let error = failure(sbd, "chat-log", ["session": .string(work.id), "role": "user"])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+  }
+
+  @Test func chatLogRefusesAFollowupThatHasNotStarted() throws {
+    let sbd = try Instance()
+    let f = try add(sbd, ["prompt": "Fix the cache. It reads twice."])
+    try #require(f.kind == .work)
+
+    let error = failure(sbd, "chat-log", ["session": .string(f.id)])
+
+    #expect(error.contains(Self.refusal), Comment(rawValue: error))
+    #expect(error.contains(f.name), Comment(rawValue: error))
+  }
+
+  @Test(arguments: SessionRef.allCases) func chatLogReadsAManagerConversationLikeManagerLog(_ how: SessionRef) throws {
+    let sbd = try Instance()
+    let target = try idleConversation(sbd, name: "Cache work", "hello")
+    let other = try idleConversation(sbd, name: "Docs work", "other")
+    try #require(target.id != other.id)
+
+    let bySession = try chatLog(sbd, ["session": .string(ref(target, how))])
+    let byManager = try chatLog(sbd, ["manager": true, "session": .string(target.name)])
+
+    #expect(bySession == ["user: hello", "assistant: Done: hello"])
+    #expect(bySession == byManager)
+  }
+
+  @Test func chatLogWithManagerAndNoSessionReadsTheConversation() throws {
+    let sbd = try Instance()
+    _ = try idleConversation(sbd, "hello")
+
+    let log = try chatLog(sbd, ["manager": true])
+
+    #expect(log == ["user: hello", "assistant: Done: hello"])
+  }
+
+  @Test func chatLogNamingNoSessionFailsWithTheUnknownSessionError() throws {
+    let sbd = try Instance()
+    _ = try newConversation(sbd, name: "Cache work")
+
+    let error = failure(sbd, "chat-log", ["session": "nope"])
+
+    #expect(error.contains("no session nope"), Comment(rawValue: error))
+  }
+
+  @Test func chatLogNamingTwoSessionsFailsWithTheAmbiguousSessionError() throws {
+    let sbd = try Instance()
+    _ = try newConversation(sbd, name: "Cache work")
+    _ = try sbd.new(name: "Cache work")
+
+    let error = failure(sbd, "chat-log", ["session": "Cache work"])
+
+    #expect(error.contains("Cache work matches 2 sessions"), Comment(rawValue: error))
   }
 
   struct NameCase: Sendable, CustomTestStringConvertible {
@@ -656,6 +758,116 @@ import Testing
     #expect(serverNames(try scriptArgs(sbd, c.id)) == ["switchboard"])
     let missing = try sbd.events(c.id).last { $0.kind == "mcp-missing" }
     #expect(missing?.data["servers"] == ["notes"])
+  }
+
+  // MARK: The manager-mcp answer that the app reads
+
+  /// Sends `manager-mcp` with the arguments that the app's server menu sends, and decodes the answer as the app does.
+  func mcpAnswer(_ sbd: Instance, _ c: SessionSummary, _ change: [String: JSON] = [:]) throws -> ManagerMCPAnswer {
+    let args = change.merging(["session": .string(c.id)]) { $1 }
+    return try JSONCoding.convert(sbd.client.call("manager-mcp", args), to: ManagerMCPAnswer.self)
+  }
+
+  /// Sends a change that alters the server list and waits for the relaunch that applies it.
+  func changeAndRelaunch(_ sbd: Instance, _ c: SessionSummary, _ change: [String: JSON]) throws -> ManagerMCPAnswer {
+    let before = launches(sbd, c).count
+    let answer = try mcpAnswer(sbd, c, change)
+    try launch(sbd, c, after: before)
+    return answer
+  }
+
+  @Test func aNoChangeReadOfANewConversationDecodesWithAnEmptyList() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let answer = try mcpAnswer(sbd, c)
+
+    #expect(answer.session == c.id)
+    #expect(answer.servers == [])
+  }
+
+  @Test func aNoChangeReadListsTheSharedServersAndLeavesOutSwitchboard() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let answer = try mcpAnswer(sbd, c)
+
+    #expect(Set(answer.available).isSuperset(of: ["grafana", "posthog-db"]), "\(answer.available)")
+    #expect(!answer.available.contains("switchboard"), "\(answer.available)")
+  }
+
+  @Test func theAppsAllChangeDecodesTheFullSetupAsNil() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+
+    let changed = try changeAndRelaunch(sbd, c, ["all": true])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == nil)
+    #expect(read.servers == nil)
+  }
+
+  @Test func theAppsNoneChangeAfterTheFullSetupDecodesAnEmptyList() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+
+    let changed = try changeAndRelaunch(sbd, c, ["none": true])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == [])
+    #expect(read.servers == [])
+  }
+
+  @Test func theAppsAddChangeDecodesTheAddedServer() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+    _ = try changeAndRelaunch(sbd, c, ["none": true])
+
+    let changed = try changeAndRelaunch(sbd, c, ["add": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == ["grafana"])
+    #expect(read.servers == ["grafana"])
+    #expect(read.available.contains("grafana"), "\(read.available)")
+  }
+
+  @Test func theAppsRmChangeDecodesTheListWithoutThatServer() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["add": ["grafana", "posthog-db"]])
+
+    let changed = try changeAndRelaunch(sbd, c, ["rm": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.servers == ["posthog-db"])
+    #expect(read.servers == ["posthog-db"])
+  }
+
+  /// The menu shows the relaunch line while `pending` is true, so it must turn false once claude relaunched.
+  @Test func aChangeAnswersPendingAndAReadAfterTheRelaunchDoesNot() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    let idle = try mcpAnswer(sbd, c)
+    try #require(idle.pending == false)
+
+    let changed = try changeAndRelaunch(sbd, c, ["add": ["grafana"]])
+    let read = try mcpAnswer(sbd, c)
+
+    #expect(changed.pending == true)
+    #expect(read.pending == false)
+  }
+
+  @Test func theAppsAddIsRefusedOnTheFullSetupAndSaysToChooseNoneFirst() throws {
+    let sbd = try Instance(config: Self.sharedServers)
+    let c = try idleConversation(sbd)
+    _ = try changeAndRelaunch(sbd, c, ["all": true])
+
+    let error = failure(sbd, "manager-mcp", ["session": .string(c.id), "add": ["grafana"]])
+
+    #expect(error.contains("--none"), Comment(rawValue: error))
+    #expect(try mcpAnswer(sbd, c).servers == nil)
   }
 
   // MARK: The Manager from before conversations

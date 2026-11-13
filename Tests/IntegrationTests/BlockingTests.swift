@@ -1,21 +1,20 @@
 import Foundation
 import Testing
+import os
 
 /// These tests call the trait's scope directly, with slots of their own, so
 /// they never wait behind the integration tests.
 @Suite struct BlockingTests {
-  final class Running: @unchecked Sendable {
-    private let lock = NSLock()
-    private var now = 0
-    private var most = 0
-    var peak: Int { lock.withLock { most } }
+  final class Running: Sendable {
+    private let counts = OSAllocatedUnfairLock(initialState: (now: 0, most: 0))
+    var peak: Int { counts.withLock { $0.most } }
     func enter() {
-      lock.withLock {
-        now += 1
-        most = max(most, now)
+      counts.withLock {
+        $0.now += 1
+        $0.most = max($0.most, $0.now)
       }
     }
-    func leave() { lock.withLock { now -= 1 } }
+    func leave() { counts.withLock { $0.now -= 1 } }
   }
 
   struct Thrown: Error {}
