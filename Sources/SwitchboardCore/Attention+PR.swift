@@ -7,8 +7,8 @@ extension Attention {
   /// when the folder has uncommitted changes and no turn runs. An open wait
   /// or a wait's outcome comes first, because a session can wait on its
   /// merged PR's deploy.
-  static func finishedPR(_ session: Session, _ facts: SessionFacts) -> Verdict? {
-    guard let pr = facts.pr, pr.state != .open, waitVerdict(session, facts) == nil else { return nil }
+  static func finishedPR(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict? {
+    guard let pr = facts.pr, pr.state != .open, waitVerdict(session, facts, now: now) == nil else { return nil }
     let what = "#\(pr.number) \(pr.state == .merged ? "merged" : "closed")"
     if let cleanup = facts.cleanup, cleanup.state == .removed {
       let removed = cleanup.reason.map { "worktree removed, \($0)" } ?? "worktree and branch removed"

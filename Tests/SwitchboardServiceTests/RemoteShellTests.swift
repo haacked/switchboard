@@ -413,6 +413,20 @@ private let everyByte = Data((0...255).map { UInt8($0) })
     #expect(t.events.closes.isEmpty)
   }
 
+  /// A tmux client exits 0 when a signal ends it. Its answer must not read as a command that succeeded.
+  @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
+  func aProgramThatExitsZeroWhenItsTimeoutEndsItAnswersWithStatus143(program: String) throws {
+    let t = try TestShell.start(program)
+    defer { t.shell.close() }
+
+    let r = try t.run(["/bin/sh", "-c", "trap 'exit 0' TERM; /bin/sleep 30 & wait"], timeout: 0.3, deadline: 30)
+    let next = try t.run(["/bin/sh", "-c", "exit 0"], timeout: 20, deadline: 30)
+
+    #expect(r.status == 143)
+    #expect(next.status == 0, "the mark of one command's timeout reached the next command")
+    #expect(try t.text(["/bin/echo", "next"]) == "next\n")
+  }
+
   @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
   func aProgramThatIgnoresSIGTERMEndsWithStatus137(program: String) throws {
     let t = try TestShell.start(program)
@@ -488,6 +502,49 @@ private let everyByte = Data((0...255).map { UInt8($0) })
     for i in 0..<12 {
       #expect(lock.withLock { outputs[i] } == "thread-\(i)\n")
     }
+  }
+
+  /// A command whose deadline passes while an earlier command runs was never sent. It fails, and the shell stays
+  /// open for the earlier command's answer and for the commands after it.
+  @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
+  func aCommandWhoseDeadlinePassesWhileAnotherRunsFailsUnsentAndLeavesTheShellOpen(program: String) throws {
+    try withRemoteShellTempFolder { folder in
+      let t = try TestShell.start(program)
+      defer { t.shell.close() }
+      let started = "\(folder)/long-started"
+      let ran = "\(folder)/short-ran"
+      let lock = NSLock()
+      var long: Result<RemoteResult, any Error>?
+      let finished = DispatchSemaphore(value: 0)
+      Thread.detachNewThread {
+        let r = Result {
+          try t.run(["/bin/sh", "-c", #": >"$1"; sleep 3; echo long"#, "sb", started], timeout: 20, deadline: 30)
+        }
+        lock.withLock { long = r }
+        finished.signal()
+      }
+      try #require(waitUntil(seconds: 20) { FileManager.default.fileExists(atPath: started) })
+
+      #expect(throws: (any Error).self) { try t.run(["/usr/bin/touch", ran], timeout: 0.2, deadline: 0.5) }
+
+      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(try lock.withLock { long }?.get().stdout == Data("long\n".utf8))
+      #expect(t.events.closes.isEmpty, "\(t.events.closes)")
+      #expect(try t.text(["/bin/echo", "next"]) == "next\n")
+      #expect(!FileManager.default.fileExists(atPath: ran), "the command that missed its deadline ran")
+    }
+  }
+
+  /// A command whose deadline has passed when it gets the shell is not sent, so the shell stays open.
+  @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)
+  func aCommandWhoseDeadlineHasPassedWhenItGetsTheShellFailsUnsentAndLeavesTheShellOpen(program: String) throws {
+    let t = try TestShell.start(program)
+    defer { t.shell.close() }
+
+    #expect(throws: (any Error).self) { try t.run(["/bin/echo", "late"], deadline: 0) }
+
+    #expect(t.events.closes.isEmpty, "\(t.events.closes)")
+    #expect(try t.text(["/bin/echo", "next"]) == "next\n")
   }
 
   @Test(.timeLimit(.minutes(1)), arguments: remoteShellPrograms)

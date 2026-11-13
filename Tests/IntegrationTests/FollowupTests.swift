@@ -153,7 +153,7 @@ final class Outcome<T>: @unchecked Sendable {
     }
     let restarted = try sbd.restartServer(slow, behind: gate)
     try FileManager.default.removeItem(atPath: hold)
-    _ = try gate.open(sbd, after: started, sentAt: Date())
+    _ = try gate.open(sbd, after: started)
     try sbd.waitFor(f.id, "the call to slow") { $0.lastReply == "MCP slow: slow \(restarted.pid!)" }
     #expect(try sbd.events(f.id).first { $0.kind == "started" }?.data["mcp"] == ["slow"])
   }

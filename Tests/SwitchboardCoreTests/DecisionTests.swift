@@ -81,7 +81,8 @@ private func decisionTurn() -> [Event] {
 }
 
 private func shownVerdict(_ f: SessionFacts) -> Verdict {
-  Attention.shown(Attention.evaluate(session(), f, now: 1000), f)
+  Attention.shown(
+    Attention.evaluate(session(), f, now: 1000), f, now: 1000, acknowledgedMs: RecheckSettings().acknowledgedMs)
 }
 
 private func decisionsEnvelope(_ payload: JSON) -> String {
