@@ -396,11 +396,6 @@ final class FakeGitHub {
     lock.withLock { files[FakeGitHub.contentsPath(repo, path)]?.content }
   }
 
-  /// The blob SHA that GET returns for the file now.
-  func fileSHA(_ repo: String, _ path: String) -> String? {
-    lock.withLock { files[FakeGitHub.contentsPath(repo, path)].map { FakeGitHub.sha($0.revision) } }
-  }
-
   /// Runs `action` once, after the fake answers the next GET of `path` and
   /// before it answers any other request, as a concurrent edit on GitHub
   /// does. `path` has no leading slash and no query.
