@@ -89,6 +89,7 @@ extension Service {
   func forgetSession(_ id: String, resolving: Set<String>) throws {
     try store.delete(session: id, resolving: checkTodos(id, resolving: resolving))
     entries[id] = nil
+    slashListings[id] = nil
     pruneDeclinedSuggestions()
   }
 

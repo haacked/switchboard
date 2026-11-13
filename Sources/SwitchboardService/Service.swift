@@ -116,6 +116,9 @@ public final class Service {
   var repositories: [String: (repository: String?, readMs: Int64)] = [:]
   /// The checkouts whose origin a lookup off the queue is reading.
   var repositoryLookups: Set<String> = []
+  /// Each session's folded skill listing and the transcript it was read
+  /// from, so that a later `slash-commands` request reads only new lines.
+  var slashListings: [String: (path: String, state: SkillListing.State)] = [:]
   /// The PermissionRequest hooks that wait for an answer, by card id.
   var held: [Int64: HeldRequest] = [:]
   let triageJobs: OperationQueue = {
@@ -272,6 +275,8 @@ public final class Service {
         return chatRequest(request.args)
       case "chat-log":
         return .success(try chatLog(request.args))
+      case "slash-commands":
+        return .success(try slashCommands(request.args))
       case "rm":
         return .success(try remove(request.args, caller: caller))
       case "cleanup":
