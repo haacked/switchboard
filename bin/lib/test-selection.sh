@@ -137,25 +137,17 @@ test_file_selection() {
   count=$(grep -c '@Test' "$file" || true)
   [ "$count" -gt 0 ] || { whole "it declares no tests"; return; }
   grep -q '^@Test' "$file" && { whole "it declares a test outside a type"; return; }
-  # The declaration parse below reads only lines in column 0. A `#if` can hide
-  # an indented declaration from it. A line such as `extension [K: V]` or
-  # `func ==` has no name for it to read.
-  if awk '
-    /^#if/ { bad = 1 }
-    /^[A-Za-z@]/ && !/^import / {
-      if (match($0, /(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]+[A-Za-z_][A-Za-z0-9_.]*/)) next
-      if (/^@/ && !/(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]/) next
-      bad = 1
-    }
-    END { exit !bad }' "$file"; then
-    whole "it has a top-level line that the selector cannot read"
-    return
-  fi
   # Prints "<kind> <name> <private>" for each top-level declaration. A line
-  # that starts in column 0 with a letter or an attribute is top level.
+  # that starts in column 0 with a letter or an attribute is top level. Prints
+  # "unreadable" for a `#if`, which can hide an indented declaration, and for
+  # a top-level line with no name to read, such as `extension [K: V]`.
   decls=$(awk '
-    /^[A-Za-z@]/ {
-      if (!match($0, /(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]+[A-Za-z_][A-Za-z0-9_.]*/)) next
+    /^#if/ { print "unreadable"; next }
+    /^[A-Za-z@]/ && !/^import / {
+      if (!match($0, /(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]+[A-Za-z_][A-Za-z0-9_.]*/)) {
+        if (!/^@/ || /(^|[ )])(struct|class|enum|actor|extension|protocol|typealias|func|let|var)[ ]/) print "unreadable"
+        next
+      }
       decl = substr($0, RSTART, RLENGTH)
       prefix = substr($0, 1, RSTART)
       sub(/^[ )]/, "", decl)
@@ -164,6 +156,10 @@ test_file_selection() {
       sub(/\..*/, "", name)
       print w[1], name, (prefix ~ /(^|[ ])(private|fileprivate)[ ]/) ? 1 : 0
     }' "$file")
+  if grep -qx unreadable <<<"$decls"; then
+    whole "it has a top-level line that the selector cannot read"
+    return
+  fi
   suites=$(awk '$1 ~ /^(struct|class|enum|actor|extension)$/ { print $2 }' <<<"$decls" | sort -u | tr '\n' ' ')
   [ -n "$suites" ] || { whole "it declares no type"; return; }
 
