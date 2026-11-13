@@ -496,7 +496,7 @@ public enum Triage {
         ], source: .card,
         details: TriageDetails(
           openByDefault: true, toolInput: .init(tool: card.tool, text: message.text),
-          targets: message.targets.map { "\($0.name) (\($0.id))" }))
+          targets: message.targets.map { sessionMention(name: $0.name, id: $0.id) }))
     }
     if card.kind == .trust {
       return TriageItem(

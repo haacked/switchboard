@@ -328,7 +328,7 @@ extension Service {
   /// conversation under its account. Its repo stays nil, because sbd didn't
   /// create its worktree. `rm --worktree` then refuses and removes nothing.
   private func adopt(_ c: ClaudeSession, name: String?, tail: TranscriptTail) throws -> SessionSummary {
-    let id = shortId("s", taken: entries.keys)
+    let id = newSessionID()
     var session = Session(
       id: id, name: name ?? c.title, cwd: c.cwd, branch: c.branch, claudeSessionId: c.id, created: nowMs())
     session.started = true

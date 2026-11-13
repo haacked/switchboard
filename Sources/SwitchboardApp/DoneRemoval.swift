@@ -215,7 +215,7 @@ private struct SkipList: View {
       ForEach(skips, id: \.id) { skip in
         VStack(alignment: .leading, spacing: 2) {
           Text(skip.name).fontWeight(.medium)
-          Text(skip.reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+          InlineText(plain: skip.reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
       }
     }

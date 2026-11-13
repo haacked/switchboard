@@ -69,7 +69,7 @@ struct DecisionCard: View {
 
   private var header: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Text(item.title).font(.title3.bold()).textSelection(.enabled)
+      InlineText(plain: item.title).font(.title3.bold()).textSelection(.enabled)
       Text(item.kind.rawValue).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
         .background(Capsule().fill(session.state.color.opacity(0.18)))
         .foregroundStyle(session.state.color)
@@ -237,7 +237,7 @@ struct CalloutView: View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       Image(systemName: style.icon).foregroundStyle(style.color).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
-        Text(callout.title).fontWeight(.semibold)
+        InlineText(plain: callout.title).fontWeight(.semibold)
         if !callout.body.isEmpty {
           MarkdownView(text: callout.body).font(.callout).foregroundStyle(.secondary)
         }
@@ -289,7 +289,7 @@ struct CardDetails: View {
           }
         }
         if !details.targets.isEmpty {
-          section("Sends to") { ForEach(details.targets, id: \.self) { Text(verbatim: $0) } }
+          section("Sends to") { ForEach(details.targets, id: \.self) { InlineText(plain: $0) } }
         }
         if !callouts.isEmpty {
           section("Callouts") {
@@ -302,7 +302,7 @@ struct CardDetails: View {
           }
         }
         if !session.waits.isEmpty {
-          section("Waits") { ForEach(session.waits, id: \.id) { Text($0.line) } }
+          section("Waits") { ForEach(session.waits, id: \.id) { InlineText(plain: $0.line) } }
         }
         if let text = model.replies[session.id] ?? session.lastReply, !text.isEmpty {
           section("Last reply") { MarkdownView(text: text) }

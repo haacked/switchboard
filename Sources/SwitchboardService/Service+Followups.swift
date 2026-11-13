@@ -71,7 +71,7 @@ extension Service {
   ) throws -> SessionSummary {
     let parent = try ref.map { try lookup(["session": .string($0)]) }
     var session = Session(
-      id: shortId("s", taken: entries.keys), name: title ?? Followup.title(followup.prompt), cwd: "",
+      id: newSessionID(), name: title ?? Followup.title(followup.prompt), cwd: "",
       branch: branch.flatMap { $0.isEmpty ? nil : $0 }, claudeSessionId: UUID().uuidString.lowercased(),
       model: model, created: nowMs())
     session.parent = parent
@@ -295,7 +295,7 @@ extension Service {
       var imported: [SessionSummary] = []
       for (item, title, followup) in items where seen.insert(item.key).inserted {
         var session = Session(
-          id: shortId("s", taken: entries.keys), name: title, cwd: "", claudeSessionId: UUID().uuidString.lowercased(),
+          id: newSessionID(), name: title, cwd: "", claudeSessionId: UUID().uuidString.lowercased(),
           created: item.added ?? now)
         session.followup = followup
         session.autoMode = config.autoMode

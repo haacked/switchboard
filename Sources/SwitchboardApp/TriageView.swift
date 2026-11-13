@@ -97,7 +97,8 @@ struct TriageDetail: View {
   private var working: some View {
     HStack(spacing: 8) {
       if session.state == .working { ProgressView().controlSize(.small) }
-      Text(session.state == .working ? "Working: \(session.reason)" : session.reason).foregroundStyle(.secondary)
+      InlineText(plain: session.state == .working ? "Working: \(session.reason)" : session.reason)
+        .foregroundStyle(.secondary)
       if session.acknowledged == true { AcknowledgeButton(session: session) }
     }
   }

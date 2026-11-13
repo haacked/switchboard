@@ -54,11 +54,15 @@ struct CleanupNote: View {
 
   var body: some View {
     if let note = CleanupOffer.blockedNote(session) {
-      Label(note, systemImage: "exclamationmark.triangle")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(2)
-        .help(note)
+      Label {
+        InlineText(plain: note, links: false)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle")
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(2)
+      .help(note)
     }
   }
 }

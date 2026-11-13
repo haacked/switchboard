@@ -21,7 +21,7 @@ func cards(_ a: Args) {
   func out(_ line: String) { print(line.printable) }
   for (name, card) in cards {
     let head =
-      "\(card.id)  \(name) (\(card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")\(card.hookClosed ? ", hook closed" : "")"
+      "\(card.id)  \(sessionMention(name: name, id: card.session))  \(ago(card.since))\(card.deferred ? ", deferred" : "")\(card.hookClosed ? ", hook closed" : "")"
     if card.kind == .permission {
       // `allow` approves the whole call, so the whole call prints.
       out("\(head)  approve \(card.tool)\(card.offersAutoMode ? ", --auto offered" : "")")

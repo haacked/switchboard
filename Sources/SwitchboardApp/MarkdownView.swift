@@ -69,9 +69,9 @@ private struct MarkdownBlocksView: View {
   static func view(_ block: MarkdownBlock) -> some View {
     switch block {
     case .heading(let level, let text):
-      Text(text.attributed).font(Self.headingFonts[min(level, Self.headingFonts.count) - 1]).padding(.top, 4)
+      InlineText(text).font(Self.headingFonts[min(level, Self.headingFonts.count) - 1]).padding(.top, 4)
     case .paragraph(let text):
-      Text(text.attributed)
+      InlineText(text)
     case .images(let images):
       VStack(alignment: .leading, spacing: 4) {
         ForEach(Array(images.enumerated()), id: \.offset) { MarkdownImageView(image: $1) }
@@ -156,7 +156,7 @@ private struct MarkdownBlocksView: View {
 
   private static func tableCell(_ text: MarkdownText, _ align: MarkdownBlock.Alignment, header: Bool) -> some View {
     CappedWidthLayout(limit: 320) {
-      Text(text.attributed).bold(header)
+      InlineText(text).bold(header)
         .multilineTextAlignment(align.text)
         .frame(maxWidth: .infinity, alignment: Alignment(horizontal: align.horizontal, vertical: .top))
     }
@@ -173,7 +173,7 @@ private struct DetailsView: View {
     DisclosureGroup(isExpanded: $expanded) {
       MarkdownBlocksView(blocks: blocks).padding(.top, 4).frame(maxWidth: .infinity, alignment: .leading)
     } label: {
-      Text(summary.attributed)
+      InlineText(summary)
     }
   }
 }
@@ -274,30 +274,6 @@ enum MarkdownImageLoader {
       return nil
     }
     return data
-  }
-}
-
-extension MarkdownText {
-  /// The text with its styles as presentation intents, and its links. `Text`
-  /// draws presentation intents in the font around it.
-  fileprivate var attributed: AttributedString {
-    var result = AttributedString()
-    for run in runs {
-      var part = AttributedString(run.text.isEmpty ? run.image ?? "" : run.text)
-      var intent: InlinePresentationIntent = []
-      if run.style.contains(.emphasis) { intent.insert(.emphasized) }
-      if run.style.contains(.strong) { intent.insert(.stronglyEmphasized) }
-      if run.style.contains(.code) { intent.insert(.code) }
-      if run.style.contains(.strikethrough) { intent.insert(.strikethrough) }
-      if !intent.isEmpty { part.inlinePresentationIntent = intent }
-      if run.style.contains(.footnote) {
-        part.baselineOffset = 6
-        part.font = .caption2
-      }
-      if let link = (run.link ?? run.image).flatMap(URL.init(string:)) { part.link = link }
-      result += part
-    }
-    return result
   }
 }
 

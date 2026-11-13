@@ -229,7 +229,8 @@ struct HoverCardBody: View {
         .background(Capsule().fill(pr.status.color.opacity(0.14)))
       }
       if let summary = content.summary {
-        Text(verbatim: summary).font(.callout).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+        InlineText(plain: summary, links: false).font(.callout).lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
     .padding(12)

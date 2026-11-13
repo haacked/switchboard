@@ -785,12 +785,14 @@ public final class Service {
     return summary
   }
 
+  func newSessionID() -> String { shortId("s", taken: entries.keys) }
+
   /// `configure` changes the session before its first launch.
   func create(
     _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?),
     configure: (inout Session) -> Void = { _ in }
   ) throws -> SessionSummary {
-    let id = shortId("s", taken: entries.keys)
+    let id = newSessionID()
     var session = Session(
       id: id, name: args.name ?? args.branch ?? (folder.cwd as NSString).lastPathComponent, cwd: folder.cwd,
       branch: folder.branch, claudeSessionId: UUID().uuidString.lowercased(), model: args.model ?? config.model,

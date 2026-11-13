@@ -45,8 +45,13 @@ struct MergeNote: View {
 
   var body: some View {
     if let error = session.mergeError {
-      Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
-        .lineLimit(2).help(error)
+      Label {
+        InlineText(plain: error, links: false)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle")
+      }
+      .font(.caption).foregroundStyle(.red)
+      .lineLimit(2).help(error)
     }
   }
 }

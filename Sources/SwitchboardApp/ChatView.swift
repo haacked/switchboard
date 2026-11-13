@@ -67,7 +67,7 @@ private struct ChatBubble: View {
     VStack(alignment: .leading, spacing: 4) {
       Text(message.role.label).font(.caption.bold()).foregroundStyle(.secondary)
       if message.role == .user {
-        Text(message.text).textSelection(.enabled)
+        InlineText(plain: message.text).textSelection(.enabled)
       } else {
         MarkdownView(text: message.text)
       }

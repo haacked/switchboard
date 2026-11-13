@@ -92,7 +92,7 @@ struct ContentView: View {
         if let error = model.actionError {
           HStack {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(error).lineLimit(2).textSelection(.enabled)
+            InlineText(plain: error).lineLimit(2).textSelection(.enabled)
             Spacer()
             Button("Dismiss") { model.actionError = nil }
           }
@@ -872,7 +872,7 @@ struct GroupSuggestionList: View {
             VStack(alignment: .leading, spacing: 2) {
               Text("\(action): \(s.sessions.map(name).joined(separator: ", "))")
                 .fontWeight(.medium)
-              Text([s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
+              InlineText(plain: [s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -986,9 +986,9 @@ struct BoardCard: View {
               }
             }
           }
-          Text(s.boardLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          InlineText(plain: s.boardLine, links: false).font(.caption).foregroundStyle(.secondary).lineLimit(2)
           if let note = s.backNote {
-            Text(note).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+            InlineText(plain: note, links: false).font(.caption2).foregroundStyle(.orange).lineLimit(2)
           }
           CleanupNote(session: s)
           MergeNote(session: s)

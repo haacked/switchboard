@@ -26,7 +26,7 @@ struct FollowupView: View {
             Text(session.name).font(.title3.bold()).textSelection(.enabled)
             StateBadge(state: session.state)
           }
-          Text(session.reason).foregroundStyle(.secondary)
+          InlineText(plain: session.reason).foregroundStyle(.secondary)
         }
         Spacer()
         StartButton(session: session)
@@ -72,7 +72,7 @@ struct FollowupView: View {
       .font(.callout)
       Divider()
       ScrollView {
-        Text(followup.prompt)
+        InlineText(plain: followup.prompt)
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
       }

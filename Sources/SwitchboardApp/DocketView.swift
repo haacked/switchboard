@@ -27,7 +27,7 @@ struct DocketView: View {
             Text(session.name).font(.title3.bold()).textSelection(.enabled)
             StateBadge(state: session.state)
           }
-          Text(session.reason).foregroundStyle(.secondary)
+          InlineText(plain: session.reason).foregroundStyle(.secondary)
         }
         Spacer()
         if let url = docket.link {
@@ -62,7 +62,7 @@ struct DocketView: View {
           ForEach(ui.log.reversed(), id: \.id) { event in
             HStack(alignment: .firstTextBaseline, spacing: 8) {
               Text(ago(event.t) + " ago").foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
-              Text(DocketView.line(event.data)).textSelection(.enabled)
+              InlineText(plain: DocketView.line(event.data)).textSelection(.enabled)
             }
           }
         }
