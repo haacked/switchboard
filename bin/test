@@ -6,13 +6,38 @@
 # also runs the tests that drive the installed claude with Haiku, which take
 # minutes and use some of your Claude quota. With --shards N, it splits the
 # integration tests across N swift test processes and runs the other tests in
-# one more, all at once, then runs MeasureTests alone. bin/lib/swift-testing.sh
-# sets the flags that swift needs to find Swift Testing.
-# The whole run, shards included, holds one machine-wide build slot
-# (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
+# one more, all at once, then runs MeasureTests alone. --shards is for CI. It
+# prints a warning elsewhere unless --force-shards follows the count.
+# bin/lib/swift-testing.sh sets the flags that swift needs to find Swift
+# Testing.
+# A run without --shards holds one machine-wide build slot (bin/lib/build-slot)
+# for its build and its tests. A sharded run holds no slot itself. Its build
+# and each of its shards take their own slot through bin/lib/swiftpm, so every
+# swift test process that runs tests counts against the queue. A caller that
+# already holds a slot runs them all inside it. Each swift build and swift test
+# caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
+sharded=
+if [ "${1:-}" = --shards ]; then
+  case "$#:${3-}" in
+  2:) [ "${CI:-}" = true ] ||
+    echo "bin/test: warning: --shards is for CI. Run bin/test without it, or pass --force-shards after the count." >&2 ;;
+  3:--force-shards) ;;
+  *)
+    echo "usage: bin/test --shards N [--force-shards]" >&2
+    exit 2
+    ;;
+  esac
+  sharded=$2
+else
+  bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
+fi
+slots=$(bin/lib/build-slot --slots)
+jobs=$(bin/lib/swiftpm --jobs)
+[ "$slots" != 0 ] || slots=off
+[ "$jobs" != 0 ] || jobs="one per core"
+echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
 source bin/lib/swift-testing.sh
 require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such
@@ -29,9 +54,10 @@ require_swift_testing
 export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-2}"
 
 # Each process caps how many tests run at once, so N processes run N times as
-# many integration tests at once. Each process holds SwiftPM's lock on its
-# build folder for the whole run, so each shard after the first runs from an
-# APFS clone of .build.
+# many integration tests at once. Each process waits for its own build slot,
+# so the queue decides how many of them run at once. Each process holds
+# SwiftPM's lock on its build folder for the whole run, so each shard after the
+# first runs from an APFS clone of .build.
 shards() {
   local n=$1 clones=.build-shards quiet=IntegrationTests.MeasureTests
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
@@ -120,10 +146,7 @@ shards() {
   exit "$status"
 }
 
-if [ "${1:-}" = --shards ]; then
-  [ $# -eq 2 ] || { echo "usage: bin/test --shards N" >&2; exit 2; }
-  shards "$2"
-fi
+if [ -n "$sharded" ]; then shards "$sharded"; fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
   shift

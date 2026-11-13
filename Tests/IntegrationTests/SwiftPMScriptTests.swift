@@ -127,6 +127,14 @@ private final class ScriptRig {
   }
 }
 
+private struct JobsCase: Sendable, CustomTestStringConvertible {
+  var cpus: Int
+  var value: String?
+  var printed: String
+
+  var testDescription: String { "cpus=\(cpus) SB_BUILD_JOBS=\(value.map { "'\($0)'" } ?? "unset")" }
+}
+
 @Suite(.blocking(timeLimit: .seconds(120))) struct SwiftPMScriptTests {
   @Test(arguments: zip([18, 4, 2, 1], [4, 4, 2, 1]))
   func buildCapsJobsAtFourOrTheCPUCount(_ cpus: Int, _ jobs: Int) throws {
@@ -169,6 +177,53 @@ private final class ScriptRig {
     #expect(r.status == 2)
     #expect(r.stderr.contains("SB_BUILD_JOBS"), "\(r.stderr)")
     #expect(rig.swiftCalls().isEmpty)
+  }
+
+  /// An empty SB_BUILD_JOBS counts as unset.
+  @Test(arguments: [
+    JobsCase(cpus: 18, value: nil, printed: "4"),
+    JobsCase(cpus: 2, value: nil, printed: "2"),
+    JobsCase(cpus: 1, value: nil, printed: "1"),
+    JobsCase(cpus: 18, value: "", printed: "4"),
+    JobsCase(cpus: 18, value: "6", printed: "6"),
+    JobsCase(cpus: 18, value: "0", printed: "0"),
+  ])
+  fileprivate func jobsPrintsTheEffectiveJobCount(_ c: JobsCase) throws {
+    let rig = try ScriptRig(cpus: c.cpus)
+    defer { rig.stop() }
+
+    let r = try rig.swiftpm("--jobs", env: ["SB_BUILD_JOBS": c.value])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == c.printed, "\(r.stdout)")
+  }
+
+  @Test(arguments: ["x", "1.5", "4x", "-1"])
+  func jobsRejectsABadJobCountWithExitTwo(_ value: String) throws {
+    let rig = try ScriptRig()
+    defer { rig.stop() }
+
+    let r = try rig.swiftpm("--jobs", env: ["SB_BUILD_JOBS": value])
+
+    #expect(r.status == 2)
+    #expect(r.stdout == "", "\(r.stdout)")
+    #expect(r.stderr == "bin/lib/swiftpm: SB_BUILD_JOBS must be a whole number, not '\(value)'\n", "\(r.stderr)")
+    #expect(rig.swiftCalls().isEmpty)
+  }
+
+  /// bin/test asks for the count before a sharded run, which holds no slot.
+  /// A live ticket fills the only slot, so a --jobs that queued would wait.
+  @Test func jobsRunsNoSwiftAndTakesNoSlot() throws {
+    let rig = try ScriptRig(cpus: 18)
+    defer { rig.stop() }
+    try rig.holdTheSlot()
+
+    let r = try rig.swiftpm("--jobs")
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(!r.stderr.contains("waiting for a build slot"), "\(r.stderr)")
+    #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
+    #expect(!rig.queue.logLines().contains("end H"))
   }
 
   /// swift test --skip-build accepts --jobs and ignores it.

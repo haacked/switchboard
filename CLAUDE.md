@@ -23,7 +23,9 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 
 Build and test only through `bin/build`, `bin/test`, `bin/test-gui`, and `bin/bundle`. Never run bare `swift build`, `swift test`, or `swift run`, because they skip the build queue and overload the machine. Extra arguments pass through to SwiftPM, for example `bin/build --product sb` and `bin/test --filter X`. `bin/fmt` does not compile, so run it directly.
 
-The scripts wait for a machine-wide build slot, so at most 3 builds or test runs share the CPU at once. They also cap each build's compile jobs. Many sessions share this machine, so a wait of several minutes is normal.
+The scripts wait for a machine-wide build slot, so at most `SB_BUILD_SLOTS` builds or test processes (3 by default) share the CPU at once. They also cap each build's compile jobs, which `SB_BUILD_JOBS` sets. `bin/test` prints both values when it starts. Many sessions share this machine, so a wait of several minutes is normal.
+
+Run `bin/test` with no arguments, and never pass `--shards` or `--force-shards` locally. Each shard takes its own build slot, so a local sharded run holds several slots at once and makes other sessions wait. Sharding is for CI. `bin/test --shards` prints a warning outside CI.
 
 Always start these scripts with `run_in_background`. The wait for a slot counts toward a foreground Bash call's timeout, which kills the call after 2 minutes by default and 10 at most.
 

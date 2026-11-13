@@ -85,7 +85,11 @@ jobs:
             echo "::error::The build has warnings in Sources or Tests."
             exit 1
           fi
+      # Each shard takes a build slot. The runner runs one job, so the step
+      # turns the queue off and the shards run at once.
       - run: bin/test --shards 4
+        env:
+          SB_BUILD_SLOTS: 0
 
   # bin/test-gui drives the real app, so it needs a logged-in session with a
   # display. GitHub's macOS runners log in a user. The job leaves out the
