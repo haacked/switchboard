@@ -6,41 +6,26 @@ extension Service {
   /// adds it as a follow-up with `followup`. The repository is `owner/name`,
   /// a bare name, or a path to a checkout that starts with / or ~.
   func spawn(_ args: JSON) throws -> SessionSummary {
-    func text(_ key: String) -> String? {
-      args[key]?.string.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
-    }
-    guard let ref = text("repository") else { throw APIError("spawn needs a repository") }
-    guard let branch = text("branch") else { throw APIError("spawn needs a branch") }
-    guard let prompt = text("prompt") else { throw APIError("spawn needs a prompt") }
-    let followup = args["followup"]?.bool == true
-    let after = text("after")
-    if after != nil, !followup { throw APIError("--after needs --followup, because a started session has no trigger") }
-    if followup, text("base") != nil {
-      throw APIError(
-        "--base needs a started spawn, because a follow-up keeps no base. Pass --base to sb followup start")
-    }
-
-    let wait = text("wait")
-    if let wait {
-      if followup { throw APIError("wait needs a started spawn, because a follow-up has no state to reach") }
-      guard let parent = text("parent") else { throw APIError("wait needs a calling session to resume") }
+    let spawn = try SpawnArgs(args)
+    if let wait = spawn.wait, let parent = spawn.parent {
       _ = try queue.sync { try lookup(["session": .string(parent)]) }
       guard AttentionState(rawValue: wait) != nil else {
         throw APIError("wait is a state, one of \(AttentionState.allCases.map(\.rawValue).joined(separator: ", "))")
       }
     }
 
-    let (checkout, named) = try spawnCheckout(ref)
-    if branchOrFolderTaken(checkout, branch, at: mac) {
-      throw APIError("branch \(branch) or its worktree folder exists for \(checkout). Name a new branch")
+    let (checkout, named) = try spawnCheckout(spawn.repository, repos: config.repos, at: mac)
+    if branchOrFolderTaken(checkout, spawn.branch, at: mac) {
+      throw APIError("branch \(spawn.branch) or its worktree folder exists for \(checkout). Name a new branch")
     }
 
-    guard followup else {
+    guard spawn.followup else {
       let child = try newSession(
         NewSession(
-          path: checkout, branch: branch, base: text("base"), name: text("name"), prompt: prompt, model: text("model"),
-          parent: text("parent"), account: text("account"), group: text("group"), autoMode: args["autoMode"]?.bool))
-      guard let wait, let parent = child.parent else { return child }
+          path: checkout, branch: spawn.branch, base: spawn.base, name: spawn.name, prompt: spawn.prompt,
+          model: spawn.model, parent: spawn.parent, account: spawn.account, group: spawn.group,
+          autoMode: spawn.autoMode))
+      guard let wait = spawn.wait, let parent = child.parent else { return child }
       try queue.sync {
         _ = try waitRequest(
           "wait",
@@ -55,42 +40,51 @@ extension Service {
     guard let repository = named ?? githubRepository(checkout, at: mac) else {
       throw APIError("\(checkout) has no remote on github.com, which a follow-up needs. Spawn it without --followup")
     }
-    var add: [String: JSON] = ["prompt": .string(prompt), "repository": .string(repository), "branch": .string(branch)]
-    if let after { add["after"] = .string(after) }
-    if let autoMode = args["autoMode"] { add["autoMode"] = autoMode }
-    for (from, to) in ["name": "title", "parent": "parent", "model": "model", "account": "account", "group": "group"] {
-      if let value = text(from) { add[to] = .string(value) }
+    var add: [String: JSON] = [
+      "prompt": .string(spawn.prompt), "repository": .string(repository), "branch": .string(spawn.branch),
+    ]
+    if let after = spawn.after { add["after"] = .string(after) }
+    if let autoMode = spawn.autoMode { add["autoMode"] = .bool(autoMode) }
+    for (key, value) in [
+      "title": spawn.name, "parent": spawn.parent, "model": spawn.model, "account": spawn.account,
+      "group": spawn.group,
+    ] {
+      if let value { add[key] = .string(value) }
     }
     return try addFollowup(.object(add))
   }
 
   /// The top folder of the checkout that `ref` names, and the `owner/name`
-  /// that `ref` names. A path names no `owner/name`.
-  private func spawnCheckout(_ ref: String) throws -> (path: String, repository: String?) {
+  /// that `ref` names. A path names no `owner/name`. `repos` is the site's
+  /// map from `owner/name` to a checkout.
+  private func spawnCheckout(
+    _ ref: String, repos: [String: String], at site: any SessionSite
+  ) throws -> (path: String, repository: String?) {
     if ref.hasPrefix("/") || ref.hasPrefix("~") {
       let path = (ref.expandingTilde as NSString).standardizingPath
       guard isDirectory(path) else { throw APIError("no folder \(path)") }
-      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"], at: mac) else {
+      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"], at: site) else {
         throw APIError("\(path) isn't a git checkout")
       }
       return (top, nil)
     }
-    let repository = Followup.isRepository(ref) ? ref : try repository(named: ref)
+    let repository = Followup.isRepository(ref) ? ref : try repository(named: ref, repos: repos, at: site)
     return (try checkout(of: repository, hint: "Pass its folder as --repo"), repository)
   }
 
-  /// The `owner/name` of the one repository called `name`: a key of the
-  /// `repos` setting, or a <root>/<owner>/<name> folder under `repoRoots`
-  /// with a github.com remote for owner/name.
-  private func repository(named name: String) throws -> String {
+  /// The `owner/name` of the one repository called `name`: a key of
+  /// `repos`, or, on this Mac, a <root>/<owner>/<name> folder under
+  /// `repoRoots` with a github.com remote for owner/name.
+  private func repository(named name: String, repos: [String: String], at site: any SessionSite) throws -> String {
     guard !name.contains("/"), name != ".", name != ".." else {
       throw APIError("\(name) isn't a repository. Use owner/name, a name, or a folder")
     }
     var found: [String: String] = [:]
-    for key in config.repos.keys where key.split(separator: "/").last?.lowercased() == name.lowercased() {
+    for key in repos.keys where key.split(separator: "/").last?.lowercased() == name.lowercased() {
       found[key.lowercased()] = key
     }
-    for root in config.repoRoots.map({ ($0.expandingTilde as NSString).standardizingPath }) {
+    let roots = site.hostName == nil ? config.repoRoots : []
+    for root in roots.map({ ($0.expandingTilde as NSString).standardizingPath }) {
       for owner in (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [] where !owner.hasPrefix(".") {
         let repository = "\(owner)/\(name)"
         if found[repository.lowercased()] == nil, isDirectory("\(root)/\(repository)"),

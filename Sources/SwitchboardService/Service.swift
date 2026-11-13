@@ -305,11 +305,9 @@ public final class Service {
     hookGone: @escaping () -> Bool = { false }
   ) -> Response {
     do {
-      // A request from a host's socket ends here. It reaches no code below, so it can only be a hook, and
-      // `handleHostHook` takes it only for a session that sbd holds on that host.
+      // A request from a host's socket ends here and reaches no code below.
       if case .remote(let host) = origin {
-        guard request.op == "hook" else { throw APIError("a request from \(host) can only be a hook") }
-        return try handleHostHook(request.args, from: host, hookGone: hookGone)
+        return try handleHostRequest(request, host: host, caller: caller, hookGone: hookGone)
       }
       switch request.op {
       case "hook":
