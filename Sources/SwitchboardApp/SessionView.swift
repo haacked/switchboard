@@ -1,9 +1,6 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The session view's own state. The Command Line Tools have no SwiftUI
-/// macro plugin, and `@State` is a macro in this SDK, so the views keep their
-/// state in an ObservableObject.
 final class SessionViewState: ObservableObject {
   @Published var deleteWorktree = false
   @Published var deleteBranch = false

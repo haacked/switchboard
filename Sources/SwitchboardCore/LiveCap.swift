@@ -1,7 +1,8 @@
 import Foundation
 
 /// The answer to `sb live`: the cap on claude processes, the sessions whose
-/// claude runs or is starting, and the starts that wait for a free slot.
+/// claude runs or is starting, and the starts that wait for a free slot, for
+/// this Mac and for each remote host.
 public struct LiveStatus: Codable, Equatable, Sendable {
   public struct LiveSession: Codable, Equatable, Sendable {
     public var session: String
@@ -39,14 +40,34 @@ public struct LiveStatus: Codable, Equatable, Sendable {
     }
   }
 
+  /// This Mac's cap and sessions.
   public var cap: Int
   /// The `livePriority` setting, highest first. An sbd that predates it sends nil.
   public var priority: [String]?
   public var live: [LiveSession]
   /// In the order in which they start.
   public var queued: [QueuedStart]
+  /// One row per host that has a session, by name. Nil when no session is on a host.
+  public var hosts: [HostLive]?
 
-  public init(cap: Int, live: [LiveSession], queued: [QueuedStart]) {
+  public init(cap: Int, live: [LiveSession], queued: [QueuedStart], hosts: [HostLive]? = nil) {
+    self.cap = cap
+    self.live = live
+    self.queued = queued
+    self.hosts = hosts
+  }
+}
+
+/// A remote host's cap, its sessions whose claude runs or is starting, and its starts that wait.
+public struct HostLive: Codable, Equatable, Sendable {
+  public var host: String
+  public var cap: Int
+  public var live: [LiveStatus.LiveSession]
+  /// Oldest first, the order in which they start.
+  public var queued: [LiveStatus.QueuedStart]
+
+  public init(host: String, cap: Int, live: [LiveStatus.LiveSession], queued: [LiveStatus.QueuedStart]) {
+    self.host = host
     self.cap = cap
     self.live = live
     self.queued = queued

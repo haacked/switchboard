@@ -82,7 +82,7 @@ extension GitHubPoller {
       }
     }
     let approved = open.filter { pr in
-      pr.verdicts.contains { $0.state == "APPROVED" && teams(pr.id, $0) == nil } && requirement(pr) != nil
+      pr.verdicts.contains { $0.isApproval && teams(pr.id, $0) == nil } && requirement(pr) != nil
     }
     for chunk in GitHub.chunks(approved.map(\.id)) {
       do {
@@ -138,7 +138,7 @@ extension GitHubPoller {
     for id in prs.keys {
       var pr = prs[id]!.pr
       for i in pr.verdicts.indices { pr.verdicts[i].teams = teams(id, pr.verdicts[i]) }
-      let unread = pr.verdicts.contains { $0.state == "APPROVED" && $0.teams == nil }
+      let unread = pr.verdicts.contains { $0.isApproval && $0.teams == nil }
       pr.codeOwners = named.contains(id) && pr.state == .open && !unread ? requirement(pr) : nil
       prs[id]!.pr = pr
     }

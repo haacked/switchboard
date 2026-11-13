@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A Model Context Protocol client for `docket mcp`, docket's only interface
 /// for programs. Each `run` starts docket, makes its calls, and closes stdin,
@@ -38,14 +39,15 @@ public final class DocketClient {
     } catch {
       throw Failure(description: "can't run \(docket): \(error.localizedDescription)")
     }
-    var errData = Data()
+    let errData = OSAllocatedUnfairLock(initialState: Data())
     let errDone = DispatchGroup()
     errDone.enter()
     // A queue of its own reads stderr. A full stderr pipe then can't stall
     // docket. The reader starts after the launch, because a launch that
     // throws leaves the pipe's write end open and the read would never end.
     DispatchQueue(label: "docket.stderr").async {
-      errData = stderr.fileHandleForReading.readDataToEndOfFile()
+      let data = stderr.fileHandleForReading.readDataToEndOfFile()
+      errData.withLock { $0 = data }
       errDone.leave()
     }
     let kill = DispatchWorkItem { if p.isRunning { p.terminate() } }
@@ -71,7 +73,7 @@ public final class DocketClient {
       try? stdin.fileHandleForWriting.close()
       if p.isRunning { p.terminate() }
       errDone.wait()
-      let err = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+      let err = String(decoding: errData.withLock { $0 }, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
       throw err.isEmpty ? failure : Failure(description: "\(failure.description): \(oneLine(err, max: 300))")
     }
   }
@@ -142,7 +144,7 @@ public final class DocketClient {
   private func readMessage() throws -> JSON {
     while true {
       guard let line = try output.next() else { throw Failure(description: "docket exited") }
-      if let message = JSON.parse(String(decoding: line, as: UTF8.self)) { return message }
+      if let message = JSON.parse(line) { return message }
     }
   }
 }

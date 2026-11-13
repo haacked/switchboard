@@ -19,6 +19,9 @@ struct SharedServer {
   var restartAt: Int64?
   var lastExit: String?
   var lastOutput: [String]?
+  /// The requests in `awaitMCPServers` that wait for the server to accept
+  /// connections.
+  var waiting = 0
 
   var pane: String { Service.mcpPanePrefix + name }
 }
@@ -61,8 +64,8 @@ extension Service {
       freePort: LocalPort.free)
     mcp = ports.keys.sorted().map { SharedServer(name: $0, config: valid[$0]!, port: ports[$0]!) }
     let panes = Set(mcp.map(\.pane))
-    for pane in snapshot.panes.keys where pane.hasPrefix(Service.mcpPanePrefix) && !panes.contains(pane) {
-      host.kill(pane)
+    for pane in mac.snapshot.panes.keys where pane.hasPrefix(Service.mcpPanePrefix) && !panes.contains(pane) {
+      mac.terminals().kill(pane)
     }
     guard !mcp.isEmpty else {
       try? FileManager.default.removeItem(atPath: home.mcpConfig)
@@ -97,10 +100,10 @@ extension Service {
         continue
       }
       if server.restartAt == nil {
-        let gone = snapshot.panes[server.pane] == nil
+        let gone = mac.snapshot.panes[server.pane] == nil
         scheduleRestart(
-          i, exit: gone ? "its tmux session is gone" : host.exitText(server.pane) ?? "unknown",
-          output: gone ? nil : host.lastLines(server.pane, 5), now: now)
+          i, exit: gone ? "its tmux session is gone" : mac.terminals().exitText(server.pane) ?? "unknown",
+          output: gone ? nil : mac.terminals().lastLines(server.pane, 5), now: now)
       }
       if let at = mcp[i].restartAt, now >= at {
         mcp[i].restarts += 1
@@ -119,7 +122,9 @@ extension Service {
     if let request {
       // A follow-up that waits to start and a docket row refuse every request that starts claude.
       let id: String? = queue.sync {
-        guard mcpStarting(now: nowMs()), let id = try? lookup(request.args), entries[id]!.session.runsClaude
+        // A session on a host gets no shared server, and its pane is not on this Mac.
+        guard mcpStarting(now: nowMs()), let id = try? lookup(request.args), entries[id]!.session.runsClaude,
+          entries[id]!.session.host == nil
         else { return nil }
         return id
       }
@@ -127,14 +132,20 @@ extension Service {
       // This asks tmux, because the tick's snapshot can still show a Claude
       // pane that has died since. `terminals` starts claude only in a missing
       // pane. The other requests start it in a dead or missing pane.
-      let dead = host.isDead(paneName(id, .claude))
+      let dead = mac.terminals().isDead(paneName(id, .claude))
       guard request.op == "terminals" ? dead == nil : dead != false else { return }
     }
+    var waitingOn: Set<Int> = []
+    defer { queue.sync { waitingOn.forEach { mcp[$0].waiting -= 1 } } }
     let deadline = Date().addingTimeInterval(Double(Service.mcpStartMs) / 1000)
     while Date() < deadline {
       let starting: [(index: Int, port: Int, run: Int64)] = queue.sync {
         let now = nowMs()
-        return mcp.indices.filter { isStarting(mcp[$0], now: now) }.map { ($0, mcp[$0].port, mcp[$0].started) }
+        let indices = Set(mcp.indices.filter { isStarting(mcp[$0], now: now) })
+        indices.subtracting(waitingOn).forEach { mcp[$0].waiting += 1 }
+        waitingOn.subtracting(indices).forEach { mcp[$0].waiting -= 1 }
+        waitingOn = indices
+        return indices.sorted().map { ($0, mcp[$0].port, mcp[$0].started) }
       }
       if starting.isEmpty { return }
       let open = starting.filter { LocalPort.accepts($0.port) }
@@ -153,12 +164,12 @@ extension Service {
     mcp.map { s in
       MCPServerStatus(
         name: s.name, type: s.config.type, url: s.config.url(port: s.port), state: mcpState(s),
-        pid: snapshot.panes[s.pane].flatMap { !$0.dead && $0.pid > 0 ? $0.pid : nil }, restarts: s.restarts,
-        restartAt: s.restartAt, lastExit: s.lastExit, lastOutput: s.lastOutput)
+        pid: mac.snapshot.panes[s.pane].flatMap { !$0.dead && $0.pid > 0 ? $0.pid : nil }, restarts: s.restarts,
+        restartAt: s.restartAt, lastExit: s.lastExit, lastOutput: s.lastOutput, waiting: s.waiting)
     }
   }
 
-  private func mcpPaneAlive(_ pane: String) -> Bool { snapshot.panes[pane]?.dead == false }
+  private func mcpPaneAlive(_ pane: String) -> Bool { mac.snapshot.panes[pane]?.dead == false }
 
   private func mcpState(_ server: SharedServer) -> MCPServerStatus.State {
     if server.restartAt != nil || !mcpPaneAlive(server.pane) { return .exited }
@@ -185,16 +196,16 @@ extension Service {
     let command = "/bin/sh \(shellQuote(mcpScriptPath(server)))"
     do {
       try mcpScript(server).write(toFile: mcpScriptPath(server), atomically: true, encoding: .utf8)
-      switch snapshot.panes[server.pane] {
+      switch mac.snapshot.panes[server.pane] {
       case let row? where row.dead:
         // Without this, the next exit's output would include this run's.
-        host.clearHistory(server.pane)
-        try host.respawn(server.pane, cwd: NSHomeDirectory(), env: [:], command: command)
+        mac.terminals().clearHistory(server.pane)
+        try mac.terminals().respawn(server.pane, cwd: NSHomeDirectory(), env: [:], command: command)
       case .some:
-        host.kill(server.pane)
+        mac.terminals().kill(server.pane)
         fallthrough
       case nil:
-        try host.create(server.pane, cwd: NSHomeDirectory(), env: [:], command: command)
+        try mac.terminals().create(server.pane, cwd: NSHomeDirectory(), env: [:], command: command)
       }
     } catch {
       logLine("can't start MCP server \(server.name): \(error)")
