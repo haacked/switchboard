@@ -18,11 +18,10 @@
 # caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# The run that waits for a slot prints the limits before it waits. It sets
-# SB_TEST_LIMITS_SHOWN for the run inside the slot. That run unsets it, so the
-# bin/test runs inside swift test still print their own limits.
-if [ -n "${SB_TEST_LIMITS_SHOWN-}" ]; then
-  unset SB_TEST_LIMITS_SHOWN
+# The run that waits for a slot prints the limits before it waits. It passes
+# --limits-shown to the run inside the slot, which then skips the print.
+if [ "${1:-}" = --limits-shown ]; then
+  shift
 else
   slots=$(bin/lib/build-slot --slots)
   jobs=$(bin/lib/swiftpm --jobs)
@@ -41,7 +40,7 @@ if [ "${1:-}" = --shards ]; then
     ;;
   esac
 else
-  bin/lib/build-slot --check || SB_TEST_LIMITS_SHOWN=1 exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
+  bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" --limits-shown "$@"
 fi
 source bin/lib/swift-testing.sh
 require_swift_testing
