@@ -26,9 +26,10 @@ private struct ShardCall: Equatable, CustomStringConvertible {
 /// test call joins the suites that its --filter matches with "+", such as
 /// "AlphaTests". With FAKE_SWIFT_HOLD set, a test call waits until the test
 /// creates go.<id> or go.all, and then exits 1 when fail.<id> exists. It
-/// writes its SB_BUILD_SLOT_HELD to held.<id> and its parent's pid to
-/// ppid.<id>. The fake sysctl reports no load, because bin/test waits for the
-/// load to drop below the CPU count before it runs MeasureTests.
+/// writes its SB_BUILD_SLOT_HELD to held.<id>, its SB_TEST_LIMITS_SHOWN to
+/// shown.<id>, and its parent's pid to ppid.<id>. The fake sysctl reports no
+/// load, because bin/test waits for the load to drop below the CPU count
+/// before it runs MeasureTests.
 private final class ShardRig {
   static let tests = [
     "IntegrationTests.AlphaTests/a()",
@@ -84,6 +85,7 @@ private final class ShardRig {
         for arg in "$@"; do printf '%s\\n' "$arg"; done
       } >> "$FAKE_SWIFT_CALLS"
       printf '%s' "${SB_BUILD_SLOT_HELD-}" > "$FAKE_SWIFT_DIR/held.$id"
+      printf '%s' "${SB_TEST_LIMITS_SHOWN-}" > "$FAKE_SWIFT_DIR/shown.$id"
       echo "$PPID" > "$FAKE_SWIFT_DIR/ppid.$id"
       if [ "$id" = list ]; then
         cat "$FAKE_SWIFT_TESTS"
@@ -436,6 +438,12 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
 
     #expect(p.terminationStatus == 0, "\(rig.output())")
     #expect(ShardRig.limitsLines(rig.output()).count == 1, "\(rig.output())")
+    let calls = rig.slotCalls()
+    try #require(!calls.isEmpty, "\(rig.output())")
+    for call in calls {
+      let shown = try String(contentsOfFile: "\(rig.queue.root)/shown.\(call.id)", encoding: .utf8)
+      #expect(shown == "", "\(call.id)")
+    }
   }
 
   /// H holds the only slot, so a run that checked the limits inside a slot

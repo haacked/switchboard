@@ -30,7 +30,6 @@ else
   [ "$jobs" != 0 ] || jobs="one per core"
   echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
 fi
-sharded=
 if [ "${1:-}" = --shards ]; then
   case "$#:${3-}" in
   2:) [ "${CI:-}" = true ] ||
@@ -41,7 +40,6 @@ if [ "${1:-}" = --shards ]; then
     exit 2
     ;;
   esac
-  sharded=$2
 else
   bin/lib/build-slot --check || SB_TEST_LIMITS_SHOWN=1 exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
 fi
@@ -153,7 +151,7 @@ shards() {
   exit "$status"
 }
 
-if [ "${1:-}" = --shards ]; then shards "$sharded"; fi
+if [ "${1:-}" = --shards ]; then shards "$2"; fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
   shift
