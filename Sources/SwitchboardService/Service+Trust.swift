@@ -27,16 +27,16 @@ extension Service {
   /// since its launch, once per launch. It captures the screens off the
   /// state queue.
   func noteTrustDialogs() {
-    let due: [(id: String, pane: String, launch: Int64?)] = queue.sync {
+    let due: [(id: String, pane: String, launch: Int64?, site: any SessionSite)] = queue.sync {
       entries.keys.sorted().compactMap { id in
         guard let f = entries[id]?.facts, case .running = claudeState(id), !f.hookSinceLaunch,
-          f.trustLaunch != f.lastLaunch
+          f.trustLaunch != f.lastLaunch, let site = try? site(of: id)
         else { return nil }
-        return (id, paneName(id, .claude), f.lastLaunch)
+        return (id, paneName(id, .claude), f.lastLaunch, site)
       }
     }
     guard !due.isEmpty else { return }
-    let screens = due.map { ($0, try? host.screen($0.pane)) }
+    let screens = due.map { ($0, try? $0.site.screen($0.pane)) }
     queue.sync {
       for case (let s, let screen?) in screens {
         guard let f = entries[s.id]?.facts, f.lastLaunch == s.launch, f.trustLaunch != s.launch, !f.hookSinceLaunch,

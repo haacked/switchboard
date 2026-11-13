@@ -434,7 +434,7 @@ import Testing
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply != nil }
     try sbd.sb("wait", s.id, "CI", "on", "#12")
     #expect(try sbd.get(s.id).state == .waiting)
-    #expect(try sbd.get(s.id).reason == "CI on #12")
+    #expect(try sbd.get(s.id).reason.hasPrefix("CI on #12 (recheck "))
     try sbd.sb("wait", s.id, "--clear")
     try sbd.sb("done", s.id)
     #expect(try sbd.get(s.id).state == .done)

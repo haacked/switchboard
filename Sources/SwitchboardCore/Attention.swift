@@ -13,6 +13,17 @@ public struct ToolCall: Codable, Equatable, Sendable {
   public var input: JSON?
 }
 
+/// Why sbd can't read a session's host, and what the session looked like when that began.
+public struct UnreadHost: Codable, Equatable, Sendable {
+  /// When the `link_down` was recorded.
+  public var since: Int64
+  public var host: String
+  /// The link's error, or nil when the link gave none.
+  public var why: String?
+  /// The session's state when the link dropped, which the session keeps until `link_up`.
+  public var state: AttentionState?
+}
+
 /// What a session's events say about it. sbd applies each event as it
 /// arrives. At startup, sbd applies the whole event log again.
 public struct SessionFacts: Codable, Equatable, Sendable {
@@ -36,6 +47,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var transcriptPath: String?
   /// When sbd last started or resumed claude.
   public var lastLaunch: Int64?
+  /// When claude last ended, stopped, or exited.
+  public var lastExit: Int64?
   /// The prompt that the last launch passed to claude, if any.
   public var lastLaunchPrompt: String?
   /// What caused the last launch, when it resumed a conversation.
@@ -56,6 +69,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var jobsEndedAt: Int64?
   /// Subagents that started and have not stopped.
   public var subagents: Set<String> = []
+  /// When a subagent last started, stopped, or sent a hook. Other activity
+  /// does not move it, so a subagent that lost its SubagentStop stops holding
+  /// the session `Attention.subagentQuietMs` after it.
+  public var lastSubagentEvent: Int64?
   /// When the state last changed. `Attention.track` sets it.
   public var stateSince: Int64 = 0
   public var lastState: AttentionState?
@@ -148,6 +165,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// the column it left, or when the session's PR changes or goes away.
   /// `noteBoard` sets it.
   public var boardBack: BoardMove?
+  /// Set from a `link_down` until the next `link_up`: sbd can't read the session's host, so the events that
+  /// would update these facts are not arriving.
+  public var unread: UnreadHost?
 
   /// The hook events that sbd's settings file subscribes claude to.
   public static let hookKinds = [
@@ -185,6 +205,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let tool = d["tool_name"]?.string ?? ""
     if !fromSubagent, let mode = d["permission_mode"]?.string { permissionMode = mode }
     if !fromSubagent, SessionFacts.hookKinds.contains(event.kind) { hookSinceLaunch = true }
+    // SubagentStart and SubagentStop carry agent_id too, so this covers them.
+    if fromSubagent { lastSubagentEvent = event.t }
     switch event.kind {
     case "SessionStart":
       live = true
@@ -215,6 +237,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       jobs = count
     case "SessionEnd", "stopped", "exited":
       live = false
+      lastExit = event.t
       jobs = 0
       endTurn()
       subagents = []
@@ -276,6 +299,17 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       // An API or usage limit error ends the turn without a Stop. So does
       // Escape, which sbd finds out from `claude agents` and records as idle.
       endTurn()
+    case "link_down":
+      // A second `link_down` keeps the first one's time and state: the facts stopped updating at the first.
+      if unread == nil {
+        unread = UnreadHost(
+          since: event.t, host: d["host"]?.string ?? "", why: d["error"]?.string, state: lastState)
+      }
+    case "link_up":
+      unread = nil
+    case "reconciled":
+      if let reply = d["lastReply"]?.string { lastReply = reply }
+      if let activity = d["lastActivity"]?.int { lastActivity = Int64(activity) }
     case "SubagentStart":
       if let id = d["agent_id"]?.string { subagents.insert(id) }
     case "SubagentStop":
@@ -415,6 +449,8 @@ public enum Attention {
     // Only a work session has a PR. A pr event recorded for a Manager or a chat must not fire a PR rule.
     if session.kind != .work { facts.pr = nil }
     let verdict = rules(session, facts, now: now, stateOf: stateOf)
+    // A PR that became ready while sbd can't read the host must not move the kept state.
+    if facts.unread != nil { return verdict }
     return readyForReview(verdict, facts) ?? verdict
   }
 
@@ -424,6 +460,7 @@ public enum Attention {
     if session.done { return Verdict(state: .done, reason: "marked done") }
     if let verdict = followupVerdict(session) { return verdict }
     if let verdict = docketVerdict(session, facts) { return verdict }
+    if let unread = facts.unread { return unreadVerdict(session, facts, unread, stateOf: stateOf) }
     if let card = facts.cards.first {
       return Verdict(state: .needsYou, reason: oneLine(card.reason))
     }
@@ -437,14 +474,14 @@ public enum Attention {
     if let q = facts.openQuestion {
       return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
     }
-    if let v = finishedPR(session, facts) { return v }
+    if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {
         return Verdict(state: .working, reason: oneLine("\(tool.summary) (\(minutes(now - tool.since)))"))
       }
       return Verdict(state: .working, reason: "working (\(minutes(now - (facts.turnStarted ?? now))))")
     }
-    if let verdict = waitVerdict(session, facts) { return verdict }
+    if let verdict = waitVerdict(session, facts, now: now) { return verdict }
     if facts.prompts == 0 && facts.lastReply == nil {
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
@@ -455,7 +492,7 @@ public enum Attention {
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    if !facts.subagents.isEmpty, now - facts.lastActivity <= subagentQuietMs,
+    if !facts.subagents.isEmpty, now - (facts.lastSubagentEvent ?? 0) <= subagentQuietMs,
       case .other = classify(facts.lastReply ?? "")
     {
       let n = facts.subagents.count
@@ -473,6 +510,22 @@ public enum Attention {
     return replyVerdict(facts.lastReply ?? "")
   }
 
+  /// The verdict of a session whose host sbd can't read: the state that the session had when the link
+  /// dropped, with the host and the cause as the reason. No rule below this one runs, so neither time nor an
+  /// event that arrives late changes the state until `link_up`. A session with no kept state, or one that was
+  /// Done when the link dropped and no longer is, gets the state that the rules give at the time of the drop.
+  /// `track` then keeps that state.
+  private static func unreadVerdict(
+    _ session: Session, _ facts: SessionFacts, _ unread: UnreadHost, stateOf: (String) -> AttentionState?
+  ) -> Verdict {
+    let cause = unread.why.map { ": \($0)" } ?? ""
+    let reason = oneLine("\(unread.host) is not connected\(cause)", max: 200)
+    if let state = unread.state, state != .done { return Verdict(state: state, reason: reason) }
+    var read = facts
+    read.unread = nil
+    return Verdict(state: rules(session, read, now: unread.since, stateOf: stateOf).state, reason: reason)
+  }
+
   /// Evaluates the session at `now`, and records in `facts` when its state
   /// changed. sbd calls it after each event, with the event's time, and on
   /// each tick, for the states that time alone changes.
@@ -484,6 +537,10 @@ public enum Attention {
     if verdict.state != facts.lastState {
       facts.lastState = verdict.state
       facts.stateSince = now
+    }
+    // Only a session with no kept state gets one here. A rule above the unread rule must not replace a kept one.
+    if let unread = facts.unread, unread.state == nil || unread.state == .done, verdict.state != .done {
+      facts.unread?.state = verdict.state
     }
     return verdict
   }

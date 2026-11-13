@@ -23,8 +23,11 @@ private func withPanes(claude: PaneRow, shell: PaneRow, _ body: (Service) throws
   defer { try? FileManager.default.removeItem(atPath: home.path) }
   let service = try Service(home: home, sbPath: "/usr/bin/true")
   service.queue.sync {
-    service.snapshot.panes[service.paneName(session, .claude)] = claude
-    service.snapshot.panes[service.paneName(session, .shell)] = shell
+    service.entries[session] = Service.Entry(
+      session: Session(
+        id: session, name: session, cwd: "/tmp", branch: nil, claudeSessionId: "c1", model: nil, created: 0))
+    service.mac.snapshot.panes[service.paneName(session, .claude)] = claude
+    service.mac.snapshot.panes[service.paneName(session, .shell)] = shell
   }
   try body(service)
 }

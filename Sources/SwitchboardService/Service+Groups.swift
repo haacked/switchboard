@@ -53,6 +53,11 @@ extension Service {
         try saveGroup(group)
       } else if let ref = args["account"]?.string {
         guard !ref.isEmpty else { throw APIError("name an account") }
+        if let remote = entries.values.map(\.session).first(where: { $0.group == id && $0.host != nil }) {
+          throw APIError(
+            "\(remote.id) of the group is on \(remote.host!): it runs under the Claude login of \(remote.host!). Move it out of the group first"
+          )
+        }
         group.account = try resolveAccount(ref)
         try saveGroup(group)
         logLine("the group \(id) runs its sessions under \(group.account!)")
