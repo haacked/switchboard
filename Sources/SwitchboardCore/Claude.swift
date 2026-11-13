@@ -233,13 +233,25 @@ public enum ClaudeFolder {
   /// The folder that Claude names after `path`. Claude counts UTF-16 units,
   /// because it runs in JavaScript. It replaces each unit other than an ASCII
   /// letter or digit with "-". It cuts a longer name to 200 units and appends
-  /// "-" and a hash of the whole path.
+  /// "-" and a hash of the whole path. It reads the path in NFC, as claude
+  /// does, so a decomposed accent gives the same name as a precomposed one.
   public static func name(_ path: String) -> String {
-    let units = Array(path.utf16)
+    let units = Array(path.precomposedStringWithCanonicalMapping.utf16)
     let dash = UInt16(UInt8(ascii: "-"))
     let name = String(decoding: units.map { isLetterOrDigit($0) ? $0 : dash }.prefix(maxLength), as: UTF16.self)
     guard units.count > maxLength else { return name }
     return "\(name)-\(String(javaHash(units).magnitude, radix: 36))"
+  }
+
+  /// The auto-memory folder of the repository or folder at `base`. It keeps `~/` for claude to expand on the
+  /// machine where it runs.
+  public static func memoryDirectory(_ base: String) -> String { "~/.claude/projects/\(name(base))/memory" }
+
+  /// Whether `transcript` sits in the folder that `name` gives for `cwd` or for its real path. claude
+  /// names the folder of a conversation that it starts after the cwd it starts in.
+  public static func holds(_ transcript: String, startedIn cwd: String, realPath: String?) -> Bool {
+    let folder = ((transcript as NSString).deletingLastPathComponent as NSString).lastPathComponent
+    return [cwd, realPath].compactMap { $0 }.contains { name($0) == folder }
   }
 
   private static func isLetterOrDigit(_ unit: UInt16) -> Bool {
