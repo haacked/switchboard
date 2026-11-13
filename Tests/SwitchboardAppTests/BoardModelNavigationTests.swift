@@ -558,6 +558,29 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.terminalFocus == "c")
     }
 
+    /// A Manager conversation shows its terminal only while the Terminal toggle is on, as a chat does.
+    @Test(arguments: Place.allCases)
+    func aManagerWithTheTerminalToggleOffRefuses(_ place: Place) throws {
+      let model = try model(needsItem("m", manager: true), at: place)
+      model.showingTerminal = false
+      let before = Snapshot(model)
+
+      model.focusTerminal()
+
+      #expect(!model.canFocusTerminal)
+      #expect(Snapshot(model) == before)
+    }
+
+    @Test func aSelectedManagerWithTheTerminalToggleOnGetsTheTerminalFocus() throws {
+      let model = try model(needsItem("m", manager: true), at: .selection)
+      model.showingTerminal = true
+
+      model.focusTerminal()
+
+      #expect(model.canFocusTerminal)
+      #expect(model.terminalFocus == "m")
+    }
+
     @Test func aSelectedSessionGetsTheTerminalFocus() throws {
       let model = try model(needsItem("a"), at: .selection)
 
@@ -614,6 +637,30 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
 
       #expect(model.selection == "other")
       #expect(model.terminalFocus == "other")
+    }
+
+    /// The Inbox's Open Terminal button shows the item's terminal in the
+    /// Inbox's right pane and gives it the keys.
+    @Test(arguments: [Place.inboxTerminalOff, .inboxTerminalOn])
+    func openInboxTerminalShowsAndFocusesTheCurrentItemsTerminal(_ place: Place) throws {
+      let model = try model(needsItem("a"), at: place)
+
+      model.openInboxTerminal()
+
+      #expect(model.showingTerminal)
+      #expect(model.terminalFocus == "a")
+    }
+
+    /// With the Terminal toggle off, `focusTerminal` alone would select the
+    /// item and leave the Inbox.
+    @Test func openInboxTerminalStaysInTheInbox() throws {
+      let model = try model(needsItem("a"), at: .inboxTerminalOff)
+
+      model.openInboxTerminal()
+
+      #expect(model.selection == nil)
+      #expect(model.visibleView == .inbox)
+      #expect(model.currentInboxItem == "a")
     }
 
     @Test(arguments: Place.allCases)

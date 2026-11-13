@@ -63,7 +63,13 @@ fi
 
 source bin/lib/swift-testing.sh
 echo "Building…"
-build_output=$(swift build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
+# Only the build holds a build slot. The slot is taken outside the log
+# redirect, so the slot's waiting lines still reach the terminal.
+build_log=.build/gui-test/build.log
+mkdir -p "${build_log%/*}"
+: >"$build_log"
+bin/lib/build-slot bash -c 'exec bin/lib/swiftpm build "$@" >"$0" 2>&1' "$build_log" ${args[@]+"${args[@]}"} ||
+  { status=$?; cat "$build_log" >&2; exit "$status"; }
 bin_dir=$(swift build --show-bin-path)
 
 # The folder is under /tmp, because a Unix socket path can't exceed 103 bytes.
@@ -387,10 +393,12 @@ check_shell() {
     result=$(app click "$1")
     [[ $result == "clicked at "* ]] || fail "the app could not click $1 on $2: $result"
   }
-  # A chat shows its messages until the test shows its terminals, so `attached` waits only when asked.
-  start_app() { # <session> [attached]
+  # A chat and the Manager show their messages until the test shows their terminals. `terminal` shows them, then
+  # waits like `attached`.
+  start_app() { # <session> [attached | terminal]
     SB_SELECT="$1" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
     app_pid=$!
+    [ "${2:-}" != terminal ] || app show-terminal >/dev/null
     [ -z "${2:-}" ] || wait_for 120 has_clients "$1-claude" || fail "the app did not attach to $1's Claude pane"
   }
   remember_claude() { cc=$(clients "$1-claude") cp=$(sb get "$1" --json | jq -r .claudePid); }
@@ -405,14 +413,14 @@ check_shell() {
     same_claude "$1"
   }
 
-  start_app "$manager" attached
+  start_app "$manager" terminal
   wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the Manager's shell"
   remember_claude "$manager"
   click close "the Manager"
   closes "$manager" "the close button"
   app snapshot "$shots/manager-closed.png" >/dev/null
   end_app
-  start_app "$manager" attached
+  start_app "$manager" terminal
   sleep 2
   shell_gone "$manager" && panes_are 1 || fail "a relaunch started the Manager's shell again"
   remember_claude "$manager"
@@ -428,6 +436,7 @@ check_shell() {
   remember_claude "$work"
   app ctrl-d >/dev/null
   closes "$work" "Ctrl-D"
+  app show-terminal >/dev/null
   app select "$manager" >/dev/null
   sleep 3
   app select "$work" >/dev/null
@@ -462,9 +471,7 @@ check_shell() {
   closes "$work" "the Inbox's close button"
   end_app
 
-  start_app "$chat"
-  app show-terminal >/dev/null
-  wait_for 120 has_clients "$chat-claude" || fail "the app did not attach to the chat's Claude pane"
+  start_app "$chat" terminal
   wait_for 60 has_clients "$chat-shell" || fail "the app did not attach to the chat's shell"
   remember_claude "$chat"
   click close "the chat"

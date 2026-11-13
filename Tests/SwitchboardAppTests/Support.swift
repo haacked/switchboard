@@ -3,17 +3,17 @@ import SwiftTerm
 import SwiftUI
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
-final class Counter: @unchecked Sendable {
-  private let lock = NSLock()
-  private var count = 0
-  var value: Int { lock.withLock { count } }
+final class Counter: Sendable {
+  private let count = OSAllocatedUnfairLock(initialState: 0)
+  var value: Int { count.withLock { $0 } }
   @discardableResult func increment() -> Int {
-    lock.withLock {
-      count += 1
-      return count
+    count.withLock {
+      $0 += 1
+      return $0
     }
   }
 }
@@ -150,6 +150,17 @@ func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "
     id: id, name: "fix", cwd: "/worktrees/posthog/haacked/fix", repo: "/repos/posthog", branch: "haacked/fix",
     claudeSessionId: "c", state: state, reason: "", since: 0, lastActivity: 0, live: false, claudePid: nil,
     attached: false, lastReply: nil, waits: [], notes: notes)
+}
+
+// MARK: - Cards
+
+/// A permission card that asks to run `ls` in the session.
+func permissionCard(_ id: Int64, session: String, hookClosed: Bool = false) throws -> Card {
+  let json: JSON = [
+    "id": .number(Double(id)), "session": .string(session), "kind": "permission", "tool": "Bash", "summary": "`ls`",
+    "input": [:], "questions": [], "since": 0, "deferred": false, "hookClosed": .bool(hookClosed),
+  ]
+  return try JSONCoding.convert(json, to: Card.self)
 }
 
 // MARK: - Notes and issues

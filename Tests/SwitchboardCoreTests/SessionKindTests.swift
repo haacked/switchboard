@@ -24,4 +24,9 @@ import Testing
 
     #expect(encoded == ["work", "manager", "chat"])
   }
+
+  @Test(arguments: [(SessionKind.work, false), (.manager, true), (.chat, true)] as [(SessionKind, Bool)])
+  func onlyAManagerConversationAndAGroupChatShowAsAChat(_ kind: SessionKind, _ showsAsChat: Bool) {
+    #expect(kind.showsAsChat == showsAsChat)
+  }
 }

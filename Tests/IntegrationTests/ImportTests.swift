@@ -255,7 +255,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.sb("send", s.id, "run them") == "resumed\n")
     try sbd.waitFor(s.id, "the resumed turn's reply") { $0.lastReply == "Done: run them" }
     let resume = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
-    #expect(resume.args == "--resume \(id) --settings \(sbd.home.claudeSettings) -- run them")
+    #expect(resume.args == "--resume \(id) --settings \(sbd.home.claudeSettings(s.id)) -- run them")
     #expect(resume.account == sbd.account("A"))
   }
 
@@ -287,7 +287,7 @@ private func reasons(_ result: ImportResult) -> [String: String] {
     #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
     try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
     let start = try #require(sbd.stubCalls().last { !$0.args.hasPrefix("agents") })
-    #expect(start.args == "--session-id \(id) --settings \(sbd.home.claudeSettings) -- begin")
+    #expect(start.args == "--session-id \(id) --settings \(sbd.home.claudeSettings(s.id)) -- begin")
   }
 
   @Test func anImportedSessionStartsInAutoModeWhenTheSettingIsOn() throws {

@@ -384,11 +384,11 @@ private let approvedByAlice = samplePR(reviewDecision: .approved, verdicts: [sam
 
   @Test(arguments: [(false, Bool?.none), (true, Bool?.some(true))])
   func approvedPRWithResolvedDependenciesIsMerged(_ deploy: Bool, _ deployed: Bool?) throws {
-    let f = try edgeFacts(approvedByAlice, [bodyEdge(41, deploy: deploy, state: .merged, deployed: deployed)])
+    var pr = approvedByAlice
+    pr.checks = "SUCCESS"
+    let f = try edgeFacts(pr, [bodyEdge(41, deploy: deploy, state: .merged, deployed: deployed)])
 
-    #expect(
-      Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .needsYou, reason: "merge #42, approved by alice"))
+    #expect(Attention.evaluate(session(), f, now: Self.now).state == .readyToMerge)
   }
 
   @Test func approvedPRWithAnUnresolvedDependencyAndAQuestionAnswersTheQuestion() throws {

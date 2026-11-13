@@ -79,6 +79,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var waitOutcome: String?
   /// Open and deferred permission prompts and questions, oldest first.
   public var cards: [Card] = []
+  /// Why the open prompt's card left while the prompt stayed open.
+  public var cardGone: CardGone?
   /// Messages that sbd sent on its own, such as a wait's outcome, until
   /// claude reports each one as a prompt.
   public var sbdMessages: [String] = []
@@ -401,8 +403,8 @@ public struct Verdict: Equatable, Sendable {
   public var callouts: [Callout] = []
   /// The card's summary for a rule that has more to say than its reason.
   public var summary: String?
-  /// True for the verdicts that ask the user to merge or enqueue the PR,
-  /// whose summary says what the PR does.
+  /// True for the Ready to merge verdict, the only one that asks the user to
+  /// merge or enqueue the PR. Its summary says what the PR does.
   public var summarizesPR = false
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
@@ -466,10 +468,11 @@ public enum Attention {
         state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
     if let p = facts.openPermission {
-      return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
+      return Verdict(
+        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
     }
     if let q = facts.openQuestion {
-      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
     }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
