@@ -141,6 +141,7 @@ struct NewSessionView: View {
 }
 
 /// Asks for a folder, or returns nil when the user cancels.
+@MainActor
 func chooseFolder(message: String? = nil, at start: String? = nil) -> String? {
   let panel = NSOpenPanel()
   panel.canChooseDirectories = true

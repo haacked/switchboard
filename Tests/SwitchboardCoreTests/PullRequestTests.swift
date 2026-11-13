@@ -109,6 +109,26 @@ func sampleVerdict(_ author: String, _ state: String, on commit: String? = nil) 
   }
 }
 
+@Suite struct StateAccessors {
+  @Test(
+    arguments: [
+      ("SUCCESS", true), ("FAILURE", false), ("ERROR", false), ("PENDING", false), ("EXPECTED", false),
+      ("SOMETHING_NEW", false), (nil, false),
+    ] as [(String?, Bool)])
+  func checksPassedOnlyOnSuccess(_ checks: String?, _ passed: Bool) {
+    #expect(samplePR(checks: checks).checksPassed == passed)
+  }
+
+  @Test(arguments: ["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING", "SOMETHING_NEW"])
+  func reviewAccessorsMatchOnlyTheirOwnState(_ state: String) {
+    let review = sampleVerdict("alice", state)
+
+    #expect(review.isApproval == (state == "APPROVED"))
+    #expect(review.requestsChanges == (state == "CHANGES_REQUESTED"))
+    #expect(review.isPending == (state == "PENDING"))
+  }
+}
+
 @Suite struct PullRequestNeedsReview {
   @Test(arguments: [
     (ReviewDecision?.some(.reviewRequired), Bool?.some(true), Bool?.some(true)),
