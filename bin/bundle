@@ -2,14 +2,18 @@
 # Builds build/Switchboard.app in release mode. Contents/MacOS holds the app,
 # sbd, and sb, because the app and sb find their siblings there. The bundle is
 # signed ad hoc, which is enough to run it on this Mac. Info.plist records the
-# commit it built, which bin/install compares before it replaces an app.
+# commit it built, which bin/install compares before it replaces an app. It
+# holds a machine-wide build slot (bin/lib/build-slot) for the whole run, so
+# bin/install takes one through it. bin/update takes its slot before it quits
+# the app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/bundle" "$@"
 source bin/lib/install-guard.sh
 commit=$(git rev-parse HEAD)
 dirty=false
 if [ -n "$(git status --porcelain)" ]; then dirty=true; fi
-swift build -c release
+bin/lib/swiftpm build -c release
 bin=$(swift build -c release --show-bin-path)
 version=$("$bin/sb" version | awk '{print $2}')
 app=build/Switchboard.app

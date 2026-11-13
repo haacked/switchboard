@@ -34,6 +34,9 @@ if ! git merge-base --is-ancestor HEAD origin/main; then
   exit 1
 fi
 if [ ${#force[@]} -eq 0 ]; then require_newer_than_installed "$app" origin/main; fi
+# The script takes its build slot before it quits the app, so the app stays
+# open during the wait. The nested bin/bundle then runs without a second slot.
+bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/update" "$@"
 
 bundle_id=com.haacked.switchboard
 if [ -f "$app/Contents/Info.plist" ]; then

@@ -88,4 +88,41 @@ public struct ChatMessage: Codable, Equatable, Sendable {
     self.text = text
     self.t = t
   }
+
+  /// Whether the message is a notice that Switchboard pasted into the conversation.
+  public var isNotice: Bool { role == .user && text.hasPrefix("Switchboard:") }
+
+  /// The output of a built-in command such as `/model`, when the message is the line Claude Code writes for
+  /// it. Claude Code writes that line as a user message without `isMeta`.
+  public var commandOutput: String? {
+    guard role == .user, text.drop(while: \.isWhitespace).hasPrefix("<local-command-") else { return nil }
+    let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    for tag in ["local-command-stdout", "local-command-stderr"] {
+      let open = "<\(tag)>"
+      let close = "</\(tag)>"
+      if line.count >= open.count + close.count, line.hasPrefix(open), line.hasSuffix(close) {
+        return line.dropFirst(open.count).dropLast(close.count).trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+    }
+    return nil
+  }
+
+  /// The `/name args` that the user typed, when the message is the line Claude Code writes for a slash
+  /// command. The line is a run of `<command-…>` elements in no fixed order, so the parser reads each by its tag.
+  public var slashCommand: String? {
+    guard role == .user else { return nil }
+    var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)[...]
+    var elements: [Substring: String] = [:]
+    // An element's text may mention another tag, so the scan skips each element whole.
+    while rest.hasPrefix("<command-"), let tagEnd = rest.firstIndex(of: ">") {
+      let tag = rest[rest.index(after: rest.startIndex)..<tagEnd]
+      let start = rest.index(after: tagEnd)
+      guard let close = rest.range(of: "</\(tag)>", range: start..<rest.endIndex) else { break }
+      elements[tag] = rest[start..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+      rest = rest[close.upperBound...].drop(while: \.isWhitespace)
+    }
+    guard let name = elements["command-name"], !name.isEmpty else { return nil }
+    guard let args = elements["command-args"], !args.isEmpty else { return name }
+    return "\(name) \(args)"
+  }
 }
