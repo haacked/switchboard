@@ -171,11 +171,16 @@ private final class NewMachine: StubMachine {
 
 @Suite(.blocking(timeLimit: .seconds(60))) struct PrerequisiteTests {
   static let tools = ["tmux", "gh", "claude"]
+  static var helper: String { Instance.root.appendingPathComponent("bin/lib/prerequisites.sh").path }
 
-  private func check(_ machine: StubMachine) throws -> CommandResult {
-    let helper = Instance.root.appendingPathComponent("bin/lib/prerequisites.sh").path
-    let body = "set -euo pipefail\nsource \(shellQuote(helper))\ncheck_prerequisites"
-    return try runCommand("/bin/bash", ["-c", body], env: machine.env, timeout: 30)
+  private func check(_ machine: StubMachine, _ body: String = "check_prerequisites") throws -> CommandResult {
+    let script = "set -euo pipefail\nsource \(shellQuote(Self.helper))\n\(body)"
+    return try runCommand("/bin/bash", ["-c", script], env: machine.env, timeout: 30)
+  }
+
+  private func writeConfig(_ machine: StubMachine, _ json: String) throws {
+    try FileManager.default.createDirectory(atPath: "\(machine.home)/.sb", withIntermediateDirectories: true)
+    try json.write(toFile: "\(machine.home)/.sb/config.json", atomically: true, encoding: .utf8)
   }
 
   @Test func everyToolPresentPassesQuietly() throws {
@@ -183,13 +188,6 @@ private final class NewMachine: StubMachine {
 
     #expect(r.status == 0, "\(r.stderr)")
     #expect(r.stderr == "")
-  }
-
-  @Test(arguments: ["tmux", "gh"]) func aMissingToolIsRefused(tool: String) throws {
-    let r = try check(try StubMachine(tools: Self.tools.filter { $0 != tool }))
-
-    #expect(r.status == 1)
-    #expect(r.stderr.contains("brew install \(tool)"), "\(r.stderr)")
   }
 
   @Test func everyMissingToolIsListed() throws {
@@ -207,7 +205,7 @@ private final class NewMachine: StubMachine {
     let r = try check(machine)
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(r.stderr.contains("claude is not on PATH"), "\(r.stderr)")
+    #expect(r.stderr.contains("can't find claude"), "\(r.stderr)")
     #expect(r.stderr.contains("gh auth login"), "\(r.stderr)")
   }
 
@@ -222,27 +220,53 @@ private final class NewMachine: StubMachine {
     #expect(r.stderr == "")
   }
 
-  /// The swift stub fails loudly, so a bin/install that skips the check fails with the wrong message.
-  @Test func binInstallChecksBeforeItBuilds() throws {
+  /// sbd runs the tools that config.json names, so a tool there passes even when PATH doesn't have it.
+  @Test func theToolsThatConfigJsonNamesPass() throws {
+    let machine = try StubMachine(tools: [])
+    for tool in Self.tools { try writeScript("\(machine.home)/tools/\(tool)", "exit 0") }
+    try writeConfig(
+      machine,
+      #"{"tmux": "~/tools/tmux", "github": {"gh": "\#(machine.home)/tools/gh"}, "claude": "~/tools/claude"}"#)
+
+    let r = try check(machine)
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stderr == "")
+  }
+
+  @Test func aConfiguredToolThatIsMissingIsRefused() throws {
+    let machine = try StubMachine(tools: Self.tools)
+    try writeConfig(machine, #"{"tmux": "/nowhere/tmux"}"#)
+
+    let r = try check(machine)
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("/nowhere/tmux"), "\(r.stderr)")
+  }
+
+  /// bin/update runs the check and then runs bin/install, which checks in a child process.
+  @Test func aChildProcessSkipsTheCheckAfterItPasses() throws {
+    let machine = try StubMachine(tools: ["tmux", "claude"])
+    try machine.stub("gh", "echo gh >>\"$HOME/gh-calls\"")
+    let child = "bash -c \(shellQuote("source \(shellQuote(Self.helper)); check_prerequisites"))"
+
+    let r = try check(machine, "check_prerequisites\n\(child)")
+
+    #expect(r.status == 0, "\(r.stderr)")
+    let calls = (try? String(contentsOfFile: "\(machine.home)/gh-calls", encoding: .utf8)) ?? ""
+    #expect(calls == "gh\n")
+  }
+
+  /// The swift stub fails loudly, so bin/install fails with the wrong message if it skips the check. Without the
+  /// check, bin/update refuses for another reason, such as the branch.
+  @Test(arguments: ["bin/install", "bin/update"]) func aScriptChecksBeforeItBuildsOrQuitsTheApp(script: String) throws {
     let machine = try StubMachine(tools: ["gh", "claude"])
     try machine.stub("swift", "echo 'swift ran' >&2; exit 99")
 
-    let r = try runCommand(
-      Instance.root.appendingPathComponent("bin/install").path, [], env: machine.env, timeout: 30)
+    let r = try runCommand(Instance.root.appendingPathComponent(script).path, [], env: machine.env, timeout: 30)
 
     #expect(r.status == 1)
     #expect(r.stderr.contains("brew install tmux"), "\(r.stderr)")
     #expect(!r.stderr.contains("swift ran"), "\(r.stderr)")
-  }
-
-  /// bin/update checks before it quits the app. Without the check, it refuses for another reason, such as the branch.
-  @Test func binUpdateChecksBeforeItQuitsTheApp() throws {
-    let machine = try StubMachine(tools: ["gh", "claude"])
-
-    let r = try runCommand(
-      Instance.root.appendingPathComponent("bin/update").path, [], env: machine.env, timeout: 30)
-
-    #expect(r.status == 1)
-    #expect(r.stderr.contains("brew install tmux"), "\(r.stderr)")
   }
 }

@@ -4,20 +4,34 @@
 # that Switchboard needs and can't find. It warns when claude is missing or gh
 # is signed out, because sessions need both but the install doesn't.
 
+# Prints the config.json setting at key path $1, or $2 when config.json doesn't
+# set it. sbd reads the same keys and expands a leading ~ the same way.
+switchboard_setting() {
+  local config="${SB_HOME:-$HOME/.sb}/config.json" value
+  value=$([ -f "$config" ] && plutil -extract "$1" raw -o - "$config" 2>/dev/null) || value=$2
+  echo "${value/#\~/$HOME}"
+}
+
 check_prerequisites() {
+  # bin/update runs the check, then runs bin/install, which would run it again.
+  [ -z "${SB_PREREQUISITES_CHECKED:-}" ] || return 0
   # sbd's findExecutable also searches these folders, so a tool there works
   # even when this shell's PATH lacks them, as on a new Mac before Homebrew's
   # shellenv runs. SB_TOOL_FOLDERS lets a test replace them.
   local PATH="$PATH:${SB_TOOL_FOLDERS:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin}"
-  local missing=()
-  command -v tmux >/dev/null || missing+=("tmux: run brew install tmux")
-  command -v gh >/dev/null || missing+=("gh: run brew install gh")
+  local missing=() tmux gh claude
+  tmux=$(switchboard_setting tmux tmux)
+  gh=$(switchboard_setting github.gh gh)
+  claude=$(switchboard_setting claude claude)
+  command -v "$tmux" >/dev/null || missing+=("$tmux: run brew install tmux")
+  command -v "$gh" >/dev/null || missing+=("$gh: run brew install gh")
   if [ ${#missing[@]} -gt 0 ]; then
     echo "Switchboard needs:" >&2
     printf '  %s\n' "${missing[@]}" >&2
     return 1
   fi
-  command -v claude >/dev/null || echo "Warning: claude is not on PATH. Switchboard's sessions run it." >&2
-  gh auth status >/dev/null 2>&1 ||
+  command -v "$claude" >/dev/null || echo "Warning: can't find $claude. Switchboard's sessions run it." >&2
+  "$gh" auth status >/dev/null 2>&1 ||
     echo "Warning: gh is not signed in. Run gh auth login so Switchboard can follow pull requests." >&2
+  export SB_PREREQUISITES_CHECKED=1
 }
