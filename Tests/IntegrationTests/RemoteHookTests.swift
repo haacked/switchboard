@@ -72,11 +72,13 @@ private func runBoxShim(_ sbd: Instance, session: String, payload: JSON) throws 
     let sbd = try Instance.remote()
 
     _ = try sbd.startOnHost()
+    let local = try sbd.new(prompt: "hello")
+    try sbd.waitFor(local.id, "the local reply") { $0.lastReply == "Done: hello" }
 
     let shim = try String(contentsOfFile: sbd.boxShim, encoding: .utf8)
     #expect(shim.contains("spool.jsonl"), "the shim names no spool")
     let settings = try #require(JSON.parse(try String(contentsOfFile: sbd.boxSettings, encoding: .utf8)))
-    let mac = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings, encoding: .utf8)))
+    let mac = try #require(JSON.parse(try String(contentsOfFile: sbd.home.claudeSettings(local.id), encoding: .utf8)))
     #expect(Set(settings["hooks"]?.object?.keys.map { $0 } ?? []) == Set(SessionFacts.hookKinds))
     for event in SessionFacts.hookKinds {
       let entry = try #require(settings["hooks"]?[event]?.array?.first, "no \(event) hook")
@@ -125,7 +127,7 @@ private func runBoxShim(_ sbd: Instance, session: String, payload: JSON) throws 
     #expect(Array(args.prefix(2)) == ["--session-id", s.claudeSessionId], "\(args)")
     let settings = try #require(args.firstIndex(of: "--settings").map { args[$0 + 1] }, "\(args)")
     #expect(real(settings) == real(sbd.boxSettings))
-    #expect(!args.contains(sbd.home.claudeSettings))
+    #expect(!args.contains(sbd.home.claudeSettings(s.id)))
   }
 
   // MARK: Live

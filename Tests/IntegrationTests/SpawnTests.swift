@@ -104,7 +104,9 @@ import Testing
     try sbd.waitFor(s.id, "the first turn") { $0.lastReply == "Done: Fix the cache. It reads twice." }
     #expect(
       sbd.stubArgs()
-        == ["--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- Fix the cache. It reads twice."]
+        == [
+          "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- Fix the cache. It reads twice."
+        ]
     )
   }
 
