@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Runs bin/lib/build-slot.py, which queues builds machine-wide. Its docstring
+# describes the queue.
+#
+# /usr/bin/python3 is an xcrun shim. The shim adds SDKROOT, CPATH, and
+# LIBRARY_PATH to the environment. Every command that the helper runs would
+# inherit them. SDKROOT names the Command Line Tools SDK even when swift comes
+# from Xcode, and that swift then fails to compile Package.swift. This script
+# runs the python3 that xcrun finds, which leaves the environment as the
+# caller set it.
+set -euo pipefail
+python=$(xcrun --find python3)
+exec "$python" "$(dirname "$0")/build-slot.py" "$@"
