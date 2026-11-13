@@ -121,7 +121,7 @@ extension Service {
   func liveRequest(_ args: JSON) throws -> JSON {
     if let value = args["cap"] {
       guard let cap = value.int, cap >= 1 else { throw APIError("the live cap is a whole number of at least 1") }
-      try saveLiveCap(cap)
+      try saveSetting("liveCap", .number(Double(cap)))
       liveCap = cap
       logLine("the live cap is \(cap)")
     }
@@ -148,18 +148,4 @@ extension Service {
     return try JSON(encoding: status)
   }
 
-  /// Writes the cap into config.json and keeps every other setting there.
-  /// It refuses to rewrite a file that it can't read as a JSON object.
-  private func saveLiveCap(_ cap: Int) throws {
-    var settings: [String: JSON] = [:]
-    if FileManager.default.fileExists(atPath: home.config) {
-      let text = try String(contentsOfFile: home.config, encoding: .utf8)
-      guard let object = JSON.parse(text)?.object else {
-        throw APIError("\(home.config) isn't a JSON object, so the cap can't be saved there")
-      }
-      settings = object
-    }
-    settings["liveCap"] = .number(Double(cap))
-    try (JSON.object(settings).prettyText + "\n").write(toFile: home.config, atomically: true, encoding: .utf8)
-  }
 }
