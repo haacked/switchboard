@@ -53,7 +53,8 @@ public enum ClaudeScreen {
   /// sbd may not when `shows` rejects the screen's dialog or no dialog
   /// shows. A dialog starts with a full-width rule, so a dialog without one
   /// lost its top lines to the pane's height. The trust dialog shows only a
-  /// folder, so any other trust dialog gets the plain refusal.
+  /// folder, so any other trust dialog gets the refusal that the terminal
+  /// doesn't show the card's dialog.
   public static func typingDialog(_ card: Card, screen: String?) throws -> [String] {
     func notShown() -> APIError {
       APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")

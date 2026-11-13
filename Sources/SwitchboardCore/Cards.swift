@@ -308,6 +308,9 @@ public enum CardGone: Codable, Equatable, Sendable {
   case unreadable
   /// `DialogWatch` saw the dialog leave without Yes or a pick.
   case dialogLeft
+  /// The dialog of a card whose hook had closed left the screen. Without the
+  /// hook, sbd can't tell Yes in the terminal from No or Escape.
+  case dialogLeftAfterHookClosed
 }
 
 extension SessionFacts {
@@ -330,6 +333,9 @@ extension SessionFacts {
     case .dialogLeft:
       return "The dialog left the terminal without an answer from Switchboard, as No or Escape in the terminal does. "
         + "Open the Terminal to see where the session stands."
+    case .dialogLeftAfterHookClosed:
+      return "The dialog left the terminal after Claude Code stopped waiting on Switchboard, so Switchboard can't "
+        + "tell whether it was allowed. Open the Terminal to see where the session stands."
     case nil:
       return "Switchboard has no card for this prompt. Answer it in the terminal."
     }
@@ -393,7 +399,11 @@ extension SessionFacts {
       // Escape leave the prompt open until the turn ends.
       guard let card else { return }
       let closed = cards.remove(at: card)
-      if d["allowed"]?.bool == true { closePrompt(closed) } else { cardGone = .dialogLeft }
+      if d["allowed"]?.bool == true {
+        closePrompt(closed)
+      } else {
+        cardGone = closed.hookClosed ? .dialogLeftAfterHookClosed : .dialogLeft
+      }
     case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.outlivesTurn }

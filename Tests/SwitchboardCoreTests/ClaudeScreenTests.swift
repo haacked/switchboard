@@ -364,6 +364,12 @@ func redrawnDialog(_ fixture: String, _ line: String, _ rows: [String]) throws -
     #expect(results(&watch, [bashCard(capturedCommand)], [try gone(), try gone(), try gone()]) == [[], [], []])
   }
 
+  @Test func anUnmatchedDialogIsNoSighting() throws {
+    var watch = DialogWatch()
+    let screens = [try screen("perm-open-other"), try gone(), try gone()]
+    #expect(results(&watch, [bashCard(capturedCommand)], screens) == [[], [], []])
+  }
+
   @Test func aDialogThatWasSeenHasLeftAfterTwoMisses() throws {
     var watch = DialogWatch()
     let card = bashCard(capturedCommand)

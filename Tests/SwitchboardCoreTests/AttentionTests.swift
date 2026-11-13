@@ -531,6 +531,9 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
   static let dialogLeft =
     "The dialog left the terminal without an answer from Switchboard, as No or Escape in the terminal does. "
     + "Open the Terminal to see where the session stands."
+  static let dialogLeftAfterHookClosed =
+    "The dialog left the terminal after Claude Code stopped waiting on Switchboard, so Switchboard can't tell "
+    + "whether it was allowed. Open the Terminal to see where the session stands."
   static let noCard = "Switchboard has no card for this prompt. Answer it in the terminal."
 
   /// The facts after `events` and an sbd restart, then `after`.
@@ -584,7 +587,8 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
       switch self {
       case .fetchRestarted, .fetchHookClosed, .unmarkedQuestionRestarted, .notificationAfterTheFetchCardWent:
         CardlessPrompt.unreadable
-      case .editDialogLeft, .editRestartedThenDialogLeft: CardlessPrompt.dialogLeft
+      case .editDialogLeft: CardlessPrompt.dialogLeft
+      case .editRestartedThenDialogLeft: CardlessPrompt.dialogLeftAfterHookClosed
       case .notificationOnly: CardlessPrompt.notificationOnly
       }
     }
@@ -738,7 +742,7 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
         CardlessPrompt.bashRequest, event("card_closed", 7, ["card": 5]), event("dialog_closed", 8, ["card": 5]),
       ])
 
-    #expect(f.cardlessPromptReason == CardlessPrompt.dialogLeft)
+    #expect(f.cardlessPromptReason == CardlessPrompt.dialogLeftAfterHookClosed)
   }
 }
 
