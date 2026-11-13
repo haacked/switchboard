@@ -18,6 +18,18 @@
 # caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The run that waits for a slot prints the limits before it waits. It sets
+# SB_TEST_LIMITS_SHOWN for the run inside the slot. That run unsets it, so the
+# bin/test runs inside swift test still print their own limits.
+if [ -n "${SB_TEST_LIMITS_SHOWN-}" ]; then
+  unset SB_TEST_LIMITS_SHOWN
+else
+  slots=$(bin/lib/build-slot --slots)
+  jobs=$(bin/lib/swiftpm --jobs)
+  [ "$slots" != 0 ] || slots=off
+  [ "$jobs" != 0 ] || jobs="one per core"
+  echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
+fi
 sharded=
 if [ "${1:-}" = --shards ]; then
   case "$#:${3-}" in
@@ -31,13 +43,8 @@ if [ "${1:-}" = --shards ]; then
   esac
   sharded=$2
 else
-  bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
+  bin/lib/build-slot --check || SB_TEST_LIMITS_SHOWN=1 exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
 fi
-slots=$(bin/lib/build-slot --slots)
-jobs=$(bin/lib/swiftpm --jobs)
-[ "$slots" != 0 ] || slots=off
-[ "$jobs" != 0 ] || jobs="one per core"
-echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
 source bin/lib/swift-testing.sh
 require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such
@@ -146,7 +153,7 @@ shards() {
   exit "$status"
 }
 
-if [ -n "$sharded" ]; then shards "$sharded"; fi
+if [ "${1:-}" = --shards ]; then shards "$sharded"; fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
   shift

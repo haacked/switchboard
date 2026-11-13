@@ -171,11 +171,13 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
   func aNonIntegerBuildJobsExitsTwoWithoutRunningSwift(_ value: String) throws {
     let rig = try ScriptRig()
     defer { rig.stop() }
+    try rig.holdTheSlot()
 
     let r = try rig.swiftpm("build", env: ["SB_BUILD_JOBS": value])
 
     #expect(r.status == 2)
     #expect(r.stderr.contains("SB_BUILD_JOBS"), "\(r.stderr)")
+    #expect(!r.stderr.contains(SlotQueue.waitingPrefix), "\(r.stderr)")
     #expect(rig.swiftCalls().isEmpty)
   }
 

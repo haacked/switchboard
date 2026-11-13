@@ -332,6 +332,24 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     #expect(rig.queue.mostRunningAtOnce() == 2, "\(rig.queue.logLines())")
   }
 
+  /// CI runs the shards with the queue off, so all three parallel shards run
+  /// at once without tickets.
+  @Test func theQueueOffRunsEveryParallelShardAtOnce() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    let p = try rig.start(["--shards", "2"], env: ["FAKE_SWIFT_HOLD": "1", "SB_BUILD_SLOTS": "0"])
+    try rig.waitForShards(ShardRig.parallelShards.count)
+
+    try rig.releaseEveryCallUntilExit(p)
+
+    #expect(p.terminationStatus == 0, "\(rig.output())")
+    #expect(rig.queue.mostRunningAtOnce() == ShardRig.parallelShards.count, "\(rig.queue.logLines())")
+    #expect(rig.waitingLines() == 0, "\(rig.output())")
+    let calls = rig.slotCalls()
+    #expect(calls.allSatisfy { $0.tickets == 0 }, "\(calls)")
+    for call in calls { #expect(try rig.queue.held(call.id) == "", "\(call.id)") }
+  }
+
   /// The first shard to start is one of the three parallel shards, so the
   /// next one starts only when the first one's slot frees. A killed helper
   /// leaves its fake swift held, so the next start shows that the helper's
@@ -389,7 +407,7 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
 
   @Test(
     arguments: zip(
-      [RunPath.plain, .plain, .plain, .shards], [Limits.numbers, .defaults, .zeros, .numbers]))
+      [RunPath.plain, .plain, .plain, .shards, .shards], [Limits.numbers, .defaults, .zeros, .numbers, .zeros]))
   fileprivate func binTestPrintsTheLimitsOnceOnStderr(_ path: RunPath, _ limits: Limits) throws {
     let rig = try ShardRig()
     defer { rig.stop() }
@@ -401,15 +419,61 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     #expect(ShardRig.limitsLines(r.stdout).isEmpty, "\(r.stdout)")
   }
 
+  /// H holds the only slot, so the plain run waits for it.
+  @Test func aPlainRunPrintsTheLimitsBeforeItWaitsForASlot() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    try rig.queue.startHolder("H")
+    let p = try rig.start(RunPath.plain.arguments)
+    try rig.waitForWaitingLines(1)
+
+    let lines = rig.queue.stderrLines(ShardRig.id)
+    let limits = try #require(lines.firstIndex { $0.contains(ShardRig.limitsPrefix) }, "\(lines)")
+    let waiting = try #require(lines.firstIndex { $0.contains(SlotQueue.waitingPrefix) }, "\(lines)")
+    #expect(limits < waiting, "\(lines)")
+
+    try rig.releaseEveryCallUntilExit(p)
+
+    #expect(p.terminationStatus == 0, "\(rig.output())")
+    #expect(ShardRig.limitsLines(rig.output()).count == 1, "\(rig.output())")
+  }
+
+  /// H holds the only slot, so a run that checked the limits inside a slot
+  /// would wait for H until its timeout.
   @Test(arguments: RunPath.allCases, ["SB_BUILD_SLOTS", "SB_BUILD_JOBS"])
   fileprivate func aBadLimitStopsBinTestBeforeSwiftRuns(_ path: RunPath, _ variable: String) throws {
     let rig = try ShardRig()
     defer { rig.stop() }
+    try rig.queue.startHolder("H")
 
-    let r = try rig.run(path.arguments, env: [variable: "x"])
+    let r = try rig.run(path.arguments, env: [variable: "x"], timeout: 30)
 
     #expect(r.status != 0)
     #expect(r.stderr.contains("\(variable) must be a whole number"), "\(r.stderr)")
+    #expect(!(r.stdout + r.stderr).contains(SlotQueue.waitingPrefix), "\(r.stdout)\(r.stderr)")
+    #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
+  }
+
+  @Test(arguments: [["--shards"], ["--shards", "--force-shards", "2"], ["--shards", "2", "--filter", "X"]])
+  func aMalformedShardsCallPrintsTheUsageAndRunsNothing(_ arguments: [String]) throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(arguments)
+
+    #expect(r.status == 2, "\(r.stderr)")
+    #expect(r.stderr.contains("usage: bin/test --shards N [--force-shards]"), "\(r.stderr)")
+    #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
+  }
+
+  @Test func anEmptyShardCountExitsTwoBeforeSwiftRuns() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(["--shards", ""], env: ["CI": "true"])
+
+    #expect(r.status == 2, "\(r.stderr)")
+    #expect(r.stderr.contains("--shards needs a positive count"), "\(r.stderr)")
     #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
   }
 
