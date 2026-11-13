@@ -57,9 +57,8 @@ extension SessionFacts {
 }
 
 extension PullRequest {
-  /// Whether someone submitted a review. A pending review is the viewer's
-  /// own draft, which nobody else sees.
-  public var hasReview: Bool { reviews.contains { $0.state != "PENDING" } }
+  /// Whether someone submitted a review.
+  public var hasReview: Bool { reviews.contains { !$0.isPending } }
 }
 
 extension Attention {

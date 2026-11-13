@@ -95,7 +95,7 @@ final class DepotPoller {
     if let org { headers["x-depot-org"] = org }
     let (status, _, data) = try postJSON(url, headers: headers, body: body)
     requests += 1
-    let json = JSON.parse(String(decoding: data, as: UTF8.self))
+    let json = JSON.parse(data)
     let message = oneLine(json?["message"]?.string ?? "", max: 120)
     if status == 401 {
       throw Unauthorized(message: "depot: \(message.isEmpty ? "unauthorized" : message); run `depot login`")

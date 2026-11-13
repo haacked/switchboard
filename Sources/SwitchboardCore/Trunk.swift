@@ -2,7 +2,7 @@ import Foundation
 
 /// Where a pull request stands in Trunk's merge queue. `trunk merge status`
 /// and Trunk's PR comments both map to these states.
-public enum TrunkQueueState: String, Codable, Sendable {
+public enum TrunkQueueState: String, Codable, Sendable, CaseIterable {
   /// Submitted. Trunk adds the PR to the queue once its branch protection
   /// rules pass.
   case submitted

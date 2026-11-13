@@ -352,6 +352,18 @@ final class Instance {
     try waitFor(id, "the idle stop", timeout: 10) { !$0.live }
   }
 
+  /// Passes the idle stop and waits for the stopped claude's SessionEnd. The stop's `stopped` event ends `live`
+  /// before that hook arrives. The hook moves `lastActivity`. A test that moves the clock past the stale time
+  /// calls this first. One move past the stale time also passes the idle stop. The SessionEnd that arrives after
+  /// that tick then ends the Stale state.
+  func passIdleStopToSessionEnd(_ id: String) throws {
+    let mark = try lastEventId(id)
+    try passIdleStop(id)
+    try waitFor("the SessionEnd after the idle stop of \(id)", timeout: 10) {
+      try events(id, after: mark).contains { $0.kind == "SessionEnd" }
+    }
+  }
+
   /// sbd's clock, in ms since the epoch.
   func now() throws -> Int64 {
     Int64(try #require(try client.call("clock")["now"]?.int))
@@ -911,11 +923,13 @@ extension Instance {
   }
 
   /// A session on the host whose claude reported its SessionStart through the forward. With a prompt, it does not
-  /// wait for the turn.
+  /// wait for the turn. It connects the host first. `sb new` waits only `hostWaitSeconds` for the link, and a slow
+  /// runner can take longer than that to connect.
   func startOnHost(_ folder: String = "sb-box-repo", host: String = "mini", prompt: String? = nil) throws -> (
     id: String, claudeSessionId: String, cwd: String, pid: Int
   ) {
     try makeBoxFolder(folder)
+    try connectHost(host)
     let summary = try #require(
       JSON.parse(try sb(["new", "~/\(folder)", "--host", host, "--json"] + (prompt.map { ["--prompt", $0] } ?? []))))
     let id = try self.id(of: summary)
