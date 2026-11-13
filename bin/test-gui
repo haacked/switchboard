@@ -63,7 +63,7 @@ fi
 
 source bin/lib/swift-testing.sh
 echo "Building…"
-build_output=$(swift build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
+build_output=$(bin/lib/swiftpm build ${args[@]+"${args[@]}"} 2>&1) || { echo "$build_output" >&2; exit 1; }
 bin_dir=$(swift build --show-bin-path)
 
 # The folder is under /tmp, because a Unix socket path can't exceed 103 bytes.

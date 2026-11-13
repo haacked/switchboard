@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Runs a SwiftPM command that compiles: `bin/lib/swiftpm build|test args…`.
+# The scripts in bin/ run every compiling swift build and swift test through
+# it. `swift test list` and `--show-bin-path` compile nothing and call swift
+# directly.
+set -euo pipefail
+exec swift "$@"

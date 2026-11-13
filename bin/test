@@ -79,7 +79,7 @@ shards() {
   mkdir "$clones"
   trap "rm -rf '$clones'" EXIT
   run_shard() {
-    swift test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
+    bin/lib/swiftpm test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
       tee "$clones/$1.log" | awk -v p="[$1] " '{ print p $0; fflush() }'
   }
   local pids=()
@@ -125,9 +125,9 @@ if [ "${1:-}" = --claude ]; then
   # real tests run first, on their own.
   if [ $# -eq 0 ]; then
     status=0
-    swift test ${args[@]+"${args[@]}"} --filter ClaudeTests || status=$?
-    swift test ${args[@]+"${args[@]}"} --skip ClaudeTests || status=$?
+    bin/lib/swiftpm test ${args[@]+"${args[@]}"} --filter ClaudeTests || status=$?
+    bin/lib/swiftpm test ${args[@]+"${args[@]}"} --skip ClaudeTests || status=$?
     exit "$status"
   fi
 fi
-exec swift test ${args[@]+"${args[@]}"} "$@"
+exec bin/lib/swiftpm test ${args[@]+"${args[@]}"} "$@"

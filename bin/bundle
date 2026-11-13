@@ -9,7 +9,7 @@ source bin/lib/install-guard.sh
 commit=$(git rev-parse HEAD)
 dirty=false
 if [ -n "$(git status --porcelain)" ]; then dirty=true; fi
-swift build -c release
+bin/lib/swiftpm build -c release
 bin=$(swift build -c release --show-bin-path)
 version=$("$bin/sb" version | awk '{print $2}')
 app=build/Switchboard.app
