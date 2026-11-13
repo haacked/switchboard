@@ -450,8 +450,9 @@ A session's open PR can wait on other PRs, and `sb get` lists each one on a `dep
 ## Develop
 
 ```
-swift build
-bin/test            # unit tests, and integration tests that run a private sbd against a stub claude
+bin/build           # swift build with bin/test's flags; extra arguments go to swift build
+bin/test            # the tests that the files changed against origin/main can affect, leaving IntegrationTests to CI for source changes; prints what it picked and why
+bin/test --all      # every unit test, and integration tests that run a private sbd against a stub claude
 bin/test --claude   # also the tests that run the installed claude with Haiku, in about 4 minutes
 bin/test-gui        # runs the app in a hidden window, checks the bytes its terminal sends, that sessions survive an app relaunch, message drafts, and drops on the message field; needs a logged-in Mac session
 bin/test-gui drops  # runs only the named checks: terminal, relaunch, drafts, drops
@@ -461,6 +462,8 @@ bin/fmt             # formats Sources, Tests and Package.swift with swift format
 bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
 ```
+
+`bin/build`, `bin/test`, `bin/bundle`, and the builds in `bin/test-gui`, `bin/measure`, and `bin/shard-weights` wait for a machine-wide build slot (`bin/lib/build-slot`), so many worktrees can build without overloading the CPU. At most 3 hold a slot at once, and the rest wait in the order they arrived and print `waiting for a build slot (N ahead)`. A slot frees when its holder exits, even from `kill -9`. Each compiling `swift build` and `swift test` runs with `--jobs 4`, or the CPU count when that is lower (`bin/lib/swiftpm`). `SB_BUILD_SLOTS` sets the slot count, and `0` turns the queue off. `SB_BUILD_JOBS` sets the job count, and `0` lets SwiftPM start one job per core. `SB_BUILD_SLOTS_DIR` moves the queue's folder from `~/Library/Caches/Switchboard/build-slots`. That folder must hold only the queue's files, because the helper deletes its own stale temp files there and overwrites its `mutex` and `counter` files.
 
 Integration suites declare `.blocking(timeLimit:)` in place of `.timeLimit`. Each test waits for a free slot without holding a thread, and its time limit starts once it has the slot. The slots run one test fewer than there are CPUs at once, which keeps one of Swift's pool threads free for async tests. A test that starts a private `sbd` in a suite without the trait records an issue. App tests build `BoardModel` with `offlineModel()`, whose client finds no `sbd`, so a test never reads the sessions of the `sbd` you run.
 
