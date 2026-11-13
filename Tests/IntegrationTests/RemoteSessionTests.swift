@@ -471,7 +471,8 @@ private struct Lifecycle {
 
     #expect(done.live)
     #expect(
-      sbd.stubArgs().first?.hasPrefix("--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings)")
+      sbd.stubArgs().first?.hasPrefix(
+        "--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
         == true)
     #expect(try sbd.boxTmuxSessions() == ["\(remote.id)-claude", "\(remote.id)-shell"])
     #expect(sbd.boxStubArgs().count == 1)
@@ -489,6 +490,7 @@ private struct Lifecycle {
     let local = try #require(JSON.parse(try sbd.sb("new", sbd.work, "--json", "--prompt", "hello", "--model", "opus")))
     let remote = try sbd.newOnHost("~/sb-box-repo", "--prompt", "hello", "--model", "opus")
     let localId = try #require(local["claudeSessionId"]?.string)
+    let localSession = try #require(local["id"]?.string)
     let remoteId = try #require(remote["claudeSessionId"]?.string)
     let localCall = try sbd.waitFor(
       "the local launch", fetch: { sbd.stubCalls().first { $0.args.contains(localId) } }, until: { _ in true })
@@ -504,7 +506,7 @@ private struct Lifecycle {
     let settings = try #require(expected.firstIndex(of: "--settings")) + 1
     try #require(remoteArgs.count > settings, "\(remoteArgs)")
     #expect(real(remoteArgs[settings]) == real(sbd.boxSettings))
-    #expect(expected[settings] == sbd.home.claudeSettings)
+    #expect(expected[settings] == sbd.home.claudeSettings(localSession))
     expected[settings] = remoteArgs[settings]
     #expect(remoteArgs == expected)
     #expect(remoteCall.args == "--session-id \(remoteId) --settings \(remoteArgs[settings]) --model opus -- hello")
@@ -528,7 +530,7 @@ private struct Lifecycle {
     try sbd.waitFor(remote.id, "the remote claude to run again") { $0.claudePid != nil }
     try sbd.waitFor(local.id, "the local claude to run again") { $0.claudePid != nil }
 
-    #expect(sbd.stubArgs().last == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings)")
+    #expect(sbd.stubArgs().last == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
     let resumed = (sbd.boxStubArgs().last ?? "").split(separator: " ").map(String.init)
     try #require(resumed.count == 4, "\(resumed)")
     #expect(Array(resumed.prefix(3)) == ["--resume", remote.claudeSessionId, "--settings"])

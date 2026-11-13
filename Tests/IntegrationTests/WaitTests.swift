@@ -156,10 +156,7 @@ import Testing
     let sbd = try Instance()
     let s = try idleSession(sbd)
     try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h", "--then", "notify")
-    try sbd.passIdleStop(s.id)
-    try sbd.waitFor("the stop's SessionEnd", timeout: 10) {
-      try sbd.events(s.id).contains { $0.kind == "SessionEnd" }
-    }
+    try sbd.passIdleStopToSessionEnd(s.id)
     let before = try sbd.get(s.id).lastActivity
     let wait = try #require(try sbd.events(s.id).last { $0.kind == "wait" })
     #expect(before >= wait.t)

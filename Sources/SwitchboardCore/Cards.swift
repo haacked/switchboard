@@ -40,6 +40,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// The session's cwd when the PermissionRequest arrived. A file tool's
   /// dialog shows its path relative to it.
   public var cwd: String?
+  /// The PermissionRequest's `permission_suggestions`, which an always-allow
+  /// sends back unchanged as `updatedPermissions`.
+  public var permissionSuggestions: JSON?
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -64,24 +67,58 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     send = nil
     permissionMode = event.data["permission_mode"]?.string
     cwd = event.data["cwd"]?.string
+    permissionSuggestions = event.data["permission_suggestions"].flatMap { $0 == .null ? nil : $0 }
   }
 
-  /// Whether an allow can also switch the session to auto mode: a permission
-  /// card from manual or acceptEdits mode whose hook still waits. The hook's
-  /// answer switches the mode. A typed answer can't, because the dialog's
-  /// item differs per tool and only Bash's was captured.
-  public var offersAutoMode: Bool { autoModeRefusal == nil }
+  /// Whether an allow can also apply the extra. Auto mode needs a permission
+  /// card from manual or acceptEdits mode whose hook still waits. Always needs
+  /// a permission card whose hook still waits and whose suggestions
+  /// `AlwaysAllow.describe` can describe.
+  public func offers(_ extra: AllowExtra) -> Bool { refusal(extra) == nil }
 
-  /// The refusal of an auto mode allow once the card's hook is gone.
-  public var hookClosedRefusal: String { "card \(id)'s hook closed, so sbd can't switch the mode" }
+  /// The extras that an allow of this card can apply.
+  public var offeredExtras: [AllowExtra] { AllowExtra.allCases.filter(offers) }
 
-  /// Why an allow can't switch the session to auto mode, or nil when it can.
-  public var autoModeRefusal: String? {
+  /// The refusal of the extra once the card's hook is gone.
+  public func hookClosedRefusal(_ extra: AllowExtra) -> String {
+    "card \(id)'s hook closed, so sbd can't \(extra.hookClosedVerb)"
+  }
+
+  /// Why an allow can't apply the extra, or nil when it can.
+  public func refusal(_ extra: AllowExtra) -> String? {
     guard kind == .permission else { return "card \(id) isn't a permission prompt" }
-    if hookClosed { return hookClosedRefusal }
-    guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
-    if PermissionMode.offeringAutoMode.contains(mode) { return nil }
-    return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    if hookClosed { return hookClosedRefusal(extra) }
+    switch extra {
+    case .autoMode:
+      guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
+      if PermissionMode.offeringAutoMode.contains(mode) { return nil }
+      return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    case .always:
+      if permissionSuggestions == nil || permissionSuggestions == [] {
+        return "card \(id)'s request offered no always-allow rule"
+      }
+      if AlwaysAllow.describe(permissionSuggestions) == nil {
+        return "card \(id)'s always-allow rule is one Switchboard can't describe, so sbd won't apply it"
+      }
+      return nil
+    }
+  }
+
+  /// The permission updates that the hook's allow sends for the extra.
+  public func permissions(_ extra: AllowExtra) -> [JSON] {
+    switch extra {
+    case .autoMode: [["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]]
+    case .always: permissionSuggestions?.array ?? []
+    }
+  }
+
+  /// What the card tells the user before they allow with the extra, or nil
+  /// when the card can't say what the extra does.
+  public func note(_ extra: AllowExtra) -> String? {
+    switch extra {
+    case .autoMode: PermissionMode.autoModeNote
+    case .always: AlwaysAllow.describe(permissionSuggestions)
+    }
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a
@@ -221,8 +258,8 @@ public struct Question: Codable, Equatable, Sendable {
 
 /// A held PermissionRequest's answer.
 public enum Decision: Equatable, Sendable {
-  /// With `autoMode`, the allow also switches the session to auto mode.
-  case allow(updatedInput: JSON?, autoMode: Bool = false)
+  /// Claude Code applies `permissions`, such as a switch to auto mode, with the allow.
+  case allow(updatedInput: JSON?, permissions: [JSON] = [])
   /// Claude reads the message and goes on. Without a message, the turn stops,
   /// as No does in the terminal.
   case deny(message: String?)
@@ -231,14 +268,10 @@ public enum Decision: Equatable, Sendable {
   public var hookOutput: JSON {
     var decision: [String: JSON]
     switch self {
-    case .allow(let input, let autoMode):
+    case .allow(let input, let permissions):
       decision = ["behavior": "allow"]
       if let input { decision["updatedInput"] = input }
-      if autoMode {
-        decision["updatedPermissions"] = [
-          ["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]
-        ]
-      }
+      if !permissions.isEmpty { decision["updatedPermissions"] = .array(permissions) }
     case .deny(let message?):
       decision = ["behavior": "deny", "message": .string(message)]
     case .deny(nil):
@@ -269,19 +302,57 @@ extension Card {
   }
 }
 
+/// Why a card left while Claude Code's prompt for it stayed open.
+public enum CardGone: Codable, Equatable, Sendable {
+  /// The card's hook closed, and sbd can't find its dialog on the screen.
+  case unreadable
+  /// `DialogWatch` saw the dialog leave without Yes or a pick.
+  case dialogLeft
+  /// The dialog of a card whose hook had closed left the screen. Without the
+  /// hook, sbd can't tell Yes in the terminal from No or Escape.
+  case dialogLeftAfterHookClosed
+}
+
 extension SessionFacts {
   /// The open card for Claude Code's trust dialog.
   public var trustCard: Card? { cards.first { $0.kind == .trust } }
 
+  /// Why the open prompt has no card, which the Inbox item says in its
+  /// summary. It is nil while the session has a card or no open prompt.
+  public var cardlessPromptReason: String? {
+    guard cards.isEmpty, openPermission != nil || openQuestion != nil else { return nil }
+    if openPermission?.tool == Attention.notificationPromptTool {
+      return "Claude Code didn't send Switchboard this prompt's tool call, so Switchboard has no card for it. "
+        + "Answer it in the terminal."
+    }
+    switch cardGone {
+    case .unreadable:
+      return "Claude Code stopped waiting on Switchboard for this prompt. That happens when sbd restarts, when the "
+        + "request times out, or when the prompt is answered in the terminal. Switchboard can't read this tool's "
+        + "dialog on the screen. If the dialog still shows, answer it in the terminal."
+    case .dialogLeft:
+      return "The dialog left the terminal without an answer from Switchboard, as No or Escape in the terminal does. "
+        + "Open the Terminal to see where the session stands."
+    case .dialogLeftAfterHookClosed:
+      return "The dialog left the terminal after Claude Code stopped waiting on Switchboard, so Switchboard can't "
+        + "tell whether it was allowed. Open the Terminal to see where the session stands."
+    case nil:
+      return "Switchboard has no card for this prompt. Answer it in the terminal."
+    }
+  }
+
   /// Opens, closes, and defers cards. The table in the answer cards plan
   /// lists what each event does.
   mutating func applyCards(_ event: Event, userPrompt: Bool) {
+    // A cause explains only the prompt that lost its card.
+    defer { if openPermission == nil && openQuestion == nil { cardGone = nil } }
     let d = event.data
     let tool = d["tool_name"]?.string ?? ""
     let card = d["card"]?.int.flatMap { id in cards.firstIndex { $0.id == Int64(id) } }
     switch event.kind {
     case "PermissionRequest" where !event.fromSubagent:
       cards.append(Card(event))
+      cardGone = nil
     case "send_pending":
       if let card = Card(groupMessage: event) { cards.append(card) }
     case "send_decided":
@@ -328,7 +399,11 @@ extension SessionFacts {
       // Escape leave the prompt open until the turn ends.
       guard let card else { return }
       let closed = cards.remove(at: card)
-      if d["allowed"]?.bool == true { closePrompt(closed) }
+      if d["allowed"]?.bool == true {
+        closePrompt(closed)
+      } else {
+        cardGone = closed.hookClosed ? .dialogLeftAfterHookClosed : .dialogLeft
+      }
     case "Stop", "StopFailure", "SessionEnd", "stopped", "exited", "idle",
       "Notification" where d["notification_type"]?.string == "idle_prompt":
       cards.removeAll { !$0.outlivesTurn }
@@ -348,6 +423,8 @@ extension SessionFacts {
       cards[index].hookClosed = true
     } else {
       cards.remove(at: index)
+      // A restart closes hooks outside `applyCards`, so this checks the open prompt itself.
+      if openPermission != nil || openQuestion != nil { cardGone = .unreadable }
     }
   }
 

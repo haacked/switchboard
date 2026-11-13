@@ -104,6 +104,8 @@ final class BoardModel: ObservableObject {
   /// Cards whose answer is on its way to sbd. Their views stay disabled
   /// until sbd replies, so a second click can't answer again.
   @Published var answering: Set<Int64> = []
+  /// sbd's refusal of the last answer of each card, by card id. The card shows it.
+  @Published var cardErrors: [Int64: String] = [:]
   /// Sessions whose merge is on its way to sbd. Their buttons stay disabled
   /// until sbd replies, so a second click can't merge again.
   @Published var merging: Set<String> = []
@@ -167,7 +169,7 @@ final class BoardModel: ObservableObject {
   /// What the user typed in each message field and has not sent.
   private let messageDrafts: MessageDrafts
 
-  let client: Client
+  private let client: Client
   /// Sends one request to sbd. Tests replace it.
   lazy var send: @Sendable (String, [String: JSON]) throws -> JSON = { [client = self.client] op, args in
     try client.call(op, args, timeout: 300)
@@ -732,14 +734,16 @@ final class BoardModel: ObservableObject {
   }
 
   /// Answers a card: allow, deny with an optional message, or one answer per
-  /// question. `autoMode` with allow also switches the session to auto mode.
+  /// question. `extra` with allow also applies that extra, such as auto mode.
   func answer(
-    _ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil, autoMode: Bool = false
+    _ card: Card, behavior: String? = nil, message: String = "", answers: [String]? = nil, extra: AllowExtra? = nil
   ) {
     guard answering.insert(card.id).inserted else { return }
+    // A second refusal with the same text then still announces itself.
+    cardErrors[card.id] = nil
     var args: [String: JSON] = ["session": .string(card.session), "card": .number(Double(card.id))]
     if let behavior { args["behavior"] = .string(behavior) }
-    if autoMode { args["autoMode"] = true }
+    if let extra { args[extra.argument] = true }
     if !message.isEmpty { args["message"] = .string(message) }
     if let answers { args["answers"] = .array(answers.map(JSON.string)) }
     // A sent group message succeeds even when some targets fail, so the
@@ -747,10 +751,12 @@ final class BoardModel: ObservableObject {
     perform(
       "answer", args,
       then: { result in
+        self.actionError = nil
         guard card.kind == .send, let sent = try? JSONCoding.convert(result, to: GroupSend.self) else { return }
         let failed = (sent.deliveries ?? []).compactMap { d in d.error.map { "\(d.session): \($0)" } }
         if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
       },
+      failed: { self.cardErrors[card.id] = "\($0)" },
       finally: { self.answering.remove(card.id) })
   }
 
@@ -897,6 +903,14 @@ final class BoardModel: ObservableObject {
   }
 
   nonisolated static let recentEventCount = 10
+
+  /// Reads the session's events of `kind` among the newest that sbd returns by default, off the main thread.
+  func events(_ session: String, kind: String) async -> [Event] {
+    let client = client
+    return await Task.detached {
+      ((try? client.call("events", ["session": .string(session)], as: [Event].self)) ?? []).filter { $0.kind == kind }
+    }.value
+  }
 
   /// Reads the session's chat messages from its transcript, which can be large, so off the main thread.
   func loadChatLog(_ session: String) {
@@ -1152,11 +1166,11 @@ final class BoardModel: ObservableObject {
   /// The Claude sessions that the import sheet offers. It blocks, so it runs
   /// off the main thread.
   nonisolated func importable(all: Bool, repo: String?) -> Result<ImportList, Error> {
-    Result { try Client().importable(all: all, repo: repo) }
+    Result { try client.importable(all: all, repo: repo) }
   }
 
   nonisolated func importSessions(_ refs: [String], stop: [String]) -> Result<ImportResult, Error> {
-    Result { try Client().importSessions(refs, stop: stop) }
+    Result { try client.importSessions(refs, stop: stop) }
   }
 
   /// Clears the selected session and shows the Inbox or the Board.
