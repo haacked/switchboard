@@ -196,7 +196,8 @@ enum BoxShim {
   /// The text of the host's `claude-settings.json`: the events and timeouts of this Mac's settings, with each
   /// hook run as `<python> <home>/.sb/bin/sb-shim hook`.
   static func settings(for facts: BoxFacts) -> String {
-    Service.hookSettings(command: "\(shellQuote(facts.python)) \(shellQuote(shimPath(for: facts))) hook")
+    JSON.object(Service.hookSettings(command: "\(shellQuote(facts.python)) \(shellQuote(shimPath(for: facts))) hook"))
+      .text
   }
 
   static func shimPath(for facts: BoxFacts) -> String { "\(facts.folder)/bin/sb-shim" }
