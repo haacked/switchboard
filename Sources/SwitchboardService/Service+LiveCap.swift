@@ -21,9 +21,11 @@ extension Service {
     return session
   }
 
-  /// Starts claude when the live cap has room. Otherwise the start queues
-  /// until the tick finds a free slot, and its prompt becomes a queued
-  /// message, so that a restart of sbd keeps it.
+  /// Starts claude when the live cap has room. Otherwise the start queues,
+  /// and its prompt becomes a queued message, so that a restart of sbd keeps
+  /// it. A start that the user opened or that `livePriority` ranks runs the
+  /// live plan at once, so it stops an idle session and starts now. Other
+  /// starts wait for the tick to find a free slot.
   func launch(_ id: String, prompt: String?) throws {
     if hasRoom() { return try startClaude(id, prompt: prompt) }
     _ = try requireStartable(id)
@@ -32,6 +34,7 @@ extension Service {
       record(id, "start-queued", ["live": .number(Double(liveCount())), "cap": .number(Double(liveCap))])
     }
     if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
+    if entries[id].flatMap(liveStart)?.urgent == true { runQueuedStarts(now: nowMs()) }
   }
 
   /// Starts the queued starts that have a slot and stops the idle sessions
@@ -39,6 +42,9 @@ extension Service {
   func runQueuedStarts(now: Int64) {
     guard entries.values.contains(where: { $0.queuedSince != nil }) else { return }
     let plan = livePlan(now: now)
+    for id in plan.stops {
+      try? stop(id, reason: "the live cap of \(liveCap) needs the slot")
+    }
     for id in plan.starts {
       entries[id]?.queuedSince = nil
       do {
@@ -47,16 +53,11 @@ extension Service {
         logLine("can't start queued \(id): \(error)")
       }
     }
-    for id in plan.stops {
-      try? stop(id, reason: "the live cap of \(liveCap) needs the slot")
-    }
   }
 
   /// What the live cap does with the queued starts now.
   func livePlan(now: Int64) -> LivePlan {
-    let queued = entries.values.compactMap { e in
-      e.queuedSince.map { LivePlan.Start(session: e.session.id, since: $0) }
-    }
+    let queued = entries.values.compactMap(liveStart)
     return LivePlan.make(
       cap: liveCap,
       live: liveEntries().map { LivePlan.Process(session: $0.session.id, exiting: $0.facts.exiting) },
@@ -64,13 +65,64 @@ extension Service {
       names: entries.mapValues(\.session.name))
   }
 
+  /// The session's queued start, as the live plan sees it.
+  func liveStart(_ e: Entry) -> LivePlan.Start? {
+    e.queuedSince.map { LivePlan.Start(session: e.session.id, since: $0, rank: liveRank(e) ?? 0, jumped: e.jumpedAt) }
+  }
+
+  var livePriority: LivePriority { LivePriority(entries: config.livePriority) }
+
+  /// The session's `livePriority` rank, or nil while sbd hasn't read its
+  /// repository. A session that isn't work in a repository ranks 0.
+  func liveRank(_ e: Entry) -> Int? {
+    let priority = livePriority
+    guard !priority.entries.isEmpty, e.session.kind == .work else { return 0 }
+    let checkout = checkout(e.session)
+    guard repositoryRead(e.session, checkout: checkout) else { return nil }
+    return priority.rank(of: checkout.flatMap { repository($0, of: e.session) })
+  }
+
+  /// The `livePriority` entry that ranks the session, or nil.
+  func livePriorityEntry(_ e: Entry) -> String? {
+    let priority = livePriority
+    guard !priority.entries.isEmpty, e.session.kind == .work else { return nil }
+    return priority.entry(of: checkout(e.session).flatMap { repository($0, of: e.session) })
+  }
+
   /// The sessions that sbd may stop to free a slot, in the order to stop them.
   private func stoppable(now: Int64) -> [String] {
+    let lastOpened = entries.values.filter { $0.lastOpened > 0 }
+      .max { ($0.lastOpened, $0.session.id) < ($1.lastOpened, $1.session.id) }?.session.id
     let running = entries.values.compactMap { e -> StopPolicy.Claude? in
       guard case .running(let pid) = claudeState(e.session.id) else { return nil }
-      return stopInput(e, jobs: backgroundJobs(pid), now: now)
+      var c = stopInput(e, jobs: backgroundJobs(pid), now: now)
+      c.rank = liveRank(e)
+      c.lastViewed = e.lastViewed
+      c.openedLast = e.session.id == lastOpened
+      return c
     }
     return stopPolicy.capOrder(running, now: now)
+  }
+
+  /// Starts the session now, or moves its start to the front of the queue.
+  /// When the cap is full, it stops the lowest-ranked idle session first.
+  /// The request counts as an open, so the next start doesn't stop the session again.
+  func startNow(_ id: String) throws {
+    guard let e = entries[id] else { throw APIError("no session \(id)") }
+    guard claudeState(id) == .stopped else { throw APIError("\(e.session.name) is already running") }
+    try openSession(id)
+  }
+
+  /// Records that the user opened the session now, and starts a stopped one
+  /// ahead of every queued start. The record comes before the start, so the
+  /// cap may stop the session that the user left.
+  func openSession(_ id: String) throws {
+    let now = nowMs()
+    entries[id]?.lastViewed = now
+    entries[id]?.lastOpened = now
+    guard claudeState(id) == .stopped else { return }
+    entries[id]?.jumpedAt = now
+    try launch(id, prompt: nil)
   }
 
   /// Sets the cap when the request names `cap`, and returns the status. A
@@ -84,14 +136,24 @@ extension Service {
     }
     let now = nowMs()
     let live = liveEntries().map { e in
-      LiveStatus.LiveSession(
+      var s = LiveStatus.LiveSession(
         session: e.session.id, name: e.session.name, pid: snapshot.claudePids[e.session.id],
         state: Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState).state)
+      s.priority = livePriorityEntry(e)
+      if e.facts.exiting { s.stopping = true }
+      return s
     }.sorted { ($0.name, $0.session) < ($1.name, $1.session) }
-    let queued = livePlan(now: now).order.map { id in
-      LiveStatus.QueuedStart(session: id, name: entries[id]!.session.name, since: entries[id]!.queuedSince!)
+    let plan = livePlan(now: now)
+    let queued = plan.order.map { id in
+      let e = entries[id]!
+      var s = LiveStatus.QueuedStart(session: id, name: e.session.name, since: e.queuedSince!)
+      s.priority = livePriorityEntry(e)
+      s.reason = plan.waits[id]
+      return s
     }
-    return try JSON(encoding: LiveStatus(cap: liveCap, live: live, queued: queued))
+    var status = LiveStatus(cap: liveCap, live: live, queued: queued)
+    status.priority = livePriority.entries
+    return try JSON(encoding: status)
   }
 
   /// Writes the cap into config.json and keeps every other setting there.

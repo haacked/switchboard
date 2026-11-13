@@ -262,6 +262,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the user acknowledged the session's Inbox item, which moves
   /// it to Waiting until its reason changes or a new turn starts.
   public var acknowledged: Bool?
+  /// True while the session's start of claude waits behind the live cap.
+  public var queued: Bool?
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?

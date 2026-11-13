@@ -35,24 +35,74 @@ extension Instance {
   /// An idle session on screen, which sbd never stops to make room. `sb stop`
   /// ends its stub claude at once. The stub runs a tool call to its end first.
   /// Call the returned function to take it off screen.
-  func onScreenSession(_ sbd: Instance, name: String) throws -> (SessionSummary, () -> Void) {
-    let s = try idleSession(sbd, name: name)
+  func onScreenSession(_ sbd: Instance, name: String, ticking: Bool = false) throws -> (SessionSummary, () -> Void) {
+    let s = try idleSession(sbd, name: name, ticking: ticking)
     let detach = try sbd.attach(s.id)
-    return (try sbd.waitFor(s.id, "\(name) on screen") { $0.attached }, detach)
+    return (try waitFor(sbd, s.id, "\(name) on screen", ticking: ticking) { $0.attached }, detach)
   }
 
-  /// A session whose first turn has ended, with claude still running.
-  func idleSession(_ sbd: Instance, name: String) throws -> SessionSummary {
-    let s = try sbd.new(prompt: "hello", name: name)
-    return try sbd.waitFor(s.id, "\(name)'s first reply") { $0.lastReply == "Done: hello" && $0.claudePid != nil }
+  /// A session whose first turn has ended, with claude still running. It
+  /// runs in `path`, or in the instance's work folder when `path` is nil.
+  func idleSession(_ sbd: Instance, name: String, path: String? = nil, ticking: Bool = false) throws
+    -> SessionSummary
+  {
+    let s = try newSession(sbd, prompt: "hello", name: name, path: path)
+    return try waitFor(sbd, s.id, "\(name)'s first reply", ticking: ticking) {
+      $0.lastReply == "Done: hello" && $0.claudePid != nil
+    }
   }
 
   /// A session whose claude was stopped after its first turn.
-  func stoppedSession(_ sbd: Instance, name: String) throws -> SessionSummary {
-    let s = try idleSession(sbd, name: name)
+  func stoppedSession(_ sbd: Instance, name: String, ticking: Bool = false) throws -> SessionSummary {
+    let s = try idleSession(sbd, name: name, ticking: ticking)
     try sbd.sb("stop", s.id)
-    return try sbd.waitFor(s.id, "\(name)'s stop") { $0.claudePid == nil && !$0.live }
+    return try waitFor(sbd, s.id, "\(name)'s stop", ticking: ticking) { $0.claudePid == nil && !$0.live }
   }
+
+  /// A new session in `path`, or in the instance's work folder when `path` is nil.
+  func newSession(_ sbd: Instance, prompt: String? = nil, name: String, path: String? = nil) throws -> SessionSummary {
+    guard let path else { return try sbd.new(prompt: prompt, name: name) }
+    var args: [String: JSON] = ["path": .string(path), "name": .string(name)]
+    if let prompt { args["prompt"] = .string(prompt) }
+    return try sbd.client.call("new", args, as: SessionSummary.self)
+  }
+
+  /// Waits for the session to match. With `ticking`, each look first runs a
+  /// tick, for an instance whose ticks run only when the test moves the
+  /// clock. Only a tick reads the processes and terminals that the summary shows.
+  @discardableResult
+  func waitFor(
+    _ sbd: Instance, _ id: String, _ what: String, ticking: Bool, timeout: Double = 15,
+    _ match: (SessionSummary) -> Bool
+  ) throws -> SessionSummary {
+    guard ticking else { return try sbd.waitFor(id, what, timeout: timeout, match) }
+    return try sbd.waitFor(
+      what, timeout: timeout,
+      fetch: {
+        try sbd.advanceClock(1)
+        return try sbd.get(id)
+      }, until: match)
+  }
+
+  /// Waits until sbd has read the GitHub repository of each session, or found that it has none.
+  func waitForRepositories(_ sbd: Instance, _ sessions: SessionSummary...) throws {
+    for s in sessions {
+      try sbd.waitFor(s.id, "\(s.name)'s repository") { $0.repositoryRead == true }
+    }
+  }
+
+  /// An instance with this cap and this `livePriority`.
+  func priorityInstance(cap: Int, _ entries: [String], extra: [String: JSON] = [:]) throws -> Instance {
+    try instance(cap: cap, extra: extra.merging(["livePriority": .array(entries.map(JSON.string))]) { $1 })
+  }
+
+  /// The entry of `sb live --json`'s list whose session is `id`.
+  func liveEntry(_ status: JSON, _ list: String, _ id: String) -> JSON? {
+    status[list]?.array?.first { $0["session"]?.string == id }
+  }
+
+  /// The reason for a queued start when no idle session can make room.
+  func capFullReason(cap: Int) -> String { "the cap of \(cap) is full and no idle session can stop" }
 
   /// The reason of a queued session while every slot is taken.
   func queuedReason(cap: Int) -> String { "queued: \(cap) of \(cap) live" }
@@ -319,7 +369,8 @@ extension Instance {
     #expect(try sbd.get(a.id).claudePid == nil)
   }
 
-  @Test func aDoneSessionIsStoppedBeforeALongerIdleOne() throws {
+  /// A Done session stops no sooner than its idle time and last view put it.
+  @Test func aLongerIdleSessionIsStoppedBeforeADoneOne() throws {
     let sbd = try instance(cap: 2)
     let plain = try idleSession(sbd, name: "plain")
     let finished = try idleSession(sbd, name: "finished")
@@ -328,12 +379,13 @@ extension Instance {
     let c = try sbd.new(prompt: "hello", name: "c")
 
     try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
-    #expect(try !sbd.capStops(finished.id).isEmpty)
-    #expect(try sbd.get(plain.id).claudePid == plain.claudePid)
-    #expect(try !sbd.events(plain.id).contains { $0.kind == "stopped" })
+    #expect(try !sbd.capStops(plain.id).isEmpty)
+    #expect(try sbd.get(finished.id).claudePid == finished.claudePid)
+    #expect(try !sbd.events(finished.id).contains { $0.kind == "stopped" })
   }
 
-  @Test func aWaitingSessionIsStoppedBeforeALongerIdleOne() throws {
+  /// A session with an open wait stops no sooner than its idle time and last view put it.
+  @Test func aLongerIdleSessionIsStoppedBeforeAWaitingOne() throws {
     let sbd = try instance(cap: 2)
     let plain = try idleSession(sbd, name: "plain")
     let waiting = try idleSession(sbd, name: "waiting")
@@ -342,10 +394,10 @@ extension Instance {
     let c = try sbd.new(prompt: "hello", name: "c")
 
     try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
-    try sbd.waitFor(waiting.id, "the waiting session's stop") { $0.claudePid == nil }
-    #expect(try !sbd.capStops(waiting.id).isEmpty)
-    #expect(try sbd.get(plain.id).claudePid == plain.claudePid)
-    #expect(try !sbd.events(plain.id).contains { $0.kind == "stopped" })
+    try sbd.waitFor(plain.id, "the plain session's stop") { $0.claudePid == nil }
+    #expect(try !sbd.capStops(plain.id).isEmpty)
+    #expect(try sbd.get(waiting.id).claudePid == waiting.claudePid)
+    #expect(try !sbd.events(waiting.id).contains { $0.kind == "stopped" })
   }
 
   @Test func theLongestIdleSessionIsStoppedFirst() throws {
@@ -503,5 +555,340 @@ extension Instance {
     #expect(throws: (any Error).self) { try sbd.client.call("live", ["cap": cap]) }
     #expect(try sbd.config() == before)
     #expect(try sbd.liveStatus()["cap"]?.int == 2)
+  }
+
+  // MARK: Priority
+
+  @Test func aHigherPriorityStartRunsFirst() throws {
+    let repos = try Repos()
+    let sbd = try priorityInstance(cap: 1, ["PostHog/posthog"])
+    let (a, detach) = try onScreenSession(sbd, name: "a")
+    defer { detach() }
+    let unranked = try newSession(sbd, prompt: "slow 30", name: "unranked", path: try repos.make("haacked/other"))
+    try waitForQueued(sbd, unranked.id, cap: 1)
+    let ranked = try newSession(sbd, prompt: "slow 30", name: "ranked", path: try repos.make("PostHog/posthog"))
+    try waitForQueued(sbd, ranked.id, cap: 1)
+    try waitForRepositories(sbd, a, unranked, ranked)
+
+    try sbd.sb("stop", a.id)
+
+    try sbd.waitFor(ranked.id, "the PostHog start to run") { $0.state == .working && $0.claudePid != nil }
+    #expect(try sbd.liveIds("queued") == [unranked.id])
+  }
+
+  @Test func anOrgEntryRanksItsRepositories() throws {
+    let repos = try Repos()
+    let sbd = try priorityInstance(cap: 1, ["PostHog"])
+    let (a, detach) = try onScreenSession(sbd, name: "a")
+    defer { detach() }
+    let unranked = try newSession(sbd, prompt: "slow 30", name: "unranked", path: try repos.make("haacked/other"))
+    try waitForQueued(sbd, unranked.id, cap: 1)
+    let org = try newSession(sbd, prompt: "slow 30", name: "org", path: try repos.make("PostHog/other"))
+    try waitForQueued(sbd, org.id, cap: 1)
+    try waitForRepositories(sbd, a, unranked, org)
+
+    try sbd.sb("stop", a.id)
+
+    try sbd.waitFor(org.id, "the PostHog/other start to run") { $0.state == .working && $0.claudePid != nil }
+    #expect(try sbd.liveIds("queued") == [unranked.id])
+  }
+
+  /// The PostHog/posthog session has been idle longer, so idle time alone would stop it.
+  @Test func aLowerPriorityIdleSessionIsStoppedFirst() throws {
+    let repos = try Repos()
+    let sbd = try priorityInstance(cap: 2, ["PostHog/posthog"])
+    let ranked = try idleSession(sbd, name: "ranked", path: try repos.make("PostHog/posthog"))
+    let unranked = try idleSession(sbd, name: "unranked", path: try repos.make("haacked/other"))
+    try waitForRepositories(sbd, ranked, unranked)
+
+    let c = try sbd.new(prompt: "hello", name: "c")
+
+    try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
+    #expect(try !sbd.capStops(unranked.id).isEmpty)
+    #expect(try sbd.get(ranked.id).claudePid == ranked.claudePid)
+    #expect(try sbd.capStops(ranked.id).isEmpty)
+  }
+
+  @Test func aHigherPriorityIdleSessionStopsWhenNoLowerOneCan() throws {
+    let repos = try Repos()
+    let sbd = try priorityInstance(cap: 1, ["PostHog/posthog"])
+    let ranked = try idleSession(sbd, name: "ranked", path: try repos.make("PostHog/posthog"))
+    try waitForRepositories(sbd, ranked)
+
+    let unranked = try sbd.new(prompt: "hello", name: "unranked")
+
+    try sbd.waitFor(unranked.id, "the unranked start", timeout: 20) { $0.lastReply == "Done: hello" }
+    #expect(try !sbd.capStops(ranked.id).isEmpty)
+  }
+
+  /// No session is Done or waits, so only the last views explain why b stops before a.
+  @Test func aRecentlyViewedSessionOutlastsALongerIdleOne() throws {
+    let sbd = try instance(cap: 3)
+    let a = try idleSession(sbd, name: "a")
+    let b = try idleSession(sbd, name: "b")
+    let c = try idleSession(sbd, name: "c")
+    // Both are live, so each open only marks the session viewed. c is viewed last.
+    try sbd.sb("open", a.id)
+    try sbd.sb("open", c.id)
+
+    let d = try sbd.new(prompt: "hello", name: "d")
+
+    try sbd.waitFor(d.id, "d's start", timeout: 20) { $0.lastReply == "Done: hello" }
+    #expect(try !sbd.capStops(b.id).isEmpty)
+    #expect(try sbd.capStops(a.id).isEmpty)
+    #expect(try sbd.capStops(c.id).isEmpty)
+  }
+
+  /// Only an open or a terminal makes a session the last viewed. If a
+  /// message counted, a would be the last viewed and v would stop.
+  @Test func aMessageDoesNotMakeASessionTheLastViewed() throws {
+    let sbd = try instance(cap: 2)
+    let v = try idleSession(sbd, name: "v")
+    let a = try idleSession(sbd, name: "a")
+    try sbd.sb("open", v.id)
+    try sbd.sb("send", a.id, "again")
+    try sbd.waitFor(a.id, "a's reply") { $0.lastReply == "Done: again" }
+
+    let c = try sbd.new(prompt: "hello", name: "c")
+
+    try sbd.waitFor(c.id, "c's start", timeout: 20) { $0.lastReply == "Done: hello" }
+    #expect(try !sbd.capStops(a.id).isEmpty)
+    #expect(try sbd.get(v.id).claudePid == v.claudePid)
+  }
+
+  /// The session is off screen before the start queues, so only the last-viewed rule keeps it.
+  @Test func theLastViewedSessionIsNotStopped() throws {
+    let sbd = try instance(cap: 1)
+    let a = try idleSession(sbd, name: "a")
+    try sbd.sb("open", a.id)
+    let detach = try sbd.attach(a.id)
+    try sbd.waitFor(a.id, "a on screen") { $0.attached }
+    detach()
+    try sbd.waitFor(a.id, "a off screen") { !$0.attached }
+    let b = try sbd.new(prompt: "hello", name: "b")
+    try waitForQueued(sbd, b.id, cap: 1)
+
+    try sbd.advanceClock(1_000)
+    try sbd.advanceClock(1_000)
+
+    #expect(try sbd.get(a.id).claudePid == a.claudePid)
+    #expect(try sbd.capStops(a.id).isEmpty)
+    #expect(try liveEntry(sbd.liveStatus(), "queued", b.id)?["reason"]?.string == capFullReason(cap: 1))
+  }
+
+  /// A busy PostHog/posthog session holds the only slot, and a haacked/other start waits for it.
+  func rankedQueue(_ repos: Repos) throws -> (sbd: Instance, busy: SessionSummary, queued: SessionSummary) {
+    let sbd = try priorityInstance(cap: 1, ["PostHog/posthog", "haacked"])
+    let s = try newSession(sbd, prompt: "slow 30", name: "alpha-busy", path: try repos.make("PostHog/posthog"))
+    let busy = try sbd.waitFor(s.id, "alpha-busy's slow tool") { $0.state == .working && $0.claudePid != nil }
+    let queued = try newSession(sbd, prompt: "hello", name: "bravo-queued", path: try repos.make("haacked/other"))
+    try waitForQueued(sbd, queued.id, cap: 1)
+    try waitForRepositories(sbd, busy, queued)
+    return (sbd, busy, queued)
+  }
+
+  /// Waits until `sb live --json` shows the queued start's priority entry, and returns that status.
+  @discardableResult
+  func waitForQueuedPriority(_ sbd: Instance, _ queued: SessionSummary, _ entry: String) throws -> JSON {
+    try sbd.waitFor(
+      "\(queued.name)'s priority", fetch: { try sbd.liveStatus() },
+      until: { liveEntry($0, "queued", queued.id)?["priority"]?.string == entry })
+  }
+
+  @Test func sbLiveJsonShowsThePriorityAndWhyAStartWaits() throws {
+    let repos = try Repos()
+    let (sbd, busy, queued) = try rankedQueue(repos)
+
+    let status = try waitForQueuedPriority(sbd, queued, "haacked")
+
+    #expect(status["priority"]?.array?.compactMap(\.string) == ["PostHog/posthog", "haacked"])
+    #expect(liveEntry(status, "live", busy.id)?["priority"]?.string == "PostHog/posthog")
+    #expect(liveEntry(status, "queued", queued.id)?["reason"]?.string == capFullReason(cap: 1))
+  }
+
+  @Test func sbLiveTextShowsThePriorityAndWhyAStartWaits() throws {
+    let repos = try Repos()
+    let (sbd, _, queued) = try rankedQueue(repos)
+    try waitForQueuedPriority(sbd, queued, "haacked")
+
+    let text = try sbd.sb("live")
+
+    let lines = text.split(separator: "\n").map(String.init)
+    let busyLine = lines.first { $0.contains("alpha-busy") } ?? ""
+    let queuedLine = lines.first { $0.contains("bravo-queued") } ?? ""
+    #expect(lines.contains { $0.contains("PostHog/posthog") && $0.contains("haacked") && !$0.contains("alpha-busy") })
+    #expect(busyLine.contains("PostHog/posthog"), "\(text)")
+    #expect(queuedLine.contains("haacked"), "\(text)")
+    #expect(queuedLine.contains(capFullReason(cap: 1)), "\(text)")
+  }
+
+  /// A `livePriority` that isn't an array must not make sbd ignore config.json, whose default cap is 10.
+  @Test func aBadLivePriorityKeepsTheCap() throws {
+    let sbd = try instance(cap: 2, extra: ["livePriority": "PostHog"])
+
+    #expect(try sbd.liveStatus()["cap"]?.int == 2)
+  }
+
+  // MARK: Jumps
+
+  /// Ticks run only when the test moves the clock, so only a request can start claude.
+  func jumpInstance(cap: Int) throws -> Instance { try instance(cap: cap, extra: ["tickSeconds": 3600]) }
+
+  /// The opened session's SessionStart arrives through its hook, without a tick.
+  @Test func openingAStoppedSessionStartsItWithoutATick() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let stopped = try stoppedSession(sbd, name: "stopped", ticking: true)
+    let idle = try idleSession(sbd, name: "idle", ticking: true)
+
+    try sbd.sb("open", stopped.id)
+
+    try sbd.waitFor(stopped.id, "the opened session's start") { $0.live }
+    #expect(try !sbd.capStops(idle.id).isEmpty)
+  }
+
+  /// The user's real switch: x was on screen, so x is the last viewed until
+  /// the open marks y viewed. A jump before that mark finds no session to stop.
+  @Test func switchingFromAnIdleSessionStopsIt() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let y = try stoppedSession(sbd, name: "y", ticking: true)
+    let (x, detach) = try onScreenSession(sbd, name: "x", ticking: true)
+    detach()
+    try waitFor(sbd, x.id, "x off screen", ticking: true) { !$0.attached }
+
+    try sbd.sb("open", y.id)
+
+    try sbd.waitFor(y.id, "y's start") { $0.live }
+    #expect(try !sbd.capStops(x.id).isEmpty)
+  }
+
+  /// The app sends the open while x is still on screen, then shows y's dead
+  /// pane and leaves x. The tick then stops x for y, because y is the session
+  /// the user opened last.
+  @Test func aSwitchStopsTheSessionLeftOnceItLeavesTheScreen() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let y = try stoppedSession(sbd, name: "y", ticking: true)
+    let (x, detachX) = try onScreenSession(sbd, name: "x", ticking: true)
+
+    try sbd.sb("open", y.id)
+    #expect(try sbd.get(y.id).queued == true)
+
+    let detachY = try sbd.attach(y.id)
+    defer { detachY() }
+    detachX()
+    try waitFor(sbd, y.id, "y's start", ticking: true) { $0.live }
+    #expect(try !sbd.capStops(x.id).isEmpty)
+  }
+
+  /// The request queues the opened session first, and the tick starts it first.
+  @Test func openingJumpsAheadOfOlderStarts() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let opened = try stoppedSession(sbd, name: "opened", ticking: true)
+    let (a, detach) = try onScreenSession(sbd, name: "a", ticking: true)
+    defer { detach() }
+    let background = try sbd.new(prompt: "hello", name: "background")
+    try waitForQueued(sbd, background.id, cap: 1)
+
+    try sbd.sb("open", opened.id)
+
+    #expect(try sbd.liveIds("queued") == [opened.id, background.id])
+    try sbd.sb("stop", a.id)
+    try waitFor(sbd, opened.id, "the opened session's start", ticking: true) { $0.live }
+    #expect(try sbd.liveIds("queued") == [background.id])
+  }
+
+  /// The stub waits 5 s after SIGTERM before it exits, so the ticks after the
+  /// jump see the stopped claude still running. Its slot belongs to the jump.
+  @Test func aJumpWithNothingElseQueuedStopsOneSession() throws {
+    let sbd = try jumpInstance(cap: 2)
+    let stopped = try stoppedSession(sbd, name: "stopped", ticking: true)
+    let lingering = try newSession(sbd, prompt: "linger 5", name: "lingering")
+    try waitFor(sbd, lingering.id, "lingering's reply", ticking: true) {
+      $0.lastReply == "I'll linger 5 s when I stop." && $0.claudePid != nil
+    }
+    let other = try idleSession(sbd, name: "other", ticking: true)
+    try sbd.sb("open", stopped.id)
+    #expect(try !sbd.capStops(lingering.id).isEmpty)
+
+    try sbd.advanceClock(1)
+    try sbd.advanceClock(1)
+
+    #expect(try sbd.get(lingering.id).claudePid != nil, "the lingering claude still exits")
+    #expect(try liveEntry(sbd.liveStatus(), "live", lingering.id)?["stopping"]?.bool == true)
+    #expect(try sbd.capStops(other.id).isEmpty)
+    #expect(try sbd.get(other.id).claudePid == other.claudePid)
+  }
+
+  @Test func aJumpWhileAStartIsQueuedStopsOneMore() throws {
+    let sbd = try jumpInstance(cap: 2)
+    let jumped = try stoppedSession(sbd, name: "jumped", ticking: true)
+    let first = try idleSession(sbd, name: "first", ticking: true)
+    let second = try idleSession(sbd, name: "second", ticking: true)
+    let background = try sbd.new(prompt: "hello", name: "background")
+    try waitForQueued(sbd, background.id, cap: 2)
+
+    try sbd.sb("live", "--next", jumped.id)
+
+    try waitFor(sbd, background.id, "the background start", ticking: true, timeout: 20) {
+      $0.lastReply == "Done: hello"
+    }
+    try sbd.waitFor(jumped.id, "the jumped start") { $0.live }
+    #expect(try [first, second, jumped, background].map { try sbd.capStops($0.id).count } == [1, 1, 0, 0])
+  }
+
+  @Test func aJumpWithNothingToStopWaitsAtTheFront() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let jumped = try stoppedSession(sbd, name: "jumped", ticking: true)
+    let (a, detach) = try onScreenSession(sbd, name: "a", ticking: true)
+    defer { detach() }
+    let background = try sbd.new(prompt: "hello", name: "background")
+    try waitForQueued(sbd, background.id, cap: 1)
+
+    try sbd.sb("live", "--next", jumped.id)
+
+    let status = try sbd.liveStatus()
+    #expect(status["queued"]?.array?.compactMap { $0["session"]?.string } == [jumped.id, background.id])
+    #expect(liveEntry(status, "queued", jumped.id)?["reason"]?.string == capFullReason(cap: 1))
+    #expect(try sbd.get(jumped.id).queued == true)
+    try sbd.sb("stop", a.id)
+    try waitFor(sbd, jumped.id, "the jumped start", ticking: true) { $0.live }
+  }
+
+  @Test func sbLiveNextRefusesARunningSession() throws {
+    let sbd = try instance(cap: 2)
+    let alpha = try idleSession(sbd, name: "alpha")
+
+    let r = try sbd.run("live", "--next", alpha.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("alpha is already running"), "\(r.stderr)")
+  }
+
+  /// `open` on a live session only marks it viewed. It runs no plan.
+  @Test func openingALiveSessionStopsNothing() throws {
+    let sbd = try jumpInstance(cap: 1)
+    let live = try idleSession(sbd, name: "live", ticking: true)
+    let queued = try sbd.new(prompt: "hello", name: "queued")
+    try waitForQueued(sbd, queued.id, cap: 1)
+
+    try sbd.sb("open", live.id)
+
+    #expect(try sbd.capStops(live.id).isEmpty)
+    #expect(try sbd.liveIds("queued") == [queued.id])
+  }
+
+  /// A message isn't a view. Inbox and group sends reach many sessions, and a
+  /// jump for each would skip the priority order.
+  @Test func aMessageToAQueuedSessionDoesNotJump() throws {
+    let sbd = try instance(cap: 1)
+    let (_, detach) = try onScreenSession(sbd, name: "a")
+    defer { detach() }
+    let first = try sbd.new(name: "first")
+    try waitForQueued(sbd, first.id, cap: 1)
+    let second = try sbd.new(name: "second")
+    try waitForQueued(sbd, second.id, cap: 1)
+
+    try sbd.sb("send", second.id, "follow", "up")
+
+    #expect(try sbd.liveIds("queued") == [first.id, second.id])
   }
 }

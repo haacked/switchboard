@@ -582,6 +582,11 @@ final class BoardModel: ObservableObject {
   }
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
+  /// Starts a queued session now. When the live cap is full, sbd stops the
+  /// lowest-priority idle session to make room.
+  func startNow(_ id: String) { perform("live-next", ["session": .string(id)]) }
+  static let startNowHelp =
+    "Start claude now. When the live cap is full, sbd stops the lowest-priority idle session to make room."
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
   /// Sets the group's description, or clears it when `text` is blank. The
   /// Board shows the new text before sbd answers. It returns false when it

@@ -225,6 +225,9 @@ struct SessionView: View {
         if session.live {
           Button("Stop") { model.stop(session.id) }
             .help("Stop claude now. It resumes when you send a message or open the session again.")
+        } else if session.queued == true {
+          Button("Start Now") { model.startNow(session.id) }
+            .help(BoardModel.startNowHelp)
         } else {
           Button("Resume") { model.resume(session.id) }
             .help("Restart claude in this session. It continues the conversation.")

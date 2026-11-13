@@ -44,8 +44,11 @@ public final class Service {
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
-    /// When the tick last saw a terminal on the Claude pane.
+    /// When the tick last saw a terminal on the Claude pane, or the user last opened the session.
     var lastViewed: Int64 = 0
+    /// When the user last opened the session, with `open` or `live-next`. The
+    /// live cap never stops the session that the user opened last.
+    var lastOpened: Int64 = 0
     /// The Stop event of the last turn whose summary this sbd started or
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
@@ -57,6 +60,9 @@ public final class Service {
     var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// When the user opened the stopped session, which starts it ahead of
+    /// every queued start. A start of claude clears it.
+    var jumpedAt: Int64?
     /// Set when a running claude's MCP servers changed. `applyMCPChanges`
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
@@ -241,9 +247,11 @@ public final class Service {
 
   static let actsOnProcesses: Set<String> = [
     "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
-    "dependency-resolved",
+    "dependency-resolved", "live-next",
   ]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  static let launches: Set<String> = [
+    "send", "resume", "open", "resolve-wait", "answer", "dependency-resolved", "live-next",
+  ]
   /// The requests that can send claude a message. Each one first waits up to 5 s for a starting claude
   /// to go live. `open` sends nothing, so it doesn't wait.
   static let settles: Set<String> = ["send", "resume", "resolve-wait", "answer", "dependency-resolved"]
@@ -375,7 +383,7 @@ public final class Service {
       return try shellRequest(args)
     case "open":
       let id = try lookup(args)
-      if claudeState(id) == .stopped { try launch(id, prompt: nil) }
+      try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id))
     case "send":
@@ -462,6 +470,9 @@ public final class Service {
       return try autoContinueRequest(args)
     case "live":
       return try liveRequest(args)
+    case "live-next":
+      try startNow(try lookup(args))
+      return try liveRequest(.object([:]))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
       "group-suggest",
       "send-group",
@@ -712,13 +723,6 @@ public final class Service {
     return checkouts[s.cwd] != nil
   }
 
-  /// The owner/name of the session's main checkout on GitHub, or nil until
-  /// lookups off the queue have read it.
-  func repository(of s: Session) -> String? { checkout(s).flatMap { repository($0, of: s) } }
-
-  /// Whether sbd has read the session's repository, or found that it has none.
-  func repositoryKnown(of s: Session) -> Bool { repositoryRead(s, checkout: checkout(s)) }
-
   func worktreeEntry(
     _ repo: String, at path: String, on machine: any Machine
   ) throws -> WorktreeEntry? {
@@ -859,6 +863,7 @@ public final class Service {
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?) throws {
     _ = try requireStartable(id)
+    entries[id]?.jumpedAt = nil
     moveToGroupAccount(id)
     trustOwnFolder(id)
     let session = entries[id]!.session
@@ -1819,8 +1824,8 @@ public final class Service {
       markedDone: s.done)
     if s.kind == .work {
       out.checkout = checkout(s)
-      out.repository = repository(of: s)
-      if repositoryKnown(of: s) { out.repositoryRead = true }
+      out.repository = out.checkout.flatMap { repository($0, of: s) }
+      if repositoryRead(s, checkout: out.checkout) { out.repositoryRead = true }
     }
     out.parent = s.parent
     out.manager = s.manager
@@ -1853,7 +1858,10 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason }
+    if e.queuedSince != nil {
+      out.reason = queuedReason
+      out.queued = true
+    }
     out.shellClosed = s.shellClosed
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
