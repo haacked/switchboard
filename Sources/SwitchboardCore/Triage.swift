@@ -412,9 +412,39 @@ public enum Triage {
     case .all:
       let live = liveItem(facts, verdict)
       return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
-    case .none:
-      return (nil, nil, false)
+    case .blockingPrompts:
+      return (promptItem(facts, verdict), nil, false)
     }
+  }
+
+  /// The item of the first prompt that blocks the session, or nil when none
+  /// does. A send card that came first does not hide a later permission card.
+  static func promptItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
+    guard AttentionState.inbox.contains(verdict.state) else { return nil }
+    if let card = facts.cards.first(where: { blocks($0.kind) }) {
+      var item = cardItem(card)
+      item.ref = card.ref
+      return item
+    }
+    guard let open = Attention.openPromptVerdict(facts) else { return nil }
+    var item = ruleItem(open)
+    item.ref = "rule:\(item.title)"
+    return item
+  }
+
+  /// Whether a card of this kind stops the session's turn until the user
+  /// answers it. A send card does not: the turn goes on, and the card expires.
+  static func blocks(_ kind: Card.Kind) -> Bool {
+    switch kind {
+    case .permission, .question, .trust: true
+    case .send: false
+    }
+  }
+
+  /// Whether the session waits on a prompt that only the user can answer:
+  /// a card that blocks it, or a Claude Code dialog that is open without a card.
+  public static func blockingPrompt(cards: [Card], openPrompt: Bool) -> Bool {
+    openPrompt || cards.contains { blocks($0.kind) }
   }
 
   private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
@@ -656,13 +686,24 @@ public enum Triage {
   public static func inInbox(_ s: SessionSummary) -> Bool {
     switch s.kind.inboxItems {
     case .all: true
-    case .none: false
+    case .blockingPrompts: s.triage != nil && blockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
     }
   }
 
-  /// Whether sbd asks a model to summarize the session's turns. Only a work
-  /// session's turn gets a summary call.
-  public static func summarizes(_ kind: SessionKind) -> Bool { kind == .work }
+  /// How the Inbox, the menu bar, and a notification name the session. A
+  /// group chat goes by its group's current name, and a Manager conversation
+  /// says that it is one.
+  public static func inboxName(_ s: SessionSummary, groupName: String?) -> String {
+    switch s.kind {
+    case .work: s.name
+    case .chat: groupName.map { Chat.name(group: $0) } ?? s.name
+    case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
+    }
+  }
+
+  /// Whether sbd asks a model to summarize the session's turns. A summary
+  /// feeds only an item that a turn's reply may give.
+  public static func summarizes(_ kind: SessionKind) -> Bool { kind.inboxItems == .all }
 
   /// Whether the session needs the user and counts toward the Inbox and the badge.
   public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && inInbox(s) }

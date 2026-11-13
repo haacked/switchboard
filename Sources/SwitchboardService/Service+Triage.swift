@@ -79,7 +79,8 @@ extension Service {
     case .done:
       return Request(op: "done", args: ["session": session])
     case .allow, .deny, .allowAutoMode, .answer:
-      guard item.source == .card, let card = entries[id]!.facts.cards.first else {
+      // A conversation's item can name a card behind a send card.
+      guard item.source == .card, let card = entries[id]!.facts.cards.first(where: { $0.ref == item.ref }) else {
         throw APIError("\(name) has no prompt to answer")
       }
       var answer: [String: JSON] = ["session": session, "card": .number(Double(card.id))]

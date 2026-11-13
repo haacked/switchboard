@@ -112,6 +112,8 @@ import Testing
     #expect(!result.isError)
     #expect(try sbd.get(c.id).cards.map(\.kind) == [.send])
     #expect(try sbd.get(member.id).cards.isEmpty)
+    #expect(try triaged(sbd).contains(c.id) == false)
+    #expect(try sbd.get(c.id).triage == nil)
   }
 
   @Test func chatCreatesASessionNamedForTheGroupInItsFolderWithTheGuide() throws {
@@ -286,6 +288,112 @@ import Testing
 
     #expect(triage == [other.id])
     #expect(try sbd.get(c.id).triage == nil)
+  }
+
+  @Test func aChatsPermissionPromptIsInTriageAndChooseAllowsIt() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let id = try #require(try send(sbd, "Flags", "perm touch x")["id"]?.string)
+    try sbd.waitFor(id, "the card") { !$0.cards.isEmpty }
+
+    let triage = try triaged(sbd)
+    let item = try #require(try sbd.get(id).triage)
+    let result = try JSON.parse(sbd.sb("choose", "--json", id, "allow"))
+
+    #expect(triage == [id])
+    #expect(item.source == .card)
+    #expect(item.title == "Approve `touch x`")
+    #expect(Array(item.options.map(\.label).prefix(2)) == ["Allow", "Deny"])
+    #expect(result?["delivery"]?.string == "hook")
+    try sbd.waitFor(id, "the command's reply") { $0.lastReply == "Ran touch x" }
+    #expect(try !triaged(sbd).contains(id))
+  }
+
+  /// The item names the permission card behind the group message's card, so
+  /// Allow answers the prompt and sends no message.
+  @Test func chooseAllowsAChatsPromptBehindItsGroupMessageAndSendsNothing() throws {
+    let sbd = try Instance()
+    let member = try sbd.new(name: "member")
+    _ = try addGroup(sbd, "Flags", member.id)
+    let c = try chat(sbd, "Flags")
+    try sbd.waitFor(c.id, "the stub") { $0.live }
+    let config = try #require(launchConfigs(sbd, c).first ?? nil)
+    let mcp = try MCPClient(server: try #require(config["mcpServers"]?["switchboard"]))
+    #expect(!(try mcp.call("send_group", ["text": "rebase on main"])).isError)
+    _ = try send(sbd, "Flags", "perm touch x")
+    try sbd.waitFor(c.id, "the permission card") { $0.cards.map(\.kind) == [.send, .permission] }
+
+    let item = try #require(try sbd.get(c.id).triage)
+    let result = try JSON.parse(sbd.sb("choose", "--json", c.id, "allow"))
+
+    #expect(item.title == "Approve `touch x`")
+    #expect(result?["delivery"]?.string == "hook")
+    try sbd.waitFor(c.id, "the command's reply") { $0.lastReply == "Ran touch x" }
+    #expect(try sbd.get(c.id).cards.map(\.kind) == [.send])
+    #expect(try sbd.events(c.id).contains { $0.kind == "send_decided" } == false)
+    #expect(try sbd.get(member.id).cards.isEmpty)
+  }
+
+  @Test func aChatsQuestionIsInTriageAndChooseAnswersIt() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let id = try #require(try send(sbd, "Flags", "pick fruit")["id"]?.string)
+    try sbd.waitFor(id, "the card") { !$0.cards.isEmpty }
+
+    let triage = try triaged(sbd)
+    let item = try #require(try sbd.get(id).triage)
+    try sbd.sb("choose", id, "1")
+
+    #expect(triage == [id])
+    #expect(item.source == .card)
+    #expect(item.options.map(\.label) == ["apple", "cherry"])
+    let after = try sbd.waitFor(id, "the answer") { $0.lastReply?.hasPrefix("Picked:") == true }
+    #expect(after.lastReply == #"Picked: {"Which fruit?":"apple"}"#)
+    #expect(try !triaged(sbd).contains(id))
+  }
+
+  @Test func aChatsQuestionReplyStaysOutOfTriage() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let id = try #require(try send(sbd, "Flags", "ask")["id"]?.string)
+    let asked = try sbd.waitFor(id, "the reply") { $0.lastReply == "Which database should I use, Postgres or SQLite?" }
+
+    let triage = try triaged(sbd)
+
+    #expect(asked.state == .needsYou)
+    #expect(!triage.contains(id))
+    #expect(try sbd.get(id).triage == nil)
+  }
+
+  /// A chat with a card is in Needs you, so auto-continue never takes it up.
+  @Test func aChatWithACardStaysOutOfAutoContinue() throws {
+    let sbd = try Instance(config: ["autoContinue": ["quietSeconds": 60]])
+    _ = try addGroup(sbd, "Flags")
+    try sbd.sb("autocontinue", "on")
+    let id = try #require(try send(sbd, "Flags", "perm touch x")["id"]?.string)
+    try sbd.waitFor(id, "the card") { !$0.cards.isEmpty }
+
+    try sbd.advanceClock(61_000)
+
+    #expect(try sbd.autoContinueStatus().sessions.allSatisfy { $0.session != id || $0.blocker != nil })
+    #expect(try sbd.autoContinues(id).isEmpty)
+    #expect(try sbd.sbdMessages(id).isEmpty)
+    #expect(try sbd.get(id).cards.count == 1)
+  }
+
+  /// A chat whose reply offers a next step reaches Claude can continue, where
+  /// the status names why auto-continue holds it back.
+  @Test func aChatThatClaudeCanContinueIsHeldBackAsAGroupChat() throws {
+    let sbd = try Instance(config: ["autoContinue": ["quietSeconds": 60]])
+    _ = try addGroup(sbd, "Flags")
+    try sbd.sb("autocontinue", "on")
+    let id = try #require(try send(sbd, "Flags", "offer")["id"]?.string)
+    try sbd.waitFor(id, "the offer") { $0.state == .canContinue }
+
+    try sbd.advanceClock(61_000)
+
+    #expect(try sbd.blocker(id) == "a group chat")
+    #expect(try sbd.autoContinues(id).isEmpty)
   }
 
   // MARK: Removing the group

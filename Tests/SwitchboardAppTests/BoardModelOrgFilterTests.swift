@@ -408,6 +408,18 @@ let everyFilterShape = [
     #expect(filtered == all)
   }
 
+  /// A chat has no org. Its card shows under every filter and counts in no org's row.
+  @Test(arguments: everyFilterShape)
+  func aChatCardShowsAndCountsUnderAnOrgFilter(_ shape: FilterShape) throws {
+    let withChatCard = model(shape.filter, Self.list + [try chatCard("cc", group: "g2")])
+    let withoutChatCard = model(shape.filter)
+
+    #expect(withChatCard.needsUser.map(\.id).contains("cc"))
+    #expect(withChatCard.triage.map(\.id).contains("cc"))
+    #expect(withChatCard.orgEntries == withoutChatCard.orgEntries)
+    #expect(withChatCard.hiddenNeedingYou == withoutChatCard.hiddenNeedingYou)
+  }
+
   // MARK: Drafts
 
   func card(_ id: Int64, _ session: String) throws -> Card {

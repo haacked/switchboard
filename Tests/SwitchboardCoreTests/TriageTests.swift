@@ -413,25 +413,28 @@ func replyFixture(_ name: String) throws -> String {
 @Suite struct TriageOrder {
   func summary(
     _ id: String, _ state: AttentionState, since: Int64, _ source: TriageSource, _ kind: TriageKind?,
-    manager: Bool = false
+    manager: Bool = false, cards: [Card] = []
   ) -> SessionSummary {
     var s = SessionSummary(
       id: id, name: id, cwd: "/", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "", since: since,
-      lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+      lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [], cards: cards,
+      openPrompt: !cards.isEmpty)
     s.triage = kind.map { TriageItem(title: id, kind: $0, summary: "", source: source) }
     s.manager = manager ? true : nil
     if manager { s.kind = .manager }
     return s
   }
 
-  @Test func leavesOutTheManagerWhateverItsItemIs() {
+  @Test func keepsTheManagerOnlyWhileItWaitsOnAPrompt() {
+    let permission = facts(permissionTurn()).cards
     let list = [
-      summary("m1", .needsYou, since: 0, .card, .approval, manager: true),
+      summary("m1", .needsYou, since: 0, .card, .approval, manager: true, cards: permission),
       summary("m2", .needsYou, since: 0, .summary, .decision, manager: true),
       summary("m3", .canContinue, since: 0, .summary, .approval, manager: true),
+      summary("m4", .needsYou, since: 0, .card, .approval, manager: true),
       summary("a", .needsYou, since: 5, .summary, .decision),
     ]
-    #expect(Triage.order(list).map(\.id) == ["a"])
+    #expect(Triage.order(list).map(\.id) == ["m1", "a"])
   }
 
   @Test func groupsComeInOrderAndTheOldestComesFirstInAGroup() {

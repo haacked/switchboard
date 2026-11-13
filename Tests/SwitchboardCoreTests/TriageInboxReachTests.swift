@@ -17,6 +17,11 @@ struct InboxShape: CustomTestStringConvertible, Sendable {
 
 private let reply = [event("UserPromptSubmit", 0, ["prompt": "go"]), stop(5, 1, proseQuestion)]
 
+private let permissionDialog = [
+  event("UserPromptSubmit", 0, ["prompt": "go"]),
+  event("Notification", 1, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
+]
+
 let inboxShapes: [InboxShape] = [
   InboxShape(name: "a reply", events: { reply }, work: true, conversation: false),
   InboxShape(name: "a summary of the reply", events: { reply + [triageEvent(5)] }, work: true, conversation: false),
@@ -24,27 +29,43 @@ let inboxShapes: [InboxShape] = [
     name: "an sb summary set card", events: { [try summaryEvent(9, 2, sessionCard)] }, work: true,
     conversation: false),
   InboxShape(name: "a send card", events: { [sendPending()] }, work: true, conversation: false),
-  InboxShape(name: "a permission card", events: { permissionTurn() }, work: true, conversation: false),
-  InboxShape(name: "a question card", events: { questionTurn() }, work: true, conversation: false),
-  InboxShape(name: "a trust card", events: { trustLaunch() }, work: true, conversation: false),
+  InboxShape(name: "a permission card", events: { permissionTurn() }, work: true, conversation: true),
+  InboxShape(name: "a question card", events: { questionTurn() }, work: true, conversation: true),
+  InboxShape(name: "a trust card", events: { trustLaunch() }, work: true, conversation: true),
   InboxShape(
     name: "a send card, then a permission card", events: { [sendPending()] + permissionTurn() }, work: true,
-    conversation: false),
+    conversation: true),
   InboxShape(
-    name: "a permission dialog without a card",
+    name: "a permission card, then a send card", events: { permissionTurn() + [sendPending()] }, work: true,
+    conversation: true),
+  InboxShape(
+    name: "a send card and a permission dialog without a card",
     events: {
       [
-        event("UserPromptSubmit", 0, ["prompt": "go"]),
-        event("Notification", 1, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
+        sendPending(), event("UserPromptSubmit", 11, ["prompt": "go"]),
+        event("Notification", 12, ["notification_type": "permission_prompt", "message": "Allow Bash?"]),
       ]
-    }, work: true, conversation: false),
+    }, work: true, conversation: true),
+  InboxShape(
+    name: "a send card and a dialog whose card's hook closed",
+    events: { [sendPending()] + fetchTurn() + [event("card_closed", 11, ["card": 3])] }, work: true,
+    conversation: true),
+  InboxShape(name: "a permission dialog without a card", events: { permissionDialog }, work: true, conversation: true),
   InboxShape(
     name: "a question dialog without a card",
     events: { [event("UserPromptSubmit", 0, ["prompt": "go"]), event("PreToolUse", 1, ask())] }, work: true,
-    conversation: false),
+    conversation: true),
   InboxShape(
     name: "an exit at the trust dialog", events: { trustLaunch() + [trustClosed(5)] }, work: true,
     conversation: false),
+  InboxShape(
+    name: "a send card and an exit at the trust dialog",
+    events: {
+      [Event(id: 1, session: "s1", t: 0, kind: "send_pending", data: .object(sendPendingData()))] + trustLaunch() + [
+        trustClosed(5)
+      ]
+    },
+    work: true, conversation: false),
   InboxShape(
     name: "a permission card on a done session", events: { permissionTurn() }, done: true, work: false,
     conversation: false),
@@ -87,13 +108,12 @@ let inboxShapes: [InboxShape] = [
     #expect(!Triage.summarizes(.chat))
   }
 
-  @Test func theOpenPromptVerdictIsTheVerdictOfASessionWithoutACard() throws {
-    let shapes = inboxShapes.filter { ["without a card", "exit at the trust"].contains(where: $0.name.contains) }
-    #expect(shapes.count == 3)
-    for shape in shapes {
-      let f = facts(try shape.events())
+  @Test func theOpenPromptVerdictIsTheVerdictOfASessionWithoutACard() {
+    for events in [permissionDialog, [event("UserPromptSubmit", 0, ["prompt": "go"]), event("PreToolUse", 1, ask())]] {
+      let f = facts(events)
       #expect(Attention.openPromptVerdict(f) == Attention.evaluate(session(.work, done: false), f, now: 1000))
     }
     #expect(Attention.openPromptVerdict(facts(reply)) == nil)
+    #expect(Attention.openPromptVerdict(facts(trustLaunch() + [trustClosed(5)])) == nil)
   }
 }

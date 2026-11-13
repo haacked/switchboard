@@ -421,13 +421,9 @@ public enum Attention {
     return readyForReview(verdict, facts) ?? verdict
   }
 
-  /// The verdict of a Claude Code dialog that waits on the user without a
-  /// card, or of claude's exit at the folder trust dialog.
+  /// The verdict of a Claude Code permission or question dialog that waits
+  /// on the user without a card.
   public static func openPromptVerdict(_ facts: SessionFacts) -> Verdict? {
-    if facts.exitedAtTrust {
-      return Verdict(
-        state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
-    }
     if let p = facts.openPermission {
       return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
     }
@@ -445,6 +441,10 @@ public enum Attention {
     if let verdict = docketVerdict(session, facts) { return verdict }
     if let card = facts.cards.first {
       return Verdict(state: .needsYou, reason: oneLine(card.reason))
+    }
+    if facts.exitedAtTrust {
+      return Verdict(
+        state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
     if let v = openPromptVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }

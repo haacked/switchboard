@@ -191,7 +191,7 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button("\(s.name): \(s.reason)") {
+        Button("\(model.inboxName(s)): \(s.reason)") {
           model.selection = s.id
           show()
         }

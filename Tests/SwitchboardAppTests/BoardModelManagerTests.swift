@@ -10,7 +10,9 @@ import Testing
     appliedModel(list)
   }
 
-  @Test func theInboxLeavesOutTheManagerWhateverItsItemIs() {
+  /// The app checks for the prompt itself. A card item with no card in
+  /// `cards` therefore stays out, the same as a reply item.
+  @Test func theInboxLeavesOutAManagerWithOnlyAReplyItem() {
     for state in [AttentionState.needsYou, .canContinue] {
       for card in [false, true] {
         let model = model([needsItem("m", manager: true, state: state, card: card), needsItem("a")])
@@ -20,11 +22,27 @@ import Testing
     }
   }
 
-  @Test func theManagerAloneLeavesTheInboxEmpty() {
+  @Test(arguments: [Card.Kind.permission, .question, .trust])
+  func aManagersBlockingCardGoesInTheInbox(_ kind: Card.Kind) throws {
+    let model = model([try needsItem("m", manager: true, waitingOn: kind), needsItem("a")])
+
+    #expect(model.triage.map(\.id) == ["m", "a"])
+    #expect(Set(model.needsUser.map(\.id)) == ["m", "a"])
+    #expect(model.currentInboxItem == "m")
+  }
+
+  @Test func aManagerWithOnlyAReplyItemLeavesTheInboxEmpty() {
     let model = model([needsItem("m", manager: true, card: true)])
     #expect(model.triage.isEmpty)
     #expect(model.needsUser.isEmpty)
     #expect(model.currentInboxItem == nil)
+  }
+
+  @Test func aManagersSendCardStaysOutOfTheInbox() throws {
+    let model = model([try needsItem("m", manager: true, waitingOn: .send), needsItem("a")])
+
+    #expect(model.triage.map(\.id) == ["a"])
+    #expect(model.needsUser.map(\.id) == ["a"])
   }
 
   @Test func nextNeedingYouSkipsTheManagerInTheInboxAndOutsideIt() {
@@ -51,6 +69,14 @@ import Testing
     #expect(model.sessionsToNotify(next).map(\.id) == ["a"])
   }
 
+  @Test func theManagerNotifiesWhenItStartsWaitingOnACard() throws {
+    let model = model([needsItem("m", manager: true, state: .working), needsItem("a", state: .working)])
+
+    let next = [try needsItem("m", manager: true, waitingOn: .permission), needsItem("a")]
+
+    #expect(model.sessionsToNotify(next).map(\.id) == ["m", "a"])
+  }
+
   @Test func aFollowupNotifiesOnlyWhileItWaitsToStart() {
     func followup(started: Bool) -> SessionSummary {
       var s = needsItem("f")
@@ -66,13 +92,6 @@ import Testing
   @Test func aSessionSeenForTheFirstTimeDoesNotNotify() {
     let model = model([needsItem("a")])
     #expect(model.sessionsToNotify([needsItem("a"), needsItem("new")]).isEmpty)
-  }
-
-  @Test func aWorkSessionThatStillNeedsYouWithANewItemDoesNotNotifyAgain() {
-    let model = model([needsItem("a")])
-    var next = needsItem("a")
-    next.triage = TriageItem(title: "Approve touch x", kind: .approval, summary: "", source: .card)
-    #expect(model.sessionsToNotify([next]).isEmpty)
   }
 
   @Test func aSessionThatBecomesReadyToMergeNotifiesAndCounts() {
