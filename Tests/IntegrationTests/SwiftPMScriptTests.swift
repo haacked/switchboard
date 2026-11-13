@@ -200,7 +200,7 @@ private final class ScriptRig {
 
     let prebuild = try rig.sourcingSwiftTesting("build_tests")
     let build = try rig.run("bin/build")
-    let test = try rig.run("bin/test")
+    let test = try rig.run("bin/test", ["--all"])
 
     for r in [prebuild, build, test] { #expect(r.status == 0, "\(r.stderr)") }
     let calls = rig.swiftCalls().map(\.args)

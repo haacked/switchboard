@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Runs the unit and integration tests. With --claude first, it also runs the
-# tests that drive the installed claude with Haiku, which take minutes and use
-# some of your Claude quota. With --shards N, it splits the integration tests
-# across N swift test processes and runs the other tests in one more, all at
-# once, then runs MeasureTests alone. bin/lib/swift-testing.sh sets the flags
-# that swift needs to find Swift Testing. The whole run, shards included,
-# holds one machine-wide build slot (bin/lib/build-slot). Each swift test caps
-# its compile jobs (bin/lib/swiftpm).
+# With no arguments, or with --changed, runs only the tests that the files
+# changed against origin/main can affect, as bin/lib/test-selection.sh picks
+# them. Changed files include commits, uncommitted edits, and untracked files.
+# With --all, runs every unit and integration test. With --claude first, it
+# also runs the tests that drive the installed claude with Haiku, which take
+# minutes and use some of your Claude quota. With --shards N, it splits the
+# integration tests across N swift test processes and runs the other tests in
+# one more, all at once, then runs MeasureTests alone. bin/lib/swift-testing.sh
+# sets the flags that swift needs to find Swift Testing.
+# The whole run, shards included, holds one machine-wide build slot
+# (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
@@ -34,7 +37,7 @@ shards() {
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
   build_tests
   local list total i pattern matched=0 patterns=()
-  list=$(swift test list --skip-build | grep /)
+  list=$(list_tests)
   total=$(grep -c . <<<"$list")
   # Each integration suite, slowest first, goes to the shard with the least
   # time so far. Tests/shard-weights gives each suite's seconds.
@@ -133,4 +136,47 @@ if [ "${1:-}" = --claude ]; then
     exit "$status"
   fi
 fi
-exec bin/lib/swiftpm test ${args[@]+"${args[@]}"} "$@"
+
+# Builds the tests and sets `run` to the swift test arguments that filter them
+# to the selection. Leaves `run` empty, which runs every test, when it cannot
+# work out the changed files or the package's targets. Exits when no test can
+# read a changed file.
+targeted() {
+  source bin/lib/test-selection.sh
+  local base changed json selection filter
+  if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
+    echo "bin/test: no merge base with origin/main, so every test runs" >&2
+    return
+  fi
+  changed=$({ git diff --name-only --no-renames "$base"; git ls-files --others --exclude-standard; } | sort -u)
+  if ! json=$(swift package dump-package) || ! selection=$(select_tests "$json" <<<"$changed"); then
+    echo "bin/test: could not read the package's targets, so every test runs" >&2
+    return
+  fi
+  if [ -z "$selection" ]; then
+    echo "bin/test: no test reads the files changed against origin/main. bin/test --all runs every test." >&2
+    exit 0
+  fi
+  if [ "$selection" = all ]; then
+    echo "bin/test: runs every test" >&2
+    return
+  fi
+  build_tests
+  run=(--skip-build)
+  while IFS= read -r filter; do
+    echo "bin/test: runs the tests that match $filter" >&2
+    run+=(--filter "$filter")
+  done < <(test_filters <<<"$selection")
+}
+
+run=()
+case ${1:-} in
+--all) shift ;;
+--changed)
+  shift
+  [ $# -eq 0 ] || { echo "usage: bin/test --changed" >&2; exit 2; }
+  targeted
+  ;;
+"") targeted ;;
+esac
+exec bin/lib/swiftpm test ${args[@]+"${args[@]}"} ${run[@]+"${run[@]}"} "$@"

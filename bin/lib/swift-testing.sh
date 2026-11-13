@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Sets `args` to the flags that swift needs to find Swift Testing in the
-# active developer directory, and defines build_tests. bin/test, bin/test-gui,
-# and CI source it.
+# active developer directory, and defines build_tests and list_tests.
+# bin/test, bin/test-gui, and CI source it.
 #
 # The Command Line Tools' build system can leave out the folder that holds
 # Swift Testing's macro plugin. SwiftPM's native build system, the default
@@ -43,4 +43,10 @@ require_swift_testing() {
 
 build_tests() {
   "$swiftpm" build --build-tests ${args[@]+"${args[@]}"}
+}
+
+# Prints one line per test, such as SwitchboardCoreTests.FooTests/bar(), from
+# the last build.
+list_tests() {
+  swift test list --skip-build | grep /
 }

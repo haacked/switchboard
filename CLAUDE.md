@@ -29,6 +29,14 @@ Always start these scripts with `run_in_background`. The wait for a slot counts 
 
 A waiting script prints `waiting for a build slot (N ahead)`. That line means the script is queued, not hung. Don't kill it or start a second copy, because a killed script loses its place in the queue.
 
+## Tests
+
+CI runs the full suite on every push to a PR, in the `swift-test` and `gui-test` jobs. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
+
+- Before you push, run `bin/test`. With no arguments it runs only the tests that your changes against `origin/main` can affect, and it prints what it picked and why. A change to `Sources/` leaves IntegrationTests to CI.
+- After you push, wait for `swift-test` and `gui-test`, then fix what they report. The `ci-monitor` step of `/go` does the waiting.
+- Run `bin/test --all` only to reproduce a CI failure, or for a change whose effects `bin/test` can't see, such as a test that reads a file at run time through a path the selection doesn't know about.
+
 ## Design before adding code
 
 Before you implement a feature or fix, read the code it touches and ask whether the current design makes the change easy. If it doesn't, refactor first, then implement. Examples are a type or view that does two jobs, logic duplicated where the change would add a third copy, a missing abstraction the change would hard-code around, or a long function the change would make longer.
