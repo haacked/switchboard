@@ -203,7 +203,9 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     let recordedWhileDown = try kinds(sbd, s.id, after: mark).filter { SessionFacts.hookKinds.contains($0) }
     // The events wait long enough that the time of the reconnect differs from the time of the work.
     sleep(3)
+    let reconnectStart = try sbd.now()
     try reconnect(sbd, s, after: mark)
+    let reconnectMs = try sbd.now() - reconnectStart
     _ = try sbd.settledEvents()
 
     #expect(recordedWhileDown.isEmpty, "sbd recorded \(recordedWhileDown) with the link down")
@@ -215,10 +217,16 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     #expect(
       hooks.filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
         == ["while down one", "while down two"])
-    for (event, line) in zip(hooks, down) {
-      let id = try #require(HostEventID(line["id"]?.string ?? ""))
-      #expect(abs(event.t - id.ms) < 1_500, "\(event.kind) is \(event.t - id.ms) ms from the box's clock")
+    // sbd moves each box time by one offset, which the reconnect's setup measures. The box and sbd share a clock
+    // that the test has not moved. The setup reads the box's clock while it runs and reads sbd's after it
+    // returns. The offset is therefore at least 0 and at most the length of the reconnect.
+    let offsets = try zip(hooks, down).map { event, line in
+      event.t - (try #require(HostEventID(line["id"]?.string ?? ""))).ms
     }
+    #expect(Set(offsets).count == 1, "the hooks moved by \(offsets) ms")
+    #expect(
+      offsets.allSatisfy { (0...reconnectMs).contains($0) },
+      "the hooks moved by \(offsets) ms in a reconnect of \(reconnectMs) ms")
     #expect(hooks.map(\.t) == hooks.map(\.t).sorted(), "the event times run backwards")
     #expect(after.filter { $0.kind == "link_up" }.count == 1)
     #expect(!after[up...].contains { SessionFacts.hookKinds.contains($0.kind) }, "a spooled hook follows link_up")
@@ -238,6 +246,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
 
     try reconnect(sbd, s, after: mark)
     let back = try sbd.waitFor(s.id, "the claude pid after the reconnect") { $0.claudePid != nil }
+    try sbd.passIdleStopToSessionEnd(s.id)
     try sbd.advanceClock(Attention.staleAfterMs + 60_000)
 
     #expect(back.claudePid == s.pid)
@@ -585,8 +594,9 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
   }
 
   /// The turn's Stop never reaches sbd: the test removes its line from the spool. `claude agents` on the box lists
-  /// the conversation idle, which ends the turn. The transcript on the box shows the reply and when it was written,
-  /// and the reconcile records both.
+  /// the conversation idle, which ends the turn with an `idle` event at sbd's time. The transcript on the box shows
+  /// the reply, and the reconcile records it. The reply's line is older than the `idle` event. The session's last
+  /// activity therefore stays at the time of the `idle` event.
   @Test func aTurnThatEndedWhileDownWithItsStopLineRemovedFromTheSpoolEndsWithTheReplyOfTheTranscriptTail() throws {
     // The box's claude wrapper sets SB_HOME, where the stub's `claude agents` finds its rows.
     let sbd = try Instance.remoteWithGates()
@@ -607,7 +617,6 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     // Claude Code stamps each transcript line. The stub does not, so the test writes the turn's last line.
     let reply = "Finished while the link was down."
     try appendReply(sbd, s, reply)
-    let wroteAt = try sbd.now()
     // The real claude lists a conversation whose turn ended as idle. The stub removes its row when a turn ends.
     try writeAgentsRow(sbd, s, status: "idle", pid: s.pid)
 
@@ -619,12 +628,13 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     let since = try sbd.events(s.id).filter { $0.id > mark }
     #expect(try prompts(sbd, s.id, "finish while down") == 1)
     #expect(!since.contains { $0.kind == "Stop" }, "sbd recorded a Stop that was not in the spool")
-    #expect(since.filter { $0.kind == "idle" }.count == 1, "\(since.map(\.kind))")
+    let idles = since.filter { $0.kind == "idle" }
+    #expect(idles.count == 1, "\(since.map(\.kind))")
+    let idle = try #require(idles.first, "\(since.map(\.kind))")
     let reconciled = try #require(since.first { $0.kind == "reconciled" }, "\(since.map(\.kind))")
     #expect(reconciled.data["lastReply"]?.string == reply)
-    let activity = try #require(reconciled.data["lastActivity"]?.int)
-    #expect(abs(Int64(activity) - wroteAt) < 5_000, "the activity is \(Int64(activity) - wroteAt) ms from the line")
-    #expect(abs(after.lastActivity - wroteAt) < 5_000)
+    #expect(reconciled.data["lastActivity"]?.int.map(Int64.init) == idle.t)
+    #expect(after.lastActivity == idle.t)
     #expect(!after.reason.hasPrefix(notConnected), "\(after.reason)")
     #expect(sbd.boxStubArgs().count == 1, "\(sbd.boxStubArgs())")
   }
@@ -1018,6 +1028,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     sbd.stopSbd()
     try sbd.startSbd()
     let restarted = try sbd.get(s.id)
+    try sbd.passIdleStopToSessionEnd(s.id)
     try sbd.advanceClock(Attention.staleAfterMs + 60_000)
 
     #expect(restarted.state == before.state)

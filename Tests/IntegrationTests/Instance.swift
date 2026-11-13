@@ -352,6 +352,18 @@ final class Instance {
     try waitFor(id, "the idle stop", timeout: 10) { !$0.live }
   }
 
+  /// Passes the idle stop and waits for the stopped claude's SessionEnd. The stop's `stopped` event ends `live`
+  /// before that hook arrives. The hook moves `lastActivity`. A test that moves the clock past the stale time
+  /// calls this first. One move past the stale time also passes the idle stop. The SessionEnd that arrives after
+  /// that tick then ends the Stale state.
+  func passIdleStopToSessionEnd(_ id: String) throws {
+    let mark = try lastEventId(id)
+    try passIdleStop(id)
+    try waitFor("the SessionEnd after the idle stop of \(id)", timeout: 10) {
+      try events(id, after: mark).contains { $0.kind == "SessionEnd" }
+    }
+  }
+
   /// sbd's clock, in ms since the epoch.
   func now() throws -> Int64 {
     Int64(try #require(try client.call("clock")["now"]?.int))
