@@ -19,7 +19,6 @@ public struct Home: Sendable {
   public var database: String { "\(path)/sb.db" }
   public var tmuxSocket: String { "\(path)/tmux.sock" }
   public var tmuxConfig: String { "\(path)/tmux.conf" }
-  public var claudeSettings: String { "\(path)/claude-settings.json" }
   public var config: String { "\(path)/config.json" }
   /// The folder of the account that `sb account use` chose, or no file.
   public var activeAccount: String { "\(path)/account" }
@@ -48,6 +47,8 @@ public struct Home: Sendable {
   /// Where sbd keeps copies of the images sent to a session. Removing the
   /// session removes its session folder, and these with it.
   public func attachmentsFolder(_ id: String) -> String { "\(sessionFolder(id))/attachments" }
+  /// The --settings file that the session's claude gets.
+  public func claudeSettings(_ id: String) -> String { "\(sessionFolder(id))/claude-settings.json" }
 
   /// The folder of the sockets that sbd listens on for its remote hosts.
   public var hostsFolder: String { "\(path)/hosts" }
