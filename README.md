@@ -39,6 +39,7 @@ Everything in the app also works from `sb`, and every command takes `--json`:
 ```
 sb new ~/dev/myrepo --branch haacked/fix-thing --prompt "Fix the flaky test in foo_test.py"
 sb new ~/dev/myrepo --worktree --name "Fix the flaky test"   # names the branch itself
+sb new '~/dev/myrepo' --host devbox --branch haacked/fix-thing  # runs it on the remote host devbox of config.json; the quotes keep ~ for the host
 sb spawn --repo PostHog/posthog --branch haacked/flag-cache --prompt "Cache flag lookups."
 sb new ~/dev/myrepo --worktree --name "Rework the cache" --plan-mode   # plans first, edits after you approve
 sb ls
@@ -75,7 +76,7 @@ sb answer <session> cherry "red, blue"
 sb mcp                       # the shared MCP servers
 sb mcp-server [--group G]    # the MCP server for Claude, on stdin and stdout
 sb host                      # the remote hosts in config.json and each host's ssh link
-sb host connect <host>       # opens the host's ssh link and keeps it open; an open link keeps a devbox running
+sb host connect <host>       # opens the host's ssh link, keeps it open, and sets up ~/.sb there (needs tmux, git, python3); an open link keeps a devbox running
 sb host disconnect <host>    # closes the host's ssh link
 sb repo                      # the repositories that the New Session sheet offers, most recently used first
 sb repo add <path>           # adds the repository that holds the folder; a worktree adds its main checkout
@@ -325,7 +326,7 @@ A chosen option sends its label, with "(your recommendation)" when the reply rec
 
 ### Live cap
 
-`sbd` runs at most `liveCap` claude processes at once (default 10, top level in `config.json`). A start past the cap queues, and `sb ls` shows `queued: N of N live` as its reason. When a slot frees, the oldest queued start runs, and a message or prompt sent to a queued session is delivered after its start. While starts wait, `sbd` stops idle sessions to make room: sessions in Done or with an open wait first, then the one idle longest. `sb live` lists the live and the queued sessions, and `sb live --set N` changes the cap at once, with no restart, and saves it in `config.json`.
+`sbd` runs at most `liveCap` claude processes at once (default 10, top level in `config.json`). A start past the cap queues, and `sb ls` shows `queued: N of N live` as its reason. When a slot frees, the oldest queued start runs, and a message or prompt sent to a queued session is delivered after its start. While starts wait, `sbd` stops idle sessions to make room: sessions in Done or with an open wait first, then the one idle longest. `sb live` lists the live and the queued sessions, and `sb live --set N` changes the cap at once, with no restart, and saves it in `config.json`. Each remote host has its own cap: its `liveCap` key, else the top-level `liveCap`. A host's sessions count only against its cap, and a start on a host stops idle sessions only on that host. `sb live` prints a line for each host that has a session, and `sb live --json` lists them under `hosts`, each with its `host`, `cap`, `live`, and `queued`. `sb live --set N` changes only this Mac's cap.
 
 ### Follow-ups
 

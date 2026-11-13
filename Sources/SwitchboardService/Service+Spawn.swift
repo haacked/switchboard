@@ -31,7 +31,7 @@ extension Service {
     }
 
     let (checkout, named) = try spawnCheckout(ref)
-    if branchOrFolderTaken(checkout, branch) {
+    if branchOrFolderTaken(checkout, branch, at: mac) {
       throw APIError("branch \(branch) or its worktree folder exists for \(checkout). Name a new branch")
     }
 
@@ -53,7 +53,7 @@ extension Service {
       return queue.sync { summary(child.id) }
     }
     // A follow-up keeps only `owner/name`. `followup start` finds the checkout again from it.
-    guard let repository = named ?? githubRepository(checkout) else {
+    guard let repository = named ?? githubRepository(checkout, at: mac) else {
       throw APIError("\(checkout) has no remote on github.com, which a follow-up needs. Spawn it without --followup")
     }
     var add: [String: JSON] = ["prompt": .string(prompt), "repository": .string(repository), "branch": .string(branch)]
@@ -73,7 +73,7 @@ extension Service {
     if ref.hasPrefix("/") || ref.hasPrefix("~") {
       let path = (ref.expandingTilde as NSString).standardizingPath
       guard isDirectory(path) else { throw APIError("no folder \(path)") }
-      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"]) else {
+      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"], at: mac) else {
         throw APIError("\(path) isn't a git checkout")
       }
       return (top, nil)

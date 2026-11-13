@@ -28,7 +28,6 @@ enum SearchPanelKeys {
 
 /// The ⌘K panel that finds a session by name, repo, branch, PR, issue, group, reason, or note.
 struct SessionSearchView: View {
-  /// See SessionViewState for why this isn't `@State`.
   final class Search: ObservableObject {
     /// The sessions as the panel opened, so the list does not reorder under the arrows while the model refreshes.
     @Published var sessions: [SessionSummary] = []
