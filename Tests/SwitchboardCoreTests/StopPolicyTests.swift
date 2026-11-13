@@ -115,6 +115,14 @@ import Testing
     #expect(policy.capOrder(claudes, now: 10_000) == ["viewed-long-ago", "viewed-lately"])
   }
 
+  @Test func withinARankARecentTouchCountsLikeARecentView() {
+    var touched = idle("touched-lately", start: 100, rank: 1, lastViewed: 0)
+    touched.facts.lastTouched = 5_000
+    let claudes = [touched, idle("viewed-long-ago", start: 300, rank: 1, lastViewed: 1_000)]
+
+    #expect(policy.capOrder(claudes, now: 10_000) == ["viewed-long-ago", "touched-lately"])
+  }
+
   @Test func aTieInRankAndLastViewGoesToTheLongestIdle() {
     let claudes = [
       idle("newer", start: 300, rank: 1, lastViewed: 1_000), idle("older", start: 100, rank: 1, lastViewed: 1_000),

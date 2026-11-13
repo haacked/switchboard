@@ -746,6 +746,22 @@ extension Instance {
     #expect(try !sbd.capStops(idle.id).isEmpty)
   }
 
+  /// A message to a stopped session that `livePriority` ranks starts it at once, without a tick.
+  @Test func aRankedStartStopsAnIdleSessionWithoutATick() throws {
+    let repos = try Repos()
+    let sbd = try priorityInstance(cap: 1, ["PostHog/posthog"], extra: ["tickSeconds": 3600])
+    let ranked = try idleSession(sbd, name: "ranked", path: try repos.make("PostHog/posthog"), ticking: true)
+    try sbd.sb("stop", ranked.id)
+    try waitFor(sbd, ranked.id, "ranked's stop", ticking: true) { $0.claudePid == nil && !$0.live }
+    let idle = try idleSession(sbd, name: "idle", path: try repos.make("haacked/other"), ticking: true)
+    try waitForRepositories(sbd, ranked, idle)
+
+    try sbd.sb("send", ranked.id, "again")
+
+    try sbd.waitFor(ranked.id, "the ranked start") { $0.live }
+    #expect(try !sbd.capStops(idle.id).isEmpty)
+  }
+
   /// The user's real switch: x was on screen, so x is the last viewed until
   /// the open marks y viewed. A jump before that mark finds no session to stop.
   @Test func switchingFromAnIdleSessionStopsIt() throws {

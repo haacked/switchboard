@@ -222,6 +222,7 @@ struct Sidebar: View {
             .contextMenu {
               if row.session.queued == true {
                 Button("Start Now") { model.startNow(row.id) }
+                  .disabled(model.startingNow.contains(row.id))
                   .help(BoardModel.startNowHelp)
               }
               if CleanupOffer.canCleanUp(row.session) {

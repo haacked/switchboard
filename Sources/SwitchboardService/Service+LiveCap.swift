@@ -8,7 +8,8 @@ extension Service {
   func liveCount() -> Int { liveEntries().count }
 
   /// Whether a launch would start claude now instead of queueing. A launch
-  /// waits behind any queued start, so the oldest start takes the next free slot.
+  /// waits behind any queued start, so the live plan's order decides which
+  /// start takes the next free slot.
   func hasRoom() -> Bool { !entries.values.contains { $0.queuedSince != nil } && liveCount() < liveCap }
 
   var queuedReason: String { "queued: \(liveCount()) of \(liveCap) live" }
@@ -47,6 +48,7 @@ extension Service {
     }
     for id in plan.starts {
       entries[id]?.queuedSince = nil
+      entries[id]?.jumpedAt = nil
       do {
         try startClaude(id, prompt: nil)
       } catch {
@@ -78,8 +80,10 @@ extension Service {
     let priority = livePriority
     guard !priority.entries.isEmpty, e.session.kind == .work else { return 0 }
     let checkout = checkout(e.session)
+    // `repository` starts the lookup that `repositoryRead` waits for, so it runs first.
+    let name = checkout.flatMap { repository($0, of: e.session) }
     guard repositoryRead(e.session, checkout: checkout) else { return nil }
-    return priority.rank(of: checkout.flatMap { repository($0, of: e.session) })
+    return priority.rank(of: name)
   }
 
   /// The `livePriority` entry that ranks the session, or nil.
@@ -115,12 +119,15 @@ extension Service {
 
   /// Records that the user opened the session now, and starts a stopped one
   /// ahead of every queued start. The record comes before the start, so the
-  /// cap may stop the session that the user left.
+  /// cap may stop the session that the user left. It refuses a session that
+  /// can't start before it records anything.
   func openSession(_ id: String) throws {
+    let stopped = claudeState(id) == .stopped
+    if stopped { _ = try requireStartable(id) }
     let now = nowMs()
     entries[id]?.lastViewed = now
     entries[id]?.lastOpened = now
-    guard claudeState(id) == .stopped else { return }
+    guard stopped else { return }
     entries[id]?.jumpedAt = now
     try launch(id, prompt: nil)
   }

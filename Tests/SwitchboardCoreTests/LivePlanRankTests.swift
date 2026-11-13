@@ -103,6 +103,14 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
     #expect(p.waits["low"] == capFull)
   }
 
+  @Test func aStartThatWaitsForAStopNamesTheSession() {
+    let p = plan(
+      cap: 2, live: running("x", "y"), queued: [start("q", since: 1)], candidates: ["y"], names: ["y": "bravo"])
+
+    #expect(p.stops == ["y"])
+    #expect(p.waits["q"] == "waits for bravo to stop")
+  }
+
   /// A ranked start never waits in the queue for a stopped claude to exit.
   @Test func aRankedStartRunsWhileAStoppedSessionExits() {
     let p = plan(cap: 1, live: running("x", exiting: ["x"]), queued: [start("q", since: 1, rank: 2)])
@@ -135,16 +143,6 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
     let p = plan(cap: 1, live: running("busy"), queued: queued)
 
     #expect(p.waits["h1"] == capFull)
-  }
-
-  @Test func everyStartThatDoesNotRunHasAReason() {
-    let queued = [
-      start("a", since: 1), start("b", since: 2, rank: 1), start("c", since: 3, jumped: 3), start("d", since: 4),
-    ]
-
-    let p = plan(cap: 2, live: running("x", "y", "z", exiting: ["z"]), queued: queued, candidates: ["y"])
-
-    #expect(Set(p.waits.keys) == Set(queued.map(\.session)).subtracting(p.starts))
   }
 
   // MARK: Jumps
@@ -242,6 +240,7 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
 
     #expect(p.starts.isEmpty)
     #expect(p.waits["jump"] == capFull)
+    #expect(p.waits["bg"] == "behind 1 higher-priority start")
   }
 
   @Test func aJumpWithNoCandidateWaitsAtTheFront() {
@@ -284,7 +283,7 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
 
   // MARK: Slot counts
 
-  /// Each input that Risk 1 of the plan lists.
+  /// Each input that Risk 1 of the plan lists, and one input that mixes every kind of start.
   static let slotInputs: [PlanInput] = [
     input("nothing queued", cap: 2, live: running("a", "b"), queued: [], candidates: ["a", "b"]),
     input("a jump with a free slot", cap: 2, live: running("a"), queued: [start("j", since: 1, jumped: 1)]),
@@ -334,6 +333,12 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
       "ranked starts with fewer candidates than starts", cap: 2, live: running("a", "b"),
       queued: [start("q1", since: 1), start("q2", since: 2, rank: 2), start("q3", since: 3, rank: 1)],
       candidates: ["b"]),
+    input(
+      "plain, ranked, and jumped starts with an exiting claude", cap: 2, live: running("x", "y", "z", exiting: ["z"]),
+      queued: [
+        start("a", since: 1), start("b", since: 2, rank: 1), start("c", since: 3, jumped: 3), start("d", since: 4),
+      ],
+      candidates: ["y"]),
   ]
 
   /// Live claudes that sbd hasn't asked to stop.
@@ -378,6 +383,13 @@ private let capFull = "the cap of 1 is full and no idle session can stop"
     for (index, id) in p.starts.enumerated() where !jumps.contains(id) {
       #expect(input.live.count + index < input.cap, "\(id)")
     }
+  }
+
+  @Test(arguments: slotInputs)
+  func everyStartThatDoesNotRunHasAReason(_ input: PlanInput) {
+    let p = input.plan()
+
+    #expect(Set(p.waits.keys) == Set(input.queued.map(\.session)).subtracting(p.starts))
   }
 
   @Test(arguments: slotInputs)
