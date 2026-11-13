@@ -161,8 +161,17 @@ if [ "${1-}" = mcp ]; then
   exit 0
 fi
 config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
-# Claude names a project's folder after its cwd, as emit fills {{encoded_cwd}}.
-project="$config_dir/projects/$(jq -rn --arg c "$PWD" '$c | gsub("[^A-Za-z0-9]"; "-")')"
+# Claude names a project's folder after its cwd, as emit fills {{encoded_cwd}}. `folder` copies
+# ClaudeFolder.name. It counts code points where claude counts UTF-16 units, so it matches only for
+# paths without characters outside the BMP.
+folder_jq='
+  def b36: if . == 0 then "0" else [recurse(if . >= 36 then (. / 36 | floor) else empty end) | . % 36]
+    | reverse | map("0123456789abcdefghijklmnopqrstuvwxyz"[.:.+1]) | add end;
+  def jhash: reduce explode[] as $c (0; (. * 31 + $c) % 4294967296)
+    | if . >= 2147483648 then 4294967296 - . else . end;
+  def folder: gsub("[^A-Za-z0-9]"; "-") as $n
+    | if ($n | length) > 200 then "\($n[:200])-\(jhash | b36)" else $n end;'
+project="$config_dir/projects/$(jq -rn --arg c "$PWD" "$folder_jq"' $c | folder')"
 
 recordings="$(dirname "$0")/claude"
 settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm='' mode=default
@@ -437,8 +446,8 @@ answer() {
 # not in a pipeline's subshell, so a SIGKILL also stops the hooks that remain.
 emit() {
   local extra=${1:-'{}'} payload paused='' payloads
-  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --arg config "$config_dir" --arg mode "$(<"$mode_file")" --argjson extra "$extra" '
-    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | gsub("[^A-Za-z0-9]"; "-")), config_dir: $config,
+  payloads=$(jq -c --arg s "$session" --arg cwd "$PWD" --arg home "$SB_HOME" --arg config "$config_dir" --arg mode "$(<"$mode_file")" --argjson extra "$extra" "$folder_jq"'
+    ({session_id: $s, cwd: $cwd, encoded_cwd: ($cwd | folder), config_dir: $config,
       claude_tmp: "\($home)/tmp", home: env.HOME} + $extra) as $v
     | walk(if type == "string" then
         reduce ($v | to_entries[]) as $e (.; gsub("\\{\\{\($e.key)\\}\\}"; $e.value))

@@ -101,6 +101,23 @@ import Testing
     let s = try start(sbd, in: repo)
 
     #expect(try memory(sbd, s) == pinned(resolved))
+    try stopAndRelaunch(sbd, s)
+    #expect(try memory(sbd, s) == pinned(resolved))
+  }
+
+  @Test func aSessionInAWorktreeOfABareRepoGetsNoMemoryFolder() throws {
+    let sbd = try instance()
+    let bare = "\(sbd.home.path)/bare.git"
+    try sbd.git(sbd.home.path, "init", "-q", "--bare", bare)
+    let seed = try sbd.makeRepo("seed")
+    try sbd.git(seed, "push", "-q", bare, "main")
+    let tree = "\(sbd.home.path)/trees/bare/main"
+    try sbd.git(bare, "worktree", "add", "-q", tree, "main")
+
+    let s = try start(sbd, in: tree)
+
+    #expect(try memory(sbd, s) == nil)
+    #expect(try settings(sbd, s)["hooks"]?.object?.isEmpty == false)
   }
 
   // MARK: Later launches
@@ -139,13 +156,14 @@ import Testing
     try sbd.waitFor("the SessionStart event") { try !sbd.probes(marker).isEmpty }
   }
 
-  @Test func aNewConversationInAnotherFolderStopsTheSettingAtLaterLaunches() throws {
+  @Test(arguments: ["startup", "clear"])
+  func aNewConversationInAnotherFolderStopsTheSettingAtLaterLaunches(source: String) throws {
     let sbd = try instance()
     let repo = try sbd.makeRepo()
     let s = try start(sbd, in: repo)
     try #require(try memory(sbd, s) != nil)
 
-    try sendMisplacedStart(sbd, s, source: "startup")
+    try sendMisplacedStart(sbd, s, source: source)
     try stopAndRelaunch(sbd, s)
 
     let after = try settings(sbd, s)

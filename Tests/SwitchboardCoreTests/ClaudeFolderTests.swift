@@ -16,6 +16,10 @@ struct ClaudeFolderTests {
     #expect(ClaudeFolder.name("\(world)/café") == "\(worldName)-caf-")
   }
 
+  @Test func readsADecomposedAccentAsItsPrecomposedForm() {
+    #expect(ClaudeFolder.name("\(world)/cafe\u{301}") == "\(worldName)-caf-")
+  }
+
   @Test func replacesEachUTF16UnitOfACharacterOutsideTheBasicPlane() {
     #expect(ClaudeFolder.name("\(world)/rocket🚀x") == "\(worldName)-rocket--x")
   }

@@ -233,9 +233,10 @@ public enum ClaudeFolder {
   /// The folder that Claude names after `path`. Claude counts UTF-16 units,
   /// because it runs in JavaScript. It replaces each unit other than an ASCII
   /// letter or digit with "-". It cuts a longer name to 200 units and appends
-  /// "-" and a hash of the whole path.
+  /// "-" and a hash of the whole path. It reads the path in NFC, as claude
+  /// does, so a decomposed accent gives the same name as a precomposed one.
   public static func name(_ path: String) -> String {
-    let units = Array(path.utf16)
+    let units = Array(path.precomposedStringWithCanonicalMapping.utf16)
     let dash = UInt16(UInt8(ascii: "-"))
     let name = String(decoding: units.map { isLetterOrDigit($0) ? $0 : dash }.prefix(maxLength), as: UTF16.self)
     guard units.count > maxLength else { return name }

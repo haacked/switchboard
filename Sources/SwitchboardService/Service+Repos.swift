@@ -58,12 +58,15 @@ extension Service {
     return KnownRepo(path: main, name: repoName(main), used: used)
   }
 
-  /// Remembers the repository of a new session's folder `cwd` as used at `used`. A session may run outside
-  /// git, so a folder with no repository is not an error. `new` passes the session's creation time, so the
-  /// entry keeps its place in the list when the session is removed.
+  /// Remembers the repository of a starting follow-up's folder `cwd` as used at `used`, and caches it as the
+  /// folder's main checkout so that the launch doesn't run git on the state queue. A session may run outside
+  /// git, so a folder with no repository is not an error.
   func rememberRepo(_ cwd: String, used: Int64) {
     guard let main = try? mainCheckout(of: cwd) else { return }
-    queue.sync { try? store.remember(repo: main, used: used) }
+    queue.sync {
+      memoryCheckouts[cwd] = main
+      try? store.remember(repo: main, used: used)
+    }
   }
 
   private func repoName(_ path: String) -> String {

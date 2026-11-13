@@ -866,10 +866,15 @@ public final class Service {
       _ = try accountForNew(named: args.account, parent: probe.parent, for: probe)
     }
     let folder = try prepareFolder(args, at: mac)
+    let main = try? mainCheckout(of: folder.cwd)
     awaitMCPServers()
-    let summary = try queue.sync { try create(args, folder) }
-    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
-    return summary
+    return try queue.sync {
+      // The launch reads the cached checkout, so git doesn't run on the state queue.
+      if let main { memoryCheckouts[folder.cwd] = main }
+      let summary = try create(args, folder)
+      if let main { try? store.remember(repo: main, used: summary.created ?? nowMs()) }
+      return summary
+    }
   }
 
   /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
@@ -1012,7 +1017,7 @@ public final class Service {
     var args = [claudeCommand(for: session)]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     if local {
-      try writeClaudeSettings(id)
+      try writeClaudeSettings(id, session)
       args += ["--settings", home.claudeSettings(id)]
       args += launchMCPArgs(id, session)
     } else {
@@ -2098,10 +2103,10 @@ public final class Service {
   /// Writes the --settings file of a local session's claude. A claude that an
   /// earlier sbd started reads <SB_HOME>/claude-settings.json. sbd leaves that
   /// file in place. Its hooks keep working until that claude's next launch.
-  private func writeClaudeSettings(_ id: String) throws {
+  private func writeClaudeSettings(_ id: String, _ session: Session) throws {
     try FileManager.default.createDirectory(atPath: home.sessionFolder(id), withIntermediateDirectories: true)
     var settings = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
-    if !memoryPinOff, let base = memoryBase(entries[id]!.session) {
+    if !memoryPinOff, let base = memoryBase(session) {
       settings["autoMemoryDirectory"] = .string(ClaudeFolder.memoryDirectory(base))
     }
     try JSON.object(settings).text.write(toFile: home.claudeSettings(id), atomically: true, encoding: .utf8)
@@ -2109,8 +2114,10 @@ public final class Service {
 
   /// The folder that claude names a local session's auto-memory folder after: the main checkout of the git
   /// repository that holds the session's folder, or the folder's real path when no repository holds it. It is
-  /// nil when git can't name the main checkout of a repository, such as a bare one. It runs git on the state
-  /// queue at the first launch in a folder of a repo, and at each launch in a folder outside git.
+  /// nil when git can't name the main checkout of a repository, such as a bare one. `newSession` and
+  /// `rememberRepo` cache the main checkout before the first launch. This runs git on the state queue at the
+  /// first launch in a folder that neither cached, such as one from before sbd restarted, and at each launch
+  /// in a folder outside git.
   private func memoryBase(_ s: Session) -> String? {
     if let known = memoryCheckouts[s.cwd] { return known }
     if let main = try? mainCheckout(of: s.cwd) {
@@ -2121,10 +2128,10 @@ public final class Service {
     return (try? mac.realPath(s.cwd)) ?? s.cwd
   }
 
-  /// Turns memory pinning off when claude started a conversation of a local session in a folder that
-  /// `ClaudeFolder.name` doesn't give for its cwd. A resumed conversation keeps the folder it started in,
-  /// so only a new one shows how claude names folders. It checks how claude names a folder, not which
-  /// folder claude names the memory folder after.
+  /// Makes later launches leave out `autoMemoryDirectory` when claude started a conversation of a local
+  /// session in a folder that `ClaudeFolder.name` doesn't give for its cwd. A resumed conversation keeps the
+  /// folder it started in, so only a new one shows how claude names folders. It checks how claude names a
+  /// folder, not which folder claude names the memory folder after.
   private func checkFolderRule(_ session: Session, _ payload: JSON) {
     guard !memoryPinOff, session.host == nil, ["startup", "clear"].contains(payload["source"]?.string),
       let transcript = payload["transcript_path"]?.string
