@@ -162,8 +162,8 @@ if [ "${1-}" = mcp ]; then
 fi
 config_dir=${CLAUDE_CONFIG_DIR:-$SB_HOME/claude}
 # Claude names a project's folder after its cwd, as emit fills {{encoded_cwd}}. `folder` copies
-# ClaudeFolder.name. It counts code points where claude counts UTF-16 units, so it matches only for
-# paths without characters outside the BMP.
+# ClaudeFolder.name. It counts code points where claude counts UTF-16 units, and it doesn't normalize
+# to NFC. So it matches only for NFC paths without characters outside the BMP.
 folder_jq='
   def b36: if . == 0 then "0" else [recurse(if . >= 36 then (. / 36 | floor) else empty end) | . % 36]
     | reverse | map("0123456789abcdefghijklmnopqrstuvwxyz"[.:.+1]) | add end;

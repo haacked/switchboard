@@ -872,6 +872,7 @@ public final class Service {
       // The launch reads the cached checkout, so git doesn't run on the state queue.
       if let main { memoryCheckouts[folder.cwd] = main }
       let summary = try create(args, folder)
+      // The session's creation time keeps the repo in its place in the list after the session is removed.
       if let main { try? store.remember(repo: main, used: summary.created ?? nowMs()) }
       return summary
     }
@@ -2117,7 +2118,7 @@ public final class Service {
   /// nil when git can't name the main checkout of a repository, such as a bare one. `newSession` and
   /// `rememberRepo` cache the main checkout before the first launch. This runs git on the state queue at the
   /// first launch in a folder that neither cached, such as one from before sbd restarted, and at each launch
-  /// in a folder outside git.
+  /// in a folder outside git or in a worktree of a bare repository.
   private func memoryBase(_ s: Session) -> String? {
     if let known = memoryCheckouts[s.cwd] { return known }
     if let main = try? mainCheckout(of: s.cwd) {
