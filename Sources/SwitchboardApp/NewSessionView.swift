@@ -7,6 +7,12 @@ struct NewSessionRequest: Identifiable {
   let id = UUID()
   /// The id of the group that the sheet starts with.
   var group: String?
+  /// The owner/name of the repository that the sheet starts with, as the Issues view's Edit the Prompt First sets it.
+  var repo: String?
+  var branch: String?
+  var prompt: String?
+  /// The issue that the session works on.
+  var issue: IssueRef?
 }
 
 /// The new session sheet: a repository, a branch for a new worktree, and an optional first prompt.
@@ -22,11 +28,23 @@ struct NewSessionView: View {
     @Published var account = ""
     /// The id of the group that the session joins, or nil for none.
     @Published private(set) var group: String?
+    /// The owner/name that the sheet starts with, which wins over the group's preferred repository.
+    private let repoName: String?
+    /// The issue that the session works on.
+    let issue: IssueRef?
     /// The last offer, which a group change selects from again.
     private var offered: (repos: [KnownRepo]?, sessions: [SessionSummary]) = (nil, [])
 
-    init(group: String? = nil) {
-      self.group = group
+    convenience init(group: String? = nil) {
+      self.init(NewSessionRequest(group: group))
+    }
+
+    init(_ request: NewSessionRequest) {
+      group = request.group
+      repoName = request.repo
+      issue = request.issue
+      branch = request.branch ?? ""
+      prompt = request.prompt ?? ""
     }
 
     func pick(_ repo: KnownRepo?) {
@@ -38,7 +56,9 @@ struct NewSessionView: View {
     /// sheet first offers the list that the app kept from its last opening, then the list that sbd answers.
     func offer(_ repos: [KnownRepo]?, sessions: [SessionSummary] = []) {
       offered = (repos, sessions)
-      if !picked { repo = repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) } }
+      guard !picked else { return }
+      let named = repoName.flatMap { name in repos?.first { $0.name.lowercased() == name.lowercased() } }
+      repo = named ?? repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) }
     }
 
     func choose(group: String?) {
@@ -61,17 +81,22 @@ struct NewSessionView: View {
       }
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
-        prompt: optional(prompt), account: groupAccount(groups) == nil ? optional(account) : nil, group: group)
+        prompt: optional(prompt), account: groupAccount(groups) == nil ? optional(account) : nil, group: group,
+        issue: issue)
     }
   }
 
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
+  /// The user's last choice of the toggle, which a later sheet starts from.
   @AppStorage("createWorktree") private var createWorktree = false
   @StateObject private var form: Form
+  /// This sheet's toggle. A request that names a branch starts with it on and leaves the saved choice alone.
+  @State private var worktree: Bool
 
   init(request: NewSessionRequest) {
-    _form = StateObject(wrappedValue: Form(group: request.group))
+    _form = StateObject(wrappedValue: Form(request))
+    _worktree = State(initialValue: request.branch != nil || UserDefaults.standard.bool(forKey: "createWorktree"))
   }
 
   var body: some View {
@@ -81,9 +106,17 @@ struct NewSessionView: View {
         LabeledContent("Repository") {
           RepoPicker(selection: Binding(get: { form.repo }, set: { form.pick($0) }))
         }
-        Toggle("Create a worktree", isOn: $createWorktree)
-          .help("Start in a new worktree of the repository")
-        if createWorktree {
+        Toggle(
+          "Create a worktree",
+          isOn: Binding(
+            get: { worktree },
+            set: {
+              worktree = $0
+              createWorktree = $0
+            })
+        )
+        .help("Start in a new worktree of the repository")
+        if worktree {
           TextField("Branch", text: $form.branch, prompt: Text("optional: made from the name when blank"))
         }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
@@ -132,7 +165,7 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    if let session = form.request(worktree: createWorktree, groups: model.groups) { model.create(session) }
+    if let session = form.request(worktree: worktree, groups: model.groups) { model.create(session) }
   }
 }
 

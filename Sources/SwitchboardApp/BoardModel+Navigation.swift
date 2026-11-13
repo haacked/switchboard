@@ -52,7 +52,7 @@ extension BoardModel {
         boardFocus = next
       }
     case .issues:
-      break
+      moveIssue(by: step)
     }
     requestListFocus()
   }

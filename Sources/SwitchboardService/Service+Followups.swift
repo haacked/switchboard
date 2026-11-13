@@ -214,7 +214,7 @@ extension Service {
     }
     if let configured { throw APIError("repos sets \(repository) to \(configured), which isn't a folder") }
     throw APIError(
-      "can't find a checkout of \(repository) under \(config.repoRoots.joined(separator: ", ")). \(hint), or add it to repos in \(home.config)"
+      "\(Followup.missingCheckout) \(repository) under \(config.repoRoots.joined(separator: ", ")). \(hint), or add it to repos in \(home.config)"
     )
   }
 

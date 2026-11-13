@@ -18,18 +18,24 @@ struct ListDetailSplit<ListContent: View, Detail: View>: View {
   }
 }
 
-/// A list section's title and its count, above the section's rows.
+/// A list section's title and its count, above the section's rows. A section that collapses shows a chevron.
 struct ListSectionHeader: View {
   let title: String
   let count: Int
+  var collapsed: Bool?
 
   var body: some View {
-    Text("\(title) (\(count))")
-      .font(.caption.bold())
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 12)
-      .padding(.top, 10)
-      .padding(.bottom, 4)
+    HStack(spacing: 4) {
+      if let collapsed {
+        Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.caption2).accessibilityHidden(true)
+      }
+      Text("\(title) (\(count))")
+    }
+    .font(.caption.bold())
+    .foregroundStyle(.secondary)
+    .padding(.horizontal, 12)
+    .padding(.top, 10)
+    .padding(.bottom, 4)
   }
 }
 
@@ -44,8 +50,8 @@ extension View {
       .contentShape(Rectangle())
   }
 
-  /// The keys of a list that `list` names. While it has focus, j and k call `move` with a step that goes
-  /// around the ends, ↓ and ↑ call it with a step that stops at the ends, and Return calls `open`.
+  /// The keys of the list that `list` names, while it has focus. j and k call `move` with a step that goes around
+  /// the ends. ↓ and ↑ call it with a step that stops at the ends. Return calls `open`.
   func listKeys(
     _ list: ListFocus, _ focused: FocusState<Bool>.Binding, model: BoardModel,
     move: @escaping (_ step: Int, _ wrap: Bool) -> Void, open: @escaping () -> Void

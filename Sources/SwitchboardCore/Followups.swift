@@ -131,6 +131,9 @@ extension Followup {
     return link
   }
 
+  /// How the error for a repository with no local checkout starts. The app offers Clone and Choose Folder on it.
+  public static let missingCheckout = "can't find a checkout of"
+
   /// A branch name from a title: lowercase ASCII letters and digits joined
   /// by dashes, cut at a dash to at most `max` characters.
   public static func slug(_ title: String, max: Int = 50) -> String {

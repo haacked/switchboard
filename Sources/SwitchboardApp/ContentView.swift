@@ -90,14 +90,7 @@ struct ContentView: View {
           ServiceBanner(problem: problem)
         }
         if let error = model.actionError {
-          HStack {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(error).lineLimit(2).textSelection(.enabled)
-            Spacer()
-            Button("Dismiss") { model.actionError = nil }
-          }
-          .padding(8)
-          .background(.orange.opacity(0.12))
+          WarningBanner(error) { Button("Dismiss") { model.actionError = nil } }
         }
         if let s = model.selected, let f = s.followup, f.started == nil {
           FollowupView(session: s, followup: f).id(s.id)
@@ -132,7 +125,7 @@ struct ContentView: View {
         Picker("View", selection: viewChoice) {
           Text("Inbox (\(model.triage.count))").tag(MainView?.some(.inbox))
           Text("Board").tag(MainView?.some(.board))
-          Text("Issues").tag(MainView?.some(.issues))
+          Text("Issues (\(model.issueCount))").tag(MainView?.some(.issues))
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -179,6 +172,28 @@ struct ContentView: View {
     .sheet(isPresented: isShowingDoneRemoval) {
       if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
     }
+  }
+}
+
+/// An orange strip across the pane with a warning and an optional button at its end.
+struct WarningBanner<Action: View>: View {
+  let text: String
+  @ViewBuilder let action: () -> Action
+
+  init(_ text: String, @ViewBuilder action: @escaping () -> Action = { EmptyView() }) {
+    self.text = text
+    self.action = action
+  }
+
+  var body: some View {
+    HStack {
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+      Text(text).lineLimit(2).textSelection(.enabled)
+      Spacer()
+      action()
+    }
+    .padding(8)
+    .background(.orange.opacity(0.12))
   }
 }
 

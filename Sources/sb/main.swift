@@ -247,6 +247,20 @@ let usage = """
     plan apply <proposal>         write a proposal into the document
     plan reject <proposal>        drop it. A declined row stays declined
 
+  Issues, open GitHub issues from the sources you pick:
+    issues [--mine]               list them by bucket: assigned to you, the team's
+                                  unassigned, the team's assigned to others, other,
+                                  and being worked on by a session
+    issues start <owner/name#N> [--preset P] [--group G] [--path FOLDER]
+                                  start a session on the issue in a worktree on
+                                  <branchPrefix><N>-<slug>, with the preset's prompt
+    issues source add|rm <org|owner/name> [--label L] [--person P]
+                                  add or remove a source. An org needs a label or
+                                  a person
+    issues source ls              list the sources
+    issues team [--label L]... [--person P]...
+                                  show or set the labels and logins of your team
+
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
                  [--after owner/name#N] [--link URL] [--parent S] [--account A]
@@ -333,6 +347,7 @@ struct Args {
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
+      "--preset", "--label", "--person",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -838,6 +853,8 @@ case "docket":
   docket(a)
 case "followup", "followups":
   followup(a)
+case "issues":
+  issues(a)
 case "poll":
   let result = call("poll", ["all": .bool(a.switches.contains("--all"))], timeout: 300)
   if a.json {
@@ -852,6 +869,7 @@ case "poll":
   if let error = result["depotError"]?.string { warn(error) }
   if let error = result["trunkError"]?.string { warn(error) }
   if let error = result["codeOwnersError"]?.string { warn(error) }
+  if let error = result["issuesError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)

@@ -28,6 +28,8 @@ public struct Home: Sendable {
   public var drafts: String { "\(path)/drafts" }
   /// Holds `on` while `sb autocontinue on` is in force.
   public var autoContinue: String { "\(path)/auto-continue" }
+  /// sbd's cache of open issues from the configured sources.
+  public var issues: String { "\(path)/issues.json" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
   public var mcpConfig: String { "\(path)/mcp-config.json" }
   /// Where sbd writes each shared MCP server's launcher script.
@@ -145,6 +147,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var docket = DocketSettings()
   public var planUpdates = PlanUpdateSettings()
   public var recheck = RecheckSettings()
+  /// Where the Issues view reads issues from, the team, and the Start presets.
+  public var issues = IssueSettings()
 
   public init() {}
 
@@ -154,6 +158,7 @@ public struct Config: Codable, Equatable, Sendable {
       cleanupDeletes,
       supacode
     case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
+    case issues
     case recheck = "recheckSeconds"
   }
 
@@ -214,6 +219,7 @@ public struct Config: Codable, Equatable, Sendable {
     docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
     planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
     recheck = try c.decodeIfPresent(RecheckSettings.self, forKey: .recheck) ?? d.recheck
+    issues = try c.decodeIfPresent(IssueSettings.self, forKey: .issues) ?? d.issues
   }
 }
 

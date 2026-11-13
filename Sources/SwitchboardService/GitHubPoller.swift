@@ -18,7 +18,7 @@ final class GitHubPoller {
   /// After GitHub's rate limit, no request to that quota goes out before this
   /// time. GitHub counts GraphQL and REST (`core`) requests separately. Other
   /// `gh` calls with the same token spend `core`.
-  private var graphQLPausedUntil: Int64 = 0
+  private(set) var graphQLPausedUntil: Int64 = 0
   private var restPausedUntil: Int64 = 0
   var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id, with their comments from
@@ -58,6 +58,8 @@ final class GitHubPoller {
   /// Each PR's merge details, by node id, with the head commit they belong
   /// to and when the poller read them.
   var mergeDetails: [String: (head: String, read: Int64, details: MergeDetails)] = [:]
+  /// When the last issues poll started, in ms.
+  var issuesReadAt: Int64?
 
   /// What the poller knows about one session.
   struct Tracked {
@@ -151,6 +153,7 @@ final class GitHubPoller {
     var resumed = 0
     var planReads = 0
     var planWrites = 0
+    var issueReads = 0
   }
 
   init(service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings) {
@@ -208,6 +211,7 @@ final class GitHubPoller {
       logLine("github: \(error)")
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
+    let issuesError = refreshIssues(all: all, now: now, stats: &stats)
     // Each status read rebuilds its PR without a requirement. The reads
     // above can throw after they rebuild some PRs, so the apply runs after
     // the catch and before `record` compares each PR.
@@ -230,6 +234,7 @@ final class GitHubPoller {
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
+    if let issuesError { result["issuesError"] = .string(issuesError) }
     if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
     if let mergeDetailsError { result["mergeDetailsError"] = .string(mergeDetailsError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }

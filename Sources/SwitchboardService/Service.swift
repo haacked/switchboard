@@ -176,6 +176,10 @@ public final class Service {
   var autoContinueOn = false
   /// The most claude processes that may run at once. `sb live --set` changes it.
   var liveCap: Int
+  /// config.json's `issues`. `sb issues source` and `sb issues team` change it.
+  var issueSettings: IssueSettings
+  /// The open issues from `issueSettings.sources`, as issues.json holds them.
+  var issueCache = IssueCache()
   var quota: any QuotaBudget = UnlimitedBudget()
   var groups: [String: SessionGroup] = [:]
   var plans: [String: PlanDocument] = [:]
@@ -223,6 +227,7 @@ public final class Service {
     self.sbPath = sbPath
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
+    self.issueSettings = config.issues
     let links = Service.makeHostLinks(config: config, home: home)
     self.hostLinks = links
     self.remoteSites = links.mapValues { RemoteSite(link: $0, config: $0.config, home: home) }
@@ -241,6 +246,7 @@ public final class Service {
     try writeClaudeSettings()
     loadChosenAccount()
     loadAutoContinue()
+    loadIssueCache()
     try store.pruneSnapshots()
     var uncertain: [String: [String]] = [:]
     for session in try store.sessions() {
@@ -365,6 +371,9 @@ public final class Service {
       case "plan-followup":
         // `planFollowup` takes the state queue itself.
         return .success(try JSON(encoding: planFollowup(request.args)))
+      case "issues-refresh", "issues-start", "issues-clone":
+        // These wait on GitHub or git. They run off the state queue.
+        return .success(try issuesRequest(request.op, request.args))
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
@@ -510,12 +519,7 @@ public final class Service {
       let clear = args["clear"]?.bool == true
       let text = args["issue"]?.string
       guard clear != (text != nil) else { throw APIError("issue needs an issue or clear, not both") }
-      let issue = try text.map { text in
-        guard let ref = IssueRef(parsing: text) else {
-          throw APIError("can't read \"\(text)\" as an issue. Use 123, #123, owner/name#123, or an issue URL.")
-        }
-        return ref
-      }
+      let issue = try text.map(IssueRef.parse)
       try update(id) { $0.issue = issue }
       return try JSON(encoding: summary(id))
     case "events":
@@ -553,6 +557,8 @@ public final class Service {
       return try groupRequest(op, args)
     case "plan-ls", "plan-get", "plan-detach", "plan-auto":
       return try planRequest(op, args)
+    case "issues", "issues-source-add", "issues-source-rm", "issues-settings", "issues-dismiss":
+      return try issuesRequest(op, args)
     case "plan-proposals", "plan-reject":
       return try planProposalRequest(op, args)
     case "plan-artifact-reject", "plan-artifact-report":
@@ -924,6 +930,7 @@ public final class Service {
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
     session.host = args.host
+    session.issue = args.issue
     configure(&session)
     if let host = session.host {
       guard session.kind == .work else { throw APIError("the Manager and a chat run on this Mac, not on \(host)") }
