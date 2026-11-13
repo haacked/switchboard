@@ -29,3 +29,12 @@ Before you implement a feature or fix, read the code it touches and ask whether 
 - In the plan, list the refactors as their own stage before the implementation stages.
 - In the PR description, say what you restructured and why the feature needed it.
 - In review, treat code that works around a design problem instead of fixing it as a finding.
+
+## Branch upkeep and merging
+
+Every session in this repo follows the `/go --yolo` workflow. Don't stop to ask about routine branch upkeep.
+
+- When the PR conflicts with main or falls behind it, merge `origin/main` into the branch, resolve the conflicts, run the tests, push, and continue. Don't ask first.
+- Never rebase a pushed branch, and never force-push.
+- When `/go` is done and CI is green, merge with `gh pr merge <n> --merge --match-head-commit <sha>`, where `<sha>` is the head commit that CI passed on. Never use `--admin` or `--auto`.
+- If the merge command is refused, say so in one line and stop. Don't try another way to merge. The Manager merges finished Switchboard PRs.
