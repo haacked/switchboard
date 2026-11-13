@@ -25,6 +25,19 @@ extension Instance {
     guard let pid = stubPid("held-hook.pid") else { return false }
     return kill(pid, 0) == 0
   }
+
+  /// A new session whose stub asks to edit notes.txt, once its card is open.
+  func newEdit() throws -> SessionSummary {
+    try "alpha\nbeta\n".write(toFile: "\(work)/notes.txt", atomically: true, encoding: .utf8)
+    let s = try new(prompt: "edit notes.txt beta BETA")
+    return try waitFor(s.id, "the card") { !$0.cards.isEmpty }
+  }
+
+  /// Waits for the stub to make the edit that `newEdit` asked for.
+  @discardableResult
+  func waitForEdit(_ id: String) throws -> SessionSummary {
+    try waitFor(id, "the edit's reply") { $0.lastReply?.hasPrefix("Edited") == true && $0.cards.isEmpty }
+  }
 }
 
 /// A session whose card's PermissionRequest hook timed out while the
@@ -376,5 +389,51 @@ func timedOut(_ prompt: String, idleStopSeconds: Int = 600) throws -> (Instance,
     let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
     #expect(answer?["delivery"]?.string == "terminal")
     try sbd.waitFor(s.id, "the command's reply") { $0.lastReply == "Ran touch w" && $0.cards.isEmpty }
+  }
+
+  /// The restart ends the held hook. sbd can't read a WebFetch dialog on the
+  /// screen, so the card goes while Claude Code's dialog still waits. The
+  /// Inbox item says why it has no card.
+  @Test func explainsAPromptWhoseCardWentWhenSbdRestarts() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "fetch https://example.com")
+    let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
+    #expect(asked.cards.map(\.tool) == ["WebFetch"])
+    sbd.stopSbd()
+    try sbd.startSbd()
+    let after = try sbd.waitFor(s.id, "the prompt without a card") { $0.cards.isEmpty && $0.openPrompt }
+    #expect(after.triage?.summary.contains("can't read this tool's dialog") == true)
+    #expect(after.triage?.title.contains("WebFetch") == true)
+    let shown = try JSON.parse(sbd.sb("get", "--json", s.id))
+    #expect(shown?["triage"]?["summary"]?.string?.contains("can't read this tool's dialog") == true)
+  }
+
+  /// The restart ends the held hook while the pane is too short for the
+  /// dialog's title and path. sbd can't match the dialog to the card then,
+  /// so the card stays, and sbd types its answer once the pane shows the
+  /// whole dialog again.
+  @Test func keepsAnEditCardWhoseDialogTopScrolledOffWhenSbdRestarts() throws {
+    let sbd = try Instance()
+    let s = try sbd.newEdit()
+    try sbd.waitFor("the Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }
+    try sbd.resize(s.id, rows: 8)
+    try sbd.waitFor("the dialog's title to scroll off") { try !sbd.screen(s.id).contains(" Edit file") }
+    sbd.stopSbd()
+    try sbd.startSbd()
+    // Each clock advance runs a tick, and each tick checks the screen.
+    for _ in 0..<10 { try sbd.advanceClock(200) }
+    #expect(try !sbd.screen(s.id).contains(" Edit file"))
+    #expect(try sbd.get(s.id).cards.map(\.hookClosed) == [true])
+    #expect(try !sbd.events(s.id).contains { $0.kind == "dialog_closed" })
+    let refused = try sbd.run("allow", s.id)
+    #expect(refused.status != 0)
+    #expect(refused.stderr.contains("scrolled off the terminal"))
+    #expect(try sbd.cards().count == 1)
+    try sbd.resize(s.id, rows: 50)
+    try sbd.waitFor("the whole Edit dialog") { try sbd.screen(s.id).contains(" Edit file") }
+    let answer = try JSON.parse(sbd.sb("allow", "--json", s.id))
+    #expect(answer?["delivery"]?.string == "terminal")
+    try sbd.waitForEdit(s.id)
+    #expect(try String(contentsOfFile: "\(sbd.work)/notes.txt", encoding: .utf8) == "alpha\nBETA\n")
   }
 }
