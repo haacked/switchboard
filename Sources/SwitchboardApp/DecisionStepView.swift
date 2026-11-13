@@ -362,11 +362,7 @@ struct DecisionStepBar: View {
     let steps = DecisionSteps(list)
     let current = steps.resolve(step)
     VStack(alignment: .leading, spacing: 6) {
-      if let error = model.decisionErrors[session.id] {
-        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
-      }
+      RefusalLabel(refusal: model.decisionErrors[session.id])
       HStack {
         Button {
           step = steps.previous(from: current)
@@ -392,10 +388,7 @@ struct DecisionStepBar: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
-    // A refused pick neither advances nor marks the option, so VoiceOver would say nothing.
-    .onChange(of: model.decisionErrors[session.id]) {
-      if let error = model.decisionErrors[session.id] { AccessibilityNotification.Announcement(error).post() }
-    }
+    .announcesRefusal(model.decisionErrors[session.id])
   }
 
   private struct TrailingIcon: LabelStyle {

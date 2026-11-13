@@ -130,7 +130,8 @@ private func link(_ text: String, bel: Bool) -> String {
 @Suite struct PromptBoxMissing {
   @Test(arguments: [
     "perm-open", "perm-down", "q-open", "edit-open", "edit-down", "edit-multi", "edit-outside", "write-open",
-    "write-overwrite", "write-long", "read-open",
+    "write-overwrite", "write-long", "read-open", "write-restart", "write-restart-tall", "write-restart-cut-path",
+    "write-restart-narrow",
   ])
   func aDialogIsNotEmpty(_ fixture: String) throws {
     #expect(!ClaudeScreen.promptIsEmpty(try screenFixture(fixture)))

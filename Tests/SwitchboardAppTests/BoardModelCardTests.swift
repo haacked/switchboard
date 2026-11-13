@@ -152,4 +152,66 @@ private func boardCard(
       #expect(!s.hasNeedsYouEdge)
     }
   }
+
+  // MARK: An answer's refusal
+
+  /// sbd's refusal of an answer shows under the card it answered, not in the
+  /// window's error banner.
+  @MainActor
+  @Suite struct AnswerError {
+    static let refusal =
+      "the top of card 3's dialog scrolled off the terminal, so sbd can't check which call it answers. "
+      + "Make the terminal taller, or answer it there"
+
+    func card(_ id: Int64) throws -> Card { try permissionCard(id, session: "a", hookClosed: true) }
+
+    /// A model whose first answer of card 3 sbd refused.
+    func refusedModel() async throws -> BoardModel {
+      let model = offlineModel()
+      let refusal = AnswerError.refusal
+      model.send = { _, _ in throw APIError(refusal) }
+      model.answer(try card(3), behavior: "allow")
+      await settle { model.cardErrors[3] != nil && model.answering.isEmpty }
+      return model
+    }
+
+    @Test func aRefusedAnswerSetsTheCardsError() async throws {
+      let model = try await refusedModel()
+
+      #expect(model.cardErrors[3]?.contains(AnswerError.refusal) == true)
+    }
+
+    @Test func aRefusedAnswerLeavesTheErrorBannerEmpty() async throws {
+      let model = try await refusedModel()
+
+      #expect(model.actionError == nil)
+    }
+
+    @Test func aRefusedAnswerLeavesOtherCardsWithoutAnError() async throws {
+      let model = try await refusedModel()
+
+      #expect(model.cardErrors[4] == nil)
+    }
+
+    @Test func aLaterAnswerClearsIt() async throws {
+      let model = try await refusedModel()
+      try #require(model.cardErrors[3] != nil)
+      model.send = { _, _ in .null }
+
+      model.answer(try card(3), behavior: "allow")
+      await settle { model.cardErrors[3] == nil && model.answering.isEmpty }
+
+      #expect(model.cardErrors[3] == nil)
+    }
+
+    @Test func aLaterAnswerOfAnotherCardKeepsTheError() async throws {
+      let model = try await refusedModel()
+      model.send = { _, _ in .null }
+
+      model.answer(try card(4), behavior: "allow")
+      await settle { model.answering.isEmpty }
+
+      #expect(model.cardErrors[3] != nil)
+    }
+  }
 }

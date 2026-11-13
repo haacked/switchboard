@@ -18,18 +18,27 @@ struct CardView: View {
   /// Leaves out the tool call and the group message's text and targets,
   /// which the Inbox's Details section shows.
   var compact = false
+  /// Offers Open Terminal beside a hook-closed card's caption. The Inbox
+  /// shows the session's summary in place of its terminal.
+  var offersTerminal = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if card.hookClosed {
-        Label(
-          card.kind == .permission
-            ? "Claude Code stopped waiting on Switchboard. Your answer is typed into the terminal."
-            : "Claude Code stopped waiting on Switchboard. Answering cancels the terminal's question and sends your answers as a message.",
-          systemImage: "keyboard"
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline) {
+          Label(
+            card.kind == .permission
+              ? "Claude Code stopped waiting on Switchboard. Your answer is typed into the terminal."
+              : "Claude Code stopped waiting on Switchboard. Answering cancels the terminal's question and sends your answers as a message.",
+            systemImage: "keyboard"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          if offersTerminal {
+            Spacer(minLength: 8)
+            OpenTerminalButton().controlSize(.small)
+          }
+        }
       }
       switch card.kind {
       case .permission: permission
@@ -37,7 +46,9 @@ struct CardView: View {
       case .send: groupMessage
       case .trust: trust
       }
+      RefusalLabel(refusal: model.cardErrors[card.id])
     }
+    .announcesRefusal(model.cardErrors[card.id])
     .disabled(model.answering.contains(card.id))
     .padding(12)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -46,7 +57,8 @@ struct CardView: View {
   }
 
   private var permission: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    let extras = card.offeredExtras.map { (extra: $0, note: card.note($0)) }
+    return VStack(alignment: .leading, spacing: 8) {
       Text("Claude wants to use \(card.tool)").font(.headline)
       if let description = card.input["description"]?.string {
         InlineText(plain: description).foregroundStyle(.secondary)
@@ -55,9 +67,9 @@ struct CardView: View {
       HStack {
         Button("Allow") { model.answer(card, behavior: "allow") }
           .buttonStyle(.borderedProminent)
-        if card.offersAutoMode {
-          Button(PermissionMode.approveLabel) { model.answer(card, behavior: "allow", autoMode: true) }
-            .help(PermissionMode.autoModeNote)
+        ForEach(extras, id: \.extra) { extra, note in
+          Button(extra.label) { model.answer(card, behavior: "allow", extra: extra) }
+            .help(note ?? "")
         }
         Button("Deny", action: deny)
         TextField("Message for Claude (optional)", text: $draft.message, axis: .vertical)
@@ -67,8 +79,8 @@ struct CardView: View {
       Text("Deny without a message stops the turn. With a message, Claude reads it and goes on.")
         .font(.caption)
         .foregroundStyle(.secondary)
-      if card.offersAutoMode {
-        Text(PermissionMode.autoModeNote).font(.caption).foregroundStyle(.secondary)
+      ForEach(extras.compactMap(\.note), id: \.self) { note in
+        Text(note).font(.caption).foregroundStyle(.secondary)
       }
     }
   }

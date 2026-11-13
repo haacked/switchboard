@@ -24,10 +24,13 @@ public enum ClaudeScreen {
   /// wraps a long command, so the lines join with a space. Runs of white
   /// space count as one. A file tool's dialog must name the card's file and
   /// show its change, as `FileCall` describes. A question dialog is the
-  /// card's when one of the card's marks appears in it.
+  /// card's when one of the card's marks appears in it. A question's dialog
+  /// has no dashed rule. A permission dialog can show a question's mark in
+  /// its rows, so a question card never claims a dialog with a dashed rule.
   public static func shows(_ card: Card, _ dialog: [String]) -> Bool {
     if card.kind == .trust { return card.cwd != nil && trustFolder(dialog) == card.cwd }
     guard card.kind == .permission else {
+      if dialog.contains(where: isDashedRule) { return false }
       return card.marks.contains { mark in dialog.contains { $0.contains(mark) } }
     }
     if let call = FileCall(card) { return call.shows(dialog, cwd: card.cwd) }
@@ -35,14 +38,38 @@ public enum ClaudeScreen {
     return words(shown.joined(separator: " ")) == words(command)
   }
 
-  /// Whether the dialog may be the card's. `DialogWatch` keeps a card while
-  /// this holds. Claude Code breaks a token that is wider than the pane in
-  /// the middle, so this ignores white space. `shows` decides what sbd may
-  /// type. A file tool's `shows` already ignores white space.
+  /// Whether the dialog may be the card's. `DialogWatch` uses it to decide
+  /// which open card a dialog belongs to. Claude Code breaks a token that is
+  /// wider than the pane in the middle, so this ignores white space. `shows`
+  /// decides what sbd may type. A file tool's `shows` already ignores white
+  /// space.
   public static func mayShow(_ card: Card, _ dialog: [String]) -> Bool {
     guard card.kind == .permission, FileCall(card) == nil else { return shows(card, dialog) }
     guard let (shown, command) = commandBlock(card, dialog) else { return false }
     return squeezed(shown.joined()) == squeezed(command)
+  }
+
+  /// The card's dialog on the screen, which sbd may type into. It throws why
+  /// sbd may not when `shows` rejects the screen's dialog or no dialog
+  /// shows. A dialog starts with a full-width rule, so a dialog without one
+  /// lost its top lines to the pane's height. The trust dialog shows only a
+  /// folder, so any other trust dialog gets the refusal that the terminal
+  /// doesn't show the card's dialog.
+  public static func typingDialog(_ card: Card, screen: String?) throws -> [String] {
+    func notShown() -> APIError {
+      APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
+    }
+    guard let screen, let dialog = dialog(screen) else { throw notShown() }
+    if shows(card, dialog) { return dialog }
+    if card.kind == .trust { throw notShown() }
+    guard let top = dialog.first, isRule(top) else {
+      throw APIError(
+        "the top of card \(card.id)'s dialog scrolled off the terminal, so sbd can't check which call it answers. "
+          + "Make the terminal taller, or answer it there")
+    }
+    throw APIError(
+      "the terminal shows a dialog that sbd can't match to card \(card.id), such as one whose path the pane cuts. "
+        + "Widen the terminal, or answer it there")
   }
 
   /// The lines between the Bash dialog's two dashed rules, and the card's
@@ -200,14 +227,17 @@ public enum ClaudeScreen {
   }
 }
 
-/// Decides when a card's dialog has left the screen. A card's dialog has left
-/// when two checks in a row don't show it, and either an earlier check showed
-/// it or the card's hook closed. A card whose dialog Claude Code hasn't drawn
-/// yet stays. A hook closes only after its dialog was drawn, so a card whose
-/// hook closed before any check saw its dialog still goes. The second check
-/// keeps a card through a redraw, such as when a terminal attaches and
-/// resizes the pane. While the card's hook is open, a dialog whose top
-/// scrolled off the pane is not a miss, because it may still be the card's.
+/// Decides when a card's dialog has left the screen. A check is a miss for a
+/// card when the screen shows no dialog, or when `mayShow` gives the dialog
+/// to another watched card. A dialog that no watched card may show is not a
+/// miss, because it may be the card's own dialog with its title scrolled off
+/// or its path cut by a narrow pane. Such a dialog resets the run of misses,
+/// so a later miss can't complete a run that began before it. It doesn't
+/// count as a sighting either. A card's dialog has left after two misses in a
+/// row, when an earlier check showed the dialog or the card's hook closed.
+/// The second miss keeps a card through a redraw, such as when a terminal
+/// attaches and resizes the pane. A card whose hook is open stays until a
+/// check shows its dialog, because Claude Code may not have drawn it yet.
 public struct DialogWatch: Equatable, Sendable {
   struct Sighting: Equatable, Sendable {
     var seen = false
@@ -225,14 +255,18 @@ public struct DialogWatch: Equatable, Sendable {
   /// of the cards whose dialog left. It forgets every other card.
   public mutating func check(_ open: [Card], screen: String) -> [Int64] {
     let dialog = ClaudeScreen.dialog(screen)
+    let watched = open.filter(DialogWatch.watches)
+    let claims = watched.map { card in dialog.map { ClaudeScreen.mayShow(card, $0) } ?? false }
+    let claimed = claims.contains(true)
     var next: [Int64: Sighting] = [:]
     var left: [Int64] = []
-    for card in open where DialogWatch.watches(card) {
+    for (card, mayShow) in zip(watched, claims) {
       var s = sightings[card.id] ?? Sighting()
-      let topScrolledOff = !card.hookClosed && dialog?.first.map(ClaudeScreen.isRule) == false
-      if let dialog, ClaudeScreen.mayShow(card, dialog) {
+      if mayShow {
         s = Sighting(seen: true, misses: 0)
-      } else if !topScrolledOff {
+      } else if dialog != nil, !claimed {
+        s.misses = 0
+      } else {
         s.misses += 1
       }
       if s.misses >= 2 && (s.seen || card.hookClosed) {
