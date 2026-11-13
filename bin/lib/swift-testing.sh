@@ -12,6 +12,10 @@
 # <dev>/Library/Developer/usr/lib. The rpaths in Testing.framework do not
 # reach that folder.
 
+# Scripts and tests source this file from other folders, so the path to
+# swiftpm is absolute.
+swiftpm="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/swiftpm"
+
 # xcode-select -p reads DEVELOPER_DIR. It resolves an Xcode app path to the
 # app's Contents/Developer folder, as swift does.
 dev="$(xcode-select -p)"
@@ -38,7 +42,7 @@ require_swift_testing() {
 }
 
 build_tests() {
-  swift build --build-tests ${args[@]+"${args[@]}"}
+  "$swiftpm" build --build-tests ${args[@]+"${args[@]}"}
 }
 
 # Prints one line per test, such as SwitchboardCoreTests.FooTests/bar(), from

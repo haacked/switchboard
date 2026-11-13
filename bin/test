@@ -8,8 +8,11 @@
 # integration tests across N swift test processes and runs the other tests in
 # one more, all at once, then runs MeasureTests alone. bin/lib/swift-testing.sh
 # sets the flags that swift needs to find Swift Testing.
+# The whole run, shards included, holds one machine-wide build slot
+# (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
 source bin/lib/swift-testing.sh
 require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such
@@ -82,7 +85,7 @@ shards() {
   mkdir "$clones"
   trap "rm -rf '$clones'" EXIT
   run_shard() {
-    swift test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
+    bin/lib/swiftpm test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
       tee "$clones/$1.log" | awk -v p="[$1] " '{ print p $0; fflush() }'
   }
   local pids=()
@@ -128,8 +131,8 @@ if [ "${1:-}" = --claude ]; then
   # real tests run first, on their own.
   if [ $# -eq 0 ]; then
     status=0
-    swift test ${args[@]+"${args[@]}"} --filter ClaudeTests || status=$?
-    swift test ${args[@]+"${args[@]}"} --skip ClaudeTests || status=$?
+    bin/lib/swiftpm test ${args[@]+"${args[@]}"} --filter ClaudeTests || status=$?
+    bin/lib/swiftpm test ${args[@]+"${args[@]}"} --skip ClaudeTests || status=$?
     exit "$status"
   fi
 fi
@@ -176,4 +179,4 @@ case ${1:-} in
   ;;
 "") targeted ;;
 esac
-exec swift test ${args[@]+"${args[@]}"} ${run[@]+"${run[@]}"} "$@"
+exec bin/lib/swiftpm test ${args[@]+"${args[@]}"} ${run[@]+"${run[@]}"} "$@"

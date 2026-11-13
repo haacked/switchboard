@@ -160,7 +160,7 @@ private struct SelectionRun {
   }
 }
 
-/// A temporary git repo with copies of bin/test and bin/lib/*.sh, committed
+/// A temporary git repo with copies of bin/test and bin/lib, committed
 /// with the baseline files. origin/main points at that commit. A stub swift
 /// at the front of PATH logs its arguments, runs `dumpPackage` or prints the
 /// package for `dump-package`, prints `listing` for `test list`, and exits
@@ -196,7 +196,7 @@ private final class SelectionRepo {
     try fm.createDirectory(atPath: "\(dir)/bin/lib", withIntermediateDirectories: true)
     try fm.copyItem(atPath: Instance.root.appendingPathComponent("bin/test").path, toPath: "\(dir)/bin/test")
     let lib = Instance.root.appendingPathComponent("bin/lib").path
-    for name in try fm.contentsOfDirectory(atPath: lib) where name.hasSuffix(".sh") {
+    for name in try fm.contentsOfDirectory(atPath: lib) {
       try fm.copyItem(atPath: "\(lib)/\(name)", toPath: "\(dir)/bin/lib/\(name)")
     }
     for (path, text) in baselineFiles.merging(files, uniquingKeysWith: { $1 }) { try write(path, text) }
@@ -260,6 +260,11 @@ private final class SelectionRepo {
     env["PATH"] = "\(stubBin):\(env["PATH"] ?? "/usr/bin:/bin")"
     env.removeValue(forKey: "DEVELOPER_DIR")
     env.removeValue(forKey: "SB_TEST_CLAUDE")
+    // The copied scripts skip the machine-wide build queue and pass no --jobs,
+    // so the stub swift logs exactly the arguments that bin/test chose.
+    env["SB_BUILD_SLOTS"] = "0"
+    env["SB_BUILD_JOBS"] = "0"
+    env.removeValue(forKey: "SB_BUILD_SLOT_HELD")
     return env
   }
 
