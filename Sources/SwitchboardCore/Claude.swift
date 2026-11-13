@@ -233,7 +233,7 @@ public enum Transcript {
   /// folder in <account>/projects.
   /// The account, the cwd, and the transcript are on `machine`.
   public static func find(
-    _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine()
+    _ sessionId: String, account: String, cwd: String, on machine: any Machine
   ) -> String? {
     find(sessionId, account: account, cwd: cwd, on: machine, folders: machine.list)
   }
@@ -243,7 +243,7 @@ public enum Transcript {
   /// <account>/projects and returns folder names, not paths. It runs only
   /// when the cwd's folder lacks the transcript.
   public static func find(
-    _ sessionId: String, account: String, cwd: String, on machine: any Machine = LocalMachine(),
+    _ sessionId: String, account: String, cwd: String, on machine: any Machine,
     folders: (String) -> [String]
   ) -> String? {
     let projects = "\(account)/projects"
@@ -255,14 +255,14 @@ public enum Transcript {
   }
 
   /// Reads the transcript from the end, because transcripts reach 24 MB.
-  public static func tail(_ path: String, on machine: any Machine = LocalMachine()) -> TranscriptTail {
+  public static func tail(_ path: String, on machine: any Machine) -> TranscriptTail {
     var tail = TranscriptTail()
     eachLineFromEnd(path, on: machine) { fold($0, into: &tail) }
     return tail
   }
 
   /// The main conversation's last `limit` messages that have text, oldest first.
-  public static func messages(_ path: String, limit: Int, on machine: any Machine = LocalMachine()) -> [ChatMessage] {
+  public static func messages(_ path: String, limit: Int, on machine: any Machine) -> [ChatMessage] {
     var messages: [ChatMessage] = []
     eachLineFromEnd(path, on: machine) { line in
       if let message = message(line) { messages.append(message) }
@@ -275,7 +275,7 @@ public enum Transcript {
   /// at byte `offset` or later. It is false when the file is shorter than
   /// `offset`, because then it is not the file that `offset` measured.
   public static func hasUserMessage(
-    _ path: String, holding text: String, from offset: UInt64, on machine: any Machine = LocalMachine()
+    _ path: String, holding text: String, from offset: UInt64, on machine: any Machine
   ) -> Bool {
     guard let data = machine.read(path, from: offset, count: nil) else { return false }
     let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -292,7 +292,7 @@ public enum Transcript {
   /// true or the walk reached the start of the file.
   @discardableResult
   static func eachLineFromEnd(
-    _ path: String, before end: UInt64? = nil, on machine: any Machine = LocalMachine(), _ body: (Data) -> Bool
+    _ path: String, before end: UInt64? = nil, on machine: any Machine, _ body: (Data) -> Bool
   ) -> Bool {
     guard var offset = end ?? machine.size(path) else { return false }
     var size: UInt64 = 1 << 16

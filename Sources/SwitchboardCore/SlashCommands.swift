@@ -100,7 +100,7 @@ public enum SkillListing {
   /// failed read back from the end, leaves no listing at offset 0. The caller
   /// must not keep the state of a failed read for a later read from its offset.
   public static func read(
-    _ path: String, from offset: UInt64? = nil, into state: inout State, on machine: any Machine = LocalMachine()
+    _ path: String, from offset: UInt64? = nil, into state: inout State, on machine: any Machine
   ) -> Bool {
     guard let size = machine.size(path) else {
       state = State()
@@ -197,7 +197,7 @@ public enum SkillFolders {
   /// `<folder>/commands/*.md` of the account and of `<cwd>/.claude`, in the
   /// order in which Claude Code picks among entries of one name: a skill
   /// before a command, and the account's before the cwd's.
-  public static func scan(account: String, cwd: String, on machine: any Machine = LocalMachine()) -> [ScannedSkill] {
+  public static func scan(account: String, cwd: String, on machine: any Machine) -> [ScannedSkill] {
     let folders = [account, "\(cwd)/.claude"]
     let skills = folders.flatMap { folder in
       machine.list("\(folder)/skills").sorted().compactMap { name in
@@ -214,7 +214,7 @@ public enum SkillFolders {
 
   /// The `skillOverrides` of the account's settings.json, from skill name to
   /// a state such as "off".
-  public static func overrides(account: String, on machine: any Machine = LocalMachine()) -> [String: String] {
+  public static func overrides(account: String, on machine: any Machine) -> [String: String] {
     guard let text = machine.text("\(account)/settings.json"),
       let overrides = JSON.parse(text)?["skillOverrides"]?.object
     else { return [:] }

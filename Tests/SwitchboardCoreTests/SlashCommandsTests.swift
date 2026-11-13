@@ -799,12 +799,12 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     let path = "\(dir)/t.jsonl"
     try write("", to: path)
     var state = SkillListing.State()
-    #expect(SkillListing.read(path, into: &state))
+    #expect(SkillListing.read(path, into: &state, on: LocalMachine()))
     try write(joined(try fixtureLines("probe-listing.jsonl")), to: path)
-    #expect(SkillListing.read(path, into: &state))
-    #expect(SkillListing.read(path, from: state.offset, into: &state))
+    #expect(SkillListing.read(path, into: &state, on: LocalMachine()))
+    #expect(SkillListing.read(path, from: state.offset, into: &state, on: LocalMachine()))
     try append(#"{"type":"user","#, to: path)
-    #expect(SkillListing.read(path, from: state.offset, into: &state))
+    #expect(SkillListing.read(path, from: state.offset, into: &state, on: LocalMachine()))
     #expect(names(state.commands).contains("probe-default"))
   }
 }

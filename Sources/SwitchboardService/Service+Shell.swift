@@ -22,13 +22,12 @@ extension Service {
 
   /// Records the shell as closed and ends its tmux session, which also ends
   /// each terminal attached to it. A snapshot that began before the kill can
-  /// no longer replace the pane list, so it can't show the pane again.
+  /// no longer replace the pane list, so it can't show the pane again. On a
+  /// host, the pane stays in the snapshot unless the host answered the close.
   func closeShell(_ id: String) throws {
     if entries[id]?.session.shellClosed != true { try update(id) { $0.shellClosed = true } }
-    let name = paneName(id, .shell)
-    host.kill(name)
-    snapshot.panes[name] = nil
-    snapshot.taken = nowMs()
+    try closePane(id, .shell, at: site(of: id))
+    markKilled(paneName(id, .shell))
   }
 
   /// Starts the shell, then records it as open. A shell that fails to start stays closed.
@@ -41,11 +40,12 @@ extension Service {
   func startShell(_ id: String) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     let name = paneName(id, .shell)
-    switch snapshot.panes[name] {
+    let terminals = try site(for: session).terminals()
+    switch paneRow(id, .shell) {
     case nil:
-      try host.create(name, cwd: session.cwd, env: paneEnv(id))
+      try terminals.create(name, cwd: session.cwd, env: newPaneEnv(id))
     case let row? where row.dead:
-      try host.respawn(name, cwd: session.cwd, env: paneEnv(id), command: nil)
+      try terminals.respawn(name, cwd: session.cwd, env: newPaneEnv(id), command: nil)
     default:
       return
     }
@@ -54,7 +54,7 @@ extension Service {
 
   /// Closes each shell pane whose shell exited.
   func closeExitedShells() {
-    for id in entries.keys where snapshot.panes[paneName(id, .shell)]?.dead == true {
+    for id in entries.keys where paneRow(id, .shell)?.dead == true {
       try? closeShell(id)
     }
   }

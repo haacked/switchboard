@@ -8,7 +8,6 @@ import SwitchboardCore
 /// says where it runs. The list reloads when the app becomes active, as it
 /// does after the user exits claude in another terminal.
 struct ImportView: View {
-  /// See SessionViewState for why this isn't `@State`.
   final class Form: ObservableObject {
     @Published var list: ImportList?
     @Published var all = false

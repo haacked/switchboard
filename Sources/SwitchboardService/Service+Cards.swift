@@ -37,24 +37,38 @@ extension Service {
   func handleHook(_ args: JSON, hookGone: @escaping () -> Bool) throws -> Response {
     let (answer, opened): (JSON, (card: Int64, request: HeldRequest)?) = try queue.sync {
       guard let (event, answer) = try hook(args) else { return ([:], nil) }
-      guard entries[event.session]?.facts.cards.contains(where: { $0.id == event.id }) == true else {
-        return (answer, nil)
-      }
-      let request = HeldRequest(session: event.session, hookGone: hookGone)
-      held[event.id] = request
-      return (answer, (event.id, request))
+      return (answer, hold(event, hookGone: hookGone))
     }
-    guard let (card, request) = opened else { return .success(answer) }
+    return .success(awaitAnswer(opened, else: answer) { true })
+  }
+
+  /// Holds the hook of an event that opened a card. It returns nil for any other event. It runs on the state
+  /// queue.
+  func hold(_ event: Event, hookGone: @escaping () -> Bool) -> (card: Int64, request: HeldRequest)? {
+    guard entries[event.session]?.facts.cards.contains(where: { $0.id == event.id }) == true else { return nil }
+    let request = HeldRequest(session: event.session, hookGone: hookGone)
+    held[event.id] = request
+    return (event.id, request)
+  }
+
+  /// What the hook prints: `answer` for a hook that sbd does not hold, else the held request's reply. A held
+  /// request that closes with no reply is dropped. `closedByClaude` then says, off the state queue, whether
+  /// Claude Code closed it, and only then does this record `card_closed`.
+  func awaitAnswer(
+    _ opened: (card: Int64, request: HeldRequest)?, else answer: JSON, closedByClaude: () -> Bool
+  ) -> JSON {
+    guard let (card, request) = opened else { return answer }
     request.wait()
-    return .success(
-      queue.sync {
-        if let reply = request.reply { return reply }
-        held[card] = nil
-        if entries[request.session] != nil {
-          record(request.session, "card_closed", ["card": .number(Double(card))])
-        }
-        return [:]
-      })
+    if let reply = queue.sync(execute: { request.reply }) { return reply }
+    let closed = closedByClaude()
+    return queue.sync {
+      if let reply = request.reply { return reply }
+      if held[card] === request { held[card] = nil }
+      if closed, entries[request.session] != nil {
+        record(request.session, "card_closed", ["card": .number(Double(card))])
+      }
+      return [:]
+    }
   }
 
   /// Drops the session's held requests whose card is gone or deferred. A
@@ -187,7 +201,7 @@ extension Service {
 
   /// Whether a terminal shows the session's Claude pane.
   func attached(_ id: String) -> Bool {
-    (snapshot.panes[paneName(id, .claude)]?.clients ?? 0) > 0
+    (paneRow(id, .claude)?.clients ?? 0) > 0
   }
 
   /// Defers the session's held questions at once, so that its claude can

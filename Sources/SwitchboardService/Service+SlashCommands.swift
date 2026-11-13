@@ -11,7 +11,7 @@ extension Service {
       () -> (String, () -> String?, String, String, any Machine, (path: String, state: SkillListing.State)?) in
       let id = try lookup(args)
       return (
-        id, transcriptFinder(id), claudeAccount(of: id), entries[id]!.session.cwd, self.machine(of: id),
+        id, transcriptFinder(id), claudeAccount(of: id), entries[id]!.session.cwd, try site(of: id).machine,
         slashListings[id]
       )
     }

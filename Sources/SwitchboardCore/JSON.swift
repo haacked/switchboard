@@ -94,6 +94,12 @@ public enum JSON: Codable, Equatable, Sendable {
   public static func parse(_ text: String) -> JSON? {
     try? JSONCoding.decoder.decode(JSON.self, from: Data(text.utf8))
   }
+
+  /// Decodes `data` as UTF-8 before it parses. A byte that isn't valid UTF-8
+  /// becomes U+FFFD and does not fail the parse.
+  public static func parse(_ data: Data) -> JSON? {
+    parse(String(decoding: data, as: UTF8.self))
+  }
 }
 
 extension JSON: ExpressibleByStringLiteral, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral,
