@@ -218,8 +218,8 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
       hooks.filter { $0.kind == "UserPromptSubmit" }.compactMap { $0.data["prompt"]?.string }
         == ["while down one", "while down two"])
     // sbd moves each box time by one offset, which the reconnect's setup measures. The box and sbd share a clock
-    // that the test has not moved. The setup reads the box's clock while it runs and reads sbd's after it
-    // returns. The offset is therefore at least 0 and at most the length of the reconnect.
+    // that the test has not moved. The setup script reads the box's clock. sbd reads its own clock after the
+    // script returns. The offset is therefore at least 0 and at most the length of the reconnect.
     let offsets = try zip(hooks, down).map { event, line in
       event.t - (try #require(HostEventID(line["id"]?.string ?? ""))).ms
     }
