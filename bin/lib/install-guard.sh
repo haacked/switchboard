@@ -13,12 +13,19 @@ build_commit_key=SBBuildCommit
 # commit can be shown to contain it.
 build_dirty_key=SBBuildDirty
 
+# Prints the commit that the app at `app` was built from. It prints nothing
+# when the app is not installed or records no commit.
+installed_build_commit() {
+  /usr/libexec/PlistBuddy -c "Print :$build_commit_key" "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
 # Refuses unless `rev` contains the commit of the app at `app`. An app that is
 # not installed refuses nothing.
 require_newer_than_installed() {
   local app=$1 rev=$2 plist="$1/Contents/Info.plist" installed status
   [ -e "$plist" ] || return 0
-  if ! installed=$(/usr/libexec/PlistBuddy -c "Print :$build_commit_key" "$plist" 2>/dev/null); then
+  installed=$(installed_build_commit "$app")
+  if [ -z "$installed" ]; then
     echo "Refusing to install: $app records no build commit, so this build can be older. Pass --force to install anyway." >&2
     return 1
   fi

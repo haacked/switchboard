@@ -48,6 +48,16 @@ Before you implement a feature or fix, read the code it touches and ask whether 
 - In the PR description, say what you restructured and why the feature needed it.
 - In review, treat code that works around a design problem instead of fixing it as a finding.
 
+## PR titles
+
+Write every PR title as a [Conventional Commits](https://www.conventionalcommits.org/) title: `type: summary` or `type(scope): summary`. Add `!` after the type or scope when the change breaks existing behavior, for example `feat!: Rename the sb list command`. The types are `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, and `chore`. The summary starts with a capital letter and an imperative verb, for example `feat: Print the changes since the last update`.
+
+This applies when you open a PR and when you edit its title later. It also applies when the `create-pr` skill suggests a different form.
+
+GitHub writes the PR title as the first line of the merge commit's body, and `bin/changelog` prints that line. `bin/update` shows it to the user as a changelog entry, so write a single line that a user can read without opening the PR.
+
+This rule covers PR titles only. Write the commit messages inside a PR the way the commit skill writes them.
+
 ## Branch upkeep and merging
 
 Every session in this repo follows the `/go --yolo` workflow. Don't stop to ask about routine branch upkeep.
