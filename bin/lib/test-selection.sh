@@ -8,6 +8,12 @@
 # SourceAuditTests scans. When the rules below cannot show which tests a file
 # reaches, they select a whole test target or every test, never nothing.
 
+# A source change leaves these test targets to CI, which runs every test.
+# Their tests start sbd and tmux, so they take most of the suite's run time. A
+# change to one of their own files, or to a file that selects every test,
+# still runs them here.
+ci_only_targets=" IntegrationTests "
+
 # select_tests <package-json>
 # Reads changed paths, one per line, on stdin. <package-json> is the text that
 # swift package dump-package prints. Prints one line per selection:
@@ -19,7 +25,7 @@
 # each path selects.
 select_tests() {
   local graph changed found name type dir excludes deps e ex excluded
-  local all= sources= whole_targets=" " seen=" " suites=() tests file line missing=
+  local all= sources= whole_targets=" " seen=" " suites=() tests file line missing= reached
   # One line per target: name, type, folder, excluded folders, and the targets
   # it depends on, with lists joined by commas.
   graph=$(jq -r '.targets[] | [
@@ -73,7 +79,7 @@ select_tests() {
 
   tests=$(awk -F'\t' '$2 == "test" { print $1 }' <<<"$graph")
   if [ -n "$sources" ]; then
-    whole_targets+="$(awk -F'\t' -v changed="$sources" '
+    reached=$(awk -F'\t' -v changed="$sources" '
       { type[$1] = $2; deps[$1] = $5 }
       END {
         n = split(changed, c, " ")
@@ -86,14 +92,20 @@ select_tests() {
             for (j = 1; j <= m; j++) if (d[j] in hit) { hit[t] = 1; more = 1; break }
           }
         } while (more)
-        for (t in hit) if (type[t] == "test") printf "%s ", t
-      }' <<<"$graph")"
+        for (t in hit) if (type[t] == "test") print t
+      }' <<<"$graph")
+    for name in $reached; do
+      case $ci_only_targets in
+      *" $name "*) echo "bin/test: leaves $name to CI for source changes. bin/test --all runs it." >&2 ;;
+      *) whole_targets+="$name " ;;
+      esac
+    done
     # A test file reads source files at run time when it finds the repo root
     # through #filePath or Instance.root and names a Sources path in a string.
     # Tests that pass made-up paths such as "/tmp/x/Sources" do neither.
     while IFS=$'\t' read -r name type dir excludes deps; do
       [ "$type" = test ] || continue
-      case $whole_targets in *" $name "*) continue ;; esac
+      case "$whole_targets$ci_only_targets" in *" $name "*) continue ;; esac
       while IFS= read -r file; do
         [ -n "$file" ] || continue
         echo "bin/test: $file reads Sources/ at run time" >&2

@@ -40,6 +40,23 @@ private func suiteFile(_ type: String, _ tests: String...) -> String {
   "import Testing\n\nstruct \(type) {\n" + tests.map { "  @Test func \($0)() {}\n" }.joined() + "}\n"
 }
 
+/// A suite whose one test builds a path from #filePath into `folder` under the
+/// source folder, which the selection treats as reading the source folder.
+private func sourceReaderFile(_ type: String, _ test: String, folder: String) -> String {
+  """
+  import Foundation
+  import Testing
+
+  struct \(type) {
+    @Test func \(test)() {
+      let dir = URL(fileURLWithPath: #filePath).appendingPathComponent("\(srcDir)/\(folder)")
+      #expect(!dir.path.isEmpty)
+    }
+  }
+
+  """
+}
+
 /// The source folder's name. The selection treats a test file that quotes this
 /// name and finds the repo through #filePath or Instance.root as one that reads
 /// the source folder at run time. This file builds the name so that the
@@ -64,18 +81,8 @@ private let baselineFiles: [String: String] = [
   "Tests/SwitchboardCoreTests/FxCoreTests.swift": suiteFile("FxCoreTests", "parses"),
   "Tests/SwitchboardCoreTests/Fixtures/sample.json": "{}\n",
   "Tests/SwitchboardServiceTests/FxServiceTests.swift": suiteFile("FxServiceTests", "starts", "stops"),
-  "Tests/SwitchboardServiceTests/FxSourceScanTests.swift": """
-  import Foundation
-  import Testing
-
-  struct FxSourceScanTests {
-    @Test func scansSources() {
-      let dir = URL(fileURLWithPath: #filePath).appendingPathComponent("\(srcDir)/SwitchboardApp")
-      #expect(!dir.path.isEmpty)
-    }
-  }
-
-  """,
+  "Tests/SwitchboardServiceTests/FxSourceScanTests.swift":
+    sourceReaderFile("FxSourceScanTests", "scansSources", folder: "SwitchboardApp"),
   "Tests/SwitchboardAppTests/FxAppTests.swift": suiteFile("FxAppTests", "opens"),
   "Tests/IntegrationTests/FxCLITests.swift": suiteFile("FxCLITests", "lists"),
   "Tests/IntegrationTests/CLIMoreTests.swift": "import Testing\n\nextension FxCLITests {\n  @Test func more() {}\n}\n",
@@ -408,17 +415,42 @@ private struct SelectionCase: Sendable, CustomTestStringConvertible {
 
 private let sourceScanSuite = suiteFilter("SwitchboardServiceTests", "FxSourceScanTests")
 
+/// The unit test targets. A source change leaves IntegrationTests to CI.
+private let unitTargets: Set<String> = [
+  wholeTarget("SwitchboardCoreTests"), wholeTarget("SwitchboardServiceTests"), wholeTarget("SwitchboardAppTests"),
+]
+
 private let sourceCases: [SelectionCase] = [
-  SelectionCase(name: "Core", change: { try $0.edit("\(srcDir)/SwitchboardCore/Core.swift") }, filters: nil),
+  SelectionCase(name: "Core", change: { try $0.edit("\(srcDir)/SwitchboardCore/Core.swift") }, filters: unitTargets),
   SelectionCase(
     name: "Service", change: { try $0.edit("\(srcDir)/SwitchboardService/Service.swift") },
-    filters: [wholeTarget("SwitchboardServiceTests"), wholeTarget("IntegrationTests")]),
+    filters: [wholeTarget("SwitchboardServiceTests")]),
   SelectionCase(
     name: "sbd", change: { try $0.edit("\(srcDir)/sbd/main.swift") },
-    filters: [wholeTarget("IntegrationTests"), sourceScanSuite]),
+    filters: [sourceScanSuite]),
   SelectionCase(
     name: "sb", change: { try $0.edit("\(srcDir)/sb/main.swift") },
-    filters: [wholeTarget("IntegrationTests"), sourceScanSuite]),
+    filters: [sourceScanSuite]),
+  SelectionCase(
+    name: "sb with an IntegrationTests file that reads the source folder",
+    files: [
+      "Tests/IntegrationTests/FxSourceReadTests.swift": sourceReaderFile("FxSourceReadTests", "reads", folder: "sb")
+    ],
+    listing: ["IntegrationTests.FxSourceReadTests/reads()"],
+    change: { try $0.edit("\(srcDir)/sb/main.swift") },
+    filters: [sourceScanSuite]),
+  SelectionCase(
+    name: "Core and an IntegrationTests test file",
+    change: { repo in
+      try repo.edit("\(srcDir)/SwitchboardCore/Core.swift")
+      try repo.edit("Tests/IntegrationTests/FxCLITests.swift")
+    }, filters: unitTargets.union([suiteFilter("IntegrationTests", "FxCLITests")])),
+  SelectionCase(
+    name: "Core and an IntegrationTests helper",
+    change: { repo in
+      try repo.edit("\(srcDir)/SwitchboardCore/Core.swift")
+      try repo.edit("Tests/IntegrationTests/Helpers.swift")
+    }, filters: nil),
   SelectionCase(
     name: "App", change: { try $0.edit("\(srcDir)/SwitchboardApp/App.swift") },
     filters: [wholeTarget("SwitchboardAppTests"), sourceScanSuite]),
@@ -427,11 +459,11 @@ private let sourceCases: [SelectionCase] = [
     filters: [wholeTarget("SwitchboardAppTests"), sourceScanSuite]),
   SelectionCase(
     name: "deleted sb file", change: { try $0.delete("\(srcDir)/sb/main.swift") },
-    filters: [wholeTarget("IntegrationTests"), sourceScanSuite]),
+    filters: [sourceScanSuite]),
   SelectionCase(
     name: "App file moved into sb",
     change: { try $0.move("\(srcDir)/SwitchboardApp/App.swift", "\(srcDir)/sb/App.swift") },
-    filters: [wholeTarget("SwitchboardAppTests"), wholeTarget("IntegrationTests"), sourceScanSuite]),
+    filters: [wholeTarget("SwitchboardAppTests"), sourceScanSuite]),
 ]
 
 private let suiteCases: [SelectionCase] =
@@ -718,7 +750,7 @@ private let everyTestCases: [SelectionCase] = [
     change: { repo in
       try repo.append("README.md")
       try repo.edit("\(srcDir)/SwitchboardCore/Core.swift")
-    }, filters: nil),
+    }, filters: unitTargets),
 ]
 
 private let rootMarkdownChanges: [(name: String, change: @Sendable (SelectionRepo) throws -> Void)] = [
@@ -941,6 +973,14 @@ private func selectionLines(_ output: String) -> Set<String> {
     #expect(run.result.stderr.contains("SwitchboardAppTests"), "\(run.result.stderr)")
   }
 
+  @Test func aSourceChangeSaysItLeavesIntegrationTestsToCI() throws {
+    let repo = try SelectionRepo()
+
+    let r = try repo.select(["\(srcDir)/sb/main.swift"])
+
+    #expect(r.stderr.contains("leaves IntegrationTests to CI"), "\(r.stderr)")
+  }
+
   @Test func aFailingTargetedTestRunFailsBinTest() throws {
     let repo = try SelectionRepo()
     try repo.edit("\(srcDir)/SwitchboardApp/App.swift")
@@ -972,7 +1012,7 @@ private func selectionLines(_ output: String) -> Set<String> {
       lines: ["target SwitchboardAppTests", "suites SwitchboardServiceTests 1 FxSourceScanTests"]),
     SelectCase(
       name: "sb source", paths: ["\(srcDir)/sb/main.swift"],
-      lines: ["target IntegrationTests", "suites SwitchboardServiceTests 1 FxSourceScanTests"]),
+      lines: ["suites SwitchboardServiceTests 1 FxSourceScanTests"]),
     SelectCase(
       name: "test file", paths: ["Tests/SwitchboardServiceTests/FxServiceTests.swift"],
       lines: ["suites SwitchboardServiceTests 2 FxServiceTests"]),
