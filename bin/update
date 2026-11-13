@@ -39,13 +39,7 @@ if [ ${#force[@]} -eq 0 ]; then require_newer_than_installed "$app" origin/main;
 # open during the wait. The nested bin/bundle then runs without a second slot.
 bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/update" "$@"
 
-# The changes start at the installed app's commit. A build that origin/main
-# does not contain, or no installed build, starts them at this checkout's HEAD.
-since=$(git rev-parse HEAD)
-installed=$(installed_build_commit "$app")
-if [ -n "$installed" ] && git merge-base --is-ancestor "$installed" origin/main 2>/dev/null; then
-  since=$installed
-fi
+since=$(changelog_start "$app" origin/main)
 
 bundle_id=com.haacked.switchboard
 if [ -f "$app/Contents/Info.plist" ]; then

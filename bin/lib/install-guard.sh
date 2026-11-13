@@ -16,7 +16,22 @@ build_dirty_key=SBBuildDirty
 # Prints the commit that the app at `app` was built from. It prints nothing
 # when the app is not installed or records no commit.
 installed_build_commit() {
-  /usr/libexec/PlistBuddy -c "Print :$build_commit_key" "$1/Contents/Info.plist" 2>/dev/null || true
+  local plist="$1/Contents/Info.plist"
+  # PlistBuddy prints "File Doesn't Exist" to stdout for a missing file.
+  [ -e "$plist" ] || return 0
+  /usr/libexec/PlistBuddy -c "Print :$build_commit_key" "$plist" 2>/dev/null || true
+}
+
+# Prints the commit that the changes since the last update start from: the
+# commit of the app at `app` when `rev` contains it, and HEAD otherwise.
+changelog_start() {
+  local installed
+  installed=$(installed_build_commit "$1")
+  if [ -n "$installed" ] && git merge-base --is-ancestor "$installed" "$2" 2>/dev/null; then
+    printf '%s\n' "$installed"
+  else
+    git rev-parse HEAD
+  fi
 }
 
 # Refuses unless `rev` contains the commit of the app at `app`. An app that is

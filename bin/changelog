@@ -10,24 +10,18 @@ if [ $# -lt 1 ] || [ $# -gt 2 ]; then
 fi
 from=$1
 to=${2:-HEAD}
+pr_merge='^Merge pull request #([0-9]+) '
 
 # Each record is the subject, a unit separator, and the body, ended by a
 # record separator.
 log=$(git log --first-parent --reverse --format='%s%x1f%b%x1e' "$from..$to")
 while IFS=$'\x1f' read -r -d $'\x1e' subject body; do
   subject=${subject#$'\n'}
-  if [[ $subject =~ ^Merge\ pull\ request\ \#([0-9]+)\  ]]; then
-    title=
-    while IFS= read -r line; do
-      if [ -n "$line" ]; then
-        title=$line
-        break
-      fi
-    done <<<"$body"
-    if [ -n "$title" ]; then
-      printf '%s (#%s)\n' "$title" "${BASH_REMATCH[1]}"
-      continue
-    fi
+  # %b drops the blank lines after the subject, so the title is the first line.
+  title=${body%%$'\n'*}
+  if [[ $subject =~ $pr_merge ]] && [ -n "$title" ]; then
+    printf '%s (#%s)\n' "$title" "${BASH_REMATCH[1]}"
+  else
+    printf '%s\n' "$subject"
   fi
-  printf '%s\n' "$subject"
 done <<<"$log"
