@@ -742,7 +742,6 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
   }
 }
 
-
 /// A subagent holds the session only while subagent events
 /// keep arriving. Activity that has nothing to do with the subagent does not
 /// extend the hold.

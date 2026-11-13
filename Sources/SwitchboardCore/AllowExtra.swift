@@ -4,6 +4,8 @@
 public enum AllowExtra: String, CaseIterable, Sendable {
   /// Switches the session to auto mode.
   case autoMode
+  /// Applies the request's `permission_suggestions`, which can save rules in a settings file.
+  case always
 
   /// The key that asks for the extra in the `answer` op.
   public var argument: String { rawValue }
@@ -12,6 +14,7 @@ public enum AllowExtra: String, CaseIterable, Sendable {
   public var flag: String {
     switch self {
     case .autoMode: "--auto"
+    case .always: "--always"
     }
   }
 
@@ -19,6 +22,7 @@ public enum AllowExtra: String, CaseIterable, Sendable {
   public var label: String {
     switch self {
     case .autoMode: PermissionMode.approveLabel
+    case .always: "Always allow"
     }
   }
 
@@ -26,6 +30,7 @@ public enum AllowExtra: String, CaseIterable, Sendable {
   public var triageAction: TriageAction? {
     switch self {
     case .autoMode: .allowAutoMode
+    case .always: nil
     }
   }
 
@@ -33,6 +38,7 @@ public enum AllowExtra: String, CaseIterable, Sendable {
   var hookClosedVerb: String {
     switch self {
     case .autoMode: "switch the mode"
+    case .always: "save the always-allow rule"
     }
   }
 
@@ -40,6 +46,7 @@ public enum AllowExtra: String, CaseIterable, Sendable {
   public var withoutPhrase: String {
     switch self {
     case .autoMode: "auto mode"
+    case .always: "always"
     }
   }
 }

@@ -40,6 +40,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// The session's cwd when the PermissionRequest arrived. A file tool's
   /// dialog shows its path relative to it.
   public var cwd: String?
+  /// The PermissionRequest's `permission_suggestions`, which an always-allow
+  /// sends back unchanged as `updatedPermissions`.
+  public var permissionSuggestions: JSON?
 
   /// How long a PermissionRequest hook waits for its card's answer before
   /// Claude Code closes it.
@@ -64,10 +67,13 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     send = nil
     permissionMode = event.data["permission_mode"]?.string
     cwd = event.data["cwd"]?.string
+    permissionSuggestions = event.data["permission_suggestions"].flatMap { $0 == .null ? nil : $0 }
   }
 
   /// Whether an allow can also apply the extra. Auto mode needs a permission
-  /// card from manual or acceptEdits mode whose hook still waits.
+  /// card from manual or acceptEdits mode whose hook still waits. Always needs
+  /// a permission card whose hook still waits and whose suggestions
+  /// `AlwaysAllow.describe` can describe.
   public func offers(_ extra: AllowExtra) -> Bool { refusal(extra) == nil }
 
   /// The extras that an allow of this card can apply.
@@ -87,6 +93,14 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
       guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
       if PermissionMode.offeringAutoMode.contains(mode) { return nil }
       return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    case .always:
+      if permissionSuggestions == nil || permissionSuggestions == [] {
+        return "card \(id)'s request offered no always-allow rule"
+      }
+      if AlwaysAllow.describe(permissionSuggestions) == nil {
+        return "card \(id)'s always-allow rule is one Switchboard can't describe, so sbd won't apply it"
+      }
+      return nil
     }
   }
 
@@ -94,13 +108,16 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   public func permissions(_ extra: AllowExtra) -> [JSON] {
     switch extra {
     case .autoMode: [["type": "setMode", "mode": .string(PermissionMode.auto), "destination": "session"]]
+    case .always: permissionSuggestions?.array ?? []
     }
   }
 
-  /// What the card tells the user before they allow with the extra.
-  public func note(_ extra: AllowExtra) -> String {
+  /// What the card tells the user before they allow with the extra, or nil
+  /// when the card can't say what the extra does.
+  public func note(_ extra: AllowExtra) -> String? {
     switch extra {
     case .autoMode: PermissionMode.autoModeNote
+    case .always: AlwaysAllow.describe(permissionSuggestions)
     }
   }
 

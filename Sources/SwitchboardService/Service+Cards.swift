@@ -93,11 +93,13 @@ extension Service {
   /// per question. A held card answers through its hook. A deferred question
   /// answers with a message to the session. A card whose hook closed answers
   /// by typing into the terminal. An allow with an extra's argument, such as
-  /// `autoMode`, also applies that extra, which only a held card's hook can do.
+  /// `autoMode` or `always`, also applies that extra, which only a held card's
+  /// hook can do. An allow takes at most one extra.
   func answer(_ args: JSON) throws -> JSON {
     let card = try chosenCard(args)
     let id = card.session
     let extras = AllowExtra.allCases.filter { args[$0.argument]?.bool == true }
+    if extras.count > 1 { throw APIError("card \(card.id): pick one of \(englishList(extras.map(\.argument)))") }
     for extra in extras {
       guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
         throw APIError("card \(card.id): \(extra.argument) goes only with a behavior of allow")
@@ -144,6 +146,7 @@ extension Service {
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
         if extras.contains(.autoMode) { data["permission_mode"] = .string(PermissionMode.auto) }
+        if extras.contains(.always) { data["always"] = true }
         reply = (.allow(updatedInput: nil, permissions: extras.flatMap(card.permissions)), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")

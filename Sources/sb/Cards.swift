@@ -26,6 +26,9 @@ func cards(_ a: Args) {
       // `allow` approves the whole call, so the whole call prints.
       out("\(head)  approve \(card.tool)\(card.offeredExtras.map { ", \($0.flag) offered" }.joined())")
       for line in card.details.split(separator: "\n", omittingEmptySubsequences: false) { out("      \(line)") }
+      for extra in card.offeredExtras {
+        if let note = card.note(extra) { out("      \(extra.flag): \(note)") }
+      }
       continue
     }
     if card.kind == .trust {
