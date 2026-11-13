@@ -16,6 +16,8 @@ let pr1204 = Wait.PullRequest(number: 1204)
 let posthog1204 = Wait.PullRequest(repository: "PostHog/posthog", number: 1204)
 let flagCache = Wait.SessionTarget(id: "k3x9p", name: "flag-cache")
 let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue, .merge, .deploy]
+/// The kinds that count only what happened after a time, which `since` can move earlier.
+let sinceKinds: Set<Wait.Kind> = [.review, .botReview, .queue]
 
 func epochMs(
   _ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0, _ second: Int = 0, zone: TimeZone
@@ -68,12 +70,12 @@ func minimalRequest(_ kind: Wait.Kind) -> WaitRequest {
 }
 
 enum WaitField: CaseIterable {
-  case target, who, environment, service, state, until
+  case target, who, environment, service, state, until, since
 }
 
 let kindsThatUse: [WaitField: Set<Wait.Kind>] = [
   .target: Set(prKinds + [.session]), .who: [.review, .botReview, .approval], .environment: [.deploy],
-  .service: [.deploy], .state: [.session], .until: [.date, .manual],
+  .service: [.deploy], .state: [.session], .until: [.date, .manual], .since: sinceKinds,
 ]
 let kindFields = Wait.Kind.allCases.flatMap { kind in WaitField.allCases.map { (kind, $0) } }
 let usedFields = kindFields.filter { kindsThatUse[$0.1]!.contains($0.0) }
@@ -89,6 +91,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   case .service: r.service = "feature-flags"
   case .state: r.state = "waiting"
   case .until: r.until = "2h"
+  case .since: r.since = "2030-06-15T11:00:00Z"
   }
   return r
 }
@@ -561,6 +564,81 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   }
 }
 
+@Suite struct WaitSince {
+  func since(_ kind: Wait.Kind, _ text: String, now: Int64 = fixedNow) throws -> Wait {
+    var r = minimalRequest(kind)
+    r.since = text
+    return try buildWait(r, now: now)
+  }
+
+  @Test(arguments: Array(sinceKinds))
+  func sinceIsStoredAsMilliseconds(_ kind: Wait.Kind) throws {
+    #expect(try since(kind, "2030-06-15T11:00:00Z").since == epochMs(2030, 6, 15, 11, 0, zone: utc))
+  }
+
+  @Test(arguments: Array(sinceKinds))
+  func sinceDoesNotChangeCreated(_ kind: Wait.Kind) throws {
+    #expect(try since(kind, "2030-06-15T11:00:00Z").created == fixedNow)
+  }
+
+  @Test(arguments: Wait.Kind.allCases)
+  func noSinceStoresNone(_ kind: Wait.Kind) throws {
+    #expect(try buildWait(minimalRequest(kind)).since == nil)
+  }
+
+  @Test(
+    arguments: Array(sinceKinds),
+    ["2030-06-15T11:59:59Z", "2030-06-14", "2030-06-14T09:00", "2030-06-15T13:00:00+02:00"])
+  func sinceParsesLikeParseTime(_ kind: Wait.Kind, _ text: String) throws {
+    let parsed = try #require(Wait.parseTime(text, now: fixedNow))
+    #expect(try since(kind, text).since == parsed)
+  }
+
+  @Test(arguments: Array(sinceKinds))
+  func sinceAtNowIsTaken(_ kind: Wait.Kind) throws {
+    #expect(try since(kind, "2030-06-15T12:00:00Z").since == fixedNow)
+  }
+
+  @Test(arguments: Array(sinceKinds), ["2030-06-15T12:00:01Z", "2031-01-01", "1h", "90s", "2030-06-15T12:00:00-01:00"])
+  func sinceInTheFutureThrows(_ kind: Wait.Kind, _ text: String) {
+    #expect(throws: APIError.self) { try since(kind, text) }
+  }
+
+  @Test(arguments: Array(sinceKinds))
+  func sinceIsMeasuredFromTheGivenNowNotTheClock(_ kind: Wait.Kind) {
+    #expect(throws: APIError.self) {
+      try since(kind, "2010-01-01T00:00:00Z", now: epochMs(2000, 1, 1, zone: utc))
+    }
+  }
+
+  @Test(arguments: Array(sinceKinds), ["yesterday", "", "2030-13-01"])
+  func sinceThatDoesNotParseThrows(_ kind: Wait.Kind, _ text: String) {
+    #expect(throws: APIError.self) { try since(kind, text) }
+  }
+
+  @Test(arguments: Wait.Kind.allCases.filter { !sinceKinds.contains($0) })
+  func otherKindsRefuseAPastSince(_ kind: Wait.Kind) {
+    #expect(throws: APIError.self) { try since(kind, "2030-06-15T11:00:00Z") }
+  }
+
+  @Test(arguments: Array(sinceKinds))
+  func sinceSurvivesTheJSONRoundTrip(_ kind: Wait.Kind) throws {
+    let wait = try since(kind, "2030-06-15T11:00:00Z")
+    #expect(try JSONCoding.convert(JSON(encoding: wait), to: Wait.self) == wait)
+  }
+}
+
+@Suite struct CallerWaitRequests {
+  @Test(arguments: Wait.Kind.allCases)
+  func thenCallerMakesAWaitWhoseCallerReportsTheOutcome(_ kind: Wait.Kind) throws {
+    var r = minimalRequest(kind)
+    r.then = "caller"
+    let wait = try buildWait(r)
+    #expect(wait.then == .caller)
+    #expect(try JSONCoding.convert(JSON(encoding: wait), to: Wait.self) == wait)
+  }
+}
+
 @Suite struct ShortIds {
   static let alphabet = Set("abcdefghijkmnpqrstuvwxyz23456789")
 
@@ -617,6 +695,18 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   ])
   func anotherAgentsMessageLeavesTheOutcome(_ prompt: String) throws {
     let f = try afterNotify([event("UserPromptSubmit", 3, ["prompt": .string(prompt)])])
+    #expect(f.waitOutcome == "CI on #1204: the checks passed")
+  }
+
+  @Test(arguments: [Wait.Kind.ci, .manual])
+  func callerResolutionRecordsNoOutcome(_ kind: Wait.Kind) throws {
+    let caller = waitOn(kind, pr: kind == .ci ? pr1204 : nil, then: .caller)
+    #expect(facts([try resolved(caller, "it happened", 1)]).waitOutcome == nil)
+  }
+
+  @Test func callerResolutionLeavesAnEarlierOutcome() throws {
+    let caller = waitOn(.botReview, pr: pr1204, then: .caller)
+    let f = try afterNotify([resolved(caller, "greptile-apps reviewed", 3)])
     #expect(f.waitOutcome == "CI on #1204: the checks passed")
   }
 

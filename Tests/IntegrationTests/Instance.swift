@@ -311,6 +311,13 @@ final class Instance {
     return try client.call("new", args, as: SessionSummary.self)
   }
 
+  /// A session whose first turn has ended.
+  func idleSession(name: String = "t") throws -> SessionSummary {
+    let s = try new(prompt: "hello", name: name)
+    try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    return s
+  }
+
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
 
   /// Attaches a control-mode tmux client to the session's Claude pane, which

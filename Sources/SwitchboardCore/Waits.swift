@@ -35,8 +35,10 @@ public struct Wait: Codable, Equatable, Sendable {
     /// The `wait` request's fields that this kind reads.
     var fields: Set<String> {
       switch self {
-      case .ci, .queue, .merge: ["target"]
-      case .review, .botReview, .approval: ["target", "who"]
+      case .ci, .merge: ["target"]
+      case .queue: ["target", "since"]
+      case .review, .botReview: ["target", "who", "since"]
+      case .approval: ["target", "who"]
       case .deploy: ["target", "environment", "service"]
       case .session: ["target", "state"]
       case .date, .manual: ["until"]
@@ -50,6 +52,9 @@ public struct Wait: Codable, Equatable, Sendable {
     case resume
     /// Move the session to Needs you with what happened as the reason.
     case notify
+    /// Nothing happens to the session. The `sb wait --block` that set the
+    /// wait reads the outcome from the `wait-resolved` event.
+    case caller
   }
 
   public struct PullRequest: Codable, Equatable, Sendable {
@@ -117,6 +122,11 @@ public struct Wait: Codable, Equatable, Sendable {
   public var service: String?
   /// When a `date` wait resolves, or when a `manual` wait returns to Needs you.
   public var until: Int64?
+  /// For a `review`, `bot-review`, or `queue` wait, the time that
+  /// `countsAfter` uses in place of `created`. A loop of `sb wait --block`
+  /// calls sets a new wait on each call. `since` keeps a review that landed
+  /// between two calls.
+  public var since: Int64?
   public var note: String?
   /// The commit that the session's checked-out branch pointed at when a `ci`
   /// wait on the session's own PR was set. Nil for a wait on another PR, for
@@ -132,10 +142,14 @@ public struct Wait: Codable, Equatable, Sendable {
   /// serves instead, and for a wait that sbd has not stamped yet.
   public var recheck: Int64?
 
+  /// The time after which a review or a queue change counts.
+  public var countsAfter: Int64 { since ?? created }
+
   public init(
     id: String, kind: Kind, pr: PullRequest? = nil, session: SessionTarget? = nil, state: AttentionState? = nil,
-    who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, note: String? = nil,
-    headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume, recheck: Int64? = nil
+    who: String? = nil, environment: String? = nil, service: String? = nil, until: Int64? = nil, since: Int64? = nil,
+    note: String? = nil, headSha: String? = nil, by: Author = .you, created: Int64, then: Then = .resume,
+    recheck: Int64? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -146,6 +160,7 @@ public struct Wait: Codable, Equatable, Sendable {
     self.environment = environment
     self.service = service
     self.until = until
+    self.since = since
     self.note = note
     self.headSha = headSha
     self.by = by
@@ -253,15 +268,15 @@ public struct Wait: Codable, Equatable, Sendable {
   /// - `ci`: the head commit's rollup is SUCCESS, or FAILURE or ERROR, or the
   ///   head commit's Depot run has a failed job. A Depot failure names the
   ///   failed jobs.
-  /// - `review` and `bot-review`: a review that was submitted after the wait was
-  ///   set, by `who`, or by any app when a `bot-review` wait has no `who`. The
-  ///   outcome names the newest one.
+  /// - `review` and `bot-review`: a review that was submitted after
+  ///   `countsAfter`, by `who`, or by any app when a `bot-review` wait has no
+  ///   `who`. The outcome names the newest one.
   /// - `approval`: `who`'s last verdict is an approval, or the PR is approved
   ///   when there is no `who`. It holds at any time, since an approval is a
   ///   state.
   /// - `merge`: the PR merged or closed.
   /// - `queue`: the PR merged or closed, or the queue state shows that Trunk
-  ///   merged it or removed it from the queue after the wait was set. A PR that
+  ///   merged it or removed it from the queue after `countsAfter`. A PR that
   ///   Trunk has not queued yet keeps the wait open. A state that trunk gave
   ///   names Trunk's reason for a removal.
   public func resolution(of pr: SwitchboardCore.PullRequest) -> String? {
@@ -284,7 +299,8 @@ public struct Wait: Codable, Equatable, Sendable {
     case .review, .botReview:
       let verbs = ["APPROVED": "approved", "CHANGES_REQUESTED": "requested changes", "COMMENTED": "reviewed"]
       let newest = pr.reviews.last { r in
-        guard verbs[r.state] != nil, let at = r.submittedAt.flatMap(Transcript.milliseconds), at > created else {
+        guard verbs[r.state] != nil, let at = r.submittedAt.flatMap(Transcript.milliseconds), at > countsAfter
+        else {
           return false
         }
         if let who { return Wait.sameLogin(r.author, who) }
@@ -301,7 +317,7 @@ public struct Wait: Codable, Equatable, Sendable {
     case .queue:
       if ended != nil { return ended }
       // A status from before the wait can describe an earlier run of the PR.
-      guard let at = pr.queueAt, at > created else { return nil }
+      guard let at = pr.queueAt, at > countsAfter else { return nil }
       switch pr.queue {
       case .removed?:
         guard let label = pr.queueLabel, let text = pr.queueText else { return "Trunk removed it from the queue" }
