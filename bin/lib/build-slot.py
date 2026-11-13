@@ -10,10 +10,11 @@ finish before this one starts.
 
 Each command has a ticket file in SB_BUILD_SLOTS_DIR (default
 ~/Library/Caches/Switchboard/build-slots). The ticket's name is a sequence
-number that never repeats. The helper holds an flock on its ticket until the
-command ends. A ticket is live while its flock is held. The kernel drops the
-flock when the helper dies, even from SIGKILL, so a dead helper's slot frees on
-the next scan. A command runs when fewer than SB_BUILD_SLOTS live tickets have
+number that never repeats, so a stale SB_BUILD_SLOT_HELD from an earlier run
+never names a newer holder's ticket. The helper holds an flock on its ticket
+until the command ends. A ticket is live while its flock is held. The kernel
+drops the flock when the helper dies, even from SIGKILL, so a dead helper's
+slot frees on the next scan. A command runs when fewer than SB_BUILD_SLOTS live tickets have
 a lower number.
 
 The helper starts the command as a child and does not pass it the ticket's
@@ -46,6 +47,7 @@ import sys
 import time
 
 TICKET = re.compile(r"^(\d{12})\.ticket$")
+TEMP = re.compile(r"^tmp\.\d+\.\d+$")
 SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
@@ -140,8 +142,9 @@ class Queue:
             # Only the mutex holder creates tmp files, and it renames them
             # before it lets go. A tmp file seen here belongs to a dead helper.
             for name in os.listdir(self.folder):
-                if name.startswith("tmp."):
-                    unlink_quietly(self.path(name))
+                path = self.path(name)
+                if TEMP.match(name) and os.path.isfile(path) and not os.path.islink(path):
+                    unlink_quietly(path)
             highest = max((number for number, _ in tickets(self.folder)), default=0)
             seq = max(self.read_counter(), highest) + 1
             self.write_counter(seq)
@@ -269,7 +272,11 @@ def main(argv):
         return 2
     poll = setting("SB_BUILD_SLOT_POLL", 1.0, float, lambda v: 0 < v and math.isfinite(v), "a number of seconds above 0")
     if exempt(slots):
-        os.execvp(argv[0], argv)
+        try:
+            os.execvp(argv[0], argv)
+        except OSError as error:
+            print(f"build-slot: {argv[0]}: {error.strerror}", file=sys.stderr)
+            return 127 if error.errno == errno.ENOENT else 126
 
     child = Child()
     for signum in SIGNALS:

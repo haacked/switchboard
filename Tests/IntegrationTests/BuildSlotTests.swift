@@ -250,6 +250,7 @@ private struct StatusCase: Sendable, CustomTestStringConvertible {
   var name: String
   var arguments: [String]
   var status: Int32
+  var slots = "1"
 
   var testDescription: String { name }
 }
@@ -346,7 +347,7 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
   }
 
   /// The kernel drops the helper's flock when it dies. The command it
-  /// started keeps running, which is the gap the helper's header accepts.
+  /// started keeps running, as the helper's docstring says it may.
   @Test func aSIGKILLedHolderFreesItsSlotWithinTwoSeconds() throws {
     let q = try SlotQueue()
     defer { q.stop() }
@@ -430,14 +431,19 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
     StatusCase(name: "exit 0", arguments: ["--", "/usr/bin/true"], status: 0),
     StatusCase(name: "SIGTERM", arguments: ["--", "/bin/sh", "-c", "kill -TERM $$"], status: 143),
     StatusCase(name: "SIGKILL", arguments: ["--", "/bin/sh", "-c", "kill -KILL $$"], status: 137),
+    StatusCase(name: "missing command", arguments: ["--", "/nonexistent/cmd"], status: 127),
+    StatusCase(name: "missing command, queue off", arguments: ["--", "/nonexistent/cmd"], status: 127, slots: "0"),
+    StatusCase(name: "not executable", arguments: ["--", "/etc/hosts"], status: 126),
+    StatusCase(name: "not executable, queue off", arguments: ["--", "/etc/hosts"], status: 126, slots: "0"),
   ])
   fileprivate func theHelperExitsWithTheCommandsStatus(_ c: StatusCase) throws {
     let q = try SlotQueue()
     defer { q.stop() }
 
-    let r = try q.runHelper(c.arguments)
+    let r = try q.runHelper(c.arguments, slots: c.slots)
 
     #expect(r.status == c.status, "\(r.stderr)")
+    #expect(!r.stderr.contains("Traceback"), "\(r.stderr)")
   }
 
   @Test func aFreeSlotPrintsNothing() throws {
@@ -571,6 +577,22 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
     #expect(r.stderr == "")
     #expect(!FileManager.default.fileExists(atPath: stale))
     #expect(!FileManager.default.fileExists(atPath: temp))
+  }
+
+  /// The helper removes only the temp files it names itself.
+  @Test func entriesThatAreNotTheHelpersTempFilesAreKept() throws {
+    let q = try SlotQueue()
+    defer { q.stop() }
+    let foreign = "\(q.dir)/tmp.j3hD2qcsNR"
+    let folder = "\(q.dir)/tmp.2.2"
+    try q.writeStaleTicket(foreign)
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+
+    let r = try q.runHelper(["--", "/usr/bin/true"])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(FileManager.default.fileExists(atPath: foreign))
+    #expect(FileManager.default.fileExists(atPath: folder))
   }
 
   /// The test process holds the flock, as a live helper would. Closing it
