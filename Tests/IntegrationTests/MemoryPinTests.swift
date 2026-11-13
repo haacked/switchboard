@@ -9,7 +9,6 @@ import Testing
 @Suite(.blocking(timeLimit: .seconds(120))) struct MemoryPinTests {
   let key = "autoMemoryDirectory"
 
-  /// The value that sbd writes for a session whose memory belongs to `base`.
   func pinned(_ base: String) -> String { ClaudeFolder.memoryDirectory(base) }
 
   func instance() throws -> Instance {
@@ -36,8 +35,8 @@ import Testing
     try settings(sbd, s)[key]?.string
   }
 
-  /// Stops the session and sends it a message, which launches its claude again, and waits for that launch. The
-  /// settings file is written before the launch.
+  /// Stops the session and sends it a message, which launches its claude again, and waits for that launch. sbd
+  /// writes the settings file before the launch.
   func stopAndRelaunch(_ sbd: Instance, _ s: SessionSummary) throws {
     let launches = { sbd.stubCalls().filter { $0.args.contains(s.claudeSessionId) }.count }
     let before = launches()
