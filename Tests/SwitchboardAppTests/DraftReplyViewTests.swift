@@ -110,6 +110,14 @@ let everyDraftPost: [DraftPost] = [
     #expect(!DraftReplyView.mode(for: targetedDraft(post)).showsPostButton)
   }
 
+  /// Post stays where it is while posting, so keyboard focus and VoiceOver keep their place, and it can't be pressed.
+  @Test func aPostingDraftKeepsAPostButtonThatIsOff() {
+    let mode = DraftReplyView.mode(for: targetedDraft(.posting(replyTarget)))
+
+    #expect(mode.showsPostButton)
+    #expect(!DraftReplyView.postEnabled(mode, text: "Thanks."))
+  }
+
   @Test func aReadyDraftShowsThePostButton() {
     #expect(DraftReplyView.mode(for: targetedDraft(.ready(replyTarget))).showsPostButton)
   }

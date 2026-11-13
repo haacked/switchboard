@@ -447,6 +447,14 @@ public enum Triage {
     return live.ref == sent && live.hasDecisionList
   }
 
+  /// The ref of the item that the session's own summary gives, or nil when a
+  /// card, an open permission, or an open question gives the item instead.
+  static func sessionSummaryRef(_ facts: SessionFacts) -> String? {
+    guard facts.cards.isEmpty, facts.sessionSummary != nil, facts.openPermission == nil, facts.openQuestion == nil
+    else { return nil }
+    return "summary:\(facts.sessionSummaryId)"
+  }
+
   /// The item that the session's card, summary, rule, or reply gives.
   static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
@@ -454,8 +462,8 @@ public enum Triage {
     if let card = facts.cards.first {
       item = cardItem(card)
       item.ref = card.ref
-    } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
-      item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
+    } else if let own = facts.sessionSummary, let ref = sessionSummaryRef(facts) {
+      item = TriageItem(own, source: .session, ref: ref)
       if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)

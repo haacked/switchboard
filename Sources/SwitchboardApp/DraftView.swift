@@ -91,7 +91,7 @@ struct DraftReplyView: View {
 
     var showsPostButton: Bool {
       switch self {
-      case .copyOnly, .posting, .posted: false
+      case .copyOnly, .posted: false
       default: true
       }
     }
@@ -109,7 +109,8 @@ struct DraftReplyView: View {
       }
     }
 
-    /// A posting or unknown draft keeps its field read-only, so the text on screen is what sbd sent.
+    /// A posting or unknown draft keeps its field read-only. The field shows the app's stored text, which is not
+    /// always what sbd sent: `sb draft post --text` sends other text.
     var fieldEditable: Bool {
       switch self {
       case .checking, .unresolved, .editable: true
@@ -177,7 +178,10 @@ struct DraftReplyView: View {
       // An emptied field starts again with the session's text when it next appears.
       _ = model.replyDraft(session: session, ref: ref, number: draft.number, initial: draft.text)
     }
-    .onChange(of: draft.post) { model.draftErrors[key] = nil }
+    .onChange(of: draft.post) {
+      model.draftErrors[key] = nil
+      if case .posted = draft.post { AccessibilityNotification.Announcement("Posted to GitHub").post() }
+    }
     // A refused post leaves the field as it was, so VoiceOver would say nothing.
     .onChange(of: shownError) {
       if let error = shownError { AccessibilityNotification.Announcement(error).post() }
@@ -257,7 +261,9 @@ struct DraftReplyView: View {
           .accessibilityHint("Posts the text above to GitHub as you")
       }
       if mode.checksAgain {
-        Button("Check again") { model.checkDraft(session, ref: ref, number: draft.number) }
+        let checking = model.checkingDrafts.contains(key)
+        Button(checking ? "Checking…" : "Check again") { model.checkDraft(session, ref: ref, number: draft.number) }
+          .disabled(checking)
           .accessibilityHint(
             target == nil ? "Reads the comment on GitHub again" : "Looks for the reply in the thread on GitHub")
       }

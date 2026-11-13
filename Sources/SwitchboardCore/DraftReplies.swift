@@ -248,7 +248,9 @@ public enum DraftReplies {
   /// The draft's state on the session's item with `ref`. `pr` is the
   /// session's PR as the poller last read it.
   /// A recorded post comes first, so a later change to the PR never hides
-  /// a posted link or an attempt whose outcome sbd doesn't know.
+  /// a posted link or an attempt whose outcome sbd doesn't know. A draft
+  /// whose text another draft posted, or may have posted, to the same thread
+  /// shows that post, so the user can check an unknown one from this draft.
   public static func state(_ draft: InboxDraft, ref: String, pr: PullRequest?, facts: DraftReplyFacts) -> DraftPost {
     let key = key(ref: ref, number: draft.number)
     if let attempt = facts.attempts[key] { return attempt.post }
@@ -260,10 +262,12 @@ public enum DraftReplies {
       return .copyOnly(reason: "\(error)")
     }
     if !facts.attempts.isEmpty, case .resolved(let resolved) = facts.targets[key], resolved.target == target,
-      let earlier = facts.sameReply(draft.text, to: resolved, except: key)?.attempt,
-      case .posted = earlier.outcome
+      let earlier = facts.sameReply(draft.text, to: resolved, except: key)?.attempt
     {
-      return earlier.post
+      switch earlier.outcome {
+      case .posted, .unknown: return earlier.post
+      case .posting, .failed: break
+      }
     }
     guard let pr else { return .copyOnly(reason: "sbd hasn't read this session's PR yet") }
     guard target.matches(pr) else {
@@ -334,11 +338,12 @@ public enum DraftReplies {
   }
 
   /// The newest comment in `comments` by `login` whose body is `text`. With
-  /// a `root`, only a reply to that review comment counts. GitHub's
-  /// `created_at` and sbd's clock can disagree, so no time limits the match.
-  public static func matchingReply(in comments: [JSON], root: Int64?, login: String, text: String) -> (
-    url: String, id: Int64
-  )? {
+  /// a `root`, only a reply to that review comment counts. With a `floor`,
+  /// only a comment whose id is above it counts. GitHub's `created_at` and
+  /// sbd's clock can disagree, so no time limits the match.
+  public static func matchingReply(
+    in comments: [JSON], root: Int64?, newerThan floor: Int64? = nil, login: String, text: String
+  ) -> (url: String, id: Int64)? {
     let normalized = { TriageDrafts.trimBlankLines(TriageDrafts.normalize($0, unquote: false)) }
     let wanted = normalized(text)
     return comments.compactMap { c -> (url: String, id: Int64)? in
@@ -346,6 +351,7 @@ public enum DraftReplies {
         normalized(c["body"]?.string ?? "") == wanted, let url = c["html_url"]?.string, let id = c["id"]?.int
       else { return nil }
       if let root, ReplyTarget.parentId(c) != root { return nil }
+      if let floor, Int64(id) <= floor { return nil }
       return (url, Int64(id))
     }
     .max { $0.id < $1.id }
@@ -371,10 +377,7 @@ public enum DraftReplies {
   /// session summary's draft names a target. A draft with a recorded
   /// attempt or a recorded target is not waiting for a read.
   public static func mayBeChecking(_ facts: SessionFacts) -> Bool {
-    guard facts.cards.isEmpty, facts.openPermission == nil, facts.openQuestion == nil,
-      let summary = facts.sessionSummary
-    else { return false }
-    let ref = "summary:\(facts.sessionSummaryId)"
+    guard let summary = facts.sessionSummary, let ref = Triage.sessionSummaryRef(facts) else { return false }
     return summary.drafts.enumerated().contains { i, draft in
       let key = key(ref: ref, number: i + 1)
       guard let replyTo = draft.replyTo, facts.draftReplies.attempts[key] == nil else { return false }

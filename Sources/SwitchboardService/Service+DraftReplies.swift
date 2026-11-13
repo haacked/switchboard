@@ -29,7 +29,7 @@ extension Service {
     }
     for draft in item.drafts where draft.post == .checking {
       guard let replyTo = draft.replyTo, let target = try? ReplyTarget.parse(replyTo) else { continue }
-      startGhJob(resolvingKey(id, ref: item.ref, number: draft.number), session: id) {
+      startGhJob(draftFlightKey(id, ref: item.ref, number: draft.number), session: id) {
         self.resolve(target)
       } settle: { result in
         self.recordTarget(id, ref: item.ref, number: draft.number, result)
@@ -108,8 +108,12 @@ extension Service {
         if let replyTo = draft.replyTo, let target = try? ReplyTarget.parse(replyTo) {
           work = (item.ref, number, .target(target))
         }
-      case .unknown:
-        if let attempt = e.facts.draftReplies.attempts[own] { work = (item.ref, number, .outcome(attempt)) }
+      case .unknown(let target, _):
+        if let attempt = e.facts.draftReplies.attempts[own] {
+          work = (item.ref, number, .outcome(attempt))
+        } else if let other = e.facts.draftReplies.sameReply(draft.text, to: target, except: own)?.attempt {
+          work = (other.ref, other.number, .outcome(other))
+        }
       case .ready(let target), .failed(let target, _):
         if let other = e.facts.draftReplies.sameReply(draft.text, to: target, except: own)?.attempt,
           case .unknown = other.outcome
@@ -120,7 +124,7 @@ extension Service {
         break
       }
       guard let work else { return .settled(try triageJSON(id)) }
-      let key = resolvingKey(id, ref: work.ref, number: work.number)
+      let key = draftFlightKey(id, ref: work.ref, number: work.number)
       guard resolvingDrafts.insert(key).inserted else { return .settled(try triageJSON(id)) }
       return .job(CheckJob(id: id, key: key, ref: work.ref, work: work.check))
     }
@@ -147,7 +151,7 @@ extension Service {
     }
   }
 
-  private func resolvingKey(_ id: String, ref: String, number: Int) -> String {
+  private func draftFlightKey(_ id: String, ref: String, number: Int) -> String {
     "\(id) \(DraftReplies.key(ref: ref, number: number))"
   }
 
@@ -242,7 +246,7 @@ extension Service {
       if let same = e.facts.draftReplies.sameReply(draft.text, to: target, except: key)?.attempt {
         throw APIError(sameReplyRefusal(same, session: id, number: number))
       }
-      let flight = resolvingKey(id, ref: ref, number: number)
+      let flight = draftFlightKey(id, ref: ref, number: number)
       guard postingDrafts.insert(flight).inserted else { throw APIError("draft \(number) is already posting") }
       let attempt = PostAttempt(
         ref: ref, number: number, target: target, text: text, draftText: draft.text, label: draft.label,
@@ -303,10 +307,9 @@ extension Service {
   /// The target of a draft that may post, or the refusal that says why it may not.
   private func postableTarget(_ draft: InboxDraft, session id: String) throws -> ResolvedTarget {
     let n = draft.number
-    if let target = draft.post.postable { return target }
     switch draft.post {
-    case .ready, .failed:
-      throw APIError("draft \(n) can't post")
+    case .ready(let target), .failed(let target, _):
+      return target
     case .posting:
       throw APIError("draft \(n) is already posting")
     case .posted(_, let url, _):
@@ -351,18 +354,22 @@ extension Service {
 
   /// Starts one look on GitHub for the reply of each unknown post of the
   /// session that this sbd run didn't post, as after a restart. A look that
-  /// fails leaves the post unknown for `draft-check`.
+  /// finds the reply marks the post posted. A look that fails or finds no
+  /// reply leaves the post unknown for `draft-check`, because GitHub may not
+  /// list a reply that sbd's POST just created.
   func checkUnknownPosts(_ id: String) {
     guard let attempts = entries[id]?.facts.draftReplies.attempts else { return }
     for attempt in attempts.values {
       guard case .unknown = attempt.outcome else { continue }
-      let key = resolvingKey(id, ref: attempt.ref, number: attempt.number)
+      let key = draftFlightKey(id, ref: attempt.ref, number: attempt.number)
       guard !checkedUnknown.contains(key) else { continue }
       let started = startGhJob(key, session: id) { () -> Result<(url: String, id: Int64)?, Error> in
         Result { try self.findReply(attempt) }
       } settle: { found in
         switch found {
-        case .success(let reply): self.settleOutcome(id, attempt, reply)
+        case .success(let reply?): self.settleOutcome(id, attempt, reply)
+        case .success(nil):
+          logLine("draft \(attempt.number) of \(id) has no reply in the thread yet. Check again decides")
         case .failure(let error): logLine("can't check draft \(attempt.number) of \(id): \(error)")
         }
       }
@@ -400,8 +407,10 @@ extension Service {
       }
       return comment
     }
+    // A reply to an issue comment is a later issue comment, so its id is above the target's.
     return DraftReplies.matchingReply(
-      in: comments, root: t.kind == .reviewComment ? attempt.target.root : nil, login: login, text: attempt.text)
+      in: comments, root: t.kind == .reviewComment ? attempt.target.root : nil,
+      newerThan: t.kind == .issueComment ? t.id : nil, login: login, text: attempt.text)
   }
 
   /// gh's login, which sbd reads once per run.

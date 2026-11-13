@@ -160,6 +160,22 @@ private let sessionText = "Good catch, fixed in the next commit."
     #expect(model.postingDrafts.isEmpty)
   }
 
+  @Test func aSecondCheckAgainWaitsForTheFirstAnswer() async {
+    let (model, release, requests) = heldModel()
+
+    model.checkDraft("a", ref: "summary:1", number: 1)
+    model.checkDraft("a", ref: "summary:1", number: 1)
+    await settle { requests.value >= 1 }
+    let held = model.checkingDrafts.contains(key)
+    release.signal()
+    release.signal()
+    await settle { model.checkingDrafts.isEmpty }
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    #expect(held)
+    #expect(requests.value == 1)
+  }
+
   @Test func aDoublePressSendsOneRequest() async {
     let (model, release, requests) = heldModel()
 

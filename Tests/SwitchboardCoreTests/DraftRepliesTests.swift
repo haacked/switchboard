@@ -633,6 +633,14 @@ extension DraftRepliesTests {
     #expect(DraftReplies.matchingReply(in: comments, root: nil, login: "me", text: draftText)?.id == 6001)
   }
 
+  /// An older comment with the same text, such as one the user left before the target, is not the reply.
+  @Test func matchingReplyIgnoresACommentAtOrBelowTheFloor() {
+    let comments = [listed(1500, inReplyTo: nil), listed(2001, inReplyTo: nil)]
+
+    #expect(
+      DraftReplies.matchingReply(in: comments, root: nil, newerThan: 2001, login: "me", text: draftText) == nil)
+  }
+
   // MARK: Folding the attempt events
 
   @Test func aPostingEventMakesTheDraftPostingWithItsTarget() throws {
@@ -686,15 +694,15 @@ extension DraftRepliesTests {
     #expect(try stateName(try firstPost(f)) == expected)
   }
 
-  /// An attempt names one (ref, number), so it says nothing about another card's draft or another draft.
+  /// An attempt names one (ref, number), but another draft with the same text and thread shows the same unknown post.
   @Test(arguments: [("summary:9", 1), (cardRef, 2)])
-  func anAttemptOnAnotherDraftLeavesThisOneReady(_ ref: String, _ number: Int) throws {
+  func anUnknownAttemptOnAnotherDraftWithTheSameReplyShowsAsUnknown(_ ref: String, _ number: Int) throws {
     let f = try drafted([
       try resolvedEvent(4), try postingEvent(5, ref: ref, number: number),
       outcomeEvent(6, "draft_post_unknown", ref: ref, number: number, error: "gh: oops"),
     ])
 
-    #expect(try firstPost(f) == .ready(resolvedComment))
+    #expect(try firstPost(f) == .unknown(resolvedComment, error: "gh: oops"))
   }
 
   // MARK: Recorded attempts outrank the live checks
@@ -766,6 +774,41 @@ extension DraftRepliesTests {
     let f = try redrafted(replyTo: "https://github.com/acme/widgets/pull/42#discussion_r1002", resolved: reply)
 
     #expect(try stateName(try firstPost(f)) == "posted")
+  }
+
+  /// The first card's post may have reached GitHub, so the second card shows that unknown post and can check it.
+  @Test func aNewCardWithTheSameTextAndTargetShowsTheEarlierUnknownPost() throws {
+    var f = try drafted([
+      try resolvedEvent(4), try postingEvent(5),
+      outcomeEvent(6, "draft_post_unknown", error: "gh: Bad Gateway (HTTP 502)"),
+    ])
+    var card = sessionCard
+    card.drafts = [TriageDraft(label: "Reply to ann", text: draftText, replyTo: commentURL)]
+    f.apply(try summaryEvent(7, 7, card))
+    f.apply(try resolvedEvent(8, ref: "summary:7", resolvedComment))
+    try #require(itemOf(f)?.ref == "summary:7")
+
+    #expect(try firstPost(f) == .unknown(resolvedComment, error: "gh: Bad Gateway (HTTP 502)"))
+  }
+
+  /// GitHub refused the earlier post, so it never blocks a later draft with the same text.
+  @Test func sameReplyIgnoresAFailedAttempt() throws {
+    let f = try drafted([
+      try resolvedEvent(4), try postingEvent(5), outcomeEvent(6, "draft_post_failed", error: loginRefusal),
+    ])
+
+    #expect(f.draftReplies.sameReply(draftText, to: resolvedComment, except: "summary:7/1") == nil)
+  }
+
+  @Test func sameReplyPrefersAPostedAttemptOverAnUnknownOne() throws {
+    let f = try drafted([
+      try resolvedEvent(4),
+      try postingEvent(5, ref: "summary:1"), outcomeEvent(6, "draft_post_unknown", ref: "summary:1", error: "gh: oops"),
+      try postingEvent(7, ref: "summary:2"), try postedEvent(8, ref: "summary:2"),
+    ])
+
+    let match = try #require(f.draftReplies.sameReply(draftText, to: resolvedComment, except: "summary:7/1"))
+    #expect(match.attempt.outcome == .posted(url: postedURL))
   }
 
   @Test func aNewCardWithOtherTextForTheSameTargetIsReady() throws {

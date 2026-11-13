@@ -524,7 +524,7 @@ extension Instance {
   // MARK: Parity: sb get --json and sb triage show the same state
 
   enum Shown: String, CaseIterable, CustomTestStringConvertible {
-    case ready, copyOnly, checking
+    case ready, copyOnly, checking, unresolved, failed, unknown
     var testDescription: String { rawValue }
   }
 
@@ -541,6 +541,19 @@ extension Instance {
       return "Copy only: \(try #require(post["reason"]?.string))"
     case "checking":
       return "Checking the comment on GitHub…"
+    case "unresolved":
+      let error = try #require(post["error"]?.string)
+      return "Can't read the comment on GitHub: \(error). Check again: sb draft check \(session) 1"
+    case "failed":
+      let error = try #require(post["error"]?.string)
+      let t = try #require(post["target"])
+      let author = try #require(t["author"]?.string)
+      let path = try #require(t["path"]?.string)
+      let line = try #require(t["line"]?.int)
+      return
+        "Didn't post: \(error). It replies to @\(author) on \(path) line \(line). Post it again: sb draft post \(session) 1"
+    case "unknown":
+      return DraftReplies.unknownLine(error: try #require(post["error"]?.string), session: session, number: 1)
     default:
       throw TestError(description: "no triage line for \(post)")
     }
@@ -550,7 +563,11 @@ extension Instance {
   func getJSONAndTriageShowTheSameState(_ shown: Shown) throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withReplyStub(github)
-    try sbd.ghRoute("GET", Self.commentPath, json: reviewCommentJSON(1001))
+    if shown == .unresolved {
+      try sbd.ghRouteFails("GET", Self.commentPath, stderr: "gh: Bad credentials (HTTP 401)\n")
+    } else {
+      try sbd.ghRoute("GET", Self.commentPath, json: reviewCommentJSON(1001))
+    }
     let gate = shown == .checking ? try sbd.ghGate("GET", Self.commentPath) : nil
     defer { gate.map(sbd.releaseGhGate) }
     let url =
@@ -561,6 +578,12 @@ extension Instance {
       try sbd.waitFor("gh to read the comment") { !sbd.ghCalls("api \(Self.commentPath)").isEmpty }
     } else {
       try sbd.settledPost(s.id)
+    }
+    if shown == .failed || shown == .unknown {
+      let refusal = shown == .failed ? "gh: Unprocessable Entity (HTTP 422)\n" : "gh: Bad Gateway (HTTP 502)\n"
+      try sbd.ghRouteFails("POST", "repos/PostHog/charts/pulls/18303/comments/1001/replies", stderr: refusal)
+      _ = try sbd.run(["draft", "post", s.id, "1"])
+      try sbd.waitForPost(s.id, shown.rawValue)
     }
 
     let post = try #require(try sbd.draftPost(s.id))

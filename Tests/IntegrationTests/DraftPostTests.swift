@@ -541,16 +541,32 @@ extension Instance {
     #expect(sbd.posts().count == 1, "\(sbd.ghCalls())")
   }
 
-  /// The tick may check an unknown outcome once on its own. The checks fail
-  /// until the test waited out that check, so `sb draft check` settles it.
+  /// The tick never checks an unknown post that this sbd run made, so only
+  /// `sb draft check` settles it.
   private func unknownSession(_ github: FakeGitHub, _ sbd: Instance) throws -> SessionSummary {
     let s = try readySession(github, sbd)
     try sbd.checksFail()
     try sbd.ghRouteFails("POST", replyPath, stderr: "gh: Bad Gateway (HTTP 502)\n")
     _ = try sbd.postDraft(s.id)
     try sbd.waitForPost(s.id, "unknown")
-    Thread.sleep(forTimeInterval: 3)
     return s
+  }
+
+  /// GitHub may not list a reply that it just created. A tick check would find
+  /// no reply, mark the post failed, and let a second click post it again.
+  @Test func theTickNeverChecksAnUnknownPostThatThisRunMade() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withReplyStub(github)
+    let s = try readySession(github, sbd)
+    try sbd.checksFind([])
+    try sbd.ghRouteFails("POST", replyPath, stderr: "gh: Bad Gateway (HTTP 502)\n")
+
+    _ = try sbd.postDraft(s.id)
+    try sbd.waitForPost(s.id, "unknown")
+    Thread.sleep(forTimeInterval: 3)
+
+    #expect(try sbd.draftPost(s.id)?["state"]?.string == "unknown")
+    #expect(!sbd.askedForTheLogin(), "\(sbd.ghCalls())")
   }
 
   @Test func checkAgainFindsTheReplyAndMarksItPosted() throws {
@@ -577,7 +593,6 @@ extension Instance {
     try sbd.ghRouteFails("POST", conversationPath, stderr: "gh: Bad Gateway (HTTP 502)\n")
     _ = try sbd.postDraft(s.id)
     try sbd.waitForPost(s.id, "unknown")
-    Thread.sleep(forTimeInterval: 3)
     try sbd.checksFind([listedComment(6001)], list: conversationPath)
 
     _ = try sbd.run(["draft", "check", s.id, "1"])
@@ -656,10 +671,10 @@ extension Instance {
     #expect(sbd.posts().count == 1, "\(sbd.ghCalls())")
   }
 
-  // MARK: Parity: the tick and `sb draft check` settle an unknown outcome alike
+  // MARK: The tick settles only a match, `sb draft check` settles both
 
   @Test(arguments: [true, false])
-  func theTickAndCheckAgainReachTheSameState(_ found: Bool) throws {
+  func theTickSettlesOnlyAMatchAndCheckAgainSettlesBoth(_ found: Bool) throws {
     let thread = found ? [listedReply(5001)] : [listedReply(5001, body: "Another reply.")]
     let checkedHub = try FakeGitHub()
     let checking = try Instance.withReplyStub(checkedHub)
@@ -683,11 +698,18 @@ extension Instance {
     _ = first()
     try ticking.checksFind(thread)
     try ticking.startSbd()
-    let ticked = try ticking.settledOutcome(b.id)
+    let ticked: JSON
+    if found {
+      ticked = try ticking.settledOutcome(b.id)
+    } else {
+      try ticking.waitFor("the tick's look") { ticking.askedForTheLogin() }
+      Thread.sleep(forTimeInterval: 2)
+      ticked = try #require(try ticking.draftPost(b.id))
+    }
 
     #expect(checked["state"]?.string == (found ? "posted" : "failed"), "\(checked)")
-    #expect(ticked["state"] == checked["state"], "tick: \(ticked), check: \(checked)")
-    #expect(ticked["url"] == checked["url"], "tick: \(ticked), check: \(checked)")
+    #expect(ticked["state"]?.string == (found ? "posted" : "unknown"), "tick: \(ticked), check: \(checked)")
+    if found { #expect(ticked["url"] == checked["url"], "tick: \(ticked), check: \(checked)") }
   }
 
   // MARK: The duplicate rule across cards
@@ -732,8 +754,9 @@ extension Instance {
   }
 
   /// The first card's POST may have reached GitHub. A new card with the same
-  /// text and target must not post again until a check settles the first.
-  @Test func aNewCardWithTheSameDraftAsAnUnknownPostIsRefused() throws {
+  /// text and target shows that unknown post and doesn't post again until a
+  /// check of the new card's draft settles the first.
+  @Test func aNewCardWithTheSameDraftAsAnUnknownPostIsRefusedUntilACheck() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withReplyStub(github)
     let s = try unknownSession(github, sbd)
@@ -741,11 +764,17 @@ extension Instance {
 
     try sbd.setSummary(s.id, replyCard(commentURL, text: draftText))
     try sbd.waitFor(s.id, "the new card") { $0.triage?.ref != oldRef && $0.triage?.source == .session }
-    try sbd.settledPost(s.id)
+    try sbd.waitForPost(s.id, "unknown")
     try sbd.ghRoute("POST", replyPath, json: createdJSON())
     let r = try sbd.postDraft(s.id)
 
     #expect(r.status != 0, "\(r.stdout)")
+    #expect(sbd.posts().count == 1, "\(sbd.ghCalls())")
+
+    try sbd.checksFind([listedReply(5001)])
+    _ = try sbd.run(["draft", "check", s.id, "1"])
+
+    #expect(try sbd.waitForPost(s.id, "posted")["url"]?.string == postedURL)
     #expect(sbd.posts().count == 1, "\(sbd.ghCalls())")
   }
 

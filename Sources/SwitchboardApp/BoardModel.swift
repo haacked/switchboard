@@ -124,6 +124,8 @@ final class BoardModel: ObservableObject {
   @Published var decisionErrors: [String: String] = [:]
   /// The reply keys of the drafts whose `draft-post` sbd has not answered.
   @Published var postingDrafts: Set<String> = []
+  /// The reply keys of the drafts whose `draft-check` sbd has not answered.
+  @Published var checkingDrafts: Set<String> = []
   /// sbd's refusal of a draft's last post or check, by reply key.
   @Published var draftErrors: [String: String] = [:]
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
@@ -967,13 +969,16 @@ final class BoardModel: ObservableObject {
   }
 
   /// Asks sbd to read the draft's GitHub comment again, or to look for the reply of a post whose outcome it
-  /// doesn't know. `draft-check` takes no ref. The ref only names the draft's error.
+  /// doesn't know. `draft-check` takes no ref. The ref only names the draft's error. A second press does nothing
+  /// until sbd answers the first.
   func checkDraft(_ session: String, ref: String, number: Int) {
     let key = MessageDrafts.replyKey(session: session, ref: ref, number: number)
+    guard checkingDrafts.insert(key).inserted else { return }
     perform(
       "draft-check", ["session": .string(session), "draft": .number(Double(number))], on: merges,
       then: { _ in self.draftErrors[key] = nil },
-      failed: { self.draftErrors[key] = "\($0)" })
+      failed: { self.draftErrors[key] = "\($0)" },
+      finally: { self.checkingDrafts.remove(key) })
   }
 
   func draft(for card: Card) -> CardView.Draft {
