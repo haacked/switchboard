@@ -923,11 +923,13 @@ extension Instance {
   }
 
   /// A session on the host whose claude reported its SessionStart through the forward. With a prompt, it does not
-  /// wait for the turn.
+  /// wait for the turn. It connects the host first. `sb new` waits only `hostWaitSeconds` for the link, and a slow
+  /// runner can take longer than that to connect.
   func startOnHost(_ folder: String = "sb-box-repo", host: String = "mini", prompt: String? = nil) throws -> (
     id: String, claudeSessionId: String, cwd: String, pid: Int
   ) {
     try makeBoxFolder(folder)
+    try connectHost(host)
     let summary = try #require(
       JSON.parse(try sb(["new", "~/\(folder)", "--host", host, "--json"] + (prompt.map { ["--prompt", $0] } ?? []))))
     let id = try self.id(of: summary)
