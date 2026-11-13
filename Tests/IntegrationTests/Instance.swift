@@ -392,6 +392,14 @@ final class Instance {
   /// Types the text into the session's Claude pane without Enter, so it stays in the prompt box.
   func typeDraft(_ id: String, _ text: String) throws { try sendKeys(id, ["-l", text]) }
 
+  /// Sets the height of the session's Claude pane. tmux moves the top rows
+  /// into the history when the pane shrinks, and brings them back when it grows.
+  func resize(_ id: String, rows: Int) throws {
+    let t = try client.terminals(id)
+    let r = try runCommand(t.tmux, ["-S", t.socket, "resize-window", "-t", "=\(t.claude):", "-y", String(rows)])
+    guard r.status == 0 else { throw TestError(description: "tmux resize-window -y \(rows): \(r.stderr)") }
+  }
+
   private func sendKeys(_ id: String, _ keys: [String]) throws {
     let t = try client.terminals(id)
     let r = try runCommand(t.tmux, ["-S", t.socket, "send-keys", "-t", "=\(t.claude):"] + keys)
@@ -470,8 +478,18 @@ final class Instance {
   }
 
   /// What the stub's hooks printed for the conversation, oldest first.
-  func hookOutputs(_ claudeSessionId: String) -> [JSON] {
-    let text = (try? String(contentsOfFile: "\(home.path)/hook-output.log", encoding: .utf8)) ?? ""
+  func hookOutputs(_ claudeSessionId: String) -> [JSON] { stubLog("hook-output.log", claudeSessionId) }
+
+  /// The decisions that the conversation's PermissionRequest hooks answered
+  /// with, oldest first.
+  func permissionAnswers(_ claudeSessionId: String) -> [JSON] {
+    stubLog("permission-answers.log", claudeSessionId)
+  }
+
+  /// The JSON records of the conversation in one of the stub's logs. Each
+  /// record is the conversation's id, a tab, and the JSON, with a NUL after it.
+  private func stubLog(_ name: String, _ claudeSessionId: String) -> [JSON] {
+    let text = (try? String(contentsOfFile: "\(home.path)/\(name)", encoding: .utf8)) ?? ""
     return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().compactMap { record in
       let fields = record.split(separator: "\t", maxSplits: 1).map(String.init)
       guard fields.count == 2, fields[0] == claudeSessionId else { return nil }

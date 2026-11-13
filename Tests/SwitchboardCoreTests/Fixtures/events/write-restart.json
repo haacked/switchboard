@@ -1,0 +1,25 @@
+{
+  "cwd": "/Users/someone/dev/worktrees/switchboard/someone/shared-projects-permissions",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PermissionRequest",
+  "permission_mode": "auto",
+  "permission_suggestions": [
+    {
+      "destination": "session",
+      "directories": [
+        "/Users/someone/.claude-personal/projects/-Users-someone-dev-someone-switchboard/memory",
+        "/Users/someone/.claude/projects/-Users-someone-dev-someone-switchboard/memory"
+      ],
+      "type": "addDirectories"
+    }
+  ],
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "tool_input": {
+    "content": "---\nname: shared-projects-permissions-status\ndescription: Fix for permission prompts from the symlinked projects folders; refactors in draft PR #256, Stage 1 waits for it to merge\nmetadata:\n  type: project\n---\n\nOption C was chosen on 2026-11-12. Each account gets a real `projects` folder, and sbd pins every session's auto-memory to `~/.claude/projects/<ClaudeFolder.name(main checkout)>/memory` through `autoMemoryDirectory` in the per-session `--settings` file. The refactors (`ClaudeFolder.name` and the per-session settings file) are in draft PR #256. The plan is `~/dev/someone/notes/Dev/repositories/someone/switchboard/plans/shared-projects-permissions.md`.\n\n**Why:** a symlink anywhere on the path removes Claude's built-in allowances. When the target is under `~/.claude`, writes are refused as \"a sensitive file\". The user's decisions: accept the memory split for sessions outside sbd, include memory folders in the clones, and stop sbd, the automation jobs, and the sessions for the migration.\n\n**How to apply:** don't start Stage 1 (pinning memory) until #256 merges. The user asked for that on 2026-11-12, and an sb wait on the merge is set. Stage 2 (dotfiles) and Stage 3 (migration) each need the user's approval. Rerun the Phase 0 probe on `~/.claude-automation` once its spend limit resets.\n",
+    "file_path": "/Users/someone/.claude-personal/projects/-Users-someone-dev-someone-switchboard/memory/shared-projects-permissions-status.md"
+  },
+  "tool_name": "Write"
+}
