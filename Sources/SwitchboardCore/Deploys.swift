@@ -61,28 +61,15 @@ public struct DeployComment: Equatable, Sendable {
     case unrecognized(String)
   }
 
-  public struct Row: Equatable, Sendable {
-    public var status: Status
-    /// Milliseconds since the epoch, to the minute.
-    public var deployedAt: Int64?
-    /// The PostHog/charts workflow run that deployed it.
-    public var run: String?
-
-    public init(status: Status, deployedAt: Int64?, run: String?) {
-      self.status = status
-      self.deployedAt = deployedAt
-      self.run = run
-    }
-  }
-
   /// The comment's first line. The bot finds its own comment by it.
   public static let marker = "<!-- deploy-notify-bot -->"
 
-  public var rows: [DeployEnvironment: Row]
+  /// The status that each environment's row of the table shows.
+  public var rows: [DeployEnvironment: Status]
 
   public static func parse(_ body: String) -> DeployComment? {
     guard body.hasPrefix(marker) else { return nil }
-    var rows: [DeployEnvironment: Row] = [:]
+    var rows: [DeployEnvironment: Status] = [:]
     for line in body.split(whereSeparator: \.isNewline) {
       // | **dev** | :white_check_mark: Deployed | 2026-10-23 22:20 UTC | [Run](<url>) |
       let cells = line.split(separator: "|", omittingEmptySubsequences: false)
@@ -90,16 +77,13 @@ public struct DeployComment: Equatable, Sendable {
       guard cells.count >= 5,
         let environment = DeployEnvironment(rawValue: cells[1].replacingOccurrences(of: "*", with: ""))
       else { continue }
-      let status: Status =
+      rows[environment] =
         switch cells[2] {
         case ":white_check_mark: Deployed": .deployed
         case ":hourglass_flowing_sand: Pending": .pending
         case ":grey_question: Unknown": .unknown
         default: .unrecognized(cells[2])
         }
-      let deployedAt = deployTime.date(from: cells[3]).map { Int64($0.timeIntervalSince1970 * 1000) }
-      let run = cells[4].firstMatch(of: #/\]\((?<url>[^)]+)\)/#).map { String($0.url) }
-      rows[environment] = Row(status: status, deployedAt: deployedAt, run: run)
     }
     return DeployComment(rows: rows)
   }
@@ -109,7 +93,7 @@ public struct DeployComment: Equatable, Sendable {
   /// failed deploy leaves its row Pending, so the comment never reports a
   /// failure.
   public func state(in environment: DeployEnvironment) -> DeployState {
-    switch rows[environment]?.status {
+    switch rows[environment] {
     case .deployed: .deployed
     case .unknown where environment == .dev:
       [.prodUS, .prodEU].contains { state(in: $0) == .deployed } ? .deployed : .pending
@@ -118,19 +102,10 @@ public struct DeployComment: Equatable, Sendable {
   }
 }
 
-private let deployTime: DateFormatter = {
-  let f = DateFormatter()
-  f.locale = Locale(identifier: "en_US_POSIX")
-  f.timeZone = TimeZone(identifier: "UTC")
-  f.dateFormat = "yyyy-MM-dd HH:mm 'UTC'"
-  return f
-}()
-
 /// What PostHog/charts `state/<service>.yaml` says each stage runs. One prod
 /// stage covers both prod regions. The file changes when a deploy starts, and
 /// the ArgoCD sync finishes 3 to 60 minutes later (see ChartsDeployJobs).
 public struct ServiceDeployState: Equatable, Sendable {
-  public var service: String
   /// The repository whose commits build the service's image.
   public var repository: String?
   /// The source commit of the image that each stage runs, or nil when the
@@ -160,7 +135,7 @@ public struct ServiceDeployState: Equatable, Sendable {
       return namedCommit(buildImage) ?? build.commit
     }
     return ServiceDeployState(
-      service: service, repository: value("deploy_info.repository"), devCommit: stageCommit("dev"),
+      repository: value("deploy_info.repository"), devCommit: stageCommit("dev"),
       prodCommit: stageCommit("prod"), requiresProdApproval: value("require_prod_approval")?.lowercased() == "true")
   }
 

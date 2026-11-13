@@ -38,30 +38,35 @@ final class MCPGate {
   }
 
   /// Sends the request while the gate holds the stub, opens the gate as
-  /// `open(_:after:sentAt:)` does, and returns the request's result.
+  /// `open(_:after:)` does, and returns the request's result.
   @discardableResult
   func open<T>(_ sbd: Instance, during request: @escaping () throws -> T) throws -> T {
-    let sent = Date()
-    return try open(sbd, after: .detached(request), sentAt: sent)
+    try open(sbd, after: .detached(request))
   }
 
-  /// Opens the gate once the stub waits at it and the request has run for
-  /// 0.5 s since `sent`, so that the request reaches sbd's wait for the
-  /// server first. It fails when the request returned before the gate
-  /// opened. A request that launches claude has to wait for a starting
-  /// server, so an early return means that sbd launched claude without it.
-  func open<T>(_ sbd: Instance, after outcome: Outcome<T>, sentAt sent: Date) throws -> T {
-    try sbd.waitFor("the MCP stub to wait at its gate", timeout: 30) { waitingPid() != nil }
-    let left = 0.5 - Date().timeIntervalSince(sent)
-    if left > 0 { usleep(useconds_t(left * 1_000_000)) }
-    if let early = outcome.result {
-      throw TestError(description: "the request returned before the MCP server listened: \(early)")
-    }
+  /// Opens the gate once sbd reports that a request waits for the server,
+  /// and returns the request's result. It fails when the request returned
+  /// before the gate opened. A request that launches claude has to wait for
+  /// a starting server. An early return means that sbd launched claude
+  /// without it.
+  func open<T>(_ sbd: Instance, after outcome: Outcome<T>) throws -> T {
+    try waitForRequest(sbd, outcome)
     try open()
     guard outcome.done.wait(timeout: .now() + 30) == .success, let result = outcome.result else {
       throw TestError(description: "the request didn't return in 30 s after the gate opened")
     }
     return try result.get()
+  }
+
+  /// Waits until the stub waits at the gate and sbd reports a request that
+  /// waits for a starting server. It fails when the request returns first.
+  func waitForRequest<T>(_ sbd: Instance, _ outcome: Outcome<T>) throws {
+    try sbd.waitFor("the request to wait for the MCP stub at its gate", timeout: 30) {
+      if let early = outcome.result {
+        throw TestError(description: "the request returned before the MCP server listened: \(early)")
+      }
+      return try waitingPid() != nil && sbd.mcpServers().contains { $0.waiting > 0 }
+    }
   }
 }
 

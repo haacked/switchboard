@@ -18,18 +18,15 @@ func deployFixture(_ name: String) throws -> String {
 @Suite struct DeployCommentParsing {
   @Test func readsEveryEnvironmentOfADeployedPR() throws {
     let c = try #require(DeployComment.parse(try deployFixture("comment-deployed.md")))
-    let run = "https://github.com/PostHog/charts/actions/runs/40031747810"
-    #expect(c.rows[.dev] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:20:00.000Z"), run: run))
-    #expect(
-      c.rows[.prodUS] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
-    #expect(
-      c.rows[.prodEU] == DeployComment.Row(status: .deployed, deployedAt: ms("2026-10-23T22:34:00.000Z"), run: run))
+    #expect(c.rows[.dev] == .deployed)
+    #expect(c.rows[.prodUS] == .deployed)
+    #expect(c.rows[.prodEU] == .deployed)
     #expect(DeployEnvironment.allCases.allSatisfy { c.state(in: $0) == .deployed })
   }
 
   @Test func onePendingProdRegionIsNotDeployed() throws {
     let c = try #require(DeployComment.parse(try deployFixture("comment-prod-us-pending.md")))
-    #expect(c.rows[.prodUS] == DeployComment.Row(status: .pending, deployedAt: nil, run: nil))
+    #expect(c.rows[.prodUS] == .pending)
     #expect(c.state(in: .dev) == .deployed)
     #expect(c.state(in: .prodEU) == .deployed)
     #expect(c.state(in: .prodUS) == .pending)
@@ -46,7 +43,7 @@ func deployFixture(_ name: String) throws -> String {
   /// deploy. A prod deploy runs only after dev deployed in the same run.
   @Test func unknownDevCountsAsDeployedOnceAProdRegionDeployed() throws {
     let c = try #require(DeployComment.parse(try deployFixture("comment-dev-unknown.md")))
-    #expect(c.rows[.dev]?.status == .unknown)
+    #expect(c.rows[.dev] == .unknown)
     #expect(c.state(in: .dev) == .deployed)
     #expect(c.state(in: .prodUS) == .deployed)
     #expect(c.state(in: .prodEU) == .pending)
@@ -64,7 +61,7 @@ func deployFixture(_ name: String) throws -> String {
     let body = try deployFixture("comment-dev-unknown.md")
       .replacingOccurrences(of: ":grey_question: Unknown", with: ":x: Failed")
     let c = try #require(DeployComment.parse(body))
-    #expect(c.rows[.dev]?.status == .unrecognized(":x: Failed"))
+    #expect(c.rows[.dev] == .unrecognized(":x: Failed"))
     #expect(c.state(in: .dev) == .pending)
   }
 

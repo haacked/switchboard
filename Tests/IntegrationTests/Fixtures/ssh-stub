@@ -5,6 +5,7 @@ Usage:
   ssh-stub -M -T [-o K=V]... -- <destination> <command>...
   ssh-stub [-T] -G [-o K=V]... -- <destination>
   ssh-stub [-T] -O check|exit [-o K=V]... -- <destination>
+  ssh-stub [-T] -O forward -R <remote path>:<local path> [-o K=V]... -- <destination>
 
 It keeps its files in <ControlPath's folder>/../ssh-stub, which is
 $SB_HOME/ssh-stub when sbd passes ControlPath=$SB_HOME/ssh/%C:
@@ -17,6 +18,10 @@ $SB_HOME/ssh-stub when sbd passes ControlPath=$SB_HOME/ssh/%C:
   refuse              while it exists, a master prints its text to stderr and
                       exits 255
   hang                while it exists, a master sleeps before it does anything
+  refuse-forward      while it exists, -O forward prints its text to stderr and
+                      exits 255
+  <socket name>.forward.pid
+                      the pid of the relay that -O forward started last
 
 %C in a ControlPath becomes 40 hex characters from a hash of the destination.
 An -o value may stand in double quotes, with \\" and \\\\ for those two characters.
@@ -25,6 +30,14 @@ A value with a space and no quotes is an error, as it is for ssh.
 -G prints `controlpath <expanded path>` among other lines, as `ssh -G` does.
 -O check exits 0 only when the socket file exists and the pid in its pid file
 is alive. -O exit ends that pid.
+
+-O forward stands in for a remote socket forward. It needs a running master, as
+-O check does. It binds a Unix socket at <remote path> and starts a detached
+relay, which connects each client of that socket to <local path> and copies
+both ways. The end of one side's data closes the other side for writing, as
+sshd does. The relay exits within 50 ms of the master's pid ending and leaves
+its socket file, as a dropped forward can. A <remote path> that exists fails
+with exit 255, as a remote bind does without StreamLocalBindUnlink.
 
 A master binds a real Unix socket at its ControlPath when nothing is there.
 When something is there, it binds nothing and writes no pid file, as a real
@@ -41,6 +54,7 @@ import signal
 import socket
 import stat
 import sys
+import threading
 import time
 
 
@@ -50,7 +64,7 @@ def fail(message):
 
 
 def parse(argv):
-    flags, options, control, rest = set(), {}, None, []
+    flags, options, control, forward, rest = set(), {}, None, None, []
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -59,12 +73,14 @@ def parse(argv):
             break
         if arg in ("-M", "-T", "-G"):
             flags.add(arg)
-        elif arg in ("-o", "-O"):
+        elif arg in ("-o", "-O", "-R"):
             if i + 1 == len(argv):
                 fail(f"{arg} needs a value")
             i += 1
             if arg == "-O":
                 control = argv[i]
+            elif arg == "-R":
+                forward = argv[i]
             else:
                 key, sep, value = argv[i].partition("=")
                 if not sep:
@@ -82,7 +98,7 @@ def parse(argv):
         i += 1
     if not rest:
         fail("no destination")
-    return flags, options, control, rest[0], rest[1:]
+    return flags, options, control, forward, rest[0], rest[1:]
 
 
 def alive(pid):
@@ -110,7 +126,57 @@ def is_socket(path):
         return False
 
 
-flags, options, control, destination, command = parse(sys.argv[1:])
+def copy(source, sink):
+    """Copies until the source ends, then closes the sink for writing."""
+    try:
+        while True:
+            data = source.recv(65536)
+            if not data:
+                break
+            sink.sendall(data)
+    except OSError:
+        pass
+    try:
+        sink.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+
+
+def relay(listener, local, master):
+    """Serves the forward until the master's pid ends."""
+
+    def serve():
+        while True:
+            try:
+                client, _ = listener.accept()
+            except OSError:
+                return
+            far = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                far.connect(local)
+            except OSError:
+                client.close()
+                far.close()
+                continue
+
+            def both(client=client, far=far):
+                up = threading.Thread(target=copy, args=(client, far), daemon=True)
+                up.start()
+                copy(far, client)
+                up.join()
+                client.close()
+                far.close()
+
+            threading.Thread(target=both, daemon=True).start()
+
+    threading.Thread(target=serve, daemon=True).start()
+    while alive(master):
+        time.sleep(0.02)
+    # The socket file stays.
+    os._exit(0)
+
+
+flags, options, control, forward, destination, command = parse(sys.argv[1:])
 if "controlpath" not in options:
     fail("needs -o ControlPath=<path>")
 digest = hashlib.sha1(destination.encode()).hexdigest()
@@ -158,6 +224,42 @@ if control is not None:
                 pass
         print("Exit request sent.")
         sys.exit(0)
+    if control == "forward":
+        if not running:
+            fail(f"Control socket connect({control_path}): No such file or directory")
+        refuse_forward = os.path.join(folder, "refuse-forward")
+        if os.path.exists(refuse_forward):
+            with open(refuse_forward) as f:
+                sys.stderr.write(f.read())
+            sys.exit(255)
+        remote, sep, local = (forward or "").partition(":")
+        if not sep or not remote or not local:
+            fail("-O forward needs -R <remote path>:<local path>")
+        if os.path.lexists(remote):
+            sys.stderr.write(f"Error: remote port forwarding failed for listen path {remote}\n")
+            sys.exit(255)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            listener.bind(remote)
+        except OSError as error:
+            sys.stderr.write(f"Error: remote port forwarding failed for listen path {remote}: {error}\n")
+            sys.exit(255)
+        listener.listen(64)
+        sys.stdout.flush()
+        child = os.fork()
+        if child != 0:
+            # The socket listens and the pid file names the relay before this returns.
+            forward_pid = os.path.join(folder, os.path.basename(control_path) + ".forward.pid")
+            with open(forward_pid + ".tmp", "w") as f:
+                f.write(str(child))
+            os.replace(forward_pid + ".tmp", forward_pid)
+            os._exit(0)
+        os.setsid()
+        # The caller reads this run's output to its end, so the relay keeps none of it open.
+        null = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(null, fd)
+        relay(listener, local, pid)
     fail(f"unknown -O command {control}")
 
 if "-M" not in flags:
@@ -189,4 +291,8 @@ else:
 
 env = dict(os.environ)
 env["HOME"] = box_home
+# A launcher such as pyenv puts its own folder first in the PATH of this script. A test that puts programs on
+# the box names the PATH that the box's shell gets.
+if "SB_SSH_STUB_PATH" in env:
+    env["PATH"] = env.pop("SB_SSH_STUB_PATH")
 os.execve("/bin/sh", ["/bin/sh", "-c", " ".join(command)], env)

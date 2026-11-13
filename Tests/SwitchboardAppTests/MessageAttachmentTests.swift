@@ -1,6 +1,7 @@
 import AppKit
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
@@ -17,10 +18,10 @@ import Testing
 
   deinit { try? FileManager.default.removeItem(atPath: folder) }
 
-  /// Writes the data to a file in the test's folder and returns its path.
-  func file(_ name: String, _ data: Data = png) throws -> String {
+  /// Writes the data, or a 1×1 PNG when there is none, to a file in the test's folder and returns its path.
+  func file(_ name: String, _ data: Data? = nil) throws -> String {
     let path = "\(folder)/\(name)"
-    try data.write(to: URL(fileURLWithPath: path))
+    try (data ?? Self.png).write(to: URL(fileURLWithPath: path))
     return path
   }
 
@@ -182,7 +183,7 @@ import Testing
   final class Source: @unchecked Sendable {
     var calls: [(folder: URL, reader: @Sendable (URL, (any Error)?) -> Void)] = []
 
-    init(_ view: FileDropTarget.DropView) {
+    @MainActor init(_ view: FileDropTarget.DropView) {
       view.receiveFiles = { [unowned self] _, folder, _, reader in calls.append((folder, reader)) }
     }
 
@@ -202,7 +203,7 @@ import Testing
   }
 
   /// A drop view that attaches to the draft, and records what it keeps and when the drop ends.
-  final class Target {
+  @MainActor final class Target {
     let draft = MessageField.Draft()
     let view = FileDropTarget.DropView()
     var kept: [String] = []
@@ -839,11 +840,10 @@ import Testing
   }
 
   /// The requests that the model's `send` received.
-  final class Sent: @unchecked Sendable {
-    private let lock = NSLock()
-    private var requests: [(op: String, args: [String: JSON])] = []
-    var all: [(op: String, args: [String: JSON])] { lock.withLock { requests } }
-    func add(_ op: String, _ args: [String: JSON]) { lock.withLock { requests.append((op, args)) } }
+  final class Sent: Sendable {
+    private let requests = OSAllocatedUnfairLock<[(op: String, args: [String: JSON])]>(initialState: [])
+    var all: [(op: String, args: [String: JSON])] { requests.withLock { $0 } }
+    func add(_ op: String, _ args: [String: JSON]) { requests.withLock { $0.append((op, args)) } }
   }
 
   // MARK: chipLabel(_:)

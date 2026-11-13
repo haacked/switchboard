@@ -297,7 +297,7 @@ extension Service {
     if let inside = entries.keys.sorted().first(where: { isInside($0, ancestry) }) {
       return APIError("`\(command)` runs inside \(inside). \(advice)")
     }
-    let servers = Set(snapshot.panes.values.map(\.server).filter(Processes.isValidPid))
+    let servers = Set(mac.snapshot.panes.values.map(\.server).filter(Processes.isValidPid))
     guard ancestry.isDisjoint(with: servers) else {
       return APIError("`\(command)` runs in sbd's tmux server, where the sessions run. \(advice)")
     }

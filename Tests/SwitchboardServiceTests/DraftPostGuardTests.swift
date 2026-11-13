@@ -87,12 +87,12 @@ private func withSessions(_ body: (Service, Home) throws -> Void) throws {
       var entry = Service.Entry(session: s)
       if id == session { entry.facts = facts }
       service.entries[id] = entry
-      service.snapshot.panes[service.paneName(id, .claude)] = live(first)
-      service.snapshot.panes[service.paneName(id, .shell)] = live(second)
+      service.mac.snapshot.panes[service.paneName(id, .claude)] = live(first)
+      service.mac.snapshot.panes[service.paneName(id, .shell)] = live(second)
     }
     // `draft-post` builds a snapshot from tmux, which has no server here. That snapshot is older than this one,
     // so `install` keeps these panes.
-    service.snapshot.taken = .max
+    service.mac.snapshot.taken = .max
   }
   try body(service, home)
 }
@@ -145,7 +145,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
   @Test(arguments: [(Pane.claude, session), (.shell, session), (.claude, other), (.shell, other)])
   func aCallerBelowAPaneOfAnySessionIsRefused(_ pane: Pane, _ owner: String) throws {
     try withSessions { service, home in
-      service.queue.sync { service.snapshot.panes[service.paneName(owner, pane)] = live(Int(getppid())) }
+      service.queue.sync { service.mac.snapshot.panes[service.paneName(owner, pane)] = live(Int(getppid())) }
 
       let response = service.handle(postRequest(), caller: .client(pid: Int(getpid())))
 
@@ -158,7 +158,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
   /// The caller is the pane's own process, as `exec sb draft post` in the shell pane makes it.
   @Test func aCallerThatIsAPanesProcessIsRefused() throws {
     try withSessions { service, home in
-      service.queue.sync { service.snapshot.panes[service.paneName(session, .shell)] = live(Int(getpid())) }
+      service.queue.sync { service.mac.snapshot.panes[service.paneName(session, .shell)] = live(Int(getpid())) }
 
       let response = service.handle(postRequest(), caller: .client(pid: Int(getpid())))
 
@@ -175,7 +175,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
     try withSessions { service, home in
       let (outside, _) = try outsidePids()
       service.queue.sync {
-        service.snapshot.panes["opened-by-a-session"] = PaneRow(
+        service.mac.snapshot.panes["opened-by-a-session"] = PaneRow(
           pid: outside, dead: false, clients: 0, server: Int(getppid()))
       }
 
@@ -192,7 +192,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
     try withSessions { service, home in
       let (outside, _) = try outsidePids()
       service.queue.sync {
-        for name in service.snapshot.panes.keys { service.snapshot.panes[name]?.server = outside }
+        for name in service.mac.snapshot.panes.keys { service.mac.snapshot.panes[name]?.server = outside }
       }
 
       let response = service.handle(postRequest(), caller: .client(pid: Int(getpid())))
@@ -235,7 +235,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
   @Test func aDeadPaneDoesNotRefuseTheCaller() throws {
     try withSessions { service, home in
       service.queue.sync {
-        service.snapshot.panes[service.paneName(other, .shell)] = PaneRow(
+        service.mac.snapshot.panes[service.paneName(other, .shell)] = PaneRow(
           pid: Int(getppid()), dead: true, clients: 0)
       }
 
@@ -308,7 +308,7 @@ private func expectNothingDone(_ service: Service, _ home: Home) throws {
   /// `draft-check` changes no GitHub state, so a caller inside a session may run it.
   @Test func draftCheckIsNotRefusedInsideASession() throws {
     try withSessions { service, _ in
-      service.queue.sync { service.snapshot.panes[service.paneName(session, .claude)] = live(Int(getppid())) }
+      service.queue.sync { service.mac.snapshot.panes[service.paneName(session, .claude)] = live(Int(getppid())) }
 
       let response = service.handle(
         Request(op: "draft-check", args: ["session": .string(session), "draft": 1]),

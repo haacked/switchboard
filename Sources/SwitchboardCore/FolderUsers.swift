@@ -13,6 +13,12 @@ public struct FolderUser: Sendable, Equatable {
   public var pid: Int
   public var use: FolderUse
   public var path: String
+
+  public init(pid: Int, use: FolderUse, path: String) {
+    self.pid = pid
+    self.use = use
+    self.path = path
+  }
 }
 
 /// The path with every symlink resolved, or nil when the path doesn't exist.

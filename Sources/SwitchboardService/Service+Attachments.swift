@@ -17,7 +17,13 @@ extension Service {
   /// The plain `send` and the paths of the copies. It keeps nothing when it
   /// refuses one image.
   private func savingImages(_ request: Request) throws -> (send: Request, saved: [String]) {
-    let id = try queue.sync { try lookup(request.args) }
+    let id = try queue.sync {
+      let id = try lookup(request.args)
+      if let host = entries[id]?.session.host {
+        throw APIError("images can't reach a session on a host yet, and \(id) is on \(host)")
+      }
+      return id
+    }
     guard let images = request.args["images"]?.array, !images.isEmpty else {
       throw APIError("send needs images when it names them")
     }

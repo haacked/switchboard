@@ -4,20 +4,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// A model whose `send` holds each request until `release` is signaled, and counts the requests.
-@MainActor
-private func heldModel() -> (BoardModel, DispatchSemaphore, Counter) {
-  let model = offlineModel()
-  let release = DispatchSemaphore(value: 0)
-  let requests = Counter()
-  model.send = { _, _ in
-    requests.increment()
-    release.wait()
-    return .null
-  }
-  return (model, release, requests)
-}
-
 /// A session whose Inbox item is its own card under `ref`, with one draft per state in `posts`, numbered from 1.
 private func withDrafts(_ id: String, ref: String = "summary:1", _ posts: [DraftPost]) -> SessionSummary {
   var s = needsItem(id)

@@ -40,7 +40,8 @@ final class BoardModel: ObservableObject {
   @Published var selection: String? {
     didSet { navigate { if let selection, selection != oldValue { showOrg(of: selection) } } }
   }
-  @Published var showingNew = false
+  /// The New Session sheet's opening, or nil while it is closed.
+  @Published var newSession: NewSessionRequest?
   @Published var showingImport = false
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
   @Published var knownRepos: [KnownRepo]?
@@ -56,7 +57,8 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { showingNew || showingImport || showingSearch || doneRemoval != nil }
+  var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
+  func openNewSession(group: String? = nil) { newSession = NewSessionRequest(group: group) }
   /// The view that the detail pane shows while no session is selected.
   @Published var mainView = MainView.inbox {
     didSet { navigate() }
@@ -582,7 +584,6 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  func open(_ id: String) { perform("open", ["session": .string(id)]) }
   /// Starts the session's shell pane, or ends it. sbd keeps a closed shell closed until this opens it.
   func setShellOpen(_ id: String, _ open: Bool) {
     perform("shell", ["session": .string(id), "open": .bool(open)])
@@ -927,6 +928,23 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// Reads the blocks of the session's recent assistant messages for the copy buttons in its Claude terminal.
+  /// A failed read gives no blocks, so a quote's button copies the screen's text.
+  func loadBlockSources(_ session: String, then done: @escaping @MainActor @Sendable (BlockSources) -> Void) {
+    let client = client
+    poller.async {
+      let messages = try? client.call(
+        "chat-log", ["session": .string(session), "limit": .number(Double(Self.blockSourceMessageCount))],
+        as: [ChatMessage].self)
+      let sources = BlockSources(messages: (messages ?? []).filter { $0.role == .assistant }.reversed().map(\.text))
+      Task { @MainActor in done(sources) }
+    }
+  }
+
+  /// The transcript messages that the copy buttons match against. The count includes user messages, so fewer
+  /// assistant messages come back.
+  nonisolated static let blockSourceMessageCount = 20
+
   func messageDraft(for session: SessionSummary) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.key(for: session))
   }
@@ -1136,12 +1154,6 @@ final class BoardModel: ObservableObject {
   /// Puts `repo` first in `knownRepos` and drops any other row with its path.
   private func moveToFront(_ repo: KnownRepo) {
     knownRepos = [repo] + (knownRepos ?? []).filter { $0.path != repo.path }
-  }
-
-  /// Asks sbd for the session's tmux targets. It blocks, so it runs off the
-  /// main thread.
-  nonisolated func terminals(_ id: String) -> Result<Terminals, Error> {
-    Result { try Client().terminals(id) }
   }
 
   /// The Claude sessions that the import sheet offers. It blocks, so it runs

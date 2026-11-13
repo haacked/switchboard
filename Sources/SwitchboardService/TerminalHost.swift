@@ -28,28 +28,40 @@ struct PaneRow {
   }
 }
 
-/// The terminal host: a private tmux server on $SB_HOME/tmux.sock. Each pane
-/// is a tmux session of its own, so two terminals can show a session's Claude
-/// pane and its shell at once.
+/// The terminal host: a private tmux server on $SB_HOME/tmux.sock, or on a remote host's ~/.sb/tmux.sock. Each
+/// pane is a tmux session of its own, so two terminals can show a session's Claude pane and its shell at once.
 final class TerminalHost {
   let tmux: String
   let socket: String
   let shell: String
-  private let conf: String
+  let conf: String
   private let baseEnv: [String: String]
-  /// The machine that the tmux server and its panes run on. The tmux program's path, tmux.conf, and the panes'
-  /// base environment still come from this Mac.
+  /// The timeout of each tmux command, or nil for none.
+  private let timeout: Double?
+  /// The machine that the tmux server and its panes run on.
   private let machine: any Machine
 
-  init(home: Home, config: Config, machine: any Machine = LocalMachine()) throws {
+  /// A tmux server on `machine`. Every path and the base environment name things on that machine. It writes no
+  /// config file and reads nothing from sbd's environment.
+  init(
+    tmux: String, socket: String, conf: String, shell: String, baseEnv: [String: String], timeout: Double?,
+    machine: any Machine
+  ) {
+    self.tmux = tmux
+    self.socket = socket
+    self.conf = conf
+    self.shell = shell
+    self.baseEnv = baseEnv
+    self.timeout = timeout
     self.machine = machine
+  }
+
+  /// This Mac's tmux server. The tmux program's path, tmux.conf, and the panes' base environment come from this Mac.
+  convenience init(home: Home, config: Config, machine: any Machine) throws {
     guard let tmux = findExecutable(config.tmux ?? "tmux") else {
       throw APIError("can't find tmux. Install it with `brew install tmux`, or set \"tmux\" in \(home.config)")
     }
-    self.tmux = tmux
-    self.socket = home.tmuxSocket
-    self.shell = config.shell ?? TerminalHost.loginShell()
-    self.conf = home.tmuxConfig
+    let shell = config.shell ?? TerminalHost.loginShell()
     // tmux runs every pane with the server's environment. Starting it from a
     // short list keeps variables such as CLAUDECODE, which mark a child of
     // another Claude session, out of the sessions that sbd starts.
@@ -59,7 +71,9 @@ final class TerminalHost {
       if let value = env[key] { base[key] = value }
     }
     base["LANG"] = base["LANG"] ?? "en_US.UTF-8"
-    self.baseEnv = base
+    self.init(
+      tmux: tmux, socket: home.tmuxSocket, conf: home.tmuxConfig, shell: shell, baseEnv: base, timeout: nil,
+      machine: machine)
     try TerminalHost.configText.write(toFile: conf, atomically: true, encoding: .utf8)
     syncServer()
   }
@@ -108,7 +122,7 @@ final class TerminalHost {
 
   @discardableResult
   func run(_ args: [String], input: Data? = nil) throws -> String {
-    let r = try machine.run(tmux, ["-S", socket, "-f", conf] + args, env: baseEnv, input: input, timeout: nil)
+    let r = try machine.run(tmux, ["-S", socket, "-f", conf] + args, env: baseEnv, input: input, timeout: timeout)
     guard r.status == 0 else {
       throw APIError("tmux \(args.first ?? ""): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
@@ -136,8 +150,12 @@ final class TerminalHost {
   /// "No such file or directory", such as a missing config file, is not.
   static func isNoServer(_ error: Error) -> Bool {
     guard let error = error as? APIError, error.description.hasPrefix("tmux ") else { return false }
-    let text = error.description
-    return text.contains("no server running")
+    return saysNoServer(error.description)
+  }
+
+  /// Whether tmux's error text reports that no server runs.
+  static func saysNoServer(_ text: String) -> Bool {
+    text.contains("no server running")
       || (text.contains("error connecting to") && text.contains("No such file or directory"))
   }
 
@@ -248,6 +266,17 @@ final class TerminalHost {
     _ = try? run(["kill-session", "-t", "=\(name)"])
   }
 
+  /// Closes the pane's tmux session. A session or a server that is already gone counts as closed. Any other
+  /// failure throws.
+  func close(_ name: String) throws {
+    do {
+      try run(["kill-session", "-t", "=\(name)"])
+    } catch let error
+      where TerminalHost.isNoServer(error) || "\(error)".hasPrefix("tmux kill-session: can't find session")
+    {
+    }
+  }
+
   /// Pastes `text` with bracketed paste, then `attachments` as a paste of its
   /// own, then presses Enter. Claude Code attaches the images of a paste that
   /// holds only image paths, and leaves paths inside other text as text. It
@@ -286,9 +315,34 @@ final class TerminalHost {
   /// that many lines of scrollback above it. `colors` keeps the colors as
   /// SGR escape sequences, which `ClaudeScreen.promptIsEmpty` reads.
   func screen(_ name: String, history: Int = 0, colors: Bool = false) throws -> String {
-    try run(
-      ["capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + (history > 0 ? ["-S", "-\(history)"] : [])
-        + ["-t", "=\(name):"])
+    try run(Self.captureArgs(name, colors: colors, history: history))
+  }
+
+  /// The `capture-pane` arguments of the pane's screen. Here `-S` is the first line of scrollback, not the socket.
+  private static func captureArgs(_ name: String, colors: Bool, history: Int = 0) -> [String] {
+    ["capture-pane", "-p", "-J"] + (colors ? ["-e"] : []) + (history > 0 ? ["-S", "-\(history)"] : [])
+      + ["-t", "=\(name):"]
+  }
+
+  /// Prints the exit status of the command in `$@` and its output, with a NUL after each. An `x` ends the
+  /// output, so the shell keeps the newlines at the end of a screen.
+  private static let answeredScript = #"out=$("$@" 2>&1; s=$?; printf x; exit $s); printf '%s\0%s\0' "$?" "$out""#
+
+  /// The visible screen, read through `machine` in a form that shows tmux answered: tmux's exit status and
+  /// the screen, each ended by a NUL. It throws for any other output, which a capture that its timeout ended
+  /// gives, and for a capture that tmux refused.
+  func answeredScreen(_ name: String, colors: Bool = false, on machine: any Machine) throws -> String {
+    let capture = ["-S", socket, "-f", conf] + Self.captureArgs(name, colors: colors)
+    let r = try machine.run(
+      "/bin/sh", ["-c", Self.answeredScript, "sb", tmux] + capture, env: baseEnv, input: nil, timeout: timeout)
+    guard r.status == 0 else { throw APIError("the screen read of \(name) exited with status \(r.status)") }
+    let f = try RemoteSite.fields(Data(r.stdout.utf8), count: 2, of: "the screen read of \(name)")
+    guard f[1].hasSuffix("x") else { throw APIError("the screen read of \(name) is cut short") }
+    let output = String(f[1].dropLast())
+    guard f[0] == "0" else {
+      throw APIError("tmux capture-pane: \(output.trimmingCharacters(in: .whitespacesAndNewlines))")
+    }
+    return output
   }
 
   /// The last `count` lines that the pane's program printed, without the

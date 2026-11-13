@@ -27,10 +27,10 @@ import Testing
 
   deinit { try? FileManager.default.removeItem(atPath: root) }
 
-  /// Writes the data to a file outside the store's folder and returns its path.
-  func file(_ name: String, _ data: Data = png) throws -> String {
+  /// Writes the data, or a 1×1 PNG when there is none, to a file outside the store's folder and returns its path.
+  func file(_ name: String, _ data: Data? = nil) throws -> String {
     let path = "\(root)/\(name)"
-    try data.write(to: URL(fileURLWithPath: path))
+    try (data ?? Self.png).write(to: URL(fileURLWithPath: path))
     return path
   }
 

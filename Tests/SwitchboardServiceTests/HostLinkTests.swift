@@ -2,17 +2,17 @@ import CryptoKit
 import Foundation
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardService
 
 /// The clock of one test. A test moves it and passes the same time to `poll(now:)`.
-final class LinkClock: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value: Int64 = 1_794_377_400_000
+final class LinkClock: Sendable {
+  private let value = OSAllocatedUnfairLock<Int64>(initialState: 1_794_377_400_000)
 
-  var now: Int64 { lock.withLock { value } }
+  var now: Int64 { value.withLock { $0 } }
 
-  func advance(_ ms: Int64) { lock.withLock { value += ms } }
+  func advance(_ ms: Int64) { value.withLock { $0 += ms } }
 }
 
 /// One run of Fixtures/ssh-stub, from the stub's log.
@@ -37,18 +37,17 @@ struct StubRun {
 }
 
 /// A command that runs on another thread, so that the test can end its link meanwhile.
-final class Flight: @unchecked Sendable {
-  private let lock = NSLock()
-  private var outcome: Result<CommandResult, Error>?
+final class Flight: Sendable {
+  private let outcome = OSAllocatedUnfairLock<Result<CommandResult, Error>?>(initialState: nil)
 
   init(_ machine: SSHMachine, _ executable: String, _ args: [String]) {
     Thread.detachNewThread {
       let result = Result { try machine.run(executable, args) }
-      self.lock.withLock { self.outcome = result }
+      self.outcome.withLock { $0 = result }
     }
   }
 
-  var result: Result<CommandResult, Error>? { lock.withLock { outcome } }
+  var result: Result<CommandResult, Error>? { outcome.withLock { $0 } }
 
   /// The outcome, or nil when the command still runs after `seconds`.
   func wait(seconds: Double = 10) -> Result<CommandResult, Error>? {

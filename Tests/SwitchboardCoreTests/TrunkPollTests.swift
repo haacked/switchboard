@@ -14,7 +14,7 @@ private func entry(_ time: Int64, _ label: String, _ state: TrunkQueueState, _ t
 }
 
 private func trunkFound(_ entries: [TrunkTimeline.Entry]) -> TrunkTimeline.Result {
-  .found(TrunkTimeline(number: 42, title: "fix: a thing", author: "haacked", entries: entries))
+  .found(TrunkTimeline(entries: entries))
 }
 
 /// A timeline whose newest entry removes the PR, after a testing entry.

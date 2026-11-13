@@ -6,16 +6,27 @@ public struct Acknowledgment: Codable, Equatable, Sendable {
   public var reason: String
   /// The PR's head commit when the user acknowledged, or nil without a PR.
   public var head: String?
+  /// When the `ack` event was recorded. The event's time sets it, so the
+  /// event's data leaves it out.
+  public var at: Int64?
 
-  public init(state: AttentionState, reason: String, head: String?) {
+  public init(state: AttentionState, reason: String, head: String?, at: Int64? = nil) {
     self.state = state
     self.reason = reason
     self.head = head
+    self.at = at
   }
 
   /// The acknowledgment of the verdict for a session with these facts.
   public init(_ verdict: Verdict, _ facts: SessionFacts) {
     self.init(state: verdict.state, reason: verdict.reason, head: facts.pr?.headSha)
+  }
+
+  /// Whether this acknowledgment is of the verdict for a session with these
+  /// facts: the state, the reason, and the PR's head commit are the ones that
+  /// the user saw.
+  public func covers(_ verdict: Verdict, _ facts: SessionFacts) -> Bool {
+    state == verdict.state && reason == verdict.reason && head == facts.pr?.headSha
   }
 }
 
@@ -45,7 +56,9 @@ extension SessionFacts {
   /// `before` is nil when no acknowledgment was set before the event.
   mutating func applyAcknowledgment(_ event: Event, promptsBefore before: OpenPrompts?) {
     switch event.kind {
-    case "ack": acknowledgment = try? JSONCoding.convert(event.data, to: Acknowledgment.self)
+    case "ack":
+      acknowledgment = try? JSONCoding.convert(event.data, to: Acknowledgment.self)
+      acknowledgment?.at = event.t
     case "unack": acknowledgment = nil
     default: if let before, openPrompts.opened(since: before) { acknowledgment = nil }
     }
@@ -55,14 +68,20 @@ extension SessionFacts {
 extension Attention {
   /// The verdict that the app and `sb` show. An Inbox verdict that the user
   /// acknowledged moves to Waiting while its state, its reason, and the PR's
-  /// head commit are the ones that the user saw. sbd's own rules, such as
+  /// head commit are the ones that the user saw, for `acknowledgedMs` after
+  /// the acknowledgment. After that the verdict stays in the Inbox, and its
+  /// reason says when the user acknowledged it. sbd's own rules, such as
   /// waits, parent notices, and auto-continue, read `evaluate`'s verdict. An
   /// acknowledgment therefore changes nothing that sbd does.
-  public static func shown(_ verdict: Verdict, _ facts: SessionFacts) -> Verdict {
-    guard AttentionState.inbox.contains(verdict.state), facts.acknowledgment == Acknowledgment(verdict, facts) else {
-      return verdict
-    }
+  public static func shown(_ verdict: Verdict, _ facts: SessionFacts, now: Int64, acknowledgedMs: Int64) -> Verdict {
+    guard AttentionState.inbox.contains(verdict.state), let ack = facts.acknowledgment, ack.covers(verdict, facts)
+    else { return verdict }
     var out = verdict
+    let at = ack.at ?? now
+    if now >= at + acknowledgedMs {
+      out.reason = "\(verdict.reason) (acknowledged \(Wait.formatTime(at)), time to recheck)"
+      return out
+    }
     out.state = .waiting
     out.acknowledged = true
     return out

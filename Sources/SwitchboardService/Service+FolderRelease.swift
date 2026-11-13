@@ -31,20 +31,21 @@ public enum Caller: Sendable {
 extension Service {
   /// The pids of the session's Claude and shell panes that still run. It runs on the state queue.
   func livePanePids(_ id: String) -> [Int] {
-    [Pane.claude, .shell].compactMap { snapshot.panes[paneName(id, $0)] }.filter { !$0.dead }.map(\.pid)
+    [Pane.claude, .shell].compactMap { paneRow(id, $0) }.filter { !$0.dead }.map(\.pid)
       .filter(Processes.isValidPid)
   }
 
-  /// Whether `ancestry` holds the pid of a live Claude or shell pane of the session. It runs on the state queue.
+  /// Whether `ancestry` holds the pid of a live Claude or shell pane of a session on this Mac. A session on a
+  /// host never holds a local caller, because its pane pids belong to the host. It runs on the state queue.
   func isInside(_ id: String, _ ancestry: Set<Int>) -> Bool {
-    !ancestry.isDisjoint(with: livePanePids(id))
+    entries[id]?.session.host == nil && !ancestry.isDisjoint(with: livePanePids(id))
   }
 
   /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
   /// A stop would wait on such a caller, which waits on sbd, so the stop could never
-  /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. Every session's panes run
-  /// on this Mac, so a local ancestry can hold their pids. A session on another host needs
-  /// another check.
+  /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. A client's ancestry holds pids
+  /// of this Mac, and a request from a host's socket is only a hook, so a client is never inside a session
+  /// on a host. The pids of such a session's panes belong to the host, so it returns nil for it.
   func insideRefusal(_ id: String, _ ancestry: Set<Int>?, command: String) -> APIError? {
     guard let ancestry, isInside(id, ancestry) else { return nil }
     return APIError(
@@ -53,16 +54,17 @@ extension Service {
 
   /// Records every process below the session's panes, closes the shell pane,
   /// and sends SIGTERM to claude. It runs on the state queue, after `install`
-  /// of a fresh snapshot, because it reads the panes' processes from it.
-  /// It first throws `insideRefusal` for a caller inside the session, so a
-  /// refusal stops nothing.
+  /// of a fresh snapshot, because it reads the panes' processes from it. It throws for a session on a host
+  /// whose snapshot sbd can't read, because it would then find no process to wait for.
+  /// It first throws `insideRefusal` for a caller inside the session, so a refusal stops nothing.
   func beginPaneStop(_ id: String, ancestry: Set<Int>?, command: String) throws -> PaneStop {
+    try requireRead(id)
     if let refusal = insideRefusal(id, ancestry, command: command) { throw refusal }
-    let processes = Processes.descendants(of: livePanePids(id), in: snapshot.children)
-    host.kill(paneName(id, .shell))
+    let processes = Processes.descendants(of: livePanePids(id), in: processChildren(of: id))
+    try closePane(id, .shell, at: site(of: id))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {
-      machine(of: id).signal(pid, SIGTERM)
+      try stopClaude(id, pid)
       claudePid = pid
     }
     return PaneStop(claudePid: claudePid, processes: processes)
@@ -78,25 +80,50 @@ extension Service {
   /// `command` names the command that the error tells the user to run again.
   func finishPaneStop(_ session: Session, _ stop: PaneStop, command: String) throws {
     // A process can write to the folder until it exits. `worktree remove` deletes ignored files.
-    if let pid = stop.claudePid, !Processes.waitForExit([pid], seconds: 5).isEmpty {
+    let site = self.site(for: session)
+    if let pid = stop.claudePid, try !waitForExit([pid], seconds: 5, at: site).isEmpty {
       throw APIError("\(session.id)'s claude has not exited. Run `\(command)` again once it has.")
     }
-    host.kill(paneName(session.id, .claude))
+    try closePane(session.id, .claude, at: site)
     let deadline = Date().addingTimeInterval(5)
-    let running = Processes.waitForExit(stop.processes, seconds: deadline.timeIntervalSinceNow)
-    var users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
+    let running = try waitForExit(stop.processes, seconds: deadline.timeIntervalSinceNow, at: site)
+    var users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     while running.isEmpty, !users.isEmpty, Date() < deadline {
       Thread.sleep(forTimeInterval: 0.25)
-      users = Processes.using(session.cwd).filter { !running.contains($0.pid) }
+      users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     }
     guard !running.isEmpty || !users.isEmpty else { return }
-    let commands = Dictionary(
-      uniqueKeysWithValues: Processes.byParent().values.joined().map { ($0.pid, $0.command) })
+    // `Processes.byParent` runs this Mac's form of ps, so a host's processes come from its batched read.
+    let rows =
+      site.hostName == nil
+      ? Processes.byParent(on: site.machine)
+      : (try? site.readSnapshot(claudeProgram: claudeProgram(for: session)))?.children ?? [:]
+    let commands = Dictionary(uniqueKeysWithValues: rows.values.joined().map { ($0.pid, $0.command) })
     let named =
       running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
       + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
       "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )
+  }
+
+  /// Closes the session's pane at the site. On a host, it throws unless the host answered that the pane is
+  /// gone, because `TerminalHost.kill` reads a close that got no answer as done.
+  func closePane(_ id: String, _ pane: Pane, at site: any SessionSite) throws {
+    let name = paneName(id, pane)
+    let terminals = try site.terminals()
+    guard site.hostName != nil else { return terminals.kill(name) }
+    try site.confirmed("the close of \(name)") { _ in try terminals.close(name) }
+  }
+
+  /// Waits up to `seconds` for every pid to exit at the site. Returns the pids that still run.
+  private func waitForExit(_ pids: Set<Int>, seconds: TimeInterval, at site: any SessionSite) throws -> Set<Int> {
+    let deadline = Date().addingTimeInterval(seconds)
+    var alive = try site.alive(pids)
+    while !alive.isEmpty, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.05)
+      alive = try site.alive(alive)
+    }
+    return alive
   }
 }

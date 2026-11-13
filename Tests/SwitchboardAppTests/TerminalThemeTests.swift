@@ -4,58 +4,6 @@ import Testing
 
 @testable import SwitchboardApp
 
-enum Mode: String, CaseIterable, CustomTestStringConvertible {
-  case light, dark
-
-  var appearance: NSAppearance { NSAppearance(named: self == .light ? .aqua : .darkAqua)! }
-  var other: Mode { self == .light ? .dark : .light }
-  var testDescription: String { rawValue }
-}
-
-struct RGB: Equatable {
-  let red: Double
-  let green: Double
-  let blue: Double
-
-  static let black = RGB(red: 0, green: 0, blue: 0)
-
-  /// WCAG 2 relative luminance.
-  var luminance: Double {
-    func linear(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-  }
-
-  /// WCAG 2 contrast ratio, from 1 to 21.
-  func contrast(with other: RGB) -> Double {
-    let (high, low) = (max(luminance, other.luminance), min(luminance, other.luminance))
-    return (high + 0.05) / (low + 0.05)
-  }
-
-  func isClose(to other: RGB) -> Bool {
-    let tolerance = 1.0 / 255
-    return abs(red - other.red) <= tolerance && abs(green - other.green) <= tolerance
-      && abs(blue - other.blue) <= tolerance
-  }
-}
-
-extension RGB {
-  init(_ color: SwiftTerm.Color) {
-    self.init(red: Double(color.red) / 65535, green: Double(color.green) / 65535, blue: Double(color.blue) / 65535)
-  }
-
-  /// Converts a color without resolving it under an appearance. A dynamic system color that
-  /// `TerminalTheme` left unresolved therefore fails the tests instead of passing.
-  init(_ color: NSColor, over backdrop: RGB = .black) {
-    let srgb = color.usingColorSpace(.sRGB)!
-    let alpha = Double(srgb.alphaComponent)
-    // AppKit draws a translucent color over the backdrop. The reader sees the blend.
-    self.init(
-      red: Double(srgb.redComponent) * alpha + backdrop.red * (1 - alpha),
-      green: Double(srgb.greenComponent) * alpha + backdrop.green * (1 - alpha),
-      blue: Double(srgb.blueComponent) * alpha + backdrop.blue * (1 - alpha))
-  }
-}
-
 @MainActor
 @Suite struct TerminalThemeColors {
   func theme(_ mode: Mode) -> TerminalTheme { TerminalTheme(appearance: mode.appearance) }
@@ -65,7 +13,7 @@ extension RGB {
 
   // Text needs 4.5:1. In the light palette every color except bright white meets it. In the dark palette black
   // sits close to the background on purpose. Bright black is the muted gray for secondary text.
-  static let minimumContrast: [(Mode, Int, Double)] =
+  nonisolated static let minimumContrast: [(Mode, Int, Double)] =
     (0...14).map { (Mode.light, $0, 4.5) }
     + [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15].map { (Mode.dark, $0, 4.5) }
     + [(Mode.dark, 8, 3.0)]

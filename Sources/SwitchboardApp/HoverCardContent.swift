@@ -54,24 +54,11 @@ struct HoverCardContent: Equatable {
   private static func summary(_ s: SessionSummary) -> String? {
     let candidates = [
       s.triage?.summary,
-      plain(s.reason, working: s.state == .working),
+      Attention.plainReason(s.reason, working: s.state == .working),
       s.lastReply.map { String($0.drop(while: \.isWhitespace).prefix(400)) },
     ]
     guard let text = candidates.lazy.compactMap({ $0.map { oneLine($0, max: 160) } }).first(where: { !$0.isEmpty })
     else { return nil }
     return Triage.capitalized(text)
-  }
-
-  /// The reason with its shell command replaced by words. sbd writes a Bash call as its command in
-  /// backticks (`Attention.toolSummary`). A Working reason is that command and an optional " (N min)".
-  /// A permission's reason is "approve " and the command. The command can contain backticks, so the
-  /// rewrite matches the whole reason rather than the first closing backtick. Other reasons stay as
-  /// written, such as a wait note that starts with a code span.
-  private static func plain(_ reason: String, working: Bool) -> String {
-    if working, let match = reason.wholeMatch(of: #/`.+`((?: \((?:<1|\d+) min\))?)/#) {
-      return "Running a shell command" + match.1
-    }
-    if reason.wholeMatch(of: #/approve `.+`/#) != nil { return "approve a shell command" }
-    return reason
   }
 }

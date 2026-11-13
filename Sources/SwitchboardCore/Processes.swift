@@ -18,6 +18,14 @@ extension String {
   public var hasNul: Bool { utf8.contains(0) }
 }
 
+extension CommandResult {
+  /// The trimmed error text, else the exit status.
+  public var problem: String {
+    let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? "exit status \(status)" : text
+  }
+}
+
 /// Runs a program and waits for it. `env` replaces the environment when set.
 /// With `timeout`, the program gets SIGTERM after that many seconds. An
 /// argument or environment value with a NUL throws.
@@ -124,9 +132,14 @@ public struct ProcessRow: Sendable {
 
 public enum Processes {
   /// Every process on the machine, grouped by parent pid.
-  public static func byParent(on machine: any Machine = LocalMachine()) -> [Int: [ProcessRow]] {
+  public static func byParent(on machine: any Machine) -> [Int: [ProcessRow]] {
     guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
-    let rows = r.stdout.split(separator: "\n").compactMap { line -> ProcessRow? in
+    return parse(r.stdout)
+  }
+
+  /// The rows of `ps` output whose columns are pid, ppid, pgid, and the command, grouped by parent pid.
+  public static func parse(_ output: String) -> [Int: [ProcessRow]] {
+    let rows = output.split(separator: "\n").compactMap { line -> ProcessRow? in
       let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
       guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
         return nil

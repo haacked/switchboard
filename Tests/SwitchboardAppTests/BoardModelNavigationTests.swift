@@ -121,7 +121,8 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
     @Test func nextFromTheLastRowWrapsToTheFirst() throws {
       let model = model()
       let order = model.sidebarOrder
-      model.selection = try #require(order.last)
+      let last = try #require(order.last)
+      model.selection = last
 
       model.selectAdjacentSession(by: 1)
 
@@ -131,7 +132,8 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
     @Test func previousFromTheFirstRowWrapsToTheLast() throws {
       let model = model()
       let order = model.sidebarOrder
-      model.selection = try #require(order.first)
+      let first = try #require(order.first)
+      model.selection = first
 
       model.selectAdjacentSession(by: -1)
 
