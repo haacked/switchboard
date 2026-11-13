@@ -73,26 +73,23 @@ public enum TriageDrafts {
     let text = raw.string ?? raw["text"]?.string ?? ""
     let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
     var draft = try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
+    func drop(_ reason: String) {
+      dropped.append(TriageCard.droppedLine("replyTo of draft", label: draft.label, index: index, APIError(reason)))
+    }
     switch raw["replyTo"] {
     case nil, .null?:
       break
     case .string(let url)?:
       let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
       if url.count > replyToLength {
-        dropped.append(
-          TriageCard.droppedLine(
-            "replyTo of draft", label: draft.label, index: index,
-            APIError("it has \(url.count) characters, and a replyTo has at most \(replyToLength)")))
+        drop("it has \(url.count) characters, and a replyTo has at most \(replyToLength)")
       } else if url.hasNul {
-        dropped.append(
-          TriageCard.droppedLine(
-            "replyTo of draft", label: draft.label, index: index, APIError("it has a NUL character")))
+        drop("it has a NUL character")
       } else if !url.isEmpty {
         draft.replyTo = url
       }
     default:
-      dropped.append(
-        TriageCard.droppedLine("replyTo of draft", label: draft.label, index: index, APIError("it is not text")))
+      drop("it is not text")
     }
     return draft
   }

@@ -79,6 +79,24 @@ public enum DraftPost: Codable, Equatable, Sendable {
   }
 }
 
+extension DraftPost {
+  /// The target of a draft that has one.
+  public var target: ResolvedTarget? {
+    switch self {
+    case .ready(let t), .posting(let t), .unknown(let t, _), .failed(let t, _), .posted(let t, _, _): t
+    case .copyOnly, .checking, .unresolved: nil
+    }
+  }
+
+  /// The target of a draft that may post: only a ready or a failed one.
+  public var postable: ResolvedTarget? {
+    switch self {
+    case .ready(let t), .failed(let t, _): t
+    default: nil
+    }
+  }
+}
+
 /// The latest post of one draft, from its `draft_posting` event and the
 /// outcome event after it.
 public struct PostAttempt: Codable, Equatable, Sendable {
@@ -241,7 +259,7 @@ public enum DraftReplies {
     } catch {
       return .copyOnly(reason: "\(error)")
     }
-    if case .resolved(let resolved) = facts.targets[key], resolved.target == target,
+    if !facts.attempts.isEmpty, case .resolved(let resolved) = facts.targets[key], resolved.target == target,
       let earlier = facts.sameReply(draft.text, to: resolved, except: key)?.attempt,
       case .posted = earlier.outcome
     {
@@ -260,10 +278,30 @@ public enum DraftReplies {
     }
   }
 
+  /// What gh's stderr says about a failure.
+  struct GhFailure {
+    let unauthorized: Bool
+    let notFound: Bool
+    let clientError: Bool
+    let noLogin: Bool
+
+    init(_ stderr: String) {
+      unauthorized = stderr.contains("(HTTP 401)")
+      notFound = stderr.contains("(HTTP 404)")
+      clientError = stderr.contains(#/\(HTTP 4[0-9]{2}\)/#)
+      noLogin = stderr.contains("gh auth login")
+    }
+
+    func refusedLogin(then again: String) -> String {
+      "GitHub refused gh's login. Run `gh auth login`, then \(again)"
+    }
+  }
+
   /// The error that a draft shows when gh couldn't read the comment with `id`.
   public static func resolutionError(_ ghError: String, id: Int64) -> String {
-    if ghError.contains("(HTTP 404)") { return "GitHub has no comment \(id), or gh can't see it" }
-    if ghError.contains("(HTTP 401)") { return "GitHub refused gh's login. Run `gh auth login`, then check again" }
+    let failure = GhFailure(ghError)
+    if failure.notFound { return "GitHub has no comment \(id), or gh can't see it" }
+    if failure.unauthorized { return failure.refusedLogin(then: "check again") }
     return ghError
   }
 
@@ -277,18 +315,18 @@ public enum DraftReplies {
       }
       return .unknown("gh printed no new comment")
     }
-    if r.stderr.contains(#/\(HTTP 4[0-9]{2}\)/#) || r.stderr.contains("gh auth login") {
-      return .failed(plainError(r.stderr))
-    }
+    let failure = GhFailure(r.stderr)
+    if failure.clientError || failure.noLogin { return .failed(plainError(r.stderr)) }
     let text = r.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
     return .unknown(text.isEmpty ? "gh stopped with status \(r.status) before it answered" : text)
   }
 
   /// gh's error as a draft shows it.
   public static func plainError(_ stderr: String) -> String {
-    if stderr.contains("(HTTP 401)") { return "GitHub refused gh's login. Run `gh auth login`, then post again." }
-    if stderr.contains("gh auth login") { return "gh has no login. Run `gh auth login`, then post again." }
-    if stderr.contains("(HTTP 404)") {
+    let failure = GhFailure(stderr)
+    if failure.unauthorized { return failure.refusedLogin(then: "post again.") }
+    if failure.noLogin { return "gh has no login. Run `gh auth login`, then post again." }
+    if failure.notFound {
       return "GitHub answered Not Found: the thread is gone from GitHub, or gh can't see it"
     }
     let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -307,7 +345,7 @@ public enum DraftReplies {
       guard c["user"]?["login"]?.string?.lowercased() == login.lowercased(),
         normalized(c["body"]?.string ?? "") == wanted, let url = c["html_url"]?.string, let id = c["id"]?.int
       else { return nil }
-      if let root, c["in_reply_to_id"]?.int.map(Int64.init) != root { return nil }
+      if let root, ReplyTarget.parentId(c) != root { return nil }
       return (url, Int64(id))
     }
     .max { $0.id < $1.id }
@@ -326,6 +364,31 @@ public enum DraftReplies {
     }
     return (["Switchboard: the user posted these replies that you drafted. Don't draft or post them again."] + lines)
       .joined(separator: "\n")
+  }
+
+  /// Whether the session's item may show a draft as `checking`. It is a
+  /// cheap test that never builds the item. It errs toward true. Only a
+  /// session summary's draft names a target. A draft with a recorded
+  /// attempt or a recorded target is not waiting for a read.
+  public static func mayBeChecking(_ facts: SessionFacts) -> Bool {
+    guard facts.cards.isEmpty, facts.openPermission == nil, facts.openQuestion == nil,
+      let summary = facts.sessionSummary
+    else { return false }
+    let ref = "summary:\(facts.sessionSummaryId)"
+    return summary.drafts.enumerated().contains { i, draft in
+      let key = key(ref: ref, number: i + 1)
+      guard let replyTo = draft.replyTo, facts.draftReplies.attempts[key] == nil else { return false }
+      switch facts.draftReplies.targets[key] {
+      case nil: return true
+      case .resolved(let resolved)?: return (try? ReplyTarget.parse(replyTo)) != resolved.target
+      default: return false
+      }
+    }
+  }
+
+  /// The line that says sbd can't tell whether GitHub got the reply.
+  public static func unknownLine(error: String, session: String, number: Int) -> String {
+    "sbd can't tell whether GitHub got the reply: \(error). Check: sb draft check \(session) \(number)"
   }
 
   /// The `draft_target` event's data for a result.

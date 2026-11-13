@@ -356,6 +356,10 @@ func warn(_ message: String) {
   FileHandle.standardError.write(Data("sb: \(controlsEscaped(message))\n".utf8))
 }
 
+func refuseInsideClaudeCode(_ message: String) {
+  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil { die(message) }
+}
+
 func die(_ message: String) -> Never {
   warn(message)
   exit(1)

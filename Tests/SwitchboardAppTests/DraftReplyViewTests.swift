@@ -149,17 +149,6 @@ let everyDraftPost: [DraftPost] = [
     #expect(DraftReplyView.mode(for: targetedDraft(post)).fieldEditable == editable)
   }
 
-  @Test(arguments: everyDraftPost)
-  func everyModeButCopyOnlyAndPostedShowsTheUsersText(_ post: DraftPost) {
-    let shows: Bool
-    switch post {
-    case .copyOnly, .posted: shows = false
-    default: shows = true
-    }
-
-    #expect(DraftReplyView.mode(for: targetedDraft(post)).showsUserText == shows)
-  }
-
   // MARK: The app's own post
 
   /// sbd's `posting` state arrives one refresh after the press, so the app's request locks the field first.

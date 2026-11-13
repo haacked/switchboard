@@ -116,13 +116,6 @@ struct DraftReplyView: View {
       default: false
       }
     }
-
-    var showsUserText: Bool {
-      switch self {
-      case .copyOnly, .posted: false
-      default: true
-      }
-    }
   }
 
   /// `unknown` shows the field's text, because sbd's state doesn't carry the text that it sent. `posting` is the
@@ -130,10 +123,10 @@ struct DraftReplyView: View {
   /// locks a postable field first.
   static func mode(for draft: InboxDraft, posting: Bool = false) -> Mode {
     let mode = mode(of: draft.post)
-    return posting && mode.canPost ? .posting : mode
+    return posting && draft.post.postable != nil ? .posting : mode
   }
 
-  /// Post is on only for a postable draft whose text has more than blank lines, which is what sbd accepts.
+  /// Post is on only for a postable draft whose text has more than blank lines. sbd accepts the same drafts.
   static func postEnabled(_ mode: Mode, text: String) -> Bool {
     mode.canPost && !TriageDrafts.trimBlankLines(text).isEmpty
   }
@@ -166,12 +159,7 @@ struct DraftReplyView: View {
   /// A refusal that sbd didn't record shows until sbd's state changes.
   private var shownError: String? { model.draftErrors[key] ?? mode.error }
 
-  private var target: ResolvedTarget? {
-    switch draft.post {
-    case .ready(let t), .posting(let t), .unknown(let t, _), .failed(let t, _), .posted(let t, _, _): t
-    case .copyOnly, .checking, .unresolved: nil
-    }
-  }
+  private var target: ResolvedTarget? { draft.post.target }
 
   var body: some View {
     let mode = mode

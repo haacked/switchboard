@@ -372,7 +372,7 @@ extension PullRequest {
   }
 }
 
-// MARK: - Stage 3: posting
+// MARK: - Posting
 
 /// The draft text of the card that `drafted` builds.
 private let draftText = "Good catch, fixed."

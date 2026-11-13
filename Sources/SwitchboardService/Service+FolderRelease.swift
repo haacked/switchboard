@@ -35,13 +35,18 @@ extension Service {
       .filter(Processes.isValidPid)
   }
 
+  /// Whether `ancestry` holds the pid of a live Claude or shell pane of the session. It runs on the state queue.
+  func isInside(_ id: String, _ ancestry: Set<Int>) -> Bool {
+    !ancestry.isDisjoint(with: livePanePids(id))
+  }
+
   /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
   /// A stop would wait on such a caller, which waits on sbd, so the stop could never
   /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. Every session's panes run
   /// on this Mac, so a local ancestry can hold their pids. A session on another host needs
   /// another check.
   func insideRefusal(_ id: String, _ ancestry: Set<Int>?, command: String) -> APIError? {
-    guard let ancestry, !ancestry.isDisjoint(with: livePanePids(id)) else { return nil }
+    guard let ancestry, isInside(id, ancestry) else { return nil }
     return APIError(
       "`\(command)` runs inside \(id), so it would stop itself. Run it from a terminal outside the session.")
   }

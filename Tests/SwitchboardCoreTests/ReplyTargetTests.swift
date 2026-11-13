@@ -357,3 +357,13 @@ private func resolvedTarget(_ kind: ReplyTarget.Kind, root: Int64 = bigId) -> Re
     #expect(try JSONCoding.convert(try JSON(encoding: r), to: ResolvedTarget.self) == r)
   }
 }
+
+extension ReplyTarget.Resolution {
+  var resolved: ResolvedTarget? {
+    if case .resolved(let target) = self { target } else { nil }
+  }
+
+  var rootToFetch: Int64? {
+    if case .fetchRoot(let id) = self { id } else { nil }
+  }
+}

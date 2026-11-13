@@ -24,28 +24,66 @@ extension Service {
   /// `draft-check` reads it again. sbd calls this after each event and tick,
   /// and once at startup.
   func resolveDraftTargets(_ id: String, _ verdict: Verdict) {
-    guard let e = entries[id], e.facts.sessionSummary?.drafts.contains(where: { $0.replyTo != nil }) == true,
-      let item = Triage.item(e.facts, verdict)
-    else { return }
+    guard let e = entries[id], DraftReplies.mayBeChecking(e.facts), let item = Triage.item(e.facts, verdict) else {
+      return
+    }
     for draft in item.drafts where draft.post == .checking {
       guard let replyTo = draft.replyTo, let target = try? ReplyTarget.parse(replyTo) else { continue }
-      let key = resolvingKey(id, ref: item.ref, number: draft.number)
-      guard resolvingDrafts.insert(key).inserted else { continue }
-      ghJobs.addOperation { [self] in
-        let result = resolve(target)
-        queue.async { [self] in
-          resolvingDrafts.remove(key)
-          guard entries[id] != nil else { return }
-          recordTarget(id, ref: item.ref, number: draft.number, result)
-        }
+      startGhJob(resolvingKey(id, ref: item.ref, number: draft.number), session: id) {
+        self.resolve(target)
+      } settle: { result in
+        self.recordTarget(id, ref: item.ref, number: draft.number, result)
       }
     }
   }
+
+  /// Runs `work` on the gh queue unless a job with `key` is in flight, then
+  /// runs `settle` with its result on the state queue unless the session is
+  /// gone. The key is in flight until then. It returns whether it started.
+  @discardableResult
+  private func startGhJob<T>(
+    _ key: String, session id: String, work: @escaping () -> T, settle: @escaping (T) -> Void
+  ) -> Bool {
+    guard resolvingDrafts.insert(key).inserted else { return false }
+    ghJobs.addOperation { [self] in
+      let result = work()
+      queue.async { [self] in
+        resolvingDrafts.remove(key)
+        guard entries[id] != nil else { return }
+        settle(result)
+      }
+    }
+    return true
+  }
+
+  /// Runs `body` on the state queue once the check that holds `job.key` is
+  /// done, and frees the key. It throws when the session is gone.
+  private func finishCheck<T>(_ job: CheckJob, _ body: () throws -> T) throws -> T {
+    try queue.sync {
+      resolvingDrafts.remove(job.key)
+      guard entries[job.id] != nil else { throw APIError("\(job.id) was removed") }
+      return try body()
+    }
+  }
+
+  private func triageJSON(_ id: String) throws -> JSON { try JSON(encoding: summary(id).triage) }
 
   /// What `draft-check` reads with gh.
   private enum DraftCheck {
     case target(ReplyTarget)
     case outcome(PostAttempt)
+  }
+
+  private struct CheckJob {
+    let id: String
+    let key: String
+    let ref: String
+    let work: DraftCheck
+  }
+
+  private enum CheckStart {
+    case settled(JSON)
+    case job(CheckJob)
   }
 
   /// `draft-check` {session, draft} reads the target of an `unresolved`
@@ -56,7 +94,7 @@ extension Service {
   /// throws, and the post stays unknown.
   private func checkDraft(_ args: JSON) throws -> JSON {
     guard let number = args["draft"]?.int else { throw APIError("name a draft by its number") }
-    let (id, check) = try queue.sync { () -> (String, (key: String, ref: String, work: DraftCheck)?) in
+    let start: CheckStart = try queue.sync {
       let id = try lookup(args)
       let e = entries[id]!
       guard let item = summary(id).triage else { throw APIError("\(e.session.name) needs nothing from you") }
@@ -64,43 +102,47 @@ extension Service {
         throw APIError("\(e.session.name)'s item has no draft \(number)")
       }
       let own = DraftReplies.key(ref: item.ref, number: number)
-      let work: (ref: String, number: Int, check: DraftCheck)
+      var work: (ref: String, number: Int, check: DraftCheck)?
       switch draft.post {
       case .unresolved:
-        guard let replyTo = draft.replyTo, let target = try? ReplyTarget.parse(replyTo) else { return (id, nil) }
-        work = (item.ref, number, .target(target))
+        if let replyTo = draft.replyTo, let target = try? ReplyTarget.parse(replyTo) {
+          work = (item.ref, number, .target(target))
+        }
       case .unknown:
-        guard let attempt = e.facts.draftReplies.attempts[own] else { return (id, nil) }
-        work = (item.ref, number, .outcome(attempt))
+        if let attempt = e.facts.draftReplies.attempts[own] { work = (item.ref, number, .outcome(attempt)) }
       case .ready(let target), .failed(let target, _):
-        guard let other = e.facts.draftReplies.sameReply(draft.text, to: target, except: own)?.attempt,
+        if let other = e.facts.draftReplies.sameReply(draft.text, to: target, except: own)?.attempt,
           case .unknown = other.outcome
-        else { return (id, nil) }
-        work = (other.ref, other.number, .outcome(other))
+        {
+          work = (other.ref, other.number, .outcome(other))
+        }
       default:
-        return (id, nil)
+        break
       }
+      guard let work else { return .settled(try triageJSON(id)) }
       let key = resolvingKey(id, ref: work.ref, number: work.number)
-      guard resolvingDrafts.insert(key).inserted else { return (id, nil) }
-      return (id, (key, work.ref, work.check))
+      guard resolvingDrafts.insert(key).inserted else { return .settled(try triageJSON(id)) }
+      return .job(CheckJob(id: id, key: key, ref: work.ref, work: work.check))
     }
-    guard let check else { return try queue.sync { try JSON(encoding: summary(id).triage) } }
-    switch check.work {
+    switch start {
+    case .settled(let json): return json
+    case .job(let job): return try runCheck(job, draft: number)
+    }
+  }
+
+  private func runCheck(_ job: CheckJob, draft number: Int) throws -> JSON {
+    switch job.work {
     case .target(let target):
       let result = resolve(target)
-      return try queue.sync {
-        resolvingDrafts.remove(check.key)
-        guard entries[id] != nil else { throw APIError("\(id) was removed") }
-        recordTarget(id, ref: check.ref, number: number, result)
-        return try JSON(encoding: summary(id).triage)
+      return try finishCheck(job) {
+        recordTarget(job.id, ref: job.ref, number: number, result)
+        return try triageJSON(job.id)
       }
     case .outcome(let attempt):
       let found = Result { try findReply(attempt) }
-      return try queue.sync {
-        resolvingDrafts.remove(check.key)
-        guard entries[id] != nil else { throw APIError("\(id) was removed") }
-        settleOutcome(id, attempt, try found.get())
-        return try JSON(encoding: summary(id).triage)
+      return try finishCheck(job) {
+        settleOutcome(job.id, attempt, try found.get())
+        return try triageJSON(job.id)
       }
     }
   }
@@ -123,10 +165,10 @@ extension Service {
   private func resolve(_ target: ReplyTarget) -> TargetResult {
     do {
       let comment = try readComment(target.getPath, id: target.id)
-      let first = try ReplyTarget.resolution(of: target, comment: comment)
-      if let resolved = first.resolved { return .resolved(resolved) }
-      guard let root = first.rootToFetch else {
-        return .refused("GitHub reports no thread root for comment \(target.id)")
+      let root: Int64
+      switch try ReplyTarget.resolution(of: target, comment: comment) {
+      case .resolved(let resolved): return .resolved(resolved)
+      case .fetchRoot(let parent): root = parent
       }
       let rootPath = ReplyTarget(repo: target.repo, pr: target.pr, kind: .reviewComment, id: root).getPath
       let rootComment = try readComment(rootPath, id: root)
@@ -148,7 +190,7 @@ extension Service {
     guard let json = JSON.parse(output), json.object != nil else {
       throw ReadFailure(message: "gh api \(path) printed no JSON object")
     }
-    // A comment always has these, so an answer without them is a bad read, which Check again retries.
+    // A comment always has these. An answer without them is a bad read, and Check again retries it.
     guard json["user"]?["login"]?.string != nil, json["html_url"]?.string != nil else {
       throw ReadFailure(message: "gh api \(path) printed a comment without an author or a URL")
     }
@@ -227,16 +269,15 @@ extension Service {
       case .posted(let url, let commentId):
         record(id, DraftReplies.postedEvent, try attempt.eventData(posted: (url, commentId)))
         guard entries[id] != nil else { return ["url": .string(url)] }
-        return try JSON(encoding: summary(id).triage)
+        return try triageJSON(id)
       case .failed(let error):
         record(id, DraftReplies.failedEvent, attempt.outcomeData(error: error))
         throw APIError(error)
       case .unknown(let error):
         record(id, DraftReplies.unknownEvent, attempt.outcomeData(error: error))
-        // GitHub may not list a reply that it just created, so the user checks this one, not the tick.
+        // GitHub may not list a reply that it just created. The user checks this one, not the tick.
         checkedUnknown.insert(flight)
-        throw APIError(
-          "sbd can't tell whether GitHub got the reply: \(error). Check: sb draft check \(id) \(attempt.number)")
+        throw APIError(DraftReplies.unknownLine(error: error, session: id, number: attempt.number))
       }
     }
   }
@@ -249,7 +290,7 @@ extension Service {
   private func postCallerRefusal(_ ancestry: Set<Int>?, command: String) -> APIError? {
     guard let ancestry else { return nil }
     let advice = "Posting needs your click, so run it from a terminal outside the sessions."
-    if let inside = entries.keys.sorted().first(where: { !ancestry.isDisjoint(with: livePanePids($0)) }) {
+    if let inside = entries.keys.sorted().first(where: { isInside($0, ancestry) }) {
       return APIError("`\(command)` runs inside \(inside). \(advice)")
     }
     let servers = Set(snapshot.panes.values.map(\.server).filter(Processes.isValidPid))
@@ -262,9 +303,10 @@ extension Service {
   /// The target of a draft that may post, or the refusal that says why it may not.
   private func postableTarget(_ draft: InboxDraft, session id: String) throws -> ResolvedTarget {
     let n = draft.number
+    if let target = draft.post.postable { return target }
     switch draft.post {
-    case .ready(let target), .failed(let target, _):
-      return target
+    case .ready, .failed:
+      throw APIError("draft \(n) can't post")
     case .posting:
       throw APIError("draft \(n) is already posting")
     case .posted(_, let url, _):
@@ -284,12 +326,15 @@ extension Service {
   /// The refusal for draft `number`, whose text another draft posted, or may
   /// have posted, to the same thread.
   private func sameReplyRefusal(_ other: PostAttempt, session id: String, number: Int) -> String {
-    if case .posted(let url) = other.outcome { return "this reply is already posted at \(url)" }
-    if case .unknown(let error) = other.outcome {
+    switch other.outcome {
+    case .posted(let url):
+      return "this reply is already posted at \(url)"
+    case .unknown(let error):
       return
         "sbd can't tell whether GitHub got the same reply from an earlier item: \(error). Check first: sb draft check \(id) \(number)"
+    default:
+      return "the same reply is already posting from an earlier item"
     }
-    return "the same reply is already posting from an earlier item"
   }
 
   // MARK: Unknown outcomes
@@ -312,19 +357,16 @@ extension Service {
     for attempt in attempts.values {
       guard case .unknown = attempt.outcome else { continue }
       let key = resolvingKey(id, ref: attempt.ref, number: attempt.number)
-      guard !checkedUnknown.contains(key), resolvingDrafts.insert(key).inserted else { continue }
-      checkedUnknown.insert(key)
-      ghJobs.addOperation { [self] in
-        let found = Result { try findReply(attempt) }
-        queue.async { [self] in
-          resolvingDrafts.remove(key)
-          guard entries[id] != nil else { return }
-          switch found {
-          case .success(let reply): settleOutcome(id, attempt, reply)
-          case .failure(let error): logLine("can't check draft \(attempt.number) of \(id): \(error)")
-          }
+      guard !checkedUnknown.contains(key) else { continue }
+      let started = startGhJob(key, session: id) { () -> Result<(url: String, id: Int64)?, Error> in
+        Result { try self.findReply(attempt) }
+      } settle: { found in
+        switch found {
+        case .success(let reply): self.settleOutcome(id, attempt, reply)
+        case .failure(let error): logLine("can't check draft \(attempt.number) of \(id): \(error)")
         }
       }
+      if started { checkedUnknown.insert(key) }
     }
   }
 
@@ -349,7 +391,7 @@ extension Service {
   private func findReply(_ attempt: PostAttempt) throws -> (url: String, id: Int64)? {
     let login = try viewerLogin()
     let t = attempt.target.target
-    let list = "repos/\(t.repo)/\(t.kind == .reviewComment ? "pulls" : "issues")/\(t.pr)/comments"
+    let list = t.commentsPath
     let output = try runGh(
       ["api", "--paginate", "--jq", ".[] | @json", "\(list)?per_page=100"], timeout: Service.reviewTimeoutSeconds)
     let comments = try output.split(whereSeparator: \.isNewline).map { line in

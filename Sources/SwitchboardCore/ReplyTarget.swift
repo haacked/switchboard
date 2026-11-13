@@ -71,15 +71,24 @@ public struct ReplyTarget: Codable, Equatable, Sendable {
     }
   }
 
+  /// The `gh api` path of the comments on the target's PR: the review
+  /// comments of a review comment, and the conversation comments otherwise.
+  public var commentsPath: String {
+    "repos/\(repo)/\(kind == .reviewComment ? "pulls" : "issues")/\(pr)/comments"
+  }
+
   /// Checks that GitHub places `comment`, as `getPath` reads it, on the
   /// target's PR. A review comment that replies to another gives no
   /// resolution yet: its parent is the root to fetch next.
-  public static func resolution(of target: ReplyTarget, comment: JSON) throws -> (
-    resolved: ResolvedTarget?, rootToFetch: Int64?
-  ) {
+  public static func resolution(of target: ReplyTarget, comment: JSON) throws -> Resolution {
     try target.requireOnPR(comment, id: target.id)
-    if target.kind == .reviewComment, let parent = parentId(comment) { return (nil, parent) }
-    return (try ResolvedTarget(target: target, root: target.id, comment: comment), nil)
+    if target.kind == .reviewComment, let parent = parentId(comment) { return .fetchRoot(parent) }
+    return .resolved(try ResolvedTarget(target: target, root: target.id, comment: comment))
+  }
+
+  public enum Resolution {
+    case resolved(ResolvedTarget)
+    case fetchRoot(Int64)
   }
 
   /// The resolution of a review comment that replies to `rootComment`. The
@@ -95,7 +104,7 @@ public struct ReplyTarget: Codable, Equatable, Sendable {
   }
 
   /// A review comment's `in_reply_to_id`. A missing or null one means none.
-  private static func parentId(_ comment: JSON) -> Int64? {
+  static func parentId(_ comment: JSON) -> Int64? {
     comment["in_reply_to_id"]?.int.map(Int64.init)
   }
 
@@ -175,11 +184,7 @@ public struct ResolvedTarget: Codable, Equatable, Sendable {
   /// new PR conversation comment. `-f` sends the body as it is, where `-F`
   /// would read `@path` as a file and convert true, false, null, and numbers.
   public func postArgs(body: String) -> [String] {
-    let path =
-      switch target.kind {
-      case .reviewComment: "repos/\(target.repo)/pulls/\(target.pr)/comments/\(root)/replies"
-      case .issueComment, .review: "repos/\(target.repo)/issues/\(target.pr)/comments"
-      }
+    let path = target.kind == .reviewComment ? "\(target.commentsPath)/\(root)/replies" : target.commentsPath
     return ["api", "-X", "POST", path, "-f", "body=\(body)"]
   }
 

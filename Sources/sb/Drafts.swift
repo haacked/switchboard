@@ -25,10 +25,8 @@ func draftCommand(_ a: Args) {
 /// own text. sbd also refuses a caller inside any session.
 private func postDraft(_ a: Args, _ id: String, _ number: Int) {
   // A session that read injected instructions could otherwise post as the user.
-  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
-    die(
-      "draft post needs your click, so it doesn't run inside Claude Code. Run it from a terminal outside the sessions.")
-  }
+  refuseInsideClaudeCode(
+    "draft post needs your click, so it doesn't run inside Claude Code. Run it from a terminal outside the sessions.")
   // The item that the user read, so a draft of a newer item is not posted by mistake.
   guard let item = summary(call("get", ["session": .string(id)])).triage else { die("\(id) needs nothing from you") }
   guard let draft = item.drafts.first(where: { $0.number == number }) else { die("\(id) has no draft \(number)") }
@@ -67,7 +65,6 @@ func draftStateLine(_ draft: InboxDraft, session: String) -> String? {
     return
       "Didn't post: \(error). It replies to @\(target.author) \(target.place). Post it again: sb draft post \(session) \(draft.number)"
   case .unknown(_, let error):
-    return
-      "sbd can't tell whether GitHub got the reply: \(error). Check: sb draft check \(session) \(draft.number)"
+    return DraftReplies.unknownLine(error: error, session: session, number: draft.number)
   }
 }
