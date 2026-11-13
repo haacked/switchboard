@@ -66,7 +66,6 @@ struct RepoPickerList: Equatable {
 /// The New Session sheet's repository control. It shows the selected repository and opens a popover that
 /// filters the known repositories and adds one from a pasted path or the folder panel.
 struct RepoPicker: View {
-  /// See SessionViewState for why this isn't `@State`.
   final class Popover: ObservableObject {
     @Published var open = false
     @Published var filter = ""

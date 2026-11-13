@@ -143,7 +143,7 @@ extension Service {
   private func docketEnvironment() -> [String: String] {
     var env = ProcessInfo.processInfo.environment
     for (key, value) in config.env { env[key] = value.expandingTilde }
-    let tools = [git, findExecutable(config.github.gh), findExecutable(config.claude)].compactMap { $0 }
+    let tools = [mac.git(), findExecutable(config.github.gh), findExecutable(config.claude)].compactMap { $0 }
     let folders = tools.map { ($0 as NSString).deletingLastPathComponent }
     env["PATH"] = (folders + [env["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
     return env

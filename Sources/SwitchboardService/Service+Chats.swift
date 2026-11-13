@@ -59,22 +59,33 @@ extension Service {
   /// The `chat-log` request: the last messages of the group's chat, or of
   /// the session that `session` names, oldest first. With `manager`, the
   /// session is a Manager conversation, and the most recent one without
-  /// `session`. It reads the transcript off the state queue.
+  /// `session`. It refuses a session that is not a Manager conversation or a
+  /// group chat, unless `role` is `assistant`. That read returns only
+  /// Claude's messages, which the session's terminal already shows, so it
+  /// serves any session. It reads the transcript off the state queue.
   func chatLog(_ args: JSON) throws -> JSON {
+    let assistantOnly = args["role"]?.string == ChatMessage.Role.assistant.rawValue
     let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
       let manager = args["manager"]?.bool == true
+      let id: String
       if manager || args["session"] != nil {
-        let id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
-        return (transcriptFinder(id), self.machine(of: id))
+        id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
+        guard let session = entries[id]?.session, assistantOnly || session.kind.showsAsChat else {
+          let name = entries[id]?.session.name ?? id
+          throw APIError("\(name) is not a Manager conversation or a group chat. chat-log reads only those")
+        }
+      } else {
+        let group = try lookupGroup(args)
+        guard let chat = chatID(group) else {
+          throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
+        }
+        id = chat
       }
-      let group = try lookupGroup(args)
-      guard let id = chatID(group) else {
-        throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
-      }
-      return (transcriptFinder(id), self.machine(of: id))
+      return (transcriptFinder(id), try site(of: id).machine)
     }
     let limit = args["limit"]?.int ?? 50
-    return try JSON(encoding: findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? [])
+    let messages = findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? []
+    return try JSON(encoding: assistantOnly ? messages.filter { $0.role == .assistant } : messages)
   }
 
   func chatID(_ group: String) -> String? {

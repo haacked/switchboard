@@ -1,6 +1,7 @@
 import AppKit
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
@@ -839,11 +840,10 @@ import Testing
   }
 
   /// The requests that the model's `send` received.
-  final class Sent: @unchecked Sendable {
-    private let lock = NSLock()
-    private var requests: [(op: String, args: [String: JSON])] = []
-    var all: [(op: String, args: [String: JSON])] { lock.withLock { requests } }
-    func add(_ op: String, _ args: [String: JSON]) { lock.withLock { requests.append((op, args)) } }
+  final class Sent: Sendable {
+    private let requests = OSAllocatedUnfairLock<[(op: String, args: [String: JSON])]>(initialState: [])
+    var all: [(op: String, args: [String: JSON])] { requests.withLock { $0 } }
+    func add(_ op: String, _ args: [String: JSON]) { requests.withLock { $0.append((op, args)) } }
   }
 
   // MARK: chipLabel(_:)

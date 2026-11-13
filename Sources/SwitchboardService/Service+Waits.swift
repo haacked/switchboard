@@ -19,7 +19,7 @@ extension Service {
         return Wait.SessionTarget(id: other, name: entries[other]!.session.name)
       }
       if wait.kind == .ci && wait.pr == nil {
-        wait.headSha = try? checkedOutBranch(entries[id]!.session).tip
+        wait.headSha = try? checkedOutBranch(entries[id]!.session, at: site(of: id)).tip
       }
       wait = config.recheck.stamped(wait)
       try update(id) { $0.waits = open + [wait] }

@@ -187,7 +187,7 @@ public struct CodeOwnerStatus: Codable, Equatable, Sendable {
     guard pr.state == .open, let requirement = pr.codeOwners, !requirement.groups.isEmpty,
       let author = pr.author?.lowercased(), let requests = pr.codeOwnerRequests
     else { return nil }
-    let approvals = pr.verdicts.filter { $0.state == "APPROVED" && $0.author.lowercased() != author }
+    let approvals = pr.verdicts.filter { $0.isApproval && $0.author.lowercased() != author }
     // A login has no slash and a team slug has one, so one set holds both kinds of owner.
     func approvers(_ verdicts: [Review]) -> Set<String> {
       Set(verdicts.flatMap { ["@" + $0.author] + ($0.teams ?? []).map { "@" + $0 } }.map { $0.lowercased() })

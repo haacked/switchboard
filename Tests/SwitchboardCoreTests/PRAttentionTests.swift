@@ -264,13 +264,16 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     ),
     (
       samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]),
-      "merge #42, approved by alice"
+      "no checks ran on #42; approved by alice"
     ),
-    (samplePR(reviewDecision: nil, verdicts: [sampleVerdict("alice", "APPROVED")]), "merge #42, approved by alice"),
+    (
+      samplePR(reviewDecision: nil, verdicts: [sampleVerdict("alice", "APPROVED")], reviewDecisionRead: true),
+      "no checks ran on #42; approved by alice"
+    ),
     (
       samplePR(
         reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED")]),
-      "merge #42, approved by alice and bob"
+      "no checks ran on #42; approved by alice and bob"
     ),
     (
       samplePR(
@@ -278,9 +281,9 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
         verdicts: [
           sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED"), sampleVerdict("carol", "APPROVED"),
         ]),
-      "merge #42, approved by alice and bob and carol"
+      "no checks ran on #42; approved by alice and bob and carol"
     ),
-    (samplePR(reviewDecision: .approved), "merge #42"),
+    (samplePR(reviewDecision: .approved), "no checks ran on #42"),
   ])
   func openPRNeedsYou(_ pr: PullRequest, _ reason: String) throws {
     let f = try prFacts(pr)
@@ -289,17 +292,23 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
   }
 
   @Test(arguments: [
-    ([sampleVerdict("stamphog", "APPROVED")], "enqueue #42, approved by stamphog"),
-    ([sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED")], "enqueue #42, approved by alice and bob"),
-    ([], "enqueue #42"),
+    ([sampleVerdict("stamphog", "APPROVED")], "#42 is ready to merge, approved by stamphog"),
+    (
+      [sampleVerdict("alice", "APPROVED"), sampleVerdict("bob", "APPROVED")],
+      "#42 is ready to merge, approved by alice and bob"
+    ),
+    ([], "#42 is ready to merge"),
   ])
   func approvedPRThatTrunkManagesIsEnqueued(_ verdicts: [Review], _ reason: String) throws {
     let comments = [
       PRComment(id: "IC_gh", author: "github-actions[bot]", createdAt: "2026-10-24T00:00:00Z"), trunkComment(),
     ]
-    let f = try prFacts(samplePR(reviewDecision: .approved, verdicts: verdicts), comments: comments)
+    let f = try prFacts(samplePR(reviewDecision: .approved, verdicts: verdicts, checks: "SUCCESS"), comments: comments)
 
-    #expect(Attention.evaluate(session(), f, now: Self.now) == Verdict(state: .needsYou, reason: reason))
+    let v = Attention.evaluate(session(), f, now: Self.now)
+
+    #expect(v == Verdict(state: .readyToMerge, reason: reason))
+    #expect(v.options.first?.label == "Enqueue #42")
   }
 
   @Test func approvedPRWhoseQueueStatusDidNotLoadNeedsAQueueCheck() throws {
@@ -326,12 +335,15 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
       PRComment(
         id: "IC_dp", author: "deployment-status-posthog[bot]", createdAt: "2026-10-24T00:00:00Z", body: "deployed"),
     ]
-    let f = try prFacts(
-      samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")]), comments: comments)
+    var pr = samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alice", "APPROVED")], checks: "SUCCESS")
+    pr.trunkConfig = false
+    pr.mergeQueue = false
+    let f = try prFacts(pr, comments: comments)
 
-    #expect(
-      Attention.evaluate(session(), f, now: Self.now)
-        == Verdict(state: .needsYou, reason: "merge #42, approved by alice"))
+    let v = Attention.evaluate(session(), f, now: Self.now)
+
+    #expect(v == Verdict(state: .readyToMerge, reason: "#42 is ready to merge, approved by alice"))
+    #expect(v.options.first?.label == "Merge #42")
   }
 
   @Test(arguments: [
@@ -558,7 +570,7 @@ private let readTheReply = Verdict(state: .needsYou, reason: "read its last repl
     let v = try verdict(
       samplePR(reviewDecision: .approved, verdicts: [sampleVerdict("alex", "APPROVED")], reviewRequests: Self.alex))
 
-    #expect(v == Verdict(state: .needsYou, reason: "merge #42, approved by alex"))
+    #expect(v == Verdict(state: .needsYou, reason: "no checks ran on #42; approved by alex"))
   }
 
   @Test func mergedBaseNeedsYou() throws {

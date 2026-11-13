@@ -1,6 +1,7 @@
 import AppKit
 import SwitchboardCore
 import Testing
+import os
 
 @testable import SwitchboardApp
 
@@ -108,11 +109,10 @@ import Testing
   }
 }
 
-final class SentArgs: @unchecked Sendable {
-  private let lock = NSLock()
-  private var sent: [[String: JSON]] = []
-  var value: [[String: JSON]] { lock.withLock { sent } }
-  func append(_ args: [String: JSON]) { lock.withLock { sent.append(args) } }
+final class SentArgs: Sendable {
+  private let sent = OSAllocatedUnfairLock<[[String: JSON]]>(initialState: [])
+  var value: [[String: JSON]] { sent.withLock { $0 } }
+  func append(_ args: [String: JSON]) { sent.withLock { $0.append(args) } }
 }
 
 @MainActor

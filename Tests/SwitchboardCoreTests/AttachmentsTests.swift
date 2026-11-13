@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import Testing
+import os
 
 @testable import SwitchboardCore
 
@@ -232,10 +233,11 @@ func scratchFolder() throws -> String {
     let path = "\(dir)/pipe.png"
     #expect(mkfifo(path, 0o600) == 0)
     let finished = DispatchSemaphore(value: 0)
-    let result = Locked<String?>(nil)
+    let result = OSAllocatedUnfairLock<String?>(initialState: nil)
 
     DispatchQueue(label: "refusesAFIFOWithoutBlocking").async {
-      result.value = refusal { try Attachments.read(path: path) } ?? "read returned data"
+      let refused = refusal { try Attachments.read(path: path) } ?? "read returned data"
+      result.withLock { $0 = refused }
       finished.signal()
     }
     let returned = finished.wait(timeout: .now() + 5) == .success
@@ -247,7 +249,8 @@ func scratchFolder() throws -> String {
     }
 
     #expect(returned)
-    #expect(result.value != nil && result.value != "read returned data")
+    let refused = result.withLock { $0 }
+    #expect(refused != nil && refused != "read returned data")
   }
 
   @Test func refusesAFileOverTheLimitBeforeReadingIt() throws {
@@ -284,17 +287,6 @@ func scratchFolder() throws -> String {
     try handle.close()
 
     #expect(try Attachments.read(path: path).count == Attachments.limit)
-  }
-}
-
-/// A value that two threads share.
-final class Locked<T>: @unchecked Sendable {
-  private let lock = NSLock()
-  private var stored: T
-  init(_ value: T) { stored = value }
-  var value: T {
-    get { lock.withLock { stored } }
-    set { lock.withLock { stored = newValue } }
   }
 }
 
