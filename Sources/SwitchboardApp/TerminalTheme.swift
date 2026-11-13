@@ -26,6 +26,7 @@ struct TerminalTheme {
     scheme = isDark ? .dark : .light
   }
 
+  @MainActor
   func apply(to view: TerminalView) {
     view.nativeForegroundColor = foreground
     view.nativeBackgroundColor = background

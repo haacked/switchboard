@@ -53,6 +53,11 @@ public struct Review: Codable, Equatable, Sendable {
     self.commit = commit
     self.bot = bot
   }
+
+  public var isApproval: Bool { state == "APPROVED" }
+  public var requestsChanges: Bool { state == "CHANGES_REQUESTED" }
+  /// Whether the review is the viewer's own draft, which nobody else sees.
+  public var isPending: Bool { state == "PENDING" }
 }
 
 /// A comment on a PR. A status response carries no body. The poller reads
@@ -246,6 +251,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// Whether the head commit's checks ended in failure or error.
   public var checksFailed: Bool { checks == "FAILURE" || checks == "ERROR" }
+  public var checksPassed: Bool { checks == "SUCCESS" }
 
   /// Whether the PR is open, not a draft, and approved.
   public var isApproved: Bool { status == .approved }
@@ -265,10 +271,10 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// When the newest approval was submitted.
   public var approvedAt: String? {
-    verdicts.filter { $0.state == "APPROVED" }.compactMap(\.submittedAt).max()
+    verdicts.filter(\.isApproval).compactMap(\.submittedAt).max()
   }
 
-  public var approvers: [String] { verdicts.filter { $0.state == "APPROVED" }.map(\.author).sorted() }
+  public var approvers: [String] { verdicts.filter(\.isApproval).map(\.author).sorted() }
 
   /// "changes requested by X and Y", or "changes requested" when GitHub's
   /// decision requests changes that no verdict names. nil when nobody requests changes.
@@ -287,7 +293,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// The reviewers whose last verdict requests changes.
   public var changesRequestedBy: [String] {
-    verdicts.filter { $0.state == "CHANGES_REQUESTED" }.map(\.author).sorted()
+    verdicts.filter(\.requestsChanges).map(\.author).sorted()
   }
 
   /// Whether something about the PR will change soon: its checks run, or
