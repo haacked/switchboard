@@ -895,7 +895,7 @@ final class BoardModel: ObservableObject {
   nonisolated static let recentEventCount = 10
 
   /// Reads the session's events of `kind` among the newest that sbd returns by default, off the main thread.
-  func loadEvents(_ session: String, kind: String) async -> [Event] {
+  func events(_ session: String, kind: String) async -> [Event] {
     let client = client
     return await Task.detached {
       ((try? client.call("events", ["session": .string(session)], as: [Event].self)) ?? []).filter { $0.kind == kind }

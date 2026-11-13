@@ -86,6 +86,6 @@ struct DocketView: View {
   }
 
   private func loadLog() async {
-    log = await model.loadEvents(session.id, kind: "docket")
+    log = await model.events(session.id, kind: "docket")
   }
 }
