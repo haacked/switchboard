@@ -520,7 +520,7 @@ func hook() -> Never {
   guard let session = env["SB_SESSION_ID"], let payload = try? JSONCoding.decoder.decode(JSON.self, from: input) else {
     exit(0)
   }
-  // The timeout stays below the 30 s hook timeout in claude-settings.json. A
+  // The timeout stays below the 30 s hook timeout in the session's claude-settings.json. A
   // PermissionRequest waits for its card's answer until Claude Code's own
   // timeout ends the hook.
   let held = payload["hook_event_name"]?.string == "PermissionRequest"

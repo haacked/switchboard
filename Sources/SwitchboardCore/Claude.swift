@@ -224,13 +224,39 @@ public struct TranscriptTail: Equatable, Sendable {
   }
 }
 
+/// The names of the folders in <account>/projects. Claude doesn't document
+/// the rule. This copy comes from claude 2.1.322. Its tests use folder names
+/// that claude created.
+public enum ClaudeFolder {
+  private static let maxLength = 200
+
+  /// The folder that Claude names after `path`. Claude counts UTF-16 units,
+  /// because it runs in JavaScript. It replaces each unit other than an ASCII
+  /// letter or digit with "-". It cuts a longer name to 200 units and appends
+  /// "-" and a hash of the whole path.
+  public static func name(_ path: String) -> String {
+    let units = Array(path.utf16)
+    let dash = UInt16(UInt8(ascii: "-"))
+    let name = String(decoding: units.map { isLetterOrDigit($0) ? $0 : dash }.prefix(maxLength), as: UTF16.self)
+    guard units.count > maxLength else { return name }
+    return "\(name)-\(String(javaHash(units).magnitude, radix: 36))"
+  }
+
+  private static func isLetterOrDigit(_ unit: UInt16) -> Bool {
+    (0x30...0x39).contains(unit) || (0x41...0x5A).contains(unit) || (0x61...0x7A).contains(unit)
+  }
+
+  /// Java's String.hashCode, with 32-bit wrapping.
+  private static func javaHash(_ units: [UInt16]) -> Int32 {
+    units.reduce(Int32(0)) { $0 &* 31 &+ Int32($1) }
+  }
+}
+
 public enum Transcript {
   /// The transcript of a session: <account>/projects/<folder>/<id>.jsonl.
-  /// Claude names the folder after the session's cwd, with each character
-  /// other than an ASCII letter or digit replaced by "-". Claude shortens a
-  /// long path in a way that this doesn't reproduce. A symlink can also change
-  /// the cwd. So when that folder lacks the transcript, this looks in every
-  /// folder in <account>/projects.
+  /// Claude names the folder after the session's cwd, as `ClaudeFolder.name`
+  /// does. A symlink can change the cwd. So when that folder lacks the
+  /// transcript, this looks in every folder in <account>/projects.
   /// The account, the cwd, and the transcript are on `machine`.
   public static func find(
     _ sessionId: String, account: String, cwd: String, on machine: any Machine
@@ -247,8 +273,7 @@ public enum Transcript {
     folders: (String) -> [String]
   ) -> String? {
     let projects = "\(account)/projects"
-    let folder = String(cwd.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
-    let named = "\(projects)/\(folder)/\(sessionId).jsonl"
+    let named = "\(projects)/\(ClaudeFolder.name(cwd))/\(sessionId).jsonl"
     if machine.exists(named) { return named }
     return folders(projects).map { "\(projects)/\($0)/\(sessionId).jsonl" }.first(
       where: machine.exists)

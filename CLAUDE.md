@@ -19,6 +19,24 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 - Sessions run the unmodified `claude` CLI under the user's Claude subscription. Never call the Claude API with a subscription login.
 - Only Xcode's Command Line Tools are installed (Swift 6.4). The service, the CLI, and the app bundle build with SwiftPM.
 
+## Building and testing
+
+Build and test only through `bin/build`, `bin/test`, `bin/test-gui`, and `bin/bundle`. Never run bare `swift build`, `swift test`, or `swift run`, because they skip the build queue and overload the machine. Extra arguments pass through to SwiftPM, for example `bin/build --product sb` and `bin/test --filter X`. `bin/fmt` does not compile, so run it directly.
+
+The scripts wait for a machine-wide build slot, so at most 3 builds or test runs share the CPU at once. They also cap each build's compile jobs. Many sessions share this machine, so a wait of several minutes is normal.
+
+Always start these scripts with `run_in_background`. The wait for a slot counts toward a foreground Bash call's timeout, which kills the call after 2 minutes by default and 10 at most.
+
+A waiting script prints `waiting for a build slot (N ahead)`. That line means the script is queued, not hung. Don't kill it or start a second copy, because a killed script loses its place in the queue.
+
+## Tests
+
+CI runs the full suite on every push to a PR, in the `swift-test` and `gui-test` jobs. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
+
+- Before you push, run `bin/test`. With no arguments it runs only the tests that your changes against `origin/main` can affect, and it prints what it picked and why. A change to `Sources/` leaves IntegrationTests to CI.
+- After you push, wait for `swift-test` and `gui-test`, then fix what they report. The `ci-monitor` step of `/go` does the waiting.
+- Run `bin/test --all` only to reproduce a CI failure, or for a change whose effects `bin/test` can't see, such as a test that reads a file at run time through a path the selection doesn't know about.
+
 ## Design before adding code
 
 Before you implement a feature or fix, read the code it touches and ask whether the current design makes the change easy. If it doesn't, refactor first, then implement. Examples are a type or view that does two jobs, logic duplicated where the change would add a third copy, a missing abstraction the change would hard-code around, or a long function the change would make longer.

@@ -444,7 +444,7 @@ import Testing
 
     #expect(out == "queued\n")
     try expectDelivered(sbd, s.id, text: "look at this", copies: copies(sbd, s.id))
-    #expect(sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings)")
+    #expect(sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id))")
   }
 
   @Test func sendsTextAloneAsBefore() throws {
