@@ -162,11 +162,11 @@ private struct SelectionRun {
 
 /// A temporary git repo with copies of bin/test and bin/lib/*.sh, committed
 /// with the baseline files. origin/main points at that commit. A stub swift
-/// at the front of PATH logs its arguments, prints the package for
-/// `dump-package` and `listing` for `test list`, and exits with `buildStatus`
-/// or `testStatus` for a build or test run. A stub xcode-select prints a
-/// developer folder that holds only Xcode's Testing.framework, so
-/// bin/lib/swift-testing.sh passes and adds no flags.
+/// at the front of PATH logs its arguments, runs `dumpPackage` or prints the
+/// package for `dump-package`, prints `listing` for `test list`, and exits
+/// with `buildStatus` or `testStatus` for a build or test run. A stub
+/// xcode-select prints a developer folder that holds only Xcode's
+/// Testing.framework, so bin/lib/swift-testing.sh passes and adds no flags.
 private final class SelectionRepo {
   let repos: Repos
   let dir: String
@@ -178,6 +178,7 @@ private final class SelectionRepo {
   var listing: [String]
   var buildStatus: Int32 = 0
   var testStatus: Int32 = 0
+  var dumpPackage: String?
 
   init(files: [String: String] = [:], listing extraListing: [String] = [], originMain: Bool = true) throws {
     repos = try Repos()
@@ -265,6 +266,7 @@ private final class SelectionRepo {
 
   func run(_ args: [String]) throws -> SelectionRun {
     try (listing.joined(separator: "\n") + "\n").write(toFile: listingPath, atomically: true, encoding: .utf8)
+    let dumpCommand = dumpPackage ?? "cat \(shellQuote(packagePath)); exit 0"
     try writeExecutable(
       "\(stubBin)/swift",
       """
@@ -278,7 +280,7 @@ private final class SelectionRepo {
         esac
         prev=$arg
       done
-      if [ $dump = 1 ]; then cat \(shellQuote(packagePath)); exit 0; fi
+      if [ $dump = 1 ]; then \(dumpCommand); fi
       case ${1:-} in
         test) if [ $list = 1 ]; then cat \(shellQuote(listingPath)); exit 0; fi; exit \(testStatus) ;;
         build) exit \(buildStatus) ;;
@@ -525,6 +527,10 @@ private let suiteShapes: [(name: String, text: String, names: [String])] = [
 
 private let mixedFile = "Tests/SwitchboardCoreTests/FxMixedTests.swift"
 
+private func mixedText(_ free: String) -> String {
+  "import Testing\n\nstruct FxMixedTests {\n  @Test func inSuite() {}\n}\n\n\(free)"
+}
+
 /// Ways to write a free test function beside a suite. The last two do not
 /// start a line with `@Test`, so only the listing count catches them.
 private let freeTests: [(name: String, text: String)] = [
@@ -647,11 +653,26 @@ private let wholeTargetCases: [SelectionCase] =
   + freeTests.map { free in
     SelectionCase(
       name: "free function: \(free.name)",
-      files: [mixedFile: "import Testing\n\nstruct FxMixedTests {\n  @Test func inSuite() {}\n}\n\n\(free.text)"],
+      files: [mixedFile: mixedText(free.text)],
       listing: ["SwitchboardCoreTests.FxMixedTests/inSuite()", "SwitchboardCoreTests.free()"],
       change: { try $0.edit(mixedFile) },
       filters: [wholeTarget("SwitchboardCoreTests")])
   }
+  + [
+    SelectionCase(
+      name: "free function beside a suite that another file extends",
+      files: [
+        mixedFile: mixedText("@MainActor @Test func free() {}\n"),
+        "Tests/SwitchboardCoreTests/FxMixedMoreTests.swift":
+          "import Testing\n\nextension FxMixedTests {\n  @Test func more() {}\n}\n",
+      ],
+      listing: [
+        "SwitchboardCoreTests.FxMixedTests/inSuite()", "SwitchboardCoreTests.FxMixedTests/more()",
+        "SwitchboardCoreTests.free()",
+      ],
+      change: { try $0.edit(mixedFile) },
+      filters: [wholeTarget("SwitchboardCoreTests")])
+  ]
 
 /// The FxServiceTests file has two tests, and each listing shows fewer under
 /// the file's suite, as after a stale build.
@@ -841,7 +862,7 @@ private func selectionLines(_ output: String) -> Set<String> {
     let run = try repo.run()
 
     #expect(run.result.status == 0, "\(run.result.stderr)")
-    #expect(!run.invocations.contains { $0.first == "test" }, "\(run.invocations)")
+    #expect(run.invocations == [["package", "dump-package"]], "\(run.invocations)")
     #expect(run.result.stderr.contains("bin/test --all runs every test"), "\(run.result.stderr)")
   }
 
@@ -853,6 +874,18 @@ private func selectionLines(_ output: String) -> Set<String> {
     let run = try repo.run()
 
     expectTargeted(run, [suiteFilter("SwitchboardAppTests", "FxAppTests")])
+  }
+
+  @Test(arguments: ["exit 1", "echo not-json; exit 0"])
+  func anUnreadablePackageRunsEveryTest(_ dump: String) throws {
+    let repo = try SelectionRepo()
+    try repo.edit("Tests/SwitchboardServiceTests/FxServiceTests.swift")
+    repo.dumpPackage = dump
+
+    let run = try repo.run()
+
+    expectEveryTest(run)
+    #expect(run.result.stderr.contains("could not read the package's targets"), "\(run.result.stderr)")
   }
 
   @Test func missingOriginMainRunsEveryTest() throws {

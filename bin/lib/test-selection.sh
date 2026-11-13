@@ -177,6 +177,21 @@ test_file_selection() {
 
   files=$(find "$dir" -name '*.swift' | sort)
   others=$(grep -vxF -- "$file" <<<"$files" || true)
+  # The listing shows tests that other files add to these suites through
+  # extensions, so count them too. A block ends only at a `}` in column 0. An
+  # indented extension therefore counts to the end of its file, and the larger
+  # count can only widen the selection.
+  if [ -n "$others" ]; then
+    local alt=${suites% }
+    count=$((count + $(tr '\n' '\0' <<<"$others" |
+      xargs -0 awk -v re="(^|[^A-Za-z0-9_])extension[ ]+([A-Za-z_][A-Za-z0-9_]*[.])?(${alt// /|})([^A-Za-z0-9_]|$)" '
+        FNR == 1 { inside = 0 }
+        $0 ~ re { inside = 1 }
+        inside && /@Test/ { n++ }
+        /^}/ { inside = 0 }
+        END { print n + 0 }' |
+      awk '{ s += $1 } END { print s + 0 }')))
+  fi
   names=$(awk '$3 == 0 { print $2 }' <<<"$decls" | sort -u)
   used=$(
     {
@@ -219,8 +234,9 @@ test_file_selection() {
 # test_filters
 # Reads select_tests lines on stdin and prints one --filter pattern for each.
 # A file's suites become a pattern only when list_tests shows that it matches
-# at least as many tests as the file declares. Otherwise they become their
-# whole target, so a declaration that the parse missed still runs.
+# at least as many tests as the file and other files' extensions of its suites
+# declare. Otherwise they become their whole target, so a declaration that the
+# parse missed still runs.
 test_filters() {
   local kind target count names pattern list= matched
   while read -r kind target count names; do
@@ -233,7 +249,7 @@ test_filters() {
       if [ "$matched" -ge "$count" ]; then
         echo "$pattern"
       else
-        echo "bin/test: $pattern matches $matched tests, fewer than the $count its file declares, so all of $target runs" >&2
+        echo "bin/test: $pattern matches $matched tests, fewer than the $count its suites declare, so all of $target runs" >&2
         echo "^$target\\."
       fi
       ;;
