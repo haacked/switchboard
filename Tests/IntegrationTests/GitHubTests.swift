@@ -838,6 +838,20 @@ extension FakeGitHub {
     #expect(after.branch == "\(Self.charts18303)-v2")
   }
 
+  /// The timer's poll refreshes a branch only when HEAD, the repo config, or
+  /// the reflog changed. A commit on `-v2` changes only the reflog.
+  @Test func aCommitBringsBackAHiddenPRWithoutAFullPoll() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sessionThatLeftItsPR(sbd)
+    try pushFromV2(github, s)
+    try sbd.advanceClock(300_000)
+
+    try sbd.poll()
+
+    #expect(try sbd.get(s.id).pr?.number == 18303)
+  }
+
   @Test func keepsAnEarlierPRWhoseHeadThisFolderMadeAcrossARestart() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)

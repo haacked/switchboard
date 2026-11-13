@@ -356,7 +356,7 @@ private func longCommandTurn() -> [Event] {
   }
 }
 
-/// The callout that says which branch the session's PR uses (D14).
+/// The callout that says which branch the session's PR uses.
 @Suite struct TriageBranchCallout {
   static let expected = Callout(kind: .info, title: "#18303 uses haacked/x", body: "This folder is on haacked/x-v2.")
 

@@ -246,8 +246,7 @@ import Testing
   }
 }
 
-/// The Stage 1 guard. `GitHub.earlierStanding` replaces `isEarlierWork` in
-/// Stage 3, and `GitHubEarlierStanding` holds these cases there.
+/// `GitHub.isEarlierWork`, which `earlierStanding` checks first.
 @Suite struct GitHubEarlierWork {
   static let checkedOut: Set<String> = ["haacked/x", "haacked/x-v2"]
 

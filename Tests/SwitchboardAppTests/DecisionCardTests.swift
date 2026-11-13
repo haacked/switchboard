@@ -180,7 +180,7 @@ import Testing
 }
 
 /// "No summary yet. Details holds the last reply." shows only for a fallback
-/// with no options and no summary (D9).
+/// with no options and no summary.
 @Suite struct DecisionCardMissingSummary {
   static let yesNo = [
     TriageOption(label: "Yes", action: .send, message: "Yes"),
@@ -211,10 +211,10 @@ import Testing
     #expect(!DecisionCard.showsMissingSummary(item))
   }
 
-  @Test func aFallbackWithOptionsAndAnEmptySummaryShowsTheLine() {
+  @Test func aFallbackWithOptionsAndAnEmptySummaryShowsNoLine() {
     let item = TriageItem(title: "Push?", kind: .approval, summary: "", options: Self.yesNo, source: .fallback)
 
-    #expect(DecisionCard.showsMissingSummary(item))
+    #expect(!DecisionCard.showsMissingSummary(item))
   }
 
   @Test(arguments: [TriageSource.summary, .session, .rule, .card])

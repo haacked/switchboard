@@ -76,7 +76,7 @@ import Testing
   }
 }
 
-/// The header names the PR's branch when the folder is on another one (D13).
+/// The header names the PR's branch when the folder is on another one.
 @Suite struct TriageDetailPRHead {
   func session(branch: String?, head: String) -> SessionSummary {
     var s = needsItem("a")

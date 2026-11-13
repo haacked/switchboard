@@ -350,8 +350,9 @@ final class GitHubPoller {
           GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
         }
       }
-      let reflog = b.gitDir.flatMap { read("\($0)/logs/HEAD") }
-      b.reflogSize = reflog.map { UInt64($0.utf8.count) }
+      let reflogData = b.gitDir.flatMap { machine.read("\($0)/logs/HEAD", from: 0, count: nil) }
+      b.reflogSize = reflogData.map { UInt64($0.count) }
+      let reflog = reflogData.map { String(decoding: $0, as: UTF8.self) }
       let local = reflog.map(GitHub.checkedOutBranches) ?? []
       b.checkedOut = local.union(local.compactMap { GitHub.upstreamName(of: $0, config: config) })
       b.made = reflog.flatMap { GitHub.commitsSinceSwitch(reflog: $0, to: branch) }

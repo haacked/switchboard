@@ -58,9 +58,9 @@ struct DecisionCard: View {
   }
 
   /// Whether the Action says that the item has no summary: a fallback item
-  /// whose reply gave no closing section.
+  /// with no options whose reply gave no closing section.
   static func showsMissingSummary(_ item: TriageItem) -> Bool {
-    item.source == .fallback && item.summary.isEmpty
+    item.source == .fallback && item.summary.isEmpty && item.options.isEmpty
   }
 
   private func summary(_ text: String) -> some View {

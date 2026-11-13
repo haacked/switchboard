@@ -6,6 +6,9 @@ public enum OfferText {
   static let pronouns: Set = ["it", "this", "that"]
   /// The nouns that name what a candidate is, such as "the branch x".
   static let nouns: Set = ["branch", "file", "folder", "directory", "worktree", "tag", "commit", "pr"]
+  /// A name after one of these words is usually a target or a place, such as
+  /// "onto origin/main", and not the object that the pronoun stands for.
+  static let prepositions: Set = ["onto", "on", "into", "to", "from", "against", "with", "at", "in", "of"]
   static let tokenTrim = CharacterSet(charactersIn: ".,;:!?()[]\"'`*_")
 
   /// The offer as a question that starts with its verb, such as "Delete the
@@ -38,7 +41,8 @@ public enum OfferText {
 
   /// The names that a pronoun can stand for, longest first: "the <noun>
   /// <name>" when a noun stands next to the name, and the name alone. nil
-  /// when the sentence names no object, or more than one.
+  /// when the sentence names no object, names more than one, or puts its one
+  /// name after a preposition.
   static func referents(_ sentence: String) -> [String]? {
     let text = paragraph(sentence)
     let spans = Set((text?.runs ?? []).filter { $0.style.contains(.code) }.map(\.text))
@@ -48,6 +52,7 @@ public enum OfferText {
     let candidates = spans.isEmpty ? Set(tokens.filter(isPathLike)) : spans
     guard candidates.count == 1, let name = candidates.first else { return nil }
     guard let at = tokens.firstIndex(of: name) else { return [name] }
+    if at > 0, prepositions.contains(tokens[at - 1].lowercased()) { return nil }
     let neighbors = [at > 0 ? tokens[at - 1] : nil, at + 1 < tokens.count ? tokens[at + 1] : nil]
     guard let noun = neighbors.compactMap({ $0 }).first(where: { nouns.contains($0.lowercased()) }) else {
       return [name]
@@ -56,9 +61,10 @@ public enum OfferText {
   }
 
   /// A word such as owner/branch or docs/notes.md: a "/" with a letter or
-  /// digit on each side, and no "://".
+  /// digit on each side, at least one letter, and no "://". The letter rule
+  /// keeps a date such as 11/12 out.
   static func isPathLike(_ token: String) -> Bool {
-    guard !token.contains("://") else { return false }
+    guard !token.contains("://"), token.contains(where: \.isLetter) else { return false }
     let chars = Array(token)
     return chars.indices.contains { i in
       chars[i] == "/" && i > 0 && i + 1 < chars.count && isWordCharacter(chars[i - 1]) && isWordCharacter(chars[i + 1])

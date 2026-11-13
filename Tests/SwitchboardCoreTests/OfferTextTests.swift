@@ -48,7 +48,7 @@ import Testing
     // The same code span twice is one candidate.
     ("I kept `tools/run` and fixed `tools/run` too.", "Should I delete it?", "Delete tools/run?"),
     // A URL is not a candidate, so the slash token is the only one.
-    ("I copied https://example.com/a/b into docs/links.md today.", "Should I open it?", "Open docs/links.md?"),
+    ("docs/links.md now holds https://example.com/a/b.", "Should I open it?", "Open docs/links.md?"),
     ("I wrote `notes.md` in the repo.", "Want me to commit this?", "Commit notes.md?"),
     ("The tag `v2.0` points at main.", "Should I push that?", "Push the tag v2.0?"),
   ])
@@ -86,6 +86,12 @@ import Testing
     ("The `foo` branch exists.", "Should I delete them?", "Delete them?"),
     ("The `foo` branch exists.", "Should I delete these?", "Delete these?"),
     ("The `foo` branch exists.", "Should I delete those?", "Delete those?"),
+    // The one candidate follows a preposition, so it is a target and not the object.
+    ("I rebased the branch onto origin/main.", "Want me to force-push it?", "Force-push it?"),
+    ("The tests pass on `main`.", "Should I merge it?", "Merge it?"),
+    ("I copied https://example.com/a/b into docs/links.md today.", "Should I open it?", "Open it?"),
+    // A date has no letter, so it is not a candidate.
+    ("CI passed 11/12.", "Want me to merge it?", "Merge it?"),
   ])
   func leavesThePronounWithoutExactlyOneCandidate(_ previous: String, _ question: String, _ title: String) {
     #expect(OfferText.title(question: question, previous: previous) == title)
