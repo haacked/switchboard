@@ -13,7 +13,8 @@ to=${2:-HEAD}
 pr_merge='^Merge pull request #([0-9]+) '
 
 # Each record is the subject, a unit separator, and the body, ended by a
-# record separator.
+# record separator. git log adds a newline after each record, so every subject
+# after the first starts with one.
 log=$(git log --first-parent --reverse --format='%s%x1f%b%x1e' "$from..$to")
 while IFS=$'\x1f' read -r -d $'\x1e' subject body; do
   subject=${subject#$'\n'}

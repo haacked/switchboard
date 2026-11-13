@@ -214,6 +214,32 @@ private final class GuardRepo {
     #expect(r.stdout == "\(head)\n")
   }
 
+  @Test func theChangesStartAtHeadNotTheRevisionWithNoInstalledApp() throws {
+    let repo = try GuardRepo()
+    let head = try repo.head()
+    try repo.git("switch", "-q", "-c", "ahead")
+    try repo.commit("on ahead")
+    try repo.git("switch", "-q", "main")
+
+    let r = try repo.changelogStart("ahead")
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout == "\(head)\n")
+  }
+
+  @Test func theChangesStartAtAnInstalledCommitThatOnlyTheRevisionContains() throws {
+    let repo = try GuardRepo()
+    try repo.git("switch", "-q", "-c", "ahead")
+    let installed = try repo.commit("on ahead")
+    try repo.install(commit: installed)
+    try repo.git("switch", "-q", "main")
+
+    let r = try repo.changelogStart("ahead")
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout == "\(installed)\n")
+  }
+
   @Test(arguments: ["bin/install", "bin/update"])
   func anUnknownArgumentIsRejectedBeforeAnythingRuns(_ script: String) throws {
     let path = Instance.root.appendingPathComponent(script).path
