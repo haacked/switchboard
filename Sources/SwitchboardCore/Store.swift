@@ -30,6 +30,8 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS host_events (id TEXT PRIMARY KEY, host TEXT, session TEXT)")
     try exec(
       "CREATE TABLE IF NOT EXISTS removed_host_sessions (id TEXT NOT NULL, host TEXT NOT NULL, PRIMARY KEY (id, host))")
+    try exec(
+      "CREATE TABLE IF NOT EXISTS removed_sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, removed INTEGER NOT NULL)")
   }
 
   deinit { sqlite3_close(db) }
@@ -38,30 +40,46 @@ public final class Store {
     try run("INSERT OR REPLACE INTO sessions (id, json) VALUES (?, ?)", [session.id, try JSONCoding.encode(session)])
   }
 
-  /// Deletes the session's record, events, and snapshot, and records the
-  /// resolved to-dos, in one transaction. A failure leaves all of it as it was.
-  /// For a session on `host`, the same transaction records it in
+  /// Deletes the session's record, events, and snapshot, records the resolved
+  /// to-dos, and records the session's `name` and the time in
+  /// `removed_sessions`, in one transaction. A failure leaves all of it as it
+  /// was. For a session on `host`, the same transaction records it in
   /// `removed_host_sessions`.
-  public func delete(session id: String, resolving todos: [ResolvedTodo] = [], onHost host: String? = nil) throws {
-    try transaction { try deleteRows(session: id, resolving: todos, onHost: host) }
+  public func delete(
+    session id: String, name: String, resolving todos: [ResolvedTodo] = [], onHost host: String? = nil
+  ) throws {
+    try transaction { try deleteRows(session: id, name: name, resolving: todos, onHost: host) }
   }
 
-  /// Throws when `delete(session:resolving:onHost:)` hits an abort or a constraint, a
-  /// read-only connection, or a write lock held past the busy timeout. It runs
-  /// the same statements in a transaction that it rolls back. It does not see
-  /// a failure that only the commit causes.
-  public func checkDeletable(session id: String, resolving todos: [ResolvedTodo], onHost host: String? = nil) throws {
+  /// Throws when `delete(session:name:resolving:onHost:)` hits an abort or a
+  /// constraint, a read-only connection, or a write lock held past the busy
+  /// timeout. It runs the same statements in a transaction that it rolls back.
+  /// It does not see a failure that only the commit causes.
+  public func checkDeletable(
+    session id: String, name: String, resolving todos: [ResolvedTodo], onHost host: String? = nil
+  ) throws {
     try exec("BEGIN IMMEDIATE")
     defer { try? exec("ROLLBACK") }
-    try deleteRows(session: id, resolving: todos, onHost: host)
+    try deleteRows(session: id, name: name, resolving: todos, onHost: host)
   }
 
-  private func deleteRows(session id: String, resolving todos: [ResolvedTodo], onHost host: String?) throws {
+  private func deleteRows(session id: String, name: String, resolving todos: [ResolvedTodo], onHost host: String?)
+    throws
+  {
     for todo in todos { try insert(todo) }
     try run("DELETE FROM sessions WHERE id = ?", [id])
     try run("DELETE FROM events WHERE session = ?", [id])
     try run("DELETE FROM snapshots WHERE session = ?", [id])
+    try run("INSERT OR REPLACE INTO removed_sessions (id, name, removed) VALUES (?, ?, ?)", [id, name, nowMs()])
     if let host { try recordRemovedHostSession(id, host: host) }
+  }
+
+  /// The sessions that sbd removed, newest first. A second removal of an id replaces its row.
+  public func removedSessions() throws -> [RemovedSession] {
+    // REPLACE gives the row a new rowid, so the rowid orders removals within one millisecond.
+    try query("SELECT id, name, removed FROM removed_sessions ORDER BY removed DESC, rowid DESC", []) {
+      RemovedSession(id: $0.text(0), name: $0.text(1), removed: $0.int(2))
+    }
   }
 
   /// Saves the session and records the resolved to-do, in one transaction.

@@ -142,7 +142,7 @@ extension Service {
       let id = try lookup(args)
       let s = entries[id]!.session
       guard s.waitsToStart else { throw APIError("\(id) isn't a follow-up that waits to start") }
-      guard starting.insert(id).inserted else { throw APIError("\(id) is starting") }
+      guard starting.insert(id).inserted else { throw APIError("\(mention(id)) is starting") }
       return s
     }
     defer { _ = queue.sync { starting.remove(session.id) } }
@@ -189,7 +189,7 @@ extension Service {
     return try queue.sync {
       let id = try lookup(args)
       guard entries[id]!.session.waitsToStart else { throw APIError("\(id) has started. sb rm removes a session") }
-      guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      guard !starting.contains(id) else { throw APIError("\(mention(id)) is starting") }
       try forgetSession(id, resolving: resolving)
       try detachPlans { $0.session == id }
       return ["removed": .string(id)]

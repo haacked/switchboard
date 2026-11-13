@@ -102,7 +102,9 @@ extension Service {
       guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
         throw APIError("card \(card.id): autoMode goes only with a behavior of allow")
       }
-      if let refusal = card.autoModeRefusal { throw autoModeRefused(refusal) }
+      if let refusal = card.autoModeRefusal(sessionName: entries[id]?.session.name ?? id) {
+        throw autoModeRefused(refusal)
+      }
     }
     if let message = card.send {
       switch args["behavior"]?.string {
@@ -165,7 +167,7 @@ extension Service {
     // The hook can close after the check above.
     guard !autoMode else { throw autoModeRefused(card.hookClosedRefusal) }
     guard !card.deferred else {
-      throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
+      throw APIError("card \(card.id) was deferred, so answer its questions or send \(mention(id)) a message")
     }
     try type(reply.typed, card)
     switch reply.typed {

@@ -399,9 +399,17 @@ public struct Wait: Codable, Equatable, Sendable {
 
 /// A prefix and 5 random characters that aren't in `taken`, such as `w3k9ap`.
 public func shortId(_ prefix: String, taken: some Collection<String> = [String]()) -> String {
+  var generator = SystemRandomNumberGenerator()
+  return shortId(prefix, taken: taken, using: &generator)
+}
+
+/// A prefix and 5 characters drawn from `generator` that aren't in `taken`.
+public func shortId(
+  _ prefix: String, taken: some Collection<String>, using generator: inout some RandomNumberGenerator
+) -> String {
   var id: String
   repeat {
-    id = prefix + String((0..<5).map { _ in "abcdefghijkmnpqrstuvwxyz23456789".randomElement()! })
+    id = prefix + String((0..<5).map { _ in "abcdefghijkmnpqrstuvwxyz23456789".randomElement(using: &generator)! })
   } while taken.contains(id)
   return id
 }

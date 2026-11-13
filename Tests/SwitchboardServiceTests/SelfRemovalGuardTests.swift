@@ -10,10 +10,11 @@ private let claudePane = 4242
 private let shellPane = 4343
 private let caller = 5151
 private let session = "s1"
+private let sessionName = "zsh-startup-for-switchboard"
 
-/// The refusal that `beginPaneStop` throws for a caller inside the session.
+/// The refusal that `beginPaneStop` throws for a caller inside the session. It names the session first.
 private func refusal(_ command: String) -> String {
-  "`\(command)` runs inside \(session), so it would stop itself. Run it from a terminal outside the session."
+  "`\(command)` runs inside \(sessionName) (\(session)), so it would stop itself. Run it from a terminal outside the session."
 }
 
 /// A `Service` in a temporary home whose snapshot holds the session's Claude and shell panes. The service never
@@ -25,7 +26,7 @@ private func withPanes(claude: PaneRow, shell: PaneRow, _ body: (Service) throws
   service.queue.sync {
     service.entries[session] = Service.Entry(
       session: Session(
-        id: session, name: session, cwd: "/tmp", branch: nil, claudeSessionId: "c1", model: nil, created: 0))
+        id: session, name: sessionName, cwd: "/tmp", branch: nil, claudeSessionId: "c1", model: nil, created: 0))
     service.mac.snapshot.panes[service.paneName(session, .claude)] = claude
     service.mac.snapshot.panes[service.paneName(session, .shell)] = shell
   }

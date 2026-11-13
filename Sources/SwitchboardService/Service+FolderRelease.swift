@@ -45,7 +45,7 @@ extension Service {
       !ancestry.isDisjoint(with: livePanePids(id))
     else { return nil }
     return APIError(
-      "`\(command)` runs inside \(id), so it would stop itself. Run it from a terminal outside the session.")
+      "`\(command)` runs inside \(mention(id)), so it would stop itself. Run it from a terminal outside the session.")
   }
 
   /// Records every process below the session's panes, closes the shell pane,
@@ -78,7 +78,9 @@ extension Service {
     // A process can write to the folder until it exits. `worktree remove` deletes ignored files.
     let site = self.site(for: session)
     if let pid = stop.claudePid, try !waitForExit([pid], seconds: 5, at: site).isEmpty {
-      throw APIError("\(session.id)'s claude has not exited. Run `\(command)` again once it has.")
+      throw APIError(
+        "\(sessionMention(name: session.name, id: session.id))'s claude has not exited. Run `\(command)` again once it has."
+      )
     }
     try closePane(session.id, .claude, at: site)
     let deadline = Date().addingTimeInterval(5)
@@ -99,7 +101,7 @@ extension Service {
       running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
       + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
-      "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
+      "Processes from \(sessionMention(name: session.name, id: session.id)) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )
   }
 

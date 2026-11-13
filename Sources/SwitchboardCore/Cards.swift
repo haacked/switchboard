@@ -70,18 +70,21 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   /// card from manual or acceptEdits mode whose hook still waits. The hook's
   /// answer switches the mode. A typed answer can't, because the dialog's
   /// item differs per tool and only Bash's was captured.
-  public var offersAutoMode: Bool { autoModeRefusal == nil }
+  public var offersAutoMode: Bool { autoModeRefusal(sessionName: session) == nil }
 
   /// The refusal of an auto mode allow once the card's hook is gone.
   public var hookClosedRefusal: String { "card \(id)'s hook closed, so sbd can't switch the mode" }
 
-  /// Why an allow can't switch the session to auto mode, or nil when it can.
-  public var autoModeRefusal: String? {
+  /// Why an allow can't switch the session to auto mode, or nil when it can. `sessionName` only names the
+  /// session in the text.
+  public func autoModeRefusal(sessionName: String) -> String? {
     guard kind == .permission else { return "card \(id) isn't a permission prompt" }
     if hookClosed { return hookClosedRefusal }
     guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
     if PermissionMode.offeringAutoMode.contains(mode) { return nil }
-    return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+    return mode == PermissionMode.auto
+      ? "\(sessionMention(name: sessionName, id: session)) is already in auto mode"
+      : "card \(id) came from \(mode) mode"
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a

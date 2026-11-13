@@ -125,7 +125,8 @@ extension Service {
   > {
     queue.sync {
       guard let e = entries[id] else {
-        return .failure(Skipped(skip: .init(id: id, name: id, reason: "\(id) no longer exists")))
+        let skip = DoneRemovalPlan.Skip(id: id, name: removedNames[id] ?? id, reason: "\(mention(id)) no longer exists")
+        return .failure(Skipped(skip: skip))
       }
       let s = e.session
       guard summary(id).isRemovableDone else {

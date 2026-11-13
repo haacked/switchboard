@@ -396,12 +396,13 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   @Test func plainRmOfASessionThatRanWhenItsHostLeftTheConfigRefuses() throws {
     let sbd = try Instance.remote()
     let s = try sbd.liveOnHost()
+    let name = try sbd.get(s.id).name
     try sbd.restart(setting: "hosts", to: [:])
 
     let r = try sbd.run("rm", s.id)
 
     #expect(r.status != 0, "rm forgot a session whose claude may still run on mini")
-    #expect(r.stderr.contains("mini"), "\(r.stderr)")
+    #expect(r.stderr.contains("\(name) (\(s.id))'s claude may still run on mini"), "\(r.stderr)")
     #expect(try sbd.client.sessions().map(\.id) == [s.id])
     #expect(try sbd.removedHostSessions().isEmpty)
     #expect(sbd.runs(s.pid))

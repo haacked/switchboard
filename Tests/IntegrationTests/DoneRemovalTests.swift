@@ -597,6 +597,56 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(skip(result["skipped"], "snope1")?["reason"]?.string?.isEmpty == false)
   }
 
+  /// No name exists for an id that was never a session, so the skip keeps the bare id.
+  @Test func confirmedRemovalKeepsTheBareIdOfATargetThatWasNeverASession() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/done")
+    try sbd.markDone(s.id)
+
+    let result = try sbd.removeDone(["snope1", s.id])
+
+    let skipped = try #require(skip(result["skipped"], "snope1"), Comment(rawValue: result.text))
+    #expect(skipped["name"]?.string == "snope1")
+    #expect(skipped["reason"]?.string == "snope1 no longer exists")
+  }
+
+  /// A target that sbd removed after the preview is skipped with the name that sbd recorded when it removed it.
+  @Test func confirmedRemovalNamesATargetThatWasRemovedByItsRecordedName() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let gone = try sbd.new(name: "zsh-startup-for-switchboard")
+    let s = try sbd.worktreeSession(repo, branch: "haacked/done")
+    try sbd.markDone(s.id)
+    try sbd.sb("rm", gone.id)
+
+    let result = try sbd.removeDone([gone.id, s.id])
+
+    #expect(removed(result) == [s.id])
+    let skipped = try #require(skip(result["skipped"], gone.id), Comment(rawValue: result.text))
+    #expect(skipped["name"]?.string == "zsh-startup-for-switchboard")
+    #expect(skipped["reason"]?.string == "zsh-startup-for-switchboard (\(gone.id)) no longer exists")
+  }
+
+  /// sbd loads the recorded names when it starts, so a removal before a restart still has its name after it.
+  @Test func confirmedRemovalNamesATargetThatWasRemovedBeforeARestart() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let gone = try sbd.new(name: "zsh-startup-for-switchboard")
+    try sbd.sb("rm", gone.id)
+    sbd.stopSbd()
+    try sbd.startSbd()
+    let s = try sbd.worktreeSession(repo, branch: "haacked/done")
+    try sbd.markDone(s.id)
+
+    let result = try sbd.removeDone([gone.id, s.id])
+
+    #expect(removed(result) == [s.id])
+    let skipped = try #require(skip(result["skipped"], gone.id), Comment(rawValue: result.text))
+    #expect(skipped["name"]?.string == "zsh-startup-for-switchboard")
+    #expect(skipped["reason"]?.string == "zsh-startup-for-switchboard (\(gone.id)) no longer exists")
+  }
+
   @Test func confirmedRemovalAccountsForEveryTarget() throws {
     let sbd = try Instance()
     let repo = try sbd.repoWithOrigin()
@@ -677,7 +727,7 @@ private func parse(_ r: CommandResult) throws -> JSON {
     try s.sbd.advanceClock(1)
     try s.sbd.writeSbScript("preview", ["rm", "--done", "--worktree", "--json"])
     try s.sbd.writeSbScript("confirmed", ["rm", "--done", "--worktree", "--yes", "--json"])
-    let refusal = insideRefusal("sb rm --worktree", a.id)
+    let refusal = insideRefusal("sb rm --worktree", a)
 
     try s.sbd.typeInShell(terminals, "sh \"$SB_HOME/preview.sh\"")
     let preview = try s.sbd.scriptResult("preview")
@@ -732,7 +782,7 @@ private func parse(_ r: CommandResult) throws -> JSON {
     let result = try #require(response["result"], Comment(rawValue: response.text))
     #expect(removed(result).isEmpty)
     let reason = try #require(skip(result["skipped"], a.id)?["reason"]?.string, Comment(rawValue: result.text))
-    #expect(reason.contains(insideRefusal("sb rm --worktree", a.id)), Comment(rawValue: reason))
+    #expect(reason.contains(insideRefusal("sb rm --worktree", a)), Comment(rawValue: reason))
     #expect(try sbd.intact(a))
     #expect(try sbd.branchExists(repo, "haacked/inside"))
     #expect(Processes.exists(claude), "sbd ended a's claude")

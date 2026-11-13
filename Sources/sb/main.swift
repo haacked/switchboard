@@ -7,6 +7,8 @@ let usage = """
   Sessions:
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
+    ls --removed                  list the sessions that sbd removed, newest
+                                  first, with the name each had
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
         [--model M] [--account A] [--group G] [--no-auto] [--host H]
                                   start a session in the folder, or in a new
@@ -670,6 +672,16 @@ if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].
 switch command {
 case "hook":
   hook()
+// A removed session has no org, so `--removed` ignores `--org` and `--local`.
+case "ls" where a.switches.contains("--removed"), "list" where a.switches.contains("--removed"):
+  let result = call("removed-ls")
+  if a.json {
+    printJSON(result)
+  } else {
+    for r in decode(result, as: [RemovedSession].self) {
+      print("\(r.id)  \(r.name)  removed \(ago(r.removed)) ago".printable)
+    }
+  }
 case "ls", "list":
   let result = call("ls")
   var filter = OrgFilter(list: (a.allValues["--org"] ?? []).joined(separator: ","))

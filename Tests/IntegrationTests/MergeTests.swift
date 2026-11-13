@@ -180,7 +180,7 @@ extension Instance {
     try writer.close()
     merge.waitUntilExit()
     #expect(removed.status != 0)
-    #expect(removed.stderr.contains("is merging its PR"))
+    #expect(removed.stderr.contains("\(s.name) (\(s.id)) is merging its PR"), Comment(rawValue: removed.stderr))
     #expect(merge.terminationStatus == 0)
     #expect(try sbd.get(s.id).id == s.id)
   }
