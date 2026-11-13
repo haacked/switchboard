@@ -291,7 +291,7 @@ let usage = """
                                   next step on their own, or show what holds
                                   each one back. Off by default
     activity [on|off|status]      record how long each resume takes, in a local
-                                  log that sbd keeps 30 days. Off by default
+                                  log that sbd keeps \(ActivityLog.retentionMs / Attention.dayMs) days. Off by default
     activity report [--since 3d]  summarize the activity log
     activity clear                delete the activity log
     live [--set N]                list the sessions whose claude runs and the

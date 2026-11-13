@@ -31,7 +31,7 @@ extension Service {
   /// session's facts before the SessionStart, so only the first SessionStart after a resume counts.
   func recordResumeReady(_ id: String, _ facts: SessionFacts, at t: Int64) {
     guard activityOn, let trigger = facts.lastResumeTrigger, let launch = facts.lastLaunch,
-      (facts.lastStart ?? 0) < launch
+      !facts.startedSinceLaunch
     else { return }
     let event = ActivityEvent(
       t: t, kind: "resume.ready", session: id,

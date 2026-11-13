@@ -30,7 +30,9 @@ private func activityReport(_ a: Args) {
   let result = call("activity-report", args)
   if a.json { return printJSON(result) }
   let report = decode(result, as: ActivityReport.self)
-  let window = report.since.map { "since \(Wait.formatTime($0))" } ?? "in the last 30 days"
+  let window =
+    report.since.map { "since \(Wait.formatTime($0))" }
+    ?? "in the last \(ActivityLog.retentionMs / Attention.dayMs) days"
   print("the activity log is \(report.enabled ? "on" : "off"), with \(report.events) events \(window)")
   guard !report.resumes.isEmpty else { return print("it holds no resumes") }
   print("")

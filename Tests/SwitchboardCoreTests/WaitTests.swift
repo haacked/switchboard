@@ -286,7 +286,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
 
   @Test(arguments: [
     "", "soon", "2h30m", "12x", "-2h", "h", "2026-13-01", "2026-02-30", "2026-10-26T25:00", "2026-10-26T09:60",
-    "99999999999999999w", "9223372036854775807s",
+    "99999999999999999w", "9223372036854775807s", "9223372036854775s",
   ])
   func refusesWhatIsNotATime(_ text: String) {
     #expect(Wait.parseTime(text, now: fixedNow, zone: utc) == nil)

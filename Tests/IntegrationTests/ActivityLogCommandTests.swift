@@ -81,6 +81,19 @@ extension Instance {
     #expect(try sbd.activityStatus().events == 3)
   }
 
+  /// A message that a session sends to itself counts as the user's `send`.
+  @Test(arguments: [true, false])
+  func aMessageFromAnotherSessionResumesWithTheSessionTrigger(fromAnother: Bool) throws {
+    let sbd = try Instance()
+    let s = try stoppedSession(sbd)
+    let sender = try fromAnother ? sbd.new(prompt: "hello", name: "sender").id : s.id
+
+    try sbd.sb(["send", s.id, "from a session"], env: ["SB_SESSION_ID": sender, "CLAUDECODE": "1"])
+
+    try sbd.waitFor("the resume event") { try !sbd.triggers(s.id).isEmpty }
+    #expect(try sbd.triggers(s.id) == [fromAnother ? "session" : "send"])
+  }
+
   @Test func aStartThatQueuedBehindTheCapKeepsItsTrigger() throws {
     let sbd = try Instance(config: ["liveCap": 1])
     let s = try stoppedSession(sbd)
@@ -88,10 +101,25 @@ extension Instance {
     try sbd.waitFor(other.id, "the other reply") { $0.lastReply == "Done: busy" }
     try sbd.sb("activity", "on")
 
-    try sbd.sb("open", s.id)
+    try sbd.sb("send", s.id, "queued")
     #expect(try sbd.events(s.id).contains { $0.kind == "start-queued" })
 
     // sbd stops the idle session to make room for the queued start.
+    try sbd.waitForResumes(.send)
+    #expect(try sbd.triggers(s.id) == ["send"])
+  }
+
+  @Test func theUserOpeningAQueuedStartCreditsItToTheUser() throws {
+    let sbd = try Instance(config: ["liveCap": 1])
+    let s = try stoppedSession(sbd)
+    let other = try sbd.new(prompt: "busy", name: "other")
+    try sbd.waitFor(other.id, "the other reply") { $0.lastReply == "Done: busy" }
+    try sbd.sb("activity", "on")
+
+    try sbd.sb(["send", s.id, "from another session"], env: ["SB_SESSION_ID": other.id, "CLAUDECODE": "1"])
+    #expect(try sbd.events(s.id).contains { $0.kind == "start-queued" })
+    try sbd.sb("open", s.id)
+
     try sbd.waitForResumes(.open)
     #expect(try sbd.triggers(s.id) == ["open"])
   }
@@ -139,11 +167,14 @@ extension Instance {
     try sbd.sb("activity", "on")
     try sbd.sb("resume", s.id)
     try sbd.waitFor("the resume event") { try sbd.triggers(s.id) == ["resume"] }
+    // The advance stays under the 10 s after which the tick records `running` without a SessionStart.
+    try sbd.advanceClock(4_000)
 
     let conversation = sameConversation ? s.claudeSessionId : UUID().uuidString.lowercased()
     try postSessionStart(sbd, s.id, claudeSessionId: conversation, source: "resume")
 
     #expect(try sbd.activityStatus().events == (sameConversation ? 1 : 0))
+    if sameConversation { #expect(try sbd.waitForResumes(.resume).maxMs >= 4_000) }
   }
 
   @Test func aFreshStartIsNotAResume() throws {
@@ -156,10 +187,11 @@ extension Instance {
     #expect(try sbd.activityStatus().events == 0)
   }
 
-  @Test func aReportRefusesADurationPastTheClock() throws {
+  @Test(arguments: [1e19, -1])
+  func aReportRefusesADurationThatIsNotAWholeNumberOfMs(durationMs: Double) throws {
     let sbd = try Instance()
 
-    #expect(throws: (any Error).self) { try sbd.client.call("activity-report", ["durationMs": 1e19]) }
+    #expect(throws: (any Error).self) { try sbd.client.call("activity-report", ["durationMs": .number(durationMs)]) }
     #expect(try sbd.client.call("ping")["pid"] != nil)
   }
 

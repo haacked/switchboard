@@ -33,7 +33,7 @@ public enum LaunchTrigger: String, Codable, Sendable, CaseIterable {
   public var userCaused: Bool {
     switch self {
     case .open, .send, .resume, .create, .followup, .card, .decision, .group, .merge: return true
-    default: return false
+    case .session, .notice, .wait, .dependency, .autoContinue, .chat, .mcp, .pending: return false
     }
   }
 }

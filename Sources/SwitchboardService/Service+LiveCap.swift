@@ -56,6 +56,9 @@ extension Service {
       record(
         id, "start-queued",
         ["live": .number(Double(liveCount(onHost: host))), "cap": .number(Double(liveCap(onHost: host)))])
+    } else if trigger.userCaused, entries[id]?.queued?.trigger.userCaused == false {
+      // The user now waits on the queued start, so the activity log records the user's trigger.
+      entries[id]?.queued?.trigger = trigger
     }
     if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
   }
