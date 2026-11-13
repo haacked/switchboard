@@ -34,9 +34,13 @@ extension Instance {
 
   /// An idle session on screen, which sbd never stops to make room. `sb stop`
   /// ends its stub claude at once. The stub runs a tool call to its end first.
-  /// Call the returned function to take it off screen.
-  func onScreenSession(_ sbd: Instance, name: String, ticking: Bool = false) throws -> (SessionSummary, () -> Void) {
+  /// Call the returned function to take it off screen. With `opened`, the
+  /// session is the one the user opened last, as the app's switch makes it.
+  func onScreenSession(_ sbd: Instance, name: String, ticking: Bool = false, opened: Bool = false) throws -> (
+    SessionSummary, () -> Void
+  ) {
     let s = try idleSession(sbd, name: name, ticking: ticking)
+    if opened { try sbd.sb("open", s.id) }
     let detach = try sbd.attach(s.id)
     return (try waitFor(sbd, s.id, "\(name) on screen", ticking: ticking) { $0.attached }, detach)
   }
@@ -771,10 +775,7 @@ extension Instance {
   @Test func switchingFromAnIdleSessionStopsIt() throws {
     let sbd = try jumpInstance(cap: 1)
     let y = try stoppedSession(sbd, name: "y", ticking: true)
-    let x = try idleSession(sbd, name: "x", ticking: true)
-    try sbd.sb("open", x.id)
-    let detach = try sbd.attach(x.id)
-    try waitFor(sbd, x.id, "x on screen", ticking: true) { $0.attached }
+    let (x, detach) = try onScreenSession(sbd, name: "x", ticking: true, opened: true)
     detach()
     try waitFor(sbd, x.id, "x off screen", ticking: true) { !$0.attached }
 

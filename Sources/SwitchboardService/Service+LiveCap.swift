@@ -48,7 +48,6 @@ extension Service {
     }
     for id in plan.starts {
       entries[id]?.queuedSince = nil
-      entries[id]?.jumpedAt = nil
       do {
         try startClaude(id, prompt: nil)
       } catch {
