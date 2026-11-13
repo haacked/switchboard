@@ -34,7 +34,7 @@ func reaped(_ home: String) -> Bool {
     let s = try sbd.newInADialog()
     let t = try sbd.client.terminals(s.id)
     #expect(try runCommand(t.tmux, ["-S", t.socket, "kill-server"]).status == 0)
-    try sbd.waitFor("the stub to exit") { processes(matching: sbd.home.claudeSettings).isEmpty }
+    try sbd.waitFor("the stub to exit") { processes(matching: sbd.home.claudeSettings(s.id)).isEmpty }
     try sbd.waitFor("the held hook to end") { !sbd.heldHookRuns() }
   }
 
