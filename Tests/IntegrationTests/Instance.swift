@@ -676,14 +676,34 @@ extension Instance {
     let sbd = try Instance(
       config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 }, startingSbd: false)
     try sbd.prepareBox()
+    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+    var folders: [String] = []
     if boxBin {
       try FileManager.default.createDirectory(atPath: sbd.boxBin, withIntermediateDirectories: true)
-      let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-      sbd.sbdEnvironment["PATH"] = "\(sbd.boxBin):\(path)"
-      sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = "\(sbd.boxBin):\(path)"
+      folders.append(sbd.boxBin)
     }
+    if let python = Instance.python {
+      let folder = "\(sbd.home.path)/python-bin"
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(atPath: "\(folder)/python3", withDestinationPath: python)
+      folders.append(folder)
+    }
+    let first = folders.map { "\($0):" }.joined()
+    sbd.sbdEnvironment["PATH"] = first + path
+    if boxBin { sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = first + path }
     return sbd
   }
+
+  /// The interpreter that `python3` on the PATH runs. The ssh stub and the hooks on the box start python3 many
+  /// times in each test. A version manager's shim, such as pyenv's, adds about 0.4 s to each start, so a remote
+  /// sbd finds this interpreter first on its PATH.
+  static let python: String? = {
+    guard let found = findExecutable("python3"),
+      let r = try? runCommand(found, ["-c", "import sys; print(sys.executable)"]), r.status == 0
+    else { return nil }
+    let path = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    return path.hasPrefix("/") ? path : nil
+  }()
 
   /// Creates the box's home. The claude stub keeps its transcripts in `$SB_HOME/claude` when CLAUDE_CONFIG_DIR is
   /// unset, which is `<box home>/.sb/claude` for a remote pane. sbd looks for a remote transcript under
@@ -1070,7 +1090,7 @@ extension Instance {
       try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/\(name)")
     }
     var programs = Instance.gatedPrograms
-    let python = try #require(findExecutable("python3"), "python3 is not installed")
+    let python = try #require(Instance.python ?? findExecutable("python3"), "python3 is not installed")
     programs["python3"] = python
     for (name, path) in programs {
       try write(
