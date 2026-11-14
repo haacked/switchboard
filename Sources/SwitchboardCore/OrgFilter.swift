@@ -52,6 +52,11 @@ public struct OrgFilter: Equatable, Sendable {
     return keys.contains(key)
   }
 
+  /// Whether the filter shows an issue or PR in `repo`, an owner/name.
+  public func shows(repo: String) -> Bool {
+    isAll || keys.contains(GitHub.ownerAndName(repo).owner.lowercased())
+  }
+
   public mutating func insert(_ key: String) {
     keys.insert(key.lowercased())
   }

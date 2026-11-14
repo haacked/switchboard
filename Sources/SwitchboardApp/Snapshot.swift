@@ -4,7 +4,7 @@ import SwiftUI
 import SwitchboardCore
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_SHEET_GROUP=<name or id> opens it instead with that group chosen once sessions are listed, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and opens that session's hover card a second after its card appears, because the card otherwise opens only on a real hover, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, SB_HISTORY=<place,place> goes to each place in turn once sbd lists the sessions, where a place is a session id, `inbox`, or `board`, SB_HISTORY_BACK=<n> then goes back n times, SB_HISTORY_MENU=open then opens Recent Places, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_ISSUES starts on the Issues view, and SB_ISSUES=setup also opens its setup sheet, SB_BOARD_CLICK starts on the Board and clicks that session's card after 2 seconds, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_SHEET_GROUP=<name or id> opens it instead with that group chosen once sessions are listed, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and opens that session's hover card a second after its card appears, because the card otherwise opens only on a real hover, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, SB_HISTORY=<place,place> goes to each place in turn once sbd lists the sessions, where a place is a session id, `inbox`, `board`, or `issues`, SB_HISTORY_BACK=<n> then goes back n times, SB_HISTORY_MENU=open then opens Recent Places, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -30,7 +30,9 @@ enum Snapshot {
       if let id = env["SB_SELECT"] { model.selection = id }
       if let id = env["SB_INBOX"] { model.inboxFocus = id }
       if env["SB_BOARD_CLICK"] != nil || hoverSession != nil { model.show(.board) }
+      if env["SB_ISSUES"] != nil { model.show(.issues) }
     }
+    if env["SB_ISSUES"] == "setup" { model.showingIssueSetup = true }
     if let id = env["SB_BOARD_CLICK"] {
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { model.openFromBoard(id) }
       if env["SB_JUMP"] != nil {
@@ -102,12 +104,13 @@ enum Snapshot {
   }
 
   /// Goes to each place in turn as the user would, once sbd lists the sessions, so each one records a history
-  /// entry. A place is a session id, `inbox`, or `board`. Then it goes back `back` times and opens Recent Places.
+  /// entry. A place is a session id, `inbox`, `board`, or `issues`. Then it goes back `back` times and opens Recent Places.
   private static func visit(_ places: [String], _ model: BoardModel, back: Int, openList: Bool) {
     var steps: [@MainActor @Sendable () -> Void] = places.map { place in
       switch place {
       case "inbox": { model.show(.inbox) }
       case "board": { model.show(.board) }
+      case "issues": { model.show(.issues) }
       default: { model.selection = place }
       }
     }

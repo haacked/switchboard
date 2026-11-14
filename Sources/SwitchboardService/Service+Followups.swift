@@ -63,7 +63,7 @@ extension Service {
       try insertFollowup(
         followup, title: args["title"]?.string, branch: args["branch"]?.string, model: args["model"]?.string,
         parent: args["parent"]?.string, group: args["group"]?.string, account: args["account"]?.string,
-        autoMode: args["autoMode"]?.bool, planMode: args["planMode"]?.bool)
+        autoMode: args["autoMode"]?.bool, planMode: args["planMode"]?.bool, manualMode: args["manualMode"]?.bool)
     }
   }
 
@@ -71,7 +71,8 @@ extension Service {
   /// that sbd resolves. It runs on the state queue.
   func insertFollowup(
     _ followup: Followup, title: String? = nil, branch: String? = nil, model: String? = nil, parent ref: String? = nil,
-    group: String? = nil, account: String? = nil, autoMode: Bool? = nil, planMode: Bool? = nil
+    group: String? = nil, account: String? = nil, autoMode: Bool? = nil, planMode: Bool? = nil,
+    manualMode: Bool? = nil
   ) throws -> SessionSummary {
     let parent = try ref.map { try lookup(["session": .string($0)]) }
     var session = Session(
@@ -84,8 +85,7 @@ extension Service {
     // takes the active account when it starts.
     session.claudeConfigDir = try accountForNew(named: account, parent: parent, for: session)
     session.followup = followup
-    session.autoMode = autoMode ?? config.autoMode
-    session.planMode = planMode
+    session.setStartModes(auto: autoMode, plan: planMode, manual: manualMode, defaultAuto: config.autoMode)
     try save(session)
     return summary(session.id)
   }
@@ -215,7 +215,7 @@ extension Service {
     }
     if let configured { throw APIError("repos sets \(repository) to \(configured), which isn't a folder") }
     throw APIError(
-      "can't find a checkout of \(repository) under \(config.repoRoots.joined(separator: ", ")). \(hint), or add it to repos in \(home.config)"
+      "\(Followup.missingCheckout) \(repository) under \(config.repoRoots.joined(separator: ", ")). \(hint), or add it to repos in \(home.config)"
     )
   }
 
