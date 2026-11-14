@@ -75,14 +75,23 @@ import Testing
     let sbd = try Instance()
     let s = try sbd.new(prompt: "slow 30")
     let working = try sbd.waitFor(s.id, "the tool call") { $0.state == .working && $0.claudePid != nil }
-    try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
+    let stub = try #require(working.claudePid)
+    // The stub starts the sleep only after the PreToolUse hook returns. A SIGTERM before then ends the stub at once
+    // even if the sleep runs in the foreground.
+    let sleepPid = try sbd.waitFor(
+      "the tool call's sleep",
+      fetch: {
+        let found = try runCommand("/usr/bin/pgrep", ["-P", "\(stub)", "-f", "^sleep 30$"]).stdout
+        return pid_t(found.split(separator: "\n").first ?? "")
+      }, until: { _ in true })
     let mark = try sbd.lastEventId(s.id)
 
-    kill(pid_t(working.claudePid!), SIGTERM)
+    kill(pid_t(stub), SIGTERM)
 
-    try sbd.waitFor("the stub to exit before its 30 s tool call ends", timeout: 5) {
-      try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
-        .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+    try sbd.waitFor("the stub and its sleep to exit before the 30 s tool call ends", timeout: 5) {
+      try kill(sleepPid, 0) != 0
+        && runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
+          .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
     }
     try sbd.waitFor("the SessionEnd hook") {
       try sbd.events(s.id).contains { $0.id > mark && $0.kind == "SessionEnd" }
