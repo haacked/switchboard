@@ -58,8 +58,9 @@ extension Service {
 
   /// The verdict that the app and `sb` show for `id`, given the verdict that
   /// `evaluate` gave. Every caller goes through here, so the acknowledgment
-  /// rules read the same settings everywhere.
-  func shown(_ id: String, _ verdict: Verdict) -> Verdict {
-    Attention.shown(verdict, entries[id]!.facts, now: nowMs(), acknowledgedMs: config.recheck.acknowledgedMs)
+  /// rules read the same settings everywhere. `facts` replaces the session's facts, as for a host's view.
+  func shown(_ id: String, _ verdict: Verdict, facts: SessionFacts? = nil) -> Verdict {
+    Attention.shown(
+      verdict, facts ?? entries[id]!.facts, now: nowMs(), acknowledgedMs: config.recheck.acknowledgedMs)
   }
 }

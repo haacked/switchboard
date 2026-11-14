@@ -229,7 +229,7 @@ final class HostCLIRunner: @unchecked Sendable {
     }
     let status =
       process.terminationReason == .uncaughtSignal ? 128 + process.terminationStatus : process.terminationStatus
-    if status == 65 || (status == 71 && run.stdout.isEmpty) { throw noSandbox }
+    if status == EX_DATAERR || (status == EX_OSERR && run.stdout.isEmpty) { throw noSandbox }
     return HostCLIOutput(status: status, stdout: run.stdout, stderr: run.stderr)
   }
 

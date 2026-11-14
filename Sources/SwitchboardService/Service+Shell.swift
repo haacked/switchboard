@@ -6,7 +6,7 @@ import SwitchboardCore
 /// opens one. The Claude pane never changes here.
 extension Service {
   /// The `shell` request: `open` true starts the shell pane, and false ends it.
-  func shellRequest(_ args: JSON) throws -> JSON {
+  func shellRequest(_ args: JSON, origin: RequestOrigin = .mac) throws -> JSON {
     let id = try lookup(args)
     guard let open = args["open"]?.bool else { throw APIError("shell needs open true or false") }
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
@@ -17,7 +17,7 @@ extension Service {
     } else {
       try closeShell(id)
     }
-    return try JSON(encoding: summary(id))
+    return try JSON(encoding: summary(id, for: origin))
   }
 
   /// Records the shell as closed and ends its tmux session, which also ends

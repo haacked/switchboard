@@ -551,18 +551,19 @@ public final class Service {
       if let trunkProblem { ping["trunk"] = .string(trunkProblem) }
       return .object(ping)
     case "ls":
-      return try JSON(encoding: summaries().filter { $0.state != .notStarted && origin.reaches($0.host) })
+      return try JSON(
+        encoding: summaries(for: origin).filter { $0.state != .notStarted && origin.reaches($0.host) })
     case "get":
-      return try JSON(encoding: summary(try lookup(args)))
+      return try JSON(encoding: summary(try lookup(args), for: origin))
     case "terminals":
       return try JSON(encoding: terminals(try lookup(args)))
     case "shell":
-      return try shellRequest(args)
+      return try shellRequest(args, origin: origin)
     case "open":
       let id = try lookup(args)
       try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "send":
       let id = try lookup(args)
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
@@ -582,23 +583,23 @@ public final class Service {
     case "stop":
       let id = try lookup(args)
       try stop(id, reason: "asked")
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "resume":
       let id = try lookup(args)
       try launch(id, prompt: args["prompt"]?.string, trigger: .resume)
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "done":
       let id = try lookup(args)
       let done = args["done"]?.bool ?? true
       try update(id) { $0.done = done }
       record(id, done ? "done" : "undone")
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "ack":
       return try acknowledgeRequest(args)
     case "wait", "clear-wait", "resolve-wait":
-      return try waitRequest(op, args)
+      return try waitRequest(op, args, origin: origin)
     case "note", "remove-note", "resolve-note":
-      return try noteRequest(op, args)
+      return try noteRequest(op, args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "manager-ls":
@@ -609,7 +610,7 @@ public final class Service {
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
       try update(id) { $0.name = name }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "issue":
       let id = try lookup(args)
       let session = entries[id]!.session
@@ -621,7 +622,7 @@ public final class Service {
       guard clear != (text != nil) else { throw APIError("issue needs an issue or clear, not both") }
       let issue = try text.map(IssueRef.parse)
       try update(id) { $0.issue = issue }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
       var sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
@@ -631,11 +632,12 @@ public final class Service {
       }
       let limit = args["limit"]?.int ?? Event.defaultLimit
       // Without `since`, the newest events, so `sb events` shows what just happened.
-      if let since = args["since"]?.int {
-        return try JSON(
-          encoding: store.events(since: Int64(since), session: session, sessions: sessions, limit: limit))
-      }
-      return try JSON(encoding: store.events(session: session, sessions: sessions, limit: limit, newest: true))
+      let events =
+        try args["since"]?.int.map {
+          try store.events(since: Int64($0), session: session, sessions: sessions, limit: limit)
+        } ?? store.events(session: session, sessions: sessions, limit: limit, newest: true)
+      guard case .remote(let host) = origin else { return try JSON(encoding: events) }
+      return try JSON(encoding: events.map { event($0, shownTo: host) })
     case "answer":
       return try answer(args, origin: origin)
     case "screen":
@@ -2198,25 +2200,30 @@ public final class Service {
 
   // MARK: Summaries
 
-  func summaries() -> [SessionSummary] {
+  func summaries(for origin: RequestOrigin = .mac) -> [SessionSummary] {
     let rowFollowups = planRowFollowups()
-    return entries.keys.map { summary($0, rowFollowups: rowFollowups) }.sorted {
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups, for: origin) }.sorted {
       $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
     }
   }
 
-  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
+  /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
+  /// data only where `showsGitHub` allows it.
+  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil, for origin: RequestOrigin = .mac)
+    -> SessionSummary
+  {
     let e = entries[id]!
-    let verdict = shown(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+    let facts = shownFacts(id, for: origin)
+    let verdict = shown(id, Attention.evaluate(e.session, facts, now: nowMs(), stateOf: lastState), facts: facts)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: e.branch,
-      claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: e.facts.stateSince,
-      lastActivity: e.facts.lastActivity,
-      live: e.facts.live, claudePid: claudePid(id),
-      attached: attached(id), lastReply: e.facts.lastReply,
-      waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
-      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
+      claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: facts.stateSince,
+      lastActivity: facts.lastActivity,
+      live: facts.live, claudePid: claudePid(id),
+      attached: attached(id), lastReply: facts.lastReply,
+      waits: s.waits ?? [], notes: s.notes ?? [], cards: facts.cards,
+      openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)
     if s.kind == .work {
       out.checkout = checkout(s)
@@ -2228,7 +2235,7 @@ public final class Service {
     out.mcp = s.mcp
     out.kind = s.kind
     out.chat = s.chat
-    let shown = Triage.itemAndDecisions(e.facts, verdict, kind: s.kind)
+    let shown = Triage.itemAndDecisions(facts, verdict, kind: s.kind)
     out.triage = shown.item
     if out.triage != nil {
       let details = Triage.details(for: out)
@@ -2237,25 +2244,25 @@ public final class Service {
     }
     out.decisions = shown.decisions
     if shown.decisionsSent { out.decisionsSent = true }
-    out.decisionsDelivery = e.facts.decisionsDelivery
+    out.decisionsDelivery = facts.decisionsDelivery
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir
-    out.cleanup = e.facts.cleanup
+    out.cleanup = facts.cleanup
     out.group = s.group
     if let group = s.group.flatMap({ groups[$0] }) {
       out.groupName = group.name
       out.groupDescription = group.description
     }
-    if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
+    if !facts.dependencies.isEmpty { out.dependencies = facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
-    out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
-    out.mergeError = e.facts.mergeError
+    out.docket = s.docket.map { DocketSummary($0, facts.docket) }
+    out.mergeError = facts.mergeError
     if verdict.acknowledged { out.acknowledged = true }
     if verdict.requested { out.requested = true }
-    out.permissionMode = e.facts.permissionMode
-    out.pr?.mergeMethod = e.facts.mergeMethod
-    if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
+    out.permissionMode = facts.permissionMode
+    out.pr?.mergeMethod = facts.mergeMethod
+    if verdict.state == .readyToMerge, let since = facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil {
       out.reason = queuedReason(onHost: e.session.host)
       out.queued = true
@@ -2269,12 +2276,12 @@ public final class Service {
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
-    if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
+    if verdict.state == .readyForReview, let ready = facts.readySince { out.since = ready }
     if s.kind == .work && s.docket == nil {
       out.board = BoardColumn.place(
         state: verdict.state, acknowledged: verdict.acknowledged, stateSince: out.since, waits: s.waits ?? [],
-        facts: e.facts, created: s.created)
-      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+        facts: facts, created: s.created)
+      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: facts.pr, branch: e.branch) }
     }
     return out
   }

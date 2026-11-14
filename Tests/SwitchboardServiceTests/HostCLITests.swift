@@ -479,7 +479,7 @@ extension HostCLIRunner {
       #expect(seconds >= 0.4 && seconds < 5, "the run took \(seconds) s")
       #expect(text(output.stdout) == "before")
       #expect(text(output.stderr).hasPrefix("before-err"))
-      #expect(output.stderr.count > "before-err".utf8.count, "the runner added no reason to stderr")
+      #expect(text(output.stderr).contains("after 0.5 s"), "\(text(output.stderr))")
     }
   }
 
@@ -514,7 +514,7 @@ extension HostCLIRunner {
       #expect(seconds >= 0.3 && seconds < 4, "the run took \(seconds) s")
       #expect(text(output.stdout) == "before")
       #expect(text(output.stderr).hasPrefix("before-err"))
-      #expect(output.stderr.count > "before-err".utf8.count, "the runner added no reason to stderr")
+      #expect(text(output.stderr).contains("closed its connection"), "\(text(output.stderr))")
     }
   }
 

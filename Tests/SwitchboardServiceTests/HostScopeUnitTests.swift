@@ -43,11 +43,12 @@ private let twoHosts: [String: JSON] = [
 /// A service that holds a local session `l1`, mini's `m1`, and other's `o1`. Its order window is `windowMs`. No
 /// link connects unless a request waits for its host. `sbPath` is the `sb` that a `cli` request runs.
 private func withSessions(
-  windowMs: Int64 = 20, sbPath: String = "/usr/bin/true", _ body: (Service) throws -> Void
+  windowMs: Int64 = 20, sbPath: String = "/usr/bin/true", hosts: [String: JSON] = twoHosts,
+  _ body: (Service) throws -> Void
 ) throws {
   // A request that a missing guard lets through runs no claude or tmux on this Mac.
   let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
-  try withHostService(hosts: twoHosts, config: config, sbPath: sbPath) { service, _ in
+  try withHostService(hosts: hosts, config: config, sbPath: sbPath) { service, _ in
     service.queue.sync {
       service.hostEventWindowMs = windowMs
       service.entries["l1"] = Service.Entry(session: session("l1", host: nil, name: "local"))
@@ -779,6 +780,245 @@ private func ids(_ answer: Response) -> [String] {
 
       #expect(!answer.ok)
       #expect(try service.scopeState() == before)
+    }
+  }
+}
+
+/// mini's `repos` name `Secret/Listed`. A PR in `secret/vault`, which they don't name, was read with this Mac's
+/// GitHub login, so no copy of it may reach mini.
+private let listedHosts: [String: JSON] = [
+  "mini": ["kind": "ssh", "destination": .string(LinkBench.destination), "repos": ["Secret/Listed": "~/listed"]],
+  "other": ["kind": "ssh", "destination": "haacked@other.local"],
+]
+
+/// The text that only the unlisted PR carries.
+private let unlistedMarks = ["secret/vault", "Vault sentinel title", "#4242", "pull/4242"]
+
+private func pullRequest(listed: Bool) throws -> JSON {
+  let (repo, number, title) =
+    listed ? ("secret/listed", 77, "Listed title") : ("secret/vault", 4242, "Vault sentinel title")
+  return try JSON(
+    encoding: PullRequest(
+      id: "PR_\(number)", number: number, url: "https://github.com/\(repo)/pull/\(number)", repo: repo, title: title,
+      reviewDecision: .approved, checks: "pass"))
+}
+
+extension Service {
+  /// Records a `pr` event for the session, as the poller does. It sets the session's PR and logs the event.
+  fileprivate func givePR(_ id: String, listed: Bool) throws {
+    let pr = try pullRequest(listed: listed)
+    queue.sync {
+      entries[id]?.facts.prompts = 1
+      _ = record(id, "pr", ["pr": pr, "comments": []])
+    }
+  }
+}
+
+private func text(_ answer: Response) -> String {
+  (answer.result?.text ?? "") + (answer.error ?? "")
+}
+
+/// Every answer that mini gets leaves out what this Mac's GitHub login read for a session whose repo mini's
+/// `repos` don't name. sbd still polls that PR and shows it on this Mac.
+@Suite struct HostGitHubScopeTests {
+  // MARK: Summaries
+
+  @Test(.timeLimit(.minutes(1)), arguments: ownRequests)
+  func noAnswerToTheHostCarriesAnUnlistedPR(op: String, args: [String: JSON]) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "\(op) answered \(mark)") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(3)), arguments: ownHostRequests)
+  func noAnswerThatWaitsForTheHostCarriesAnUnlistedPR(op: String, args: [String: JSON]) throws {
+    try withReadySessions { service, _, _ in
+      try service.givePR("m1", listed: false)
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "\(op) answered \(mark)") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func lsOnTheHostLeavesOutAnUnlistedPRAndKeepsAListedOne() throws {
+    try withSessions(hosts: listedHosts) { service in
+      service.queue.sync { service.entries["m2"] = Service.Entry(session: session("m2", host: "mini")) }
+      try service.givePR("m1", listed: false)
+      try service.givePR("m2", listed: true)
+
+      let answer = service.handle(Request(op: "ls"), origin: .remote("mini"))
+
+      let rows = answer.result?.array ?? []
+      #expect(rows.first { $0["id"] == "m1" }?["pr"] == nil)
+      #expect(rows.first { $0["id"] == "m2" }?["pr"]?["title"] == "Listed title")
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "ls answered \(mark)") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func thisMacStillSeesTheUnlistedPR() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+
+      let get = service.handle(Request(op: "get", args: ["session": "m1"]))
+      let ls = service.handle(Request(op: "ls"))
+
+      #expect(get.result?["pr"]?["title"] == "Vault sentinel title")
+      #expect(ls.result?.array?.first { $0["id"] == "m1" }?["pr"]?["repo"] == "secret/vault")
+    }
+  }
+
+  // MARK: Events
+
+  @Test(.timeLimit(.minutes(1)))
+  func eventsToTheHostLoseTheDataOfAnUnlistedPRAndKeepAListedOne() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      let unlisted = service.handle(Request(op: "events", args: ["session": "m1"]), origin: .remote("mini"))
+      try service.givePR("m1", listed: true)
+      let listed = service.handle(Request(op: "events", args: ["session": "m1"]), origin: .remote("mini"))
+
+      let first = unlisted.result?.array?.first { $0["kind"] == "pr" }
+      #expect(first?["data"] == .object([:]))
+      for mark in unlistedMarks { #expect(!text(unlisted).contains(mark), "events answered \(mark)") }
+      let shown = listed.result?.array?.filter { $0["kind"] == "pr" }.map { $0["data"]?["pr"]?["title"] }
+      #expect(shown == [nil, "Listed title"])
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aGitHubWaitsOutcomeLeavesTheHostsEventsUnlessTheRepoIsListed() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      func resolved(_ kind: Wait.Kind, _ outcome: String) throws {
+        let wait = try JSON(encoding: Wait(id: "w-\(kind.rawValue)", kind: kind, by: .you, created: 1, then: .notify))
+        service.queue.sync { _ = service.record("m1", "wait-resolved", ["wait": wait, "outcome": .string(outcome)]) }
+      }
+      try resolved(.ci, "Vault sentinel title checks passed")
+      try resolved(.date, "the date came")
+
+      let answer = service.handle(Request(op: "events", args: ["session": "m1"]), origin: .remote("mini"))
+      let get = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))
+
+      let resolutions = (answer.result?.array ?? []).filter { $0["kind"] == "wait-resolved" }
+      #expect(resolutions.map { $0["data"]?["wait"]?["id"] } == ["w-ci", "w-date"])
+      #expect(resolutions.map { $0["data"]?["outcome"] } == [nil, "the date came"])
+      for mark in unlistedMarks {
+        #expect(!text(answer).contains(mark), "events answered \(mark)")
+        #expect(!text(get).contains(mark), "get answered \(mark)")
+      }
+    }
+  }
+
+  // MARK: Waits
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["ci", "review", "approval", "merge", "queue"])
+  func aGitHubWaitFromTheHostOnAnUnlistedRepoIsRefused(kind: String) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      let before = try service.scopeState()
+      var args: [String: JSON] = ["session": "m1", "kind": .string(kind), "target": "4242"]
+      if ["review", "approval"].contains(kind) { args["who"] = "bob" }
+
+      let answer = service.handle(Request(op: "wait", args: .object(args)), origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("repos of mini") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aGitHubWaitFromTheHostOnASessionWithNoKnownRepoIsRefused() throws {
+    try withSessions(hosts: listedHosts) { service in
+      let answer = service.handle(
+        Request(op: "wait", args: ["session": "m1", "kind": "ci", "target": "12"]), origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("repos of mini") == true, "\(answer.error ?? "")")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aGitHubWaitFromTheHostOnAListedRepoIsSet() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: true)
+
+      let answer = service.handle(
+        Request(op: "wait", args: ["session": "m1", "kind": "ci", "target": "77"]), origin: .remote("mini"))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      #expect(service.queue.sync { service.entries["m1"]?.session.waits?.map(\.kind) } == [.ci])
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aGitHubWaitFromThisMacOnAnUnlistedRepoIsSet() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+
+      let answer = service.handle(Request(op: "wait", args: ["session": "m1", "kind": "ci", "target": "4242"]))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+    }
+  }
+
+  // MARK: Notices to a parent on the host
+
+  /// mini's `m1` started `m2`, whose PR is in an unlisted repo, and `m3`, whose PR is in a listed one.
+  @Test(.timeLimit(.minutes(1)))
+  func aParentOnTheHostHearsOnlyOfItsChildrensListedPRs() throws {
+    try withSessions(hosts: listedHosts) { service in
+      service.queue.sync {
+        for id in ["m2", "m3"] {
+          var child = session(id, host: "mini")
+          child.parent = "m1"
+          service.entries[id] = Service.Entry(session: child)
+        }
+      }
+      try service.givePR("m2", listed: false)
+      try service.givePR("m3", listed: true)
+
+      let unsent = service.queue.sync { () -> [String] in
+        service.notifyParents(now: nowMs())
+        return service.parentNotices.unsent["m1"] ?? []
+      }
+      let sent = try service.logged().filter { $0.session == "m1" && $0.kind == "sent" }.compactMap {
+        $0.data["text"]?.string
+      }
+      let heard = (sent + unsent).joined(separator: "\n")
+
+      #expect(heard.contains("m3 (m3) opened PR #77"), "\(heard)")
+      for mark in unlistedMarks { #expect(!heard.contains(mark), "\(heard)") }
+    }
+  }
+
+  // MARK: Messages to the host's session
+
+  @Test(.timeLimit(.minutes(1)))
+  func aDependencyMessageReachesTheHostsSessionOnlyForAListedRepo() throws {
+    try withSessions(hosts: listedHosts) { service in
+      service.queue.sync { service.entries["m2"] = Service.Entry(session: session("m2", host: "mini")) }
+      try service.givePR("m1", listed: false)
+      try service.givePR("m2", listed: true)
+      let args: (String) -> JSON = {
+        ["session": .string($0), "message": "secret/vault#4242 merged", "dependencies": []]
+      }
+
+      let unlisted = try service.queue.sync { try service.dependencyResolved(args("m1")) }
+      let listed = Result { try service.queue.sync { try service.dependencyResolved(args("m2")) } }
+
+      #expect(unlisted["id"] == "m1")
+      let sent = try service.logged().filter { $0.kind == "sent" }.map(\.session)
+      #expect(!sent.contains("m1"))
+      // A send to mini's session with no link either records the message or fails trying.
+      if case .success = listed { #expect(sent.contains("m2")) }
     }
   }
 }

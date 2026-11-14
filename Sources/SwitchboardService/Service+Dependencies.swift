@@ -8,10 +8,11 @@ extension Service {
   /// The `dependency-resolved` request, which the GitHub poller sends when a
   /// PR that the session's PR waits on merged or deployed. It sends `message`
   /// to the session, then records `dependencies`. A session marked done gets
-  /// no message.
+  /// no message, and neither does a session on a host that `showsGitHub` keeps from the PR.
   func dependencyResolved(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
-    if let message = args["message"]?.string, entries[id]?.session.done == false {
+    let audience = entries[id]?.session.host.map(RequestOrigin.remote) ?? .mac
+    if let message = args["message"]?.string, entries[id]?.session.done == false, showsGitHub(id, to: audience) {
       _ = try send(id, message, byUser: false, trigger: .dependency)
     }
     record(id, "dependencies", ["dependencies": args["dependencies"] ?? []])

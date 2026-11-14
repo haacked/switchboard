@@ -33,5 +33,12 @@ import Testing
         try sbd.sb("spawn", "--host", "mini", "--repo", "~/sb-box-repo", "--branch", "c", "--prompt", "p", "--json")))
     #expect(byPath["host"] == "mini")
     #expect(byPath["repo"]?.string.map(real) == real(repo))
+
+    // The MCP spawn tool also passes a path for a host as typed.
+    let byTool = try MCPClient(sbd).call(
+      "spawn", ["repository": "~/sb-box-repo", "branch": "d", "prompt": "p", "host": "mini"]
+    ).decode(JSON.self)
+    #expect(byTool["host"] == "mini")
+    #expect(byTool["repo"]?.string.map(real) == real(repo))
   }
 }

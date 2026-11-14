@@ -28,8 +28,8 @@ enum HostScope {
   private static let noteKeys: Set<String> = ["session", "text", "by", "kind", "note"]
   /// The fields of `WaitRequest`, and the keys that `waitRequest` reads for `clear-wait` and `resolve-wait`.
   private static let waitKeys: Set<String> = [
-    "session", "kind", "target", "who", "environment", "service", "state", "until", "note", "then", "by", "wait",
-    "outcome",
+    "session", "kind", "target", "who", "environment", "service", "state", "until", "since", "note", "then", "by",
+    "wait", "outcome",
   ]
 
   /// The ops that a host may send, with the keys that each one reads.
@@ -180,5 +180,97 @@ extension RequestOrigin {
   func reaches(_ host: String?) -> Bool {
     guard case .remote(let origin) = self else { return true }
     return host == origin
+  }
+}
+
+/// What a host may read of the data that this Mac's GitHub login read. A process on the box chooses its session's
+/// repo through the git remote and the transcript that the poller reads, so the poller can read a PR that the box
+/// has no access to. sbd still polls it and shows it on this Mac. Only the copies that reach the box leave it out.
+extension Service {
+  /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it.
+  static let gitHubEventKinds: Set<String> = [
+    "pr", "dependencies", "merge", "cleanup", "worktree", "triage", "digest", MergeBrief.event,
+    ReviewRequestAttempt.event, AutoContinue.eventKind, DraftReplies.targetEvent, DraftReplies.postingEvent,
+    DraftReplies.postedEvent, DraftReplies.failedEvent, DraftReplies.unknownEvent,
+  ]
+
+  /// Whether `host` may read this Mac's GitHub data about `repo`: `repo` is a key of the host's `repos`, compared
+  /// without case as `spawn` compares it. A nil repo is refused.
+  func hostMayRead(_ repo: String?, on host: String) -> Bool {
+    guard let repo = repo?.lowercased() else { return false }
+    return config.hosts[host]?.repos.keys.contains { $0.lowercased() == repo } == true
+  }
+
+  /// Whether a request from `origin` may read the GitHub data of session `id`. A request from this Mac reads all
+  /// of it. A request from host h reads it only for a session on h whose repo h may read. The session's repo is
+  /// its PR's, else the one that its origin remote names. It runs on the state queue.
+  func showsGitHub(_ id: String, to origin: RequestOrigin) -> Bool {
+    guard case .remote(let host) = origin else { return true }
+    guard let e = entries[id], e.session.host == host else { return false }
+    return hostMayRead(e.facts.pr?.repo ?? checkout(e.session).flatMap { repository($0, of: e.session) }, on: host)
+  }
+
+  /// The facts of session `id` as `origin` may read them: without the GitHub data when `showsGitHub` is false.
+  /// What sbd derives from these facts, such as the state, the reason, the Inbox item, and the board column, then
+  /// derives from no PR. It runs on the state queue.
+  func shownFacts(_ id: String, for origin: RequestOrigin) -> SessionFacts {
+    let facts = entries[id]!.facts
+    return showsGitHub(id, to: origin) ? facts : facts.withoutGitHub
+  }
+
+  /// The event as host `host` may read it. An event of `gitHubEventKinds`, or a `wait-resolved` of a wait that
+  /// the GitHub poller resolves, loses its data unless `showsGitHub` holds and any PR that the event names is in a
+  /// repo that the host may read. A `wait-resolved` keeps its wait. It runs on the state queue.
+  func event(_ event: Event, shownTo host: String) -> Event {
+    let waitKind = event.data["wait"].flatMap { try? JSONCoding.convert($0, to: Wait.self) }?.kind
+    let fromGitHub =
+      Self.gitHubEventKinds.contains(event.kind)
+      || (event.kind == "wait-resolved" && waitKind.map(GitHubPoller.waitKinds.contains) == true)
+    guard fromGitHub else { return event }
+    let named = event.data["pr"]?["repo"]
+    if showsGitHub(event.session, to: .remote(host)), named == nil || hostMayRead(named?.string, on: host) {
+      return event
+    }
+    var shown = event
+    shown.data = event.kind == "wait-resolved" ? ["wait": event.data["wait"] ?? .null] : [:]
+    return shown
+  }
+
+  /// Throws when host `host` sets a wait that the GitHub poller resolves on session `id`, and `showsGitHub` keeps
+  /// the host from the session's GitHub data. It runs on the state queue.
+  func requireGitHubWait(_ wait: Wait, on id: String, from host: String) throws {
+    guard GitHubPoller.waitKinds.contains(wait.kind), !showsGitHub(id, to: .remote(host)) else { return }
+    throw APIError(
+      "a \(wait.kind.rawValue) wait from \(host) reads GitHub with this Mac's login, so the session's repo must be in the repos of \(host) in \(home.config)"
+    )
+  }
+}
+
+extension SessionFacts {
+  /// The facts without what this Mac's GitHub login read, and without what sbd derived from it: the PR, its
+  /// comments, dependencies, merge and review-request attempts, the model's briefs, the drafts' targets, the
+  /// cleanup checks, the board moves, and the outcome of a wait that the GitHub poller resolved. The turn summary
+  /// goes too, because its model call read the session's summary with its PR.
+  var withoutGitHub: SessionFacts {
+    var f = self
+    f.pr = nil
+    f.prNumbers = []
+    f.prComments = []
+    f.readySince = nil
+    f.dependencies = []
+    f.mergeBrief = nil
+    f.merge = nil
+    f.reviewRequest = nil
+    f.draftReplies = DraftReplyFacts()
+    f.cleanupChecked = nil
+    f.cleanedUp = nil
+    f.boardSince = nil
+    f.boardBack = nil
+    f.triage = nil
+    if f.waitOutcomeKind.map(GitHubPoller.waitKinds.contains) == true {
+      f.waitOutcome = nil
+      f.waitOutcomeKind = nil
+    }
+    return f
   }
 }

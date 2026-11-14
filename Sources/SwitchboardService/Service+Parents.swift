@@ -19,14 +19,21 @@ extension Service {
       of: session.id, parent: session.parent, followup: session.followup, isKnown: { entries[$0] != nil })
   }
 
+  /// What the child's parent sees of it. A parent on a host sees the child as `showsGitHub` lets that host see it.
   private func mark(_ id: String, now: Int64) -> (mark: ChildMark, reason: String) {
     let e = entries[id]!
+    let facts = shownFacts(id, for: audience(ofChild: e.session))
     let isDocket = e.session.docket != nil
     // Until its first prompt, a child waits for the prompt that started it. A docket row never gets a prompt.
-    if !isDocket, e.facts.prompts == 0, e.facts.lastReply == nil { return (.fresh, "") }
-    let verdict = Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState)
+    if !isDocket, facts.prompts == 0, facts.lastReply == nil { return (.fresh, "") }
+    let verdict = Attention.evaluate(e.session, facts, now: now, stateOf: lastState)
     let needs = isDocket && verdict.state == .needsYou ? verdict.reason : nil
-    return (ChildMark(state: verdict.state, pr: e.facts.pr?.number, needs: needs), verdict.reason)
+    return (ChildMark(state: verdict.state, pr: facts.pr?.number, needs: needs), verdict.reason)
+  }
+
+  /// Where the child's parent runs, as the origin of a request from there.
+  private func audience(ofChild session: Session) -> RequestOrigin {
+    parentOf(session).flatMap { entries[$0]?.session.host }.map(RequestOrigin.remote) ?? .mac
   }
 
   /// Records that the child's parent hears what the child shows now. It
@@ -40,7 +47,9 @@ extension Service {
     return (before, after, reason)
   }
 
-  private func prURL(_ e: Entry) -> String? { e.facts.pr.flatMap { PRSummary($0).link?.absoluteString } }
+  private func prURL(_ id: String) -> String? {
+    shownFacts(id, for: audience(ofChild: entries[id]!.session)).pr.flatMap { PRSummary($0).link?.absoluteString }
+  }
 
   private func hearsNotices(_ parent: String) -> Bool { entries[parent]?.session.kind.hearsChildNotices ?? true }
 
@@ -50,7 +59,7 @@ extension Service {
   func seedParentMarks(now: Int64) {
     for (id, e) in entries where parentOf(e.session) != nil {
       var seeded = mark(id, now: now).mark
-      seeded.heardPRs.formUnion(e.facts.prNumbers)
+      seeded.heardPRs.formUnion(shownFacts(id, for: audience(ofChild: e.session)).prNumbers)
       parentNotices.marks[id] = seeded
     }
     for id in entries.keys where !hearsNotices(id) { parentNotices.heardCounts[id] = otherCounts(id) }
@@ -100,7 +109,7 @@ extension Service {
       guard after != before else { continue }
       parentNotices.unsent[parent, default: []] += ParentNotice.lines(
         name: e.session.name, id: id, before: before, after: after, reason: reason,
-        prURL: prURL(e))
+        prURL: prURL(id))
     }
     parentNotices.marks = parentNotices.marks.filter { children.contains($0.key) }
     parentNotices.heardCounts = parentNotices.heardCounts.filter { entries[$0.key] != nil }
@@ -116,7 +125,7 @@ extension Service {
       guard let e = entries[id], parentOf(e.session) == parent else { continue }
       let (heard, current, reason) = hear(id, now: now)
       if let line = ParentDigest.line(
-        name: e.session.name, id: id, heard: heard, now: current, reason: reason, prURL: prURL(e))
+        name: e.session.name, id: id, heard: heard, now: current, reason: reason, prURL: prURL(id))
       {
         lines.append(line)
       }
@@ -132,8 +141,10 @@ extension Service {
   /// starts, which a SessionStart with `source` startup reports. It is nil
   /// for every other kind and source. It leaves out every Manager conversation.
   func startDigest(_ id: String, source: String?) -> String? {
-    guard entries[id]?.session.kind == .manager, source == "startup" else { return nil }
-    let all = summaries().filter { $0.id != id && $0.kind != .manager }
+    guard let session = entries[id]?.session, session.kind == .manager, source == "startup" else { return nil }
+    let all = summaries(for: session.host.map(RequestOrigin.remote) ?? .mac).filter {
+      $0.id != id && $0.kind != .manager
+    }
     return ParentDigest.startText(all, inbox: Triage.order(all))
   }
 

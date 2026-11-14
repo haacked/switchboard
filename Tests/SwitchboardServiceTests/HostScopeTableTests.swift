@@ -21,8 +21,8 @@ enum PlannedScope {
   private static let sessionOnly = Row(keys: ["session"], refs: ["session"])
   private static let noteKeys: Set<String> = ["session", "text", "by", "kind", "note"]
   private static let waitKeys: Set<String> = [
-    "session", "kind", "target", "who", "environment", "service", "state", "until", "note", "then", "by", "wait",
-    "outcome",
+    "session", "kind", "target", "who", "environment", "service", "state", "until", "since", "note", "then", "by",
+    "wait", "outcome",
   ]
 
   /// The op table of "The scope design". `answer` also takes `always`, which it reads through `AllowExtra` as it
@@ -258,6 +258,56 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     let (refused, why) = refuses(key.trimmingCharacters(in: .whitespaces)) { try authorize(op, args) }
 
     #expect(refused, "\(why)")
+  }
+
+  /// The stored properties of `value`, which for each request type are the keys that it reads.
+  private func storedProperties(of value: Any) -> Set<String> {
+    Set(Mirror(reflecting: value).children.compactMap(\.label))
+  }
+
+  /// A field added to `WaitRequest` fails here instead of failing on a host.
+  @Test func theWaitRowTakesEveryFieldOfWaitRequest() throws {
+    let fields = storedProperties(of: WaitRequest())
+    let keys = try #require(HostScope.rules["wait"]).keys
+
+    #expect(fields.contains("since"))
+    #expect(fields.isSubset(of: keys), "\(fields.subtracting(keys))")
+  }
+
+  /// The fields of `NewSession` that a host may not send.
+  private static let newExclusions: [String: String] = [
+    "account": "Decision 10: a host's session may not choose this Mac's Claude account",
+    "group": "Decision 10: a group can hold sessions on this Mac",
+  ]
+
+  /// A field added to `NewSession` fails here until the `new` row takes it or the test excludes it.
+  @Test func theNewRowTakesEveryFieldOfNewSessionButTheExcludedOnes() throws {
+    let fields = storedProperties(of: NewSession(path: "p"))
+    let excluded = Set(Self.newExclusions.keys)
+    let keys = try #require(HostScope.rules["new"]).keys
+
+    #expect(excluded.isSubset(of: fields), "\(excluded.subtracting(fields))")
+    #expect(fields.subtracting(excluded).isSubset(of: keys), "\(fields.subtracting(excluded).subtracting(keys))")
+    #expect(keys.isDisjoint(with: excluded), "\(keys.intersection(excluded))")
+  }
+
+  /// The fields of `SpawnArgs` that a host may not send.
+  private static let spawnExclusions: [String: String] = [
+    "account": "Decision 10: a host's session may not choose this Mac's Claude account",
+    "group": "Decision 10: a group can hold sessions on this Mac",
+    "followup": "Decision 15: a follow-up starts on this Mac",
+    "after": "it takes followup, which a host may not send",
+  ]
+
+  /// A field added to `SpawnArgs` fails here until the `spawn` row takes it or the test excludes it.
+  @Test func theSpawnRowTakesEveryFieldOfSpawnArgsButTheExcludedOnes() throws {
+    let fields = storedProperties(of: try SpawnArgs(["repository": "r", "branch": "b", "prompt": "p"]))
+    let excluded = Set(Self.spawnExclusions.keys)
+    let keys = try #require(HostScope.rules["spawn"]).keys
+
+    #expect(excluded.isSubset(of: fields), "\(excluded.subtracting(fields))")
+    #expect(fields.subtracting(excluded).isSubset(of: keys), "\(fields.subtracting(excluded).subtracting(keys))")
+    #expect(keys.isDisjoint(with: excluded), "\(keys.intersection(excluded))")
   }
 
   // MARK: The session references

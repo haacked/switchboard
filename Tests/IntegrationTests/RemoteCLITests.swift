@@ -63,11 +63,13 @@ private let refusal = "ssh: connect to host mini.local port 22: Connection refus
       to: ["mini": Instance.remoteHost(Instance.boxDestination, ["repos": ["o/n": .string(repo)]])])
     let parent = try sbd.startOnHost()
     try sbd.makeBoxFolder("repo2")
+    try sbd.makeBoxFolder("repo3")
     let claude = ["SB_SESSION_ID": parent.id, "CLAUDECODE": "1"]
 
     let spawned = try sbd.boxSb(["spawn", "--repo", "o/n", "--branch", "b", "--prompt", "p", "--json"], env: claude)
     let made = try sbd.boxSb(["new", "~/repo2", "--json"], env: claude)
     let toMac = try sbd.boxSb(["new", "~/repo2", "--host", "local", "--json"], env: claude)
+    let relative = try sbd.boxSb(["new", "repo3", "--json"], env: claude)
 
     #expect(spawned.status == 0, "\(text(spawned))")
     #expect(made.status == 0, "\(text(made))")
@@ -80,6 +82,9 @@ private let refusal = "ssh: connect to host mini.local port 22: Connection refus
     }
     let madeCwd = JSON.parse(made.stdout)?["cwd"]?.string
     #expect(madeCwd.map(real) == real("\(sbd.boxHome)/repo2"), "\(madeCwd ?? "")")
+    #expect(relative.status == 0, "\(text(relative))")
+    let relativeCwd = JSON.parse(relative.stdout)?["cwd"]?.string
+    #expect(relativeCwd.map(real) == real("\(sbd.boxHome)/repo3"), "\(relativeCwd ?? "")")
     #expect(toMac.status == 1, "\(text(toMac))")
     #expect(toMac.stderr.contains("a session on mini can start sessions only on mini"), "\(toMac.stderr)")
   }

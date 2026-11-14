@@ -44,9 +44,12 @@ public final class Server {
       if line.isEmpty { continue }
       var sent = false
       let send = { (response: Response) in
-        sent =
-          (try? JSONCoding.encode(response)).map { (try? UnixSocket.write(client, Data(($0 + "\n").utf8))) != nil }
-          ?? false
+        guard var data = try? JSONCoding.encoder.encode(response) else {
+          sent = false
+          return
+        }
+        data.append(UInt8(ascii: "\n"))
+        sent = (try? UnixSocket.write(client, data)) != nil
       }
       if let request = try? JSONCoding.decoder.decode(Request.self, from: line) {
         service.handle(
@@ -59,9 +62,9 @@ public final class Server {
   }
 
   /// A client on a host can stop reading its answers. A write to a client that reads nothing fails within twice
-  /// the seconds: the first send returns what it sent so far, and the next one times out. The connection's thread
-  /// then ends with the answer that it held. A write to a closed client fails
-  /// with EPIPE instead of raising SIGPIPE.
+  /// the seconds: the first send returns what it sent so far, and the next one times out. `serve` then returns and
+  /// closes the connection. It drops the answer that it couldn't send. A write to a closed client fails with EPIPE
+  /// instead of raising SIGPIPE.
   static func limitSends(_ fd: Int32, seconds: Double) {
     var tv = timeval(tv_sec: Int(seconds), tv_usec: Int32((seconds - floor(seconds)) * 1_000_000))
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
