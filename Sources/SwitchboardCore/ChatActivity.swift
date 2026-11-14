@@ -70,11 +70,36 @@ public enum ChatMark: Equatable, Sendable {
     }
   }
 
-  public var isNeedsMe: Bool {
-    if case .needsMe = self { true } else { false }
+  /// Why the chat waits on the user, or nil when it doesn't.
+  public var needsMeReason: String? {
+    if case .needsMe(let reason) = self { reason } else { nil }
+  }
+}
+
+/// The sidebar's Manager conversations: pinned first, then the others, then
+/// the archive. Each group is newest activity first.
+public enum Conversations {
+  /// How long a conversation that needs nothing stays out of the archive.
+  public static let archiveAfterMs: Int64 = 3 * 24 * 60 * 60 * 1000
+
+  /// Whether the conversation belongs in the archive: it is not pinned, it
+  /// needs nothing, it has no unread reply, no turn runs, and it has had no
+  /// activity for `archiveAfterMs`. A summary from an sbd without read state is never archived.
+  public static func isArchived(_ s: SessionSummary, now: Int64) -> Bool {
+    guard s.pinned != true, s.activity != nil, case .idle = ChatMark(s) else { return false }
+    let last = s.lastActivity > 0 ? s.lastActivity : s.created ?? now
+    return now - last >= archiveAfterMs
   }
 
-  public var unreadCount: Int {
-    if case .unread(let n, _) = self { n } else { 0 }
+  /// The conversations in the sidebar's order. `archived` comes from sbd's summary.
+  public static func sidebar(_ conversations: [SessionSummary]) -> (
+    pinned: [SessionSummary], active: [SessionSummary], archived: [SessionSummary]
+  ) {
+    let sorted = conversations.sorted(by: Manager.newestFirst)
+    return (
+      sorted.filter { $0.pinned == true },
+      sorted.filter { $0.pinned != true && $0.activity?.archived != true },
+      sorted.filter { $0.pinned != true && $0.activity?.archived == true }
+    )
   }
 }

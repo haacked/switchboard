@@ -557,6 +557,8 @@ public final class Service {
       return try JSON(encoding: managerList())
     case "manager-mcp":
       return try managerMCP(args)
+    case "manager-pin":
+      return try managerPin(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -2192,6 +2194,11 @@ public final class Service {
         state: verdict.state, acknowledged: verdict.acknowledged, stateSince: out.since, waits: s.waits ?? [],
         facts: e.facts, created: s.created)
       if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+    }
+    if s.kind == .manager {
+      out.pinned = s.pinned
+      // Last, because the archive rule reads the rest of the summary.
+      if Conversations.isArchived(out, now: nowMs()) { out.activity?.archived = true }
     }
     return out
   }

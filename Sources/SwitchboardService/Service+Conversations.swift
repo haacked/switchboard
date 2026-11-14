@@ -46,6 +46,23 @@ extension Service {
     }
   }
 
+  /// The `manager-pin` request, which pins the Manager conversation that
+  /// `session` names to the top of the sidebar, or with `pinned` false unpins
+  /// it. A pin is not activity, so it doesn't reorder the list.
+  func managerPin(_ args: JSON) throws -> JSON {
+    let id = try lookup(args)
+    let session = entries[id]!.session
+    guard session.kind == .manager else {
+      throw APIError("\(session.name) is not a Manager conversation. Only a conversation can be pinned")
+    }
+    let pinned = args["pinned"]?.bool ?? true
+    if (session.pinned == true) != pinned {
+      try update(id) { $0.pinned = pinned ? true : nil }
+      record(id, pinned ? "pinned" : "unpinned")
+    }
+    return try JSON(encoding: summary(id))
+  }
+
   func recordRead(_ id: String, _ replies: Int) {
     record(id, ChatActivity.readEvent, ["replies": .number(Double(replies))])
   }

@@ -374,22 +374,23 @@ struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
   private var waiting: SessionSummary? { model.waitingManager }
-  private var needsYou: Bool { waiting != nil }
 
   private var tooltip: String {
-    if let waiting { return "\(waiting.name) needs you: \(waiting.reason) (⇧⌘M)" }
+    if let waiting { return "\(waiting.name) needs you: \(ChatMark(waiting).needsMeReason ?? waiting.reason) (⇧⌘M)" }
+    if model.managerUnread { return "A Manager conversation has unread replies (⇧⌘M)" }
     return model.managers.isEmpty
       ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
   }
 
   var body: some View {
+    let unread = waiting == nil && model.managerUnread
     Button {
       model.openManager()
     } label: {
-      Label("Manager", systemImage: needsYou ? "star.fill" : "star")
-        .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
+      Label("Manager", systemImage: waiting != nil || unread ? "star.fill" : "star")
+        .foregroundStyle(waiting != nil ? AttentionState.needsYou.color : unread ? Color.accentColor : .primary)
     }
-    .accessibilityValue(needsYou ? AttentionState.needsYou.title : "")
+    .accessibilityValue(waiting != nil ? AttentionState.needsYou.title : unread ? "Unread replies" : "")
     .help(tooltip)
   }
 }

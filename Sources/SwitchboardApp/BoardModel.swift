@@ -145,6 +145,8 @@ final class BoardModel: ObservableObject {
   @Published var checkingDrafts: Set<String> = []
   /// sbd's refusal of a draft's last post or check, by reply key.
   @Published var draftErrors: [String: String] = [:]
+  /// Whether the sidebar shows the archived Manager conversations.
+  @Published var showingArchive = false
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -225,6 +227,10 @@ final class BoardModel: ObservableObject {
   /// it runs apart from other actions too.
   private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
+  /// Whether Switchboard is the active app. A chat's replies count as read only while it is. Tests replace it.
+  var appIsActive: () -> Bool = { NSApp.isActive }
+  /// The last `chat-read` sent, so each refresh doesn't send it again.
+  var lastChatRead: (session: String, replies: Int)?
   /// Each session as the last refresh listed it.
   private var lastSeen: [String: SessionSummary] = [:]
   /// The session that `create` or `openManager` selected before a refresh
@@ -332,8 +338,8 @@ final class BoardModel: ObservableObject {
     sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
   }
 
-  /// The Manager conversation that the toolbar star names while one needs you.
-  var waitingManager: SessionSummary? { managers.first { $0.state == .needsYou } }
+  /// The Manager conversation that the toolbar star names while one waits on the user.
+  var waitingManager: SessionSummary? { managers.first { ChatMark($0).needsMeReason != nil } }
 
   /// A state's sessions in the sidebar, each one followed by its children.
   struct SidebarGroup: Identifiable {
@@ -483,6 +489,7 @@ final class BoardModel: ObservableObject {
       // include the follow-ups, so that change from Not started notifies.
       lastSeen = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0) })
       loaded = true
+      markSelectedChatRead()
     case .failure(let error):
       let problem = "\(error)"
       if unreachable != problem { unreachable = problem }
