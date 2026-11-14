@@ -60,11 +60,21 @@ jobs:
           fi
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
 
+  # The suite takes longer than one 3-CPU runner can finish within the time
+  # limit, so the matrix splits it across runners. Each part builds the tests
+  # and runs its share of them (bin/lib/shard-plan). Each runner runs one job,
+  # so the machine-wide build queue is off.
   swift-test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2]
+    env:
+      SB_BUILD_SLOTS: 0
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
@@ -85,7 +95,7 @@ jobs:
             echo "::error::The build has warnings in Sources or Tests."
             exit 1
           fi
-      - run: bin/test --shards 4
+      - run: bin/test --shards 4 --part ${{ matrix.part }}/2
 
   # bin/test-gui drives the real app, so it needs a logged-in session with a
   # display. GitHub's macOS runners log in a user. The job leaves out the

@@ -6,7 +6,9 @@
 # also runs the tests that drive the installed claude with Haiku, which take
 # minutes and use some of your Claude quota. With --shards N, it splits the
 # integration tests across N swift test processes and runs the other tests in
-# one more, all at once, then runs MeasureTests alone. bin/lib/swift-testing.sh
+# one more, all at once, then runs MeasureTests alone. With --part K/P after
+# the count, it splits the tests into P parts for P machines, such as the jobs
+# of a CI matrix, and runs part K (bin/lib/shard-plan). bin/lib/swift-testing.sh
 # sets the flags that swift needs to find Swift Testing.
 # The whole run, shards included, holds one machine-wide build slot
 # (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
@@ -35,14 +37,19 @@ export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMU
 shards() {
   local n=$1 clones=.build-shards
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
+  if ! [[ $2 =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "bin/test: --part needs K/P with 1 <= K <= P, not '$2'" >&2
+    exit 2
+  fi
+  local part=${BASH_REMATCH[1]} parts=${BASH_REMATCH[2]}
   build_tests
-  local list total i pattern plan patterns=()
+  local list total p i pattern plan patterns=()
   list=$(list_tests)
-  total=$(grep -c . <<<"$list")
-  plan=$(bin/lib/shard-plan "$n" Tests/shard-weights <<<"$list")
-  while read -r i pattern; do
-    patterns[i]=$pattern
+  plan=$(bin/lib/shard-plan "$n" "$parts" Tests/shard-weights <<<"$list")
+  while read -r p i pattern; do
+    if [ "$p" -eq "$part" ]; then patterns[i]=$pattern; fi
   done <<<"$plan"
+  total=$(grep -c -E "$(IFS='|'; echo "${patterns[*]}")" <<<"$list")
   rm -rf "$clones"
   mkdir "$clones"
   trap "rm -rf '$clones'" EXIT
@@ -65,11 +72,13 @@ shards() {
   for i in "${!pids[@]}"; do
     wait "${pids[i]}" || status=$?
   done
-  for _ in {1..36}; do
-    sysctl -n vm.loadavg | awk -v c="$(sysctl -n hw.activecpu)" '{ exit !($2 > c) }' || break
-    sleep 5
-  done
-  run_shard $((n + 1)) .build || status=$?
+  if [ -n "${patterns[n + 1]:-}" ]; then
+    for _ in {1..36}; do
+      sysctl -n vm.loadavg | awk -v c="$(sysctl -n hw.activecpu)" '{ exit !($2 > c) }' || break
+      sleep 5
+    done
+    run_shard $((n + 1)) .build || status=$?
+  fi
   local ran=0 count
   for i in "${!patterns[@]}"; do
     count=$(sed -n -E 's/.*Test run with ([0-9]+) tests?.*/\1/p' "$clones/$i.log" | tail -1) || count=
@@ -83,8 +92,9 @@ shards() {
 }
 
 if [ "${1:-}" = --shards ]; then
-  [ $# -eq 2 ] || { echo "usage: bin/test --shards N" >&2; exit 2; }
-  shards "$2"
+  if [ $# -eq 2 ]; then shards "$2" 1/1; fi
+  [ $# -eq 4 ] && [ "$3" = --part ] || { echo "usage: bin/test --shards N [--part K/P]" >&2; exit 2; }
+  shards "$2" "$4"
 fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
