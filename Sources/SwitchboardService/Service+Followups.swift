@@ -203,7 +203,7 @@ extension Service {
   /// repository, so a folder that only shares the name is refused.
   func checkout(of repository: String?, hint: String = "Pass --path") throws -> String {
     guard let repository else { throw APIError("the follow-up has no repository. \(hint)") }
-    let configured = config.repos.first { $0.key.lowercased() == repository.lowercased() }?.value
+    let configured = Self.configuredCheckout(repository, in: config.repos)
     let candidates = configured.map { [$0] } ?? config.repoRoots.map { "\($0)/\(repository)" }
     for path in candidates.map({ ($0.expandingTilde as NSString).standardizingPath }) {
       var isDir: ObjCBool = false

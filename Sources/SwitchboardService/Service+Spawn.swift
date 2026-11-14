@@ -86,7 +86,7 @@ extension Service {
     guard let host = site.hostName else {
       return (try checkout(of: repository, hint: "Pass its folder as --repo"), repository)
     }
-    guard let configured = repos.first(where: { $0.key.lowercased() == repository.lowercased() })?.value else {
+    guard let configured = Self.configuredCheckout(repository, in: repos) else {
       throw APIError(
         "the repos of \(host) in \(home.config) have no \(repository). Pass its folder on \(host) as --repo, or add it to those repos"
       )
@@ -99,6 +99,11 @@ extension Service {
       throw APIError("\(path) on \(host) has no remote on github.com for \(repository)")
     }
     return (try gitOutput(path, ["rev-parse", "--show-toplevel"], at: site), repository)
+  }
+
+  /// The checkout that `repos` sets for `repository`, whose key matches it without case.
+  static func configuredCheckout(_ repository: String, in repos: [String: String]) -> String? {
+    repos.first { Dependencies.sameRepo($0.key, repository) }?.value
   }
 
   /// The path with `~` resolved at the site. A host refuses `~name`, whose home sbd doesn't know.

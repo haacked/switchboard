@@ -7,6 +7,11 @@ public enum RequestOrigin: Equatable, Sendable {
   /// The socket of the named remote host, `$SB_HOME/hosts/<host>/sbd.sock`, which any program on that host can
   /// reach through the forward.
   case remote(String)
+
+  /// The origin of a request from a session on `host`, nil for this Mac.
+  public init(host: String?) {
+    self = host.map(RequestOrigin.remote) ?? .mac
+  }
 }
 
 /// The rule for the machine that a new session runs on.

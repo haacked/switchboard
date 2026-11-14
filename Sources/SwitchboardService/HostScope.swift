@@ -121,23 +121,15 @@ enum HostScope {
     guard unread.isEmpty else {
       throw APIError("\(op) from \(host) doesn't take \(unread.sorted().joined(separator: ", "))")
     }
-    func resolved(_ value: JSON, _ key: String) throws -> JSON {
+    try mapRefs(&args, rule) { value, key in
       guard let ref = value.string else { throw APIError("\(key) names a session by its id or name") }
       return .string(try resolve(ref, host: host, sessions: sessions))
     }
-    for key in rule.refs { if let value = args[key] { args[key] = try resolved(value, key) } }
-    for key in rule.refLists {
-      guard let value = args[key] else { continue }
-      guard let items = value.array else { throw APIError("\(key) is a list of sessions") }
-      args[key] = .array(try items.map { try resolved($0, key) })
-    }
-    if rule.waitTarget, let target = args["target"] {
-      if args["kind"] == .string(Wait.Kind.session.rawValue) {
-        args["target"] = try resolved(target, "target")
-      } else if let text = target.string, Wait.PullRequest(parsing: text)?.repository != nil {
-        // This Mac's GitHub login polls the PR, so a host may name only a PR of its session's own repo.
-        throw APIError("a wait from \(host) names a PR by its number in the session's repo")
-      }
+    if rule.waitTarget, !namesSessionTarget(args), let text = args["target"]?.string,
+      Wait.PullRequest(parsing: text)?.repository != nil
+    {
+      // This Mac's GitHub login polls the PR, so a host may name only a PR of its session's own repo.
+      throw APIError("a wait from \(host) names a PR by its number in the session's repo")
     }
     if rule.creates {
       var named: String?
@@ -162,15 +154,35 @@ enum HostScope {
 
   /// The ids of the sessions that a request which `authorize` returned names.
   static func sessionIds(of request: Request) -> [String] {
-    guard let rule = rules[request.op] else { return [] }
-    var ids = rule.refs.compactMap { request.args[$0]?.string }
-    for key in rule.refLists { ids += request.args[key]?.array?.compactMap(\.string) ?? [] }
-    if rule.waitTarget, request.args["kind"] == .string(Wait.Kind.session.rawValue),
-      let target = request.args["target"]?.string
-    {
-      ids.append(target)
+    guard let rule = rules[request.op], var args = request.args.object else { return [] }
+    var ids: [String] = []
+    try? mapRefs(&args, rule) { value, _ in
+      if let id = value.string { ids.append(id) }
+      return value
     }
     return ids
+  }
+
+  /// Replaces each value of `args` that names a session under `rule` with what `body` returns for it and its key.
+  /// It throws when a key of `refLists` holds no list. `authorize` and `sessionIds` both walk through here, so the
+  /// recheck in `Service.requireOnHost` reads the same references that `authorize` resolved.
+  private static func mapRefs(
+    _ args: inout [String: JSON], _ rule: Rule, _ body: (JSON, String) throws -> JSON
+  ) throws {
+    for key in rule.refs { if let value = args[key] { args[key] = try body(value, key) } }
+    for key in rule.refLists {
+      guard let value = args[key] else { continue }
+      guard let items = value.array else { throw APIError("\(key) is a list of sessions") }
+      args[key] = .array(try items.map { try body($0, key) })
+    }
+    if rule.waitTarget, namesSessionTarget(args), let target = args["target"] {
+      args["target"] = try body(target, "target")
+    }
+  }
+
+  /// Whether a wait's `target` names a session, which it does when `kind` is `session`.
+  private static func namesSessionTarget(_ args: [String: JSON]) -> Bool {
+    args["kind"] == .string(Wait.Kind.session.rawValue)
   }
 }
 
@@ -198,8 +210,8 @@ extension Service {
   /// Whether `host` may read this Mac's GitHub data about `repo`: `repo` is a key of the host's `repos`, compared
   /// without case as `spawn` compares it. A nil repo is refused.
   func hostMayRead(_ repo: String?, on host: String) -> Bool {
-    guard let repo = repo?.lowercased() else { return false }
-    return config.hosts[host]?.repos.keys.contains { $0.lowercased() == repo } == true
+    guard let repo, let repos = config.hosts[host]?.repos else { return false }
+    return Self.configuredCheckout(repo, in: repos) != nil
   }
 
   /// Whether a request from `origin` may read the GitHub data of session `id`. A request from this Mac reads all
@@ -223,10 +235,11 @@ extension Service {
   /// the GitHub poller resolves, loses its data unless `showsGitHub` holds and any PR that the event names is in a
   /// repo that the host may read. A `wait-resolved` keeps its wait. It runs on the state queue.
   func event(_ event: Event, shownTo host: String) -> Event {
-    let waitKind = event.data["wait"].flatMap { try? JSONCoding.convert($0, to: Wait.self) }?.kind
     let fromGitHub =
       Self.gitHubEventKinds.contains(event.kind)
-      || (event.kind == "wait-resolved" && waitKind.map(GitHubPoller.waitKinds.contains) == true)
+      || (event.kind == "wait-resolved"
+        && event.data["wait"].flatMap { try? JSONCoding.convert($0, to: Wait.self) }
+          .map { GitHubPoller.waitKinds.contains($0.kind) } == true)
     guard fromGitHub else { return event }
     let named = event.data["pr"]?["repo"]
     if showsGitHub(event.session, to: .remote(host)), named == nil || hostMayRead(named?.string, on: host) {

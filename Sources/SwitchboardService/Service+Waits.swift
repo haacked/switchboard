@@ -18,10 +18,10 @@ extension Service {
         let other = try lookup(["session": .string(ref)])
         return Wait.SessionTarget(id: other, name: entries[other]!.session.name)
       }
+      if case .remote(let host) = origin { try requireGitHubWait(wait, on: id, from: host) }
       if wait.kind == .ci && wait.pr == nil {
         wait.headSha = try? checkedOutBranch(entries[id]!.session, at: site(of: id)).tip
       }
-      if case .remote(let host) = origin { try requireGitHubWait(wait, on: id, from: host) }
       wait = config.recheck.stamped(wait)
       try update(id) { $0.waits = open + [wait] }
       record(id, "wait", ["wait": try JSON(encoding: wait)])

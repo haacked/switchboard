@@ -11,7 +11,7 @@ extension Service {
   /// no message, and neither does a session on a host that `showsGitHub` keeps from the PR.
   func dependencyResolved(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
-    let audience = entries[id]?.session.host.map(RequestOrigin.remote) ?? .mac
+    let audience = RequestOrigin(host: entries[id]?.session.host)
     if let message = args["message"]?.string, entries[id]?.session.done == false, showsGitHub(id, to: audience) {
       _ = try send(id, message, byUser: false, trigger: .dependency)
     }

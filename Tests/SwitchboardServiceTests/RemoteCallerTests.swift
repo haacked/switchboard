@@ -66,9 +66,9 @@ private func watched(
     id: id, cwd: cwd, claudeSessionId: "u-\(id)", configDir: configDir, site: site, branch: nil, facts: facts)
 }
 
-private func remoteSession(_ id: String, cwd: String = "/srv/repo") -> Session {
+private func remoteSession(_ id: String, cwd: String = "/srv/repo", host: String? = "mini") -> Session {
   var s = Session(id: id, name: id, cwd: cwd, claudeSessionId: "u-\(id)", created: 5)
-  s.host = "mini"
+  s.host = host
   s.started = true
   return s
 }
@@ -463,9 +463,7 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
   }
 
   private func add(_ service: Service, _ id: String, host: String?, cwd: String, waits: [Wait]? = nil) {
-    var s = Session(id: id, name: id, cwd: cwd, claudeSessionId: "u-\(id)", created: 5)
-    s.host = host
-    s.started = true
+    var s = remoteSession(id, cwd: cwd, host: host)
     s.waits = waits
     // A session on this Mac would otherwise search ~/.claude for its transcript.
     if host == nil { s.claudeConfigDir = "\(cwd)/claude" }

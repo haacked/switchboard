@@ -358,6 +358,14 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     #expect(slot.value(in: authorized.args) == .string(exact))
   }
 
+  /// `Service.requireOnHost` rechecks the ids that `sessionIds` returns, so they hold every ref that the rewrite set.
+  @Test(arguments: RefSlot.all)
+  func sessionIdsReturnsEachRefThatTheRewriteSet(slot: RefSlot) throws {
+    let authorized = try authorize(slot.op, slot.args(with: .string("box")))
+
+    #expect(HostScope.sessionIds(of: authorized).contains("mq7x"))
+  }
+
   @Test func theRewriteChangesNoKeyButTheRefs() throws {
     let args: [String: JSON] = ["session": "box", "text": "box", "from": "mq"]
 
