@@ -294,7 +294,7 @@ public struct Wait: Codable, Equatable, Sendable {
     case .merge:
       return ended
     case .ci:
-      if pr.checks == "SUCCESS" { return "the checks passed" }
+      if pr.checksPassed { return "the checks passed" }
       if let depot = pr.depotFailure { return depot.outcome }
       return pr.checksFailed ? "the checks failed" : ended
     case .review, .botReview:

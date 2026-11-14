@@ -54,7 +54,7 @@ extension Attention {
     // A push after the review moves the head commit, and the PR then waits
     // for the reviewer.
     let current = pr.verdicts.filter {
-      $0.state == "CHANGES_REQUESTED" && ($0.commit == nil || $0.commit == pr.headSha)
+      $0.requestsChanges && ($0.commit == nil || $0.commit == pr.headSha)
     }
     .map(\.author).sorted()
     if !current.isEmpty {
