@@ -301,11 +301,15 @@ public struct MCPToolServer: Sendable {
     return .object(answer)
   }
 
-  /// A scoped server puts the new session in its group.
+  /// A scoped server puts the new session in its group. A path on a remote host is passed as typed, and the
+  /// host resolves its ~.
   private func spawn(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(
-      args, ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after", "wait"])
-    if let repo = args["repository"]?.string { request["repository"] = .string(repo.repositoryArgument) }
+      args,
+      ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after", "wait", "host"])
+    if let repo = args["repository"]?.string, !SessionHost.namesRemote(args["host"]?.string) {
+      request["repository"] = .string(repo.repositoryArgument)
+    }
     if let caller { request["parent"] = .string(caller) }
     if let scoped { request["group"] = .string(scoped.group.id) }
     return try client.call("spawn", request, timeout: 300)

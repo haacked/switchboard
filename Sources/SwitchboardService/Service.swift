@@ -851,8 +851,22 @@ public final class Service {
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
+  /// Starts the session that a `new` request asks for, on the host that `SessionHost.choose` picks. A request
+  /// with no host and a parent on a host fails, because `sb new` resolved its folder on this Mac.
   func newSession(_ args: NewSession) throws -> SessionSummary {
+    let parentHost = queue.sync { host(ofParent: args.parent) }
+    if args.host == nil, let parentHost {
+      throw APIError(
+        "name --host \(parentHost) or --host local: a folder typed on this Mac is not a folder on \(parentHost)")
+    }
+    var args = args
+    args.host = try SessionHost.choose(named: args.host, parent: parentHost, origin: .mac)
+    return try startSession(args)
+  }
+
+  /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
+  /// `args.host` is a host of config.json, or nil for this Mac.
+  func startSession(_ args: NewSession) throws -> SessionSummary {
     if let host = args.host { return try newSession(args, onHost: host) }
     var args = args
     args.branch = branch(of: args, repo: (args.path as NSString).standardizingPath, at: mac)
@@ -882,9 +896,7 @@ public final class Service {
   /// panes and processes before it creates the session.
   private func newSession(_ args: NewSession, onHost host: String) throws -> SessionSummary {
     let site = try remoteSite(host)
-    if args.account?.isEmpty == false {
-      throw APIError("a session on \(host) takes no account: it runs under the Claude login of \(host)")
-    }
+    if args.account?.isEmpty == false { throw Self.noAccount(on: host) }
     try queue.sync {
       let parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
       _ = try groupOfNew(args.group, parent: parent)
@@ -909,6 +921,16 @@ public final class Service {
       install(read, onHost: host)
       return try create(args, folder)
     }
+  }
+
+  static func noAccount(on host: String) -> APIError {
+    APIError("a session on \(host) takes no account: it runs under the Claude login of \(host)")
+  }
+
+  /// The host of the session that `parent` names, nil when it runs on this Mac or names no session.
+  /// It runs on the state queue.
+  func host(ofParent parent: String?) -> String? {
+    parent.flatMap { try? lookup(["session": .string($0)]) }.flatMap { entries[$0]?.session.host }
   }
 
   /// The branch of a new session: a free branch at the site for a worktree that names none, else the one it names.

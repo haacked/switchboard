@@ -207,7 +207,7 @@ extension Service {
     for path in candidates.map({ ($0.expandingTilde as NSString).standardizingPath }) {
       var isDir: ObjCBool = false
       guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
-      guard hasRemote(path, for: repository) else {
+      guard hasRemote(path, for: repository, at: mac) else {
         throw APIError("\(path) has no remote on github.com for \(repository)")
       }
       return try gitOutput(path, ["rev-parse", "--show-toplevel"], at: mac)
@@ -218,9 +218,9 @@ extension Service {
     )
   }
 
-  /// Whether the folder has a remote on github.com for `owner/name`.
-  func hasRemote(_ path: String, for repository: String) -> Bool {
-    ((try? gitOutput(path, ["remote", "-v"], at: mac)) ?? "").split(separator: "\n").contains { line in
+  /// Whether the folder at the site has a remote on github.com for `owner/name`.
+  func hasRemote(_ path: String, for repository: String, at site: any SessionSite) -> Bool {
+    ((try? gitOutput(path, ["remote", "-v"], at: site)) ?? "").split(separator: "\n").contains { line in
       line.split(whereSeparator: \.isWhitespace).dropFirst().first
         .flatMap { Followup.repository(remote: String($0)) }?.lowercased() == repository.lowercased()
     }

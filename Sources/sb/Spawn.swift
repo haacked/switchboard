@@ -3,10 +3,13 @@ import SwitchboardCore
 
 func spawn(_ a: Args) {
   var args: [String: JSON] = [:]
-  if let repo = a.values["--repo"] { args["repository"] = .string(repo.repositoryArgument) }
+  // A path on a host is passed as typed, and the host resolves its ~.
+  if let repo = a.values["--repo"] {
+    args["repository"] = .string(SessionHost.namesRemote(a.values["--host"]) ? repo : repo.repositoryArgument)
+  }
   let flags = [
     "--branch": "branch", "--prompt": "prompt", "--after": "after", "--name": "name", "--base": "base",
-    "--model": "model", "--account": "account", "--wait": "wait",
+    "--model": "model", "--account": "account", "--wait": "wait", "--host": "host",
   ]
   for (flag, key) in flags {
     if let value = a.values[flag] { args[key] = .string(value) }

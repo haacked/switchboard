@@ -18,6 +18,8 @@ struct SpawnArgs {
   var account: String?
   var group: String?
   var autoMode: Bool?
+  /// The host as the request names it, `local` included.
+  var host: String?
 
   init(_ args: JSON) throws {
     func text(_ key: String) -> String? {
@@ -32,6 +34,11 @@ struct SpawnArgs {
     if followup, text("base") != nil {
       throw APIError(
         "--base needs a started spawn, because a follow-up keeps no base. Pass --base to sb followup start")
+    }
+    let host = text("host")
+    if followup, let host, host != SessionHost.local {
+      throw APIError(
+        "a follow-up starts on this Mac, so it can't run on \(host). Spawn it without --followup, or without --host")
     }
     let wait = text("wait")
     if wait != nil {
@@ -51,5 +58,6 @@ struct SpawnArgs {
     self.account = text("account")
     self.group = text("group")
     self.autoMode = args["autoMode"]?.bool
+    self.host = host
   }
 }

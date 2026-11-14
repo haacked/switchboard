@@ -60,8 +60,9 @@ public struct NewSession: Codable, Sendable {
   public var group: String?
   /// Whether claude starts in auto mode. Without it, `Config.autoMode` decides.
   public var autoMode: Bool?
-  /// The remote host to run on, by its name in config.json. `path` is then a folder on that host, absolute or
-  /// starting with `~`, which the host resolves.
+  /// The remote host to run on, by its name in config.json, or `local` for this Mac. With a remote host, `path` is
+  /// a folder on that host, absolute or starting with `~`, which the host resolves. A request from this Mac with
+  /// no host and a parent on a host fails. sbd maps `local` to nil, so no record holds it.
   public var host: String?
 
   public init(

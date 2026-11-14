@@ -360,7 +360,7 @@ private func withBench(scripts: Bool = true, _ body: (SiteBench) throws -> Void)
 // MARK: The launch
 
 /// A `Service` whose host mini runs through the bench's ssh wrapper, with setup done.
-private func withReadyService(
+func withReadyService(
   host extra: [String: JSON] = [:], config: [String: JSON] = [:],
   _ body: (SiteBench, Service, BoxFacts) throws -> Void
 ) throws {

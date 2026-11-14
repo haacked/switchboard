@@ -119,6 +119,11 @@ import Testing
     let s = try mcp.call("spawn", try spawnArgs(sbd, "loner")).decode(SessionSummary.self)
 
     #expect(s.parent == nil)
+
+    // The tool passes `host` on, so a host that config.json doesn't hold fails instead of starting on this Mac.
+    let elsewhere = try mcp.call("spawn", try spawnArgs(sbd, "elsewhere").merging(["host": "nope"]) { $1 })
+    #expect(elsewhere.isError, "\(elsewhere.text)")
+    #expect(elsewhere.text.contains("nope"), "\(elsewhere.text)")
   }
 
   @Test func spawnInsideAGroupedCallerJoinsTheCallersGroup() throws {

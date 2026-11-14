@@ -93,6 +93,12 @@ import Testing
     #expect(text.contains("Ask the user before you send one message to several sessions"))
   }
 
+  @Test func theGuideNamesHowToStartASessionOnAHost() {
+    let text = Manager.guide
+    #expect(text.contains("`sb host ls`"))
+    #expect(text.contains("`sb spawn --host "))
+  }
+
   func triaged(_ sbd: Instance) throws -> [String] {
     try sbd.client.call("triage", as: [SessionSummary].self).map(\.id)
   }
