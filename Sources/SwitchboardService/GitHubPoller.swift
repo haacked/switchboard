@@ -63,6 +63,8 @@ final class GitHubPoller {
 
   /// What the poller knows about one session.
   struct Tracked {
+    /// The session's host, or nil on this Mac.
+    var host: String?
     var branch = Branch()
     var transcript: Transcript
     /// When the poller last counted the uncommitted files of a finished PR's
@@ -185,6 +187,21 @@ final class GitHubPoller {
     timer = t
   }
 
+  /// Sends one HTTP request and returns the status, the headers, and the body. Tests replace it.
+  var transport: (URLRequest) throws -> (Int, [String: String], Data) = httpRequest
+
+  /// Whether this Mac's GitHub login may read `repo` for a session on `host`. A session on this Mac reads any repo.
+  /// A box chooses the repo of its session through its git remotes, its transcript, its PR's body, and its waits. A
+  /// session on a host therefore reads only a repo that `Service.hostMayRead` allows.
+  func mayRead(_ repo: String, for host: String?) -> Bool {
+    host.map { service.hostMayRead(repo, on: $0) } ?? true
+  }
+
+  /// The key when `mayRead` allows its repo for the session's host.
+  private func readable(_ key: PRKey?, for host: String?) -> PRKey? {
+    key.flatMap { mayRead($0.repo, for: host) ? $0 : nil }
+  }
+
   /// Runs one poll and returns what it did. With `all`, it reads every PR,
   /// looks up every branch, and counts every finished PR's folder, due or not.
   func poll(all: Bool) -> JSON {
@@ -287,8 +304,13 @@ final class GitHubPoller {
 
   private func refreshLocal(_ s: Watched, at site: any SessionSite, all: Bool, now: Int64, shared: inout Shared) {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
+    let host = s.site.hostName
     var t =
-      tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
+      tracked[s.id]
+      ?? Tracked(
+        transcript: Transcript(claudeSessionId: s.claudeSessionId),
+        recordedPRId: s.facts.pr.flatMap { mayRead($0.repo, for: host) ? $0.id : nil })
+    t.host = host
     refreshBranch(
       &t.branch, cwd: s.cwd, at: site, all: all, now: now, watchReflog: !t.hidden.isEmpty, configs: &shared.configs)
     // `/clear` starts another conversation, with its own transcript. The
@@ -438,7 +460,7 @@ final class GitHubPoller {
   private func lookUp(all: Bool, now: Int64, interest: Interest, stats: inout Stats) throws {
     var keys: Set<PRKey> = []
     for t in tracked.values {
-      if let key = t.branch.key {
+      if let key = readable(t.branch.key, for: t.host) {
         let ended = t.branch.prId.flatMap { prs[$0]?.pr.state }.map { $0 != .open } ?? false
         if (t.branch.prId == nil || ended)
           && (all || GitHub.elapsed(since: t.branch.lookedUp, settings.idleMs, now: now))
@@ -446,7 +468,7 @@ final class GitHubPoller {
           keys.insert(key)
         }
       }
-      if let link = t.transcript.link, !t.transcript.lookedUp { keys.insert(link) }
+      if let link = readable(t.transcript.link, for: t.host), !t.transcript.lookedUp { keys.insert(link) }
     }
     for key in interest.keys
     where all
@@ -464,12 +486,12 @@ final class GitHubPoller {
     stats.lookups = keys.count
     for key in interest.keys { if let result = found[key] { targets[key] = Target(prId: result, lookedUp: now) } }
     for (id, var t) in tracked {
-      if let key = t.branch.key, let result = found[key] {
+      if let key = readable(t.branch.key, for: t.host), let result = found[key] {
         t.branch.prId = result
         t.branch.lookedUp = now
         if result != nil { t.recordedPRId = nil }
       }
-      if let link = t.transcript.link, let result = found[link] {
+      if let link = readable(t.transcript.link, for: t.host), let result = found[link] {
         t.transcript.prId = result
         t.transcript.lookedUp = true
       }
@@ -620,7 +642,7 @@ final class GitHubPoller {
       var req = request
       req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
       stats.requests += 1
-      return try httpRequest(req)
+      return try transport(req)
     }
     var (status, headers, body) = try attempt()
     if status == 401 {
@@ -689,11 +711,14 @@ final class GitHubPoller {
           changed = true
         }
       }
-    } else if s.facts.pr != nil, t.branch.key != nil, t.branch.lookedUp != nil,
-      t.transcript.link == nil || t.transcript.lookedUp
+    } else if let pr = s.facts.pr,
+      !mayRead(pr.repo, for: t.host)
+        || (t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp))
     {
       // GitHub answered that the branch has no PR. Without a branch, as in a
-      // folder outside git, the session keeps the PR that it had.
+      // folder outside git, the session keeps the PR that it had. A PR that
+      // `mayRead` refuses was recorded before the check existed, and the
+      // session drops it.
       event(s.id, "pr", ["pr": .null, "comments": []])
       changed = true
     }

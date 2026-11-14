@@ -474,7 +474,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   /// head. As on this Mac, the worktree and the branch go.
   @Test func theWorktreeAndTheBranchOfAMergedPRAreRemovedOnTheBox() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (s, _) = try cleanWorktree(sbd, branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
@@ -499,7 +499,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   /// on the same connection.
   @Test func aSlowWorktreeRemovalFinishesItsLaterStepsOnTheSameConnection() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (s, _) = try cleanWorktree(sbd, branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
@@ -536,7 +536,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
 
   @Test func theRemoteBranchOfAMergedPRIsDeletedFromTheBoxesOriginAtThePRsHead() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (s, origin) = try cleanWorktree(sbd, branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     try sbd.git(s.cwd, "push", "-q", "origin", Instance.mergedBranch)
@@ -561,7 +561,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   @Test(arguments: [["--worktree"], ["--worktree", "--delete-branch"]])
   func aPRThatOnlyTheBoxesTranscriptNamesIsNoProofOfAMerge(_ flags: [String]) throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (repo, origin) = try sbd.makeBoxRepoWithOrigin(url: "https://github.com/haacked/elsewhere.git")
     // A transcript's PR counts only in a repo that a remote names.
     try sbd.git(repo, "remote", "add", "mirror", "https://github.com/PostHog/posthog.git")
@@ -679,7 +679,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
   /// and delete the remote branch.
   @Test func anUnansweredCheckThatTheLocalBranchIsGoneKeepsTheRemoteBranch() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (s, origin) = try cleanWorktree(sbd, branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     try sbd.git(s.cwd, "push", "-q", "origin", Instance.mergedBranch)
@@ -703,7 +703,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
 
   @Test func rmDoneRemovesALocalAndARemoteSessionWithTheirWorktreesAndBranches() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let localRepo = try Repos.create("\(sbd.home.path)/posthog", origin: Instance.posthogURL)
     let localOrigin = "\(sbd.home.path)/origin.git"
     try sbd.git(sbd.home.path, "init", "-q", "--bare", localOrigin)
@@ -841,7 +841,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
 
   /// A session on the branch of PR 122953, which merged at the worktree's tip. The branch is on the box's origin.
   private func mergedOnBox(_ github: FakeGitHub) throws -> (Instance, Instance.BoxSession, String) {
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (s, origin) = try cleanWorktree(sbd, branch: Instance.mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
     try sbd.git(s.cwd, "push", "-q", "origin", Instance.mergedBranch)

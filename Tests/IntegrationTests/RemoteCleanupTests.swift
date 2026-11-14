@@ -25,7 +25,8 @@ extension Instance {
     -> (Instance, Instance.BoxSession, String)
   {
     let wait = shortHostWait ? Instance.shortHostWait : [:]
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github).merging(wait) { $1 })
+    let sbd = try Instance.remoteForRemoval(
+      host: Instance.listsPostHog, config: Instance.gitHubConfig(github).merging(wait) { $1 })
     if shortHostWait { try sbd.connectHost() }
     let (_, origin) = try sbd.makeBoxRepoWithOrigin()
     let s = try sbd.startBoxWorktree(branch: Instance.mergedBranch)
@@ -214,7 +215,7 @@ extension Instance {
   /// PR is no proof that the work merged.
   @Test func aPRThatOnlyTheBoxesTranscriptNamesDoesNotLetCleanupRun() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.remoteForRemoval(config: Instance.gitHubConfig(github))
+    let sbd = try Instance.remoteForRemoval(host: Instance.listsPostHog, config: Instance.gitHubConfig(github))
     let (repo, origin) = try sbd.makeBoxRepoWithOrigin(url: "https://github.com/haacked/elsewhere.git")
     // A transcript's PR counts only in a repo that a remote names.
     try sbd.git(repo, "remote", "add", "mirror", "https://github.com/PostHog/posthog.git")

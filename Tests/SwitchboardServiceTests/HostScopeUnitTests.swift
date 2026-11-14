@@ -900,15 +900,18 @@ private func text(_ answer: Response) -> String {
         let wait = try JSON(encoding: Wait(id: "w-\(kind.rawValue)", kind: kind, by: .you, created: 1, then: .notify))
         service.queue.sync { _ = service.record("m1", "wait-resolved", ["wait": wait, "outcome": .string(outcome)]) }
       }
-      try resolved(.ci, "Vault sentinel title checks passed")
+      // The CI outcome resolves last, so it is the one that the facts keep for `get`.
       try resolved(.date, "the date came")
+      try resolved(.ci, "Vault sentinel title checks passed")
 
       let answer = service.handle(Request(op: "events", args: ["session": "m1"]), origin: .remote("mini"))
       let get = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))
+      let onMac = service.handle(Request(op: "get", args: ["session": "m1"]))
 
+      #expect(onMac.result?["reason"]?.string?.contains("checks passed") == true, "\(text(onMac))")
       let resolutions = (answer.result?.array ?? []).filter { $0["kind"] == "wait-resolved" }
-      #expect(resolutions.map { $0["data"]?["wait"]?["id"] } == ["w-ci", "w-date"])
-      #expect(resolutions.map { $0["data"]?["outcome"] } == [nil, "the date came"])
+      #expect(resolutions.map { $0["data"]?["wait"]?["id"] } == ["w-date", "w-ci"])
+      #expect(resolutions.map { $0["data"]?["outcome"] } == ["the date came", nil])
       for mark in unlistedMarks {
         #expect(!text(answer).contains(mark), "events answered \(mark)")
         #expect(!text(get).contains(mark), "get answered \(mark)")

@@ -184,8 +184,9 @@ extension RequestOrigin {
 }
 
 /// What a host may read of the data that this Mac's GitHub login read. A process on the box chooses its session's
-/// repo through the git remote and the transcript that the poller reads, so the poller can read a PR that the box
-/// has no access to. sbd still polls it and shows it on this Mac. Only the copies that reach the box leave it out.
+/// repo through the git remote and the transcript that the poller reads. `GitHubPoller.mayRead` keeps the poller
+/// from reading a repo that the host's `repos` don't list. The event log can still hold data that an earlier sbd read
+/// before that check existed. The copies that reach the box leave that data out.
 extension Service {
   /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it.
   static let gitHubEventKinds: Set<String> = [

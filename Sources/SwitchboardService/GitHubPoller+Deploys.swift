@@ -39,7 +39,7 @@ extension GitHubPoller {
 
   private func serviceWaits(_ interest: Interest) -> [ServiceWait] {
     interest.waits.compactMap { session, wait in
-      guard wait.kind == .deploy, let service = wait.service, let id = prId(of: wait, session: session.id),
+      guard wait.kind == .deploy, let service = wait.service, let id = prId(of: wait, session: session),
         let pr = prs[id]?.pr, pr.state == .merged, let merge = pr.mergeCommit
       else { return nil }
       return ServiceWait(wait: wait, service: service, pr: pr, merge: merge)

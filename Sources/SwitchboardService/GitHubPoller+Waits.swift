@@ -22,27 +22,27 @@ extension GitHubPoller {
     var seen: Set<String> = []
     let merges = service.followupPullRequests().filter { seen.insert($0.text.lowercased()).inserted }
     let named =
-      waits.compactMap { w in w.wait.pr.map { (pr: $0, session: Optional(w.session.id)) } }
+      waits.compactMap { w in w.wait.pr.map { (pr: $0, session: Optional(w.session)) } }
       + merges.map { (pr: $0, session: nil) }
     return Interest(waits: waits, merges: merges, keys: Set(named.compactMap { key(of: $0.pr, session: $0.session) }))
   }
 
-  private func key(of pr: Wait.PullRequest, session: String?) -> PRKey? {
-    guard let repo = pr.repository ?? session.flatMap(ownRepository) else { return nil }
+  /// The key of the PR, or nil when `mayRead` refuses its repo for the session's host. A PR without a repo takes
+  /// the session's repo, which the box can change at any time. The check therefore runs at each poll.
+  private func key(of pr: Wait.PullRequest, session: Session?) -> PRKey? {
+    guard let repo = pr.repository ?? session.flatMap({ ownRepository($0.id) }), mayRead(repo, for: session?.host)
+    else { return nil }
     return .number(repo: repo, number: pr.number)
   }
 
   private func ownRepository(_ session: String) -> String? {
     guard let t = tracked[session] else { return nil }
-    switch t.branch.key ?? t.transcript.link {
-    case .branch(let repo, _, _)?, .number(let repo, _)?: return repo
-    case nil: return t.prId.flatMap { prs[$0]?.pr.repo }
-    }
+    return (t.branch.key ?? t.transcript.link)?.repo ?? t.prId.flatMap { prs[$0]?.pr.repo }
   }
 
   /// The node id of the PR that a wait is about.
-  func prId(of wait: Wait, session: String) -> String? {
-    guard let pr = wait.pr else { return tracked[session]?.prId }
+  func prId(of wait: Wait, session: Session) -> String? {
+    guard let pr = wait.pr else { return tracked[session.id]?.prId }
     return key(of: pr, session: session).flatMap { targets[$0]?.prId }
   }
 
@@ -56,7 +56,7 @@ extension GitHubPoller {
   func waitedOn(_ interest: Interest) -> Waited {
     var waited = Waited()
     for (session, wait) in interest.waits {
-      guard let id = prId(of: wait, session: session.id) else { continue }
+      guard let id = prId(of: wait, session: session) else { continue }
       waited.created[id] = max(waited.created[id] ?? 0, wait.created)
       if wait.readsPRWhilePending(prs[id]?.pr) { waited.pending.insert(id) }
     }
@@ -82,7 +82,7 @@ extension GitHubPoller {
     confirming = confirming.filter { id, _ in interest.waits.contains { $0.wait.id == id } }
     queuedWaits = queuedWaits.filter { id in interest.waits.contains { $0.wait.id == id } }
     let settled = interest.waits.compactMap { session, wait -> Settled? in
-      guard let id = prId(of: wait, session: session.id), let read = prs[id], read.polled >= wait.created,
+      guard let id = prId(of: wait, session: session), let read = prs[id], read.polled >= wait.created,
         case let comments = keptComments(read.comments), let pr = shown(id, last: nil),
         let outcome = wait.kind == .deploy
           ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr) ?? githubQueueOutcome(wait, pr),

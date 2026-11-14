@@ -1244,6 +1244,10 @@ extension Instance {
     ]
   }
 
+  /// Host keys that list PostHog/posthog in the host's `repos`, so the poller reads that repo's PRs for the host's
+  /// sessions.
+  static let listsPostHog: [String: JSON] = ["repos": ["PostHog/posthog": "~/sb-box-repo"]]
+
   /// A sbd with the host `mini` whose box runs git through `installBoxGit`. The box's git must be in place before
   /// the first session on the host, because setup finds it once per connection.
   static func remoteForRemoval(host extra: [String: JSON] = [:], config settings: [String: JSON] = [:]) throws

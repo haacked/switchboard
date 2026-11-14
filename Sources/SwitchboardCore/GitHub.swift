@@ -45,6 +45,13 @@ public enum PRKey: Hashable, Sendable {
   /// belongs to `owner`, the owner of the branch's push remote.
   case branch(repo: String, branch: String, owner: String)
   case number(repo: String, number: Int)
+
+  /// The repo (owner/name) that the lookup reads.
+  public var repo: String {
+    switch self {
+    case .branch(let repo, _, _), .number(let repo, _): repo
+    }
+  }
 }
 
 /// The GraphQL queries and the pure parts of the GitHub poller. Phase 0 test
