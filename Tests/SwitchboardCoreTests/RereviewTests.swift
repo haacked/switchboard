@@ -103,6 +103,15 @@ private let rereviewCases: [RereviewCase] = [
       ]),
     reviewers: nil),
   RereviewCase(
+    name: "a bot's approval does not hide an answered person's change request",
+    pr: reviewedPR(
+      verdicts: [
+        changesVerdict("mariusandra"),
+        Review(author: "stamphog", state: "APPROVED", submittedAt: afterReplies, commit: samplePRHead, bot: true),
+      ],
+      reviews: [entry("mariusandra", "CHANGES_REQUESTED", at: changeRequest), reply()]),
+    reviewers: ["mariusandra"]),
+  RereviewCase(
     name: "a requester who later approved leaves only the answered requester",
     pr: reviewedPR(
       verdicts: [
@@ -368,7 +377,7 @@ extension RereviewTests {
 
 extension RereviewTests {
   /// The PR has a re-review exactly when `prColumn` would put it In review without its
-  /// change requests, for PRs whose change requests the author answered.
+  /// change requests, for PRs whose change requests the author answered and that no bot requested.
   @Suite struct ColumnParity {
     @Test(arguments: parityShapes)
     func aReReviewExistsExactlyWhenThePRWouldBeInReviewWithoutItsChangeRequests(_ name: String, _ pr: PullRequest) {
