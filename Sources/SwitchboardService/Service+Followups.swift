@@ -16,11 +16,6 @@ extension Service {
       return try removeFollowup(args)
     case "followup-import":
       return try importFollowups(args)
-    case "pr-merged":
-      guard let text = args["pr"]?.string, let pr = Wait.PullRequest(parsing: text), pr.repository != nil else {
-        throw APIError("pr-merged needs a PR as owner/name#12 or a PR URL")
-      }
-      return try JSON(encoding: pullRequestMerged(pr))
     default:
       throw APIError("unknown request \(op)")
     }

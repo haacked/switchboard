@@ -404,7 +404,7 @@ public final class Service {
         let now = try queue.sync { try clockRequest(request.args) }
         if request.args["advance"] != nil { tick() }
         return .success(now)
-      case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
+      case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import":
         return .success(try followupRequest(request.op, request.args))
       case "importable":
         let all = request.args["all"]?.bool ?? false

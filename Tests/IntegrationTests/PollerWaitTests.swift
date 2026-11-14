@@ -420,16 +420,26 @@ func resumed(_ sbd: Instance, _ s: SessionSummary, with message: String) throws 
   @Test func aMergeTriggerFiresWhenThePollSeesThePRMerge() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
+    // GitHub reads owner and name without case. A URL in other case names
+    // the same PR.
     let open = try add(
-      sbd, ["prompt": "Clean up.", "repository": "PostHog/posthog", "after": "PostHog/posthog#122953"])
+      sbd,
+      [
+        "prompt": "Clean up.", "repository": "PostHog/posthog",
+        "after": "https://github.com/POSTHOG/PostHog/pull/122953",
+      ])
     let merged = try add(
       sbd, ["prompt": "Retarget.", "repository": "PostHog/posthog", "after": "PostHog/posthog#122179"])
-    try sbd.poll()
+    let other = try add(
+      sbd, ["prompt": "Wait.", "repository": "PostHog/posthog", "after": "PostHog/posthog#122896"])
+    #expect(try sbd.poll()["merged"]?.int == 1)
     #expect(try sbd.get(open.id).state == .notStarted)
     #expect(try sbd.get(merged.id).reason == "ready to start: PostHog/posthog#122179 merged")
     github.change(122953) { $0["state"] = "MERGED" }
-    try sbd.poll()
-    #expect(try sbd.get(open.id).reason == "ready to start: PostHog/posthog#122953 merged")
+    #expect(try sbd.poll()["merged"]?.int == 1)
+    #expect(try sbd.get(open.id).reason == "ready to start: POSTHOG/PostHog#122953 merged")
+    #expect(try sbd.get(other.id).state == .notStarted)
+    #expect(try sbd.poll()["merged"]?.int == 0)
     #expect(try sbd.events(open.id).filter { $0.kind == "followup-ready" }.count == 1)
   }
 }
