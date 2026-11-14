@@ -12,6 +12,11 @@
 # sets the flags that swift needs to find Swift Testing.
 # The whole run, shards included, holds one machine-wide build slot
 # (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
+# SB_TEST_SLOTS sets how many integration tests, each with its own sbd, run at
+# once in one swift test process. The default is 4, or one less than the CPU
+# count when that is lower, and a value above one less than the CPU count
+# counts as that (Tests/IntegrationTests/Blocking.swift). The cap applies to
+# each process, so --shards N runs up to N times as many at once.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
