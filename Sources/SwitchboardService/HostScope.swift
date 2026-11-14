@@ -144,7 +144,7 @@ enum HostScope {
         guard let name = value.string else { throw APIError("host is a host name") }
         named = name
       }
-      args["host"] = try SessionHost.choose(named: named, parent: nil, origin: .host(host)).map(JSON.string)
+      args["host"] = try SessionHost.choose(named: named, parent: nil, origin: .remote(host)).map(JSON.string)
     }
     return Request(op: op, args: .object(args))
   }
@@ -179,13 +179,5 @@ extension RequestOrigin {
   func reaches(_ host: String?) -> Bool {
     guard case .remote(let origin) = self else { return true }
     return host == origin
-  }
-
-  /// The origin that `SessionHost.choose` takes.
-  var sessionOrigin: SessionHost.Origin {
-    switch self {
-    case .mac: .mac
-    case .remote(let host): .host(host)
-    }
   }
 }

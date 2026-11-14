@@ -376,7 +376,6 @@ public final class Service {
   ) {
     var replied = false
     do {
-      // A request from a host's socket goes through the host's scope before it reaches `route`.
       if case .remote(let host) = origin {
         return try handleHostRequest(request, host: host, caller: caller, hookGone: hookGone) {
           replied = true
@@ -400,9 +399,9 @@ public final class Service {
       return try handleHook(request.args, hookGone: hookGone)
     case "new":
       return try .success(
-        JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self), origin: origin.sessionOrigin)))
+        JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self), origin: origin)))
     case "spawn":
-      return try .success(JSON(encoding: spawn(request.args, origin: origin.sessionOrigin)))
+      return try .success(JSON(encoding: spawn(request.args, origin: origin)))
     case "repos":
       return try .success(JSON(encoding: knownRepos()))
     case "repo-add":
@@ -966,7 +965,7 @@ public final class Service {
 
   /// Starts the session that a `new` request asks for, on the host that `SessionHost.choose` picks. A request
   /// from this Mac with no host and a parent on a host fails, because `sb new` resolved its folder on this Mac.
-  func newSession(_ args: NewSession, origin: SessionHost.Origin = .mac) throws -> SessionSummary {
+  func newSession(_ args: NewSession, origin: RequestOrigin = .mac) throws -> SessionSummary {
     let parentHost = queue.sync { host(ofParent: args.parent) }
     if origin == .mac, args.host == nil, let parentHost {
       throw APIError(
@@ -980,8 +979,8 @@ public final class Service {
   /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
   /// `args.host` is a host of config.json, or nil for this Mac. `origin` is the machine that asked, which `create`
   /// checks the parent against.
-  func startSession(_ args: NewSession, origin: SessionHost.Origin) throws -> SessionSummary {
-    if let host = args.host { return try newSession(args, onHost: host, origin: origin) }
+  func startSession(_ args: NewSession, origin: RequestOrigin) throws -> SessionSummary {
+    if let host = args.host { return try startSession(args, onHost: host, origin: origin) }
     var args = args
     args.branch = branch(of: args, repo: (args.path as NSString).standardizingPath, at: mac)
     // An unknown group, an unknown account, or an account that differs from
@@ -1008,7 +1007,7 @@ public final class Service {
   /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
   /// It waits for the host, makes the folder and worktree there off the state queue, and reads the host's
   /// panes and processes before it creates the session.
-  private func newSession(_ args: NewSession, onHost host: String, origin: SessionHost.Origin) throws
+  private func startSession(_ args: NewSession, onHost host: String, origin: RequestOrigin) throws
     -> SessionSummary
   {
     let site = try remoteSite(host)
@@ -1060,7 +1059,7 @@ public final class Service {
   /// `configure` changes the session before its first launch. A session that host h asked for takes a parent only
   /// on h, which this checks in the state queue block that saves the record.
   func create(
-    _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?), origin: SessionHost.Origin = .mac,
+    _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?), origin: RequestOrigin = .mac,
     configure: (inout Session) -> Void = { _ in }
   ) throws -> SessionSummary {
     let id = shortId("s", taken: entries.keys)
@@ -1070,7 +1069,7 @@ public final class Service {
       created: nowMs())
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
-    if case .host(let host) = origin, let parent = session.parent, entries[parent]?.session.host != host {
+    if case .remote(let host) = origin, let parent = session.parent, entries[parent]?.session.host != host {
       throw APIError("the parent \(parent) is not on \(host)")
     }
     session.group = try groupOfNew(args.group, parent: session.parent)

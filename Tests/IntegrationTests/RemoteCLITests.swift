@@ -4,8 +4,6 @@ import Testing
 
 private let refusal = "ssh: connect to host mini.local port 22: Connection refused"
 
-private func text(_ r: CommandResult) -> String { "exit \(r.status), stdout: \(r.stdout), stderr: \(r.stderr)" }
-
 /// `sb` on a remote host, end to end over the ssh stub: the box's `~/.sb/bin/sb` runs the shim's `cli`, the
 /// forward carries the request to the host's socket, and sbd runs this Mac's `sb` in its sandbox as a client of
 /// that socket. `BoxShimTests`, `HostCLITests`, and `CLISandboxTests` cover each part's shapes.

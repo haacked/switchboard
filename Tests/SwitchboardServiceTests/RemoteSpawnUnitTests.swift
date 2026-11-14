@@ -34,12 +34,6 @@ private func makeCheckout(_ path: String, _ repository: String) throws {
       + " && git remote add origin https://github.com/\(repository).git", in: path)
 }
 
-private func real(_ path: String) -> String {
-  guard let resolved = realpath(path, nil) else { return path }
-  defer { free(resolved) }
-  return String(cString: resolved)
-}
-
 /// The checkouts that this Mac's config.json and mini's `repos` name. The Mac and mini name different checkouts
 /// for the same `owner/name`, so a lookup in the wrong map lands in the wrong folder. The bench's box shares this
 /// Mac's files, so every path here also exists on the box.

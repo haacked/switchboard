@@ -6,6 +6,9 @@ import Testing
 
 // The callers of a remote site's guard: the poller, the launch, the caches by path, and the refusals.
 
+/// The path with its links resolved, or the path itself when it names nothing.
+func real(_ path: String) -> String { realPath(path) ?? path }
+
 private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.hostName == "mini" }
 
 private func sh(_ script: String, in folder: String) throws {

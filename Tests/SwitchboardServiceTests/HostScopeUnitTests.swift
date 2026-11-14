@@ -360,12 +360,6 @@ private func settle(_ service: Service) {
 
 // MARK: The ops that a host may send
 
-private func real(_ path: String) -> String {
-  guard let resolved = realpath(path, nil) else { return path }
-  defer { free(resolved) }
-  return String(cString: resolved)
-}
-
 /// A checkout on branch main with one commit, whose origin is github.com/o/n, as a host's `repos` needs.
 private func makeCheckout(_ path: String) throws {
   try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
@@ -703,10 +697,10 @@ private func ids(_ answer: Response) -> [String] {
       do {
         if op == "new" {
           _ = try service.newSession(
-            NewSession(path: "\(facts.home)/work", prompt: "hello", parent: "l1"), origin: .host("mini"))
+            NewSession(path: "\(facts.home)/work", prompt: "hello", parent: "l1"), origin: .remote("mini"))
         } else {
           _ = try service.spawn(
-            ["repository": "o/n", "branch": "b3", "prompt": "hello", "parent": "l1"], origin: .host("mini"))
+            ["repository": "o/n", "branch": "b3", "prompt": "hello", "parent": "l1"], origin: .remote("mini"))
         }
         Issue.record("\(op) from mini created a session with the local parent l1")
       } catch {
@@ -897,7 +891,7 @@ private func cliOutput(_ answer: Response) throws -> (status: Int?, stdout: Data
         return fd
       }
       defer { silent.forEach { close($0) } }
-      // An answer that has begun to arrive is being written, and its run holds its slot until the write ends.
+      // sbd is still writing an answer that has begun to arrive. Its run holds its slot until the write ends.
       let writing = waitUntil(seconds: 6) {
         var ready = silent.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
         return poll(&ready, nfds_t(ready.count), 0) == silent.count
@@ -906,9 +900,9 @@ private func cliOutput(_ answer: Response) throws -> (status: Int?, stdout: Data
       let refused = try ask()
 
       #expect(refused.error == "too many sb commands from mini are running", "\(refused)")
-      // A read would let a write go on, so the test reads nothing until every write has had twice its 4 s: the
-      // write that stalls first returns its partial count, and the next write times out. The reads below then show
-      // whether sbd hung up.
+      // A read would let a write go on, so the test reads nothing until every write has had twice its 4 s.
+      // The write that stalls first returns its partial count. The next write times out.
+      // The reads below then show whether sbd hung up.
       _ = waitUntil(seconds: 12) {
         var ends = silent.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
         _ = poll(&ends, nfds_t(ends.count), 0)

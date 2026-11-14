@@ -13,6 +13,9 @@ func real(_ path: String) -> String {
   return String(cString: resolved)
 }
 
+/// A command's exit status and both streams, for a failure message.
+func text(_ r: CommandResult) -> String { "exit \(r.status), stdout: \(r.stdout), stderr: \(r.stderr)" }
+
 extension Home {
   /// Names the test process that owns the home, for Fixtures/reap.
   func setOwner(_ pid: pid_t) throws {

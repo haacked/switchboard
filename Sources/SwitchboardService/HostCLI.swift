@@ -181,20 +181,9 @@ final class HostCLIRunner: @unchecked Sendable {
   /// Runs the program under the profile with exactly `environment`, in `cwd`, with `stdin`. It throws, and runs
   /// nothing, when the host's slots are taken. It throws when `sandbox-exec` is missing, can't read the profile
   /// (exit 65), or can't run the program (exit 71 with nothing on stdout), so the program never runs without
-  /// its sandbox.
-  func run(
-    host: String, profile: String, argv: [String], environment: [String: String], cwd: String, stdin: Data,
-    cancelled: @escaping () -> Bool
-  ) throws -> HostCLIOutput {
-    try run(
-      host: host, profile: profile, argv: argv, environment: environment, cwd: cwd, stdin: stdin,
-      cancelled: cancelled
-    ) { $0 }
-  }
-
-  /// Runs the program as the other `run` does, then passes its output to `finish` while the run still holds its
-  /// slot. A caller that sends the output in `finish` keeps the slot until the send ends, so a client that never
-  /// reads its answers holds at most `slotsPerHost` of them.
+  /// its sandbox. It passes the output to `finish` while the run still holds its slot. A caller that sends the
+  /// output in `finish` keeps the slot until the send ends, so a client that never reads its answers holds at
+  /// most `slotsPerHost` of them.
   func run<T>(
     host: String, profile: String, argv: [String], environment: [String: String], cwd: String, stdin: Data,
     cancelled: @escaping () -> Bool, finish: (HostCLIOutput) throws -> T

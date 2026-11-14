@@ -147,8 +147,6 @@ private func sandboxLog() -> String {
   return r.map { String($0.stdout.suffix(4_000)) } ?? "log show failed"
 }
 
-private func text(_ r: CommandResult) -> String { "exit \(r.status), stdout: \(r.stdout), stderr: \(r.stderr)" }
-
 /// The real `sb` under `HostCLI.profile`, with `HostCLI.environment`. Each case runs `sb` once against sockets
 /// that the test owns, with no sbd and no ssh stub. The two positive controls show that `sb` starts and reaches
 /// mini's socket under the profile, so a denial below fails because of the sandbox and not because `sb` never

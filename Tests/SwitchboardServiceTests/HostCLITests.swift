@@ -12,17 +12,8 @@ let builtSb: String = {
   let folder =
     ProcessInfo.processInfo.environment["SB_BIN_DIR"]
     ?? URL(fileURLWithPath: Bundle(for: BundleMarker.self).bundlePath).deletingLastPathComponent().path
-  let path = "\(folder)/sb"
-  guard let resolved = realpath(path, nil) else { return path }
-  defer { free(resolved) }
-  return String(cString: resolved)
+  return real("\(folder)/sb")
 }()
-
-private func real(_ path: String) -> String {
-  guard let resolved = realpath(path, nil) else { return path }
-  defer { free(resolved) }
-  return String(cString: resolved)
-}
 
 private let mib = 1024 * 1024
 
@@ -403,7 +394,8 @@ extension HostCLIRunner {
   ) throws -> HostCLIOutput {
     try run(
       host: host, profile: allowAll, argv: [mode] + args, environment: ["PATH": "/usr/bin:/bin"], cwd: cwd,
-      stdin: stdin, cancelled: cancelled)
+      stdin: stdin, cancelled: cancelled
+    ) { $0 }
   }
 }
 
@@ -444,7 +436,8 @@ extension HostCLIRunner {
     let given = ["SB_HOME": "/Users/u/.sb/hosts/mini", "SB_CLI_HOST": "mini", "PATH": "/usr/bin:/bin", "A": "x y"]
 
     let output = try HostCLIRunner(program: "/usr/bin/env").run(
-      host: "mini", profile: allowAll, argv: [], environment: given, cwd: "/", stdin: Data(), cancelled: { false })
+      host: "mini", profile: allowAll, argv: [], environment: given, cwd: "/", stdin: Data(), cancelled: { false }
+    ) { $0 }
 
     let lines = text(output.stdout).split(separator: "\n").map(String.init)
     #expect(Set(lines) == Set(given.map { "\($0.key)=\($0.value)" }), "\(lines)")
@@ -635,7 +628,8 @@ extension HostCLIRunner {
 
     let output = try HostCLIRunner(program: "/bin/ls").run(
       host: "mini", profile: allowAll, argv: ["-l", "/dev/fd/"], environment: [:], cwd: "/", stdin: Data(),
-      cancelled: { false })
+      cancelled: { false }
+    ) { $0 }
 
     // `ls` opens folders of its own to list /dev/fd. Each other descriptor past the three streams was inherited.
     let rows = text(output.stdout).split(separator: "\n").filter { Int($0.split(separator: " ").last ?? "") != nil }
@@ -722,7 +716,8 @@ extension HostCLIRunner {
       #expect {
         try HostCLIRunner(program: program).run(
           host: "mini", profile: "(version 1)(deny default)", argv: ["quick"], environment: [:], cwd: "/",
-          stdin: Data(), cancelled: { false })
+          stdin: Data(), cancelled: { false }
+        ) { $0 }
       } throws: { error in
         "\(error)".contains("sbd can't run sb for mini without its sandbox")
       }
@@ -736,7 +731,8 @@ extension HostCLIRunner {
       #expect {
         try HostCLIRunner(program: program).run(
           host: "mini", profile: "(version 1)(allow default", argv: ["quick"], environment: [:], cwd: "/",
-          stdin: Data(), cancelled: { false })
+          stdin: Data(), cancelled: { false }
+        ) { $0 }
       } throws: { error in
         "\(error)".contains("sbd can't run sb for mini without its sandbox")
       }

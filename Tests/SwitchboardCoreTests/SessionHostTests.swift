@@ -55,13 +55,13 @@ import Testing
   /// The scope of mini's requests refuses a parent off mini first, so the rule reads no parent for mini.
   @Test(arguments: [nil, "mini"] as [String?], [nil, "mini"] as [String?])
   func aRequestFromAHostThatNamesNoHostOrItselfRunsOnThatHost(named: String?, parent: String?) throws {
-    #expect(try SessionHost.choose(named: named, parent: parent, origin: .host("mini")) == "mini")
+    #expect(try SessionHost.choose(named: named, parent: parent, origin: .remote("mini")) == "mini")
   }
 
   @Test(arguments: ["local", "other", "", "LOCAL", "Mini", "mini "], [nil, "mini", "other"] as [String?])
   func aRequestFromAHostForAnotherMachineThrows(named: String, parent: String?) {
     do {
-      let chosen = try SessionHost.choose(named: named, parent: parent, origin: .host("mini"))
+      let chosen = try SessionHost.choose(named: named, parent: parent, origin: .remote("mini"))
       Issue.record("a request from mini chose \(chosen ?? "this Mac") for \(named)")
     } catch {
       #expect("\(error)" == "a session on mini can start sessions only on mini")

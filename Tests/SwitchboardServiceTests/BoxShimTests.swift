@@ -567,12 +567,6 @@ private func sentStdin(_ request: JSON) -> Data? {
   return field.string.flatMap { Data(base64Encoded: $0) }
 }
 
-private func realPath(_ path: String) -> String {
-  guard let resolved = realpath(path, nil) else { return path }
-  defer { free(resolved) }
-  return String(cString: resolved)
-}
-
 /// The argv of `sb summary set` in each form that `sb` reads as that command.
 private let summarySets: [[String]] = [
   ["summary", "set"], ["summary", "set", "--json"], ["summary", "--json", "set"], ["summary", "set", "s1"],
@@ -607,7 +601,7 @@ private let noStdin: [[String]] = [
       let keys = Set(request["args"]?.object?.keys.map { $0 } ?? [])
       #expect(keys.isSubset(of: ["argv", "cwd", "session", "claudecode", "stdin"]), "\(keys)")
       #expect(request["args"]?["argv"] == .array(argv.map(JSON.string)))
-      #expect(request["args"]?["cwd"]?.string.map(realPath) == realPath(b.work))
+      #expect(request["args"]?["cwd"]?.string.map(real) == real(b.work))
       #expect(request["args"]?["session"] == "s1a2b3")
       #expect(request["args"]?["claudecode"] == "1")
       #expect(sentStdin(request) == Data())

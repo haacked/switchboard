@@ -8,7 +8,7 @@ extension Service {
   /// It starts on the host that `host` names, else on its parent's host, and
   /// there finds the checkout in the host's `repos` or at a path on the host.
   /// `local` names this Mac. A follow-up starts on this Mac. A request from host h starts on h.
-  func spawn(_ args: JSON, origin: SessionHost.Origin = .mac) throws -> SessionSummary {
+  func spawn(_ args: JSON, origin: RequestOrigin = .mac) throws -> SessionSummary {
     let spawn = try SpawnArgs(args)
     if let wait = spawn.wait, let parent = spawn.parent {
       _ = try queue.sync { try lookup(["session": .string(parent)]) }
