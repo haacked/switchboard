@@ -55,7 +55,7 @@ struct TriageDetail: View {
         } else if session.runsClaude {
           MessageField(
             session: session.id, draft: model.messageDraft(for: session),
-            shortcut: KeyboardShortcut(.return, modifiers: [.command])
+            shortcut: KeyboardShortcut(.return, modifiers: [.command]), ref: session.triage?.ref
           )
           .padding(8)
         }

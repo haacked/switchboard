@@ -29,11 +29,11 @@ struct MessageField: View {
 
     /// Sends the trimmed text and the images, and empties the field once sbd accepts them, unless the user
     /// changed it meanwhile.
-    @MainActor func submit(_ session: String, to model: BoardModel) {
+    @MainActor func submit(_ session: String, ref: String? = nil, to model: BoardModel) {
       guard !isEmpty else { return }
       let sent = trimmed
       let ids = images.map(\.id)
-      model.send(session, sent, images: images.map { ($0.name, $0.data) }) { [weak self] in
+      model.send(session, sent, images: images.map { ($0.name, $0.data) }, ref: ref) { [weak self] in
         self?.clear(ifStill: sent, images: ids)
       }
     }
@@ -197,6 +197,9 @@ struct MessageField: View {
   /// From `BoardModel.messageDraft(for:)`, so that the text survives a switch to another view.
   @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
+  /// The ref of the Inbox item that the field answers, so sbd can hold the session while it works on the
+  /// message.
+  var ref: String?
   @FocusState private var focused: Bool
   /// The paste monitor reads this view's focus here. The draft can't hold it, because several views share one draft.
   @State private var focus = Focus()
@@ -293,7 +296,7 @@ struct MessageField: View {
     .accessibilityAction { draft.remove(image.id) }
   }
 
-  private func send() { draft.submit(session, to: model) }
+  private func send() { draft.submit(session, ref: ref, to: model) }
 
   /// The chip's VoiceOver label. Activating the chip removes the image.
   static func chipLabel(_ name: String) -> String { "Image: \(name), remove" }

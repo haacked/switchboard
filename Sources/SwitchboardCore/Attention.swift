@@ -144,6 +144,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var reviewRequest: ReviewRequestAttempt?
   /// The Inbox item that the user acknowledged during this turn.
   public var acknowledgment: Acknowledgment?
+  /// The rule's Inbox item that the user last answered with a message.
+  public var request: InboxRequest?
   /// Claude Code's permission mode, as the last main-session hook or launch
   /// reported it. SessionStart carries none, so a launch without a mode
   /// leaves it unknown until the next hook.
@@ -202,6 +204,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     let d = event.data
     if SessionFacts.activityKinds.contains(event.kind) { lastActivity = max(lastActivity, event.t) }
     let userPrompt = isUserPrompt(event)
+    let turnWasRunning = turnRunning
     // Only an acknowledgment needs the snapshot. Startup replay applies every event, so most events skip it.
     let promptsBefore = acknowledgment == nil ? nil : openPrompts
     applyWait(event, userPrompt: userPrompt)
@@ -357,6 +360,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
+    applyRequest(event, userPrompt: userPrompt, turnEnded: turnWasRunning && !turnRunning)
   }
 
   private mutating func startTurn(_ t: Int64) {
@@ -411,6 +415,9 @@ public struct Verdict: Equatable, Sendable {
   public var source: VerdictSource = .rule
   /// True when `Attention.shown` moved an acknowledged Inbox verdict to Waiting.
   public var acknowledged = false
+  /// True when `Attention.requested` holds a rule verdict in Waiting while
+  /// the session works on the user's request.
+  public var requested = false
   /// What the session's card offers for a rule that knows the next step.
   public var options: [TriageOption] = []
   /// What the user should read before deciding.
@@ -456,6 +463,16 @@ public enum Attention {
   /// `stateOf` gives another session's last state, which the dependency
   /// rules read for the session of a stack base.
   public static func evaluate(
+    _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
+  ) -> Verdict {
+    let verdict = unheld(session, facts, now: now, stateOf: stateOf)
+    // A held verdict is Waiting. The hold comes after `readyForReview`, which would turn it into Ready for review.
+    return facts.unread != nil ? verdict : requested(verdict, facts, now: now)
+  }
+
+  /// The verdict without the hold of the user's request, which a new
+  /// request records.
+  public static func unheld(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState? = { _ in nil }
   ) -> Verdict {
     var facts = facts

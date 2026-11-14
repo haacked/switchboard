@@ -55,13 +55,21 @@ extension Service {
       throw APIError("choose answers a prompt or acts on a PR for you, so it doesn't run inside Claude Code")
     }
     let session = JSON.string(id)
+    // The ref lets `send` record that the user's message answered a rule's item. `send` drops it for a choice
+    // made inside Claude Code, as by the Manager.
+    let insideClaude = args["insideClaude"] ?? false
+    func send(_ text: String) -> Request {
+      Request(
+        op: "send",
+        args: ["session": session, "text": .string(text), "ref": .string(item.ref), "insideClaude": insideClaude])
+    }
     switch option.action {
     case .send:
-      return Request(op: "send", args: ["session": session, "text": .string(option.message ?? option.label)])
+      return send(option.message ?? option.label)
     case .reply:
       let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       guard !text.isEmpty else { throw APIError("\(option.label) needs the text to send") }
-      return Request(op: "send", args: ["session": session, "text": .string(text)])
+      return send(text)
     case .merge:
       return Request(op: "merge", args: ["session": session])
     case .dismiss:
