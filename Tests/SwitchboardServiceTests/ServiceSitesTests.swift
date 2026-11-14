@@ -23,18 +23,13 @@ import Testing
     func sessionFolder(_ id: String) throws -> String { "\(folder)/sessions/\(id)" }
     func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { throw Unused() }
     func readSnapshot(claudeProgram: String) throws -> Service.Snapshot { throw Unused() }
+    func processes() throws -> ProcessTable { throw Unused() }
     func alive(_ pids: Set<Int>) throws -> Set<Int> { throw Unused() }
     func folderUsers(_ folder: String) throws -> [FolderUser] { throw Unused() }
     func samePath(_ a: String, _ b: String) throws -> Bool { throw Unused() }
     func realPath(_ path: String) throws -> String? { throw Unused() }
     func folderGone(_ path: String) throws -> Bool { throw Unused() }
     func stopClaude(_ pid: Int, below pane: Int, program: String) throws { throw Unused() }
-  }
-
-  private func withService(_ body: (Service, Home) throws -> Void) throws {
-    let home = Home(path: try makeShortTempFolder())
-    defer { try? FileManager.default.removeItem(atPath: home.path) }
-    try body(try Service(home: home, sbPath: "/usr/bin/true"), home)
   }
 
   @Test(.timeLimit(.minutes(1)))

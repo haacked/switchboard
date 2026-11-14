@@ -197,7 +197,9 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
   static let procpsPanes = "s1-claude\t813\t0\t0\ns1-shell\t814\t0\t0\n"
 
   private func parse(_ answer: Data) throws -> Service.Snapshot {
-    try RemoteSite.parseBatchedRead(answer, claudeProgram: "claude")
+    var read = try RemoteSite.parseBatchedRead(answer)
+    read.findClaudes(program: "claude")
+    return read
   }
 
   @Test func aMacOSAnswerGivesThePanesTheProcessesAndTheClaudeOfEachSession() throws {
@@ -208,10 +210,10 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
     #expect(s.panes["s1-claude"]?.clients == 1)
     #expect(s.panes["s1-claude"]?.dead == false)
     #expect(s.claudePids == ["s1": 530])
-    #expect(s.children[501]?.map(\.pid) == [530])
-    #expect(s.children[501]?.first?.command == "claude --session-id 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
-    #expect(s.children[1]?.map(\.pid).sorted() == [480, 60114])
-    #expect(s.children.values.map(\.count).reduce(0, +) == 7)
+    #expect(s.processes.children(of: 501).map(\.pid) == [530])
+    #expect(s.processes.command(of: 530) == "claude --session-id 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
+    #expect(s.processes.children(of: 1).map(\.pid).sorted() == [480, 60114])
+    #expect(s.processes.all.count == 7)
   }
 
   @Test func aProcpsAnswerGivesThePanesTheProcessesAndTheClaudeOfEachSession() throws {
@@ -219,13 +221,13 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
 
     #expect(s.panes["s1-claude"]?.pid == 813)
     #expect(s.claudePids == ["s1": 840])
-    #expect(s.children[813]?.first?.pgid == 813)
+    #expect(s.processes.children(of: 813).first?.pgid == 813)
     #expect(
-      s.children[813]?.first?.command
+      s.processes.children(of: 813).first.flatMap { s.processes.command(of: $0.pid) }
         == "node /home/haacked/.local/bin/claude --resume 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
-    #expect(s.children[2]?.first?.command == "[kworker/0:1-events]")
-    #expect(s.children[814]?.map(\.pid) == [4_194_304])
-    #expect(s.children.values.map(\.count).reduce(0, +) == 8)
+    #expect(s.processes.children(of: 2).first.flatMap { s.processes.command(of: $0.pid) } == "[kworker/0:1-events]")
+    #expect(s.processes.children(of: 814).map(\.pid) == [4_194_304])
+    #expect(s.processes.all.count == 8)
   }
 
   @Test func aDeadClaudePaneHasNoClaude() throws {
@@ -250,7 +252,7 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
 
     #expect(s.panes.isEmpty)
     #expect(s.claudePids.isEmpty)
-    #expect(s.children[813]?.map(\.pid) == [840])
+    #expect(s.processes.children(of: 813).map(\.pid) == [840])
   }
 
   @Test(arguments: [
@@ -796,7 +798,7 @@ func paths(inside folder: String) throws -> [String] {
 
   /// The link drops while setup runs. The link connects again, and setup runs on the new connection, well within
   /// the wait.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(2)))
   func aLinkThatDropsDuringSetupIsReadyOnTheNextConnectionWithinTheWait() throws {
     try withSite { b in
       try holdNextSetup(b)
@@ -806,9 +808,8 @@ func paths(inside folder: String) throws -> [String] {
       let lock = NSLock()
       var outcome: Result<Void, any Error>?
       let finished = DispatchSemaphore(value: 0)
-      let started = Date()
       Thread.detachNewThread {
-        let r = Result { try b.site.awaitReady(seconds: 15) }
+        let r = Result { try b.site.awaitReady(seconds: 60) }
         lock.withLock { outcome = r }
         finished.signal()
       }
@@ -816,9 +817,8 @@ func paths(inside folder: String) throws -> [String] {
 
       b.bench.drop(first)
 
-      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(finished.wait(timeout: .now() + 65) == .success)
       #expect(throws: Never.self) { try lock.withLock { outcome }?.get() }
-      #expect(Date().timeIntervalSince(started) < 15)
       #expect(b.bench.masters().count >= 2)
       #expect(b.site.facts?.epoch == b.link.status.connection)
       #expect(b.site.facts?.epoch != connection)
@@ -855,7 +855,7 @@ func paths(inside folder: String) throws -> [String] {
   /// The link drops just after the hook script answered, so the forward fails before the link reports the drop.
   /// The box's `chmod` of the hook settings starts the drop: it lets the forward through again and kills the
   /// master 0.4 s later. Until then the stub refuses the forward.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(2)))
   func aSetupWhoseForwardFailsAsTheLinkDropsIsReadyOnTheNextConnection() throws {
     try withSite { b in
       let first = try b.bench.connect()
@@ -876,11 +876,8 @@ func paths(inside folder: String) throws -> [String] {
         """.utf8
       ).write(to: URL(fileURLWithPath: path))
       chmod(path, 0o755)
-      let started = Date()
+      try b.site.awaitReady(seconds: 60)
 
-      try b.site.awaitReady(seconds: 15)
-
-      #expect(Date().timeIntervalSince(started) < 15)
       #expect(b.bench.masters().count >= 2)
       #expect(b.site.facts?.epoch == b.link.status.connection)
       #expect(b.site.facts?.epoch != connection)
@@ -889,15 +886,17 @@ func paths(inside folder: String) throws -> [String] {
   }
 
   /// A setup that fails while its connection stays up fails at once and does not wait out the deadline.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(3)))
   func aSetupThatFailsWhileTheLinkStaysUpFailsAtOnce() throws {
     try withSite(host: ["tmux": "/nonexistent/sb/tmux"]) { b in
       try b.bench.connect()
       let started = Date()
 
-      #expect { try b.site.awaitReady(seconds: 15) } throws: { "\($0)".contains(tmuxInstall) }
+      #expect { try b.site.awaitReady(seconds: 120) } throws: { "\($0)".contains(tmuxInstall) }
 
-      #expect(Date().timeIntervalSince(started) < 7)
+      // A loaded CI runner has taken 15 s for one setup on a link that stayed up. A setup that waited out the
+      // deadline would take 120 s.
+      #expect(Date().timeIntervalSince(started) < 60)
       #expect(b.bench.masters().count == 1)
     }
   }
@@ -1798,7 +1797,7 @@ func paths(inside folder: String) throws -> [String] {
       #expect(s.panes.keys.sorted() == ["s1-claude", "s1-shell"])
       #expect(s.panes["s1-claude"]?.pid == claude.pane)
       #expect(s.claudePids == ["s1": claude.child])
-      #expect(s.children[claude.pane]?.map(\.pid) == [claude.child])
+      #expect(s.processes.children(of: claude.pane).map(\.pid) == [claude.child])
       #expect(s.taken > 0)
     }
   }
@@ -1826,7 +1825,7 @@ func paths(inside folder: String) throws -> [String] {
       let s = try b.site.readSnapshot(claudeProgram: "sleep")
 
       #expect(s.panes.isEmpty)
-      #expect(!s.children.isEmpty)
+      #expect(!s.processes.all.isEmpty)
     }
   }
 

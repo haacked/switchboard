@@ -236,14 +236,15 @@ extension Service {
         })
     }
     let program = (config.claude as NSString).lastPathComponent
-    let claudes = Set(snapshot.children.values.joined().filter { Service.isClaude($0, program: program) }.map(\.pid))
     let owned = Set(snapshot.claudePids.values)
     var verified = Set<Int>()
     func problem(_ pid: Int, of s: ClaudeSession) -> String? {
       guard Processes.isValidPid(pid), pid != 1, pid != Int(getpid()) else { return notOutside(s, pid) }
       guard Processes.exists(pid) else { return nil }
-      if !claudes.contains(pid) || owned.contains(pid) { return notOutside(s, pid) }
-      if backgroundJobs(pid, in: snapshot.children) > 0 {
+      if owned.contains(pid) || !Service.isClaude(snapshot.processes.command(of: pid) ?? "", program: program) {
+        return notOutside(s, pid)
+      }
+      if backgroundJobs(pid, in: snapshot.processes) > 0 {
         return
           "\(s.label)'s claude (pid \(pid)) runs a background task, and exiting claude would lose its result. Exit claude there, then import it."
       }

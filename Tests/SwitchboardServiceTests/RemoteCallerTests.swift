@@ -990,7 +990,7 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
     var read = Service.Snapshot()
     read.panes["s1-claude"] = PaneRow(pid: tree.pane, dead: false, clients: 0)
     read.claudePids["s1"] = tree.child
-    read.children = [tree.pane: [ProcessRow(pid: tree.child, ppid: tree.pane, pgid: tree.pane, command: command)]]
+    read.processes = ProcessTable.parse("\(tree.child) \(tree.pane) \(tree.pane) \(command)")
     hold(Service.Entry(session: session), in: service, facts, snapshot: read)
     return (session, tree)
   }
