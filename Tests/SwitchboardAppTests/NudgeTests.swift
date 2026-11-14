@@ -758,7 +758,7 @@ private let candidateTeams = ["@PostHog/team-flags", "@PostHog/team-hogql", "@Po
 
   // MARK: Nudge all grouping
 
-  /// The plan's Risk 3 shapes.
+  /// The forms one team's mention takes across cards, and the cards that Nudge all leaves out.
   @Suite struct TeamGrouping {
     @Test func aTeamInTwoCasesIsOneGroup() {
       let cards = [
@@ -878,7 +878,8 @@ private let candidateTeams = ["@PostHog/team-flags", "@PostHog/team-hogql", "@Po
   /// For each team, the Nudge all bullets are exactly the cards that show Nudge and whose single nudge
   /// addresses that team. The expected side runs `Nudge.shows` and `Nudge.text(for:now:)`.
   @Suite struct TeamParity {
-    /// Every Risk 3 shape on one board, plus a login-only PR.
+    /// Every form of a team mention and every card that Nudge all leaves out, on one board, plus a
+    /// login-only PR.
     private static let board: [SessionSummary] = [
       reviewCard("flags-upper", number: 1, since: now - 6 * day, reviewers: ["@PostHog/team-flags"]),
       reviewCard("flags-lower", number: 2, since: now - 5 * day, reviewers: ["@posthog/Team-Flags"]),

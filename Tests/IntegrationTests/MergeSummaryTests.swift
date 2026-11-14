@@ -212,6 +212,7 @@ extension Instance {
     let pr = try #require(try sbd.get(s.id).pr)
     #expect(pr.rereview?.reviewers == ["mariusandra"])
     #expect(pr.rereview?.repliedAt == Transcript.milliseconds("2026-11-13T18:07:49Z"))
+    #expect(detailsReads(github) == 0)
   }
 
   @Test func failedBriefKeepsTheGistAndIsNotRetriedForTheSameHead() throws {

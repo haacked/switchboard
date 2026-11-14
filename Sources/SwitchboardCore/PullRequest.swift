@@ -299,12 +299,15 @@ public struct PullRequest: Codable, Equatable, Sendable {
 
   /// The change requests that the author answered, or nil unless the PR
   /// author replied after each requester's newest review and the PR would be
-  /// In review without the change requests. A reply is a review by the
-  /// author, which is what a reply in a review thread makes. A time that
-  /// does not parse gives nil.
+  /// In review without the change requests. A bot's change request gives nil.
+  /// A reply is a review by the author, which is what a reply in a review
+  /// thread makes. A time that does not parse gives nil.
   public var rereview: Rereview? {
     let requested = changesRequestedBy
-    guard let author = author?.lowercased(), !requested.isEmpty else { return nil }
+    // A person's re-review does not clear a bot's change request.
+    guard let author = author?.lowercased(), !requested.isEmpty,
+      !verdicts.contains(where: { $0.requestsChanges && $0.bot == true })
+    else { return nil }
     let requesters = Set(requested.map { $0.lowercased() })
     var newest: [String: Int64] = [:]
     for review in verdicts + reviews where !review.isPending {

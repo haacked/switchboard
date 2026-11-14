@@ -217,7 +217,6 @@ struct NudgeAllMenu: View {
         Menu {
           ForEach(teams) { team in
             Button("Nudge \(team.mention) (\(team.sessions.count) PRs)…") { chosen = team }
-              .accessibilityLabel("Draft a nudge for every PR waiting on \(team.mention)")
           }
         } label: {
           Image(systemName: "hand.wave")

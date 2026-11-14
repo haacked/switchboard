@@ -88,11 +88,20 @@ private let rereviewCases: [RereviewCase] = [
       ]),
     reviewers: ["alice", "zoe"]),
   RereviewCase(
-    name: "an answered bot requester counts",
+    name: "an answered bot requester gives no re-review",
     pr: reviewedPR(
       verdicts: [changesVerdict("chatgpt-codex-connector", bot: true)],
       reviews: [entry("chatgpt-codex-connector", "CHANGES_REQUESTED", at: changeRequest), reply()]),
-    reviewers: ["chatgpt-codex-connector"]),
+    reviewers: nil),
+  RereviewCase(
+    name: "an answered person and an answered bot requester give no re-review",
+    pr: reviewedPR(
+      verdicts: [changesVerdict("mariusandra"), changesVerdict("chatgpt-codex-connector", bot: true)],
+      reviews: [
+        entry("mariusandra", "CHANGES_REQUESTED", at: changeRequest),
+        entry("chatgpt-codex-connector", "CHANGES_REQUESTED", at: changeRequest), reply(),
+      ]),
+    reviewers: nil),
   RereviewCase(
     name: "a requester who later approved leaves only the answered requester",
     pr: reviewedPR(
