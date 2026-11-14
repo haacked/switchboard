@@ -153,6 +153,8 @@ public struct MCPToolServer: Sendable {
       return try spawn(args, scoped)
     case "set_wait":
       var wait = try JSONCoding.convert(args, to: WaitRequest.self)
+      // Only a blocked `sb wait --block` reads a caller wait's outcome.
+      if wait.then == Wait.Then.caller.rawValue { throw APIError("then is resume or notify, not caller") }
       wait.by = Author.claude.rawValue
       if wait.kind == Wait.Kind.session.rawValue, let target = wait.target {
         wait.target = try sessionID(target, scoped).string

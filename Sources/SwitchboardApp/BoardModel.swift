@@ -102,6 +102,8 @@ final class BoardModel: ObservableObject {
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
+  /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
+  @Published var slashCommands: [String: [SlashCommand]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -787,10 +789,15 @@ final class BoardModel: ObservableObject {
 
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first. Each image is a
-  /// file name and the image's bytes.
-  func send(_ id: String, _ text: String, images: [(name: String, data: Data)] = [], sent: (() -> Void)? = nil) {
+  /// file name and the image's bytes. `ref` names the Inbox item that the
+  /// message answers.
+  func send(
+    _ id: String, _ text: String, images: [(name: String, data: Data)] = [], ref: String? = nil,
+    sent: (() -> Void)? = nil
+  ) {
     guard sending.insert(id).inserted else { return }
     var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    if let ref { args["ref"] = .string(ref) }
     if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
     perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
@@ -994,6 +1001,19 @@ final class BoardModel: ObservableObject {
         if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
           self.chatLogs[session] = messages
         }
+      }
+    }
+  }
+
+  /// Reads the commands that the session's claude takes after `/`. A failed read keeps the stored rows, which the
+  /// message field shows while sbd answers.
+  func loadSlashCommands(_ session: String) {
+    let send = send
+    poller.async {
+      let commands = try? JSONCoding.convert(
+        send("slash-commands", ["session": .string(session)])["commands"], to: [SlashCommand].self)
+      Task { @MainActor in
+        if let commands, self.slashCommands[session] != commands { self.slashCommands[session] = commands }
       }
     }
   }

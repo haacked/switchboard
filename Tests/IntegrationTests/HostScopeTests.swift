@@ -299,11 +299,7 @@ private let otherDestination = "haacked@other.local"
   /// A SessionStart names the session's conversation, as after `/clear`. A host can name the id of a conversation
   /// on this Mac that Switchboard does not hold. Import still lists that conversation and still imports it.
   @Test func aHostThatNamesAConversationOfThisMacDoesNotTakeItFromImport() throws {
-    let sbd = try Instance.remote()
-    let account = "\(sbd.home.path)/A"
-    try FileManager.default.createDirectory(atPath: account, withIntermediateDirectories: true)
-    FileManager.default.createFile(atPath: "\(account)/.claude.json", contents: Data("{}".utf8))
-    try sbd.restart(setting: "claudeConfigDirs", to: [.string(account)])
+    let sbd = try Instance.remote(accounts: ["A"])
     let mini = try sbd.startOnHost()
     let outside = UUID().uuidString.lowercased()
     try sbd.writeAgents(
@@ -379,7 +375,8 @@ private let otherDestination = "haacked@other.local"
   private static let refusedOps = [
     "rm", "cleanup", "rm-done", "send-group", "send-pending", "group-ls", "group-add", "group-rm", "group-move",
     "group-note", "group-describe", "group-account", "group-suggest", "manager", "manager-ls", "manager-mcp", "chat",
-    "chat-log", "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp", "hosts",
+    "chat-log", "slash-commands", "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp",
+    "hosts",
     "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
     "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",

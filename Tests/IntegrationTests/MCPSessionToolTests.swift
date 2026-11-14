@@ -197,6 +197,20 @@ import Testing
     #expect(try sbd.get(s.id).waits.isEmpty)
   }
 
+  /// sbd accepts `then: caller`, so set_wait is what refuses it.
+  @Test func setWaitRefusesThenCaller() throws {
+    let sbd = try Instance()
+    let s = try idle(sbd, name: "alpha")
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call(
+      "set_wait", ["session": .string(s.id), "kind": "manual", "note": "x", "then": "caller"])
+
+    #expect(result.isError)
+    #expect(result.text.contains("not caller"))
+    #expect(try sbd.get(s.id).waits.isEmpty)
+  }
+
   @Test func clearWaitRemovesOneWaitOrAll() throws {
     let sbd = try Instance()
     let s = try idle(sbd, name: "alpha")

@@ -25,6 +25,12 @@ func makeShortTempFolder() throws -> String {
   return String(cString: folder)
 }
 
+func withService(_ body: (Service, Home) throws -> Void) throws {
+  let home = Home(path: try makeShortTempFolder())
+  defer { try? FileManager.default.removeItem(atPath: home.path) }
+  try body(try Service(home: home, sbPath: "/usr/bin/true"), home)
+}
+
 func withSleepingChild(_ body: (Process) throws -> Void) throws {
   let child = Process()
   child.executableURL = URL(fileURLWithPath: "/bin/sleep")

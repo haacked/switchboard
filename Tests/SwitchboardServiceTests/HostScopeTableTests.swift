@@ -64,11 +64,12 @@ enum PlannedScope {
 
   /// Every op of `handle` and `dispatch` that the plan refuses from a host. `accounts` is here although the plan
   /// names only `account-*`, because it lists this Mac's accounts. The `activity`, `draft`, `issues`, and
-  /// `live-next` ops came from main after the plan, and the table denies every op it doesn't name.
+  /// `live-next`, and `slash-commands` ops came from main after the plan, and the table denies every op it doesn't name.
   static let refused: [String] = [
     "rm", "cleanup", "rm-done", "send-group", "send-pending", "group-ls", "group-add", "group-rm", "group-move",
     "group-note", "group-describe", "group-account", "group-suggest", "manager", "manager-ls", "manager-mcp", "chat",
-    "chat-log", "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp", "hosts",
+    "chat-log", "slash-commands", "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp",
+    "hosts",
     "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
     "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",

@@ -61,7 +61,7 @@ extension Service {
   func beginPaneStop(_ id: String, ancestry: Set<Int>?, command: String) throws -> PaneStop {
     try requireRead(id)
     if let refusal = insideRefusal(id, ancestry, command: command) { throw refusal }
-    let processes = Processes.descendants(of: livePanePids(id), in: processChildren(of: id))
+    let processes = self.processes(of: id).descendants(of: livePanePids(id))
     try closePane(id, .shell, at: site(of: id))
     var claudePid: Int?
     if case .running(let pid) = claudeState(id) {
@@ -94,15 +94,10 @@ extension Service {
       users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     }
     guard !running.isEmpty || !users.isEmpty else { return }
-    // `Processes.byParent` runs this Mac's form of ps, so a host's processes come from its batched read.
-    let rows =
-      site.hostName == nil
-      ? Processes.byParent(on: site.machine)
-      : (try? site.readSnapshot(claudeProgram: claudeProgram(for: session)))?.children ?? [:]
-    let commands = Dictionary(uniqueKeysWithValues: rows.values.joined().map { ($0.pid, $0.command) })
+    let processes = (try? site.processes()) ?? ProcessTable()
     let named =
-      running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
-      + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
+      running.sorted().map { "\($0) (\(processes.command(of: $0) ?? "?"), started by the session)" }
+      + users.map { "\($0.pid) (\(processes.command(of: $0.pid) ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
       "Processes from \(session.id) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )

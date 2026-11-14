@@ -43,8 +43,8 @@ import Testing
     var merged = pr()
     merged.mergedAt = "2026-10-23T00:00:00Z"
 
-    #expect(w.finishedBeforeSet(closed))
-    #expect(!w.finishedBeforeSet(merged))
+    #expect(w.finishedBeforeItCounts(closed))
+    #expect(!w.finishedBeforeItCounts(merged))
   }
 
   @Test(arguments: ["PostHog/posthog", "PostHog/charts", "PostHog/posthog.com"], [nil, "feature-flags"])

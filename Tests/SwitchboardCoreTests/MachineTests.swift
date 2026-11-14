@@ -325,13 +325,4 @@ private struct MemoryMachine: Machine {
     #expect(!Transcript.hasUserMessage(path, holding: "Fix it.", from: UInt64(first.utf8.count + 1), on: machine))
     #expect(!Transcript.hasUserMessage(path, holding: "Fix it.", from: 1 << 20, on: machine), "past the end")
   }
-
-  @Test func listsTheProcessesThatTheMachinesPsPrints() {
-    let machine = MemoryMachine(stdout: "  7     1     7 /sbin/launchd\n 42     7    42 claude --resume x\n")
-
-    let children = Processes.byParent(on: machine)
-
-    #expect(children[7]?.map(\.pid) == [42])
-    #expect(children[7]?.first?.command == "claude --resume x")
-  }
 }

@@ -839,6 +839,26 @@ import os
     #expect(draft.images.isEmpty)
   }
 
+  /// The ref lets sbd hold the session while it works on the Inbox item that the message answers.
+  @Test func submitSendsTheItemsRef() async throws {
+    let model = offlineModel()
+    let requests = Sent()
+    model.send = { op, args in
+      requests.add(op, args)
+      return .null
+    }
+    let draft = MessageField.Draft()
+    draft.text = "Merge main in."
+
+    draft.submit("a", ref: "rule:merge main in", to: model)
+    for _ in 0..<300 where requests.all.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+
+    let request = try #require(requests.all.first)
+    #expect(request.op == "send")
+    #expect(request.args["text"]?.string == "Merge main in.")
+    #expect(request.args["ref"]?.string == "rule:merge main in")
+  }
+
   /// The requests that the model's `send` received.
   final class Sent: Sendable {
     private let requests = OSAllocatedUnfairLock<[(op: String, args: [String: JSON])]>(initialState: [])

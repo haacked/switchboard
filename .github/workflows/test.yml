@@ -96,6 +96,10 @@ jobs:
             echo "::error::The build has warnings in Sources or Tests."
             exit 1
           fi
+      # The runner has 3 CPUs, so each shard runs min(4, 3 - 1) = 2 integration
+      # tests at once (SB_TEST_SLOTS in bin/test). The job sets no value. A
+      # higher value would count as 2, because the width never exceeds one less
+      # than the CPU count.
       - run: bin/test --shards 4 --part ${{ matrix.part }}/${{ strategy.job-total }}
 
   # bin/test-gui drives the real app, so it needs a logged-in session with a
