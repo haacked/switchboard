@@ -20,14 +20,6 @@ private struct SeededGenerator: RandomNumberGenerator {
 
 private let seed: UInt64 = 20_261_113
 
-/// A `Service` in a temporary home. The service never loads, so it starts no tmux server and no claude.
-private func withService(_ body: (Service, Home) throws -> Void) throws {
-  let home = Home(path: try makeShortTempFolder())
-  defer { try? FileManager.default.removeItem(atPath: home.path) }
-  let service = try Service(home: home, sbPath: "/usr/bin/true")
-  try body(service, home)
-}
-
 private func makeSession(_ id: String, name: String) -> Session {
   Session(id: id, name: name, cwd: "/tmp", branch: nil, claudeSessionId: "c-\(id)", model: nil, created: 0)
 }
