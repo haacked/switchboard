@@ -462,6 +462,19 @@ public enum Attention {
     return readyForReview(verdict, facts) ?? verdict
   }
 
+  /// The verdict of a Claude Code permission or question dialog that waits
+  /// on the user without a card.
+  public static func openPromptVerdict(_ facts: SessionFacts) -> Verdict? {
+    if let p = facts.openPermission {
+      return Verdict(
+        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
+    }
+    if let q = facts.openQuestion {
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
+    }
+    return nil
+  }
+
   static func rules(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState?
   ) -> Verdict {
@@ -476,13 +489,7 @@ public enum Attention {
       return Verdict(
         state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
-    if let p = facts.openPermission {
-      return Verdict(
-        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
-    }
-    if let q = facts.openQuestion {
-      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
-    }
+    if let v = openPromptVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {

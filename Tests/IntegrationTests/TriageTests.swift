@@ -149,6 +149,30 @@ let offerDeleteBranchReply = Instance.root.appendingPathComponent(
     #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
   }
 
+  @Test func aManagersPermissionPromptIsInTriage() throws {
+    let sbd = try Instance()
+    let m = try JSONCoding.decode(SessionSummary.self, from: sbd.sb("manager", "--json"))
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("send", m.id, "perm touch x")
+    try sbd.waitFor(m.id, "the card") { !$0.cards.isEmpty }
+
+    let triage = try sbd.triage()
+    let result = try JSON.parse(sbd.sb("choose", "--json", m.id, "allow"))
+
+    #expect(triage.map(\.id) == [m.id])
+    #expect(triage.first?.triage?.source == .card)
+    #expect(triage.first?.triage?.title == "Approve `touch x`")
+    #expect(result?["delivery"]?.string == "hook")
+    try sbd.waitFor(m.id, "the command's reply") { $0.lastReply == "Ran touch x" }
+    // The other session's call runs after the Manager's would have, so the
+    // log holds both calls by the time its summary arrives.
+    let s = try sbd.new(prompt: "ask", name: "review-code")
+    try sbd.waitForTriageEvent(s.id)
+    #expect(sbd.summaryCalls().count == 1)
+    #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
+    #expect(try !sbd.triage().map(\.id).contains(m.id))
+  }
+
   @Test func summarizesAgainAfterARestartThatLostTheCall() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask", name: "FAIL-SUMMARY")
