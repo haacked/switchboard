@@ -228,7 +228,7 @@ final class BoardModel: ObservableObject {
   private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
   /// Whether Switchboard is the active app. A chat's replies count as read only while it is. Tests replace it.
-  var appIsActive: () -> Bool = { NSApp.isActive }
+  var isAppActive: () -> Bool = { NSApp.isActive }
   /// The last `chat-read` sent, so each refresh doesn't send it again.
   var lastChatRead: (session: String, replies: Int)?
   /// Each session as the last refresh listed it.

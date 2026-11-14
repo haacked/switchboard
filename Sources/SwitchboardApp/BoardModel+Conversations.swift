@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import SwitchboardCore
 
 /// The read state of group chats and Manager conversations.
@@ -13,9 +14,6 @@ extension BoardModel {
     let c = conversations
     return c.pinned + c.active + (showingArchive ? c.archived : [])
   }
-
-  /// Whether any conversation has a reply that the user has not read.
-  var managerUnread: Bool { managers.contains { ($0.activity?.unread ?? 0) > 0 } }
 
   func setPinned(_ id: String, _ pinned: Bool) {
     perform("manager-pin", ["session": .string(id), "pinned": .bool(pinned)])
@@ -36,11 +34,46 @@ extension BoardModel {
   /// replies that this refresh listed. The detail pane shows the chat for
   /// that selection. A reply that arrives later stays unread.
   func markSelectedChatRead() {
-    guard let s = selected, let replies = BoardModel.readThrough(s, appActive: appIsActive()) else { return }
+    guard let s = selected, let replies = BoardModel.readThrough(s, appActive: isAppActive()) else { return }
     if let last = lastChatRead, last.session == s.id, last.replies == replies { return }
     lastChatRead = (s.id, replies)
     perform(
       ChatActivity.readEvent, ["session": .string(s.id), "replies": .number(Double(replies))],
       failed: { NSLog("chat-read \(s.id): \($0)") })
+  }
+}
+
+/// How the toolbar star looks: orange while a conversation waits on the
+/// user, blue while one has unread replies, and an outline otherwise.
+enum ManagerStar: Equatable {
+  case needsMe, unread, outline
+
+  init(_ managers: [SessionSummary]) {
+    let marks = managers.map(ChatMark.init)
+    if marks.contains(where: { $0.needsMeReason != nil }) {
+      self = .needsMe
+    } else if marks.contains(where: { if case .unread = $0 { true } else { false } }) {
+      self = .unread
+    } else {
+      self = .outline
+    }
+  }
+}
+
+extension ManagerStar {
+  var color: Color {
+    switch self {
+    case .needsMe: AttentionState.needsYou.color
+    case .unread: .accentColor
+    case .outline: .primary
+    }
+  }
+
+  var value: String {
+    switch self {
+    case .needsMe: AttentionState.needsYou.title
+    case .unread: "Unread replies"
+    case .outline: ""
+    }
   }
 }

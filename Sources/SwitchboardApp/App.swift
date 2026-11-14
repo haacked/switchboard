@@ -41,7 +41,7 @@ struct SwitchboardApp: App {
         .keyboardShortcut("n", modifiers: [.command, .shift])
         .disabled(model.presentingSheet || newSessionGroup == nil)
         Button("New Conversation") { model.openManager(new: true) }
-          .keyboardShortcut("n", modifiers: [.command, .option])
+          .keyboardShortcut(NavShortcuts.newConversation)
           .disabled(model.presentingSheet)
         Button("Import Sessions…") { model.showingImport = true }
           .keyboardShortcut("i", modifiers: [.command, .shift])

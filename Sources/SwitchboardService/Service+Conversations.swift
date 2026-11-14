@@ -19,7 +19,12 @@ extension Service {
     guard e.session.kind.showsAsChat else {
       throw APIError("\(e.session.name) is not a Manager conversation or a group chat. chat-read reads only those")
     }
-    let read = min(args["replies"]?.int ?? e.facts.replies, e.facts.replies)
+    var asked = e.facts.replies
+    if let replies = args["replies"] {
+      guard let n = replies.int, n >= 0 else { throw APIError("chat-read needs replies as a count of 0 or more") }
+      asked = n
+    }
+    let read = min(asked, e.facts.replies)
     if read > (e.facts.repliesRead ?? 0) { recordRead(id, read) }
     return try JSON(encoding: summary(id))
   }

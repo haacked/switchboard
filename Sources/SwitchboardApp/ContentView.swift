@@ -377,20 +377,20 @@ struct ManagerButton: View {
 
   private var tooltip: String {
     if let waiting { return "\(waiting.name) needs you: \(ChatMark(waiting).needsMeReason ?? waiting.reason) (⇧⌘M)" }
-    if model.managerUnread { return "A Manager conversation has unread replies (⇧⌘M)" }
+    if ManagerStar(model.managers) == .unread { return "A Manager conversation has unread replies (⇧⌘M)" }
     return model.managers.isEmpty
       ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
   }
 
   var body: some View {
-    let unread = waiting == nil && model.managerUnread
+    let star = ManagerStar(model.managers)
     Button {
       model.openManager()
     } label: {
-      Label("Manager", systemImage: waiting != nil || unread ? "star.fill" : "star")
-        .foregroundStyle(waiting != nil ? AttentionState.needsYou.color : unread ? Color.accentColor : .primary)
+      Label("Manager", systemImage: star == .outline ? "star" : "star.fill")
+        .foregroundStyle(star.color)
     }
-    .accessibilityValue(waiting != nil ? AttentionState.needsYou.title : unread ? "Unread replies" : "")
+    .accessibilityValue(star.value)
     .help(tooltip)
   }
 }

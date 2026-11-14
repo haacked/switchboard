@@ -22,7 +22,7 @@ public struct ChatActivity: Codable, Equatable, Sendable {
 
   public init(_ facts: SessionFacts) {
     self.init(
-      replies: facts.replies, unread: max(0, facts.replies - (facts.repliesRead ?? facts.replies)),
+      replies: facts.replies, unread: max(0, facts.replies - (facts.repliesRead ?? 0)),
       lastMessageAt: facts.lastMessageAt)
   }
 }
