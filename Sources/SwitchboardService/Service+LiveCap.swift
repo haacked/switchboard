@@ -145,15 +145,6 @@ extension Service {
     return stopPolicy.capOrder(running, now: now)
   }
 
-  /// Starts the session now, or moves its start to the front of the queue.
-  /// When the cap is full, it stops the lowest-ranked idle session first.
-  /// The request counts as an open, so the next start doesn't stop the session again.
-  func startNow(_ id: String) throws {
-    guard let e = entries[id] else { throw APIError("no session \(id)") }
-    guard claudeState(id) == .stopped else { throw APIError("\(e.session.name) is already running") }
-    try openSession(id)
-  }
-
   /// Records that the user opened the session now, and starts a stopped one
   /// ahead of every queued start. It moves `lastOpened` to this session before
   /// it launches, so the session opened before it loses its protection, and

@@ -300,7 +300,7 @@ let usage = """
                                   saves it in config.json. --next starts a
                                   stopped session now, stopping the
                                   lowest-priority idle session when the cap is
-                                  full
+                                  full, and leaves a running one as it is
     service install|uninstall|status
     version
 

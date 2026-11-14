@@ -880,14 +880,17 @@ extension Instance {
     try waitFor(sbd, jumped.id, "the jumped start", ticking: true) { $0.live }
   }
 
-  @Test func sbLiveNextRefusesARunningSession() throws {
+  /// A Start Now that arrives after the session started, such as a second click, succeeds and changes nothing.
+  @Test func sbLiveNextLeavesARunningSessionAsItIs() throws {
     let sbd = try instance(cap: 2)
     let alpha = try idleSession(sbd, name: "alpha")
 
     let r = try sbd.run("live", "--next", alpha.id)
 
-    #expect(r.status != 0)
-    #expect(r.stderr.contains("alpha is already running"), "\(r.stderr)")
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(try sbd.liveIds("live").contains(alpha.id))
+    #expect(try sbd.liveIds("queued").isEmpty)
+    #expect(try sbd.get(alpha.id).claudePid == alpha.claudePid)
   }
 
   /// `open` on a live session only marks it viewed. It runs no plan.

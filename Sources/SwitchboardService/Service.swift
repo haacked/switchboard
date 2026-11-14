@@ -562,7 +562,8 @@ public final class Service {
     case "live":
       return try liveRequest(args)
     case "live-next":
-      try startNow(try lookup(args))
+      // A session that started after the user asked, such as on a second click, is already where it should be.
+      try openSession(try lookup(args))
       return try liveRequest(.object([:]))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
       "group-suggest",
