@@ -653,10 +653,23 @@ public enum Attention {
 
   static func call(_ tool: String, _ d: JSON, _ t: Int64) -> ToolCall {
     let input = d["tool_input"]
-    let summary =
-      tool == "AskUserQuestion"
+    return ToolCall(
+      tool: tool, summary: callSummary(tool, input), since: t, id: d["tool_use_id"]?.string, input: input)
+  }
+
+  /// The one-line summary of a call. A question's is its first question.
+  static func callSummary(_ tool: String, _ input: JSON?) -> String {
+    tool == "AskUserQuestion"
       ? (input?["questions"]?.array?.first?["question"]?.string ?? "a question") : toolSummary(tool, input)
-    return ToolCall(tool: tool, summary: summary, since: t, id: d["tool_use_id"]?.string, input: input)
+  }
+
+  /// A call on one line that names its tool once. The summaries of these
+  /// tools leave out the tool's name.
+  static func callLine(_ tool: String, _ input: JSON?) -> String {
+    switch tool {
+    case "Bash", "Agent", "Task", "AskUserQuestion": "\(tool) \(callSummary(tool, input))"
+    default: callSummary(tool, input)
+    }
   }
 
   /// Whether a finished call is this one: by tool_use_id, or by tool name

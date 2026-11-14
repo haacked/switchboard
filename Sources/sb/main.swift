@@ -188,6 +188,8 @@ let usage = """
                                   restarted while sending them and can't tell whether
                                   the session got them
     reply <session>               the session's last reply, as Markdown
+    context <session> [--steps N] Claude's last steps up to the session's Inbox item, with
+                                  N steps before it (5 by default)
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
     summary help                  the card's format, for a session to follow
@@ -381,7 +383,7 @@ struct Args {
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
-      "--preset", "--label", "--person",
+      "--preset", "--label", "--person", "--steps",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -859,6 +861,8 @@ case "decide":
   decide(a)
 case "reply":
   replyCommand(a)
+case "context":
+  contextCommand(a)
 case "slash":
   slashCommand(a)
 case "summary":

@@ -401,13 +401,12 @@ struct TranscriptLine {
 
   let type: String?
   let isSidechain: Bool
-  /// A line that claude adds, such as a command's output.
-  let isMeta: Bool
-  /// Claude Code writes the summary of a compacted conversation as a user
-  /// line that only its transcript view shows.
-  let isCompactSummary: Bool
-  let isVisibleInTranscriptOnly: Bool
-  let timestamp: Int64?
+  /// A line of the main conversation that a chat shows. Sidechains hold
+  /// subagents. A meta line is one that claude adds, such as a command's
+  /// output. Claude Code writes the summary of a compacted conversation as a
+  /// user line that only its transcript view shows.
+  let isMainConversation: Bool
+  private let rawTimestamp: String?
   /// The message's text and tool_use blocks in order. A string content is
   /// one text block. Other block types, such as thinking, are left out.
   let blocks: [Block]
@@ -416,10 +415,10 @@ struct TranscriptLine {
     guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return nil }
     type = object["type"]?.string
     isSidechain = object["isSidechain"]?.bool == true
-    isMeta = object["isMeta"]?.bool == true
-    isCompactSummary = object["isCompactSummary"]?.bool == true
-    isVisibleInTranscriptOnly = object["isVisibleInTranscriptOnly"]?.bool == true
-    timestamp = object["timestamp"]?.string.flatMap(Transcript.milliseconds)
+    isMainConversation =
+      !isSidechain
+      && !["isMeta", "isCompactSummary", "isVisibleInTranscriptOnly"].contains { object[$0]?.bool == true }
+    rawTimestamp = object["timestamp"]?.string
     let content = object["message"]?["content"]
     blocks =
       content?.string.map { [.text($0)] }
@@ -433,11 +432,8 @@ struct TranscriptLine {
       }
   }
 
-  /// A line of the main conversation that a chat shows. Sidechains hold
-  /// subagents.
-  var isMainConversation: Bool {
-    !isSidechain && !isMeta && !isCompactSummary && !isVisibleInTranscriptOnly
-  }
+  /// The time in ms. It parses only when a reader asks, because most lines go unread.
+  var timestamp: Int64? { rawTimestamp.flatMap(Transcript.milliseconds) }
 
   /// The text blocks joined by a blank line, trimmed.
   var text: String {

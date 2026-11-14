@@ -182,6 +182,14 @@ func unstartedFollowup(_ id: String, _ repository: String? = nil) -> SessionSumm
   return s
 }
 
+/// A docket row, which reviews a PR and runs no claude of its own.
+func docketSession(_ id: String) -> SessionSummary {
+  var s = needsItem(id)
+  s.cwd = ""
+  s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
+  return s
+}
+
 /// A finished session that holds `notes`, in the worktree of branch haacked/fix.
 func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "s1") -> SessionSummary {
   SessionSummary(

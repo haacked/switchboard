@@ -110,6 +110,25 @@ func replyCommand(_ a: Args) {
   if a.json { printJSON(result) } else { print(controlsEscaped(result["reply"]?.string ?? "")) }
 }
 
+/// `sb context <session> [--steps N]` prints Claude's steps that lead up to
+/// the session's current item, oldest first, and marks the item's own step.
+func contextCommand(_ a: Args) {
+  var args: [String: JSON] = ["session": .string(a.session("context"))]
+  if let steps = a.values["--steps"] {
+    guard let n = Int(steps) else { die("--steps needs a whole number") }
+    args["steps"] = .number(Double(n))
+  }
+  let result = call("item-context", args)
+  if a.json { return printJSON(result) }
+  let context = decode(result, as: ItemContext.self)
+  if let caption = context.caption { print("\(caption) The latest steps:") }
+  for (index, step) in context.steps.enumerated() {
+    let line = step.kind == .tool ? "→ \(step.summary ?? "")" : "Claude: \(step.text ?? "")"
+    let mark = index == context.anchorIndex ? "▶ " : ""
+    print(mark + controlsEscaped(line))
+  }
+}
+
 /// The text with each control character but newline and tab shown as an
 /// escape, so that a reply can't drive the terminal.
 func controlsEscaped(_ text: String) -> String {

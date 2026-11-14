@@ -98,6 +98,8 @@ final class BoardModel: ObservableObject {
   /// The newest events of the sessions whose card details the Inbox showed,
   /// oldest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
+  /// The transcript steps that lead up to each session's Inbox item, by session id.
+  @Published var itemContexts: [String: ItemContext] = [:]
   /// Each chat's last messages, by session id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
@@ -976,6 +978,19 @@ final class BoardModel: ObservableObject {
   }
 
   nonisolated static let recentEventCount = 10
+
+  /// Reads the transcript steps that lead up to the session's Inbox item, with `steps` steps before it. A failed
+  /// read stores nothing, so the card's details show the last reply.
+  func loadItemContext(_ session: String, steps: Int) {
+    let send = send
+    poller.async {
+      let context = try? JSONCoding.convert(
+        send("item-context", ["session": .string(session), "steps": .number(Double(steps))]), to: ItemContext.self)
+      Task { @MainActor in
+        if let context, self.itemContexts[session] != context { self.itemContexts[session] = context }
+      }
+    }
+  }
 
   /// Reads the session's events of `kind` among the newest that sbd returns by default, off the main thread.
   func events(_ session: String, kind: String) async -> [Event] {
