@@ -262,7 +262,10 @@ private let sessionCard =
 
     let text = try sbd.sb("context", s.id)
 
-    #expect(text.split(separator: "\n").contains { $0.contains("→ Bash") && $0.contains("touch x") })
+    let lines = text.split(separator: "\n")
+    #expect(lines.last?.hasPrefix("▶ → Bash") == true)
+    #expect(lines.last?.contains("touch x") == true)
+    #expect(lines.dropLast().allSatisfy { !$0.hasPrefix("▶") })
   }
 
   @Test func theTextFormPrintsClaudesReply() throws {

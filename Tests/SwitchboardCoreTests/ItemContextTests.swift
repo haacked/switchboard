@@ -110,6 +110,14 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
   TriageItem(title: "Read the reply", kind: .decision, summary: "", source: source, ref: ref)
 }
 
+/// The anchor of the item in a session whose facts hold only these cards and this last reply.
+private func anchorOf(_ item: TriageItem?, cards: [Card], lastReply: String?) -> TranscriptAnchor {
+  var facts = SessionFacts()
+  facts.cards = cards
+  facts.lastReply = lastReply
+  return TranscriptAnchor.of(item: item, facts: facts)
+}
+
 // MARK: - The reader
 
 @Suite struct ItemContextTests {
@@ -533,6 +541,79 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
     #expect(shown(read.steps) == ["a", "b", "tool:Bash#t1"])
     #expect(read.more)
   }
+
+  /// A call followed by 100 texts of about 1 KB each, which span more than one 64 KB read chunk.
+  private func callBehindFiller() throws -> String {
+    let pad = String(repeating: "x", count: 1_000)
+    return try transcriptFile(
+      raw: ([called("Bash", make, id: "t1")] + (1...100).map { said("f\($0) \(pad)") }).map(\.text))
+  }
+
+  private func fillerNames(_ steps: [TranscriptStep]) -> [String] {
+    steps.compactMap { $0.text?.split(separator: " ").first.map(String.init) }
+  }
+
+  @Test func aCallBeyondTheSearchBudgetGivesTheNewestStepsUnanchored() throws {
+    let path = try callBehindFiller()
+    defer { removeTranscript(path) }
+
+    let read = Transcript.context(
+      path, anchor: .toolCall(tool: "Bash", input: make), steps: 2, searchBytes: 10_000, on: LocalMachine())
+
+    #expect(!read.anchored)
+    #expect(fillerNames(read.steps) == ["f99", "f100"])
+    #expect(read.more)
+  }
+
+  @Test func aCallWithinTheSearchBudgetIsFound() throws {
+    let path = try callBehindFiller()
+    defer { removeTranscript(path) }
+
+    let read = Transcript.context(path, anchor: .toolCall(tool: "Bash", input: make), steps: 2, on: LocalMachine())
+
+    #expect(read.anchored)
+    #expect(read.steps.last?.tool == "Bash")
+  }
+
+  /// The app shows the last reply when there are no steps. Newest steps would carry a caption that blames the anchor.
+  @Test func aReadThatFailsBeforeTheCallGivesNoSteps() throws {
+    let path = try callBehindFiller()
+    defer { removeTranscript(path) }
+    let size = try #require(LocalMachine().size(path))
+    let machine = TailOnlyMachine(readsFrom: size - (1 << 16))
+
+    let read = Transcript.context(path, anchor: .toolCall(tool: "Bash", input: make), steps: 2, on: machine)
+
+    #expect(read.steps.isEmpty)
+    #expect(!read.anchored)
+    #expect(!read.more)
+  }
+}
+
+/// This Mac, except that a read from before `readsFrom` fails, as an ssh read that drops partway does.
+private struct TailOnlyMachine: Machine {
+  let readsFrom: UInt64
+  private let local = LocalMachine()
+
+  init(readsFrom: UInt64) { self.readsFrom = readsFrom }
+
+  func run(
+    _ executable: String, _ args: [String], env: [String: String]?, input: Data?, timeout: Double?
+  ) throws -> CommandResult {
+    try local.run(executable, args, env: env, input: input, timeout: timeout)
+  }
+
+  func read(_ path: String, from offset: UInt64, count: Int?) -> Data? {
+    offset < readsFrom ? nil : local.read(path, from: offset, count: count)
+  }
+
+  func size(_ path: String) -> UInt64? { local.size(path) }
+  func exists(_ path: String) -> Bool { local.exists(path) }
+  func isFolder(_ path: String) -> Bool { local.isFolder(path) }
+  func modified(_ path: String) -> Date? { local.modified(path) }
+  func list(_ folder: String) -> [String] { local.list(folder) }
+  func createFolder(_ path: String) throws { try local.createFolder(path) }
+  func signal(_ pid: Int, _ signal: Int32) { local.signal(pid, signal) }
 }
 
 // MARK: - The reply anchor (guard)
@@ -553,7 +634,7 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
 
   /// The Stop hook's `last_assistant_message` and the transcript's text can differ in whitespace at the ends.
   @Test func aReplyThatIsEqualAfterTrimmingIsFound() throws {
-    let anchor = TranscriptAnchor.of(item: replyItem(), cards: [], lastReply: "\n  Ship it?  \n")
+    let anchor = anchorOf(replyItem(), cards: [], lastReply: "\n  Ship it?  \n")
 
     let read = try context([said("Plan."), said("  Ship it?\n")], anchor: anchor)
 
@@ -666,7 +747,7 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
         \.text))
     defer { removeTranscript(path) }
     let lastReply = try #require(Transcript.tail(path, on: LocalMachine()).lastReply)
-    let anchor = TranscriptAnchor.of(item: replyItem(), cards: [], lastReply: lastReply)
+    let anchor = anchorOf(replyItem(), cards: [], lastReply: lastReply)
 
     let read = Transcript.context(path, anchor: anchor, steps: 5, on: LocalMachine())
 
@@ -739,13 +820,13 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
   private func questionCard() throws -> Card { try #require(facts(questionTurn()).cards.first) }
 
   @Test func noItemAnchorsAtTheEnd() {
-    #expect(TranscriptAnchor.of(item: nil, cards: [], lastReply: "Ship it?") == .end)
+    #expect(anchorOf(nil, cards: [], lastReply: "Ship it?") == .end)
   }
 
   @Test func aPermissionCardAnchorsAtItsToolCall() throws {
     let card = try permissionCard()
 
-    let anchor = TranscriptAnchor.of(item: cardItem(card.ref), cards: [card], lastReply: "Ship it?")
+    let anchor = anchorOf(cardItem(card.ref), cards: [card], lastReply: "Ship it?")
 
     #expect(anchor == .toolCall(tool: "Bash", input: ["command": "touch x"]))
   }
@@ -755,7 +836,7 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
     var card = try questionCard()
     card.deferred = deferred
 
-    let anchor = TranscriptAnchor.of(item: cardItem(card.ref), cards: [card], lastReply: nil)
+    let anchor = anchorOf(cardItem(card.ref), cards: [card], lastReply: nil)
 
     #expect(anchor == .toolCall(tool: "AskUserQuestion", input: fruitQuestions))
   }
@@ -764,7 +845,7 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
   @Test func aTrustCardIsUnanchored() {
     let card = Card(trustDialog: Event(id: 7, session: "s1", t: 1, kind: "trust_dialog", data: ["folder": "/w"]))
 
-    #expect(TranscriptAnchor.of(item: cardItem(card.ref), cards: [card], lastReply: "Ship it?") == .unanchored)
+    #expect(anchorOf(cardItem(card.ref), cards: [card], lastReply: "Ship it?") == .unanchored)
   }
 
   /// A group message's Details already holds the message, and its MCP tool's name need not equal `card.tool`.
@@ -773,18 +854,18 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
     card.kind = .send
     card.tool = "mcp__switchboard__send_group"
 
-    #expect(TranscriptAnchor.of(item: cardItem(card.ref), cards: [card], lastReply: "Ship it?") == .unanchored)
+    #expect(anchorOf(cardItem(card.ref), cards: [card], lastReply: "Ship it?") == .unanchored)
   }
 
   @Test func aCardRefWhoseCardIsGoneIsUnanchored() {
-    #expect(TranscriptAnchor.of(item: cardItem("card:3"), cards: [], lastReply: "Ship it?") == .unanchored)
+    #expect(anchorOf(cardItem("card:3"), cards: [], lastReply: "Ship it?") == .unanchored)
   }
 
   /// A lookup that took the first card would anchor at a call that the item is not about.
   @Test func aCardRefWhoseCardIsGoneIgnoresTheOtherCards() throws {
     let other = try permissionCard()
 
-    #expect(TranscriptAnchor.of(item: cardItem("card:9"), cards: [other], lastReply: nil) == .unanchored)
+    #expect(anchorOf(cardItem("card:9"), cards: [other], lastReply: nil) == .unanchored)
   }
 
   @Test func aCardRefAnchorsAtThatCardsCallAmongSeveral() throws {
@@ -793,21 +874,21 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
     second.id = 4
     second.input = ["command": "ls"]
 
-    let anchor = TranscriptAnchor.of(item: cardItem("card:4"), cards: [first, second], lastReply: nil)
+    let anchor = anchorOf(cardItem("card:4"), cards: [first, second], lastReply: nil)
 
     #expect(anchor == .toolCall(tool: "Bash", input: ["command": "ls"]))
   }
 
   @Test(arguments: [TriageSource.summary, .fallback])
   func aReplyItemAnchorsAtItsReply(_ source: TriageSource) {
-    let anchor = TranscriptAnchor.of(item: replyItem(source), cards: [], lastReply: "Ship it?")
+    let anchor = anchorOf(replyItem(source), cards: [], lastReply: "Ship it?")
 
     #expect(anchor == .reply("Ship it?"))
   }
 
   @Test(arguments: [TriageSource.summary, .fallback], [nil, "", "  \n"] as [String?])
   func aReplyItemWithoutAReplyIsUnanchored(_ source: TriageSource, _ lastReply: String?) {
-    #expect(TranscriptAnchor.of(item: replyItem(source), cards: [], lastReply: lastReply) == .unanchored)
+    #expect(anchorOf(replyItem(source), cards: [], lastReply: lastReply) == .unanchored)
   }
 
   /// A new prompt drops the session's card, so it always belongs to the newest turn.
@@ -815,14 +896,59 @@ private func replyItem(_ source: TriageSource = .summary, ref: String = "stop:7"
     let item = TriageItem(
       title: "Pick how to land #98", kind: .decision, summary: "", source: .session, ref: "summary:2")
 
-    #expect(TranscriptAnchor.of(item: item, cards: [], lastReply: "I wrote the card.") == .end)
+    #expect(anchorOf(item, cards: [], lastReply: "I wrote the card.") == .end)
   }
 
   @Test func aRuleItemIsUnanchored() {
     let item = TriageItem(
       title: "Give it a first prompt", kind: .action, summary: "", source: .rule, ref: "rule:Give it a first prompt")
 
-    #expect(TranscriptAnchor.of(item: item, cards: [], lastReply: "Ship it?") == .unanchored)
+    #expect(anchorOf(item, cards: [], lastReply: "Ship it?") == .unanchored)
+  }
+
+  /// The facts of a session whose prompt is open without a card, as after sbd restarts or the hook times out.
+  private func cardlessPrompt(_ open: ToolCall, question: Bool = false) -> SessionFacts {
+    var facts = SessionFacts()
+    if question { facts.openQuestion = open } else { facts.openPermission = open }
+    return facts
+  }
+
+  /// The Inbox item that triage builds for the open prompt.
+  private func promptItem(_ facts: SessionFacts) throws -> TriageItem {
+    let verdict = try #require(Attention.openPromptVerdict(facts))
+    return try #require(Triage.promptItem(facts, verdict))
+  }
+
+  @Test func aPermissionPromptWithoutACardAnchorsAtItsToolCall() throws {
+    let facts = cardlessPrompt(ToolCall(tool: "Bash", summary: "touch x", since: 1, input: ["command": "touch x"]))
+
+    let anchor = TranscriptAnchor.of(item: try promptItem(facts), facts: facts)
+
+    #expect(anchor == .toolCall(tool: "Bash", input: ["command": "touch x"]))
+  }
+
+  @Test func aQuestionWithoutACardAnchorsAtItsCall() throws {
+    let facts = cardlessPrompt(
+      ToolCall(tool: "AskUserQuestion", summary: "Which fruit?", since: 1, input: fruitQuestions), question: true)
+
+    let anchor = TranscriptAnchor.of(item: try promptItem(facts), facts: facts)
+
+    #expect(anchor == .toolCall(tool: "AskUserQuestion", input: fruitQuestions))
+  }
+
+  /// A Notification names no call, so the prompt belongs to the newest turn.
+  @Test func aPromptThatOnlyANotificationReportedAnchorsAtTheEnd() throws {
+    let facts = cardlessPrompt(ToolCall(tool: Attention.notificationPromptTool, summary: "a prompt", since: 1))
+
+    #expect(TranscriptAnchor.of(item: try promptItem(facts), facts: facts) == .end)
+  }
+
+  @Test func anotherRuleItemWhileAPromptIsOpenIsUnanchored() {
+    let facts = cardlessPrompt(ToolCall(tool: "Bash", summary: "touch x", since: 1, input: ["command": "touch x"]))
+    let item = TriageItem(
+      title: "Give it a first prompt", kind: .action, summary: "", source: .rule, ref: "rule:Give it a first prompt")
+
+    #expect(TranscriptAnchor.of(item: item, facts: facts) == .unanchored)
   }
 }
 

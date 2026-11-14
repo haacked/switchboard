@@ -219,6 +219,9 @@ final class BoardModel: ObservableObject {
   /// Issue reads and Starts, which wait on GitHub, gh, or git. They run here so the session list and other
   /// actions do not wait behind them.
   let issueWork = DispatchQueue(label: "switchboard.issues", attributes: .concurrent)
+  /// Item-context reads, which can take seconds for a long or remote transcript. They run apart from the poll.
+  /// The queue is serial, so two reads for one session answer in the order the user asked for them.
+  private let contextWork = DispatchQueue(label: "switchboard.context")
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.
@@ -983,7 +986,7 @@ final class BoardModel: ObservableObject {
   /// read stores nothing, so the card's details show the last reply.
   func loadItemContext(_ session: String, steps: Int) {
     let send = send
-    poller.async {
+    contextWork.async {
       let context = try? JSONCoding.convert(
         send("item-context", ["session": .string(session), "steps": .number(Double(steps))]), to: ItemContext.self)
       Task { @MainActor in

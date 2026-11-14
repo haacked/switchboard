@@ -121,7 +121,7 @@ extension Service {
       let id = try lookup(args)
       let item = summary(id).triage
       let facts = entries[id]!.facts
-      let anchor = TranscriptAnchor.of(item: item, cards: facts.cards, lastReply: facts.lastReply)
+      let anchor = TranscriptAnchor.of(item: item, facts: facts)
       return (id, item?.ref, anchor, transcriptFinder(id), try site(of: id).machine)
     }
     let steps = min(max(args["steps"]?.int ?? ItemContext.defaultSteps, 1), ItemContext.maxSteps)

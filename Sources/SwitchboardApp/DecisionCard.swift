@@ -407,7 +407,7 @@ struct CardDetails: View {
       ScrollViewReader { proxy in
         ScrollView {
           VStack(alignment: .leading, spacing: 8) {
-            if context.more {
+            if context.more && steps < ItemContext.maxSteps {
               Button("Show more") {
                 steps = Self.nextSteps(after: steps)
                 model.loadItemContext(session.id, steps: steps)

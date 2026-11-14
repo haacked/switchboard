@@ -94,6 +94,19 @@ private func startedFollowup(_ id: String) -> SessionSummary {
     #expect(itemContext(ref: "card:1").caption == nil)
   }
 
+  @Test func anAnchoredContextMarksItsLastStep() {
+    #expect(itemContext(ref: "card:1").anchorIndex == 1)
+  }
+
+  /// A mark on the newest step of an unanchored context would point at a step that the item did not come from.
+  @Test func anUnanchoredContextMarksNoStep() {
+    #expect(itemContext(ref: "card:1", anchored: false).anchorIndex == nil)
+  }
+
+  @Test func aContextWithoutStepsMarksNoStep() {
+    #expect(itemContext(ref: "card:1", steps: []).anchorIndex == nil)
+  }
+
   @Test func aContextOfAnItemThatDidNotComeFromTheConversationSaysSo() {
     let context = itemContext(ref: "rule:Wait for CI", anchor: .unanchored, anchored: false)
 

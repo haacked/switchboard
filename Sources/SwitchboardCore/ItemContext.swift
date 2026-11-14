@@ -51,24 +51,36 @@ public enum TranscriptAnchor: Equatable, Sendable {
 
   /// The anchor of the session's current item. A permission prompt or a
   /// question anchors at its call, which PermissionRequest names only by tool
-  /// and input. A reply item anchors at the reply that its summary came
-  /// from. A session card belongs to the newest turn, because a new prompt
-  /// drops it.
-  public static func of(item: TriageItem?, cards: [Card], lastReply: String?) -> TranscriptAnchor {
+  /// and input. This holds whether the prompt has a card or only a rule item.
+  /// A reply item anchors at the reply that its summary came from. A session
+  /// card belongs to the newest turn, because a new prompt drops it.
+  public static func of(item: TriageItem?, facts: SessionFacts) -> TranscriptAnchor {
     guard let item else { return .end }
     switch item.source {
     case .card:
-      guard let card = cards.first(where: { $0.ref == item.ref }), card.kind == .permission || card.kind == .question
+      guard let card = facts.cards.first(where: { $0.ref == item.ref }),
+        card.kind == .permission || card.kind == .question
       else { return .unanchored }
       return .toolCall(tool: card.tool, input: card.input)
     case .session:
       return .end
     case .summary, .fallback:
-      let reply = lastReply?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let reply = facts.lastReply?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       return reply.isEmpty ? .unanchored : .reply(reply)
     case .rule:
-      return .unanchored
+      return openPrompt(item, facts) ?? .unanchored
     }
+  }
+
+  /// The anchor of a rule item that is an open prompt without a card. A
+  /// prompt that only a Notification reported names no call, so it anchors
+  /// at the newest step.
+  private static func openPrompt(_ item: TriageItem, _ facts: SessionFacts) -> TranscriptAnchor? {
+    guard let open = Attention.openPromptVerdict(facts), item.ref == "rule:\(Triage.title(open.reason))",
+      let call = facts.openPermission ?? facts.openQuestion
+    else { return nil }
+    if call.tool == Attention.notificationPromptTool { return .end }
+    return .toolCall(tool: call.tool, input: call.input ?? [:])
   }
 }
 
@@ -86,6 +98,10 @@ public struct ItemContext: Codable, Equatable, Sendable {
   public static let defaultSteps = 5
   /// The most steps before the anchor that a read gets.
   public static let maxSteps = 200
+  /// The most transcript bytes, from the end, that a read searches for its
+  /// anchor once it holds the newest steps. A miss would otherwise read the
+  /// whole file.
+  public static let anchorSearchBytes = 8 << 20
 
   public var session: String
   /// The item's ref, or nil when the session has no item.
@@ -125,10 +141,13 @@ extension Transcript {
   /// step is a text or tool_use block of an assistant line of the main
   /// conversation, as `message(_:)` keeps them. When the anchor is not found,
   /// or is `.unanchored`, these are the newest `steps` steps and `anchored`
-  /// is false.
+  /// is false. The search for the anchor stops after `searchBytes` bytes
+  /// from the end once the newest steps are read. When a read fails before
+  /// the anchor is found, there are no steps.
   /// `more` is true when an older step exists before the first one.
   public static func context(
-    _ path: String, anchor: TranscriptAnchor, steps: Int, on machine: any Machine
+    _ path: String, anchor: TranscriptAnchor, steps: Int, searchBytes: Int = ItemContext.anchorSearchBytes,
+    on machine: any Machine
   ) -> (steps: [TranscriptStep], anchored: Bool, more: Bool) {
     // Both lists are newest first. `newest` is the answer when the walk finds no anchor.
     var anchored: [TranscriptStep] = []
@@ -136,7 +155,13 @@ extension Transcript {
     var found = false
     var more = false
     var newestMore = false
-    eachLineFromEnd(path, on: machine) { data in
+    var scanned = 0
+    let complete = eachLineFromEnd(path, on: machine) { data in
+      scanned += data.count
+      if !found, anchor != .unanchored, newest.count >= steps, scanned > searchBytes {
+        newestMore = true
+        return true
+      }
       guard let line = TranscriptLine(data), line.type == "assistant", line.isMainConversation else { return false }
       let t = line.timestamp
       let lastText = line.blocks.lastIndex { if case .text = $0 { true } else { false } }
@@ -154,7 +179,8 @@ extension Transcript {
       }
       return anchor == .unanchored && newestMore
     }
-    return found ? (anchored.reversed(), true, more) : (newest.reversed(), false, newestMore)
+    if found { return (anchored.reversed(), true, more) }
+    return complete ? (newest.reversed(), false, newestMore) : ([], false, false)
   }
 
   /// Whether the line's block at `index` is the anchor. A reply anchor also
