@@ -383,6 +383,14 @@ extension SessionFacts {
     guard let ended = jobsEndedAt else { return false }
     return now - ended < Attention.jobReportMs
   }
+
+  /// Whether a background job runs, or claude may still report one that exited.
+  public func jobsRunning(now: Int64) -> Bool { jobs > 0 || mayReportJob(now: now) }
+
+  /// Whether a subagent runs that sent an event within `Attention.subagentQuietMs`.
+  public func subagentsRunning(now: Int64) -> Bool {
+    !subagents.isEmpty && now - (lastSubagentEvent ?? 0) <= Attention.subagentQuietMs
+  }
 }
 
 /// What decided a verdict.
@@ -498,14 +506,12 @@ public enum Attention {
     if now - facts.lastActivity > staleAfterMs, !needsPRAction(facts) {
       return Verdict(state: .stale, reason: "idle for \((now - facts.lastActivity) / dayMs) days")
     }
-    if !facts.subagents.isEmpty, now - (facts.lastSubagentEvent ?? 0) <= subagentQuietMs,
-      case .other = classify(facts.lastReply ?? "")
-    {
+    if facts.subagentsRunning(now: now), case .other = classify(facts.lastReply ?? "") {
       let n = facts.subagents.count
       return Verdict(state: .waiting, reason: "waiting on \(n) subagent\(n == 1 ? "" : "s")")
     }
     // A question still needs the user's answer while a job runs.
-    if facts.jobs > 0 || facts.mayReportJob(now: now), !classify(facts.lastReply ?? "").isQuestion {
+    if facts.jobsRunning(now: now), !classify(facts.lastReply ?? "").isQuestion {
       let reason =
         facts.jobs > 0
         ? "waiting on \(facts.jobs) background job\(facts.jobs == 1 ? "" : "s")"
