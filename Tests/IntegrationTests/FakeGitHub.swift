@@ -791,7 +791,7 @@ final class FakeGitHub {
         var i = 0
         while let owner = variables["o\(i)"]?.string, let name = variables["n\(i)"]?.string {
           let repo = "\(owner)/\(name)"
-          let mine = prs.values.filter { $0["repository"]?["nameWithOwner"]?.string == repo }
+          let mine = prs.values.filter { Dependencies.sameRepo($0["repository"]?["nameWithOwner"]?.string ?? "", repo) }
           if let branch = variables["b\(i)"]?.string {
             ids.append("\(repo):\(branch)")
             let found = mine.filter { $0["headRefName"]?.string == branch }
