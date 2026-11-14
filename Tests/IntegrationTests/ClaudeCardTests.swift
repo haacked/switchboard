@@ -105,12 +105,12 @@ extension ClaudeTests {
   /// as the hook's timeout ends it.
   private func killHook(_ c: ClaudeInstance, _ id: String) throws {
     let pid = try #require(try c.sbd.get(id).claudePid)
-    let children = Processes.byParent()
-    var level = children[pid] ?? []
+    let processes = ProcessTable.readLocal()
+    var level = processes.children(of: pid)
     var hooks: [ProcessRow] = []
     while !level.isEmpty {
-      hooks += level.filter { $0.command.hasSuffix(" hook") }
-      level = level.flatMap { children[$0.pid] ?? [] }
+      hooks += level.filter { processes.command(of: $0.pid)?.hasSuffix(" hook") == true }
+      level = level.flatMap { processes.children(of: $0.pid) }
     }
     try #require(!hooks.isEmpty)
     for hook in hooks { kill(pid_t(hook.pid), SIGKILL) }

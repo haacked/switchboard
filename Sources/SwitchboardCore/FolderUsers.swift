@@ -48,16 +48,6 @@ extension Processes {
     }
   }
 
-  /// Every pid in `roots` and every process below them.
-  public static func descendants(of roots: [Int], in children: [Int: [ProcessRow]]) -> Set<Int> {
-    var found = Set(roots)
-    var level = roots
-    while !level.isEmpty {
-      level = level.flatMap { children[$0] ?? [] }.map(\.pid).filter { found.insert($0).inserted }
-    }
-    return found
-  }
-
   private static func allPids() -> [pid_t] {
     let count = proc_listallpids(nil, 0)
     guard count > 0 else { return [] }

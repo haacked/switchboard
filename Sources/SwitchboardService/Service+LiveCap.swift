@@ -136,7 +136,7 @@ extension Service {
       .max { ($0.lastOpened, $0.session.id) < ($1.lastOpened, $1.session.id) }?.session.id
     let running = entries.values.compactMap { e -> StopPolicy.Claude? in
       guard e.session.host == host, case .running(let pid) = claudeState(e.session.id) else { return nil }
-      var c = stopInput(e, jobs: backgroundJobs(pid, in: processChildren(of: e.session.id)), now: now)
+      var c = stopInput(e, jobs: backgroundJobs(pid, in: processes(of: e.session.id)), now: now)
       c.rank = liveRank(e)
       c.lastViewed = e.lastViewed
       c.openedLast = e.session.id == lastOpened

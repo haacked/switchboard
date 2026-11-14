@@ -567,7 +567,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     } else if !TerminalHost.saysNoServer(f[1]) {
       throw APIError("tmux list-panes: \(f[1].trimmingCharacters(in: .whitespacesAndNewlines))")
     }
-    read.children = Processes.parse(f[3])
+    read.processes = ProcessTable.parse(f[3])
     read.findClaudes(program: claudeProgram)
     return read
   }
@@ -590,6 +590,10 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     try confirmed("the pane and process read") { try batchedRead($0, claudeProgram: claudeProgram) }
   }
 
+  func processes(claudeProgram: String) throws -> ProcessTable {
+    try readSnapshot(claudeProgram: claudeProgram).processes
+  }
+
   /// Exits 3 without a signal unless the parent of pid `$1` is still `$2`.
   private static let killScript = #"[ "$(ps -o ppid= -p "$1" | tr -d " ")" = "$2" ] || exit 3; kill -s TERM "$1""#
 
@@ -607,8 +611,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
       let changed = APIError("the claude process changed, so nothing was signalled")
       let row = read.panes.first { $0.key.hasSuffix("-claude") && !$0.value.dead && $0.value.pid == pane }
       guard let session = row.map({ String($0.key.dropLast("-claude".count)) }), read.claudePids[session] == pid,
-        let process = read.children.values.joined().first(where: { $0.pid == pid }),
-        Service.isClaude(process, program: program)
+        let process = read.processes.row(pid), Service.isClaude(read.processes.command(of: pid) ?? "", program: program)
       else { throw changed }
       let r = try machine.run(
         "/bin/sh", ["-c", Self.killScript, "sb", String(pid), String(process.ppid)], env: nil, input: nil,

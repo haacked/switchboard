@@ -52,7 +52,7 @@ enum SourceAudit {
     Rule("realPath(", bare + #"realPath\("#, under: service, allowed: local),
     Rule("snapshot.panes", bare + #"snapshot\.panes\b"#, under: service, allowed: snapshotReaders),
     Rule("snapshot.claudePids", bare + #"snapshot\.claudePids\b"#, under: service, allowed: snapshotReaders),
-    Rule("snapshot.children", bare + #"snapshot\.children\b"#, under: service, allowed: snapshotReaders),
+    Rule("snapshot.processes", bare + #"snapshot\.processes\b"#, under: service, allowed: snapshotReaders),
     Rule("machine(for:)", #"(?<![A-Za-z0-9_])machine\(for\b"#, under: service),
     Rule("machine(of:)", #"(?<![A-Za-z0-9_])machine\(of\b"#, under: service),
     // Swift extensions hold no stored properties, so only `Service.swift` can give `Service` one.
@@ -146,7 +146,7 @@ enum SourceAudit {
   @Test(arguments: [
     ("SwitchboardService/Service.swift", "    return entries[id] == nil ? LocalMachine() : remote"),
     ("SwitchboardService/Service+Import.swift", "    Transcript.tail(path, on: LocalMachine())"),
-    ("SwitchboardCore/Processes.swift", "    byParent(on: LocalMachine())"),
+    ("SwitchboardCore/ProcessTable.swift", "    readLocal(on: LocalMachine())"),
     ("sb/main.swift", "    return LocalMachine().size(path)"),
   ])
   func aLocalMachineBuiltOutsideTheSiteFileFails(file: String, line: String) {
@@ -172,7 +172,9 @@ enum SourceAudit {
     ("    for id in ids where self.snapshot.panes[id] == nil {", "snapshot.panes"),
     ("    snapshot.claudePids[id] = nil", "snapshot.claudePids"),
     ("    let owned = Set(snapshot.claudePids.values)", "snapshot.claudePids"),
-    ("    ((children ?? snapshot.children)[pid] ?? []).filter { $0.pgid == $0.pid }.count", "snapshot.children"),
+    (
+      "    (processes ?? snapshot.processes).children(of: pid).filter { $0.pgid == $0.pid }.count", "snapshot.processes"
+    ),
     ("  func machine(for session: Session) -> any Machine { site.machine }", "machine(for:)"),
     ("      machine(of: id).signal(pid, SIGTERM)", "machine(of:)"),
     ("    try self.machine(of: id).run(tool, [])", "machine(of:)"),
@@ -201,7 +203,7 @@ enum SourceAudit {
     "    guard let root = realPath(folder) else { return [] }",
     "    let gone = snapshot.panes[server.pane] == nil",
     "    let owned = Set(snapshot.claudePids.values)",
-    "    if backgroundJobs(pid, in: snapshot.children) > 0 {",
+    "    if backgroundJobs(pid, in: snapshot.processes) > 0 {",
   ])
   func aLocalNameInTheSiteFileAndTheSessionlessFilesPasses(line: String) {
     for file in SourceAudit.local {
@@ -224,8 +226,8 @@ enum SourceAudit {
     "    if let repo = s.repo { return try site(for: s).realPath(repo) ?? repo }",
     "    let gone = mac.snapshot.panes[server.pane] == nil",
     "    let pid = hostSnapshot.claudePids[id]",
-    "    s.children = Processes.byParent(on: machine)",
-    "    let all = Processes.descendants(of: pids.filter(Processes.isValidPid), in: s.children)",
+    "    s.processes = ProcessTable.readLocal(on: machine)",
+    "    let all = s.processes.descendants(of: pids.filter(Processes.isValidPid))",
     "    try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }",
     "    let rows = snapshot.taken",
     "    /// The same processes that `Processes.using` names.",

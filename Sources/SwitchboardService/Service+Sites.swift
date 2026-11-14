@@ -105,8 +105,8 @@ extension Service {
   /// The claude process in the session's Claude pane.
   func claudePid(_ id: String) -> Int? { snapshot(of: id)?.claudePids[id] }
 
-  /// The processes at the session's site, by parent pid.
-  func processChildren(of id: String) -> [Int: [ProcessRow]] { snapshot(of: id)?.children ?? [:] }
+  /// The processes at the session's site. The table is empty when the site has no snapshot.
+  func processes(of id: String) -> ProcessTable { snapshot(of: id)?.processes ?? ProcessTable() }
 
   /// Sends SIGTERM to the session's claude through the session's site.
   func stopClaude(_ id: String, _ pid: Int) throws {

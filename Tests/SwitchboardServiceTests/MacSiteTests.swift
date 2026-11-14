@@ -394,8 +394,9 @@ import Testing
     var child: Int?
     do {
       try waitUntil("the pane's child to run sleep") {
-        let below = Processes.byParent(on: LocalMachine())[Int(pane.processIdentifier)] ?? []
-        child = below.first { $0.command.hasPrefix("/bin/sleep") }?.pid
+        let processes = ProcessTable.readLocal(on: LocalMachine())
+        let below = processes.children(of: Int(pane.processIdentifier))
+        child = below.first { processes.command(of: $0.pid)?.hasPrefix("/bin/sleep") == true }?.pid
         return child != nil
       }
     } catch {
@@ -424,7 +425,7 @@ import Testing
       let snapshot = try site.readSnapshot(claudeProgram: "sleep")
 
       #expect(snapshot.claudePids == ["s9azgg": child])
-      let processes = Processes.byParent(on: LocalMachine())
+      let processes = ProcessTable.readLocal(on: LocalMachine())
       #expect(snapshot.claudePids["s9azgg"] == Service.findClaude(below: panePid, program: "sleep", in: processes))
     }
   }
@@ -454,7 +455,7 @@ import Testing
 
       let snapshot = try site.readSnapshot(claudeProgram: "sleep")
 
-      #expect(snapshot.children[Int(pane.processIdentifier)]?.map(\.pid) == [child])
+      #expect(snapshot.processes.children(of: Int(pane.processIdentifier)).map(\.pid) == [child])
     }
   }
 

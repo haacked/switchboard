@@ -122,33 +122,7 @@ public func siblingExecutable(_ name: String) -> String {
   return me.deletingLastPathComponent().appendingPathComponent(name).path
 }
 
-/// A process from `ps`.
-public struct ProcessRow: Sendable {
-  public var pid: Int
-  public var ppid: Int
-  public var pgid: Int
-  public var command: String
-}
-
 public enum Processes {
-  /// Every process on the machine, grouped by parent pid.
-  public static func byParent(on machine: any Machine) -> [Int: [ProcessRow]] {
-    guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
-    return parse(r.stdout)
-  }
-
-  /// The rows of `ps` output whose columns are pid, ppid, pgid, and the command, grouped by parent pid.
-  public static func parse(_ output: String) -> [Int: [ProcessRow]] {
-    let rows = output.split(separator: "\n").compactMap { line -> ProcessRow? in
-      let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-      guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
-        return nil
-      }
-      return ProcessRow(pid: pid, ppid: ppid, pgid: pgid, command: parts.count > 3 ? String(parts[3]) : "")
-    }
-    return Dictionary(grouping: rows, by: \.ppid)
-  }
-
   /// Whether the number can name one process. A pid below 1 names a process
   /// group, and a pid above `Int32.max` names no process.
   public static func isValidPid(_ pid: Int) -> Bool { pid >= 1 && pid <= Int(Int32.max) }

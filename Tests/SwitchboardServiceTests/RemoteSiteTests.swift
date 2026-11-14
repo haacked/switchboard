@@ -208,10 +208,10 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
     #expect(s.panes["s1-claude"]?.clients == 1)
     #expect(s.panes["s1-claude"]?.dead == false)
     #expect(s.claudePids == ["s1": 530])
-    #expect(s.children[501]?.map(\.pid) == [530])
-    #expect(s.children[501]?.first?.command == "claude --session-id 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
-    #expect(s.children[1]?.map(\.pid).sorted() == [480, 60114])
-    #expect(s.children.values.map(\.count).reduce(0, +) == 7)
+    #expect(s.processes.children(of: 501).map(\.pid) == [530])
+    #expect(s.processes.command(of: 530) == "claude --session-id 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
+    #expect(s.processes.children(of: 1).map(\.pid).sorted() == [480, 60114])
+    #expect(s.processes.all.count == 7)
   }
 
   @Test func aProcpsAnswerGivesThePanesTheProcessesAndTheClaudeOfEachSession() throws {
@@ -219,13 +219,13 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
 
     #expect(s.panes["s1-claude"]?.pid == 813)
     #expect(s.claudePids == ["s1": 840])
-    #expect(s.children[813]?.first?.pgid == 813)
+    #expect(s.processes.children(of: 813).first?.pgid == 813)
     #expect(
-      s.children[813]?.first?.command
+      s.processes.children(of: 813).first.flatMap { s.processes.command(of: $0.pid) }
         == "node /home/haacked/.local/bin/claude --resume 6f1c0c5e-2c0f-4b0a-9a51-0d6f3a9e1b11")
-    #expect(s.children[2]?.first?.command == "[kworker/0:1-events]")
-    #expect(s.children[814]?.map(\.pid) == [4_194_304])
-    #expect(s.children.values.map(\.count).reduce(0, +) == 8)
+    #expect(s.processes.children(of: 2).first.flatMap { s.processes.command(of: $0.pid) } == "[kworker/0:1-events]")
+    #expect(s.processes.children(of: 814).map(\.pid) == [4_194_304])
+    #expect(s.processes.all.count == 8)
   }
 
   @Test func aDeadClaudePaneHasNoClaude() throws {
@@ -250,7 +250,7 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
 
     #expect(s.panes.isEmpty)
     #expect(s.claudePids.isEmpty)
-    #expect(s.children[813]?.map(\.pid) == [840])
+    #expect(s.processes.children(of: 813).map(\.pid) == [840])
   }
 
   @Test(arguments: [
@@ -1798,7 +1798,7 @@ func paths(inside folder: String) throws -> [String] {
       #expect(s.panes.keys.sorted() == ["s1-claude", "s1-shell"])
       #expect(s.panes["s1-claude"]?.pid == claude.pane)
       #expect(s.claudePids == ["s1": claude.child])
-      #expect(s.children[claude.pane]?.map(\.pid) == [claude.child])
+      #expect(s.processes.children(of: claude.pane).map(\.pid) == [claude.child])
       #expect(s.taken > 0)
     }
   }
@@ -1826,7 +1826,7 @@ func paths(inside folder: String) throws -> [String] {
       let s = try b.site.readSnapshot(claudeProgram: "sleep")
 
       #expect(s.panes.isEmpty)
-      #expect(!s.children.isEmpty)
+      #expect(!s.processes.all.isEmpty)
     }
   }
 

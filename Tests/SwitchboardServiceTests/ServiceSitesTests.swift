@@ -23,6 +23,7 @@ import Testing
     func sessionFolder(_ id: String) throws -> String { "\(folder)/sessions/\(id)" }
     func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { throw Unused() }
     func readSnapshot(claudeProgram: String) throws -> Service.Snapshot { throw Unused() }
+    func processes(claudeProgram: String) throws -> ProcessTable { throw Unused() }
     func alive(_ pids: Set<Int>) throws -> Set<Int> { throw Unused() }
     func folderUsers(_ folder: String) throws -> [FolderUser] { throw Unused() }
     func samePath(_ a: String, _ b: String) throws -> Bool { throw Unused() }

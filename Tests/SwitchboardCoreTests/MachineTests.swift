@@ -329,9 +329,9 @@ private struct MemoryMachine: Machine {
   @Test func listsTheProcessesThatTheMachinesPsPrints() {
     let machine = MemoryMachine(stdout: "  7     1     7 /sbin/launchd\n 42     7    42 claude --resume x\n")
 
-    let children = Processes.byParent(on: machine)
+    let processes = ProcessTable.readLocal(on: machine)
 
-    #expect(children[7]?.map(\.pid) == [42])
-    #expect(children[7]?.first?.command == "claude --resume x")
+    #expect(processes.children(of: 7).map(\.pid) == [42])
+    #expect(processes.command(of: 42) == "claude --resume x")
   }
 }

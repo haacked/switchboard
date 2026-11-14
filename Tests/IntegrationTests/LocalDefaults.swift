@@ -13,6 +13,6 @@ extension Transcript {
   }
 }
 
-extension Processes {
-  static func byParent() -> [Int: [ProcessRow]] { byParent(on: LocalMachine()) }
+extension ProcessTable {
+  static func readLocal() -> ProcessTable { readLocal(on: LocalMachine()) }
 }
