@@ -76,7 +76,7 @@ public enum TranscriptAnchor: Equatable, Sendable {
   /// prompt that only a Notification reported names no call, so it anchors
   /// at the newest step.
   private static func openPrompt(_ item: TriageItem, _ facts: SessionFacts) -> TranscriptAnchor? {
-    guard let open = Attention.openPromptVerdict(facts), item.ref == "rule:\(Triage.title(open.reason))",
+    guard let open = Attention.openPromptVerdict(facts), item.ref == Triage.ruleRef(Triage.title(open.reason)),
       let call = facts.openPermission ?? facts.openQuestion
     else { return nil }
     if call.tool == Attention.notificationPromptTool { return .end }
