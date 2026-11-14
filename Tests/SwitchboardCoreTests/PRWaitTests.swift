@@ -194,6 +194,15 @@ import Testing
     #expect(wait(.queue, since: PRWaitTests.since).resolution(of: pr(queue: state, queueAt: at)) == nil)
   }
 
+  /// A loop of blocked waits on the session's own PR sets a new wait each
+  /// slice. A merge between `since` and the slice's wait still counts.
+  @Test(arguments: [nil, PRWaitTests.since] as [Int64?])
+  func aMergeAfterSinceButBeforeTheWaitCountsOnlyWithSince(_ since: Int64?) {
+    var merged = pr(.merged)
+    merged.mergedAt = PRWaitTests.betweenSinceAndSet
+    #expect(wait(.queue, since: since).finishedBeforeSet(merged) == (since == nil))
+  }
+
   /// A wait whose `since` is its `created` reads the PR exactly as one with no `since`.
   @Test(arguments: [
     PRWaitTests.beforeSince, PRWaitTests.betweenSinceAndSet, PRWaitTests.before, "2030-06-15T12:00:00Z",

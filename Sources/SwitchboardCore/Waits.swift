@@ -124,8 +124,8 @@ public struct Wait: Codable, Equatable, Sendable {
   public var until: Int64?
   /// For a `review`, `bot-review`, or `queue` wait, the time that
   /// `countsAfter` uses in place of `created`. A loop of `sb wait --block`
-  /// calls sets a new wait on each call. `since` keeps a review that landed
-  /// between two calls.
+  /// calls sets a new wait on each call. With `since`, a review that landed
+  /// between two calls still resolves the next call's wait.
   public var since: Int64?
   public var note: String?
   /// The commit that the session's checked-out branch pointed at when a `ci`
@@ -330,15 +330,15 @@ public struct Wait: Codable, Equatable, Sendable {
     }
   }
 
-  /// Whether the PR merged or closed before this wait was set, or at a time
-  /// that GitHub didn't give. A deploy wait is usually set after its PR
-  /// merged, so a merge doesn't count for it.
+  /// Whether the PR merged or closed before `countsAfter`, or at a time that
+  /// GitHub didn't give. A deploy wait is usually set after its PR merged, so
+  /// a merge doesn't count for it.
   public func finishedBeforeSet(_ pr: SwitchboardCore.PullRequest) -> Bool {
     guard pr.state != .open, !(kind == .deploy && pr.state == .merged) else { return false }
     guard let at = (pr.state == .merged ? pr.mergedAt : pr.closedAt).flatMap(Transcript.milliseconds) else {
       return true
     }
-    return at < created
+    return at < countsAfter
   }
 
   /// GitHub's REST API shows a GitHub App's login with `[bot]`, and its
