@@ -25,6 +25,12 @@ import Testing
     #expect(played == recorded, "the stub's \(step) step", sourceLocation: sourceLocation)
   }
 
+  /// Whether no process runs the stub for the conversation.
+  func stubExited(_ claudeSessionId: String) throws -> Bool {
+    try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
+      .allSatisfy { !($0.contains("claude-stub") && $0.contains(claudeSessionId)) }
+  }
+
   @Test func playsTheRecordedSteps() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "hello")
@@ -70,6 +76,32 @@ import Testing
     try expectRecorded("interrupt", sbd, s.id, after: mark, prompts: ["interrupt it"], commands: ["sleep 100"])
   }
 
+  /// SIGTERM ends a tool call at once, as it ends one of claude's, and the stub plays its sigterm step.
+  @Test func sigtermEndsASlowToolCallAtOnce() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "slow 30")
+    let working = try sbd.waitFor(s.id, "the tool call") { $0.state == .working && $0.claudePid != nil }
+    let stub = try #require(working.claudePid)
+    // The stub starts the sleep only after the PreToolUse hook returns. A SIGTERM before then ends the stub at once
+    // even if the sleep runs in the foreground.
+    let sleepPid = try sbd.waitFor(
+      "the tool call's sleep",
+      fetch: {
+        let found = try runCommand("/usr/bin/pgrep", ["-P", "\(stub)", "-f", "^sleep 30$"]).stdout
+        return pid_t(found.split(separator: "\n").first ?? "")
+      }, until: { _ in true })
+    let mark = try sbd.lastEventId(s.id)
+
+    kill(pid_t(stub), SIGTERM)
+
+    try sbd.waitFor("the stub and its sleep to exit before the 30 s tool call ends", timeout: 5) {
+      try kill(sleepPid, 0) != 0 && stubExited(working.claudeSessionId)
+    }
+    try sbd.waitFor("the SessionEnd hook") {
+      try sbd.events(s.id).contains { $0.id > mark && $0.kind == "SessionEnd" }
+    }
+  }
+
   /// A claude that dies mid-turn sends no more hooks, so no process that runs
   /// the stub may outlive it.
   @Test func aKilledStubSendsNoMoreHooks() throws {
@@ -79,8 +111,7 @@ import Testing
     try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
     kill(pid_t(working.claudePid!), SIGKILL)
     try sbd.waitFor("the stub's processes to exit") {
-      try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
-        .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+      try stubExited(working.claudeSessionId)
     }
   }
 }
