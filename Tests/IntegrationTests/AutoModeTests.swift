@@ -23,7 +23,7 @@ import Testing
     let (sbd, s, card) = try asked()
     #expect(s.permissionMode == "default")
     #expect(card.permissionMode == "default")
-    #expect(card.offersAutoMode)
+    #expect(card.offers(.autoMode))
     #expect(try sbd.sb("cards", s.id).contains("approve Bash, --auto offered"))
   }
 
@@ -43,7 +43,7 @@ import Testing
     try sbd.sb("send", s.id, "perm touch y")
     let next = try sbd.waitFor(s.id, "the next card") { !$0.cards.isEmpty }
     #expect(next.cards.first?.permissionMode == "auto")
-    #expect(next.cards.first?.offersAutoMode == false)
+    #expect(next.cards.first?.offers(.autoMode) == false)
     #expect(throws: TestError.self) { try sbd.sb("allow", "--auto", s.id) }
     try sbd.sb("allow", s.id)
     try sbd.waitFor(s.id, "the second reply") { $0.lastReply == "Ran touch y" }
@@ -87,7 +87,7 @@ import Testing
 
   @Test func autoIsRefusedAfterTheHookCloses() throws {
     let (sbd, s) = try timedOut("perm touch x")
-    #expect(try sbd.get(s.id).cards.first?.offersAutoMode == false)
+    #expect(try sbd.get(s.id).cards.first?.offers(.autoMode) == false)
     #expect(throws: TestError.self) { try sbd.sb("allow", "--auto", s.id) }
     #expect(try sbd.get(s.id).cards.count == 1)
   }
@@ -98,7 +98,7 @@ import Testing
     let asked = try sbd.waitFor(s.id, "the card") { !$0.cards.isEmpty }
     #expect(sbd.stubArgs().first?.hasSuffix("--permission-mode auto -- perm touch x") == true)
     #expect(asked.permissionMode == "auto")
-    #expect(asked.cards.first?.offersAutoMode == false)
+    #expect(asked.cards.first?.offers(.autoMode) == false)
   }
 
   @Test func noAutoStartsASessionWithoutAMode() throws {

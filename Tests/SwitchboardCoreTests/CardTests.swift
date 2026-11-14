@@ -636,12 +636,50 @@ func trustCard(_ folder: String = "/w/repo") -> Card { facts(trustLaunch(folder:
   }
 
   @Test func aTrustCardOffersNoAutoMode() {
-    #expect(!trustCard().offersAutoMode)
+    #expect(!trustCard().offers(.autoMode))
   }
 
   @Test func aTrustCardSurvivesEncoding() throws {
     let card = trustCard()
 
     #expect(try JSONCoding.decode(Card.self, from: try JSONCoding.encode(card)) == card)
+  }
+}
+
+@Suite struct AlwaysAllowCards {
+  @Test func aPermissionRequestKeepsItsSuggestions() throws {
+    let suggestions = try #require(try eventFixture("write-restart")["permission_suggestions"])
+
+    #expect(try writeRestartCard(restarted: false).permissionSuggestions == suggestions)
+  }
+
+  @Test func aRestartKeepsTheSuggestions() throws {
+    let held = try writeRestartCard(restarted: false)
+
+    #expect(try writeRestartCard().permissionSuggestions == held.permissionSuggestions)
+  }
+
+  @Test func aRequestWithoutSuggestionsLeavesThemNil() {
+    #expect(facts(permissionTurn()).cards[0].permissionSuggestions == nil)
+  }
+
+  @Test func aCardWithSuggestionsSurvivesEncoding() throws {
+    let card = try writeRestartCard(restarted: false)
+
+    #expect(try JSONCoding.decode(Card.self, from: try JSONCoding.encode(card)) == card)
+  }
+
+  /// An sbd from before the field sends cards without it.
+  @Test func aCardWithoutTheSuggestionsKeyDecodes() throws {
+    let card = try writeRestartCard(restarted: false)
+    var fields = try #require(JSON.parse(try JSONCoding.encode(card))?.object)
+    try #require(fields["permissionSuggestions"] != nil)
+    fields["permissionSuggestions"] = nil
+    var expected = card
+    expected.permissionSuggestions = nil
+
+    let decoded = try JSONCoding.decode(Card.self, from: JSON.object(fields).text)
+
+    #expect(decoded == expected)
   }
 }
