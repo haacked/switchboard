@@ -159,7 +159,7 @@ extension Service {
     let request = Request(op: "send", args: ["session": .string(id), "text": .string(message)])
     do {
       return .success(
-        try prepared(request) {
+        try prepared(request, origin: .mac) {
           defer { submittingDecisions.remove(id) }
           let before = entries[id]
           do {

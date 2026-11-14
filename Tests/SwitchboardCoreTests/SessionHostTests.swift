@@ -3,10 +3,9 @@ import Testing
 
 @testable import SwitchboardCore
 
-/// `SessionHost.choose(named:parent:origin:)` for a request from this Mac. `named` is the `host` of the request as
-/// sent, and `parent` is the host of the new session's parent, nil when it has no parent or a parent on this Mac.
-/// The result is the host that the new session runs on, nil for this Mac. The rows for a request from a host wait
-/// for stage 3.
+/// `SessionHost.choose(named:parent:origin:)`. `named` is the `host` of the request as sent, and `parent` is the
+/// host of the new session's parent, nil when it has no parent or a parent on this Mac. The result is the host that
+/// the new session runs on, nil for this Mac.
 @Suite struct SessionHostChooseTests {
   @Test func noHostAndNoParentOnAHostRunsOnThisMac() throws {
     #expect(try SessionHost.choose(named: nil, parent: nil, origin: .mac) == nil)
@@ -49,6 +48,24 @@ import Testing
     let chosen = try? SessionHost.choose(named: named, parent: parent, origin: .mac)
 
     #expect(chosen != "local")
+  }
+
+  // MARK: A request from a host
+
+  /// The scope of mini's requests refuses a parent off mini first, so the rule reads no parent for mini.
+  @Test(arguments: [nil, "mini"] as [String?], [nil, "mini"] as [String?])
+  func aRequestFromAHostThatNamesNoHostOrItselfRunsOnThatHost(named: String?, parent: String?) throws {
+    #expect(try SessionHost.choose(named: named, parent: parent, origin: .host("mini")) == "mini")
+  }
+
+  @Test(arguments: ["local", "other", "", "LOCAL", "Mini", "mini "], [nil, "mini", "other"] as [String?])
+  func aRequestFromAHostForAnotherMachineThrows(named: String, parent: String?) {
+    do {
+      let chosen = try SessionHost.choose(named: named, parent: parent, origin: .host("mini"))
+      Issue.record("a request from mini chose \(chosen ?? "this Mac") for \(named)")
+    } catch {
+      #expect("\(error)" == "a session on mini can start sessions only on mini")
+    }
   }
 }
 

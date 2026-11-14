@@ -94,8 +94,9 @@ extension Service {
   /// answers with a message to the session. A card whose hook closed answers
   /// by typing into the terminal. An allow with an extra's argument, such as
   /// `autoMode` or `always`, also applies that extra, which only a held card's
-  /// hook can do. An allow takes at most one extra.
-  func answer(_ args: JSON) throws -> JSON {
+  /// hook can do. An allow takes at most one extra. A host may answer a group message only when every target is on
+  /// that host, since the answer decides what those sessions receive.
+  func answer(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let card = try chosenCard(args)
     let id = card.session
     let extras = AllowExtra.allCases.filter { args[$0.argument]?.bool == true }
@@ -108,6 +109,11 @@ extension Service {
       if let refusal = card.refusal(extra) { throw refused(refusal, extra) }
     }
     if let message = card.send {
+      if case .remote(let host) = origin,
+        let off = message.targets.first(where: { entries[$0.id]?.session.host != host })
+      {
+        throw APIError("card \(card.id) sends to \(off.name), which is not on \(host)")
+      }
       switch args["behavior"]?.string {
       case "allow": return try decideGroupMessage(card, message, send: true)
       case "deny": return try decideGroupMessage(card, message, send: false)

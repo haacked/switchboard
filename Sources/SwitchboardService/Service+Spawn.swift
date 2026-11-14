@@ -7,8 +7,8 @@ extension Service {
   /// a bare name, or a path to a checkout that starts with / or ~.
   /// It starts on the host that `host` names, else on its parent's host, and
   /// there finds the checkout in the host's `repos` or at a path on the host.
-  /// `local` names this Mac. A follow-up starts on this Mac.
-  func spawn(_ args: JSON) throws -> SessionSummary {
+  /// `local` names this Mac. A follow-up starts on this Mac. A request from host h starts on h.
+  func spawn(_ args: JSON, origin: SessionHost.Origin = .mac) throws -> SessionSummary {
     let spawn = try SpawnArgs(args)
     if let wait = spawn.wait, let parent = spawn.parent {
       _ = try queue.sync { try lookup(["session": .string(parent)]) }
@@ -19,7 +19,7 @@ extension Service {
 
     let parentHost = queue.sync { self.host(ofParent: spawn.parent) }
     // A follow-up starts on this Mac, so it takes no host from its parent.
-    let host = spawn.followup ? nil : try SessionHost.choose(named: spawn.host, parent: parentHost, origin: .mac)
+    let host = spawn.followup ? nil : try SessionHost.choose(named: spawn.host, parent: parentHost, origin: origin)
     if let host, spawn.account != nil { throw Self.noAccount(on: host) }
     let site: any SessionSite = try host.map { try remoteSite($0) } ?? mac
     try awaitSite(site)
@@ -37,7 +37,7 @@ extension Service {
         NewSession(
           path: checkout, branch: spawn.branch, base: spawn.base, name: spawn.name, prompt: spawn.prompt,
           model: spawn.model, parent: spawn.parent, account: spawn.account, group: spawn.group,
-          autoMode: spawn.autoMode, planMode: spawn.planMode, host: host))
+          autoMode: spawn.autoMode, planMode: spawn.planMode, host: host), origin: origin)
       guard let wait = spawn.wait, let parent = child.parent else { return child }
       try queue.sync {
         _ = try waitRequest(

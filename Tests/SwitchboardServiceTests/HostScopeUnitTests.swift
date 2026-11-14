@@ -40,9 +40,12 @@ private let twoHosts: [String: JSON] = [
   "other": ["kind": "ssh", "destination": "haacked@other.local"],
 ]
 
-/// A service that holds a local session `l1`, mini's `m1`, and other's `o1`. Its order window is `windowMs`.
+/// A service that holds a local session `l1`, mini's `m1`, and other's `o1`. Its order window is `windowMs`. No
+/// link connects unless a request waits for its host.
 private func withSessions(windowMs: Int64 = 20, _ body: (Service) throws -> Void) throws {
-  try withHostService(hosts: twoHosts) { service, _ in
+  // A request that a missing guard lets through runs no claude or tmux on this Mac.
+  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
+  try withHostService(hosts: twoHosts, config: config) { service, _ in
     service.queue.sync {
       service.hostEventWindowMs = windowMs
       service.entries["l1"] = Service.Entry(session: session("l1", host: nil, name: "local"))
@@ -53,9 +56,25 @@ private func withSessions(windowMs: Int64 = 20, _ body: (Service) throws -> Void
   }
 }
 
+/// What a request can change: the log, each session's record, cards, and queued messages.
+private struct ScopeState: Equatable {
+  var events: [Event]
+  var sessions: [String: JSON]
+  var cards: [String: [Card]]
+  var pending: [String: Int]
+}
+
 extension Service {
   /// Every event in the log.
   fileprivate func logged() throws -> [Event] { try queue.sync { try store.events() } }
+
+  fileprivate func scopeState() throws -> ScopeState {
+    try queue.sync {
+      ScopeState(
+        events: try store.events(), sessions: try entries.mapValues { try JSON(encoding: $0.session) },
+        cards: entries.mapValues(\.facts.cards), pending: entries.mapValues(\.pending.count))
+    }
+  }
 }
 
 /// Waits until every event that the service took has left the order window, so the event is in the log.
@@ -66,8 +85,9 @@ private func settle(_ service: Service) {
   #expect(left, "an event stayed in the order window")
 }
 
-/// The scope of a request whose origin is a host: it changes nothing unless it is a hook for a session that sbd
-/// holds on that host. The origin is the socket's, and nothing in the request can change it.
+/// The scope of a request whose origin is a host: a hook must name a session that sbd holds on that host, and any
+/// other op must be one of the table's ops with only the keys of its row. The origin is the socket's, and nothing in
+/// the request can change it.
 @Suite struct HostScopeRequestTests {
   @Test(.timeLimit(.minutes(1)))
   func aHookForTheHostsOwnSessionIsRecordedOnce() throws {
@@ -136,29 +156,42 @@ private func settle(_ service: Service) {
     }
   }
 
+  /// An op that the table refuses fails with its name. An op that the table admits fails here too, because these
+  /// arguments hold keys that it does not read, and the refusal names one of them.
   @Test(
     .timeLimit(.minutes(1)),
-    arguments: [
-      "send", "new", "rm", "rm-done", "cleanup", "stop", "resume", "open", "done", "answer", "rename", "note", "wait",
-      "ls", "get", "events", "screen", "terminals", "shell", "ping", "clock", "hosts", "host-connect",
-      "host-disconnect", "live", "accounts", "account-use", "account-move", "group-account", "usage", "mcp", "poll",
-      "import", "importable", "triage", "manager", "chat", "spawn", "followup-add", "plan-ls", "docket-start", "Hook",
-      "hook ", " hook", "hooks", "", "HOOK", "hook\0", "no-such-op",
-    ])
-  func everyOpOtherThanHookIsRefusedForAHostAndChangesNothing(op: String) throws {
+    arguments: Array(
+      Set(
+        [
+          "send", "new", "rm", "rm-done", "cleanup", "stop", "resume", "open", "done", "answer", "rename", "note",
+          "wait", "ls", "get", "events", "screen", "terminals", "shell", "ping", "clock", "hosts", "host-connect",
+          "host-disconnect", "live", "accounts", "account-use", "account-move", "group-account", "usage", "mcp", "poll",
+          "import", "importable", "triage", "manager", "chat", "spawn", "followup-add", "plan-ls", "docket-start",
+          "Hook", "hook ", " hook", "hooks", "", "HOOK", "hook\0", "no-such-op",
+        ] + PlannedScope.refused)
+    ).sorted())
+  func everyRefusedOpAndEveryKeyAnOpDoesNotReadIsRefusedForAHostAndChangesNothing(op: String) throws {
     try withSessions { service in
-      let args: JSON = [
+      let args: [String: JSON] = [
         "session": "m1", "text": "pwned", "name": "pwned", "path": "/tmp", "host": "mini", "advance": 3_600_000,
         "set": 1, "payload": payload("op"), "id": .string(eventId()), "images": ["a.png"], "account": "x",
         "behavior": "allow",
       ]
       let clock = nowMs()
 
-      let answer = service.handle(Request(op: op, args: args), origin: .remote("mini"))
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
       settle(service)
 
       #expect(!answer.ok)
-      #expect(answer.error?.contains("can only be a hook") == true, "\(answer.error ?? "")")
+      if let row = PlannedScope.rows[op] {
+        // A short key such as `id` is a part of ordinary words, so only the longer keys show which key was named.
+        let unread = Set(args.keys).subtracting(row.keys).filter { $0.count >= 4 }
+        let error = answer.error ?? ""
+        #expect(unread.contains { error.contains($0) }, "\(error)")
+        #expect(!error.contains("can't run from mini") && !error.contains("that session is not on mini"), "\(error)")
+      } else {
+        #expect(answer.error?.contains("\(op) can't run from mini") == true, "\(answer.error ?? "")")
+      }
       #expect(service.queue.sync { service.held.isEmpty && service.hostEvents.isEmpty })
       let recorded = try service.logged()
       #expect(recorded.isEmpty)
@@ -319,6 +352,436 @@ private func settle(_ service: Service) {
         #expect(event.t >= before.t)
         #expect(event.t <= nowMs())
       }
+    }
+  }
+}
+
+// MARK: The ops that a host may send
+
+private func real(_ path: String) -> String {
+  guard let resolved = realpath(path, nil) else { return path }
+  defer { free(resolved) }
+  return String(cString: resolved)
+}
+
+/// A checkout on branch main with one commit, whose origin is github.com/o/n, as a host's `repos` needs.
+private func makeCheckout(_ path: String) throws {
+  try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+  let p = Process()
+  p.executableURL = URL(fileURLWithPath: "/bin/sh")
+  p.arguments = [
+    "-c",
+    "git init -q -b main . && git commit -q --allow-empty -m first && git remote add origin https://github.com/o/n.git",
+  ]
+  p.currentDirectoryURL = URL(fileURLWithPath: path)
+  p.environment = [
+    "PATH": "/usr/bin:/bin", "HOME": path, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.com",
+  ]
+  p.standardOutput = FileHandle.nullDevice
+  p.standardError = FileHandle.nullDevice
+  try p.run()
+  p.waitUntilExit()
+  guard p.terminationStatus == 0 else { throw APIError("git init in \(path) exited with \(p.terminationStatus)") }
+}
+
+/// A service whose host mini is ready, with `o/n` in mini's `repos`. It holds the local `l1` (named `local`) and
+/// `l2` (named `twin`), and mini's `m1` (named `l1`), `m2`, and `mq7x` (named `twin`), each on mini in a folder on
+/// the box. `roots` holds the folders whose paths differ from one bench to the next.
+private func withReadySessions(_ body: (Service, BoxFacts, _ roots: [String]) throws -> Void) throws {
+  let root = try makeShortTempFolder()
+  defer { try? FileManager.default.removeItem(atPath: root) }
+  try makeCheckout("\(root)/n")
+  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
+  try withReadyService(host: ["repos": ["o/n": .string("\(root)/n")]], config: config) { bench, service, facts in
+    let cwd = "\(facts.home)/work"
+    try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+    func onMini(_ id: String, _ name: String) -> Service.Entry {
+      var s = session(id, host: "mini", name: name)
+      s.cwd = cwd
+      return Service.Entry(session: s)
+    }
+    service.queue.sync {
+      service.hostEventWindowMs = 20
+      service.entries["l1"] = Service.Entry(session: session("l1", host: nil, name: "local"))
+      service.entries["l2"] = Service.Entry(session: session("l2", host: nil, name: "twin"))
+      service.entries["m1"] = onMini("m1", "l1")
+      service.entries["m2"] = onMini("m2", "m2")
+      service.entries["mq7x"] = onMini("mq7x", "twin")
+    }
+    let roots = [bench.home, service.home.path, facts.home, root].flatMap { [real($0), $0] }
+    try body(service, facts, roots.sorted { $0.count > $1.count })
+  }
+}
+
+/// The answer with every number set to 0 and every root replaced, so two benches can be compared.
+private func comparable(_ json: JSON?, _ roots: [String]) -> JSON? {
+  switch json {
+  case .number: .number(0)
+  case .string(let text): .string(roots.reduce(text) { $0.replacingOccurrences(of: $1, with: "<root>") })
+  case .array(let items): .array(items.map { comparable($0, roots) ?? .null })
+  case .object(let fields): .object(fields.mapValues { comparable($0, roots) ?? .null })
+  default: json
+  }
+}
+
+private func comparable(_ answer: Response, _ roots: [String]) -> JSON? {
+  comparable(
+    ["ok": .bool(answer.ok), "error": answer.error.map(JSON.string) ?? .null, "result": answer.result ?? .null], roots)
+}
+
+extension Service {
+  /// The kinds of the events of each session, and each session's record, for two benches to compare.
+  fileprivate func comparableState(_ roots: [String]) throws -> JSON? {
+    let state = try scopeState()
+    return comparable(
+      [
+        "events": .array(state.events.map { .string("\($0.session) \($0.kind)") }),
+        "sessions": .object(state.sessions), "pending": .object(state.pending.mapValues { .number(Double($0)) }),
+      ], roots)
+  }
+
+  /// The home's paths and the random ids of every note and wait, which differ from one bench to the next.
+  fileprivate func benchRoots() -> [String] {
+    let generated = queue.sync {
+      entries.values.flatMap { ($0.session.notes ?? []).map(\.id) + ($0.session.waits ?? []).map(\.id) }
+    }
+    return [home.path, real(home.path)] + generated
+  }
+}
+
+/// A request of the table for `m1` whose effect the op would make if it ran.
+private let ownRequests: [(op: String, args: [String: JSON])] = [
+  ("ping", [:]), ("get", ["session": "m1"]), ("reply", ["session": "m1"]), ("events", ["session": "m1"]),
+  ("done", ["session": "m1", "done": true]), ("rename", ["session": "m1", "name": "renamed"]),
+  ("issue", ["session": "m1", "issue": "12"]), ("note", ["session": "m1", "text": "a note", "by": "you"]),
+  ("remove-note", ["session": "m1", "note": "n1"]), ("resolve-note", ["session": "m1", "note": "n1", "by": "you"]),
+  ("wait", ["session": "m1", "note": "later", "by": "claude"]), ("clear-wait", ["session": "m1"]),
+  ("resolve-wait", ["session": "m1", "outcome": "it happened"]),
+  ("summary-set", ["session": "m1", "card": ["summary": "a turn"]]),
+]
+
+/// The requests of the table that wait for the session's host first.
+private let ownHostRequests: [(op: String, args: [String: JSON])] = [
+  ("send", ["session": "m1", "text": "hello"]), ("answer", ["session": "m1", "behavior": "allow"]),
+  ("stop", ["session": "m1"]), ("screen", ["session": "m1", "pane": "claude"]), ("terminals", ["session": "m1"]),
+  ("shell", ["session": "m1", "open": false]), ("open", ["session": "m1"]),
+  ("resume", ["session": "m1", "prompt": "go on"]),
+]
+
+private func expectLinksDisconnected(_ service: Service) {
+  #expect(service.hostLinks.values.allSatisfy { $0.status.state == .disconnected }, "a refusal touched a host")
+}
+
+private func ids(_ answer: Response) -> [String] {
+  (answer.result?.array ?? []).compactMap { $0["id"]?.string }.sorted()
+}
+
+/// The ops of the scope table on a host's socket: each one reads and acts only on that host's sessions.
+@Suite struct HostScopeOpTests {
+  // MARK: Refs off the host
+
+  /// `l1` is the local session's id and also `m1`'s name. `local` is the local session's name. `l` and `o` are
+  /// prefixes of the ids of sessions off mini.
+  @Test(.timeLimit(.minutes(1)), arguments: RefSlot.all, ["l1", "o1", "local", "l", "o"])
+  func everyRefToASessionOffTheHostFailsAndChangesNothing(slot: RefSlot, ref: String) throws {
+    try withSessions { service in
+      let before = try service.scopeState()
+
+      let answer = service.handle(
+        Request(op: slot.op, args: .object(slot.args(with: .string(ref)))), origin: .remote("mini"))
+      settle(service)
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("that session is not on mini") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+      expectLinksDisconnected(service)
+    }
+  }
+
+  // MARK: The same answer as on sbd's own socket
+
+  /// Two benches run the same request, one from this Mac and one from mini, and end in the same state.
+  @Test(.timeLimit(.minutes(1)), arguments: ownRequests)
+  func anOpForTheHostsOwnSessionAnswersAsOnSbdsOwnSocket(op: String, args: [String: JSON]) throws {
+    try withSessions { onMac in
+      try withSessions { onMini in
+        let request = Request(op: op, args: .object(args))
+
+        let fromMac = onMac.handle(request)
+        let fromMini = onMini.handle(request, origin: .remote("mini"))
+        settle(onMac)
+        settle(onMini)
+
+        let macRoots = onMac.benchRoots()
+        let miniRoots = onMini.benchRoots()
+        #expect(comparable(fromMini, miniRoots) == comparable(fromMac, macRoots))
+        let macState = try onMac.comparableState(macRoots)
+        let miniState = try onMini.comparableState(miniRoots)
+        #expect(miniState == macState)
+      }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(3)), arguments: ownHostRequests)
+  func anOpThatWaitsForTheHostAnswersForTheHostsOwnSessionAsOnSbdsOwnSocket(op: String, args: [String: JSON]) throws {
+    try withReadySessions { onMac, _, macRoots in
+      try withReadySessions { onMini, _, miniRoots in
+        let request = Request(op: op, args: .object(args))
+
+        let fromMac = onMac.handle(request)
+        let fromMini = onMini.handle(request, origin: .remote("mini"))
+        settle(onMac)
+        settle(onMini)
+
+        #expect(comparable(fromMini, miniRoots) == comparable(fromMac, macRoots))
+        let macState = try onMac.comparableState(macRoots)
+        let miniState = try onMini.comparableState(miniRoots)
+        #expect(miniState == macState)
+      }
+    }
+  }
+
+  // MARK: Lists
+
+  @Test(.timeLimit(.minutes(1)))
+  func lsOnAHostsSocketListsOnlyTheHostsSessions() throws {
+    try withSessions { service in
+      let onMini = service.handle(Request(op: "ls"), origin: .remote("mini"))
+      let onOther = service.handle(Request(op: "ls"), origin: .remote("other"))
+      let onMac = service.handle(Request(op: "ls"))
+
+      #expect(onMini.ok && onOther.ok && onMac.ok)
+      #expect(ids(onMini) == ["m1"])
+      #expect(ids(onOther) == ["o1"])
+      #expect(ids(onMac) == ["l1", "m1", "o1"])
+    }
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [[:], ["since": 0], ["limit": 1000], ["since": 0, "limit": 1000]] as [[String: JSON]])
+  func eventsWithNoSessionOnAHostsSocketReturnOnlyTheHostsEvents(args: [String: JSON]) throws {
+    try withSessions { service in
+      service.queue.sync {
+        for id in ["l1", "m1", "o1"] { _ = service.record(id, "note", ["text": .string("by \(id)")]) }
+      }
+
+      let answer = service.handle(Request(op: "events", args: .object(args)), origin: .remote("mini"))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let sessions = (answer.result?.array ?? []).compactMap { $0["session"]?.string }
+      #expect(!sessions.isEmpty)
+      #expect(Set(sessions) == ["m1"])
+    }
+  }
+
+  // MARK: A send card
+
+  private static func sendCard(_ targets: [(id: String, name: String)]) -> JSON {
+    [
+      "group": "g", "groupName": "Flags", "text": "Rebase on main.",
+      "targets": .array(targets.map { ["id": .string($0.id), "name": .string($0.name)] }),
+      "expires": .number(Double(nowMs() + 3_600_000)),
+    ]
+  }
+
+  /// A `send` card's targets are sessions that the answer reaches, so each one must be on the host.
+  @Test(.timeLimit(.minutes(2)), arguments: ["allow", "deny"])
+  func anAnswerToASendCardWithATargetOffTheHostFailsAndSendsNothing(behavior: String) throws {
+    try withReadySessions { service, _, _ in
+      let card = service.queue.sync {
+        service.record("m1", "send_pending", Self.sendCard([("m2", "m2"), ("l1", "local")]))
+      }
+      let before = try service.scopeState()
+
+      let answer = service.handle(
+        Request(
+          op: "answer", args: ["session": "m1", "card": .number(Double(card.id)), "behavior": .string(behavior)]),
+        origin: .remote("mini"))
+      settle(service)
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("not on mini") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(2)))
+  func anAnswerToASendCardWhoseTargetsAreAllOnTheHostIsTaken() throws {
+    try withReadySessions { service, _, _ in
+      let card = service.queue.sync { service.record("m1", "send_pending", Self.sendCard([("m2", "m2")])) }
+
+      let answer = service.handle(
+        Request(op: "answer", args: ["session": "m1", "card": .number(Double(card.id)), "behavior": "deny"]),
+        origin: .remote("mini"))
+      settle(service)
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let recorded = try service.logged()
+      #expect(recorded.contains { $0.session == "m1" && $0.kind == "send_decided" })
+    }
+  }
+
+  // MARK: New sessions
+
+  @Test(.timeLimit(.minutes(2)), arguments: [JSON?.none, .string("mini")])
+  func aNewSessionFromTheHostStartsOnTheHost(host: JSON?) throws {
+    try withReadySessions { service, facts, _ in
+      var args: [String: JSON] = ["path": .string("\(facts.home)/work"), "prompt": "hello"]
+      args["host"] = host
+
+      let answer = service.handle(Request(op: "new", args: .object(args)), origin: .remote("mini"))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let id = try #require(answer.result?["id"]?.string)
+      #expect(answer.result?["host"] == "mini")
+      #expect(service.queue.sync { service.entries[id]?.session.host } == "mini")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(2)), arguments: [JSON?.none, .string("mini")])
+  func aSpawnFromTheHostStartsOnTheHost(host: JSON?) throws {
+    try withReadySessions { service, _, _ in
+      var args: [String: JSON] = ["repository": "o/n", "branch": "b1", "prompt": "hello"]
+      args["host"] = host
+
+      let answer = service.handle(Request(op: "spawn", args: .object(args)), origin: .remote("mini"))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let id = try #require(answer.result?["id"]?.string)
+      #expect(answer.result?["host"] == "mini")
+      #expect(service.queue.sync { service.entries[id]?.session.host } == "mini")
+    }
+  }
+
+  /// `twin` names both the local `l2` and mini's `mq7x`, so only the rewrite to mini's exact id lets the op's own
+  /// lookup over every session find the parent.
+  @Test(.timeLimit(.minutes(2)), arguments: ["new", "spawn"])
+  func aNewSessionFromTheHostTakesItsParentAmongTheHostsSessions(op: String) throws {
+    try withReadySessions { service, facts, _ in
+      let args: [String: JSON] =
+        op == "new"
+        ? ["path": .string("\(facts.home)/work"), "prompt": "hello", "parent": "twin"]
+        : ["repository": "o/n", "branch": "b2", "prompt": "hello", "parent": "twin"]
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let id = try #require(answer.result?["id"]?.string)
+      #expect(service.queue.sync { service.entries[id]?.session.parent } == "mq7x")
+      #expect(service.queue.sync { service.entries[id]?.session.host } == "mini")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["new", "spawn"], ["local", "other"])
+  func aNewSessionFromTheHostOnAnotherMachineFailsAndChangesNothing(op: String, host: String) throws {
+    try withSessions { service in
+      var args = PlannedScope.baseArgs(op)
+      args["host"] = .string(host)
+      let before = try service.scopeState()
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("can start sessions only on mini") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+      expectLinksDisconnected(service)
+    }
+  }
+
+  /// `create` checks the parent's host itself, in the block that saves the record, so a caller that skipped the
+  /// scope still can't give a session on mini a local parent.
+  @Test(.timeLimit(.minutes(2)), arguments: ["new", "spawn"])
+  func aSessionFromTheHostWithAParentOffTheHostIsNotCreated(op: String) throws {
+    try withReadySessions { service, facts, _ in
+      let before = try service.scopeState()
+
+      do {
+        if op == "new" {
+          _ = try service.newSession(
+            NewSession(path: "\(facts.home)/work", prompt: "hello", parent: "l1"), origin: .host("mini"))
+        } else {
+          _ = try service.spawn(
+            ["repository": "o/n", "branch": "b3", "prompt": "hello", "parent": "l1"], origin: .host("mini"))
+        }
+        Issue.record("\(op) from mini created a session with the local parent l1")
+      } catch {
+        #expect("\(error)".contains("not on mini"), "\(error)")
+      }
+
+      #expect(try service.scopeState() == before)
+    }
+  }
+
+  // MARK: The recheck
+
+  /// mini's `m1` leaves and a local session takes its id after `authorize` checked it. The op must not act on the
+  /// local session. `afterHostAuthorize` runs off the state queue, between `authorize` and the op.
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: (ownRequests + ownHostRequests).filter { $0.args["session"] == "m1" })
+  func anOpWhoseSessionLeftTheHostAfterTheCheckFailsAndChangesNothing(op: String, args: [String: JSON]) throws {
+    try withSessions { service in
+      let taken = session("m1", host: nil, name: "taken")
+      service.afterHostAuthorize = {
+        service.queue.sync { service.entries["m1"] = Service.Entry(session: taken) }
+      }
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+      settle(service)
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("that session is not on mini") == true, "\(answer.error ?? "")")
+      #expect(try service.logged().isEmpty)
+      let after = try service.queue.sync { try JSON(encoding: service.entries["m1"]!.session) }
+      #expect(try after == JSON(encoding: taken))
+      #expect(
+        service.queue.sync { service.entries["m1"]!.pending.isEmpty && service.entries["m1"]!.facts.cards.isEmpty })
+      expectLinksDisconnected(service)
+    }
+  }
+
+  /// The recheck covers every session that the request names, not only `session`. mini's `m2` leaves and a local
+  /// session takes its id after `authorize` checked it.
+  @Test(
+    .timeLimit(.minutes(2)),
+    arguments: [
+      ("send", ["session": "m1", "text": "hello", "from": "m2"]), ("events", ["sessions": ["m1", "m2"]]),
+      ("wait", ["session": "m1", "kind": "session", "target": "m2", "state": "idle"]),
+    ] as [(String, [String: JSON])])
+  func anOpWhoseOtherSessionLeftTheHostAfterTheCheckFailsAndChangesNothing(op: String, args: [String: JSON]) throws {
+    try withReadySessions { service, _, _ in
+      let taken = session("m2", host: nil, name: "taken")
+      service.afterHostAuthorize = {
+        service.queue.sync { service.entries["m2"] = Service.Entry(session: taken) }
+      }
+      let before = try service.logged()
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+      settle(service)
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("that session is not on mini") == true, "\(answer.error ?? "")")
+      #expect(try service.logged() == before)
+      #expect(service.queue.sync { service.entries["m1"]!.session.waits ?? [] }.isEmpty)
+    }
+  }
+
+  // MARK: cli
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCliRequestFailsUntilStageFourAndChangesNothing() throws {
+    try withSessions { service in
+      let before = try service.scopeState()
+
+      let answer = service.handle(
+        Request(op: "cli", args: ["argv": ["ls", "--json"], "session": "m1"]), origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("not yet") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
     }
   }
 }

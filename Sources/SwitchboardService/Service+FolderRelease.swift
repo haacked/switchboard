@@ -44,8 +44,9 @@ extension Service {
   /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
   /// A stop would wait on such a caller, which waits on sbd, so the stop could never
   /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. A client's ancestry holds pids
-  /// of this Mac, and a request from a host's socket is only a hook, so a client is never inside a session
-  /// on a host. The pids of such a session's panes belong to the host, so it returns nil for it.
+  /// of this Mac. A request from a host's socket never reaches this, because `HostScope` refuses `rm`, `cleanup`,
+  /// and `rm-done` from a host. So a client is never inside a session on a host. The pids of such a session's
+  /// panes belong to the host, so it returns nil for it.
   func insideRefusal(_ id: String, _ ancestry: Set<Int>?, command: String) -> APIError? {
     guard let ancestry, isInside(id, ancestry) else { return nil }
     return APIError(
