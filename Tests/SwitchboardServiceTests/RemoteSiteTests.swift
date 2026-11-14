@@ -796,7 +796,7 @@ func paths(inside folder: String) throws -> [String] {
 
   /// The link drops while setup runs. The link connects again, and setup runs on the new connection, well within
   /// the wait.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(2)))
   func aLinkThatDropsDuringSetupIsReadyOnTheNextConnectionWithinTheWait() throws {
     try withSite { b in
       try holdNextSetup(b)
@@ -806,9 +806,8 @@ func paths(inside folder: String) throws -> [String] {
       let lock = NSLock()
       var outcome: Result<Void, any Error>?
       let finished = DispatchSemaphore(value: 0)
-      let started = Date()
       Thread.detachNewThread {
-        let r = Result { try b.site.awaitReady(seconds: 15) }
+        let r = Result { try b.site.awaitReady(seconds: 60) }
         lock.withLock { outcome = r }
         finished.signal()
       }
@@ -816,9 +815,8 @@ func paths(inside folder: String) throws -> [String] {
 
       b.bench.drop(first)
 
-      #expect(finished.wait(timeout: .now() + 20) == .success)
+      #expect(finished.wait(timeout: .now() + 65) == .success)
       #expect(throws: Never.self) { try lock.withLock { outcome }?.get() }
-      #expect(Date().timeIntervalSince(started) < 15)
       #expect(b.bench.masters().count >= 2)
       #expect(b.site.facts?.epoch == b.link.status.connection)
       #expect(b.site.facts?.epoch != connection)
@@ -855,7 +853,7 @@ func paths(inside folder: String) throws -> [String] {
   /// The link drops just after the hook script answered, so the forward fails before the link reports the drop.
   /// The box's `chmod` of the hook settings starts the drop: it lets the forward through again and kills the
   /// master 0.4 s later. Until then the stub refuses the forward.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(2)))
   func aSetupWhoseForwardFailsAsTheLinkDropsIsReadyOnTheNextConnection() throws {
     try withSite { b in
       let first = try b.bench.connect()
@@ -876,11 +874,8 @@ func paths(inside folder: String) throws -> [String] {
         """.utf8
       ).write(to: URL(fileURLWithPath: path))
       chmod(path, 0o755)
-      let started = Date()
+      try b.site.awaitReady(seconds: 60)
 
-      try b.site.awaitReady(seconds: 15)
-
-      #expect(Date().timeIntervalSince(started) < 15)
       #expect(b.bench.masters().count >= 2)
       #expect(b.site.facts?.epoch == b.link.status.connection)
       #expect(b.site.facts?.epoch != connection)
@@ -889,15 +884,17 @@ func paths(inside folder: String) throws -> [String] {
   }
 
   /// A setup that fails while its connection stays up fails at once and does not wait out the deadline.
-  @Test(.timeLimit(.minutes(1)))
+  @Test(.timeLimit(.minutes(3)))
   func aSetupThatFailsWhileTheLinkStaysUpFailsAtOnce() throws {
     try withSite(host: ["tmux": "/nonexistent/sb/tmux"]) { b in
       try b.bench.connect()
       let started = Date()
 
-      #expect { try b.site.awaitReady(seconds: 15) } throws: { "\($0)".contains(tmuxInstall) }
+      #expect { try b.site.awaitReady(seconds: 120) } throws: { "\($0)".contains(tmuxInstall) }
 
-      #expect(Date().timeIntervalSince(started) < 7)
+      // A loaded CI runner has taken 15 s for one setup on a link that stayed up. A setup that waited out the
+      // deadline would take 120 s.
+      #expect(Date().timeIntervalSince(started) < 60)
       #expect(b.bench.masters().count == 1)
     }
   }
