@@ -79,6 +79,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The reason line of a wait that resolved with `notify`. The next prompt,
   /// or a new wait, clears it.
   public var waitOutcome: String?
+  /// The kind of the wait whose outcome `waitOutcome` holds.
+  public var waitOutcomeKind: Wait.Kind?
   /// Open and deferred permission prompts and questions, oldest first.
   public var cards: [Card] = []
   /// Why the open prompt's card left while the prompt stayed open.

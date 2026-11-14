@@ -4,9 +4,10 @@ import Testing
 
 private let otherDestination = "haacked@other.local"
 
-/// What a request on a host's socket may do. A request that arrives on host `h`'s socket changes nothing unless it
-/// is a `hook` for a session whose `host` is `h`. Each test sends raw lines to mini's socket, as any program on mini
-/// can, and compares the whole event log before and after.
+/// What a request on a host's socket may do. A request that arrives on host `h`'s socket reads and acts only on
+/// sessions whose `host` is `h`: a `hook` names one of them, and every other op is one of the scope table's ops with
+/// only the keys of its row. Each test sends raw lines to mini's socket, as any program on mini can, and compares
+/// the whole event log before and after.
 ///
 /// The ssh stub gives every host the same box, so `mini` and `other` share one `~/.sb` there. The host that set up
 /// last owns the box's end of the forward. These tests send to the sockets on this Mac, which stay apart.
@@ -22,7 +23,8 @@ private let otherDestination = "haacked@other.local"
 
   /// A local session, a session on mini, and a session on other, each with an idle claude.
   private func bench() throws -> Bench {
-    let sbd = try Instance.remote(hosts: ["other": Instance.remoteHost(otherDestination)])
+    let sbd = try Instance.remote(
+      hosts: ["other": Instance.remoteHost(otherDestination)], config: Instance.shortHostWait)
     let local = try sbd.new(name: "local-probe")
     try sbd.waitFor(local.id, "the local SessionStart") { $0.live }
     let mini = try sbd.startOnHost("sb-box-repo", host: "mini")
@@ -369,49 +371,88 @@ private let otherDestination = "haacked@other.local"
 
   // MARK: Every other op
 
-  @Test func everyOpOtherThanHookFailsOnAHostsSocketAndChangesNothing() throws {
+  /// The ops that mini's socket refuses, whatever they name.
+  private static let refusedOps = [
+    "rm", "cleanup", "rm-done", "send-group", "send-pending", "group-ls", "group-add", "group-rm", "group-move",
+    "group-note", "group-describe", "group-account", "group-suggest", "manager", "manager-ls", "manager-mcp", "chat",
+    "chat-log", "slash-commands", "removed-ls", "import", "importable", "accounts", "account-use", "account-move",
+    "usage", "mcp",
+    "hosts",
+    "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
+    "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+    "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
+    "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
+    "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
+    "followup-rm", "followup-import", "pr-merged", "docket-start", "merge", "review", "ack", "resolved-todos",
+    "dependency-resolved", "activity", "activity-report", "activity-clear", "live-next", "draft-post", "draft-check",
+    "issues", "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm",
+    "issues-settings", "issues-dismiss",
+  ]
+
+  /// The keys that the requests below carry and their ops do not read.
+  private static let unreadKeys: Set<String> = ["images", "account", "path", "on", "host"]
+
+  /// Every op that the stage 3 test sent, each in a form that mini's socket refuses: a refused op, a session that
+  /// is not mini's, a key that the op does not read, or a host other than mini. The ops that only read, sent for
+  /// mini's own session, are taken and change nothing.
+  @Test func everyRefusedOpFailsOnAHostsSocketAndChangesNothing() throws {
     let b = try bench()
     let sbd = b.sbd
     let (l, s, o): (JSON, JSON, JSON) = (.string(b.local.id), .string(b.mini.id), .string(b.other.id))
     let marker = "op-\(UUID().uuidString)"
     let text = JSON.string(marker)
     let clock = try sbd.now()
-    var requests: [(op: String, args: [String: JSON])] = []
-    func add(_ op: String, _ args: [String: JSON] = [:]) { requests.append((op, args)) }
-    add("send", ["session": s, "text": text])
-    add("send", ["session": l, "text": text])
-    add("send", ["session": o, "text": text])
+    let scope = "that session is not on mini"
+    let elsewhere = "can start sessions only on mini"
+    /// `refusal` is a text that the error holds, or nil for a request that mini's socket takes.
+    var requests: [(op: String, args: [String: JSON], refusal: String?)] = []
+    func add(_ op: String, _ args: [String: JSON] = [:], _ refusal: String? = nil) {
+      requests.append((op, args, refusal ?? "\(op) can't run from mini"))
+    }
+    func taken(_ op: String, _ args: [String: JSON] = [:]) { requests.append((op, args, nil)) }
+    add("send", ["session": l, "text": text], scope)
+    add("send", ["session": o, "text": text], scope)
+    add("send", ["session": s, "text": text, "from": l], scope)
+    add("send", ["session": s, "text": text, "images": [["name": "a.png", "data": "AA=="]]], "images")
     add("send-group", ["group": "g", "text": text])
-    add("new", ["path": .string(sbd.work), "name": text])
-    add("new", ["path": "~/sb-box-repo", "host": "mini", "name": text])
-    add("spawn", ["path": .string(sbd.work), "name": text, "prompt": text])
+    add("new", ["path": .string(sbd.work), "name": text, "host": "local"], elsewhere)
+    add("new", ["path": "~/sb-box-repo", "host": "other", "name": text], elsewhere)
+    add("new", ["path": "~/sb-box-repo", "name": text, "parent": l], scope)
+    add("new", ["path": "~/sb-box-repo", "name": text, "account": "x"], "account")
+    add("spawn", ["path": .string(sbd.work), "name": text, "prompt": text], "path")
+    add("spawn", ["repository": "o/n", "branch": text, "prompt": text, "host": "local"], elsewhere)
+    add("spawn", ["repository": "o/n", "branch": text, "prompt": text, "parent": o], scope)
     add("rm", ["session": s])
     add("rm", ["session": l])
     add("rm-done")
     add("cleanup", ["session": s])
-    add("stop", ["session": s])
-    add("stop", ["session": l])
-    add("resume", ["session": s])
-    add("open", ["session": s])
-    add("done", ["session": s])
-    add("done", ["session": l])
+    add("stop", ["session": l], scope)
+    add("stop", ["session": o], scope)
+    add("resume", ["session": l], scope)
+    add("open", ["session": o], scope)
+    add("done", ["session": l], scope)
+    add("done", ["session": .string(b.local.name)], scope)
     add("ack", ["session": s])
-    add("answer", ["session": s, "behavior": "allow"])
-    add("rename", ["session": s, "name": text])
-    add("rename", ["session": l, "name": text])
-    add("note", ["session": s, "text": text])
-    add("wait", ["session": s, "on": text])
-    add("issue", ["session": s, "issue": 1])
-    add("ls")
-    add("get", ["session": s])
-    add("get", ["session": l])
-    add("events")
-    add("events", ["session": s])
-    add("screen", ["session": s])
-    add("screen", ["session": l])
-    add("terminals", ["session": s])
-    add("shell", ["session": s, "open": true])
-    add("ping")
+    add("answer", ["session": l, "behavior": "allow"], scope)
+    add("rename", ["session": l, "name": text], scope)
+    add("rename", ["session": o, "name": text], scope)
+    add("note", ["session": l, "text": text], scope)
+    add("wait", ["session": s, "on": text], "on")
+    add("wait", ["session": s, "kind": "session", "target": l, "state": "idle"], scope)
+    add("issue", ["session": l, "issue": "1"], scope)
+    taken("ls")
+    add("ls", ["host": "other"], "host")
+    taken("get", ["session": s])
+    add("get", ["session": l], scope)
+    add("get", ["session": .string(String(b.local.id.dropLast()))], scope)
+    taken("events")
+    taken("events", ["session": s])
+    add("events", ["sessions": [s, l]], scope)
+    taken("screen", ["session": s])
+    add("screen", ["session": l], scope)
+    add("terminals", ["session": l], scope)
+    add("shell", ["session": o, "open": true], scope)
+    taken("ping")
     add("clock")
     add("clock", ["advance": 3_600_000])
     add("hosts")
@@ -431,7 +472,7 @@ private let otherDestination = "haacked@other.local"
     add("importable")
     add("import", ["refs": [text]])
     add("triage")
-    add("summary-set", ["session": s, "card": ["title": text]])
+    add("summary-set", ["session": l, "card": ["summary": text]], scope)
     add("decisions", ["session": s])
     add("manager")
     add("chat", ["group": text])
@@ -446,17 +487,28 @@ private let otherDestination = "haacked@other.local"
     add("resolved-todos")
     add("dependency-resolved", ["session": s])
     add("no-such-op")
+    let sent = Set(requests.map(\.op))
+    for op in Self.refusedOps where !sent.contains(op) { add(op, ["session": s]) }
 
     for request in requests {
       let answer = try? sbd.sendLine(Instance.requestLine(request.op, request.args), to: sbd.hostSocket("mini"))
 
-      #expect(
-        refused(answer),
-        "\(request.op) \(JSON.object(request.args).text): \(answer?.text ?? "no answer")")
+      let label = "\(request.op) \(JSON.object(request.args).text): \(answer?.text ?? "no answer")"
+      if let refusal = request.refusal {
+        let error = answer?["error"]?.string ?? ""
+        #expect(refused(answer), "\(label)")
+        #expect(error.contains(refusal), "\(label)")
+        // A key's name such as `on` is a part of other refusals, so a key refusal must be neither of them.
+        if Self.unreadKeys.contains(refusal) {
+          #expect(!error.contains("can't run from mini") && !error.contains(scope), "\(label)")
+        }
+      } else {
+        #expect(answer?["ok"] == true, "\(label)")
+      }
     }
 
     let new = try added(b)
-    #expect(new.isEmpty, "the refused requests added \(new.count) events, first: \(new.prefix(3))")
+    #expect(new.isEmpty, "the requests added \(new.count) events, first: \(new.prefix(3))")
     #expect(try Set(sbd.client.sessions().map(\.id)) == [b.local.id, b.mini.id, b.other.id])
     #expect(try sbd.client.sessions().map(\.name).contains(marker) == false)
     #expect(try sbd.get(b.local.id).claudePid == b.local.claudePid)
@@ -472,14 +524,14 @@ private let otherDestination = "haacked@other.local"
   }
 
   /// A connection that sent a hook that sbd took gets no more rights from it.
-  @Test func aConnectionThatSentAGoodHookStillCantSendAnotherOp() throws {
+  @Test func aConnectionThatSentAGoodHookStillCantSendToALocalSession() throws {
     let b = try bench()
     let (first, second, third) = ("conn-1-\(UUID())", "conn-2-\(UUID())", "conn-3-\(UUID())")
     let lines = [
       Instance.hookLine(
         session: .string(b.mini.id), payload: Instance.probePayload(first), id: Instance.eventId(ns: Instance.clockNs())
       ),
-      Instance.requestLine("send", ["session": .string(b.mini.id), "text": .string(second)]),
+      Instance.requestLine("send", ["session": .string(b.local.id), "text": .string(second)]),
       Instance.hookLine(
         session: .string(b.local.id), payload: Instance.probePayload(third),
         id: Instance.eventId(ns: Instance.clockNs())),
@@ -489,12 +541,40 @@ private let otherDestination = "haacked@other.local"
 
     #expect(answers[0]?["ok"] == true, "\(answers[0]?.text ?? "no answer")")
     #expect(refused(answers[1]), "\(answers[1]?.text ?? "no answer")")
+    #expect(
+      answers[1]?["error"]?.string?.contains("that session is not on mini") == true,
+      "\(answers[1]?.text ?? "no answer")")
     #expect(refused(answers[2]), "\(answers[2]?.text ?? "no answer")")
     try b.sbd.waitFor("the good hook") { try b.sbd.probes(first).count == 1 }
     let new = try added(b)
     #expect(new.count == 1, "\(new)")
     #expect(try b.sbd.probes(third).isEmpty)
+    #expect(!b.sbd.stubInput().contains { $0.contains(second) }, "the send reached the local pane")
     #expect(!b.sbd.boxStubInput().contains { $0.contains(second) })
+  }
+
+  /// A program on mini reaches mini's own session through the box's end of the forward. The bench's box forward
+  /// belongs to the host that set up last, so this test runs a sbd with mini alone.
+  @Test func aSessionsOwnOpsWorkOnItsHostsSocket() throws {
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    let mini = try sbd.startOnHost()
+    let marker = "own-op-\(UUID().uuidString)"
+    let session = JSON.string(mini.id)
+
+    let got = try sbd.sendLine(Instance.requestLine("get", ["session": session]), to: sbd.boxSocket)
+    let sent = try sbd.sendLine(
+      Instance.requestLine("send", ["session": session, "text": .string(marker)]), to: sbd.boxSocket, timeout: 30)
+    let waited = try sbd.sendLine(
+      Instance.requestLine("wait", ["session": session, "note": .string(marker), "by": "claude"]), to: sbd.boxSocket)
+
+    #expect(got?["ok"] == true, "\(got?.text ?? "no answer")")
+    #expect(got?["result"]?["id"] == session)
+    #expect(got?["result"]?["host"] == "mini")
+    #expect(sent?["ok"] == true, "\(sent?.text ?? "no answer")")
+    try sbd.waitFor("the message in mini's pane") { sbd.boxStubInput().contains { $0.contains(marker) } }
+    #expect(waited?["ok"] == true, "\(waited?.text ?? "no answer")")
+    #expect(try sbd.get(mini.id).waits.contains { $0.note == marker })
+    #expect(!sbd.stubInput().contains { $0.contains(marker) }, "the send reached a local pane")
   }
 
   // MARK: Lines that are not requests

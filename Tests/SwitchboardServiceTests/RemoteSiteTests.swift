@@ -699,7 +699,7 @@ func paths(inside folder: String) throws -> [String] {
       try replaceWithLink("\(facts.home)/\(linked)", to: target, keeping: "\(b.home)/moved")
 
       let r = try b.site.machine.run(
-        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}"], env: nil, input: nil,
+        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}", "wrapper"], env: nil, input: nil,
         timeout: 20)
 
       #expect(r.status == 1, "\(r.stderr)")
@@ -716,7 +716,7 @@ func paths(inside folder: String) throws -> [String] {
       try Data("keep\n".utf8).write(to: URL(fileURLWithPath: bin))
 
       let r = try b.site.machine.run(
-        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}"], env: nil, input: nil,
+        "/bin/sh", ["-c", RemoteSite.hookScript, "sb", facts.folder, "shim", "{}", "wrapper"], env: nil, input: nil,
         timeout: 20)
 
       #expect(r.status == 1, "\(r.stderr)")
@@ -2242,14 +2242,14 @@ func paths(inside folder: String) throws -> [String] {
 /// sessions but the ones a test adds.
 func withHostService(
   hosts: [String: JSON] = ["mini": ["kind": "ssh", "destination": .string(LinkBench.destination)]],
-  ssh: String = LinkBench.stub, config extra: [String: JSON] = [:],
+  ssh: String = LinkBench.stub, config extra: [String: JSON] = [:], sbPath: String = "/usr/bin/true",
   _ body: (Service, Home) throws -> Void
 ) throws {
   let home = Home(path: try makeShortTempFolder())
   defer { try? FileManager.default.removeItem(atPath: home.path) }
   let config: [String: JSON] = ["ssh": .string(ssh), "hosts": .object(hosts)].merging(extra) { $1 }
   try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
-  let service = try Service(home: home, sbPath: "/usr/bin/true")
+  let service = try Service(home: home, sbPath: sbPath)
   defer { for link in service.hostLinks.values { link.disconnect() } }
   try body(service, home)
 }

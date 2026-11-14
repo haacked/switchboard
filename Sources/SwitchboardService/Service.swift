@@ -153,6 +153,14 @@ public final class Service {
   var hostEvents: [String: HostEventBuffer] = [:]
   /// The order window of each new buffer in `hostEvents`. Only tests change it.
   var hostEventWindowMs = HostEventOrder.windowMs
+  /// Runs after `handleHostRequest` authorizes a request and before the request runs, off the state queue. Only
+  /// tests set it.
+  var afterHostAuthorize: (() -> Void)?
+  /// Runs this Mac's `sb` for the hosts' `cli` requests. Only tests replace it.
+  var hostCLIRunner: HostCLIRunner
+  /// How long a write of an answer on a host's socket may wait for the client to read before sbd drops the
+  /// connection. Only tests change it.
+  var hostSendTimeoutSeconds: Double = 30
   /// When sbd last pruned the recorded ids of the hosts' events.
   var hostEventsPruned: Int64 = 0
   let triageJobs: OperationQueue = {
@@ -268,6 +276,7 @@ public final class Service {
     self.store = try Store(path: home.database)
     self.mac = try MacSite(home: home, config: config)
     self.sbPath = sbPath
+    self.hostCLIRunner = HostCLIRunner(program: sbPath)
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.issueSettings = config.issues
@@ -359,98 +368,121 @@ public final class Service {
     _ request: Request, origin: RequestOrigin = .mac, caller: Caller = .inProcess,
     hookGone: @escaping () -> Bool = { false }
   ) -> Response {
+    var answer = Response.failure("sbd gave no answer")
+    handle(request, origin: origin, caller: caller, hookGone: hookGone) { answer = $0 }
+    return answer
+  }
+
+  /// Runs the request as the other `handle` does and passes its one answer to `reply`, which sends it. A host's
+  /// `cli` request calls `reply` while its run still holds one of the host's slots, so the slot stays taken
+  /// until the answer is sent.
+  public func handle(
+    _ request: Request, origin: RequestOrigin, caller: Caller, hookGone: @escaping () -> Bool,
+    reply: (Response) -> Void
+  ) {
+    var replied = false
     do {
-      // A request from a host's socket ends here. It reaches no code below, so it can only be a hook, and
-      // `handleHostHook` takes it only for a session that sbd holds on that host.
       if case .remote(let host) = origin {
-        guard request.op == "hook" else { throw APIError("a request from \(host) can only be a hook") }
-        return try handleHostHook(request.args, from: host, hookGone: hookGone)
+        return try handleHostRequest(request, host: host, caller: caller, hookGone: hookGone) {
+          replied = true
+          reply($0)
+        }
       }
-      switch request.op {
-      case "hook":
-        return try handleHook(request.args, hookGone: hookGone)
-      case "new":
-        return try .success(JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self))))
-      case "spawn":
-        return try .success(JSON(encoding: spawn(request.args)))
-      case "repos":
-        return try .success(JSON(encoding: knownRepos()))
-      case "repo-add":
-        return try .success(JSON(encoding: addRepo(request.args)))
-      case "manager":
-        return managerRequest(request.args)
-      case "chat":
-        return chatRequest(request.args)
-      case "chat-log":
-        return .success(try chatLog(request.args))
-      case "slash-commands":
-        return .success(try slashCommands(request.args))
-      case "rm":
-        return .success(try remove(request.args, caller: caller))
-      case "cleanup":
-        return .success(try cleanup(request.args, caller: caller))
-      case "rm-done":
-        return .success(try removeDone(request.args, caller: caller))
-      case "merge":
-        return .success(try mergeRequest(request.args))
-      case "review":
-        return .success(try reviewRequest(request.args))
-      case "draft-post", "draft-check":
-        return .success(try draftReplyRequest(request.op, request.args, caller: caller))
-      // An advance runs a tick before the reply, so the stop rule sees the
-      // new time. `tick` takes the state queue itself, so `clock` runs here
-      // and not in `dispatch`.
-      case "clock":
-        let now = try queue.sync { try clockRequest(request.args) }
-        if request.args["advance"] != nil { tick() }
-        return .success(now)
-      case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
-        return .success(try followupRequest(request.op, request.args))
-      case "importable":
-        let all = request.args["all"]?.bool ?? false
-        return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
-      case "import":
-        return .success(try JSON(encoding: importSessions(request.args)))
-      case "triage", "choose", "reply", "summary-set":
-        return try triageRequest(request.op, request.args)
-      case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard":
-        return try decisionRequest(request.op, request.args)
-      case "plan-attach", "plan-update":
-        return .success(try planDocumentRequest(request.op, request.args))
-      case "plan-propose", "plan-apply":
-        return .success(try planProposalDocumentRequest(request.op, request.args))
-      case "plan-artifact-read", "plan-artifact-rewrite", "plan-artifact-apply":
-        return .success(try artifactTurnRequest(request.op, request.args))
-      case "plan-followup":
-        // `planFollowup` takes the state queue itself.
-        return .success(try JSON(encoding: planFollowup(request.args)))
-      case "issues-refresh", "issues-start", "issues-clone":
-        return .success(try issueWorkRequest(request.op, request.args))
-      case "poll":
-        // A poll waits on GitHub, so it runs off the state queue.
-        return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
-      case "docket-start":
-        return .success(try JSON(encoding: startDocket(request.args)))
-      case "usage":
-        // `usage` runs off the state queue. The reader takes that queue itself
-        // to list the accounts, and a refresh waits on the network.
-        return .success(try JSON(encoding: usageRequest(request.args)))
-      case "send" where request.args["images"] != nil:
-        return try sendWithImages(request, hookGone: hookGone)
-      case "account-use", "account-move", "group-account":
-        try requireSignedIn(request.args)
-      default:
-        break
-      }
-      return try .success(prepared(request) { try dispatch(request.op, request.args) })
+      reply(try route(request, origin: .mac, caller: caller, hookGone: hookGone))
     } catch {
-      return .failure("\(error)")
+      if !replied { reply(.failure("\(error)")) }
     }
+  }
+
+  /// Runs a request from this Mac, or a request from a host that `HostScope.authorize` returned. In the state queue
+  /// block that runs the op, each session that a host's request names is checked again to be on that host: by
+  /// `requireOnHost`, or for the parent of `new` and `spawn`, by `create`.
+  func route(_ request: Request, origin: RequestOrigin, caller: Caller, hookGone: @escaping () -> Bool) throws
+    -> Response
+  {
+    switch request.op {
+    case "hook":
+      return try handleHook(request.args, hookGone: hookGone)
+    case "new":
+      return try .success(
+        JSON(encoding: newSession(JSONCoding.convert(request.args, to: NewSession.self), origin: origin)))
+    case "spawn":
+      return try .success(JSON(encoding: spawn(request.args, origin: origin)))
+    case "repos":
+      return try .success(JSON(encoding: knownRepos()))
+    case "repo-add":
+      return try .success(JSON(encoding: addRepo(request.args)))
+    case "manager":
+      return managerRequest(request.args)
+    case "chat":
+      return chatRequest(request.args)
+    case "chat-log":
+      return .success(try chatLog(request.args))
+    case "slash-commands":
+      return .success(try slashCommands(request.args))
+    case "rm":
+      return .success(try remove(request.args, caller: caller))
+    case "cleanup":
+      return .success(try cleanup(request.args, caller: caller))
+    case "rm-done":
+      return .success(try removeDone(request.args, caller: caller))
+    case "merge":
+      return .success(try mergeRequest(request.args))
+    case "review":
+      return .success(try reviewRequest(request.args))
+    case "draft-post", "draft-check":
+      return .success(try draftReplyRequest(request.op, request.args, caller: caller))
+    // An advance runs a tick before the reply, so the stop rule sees the
+    // new time. `tick` takes the state queue itself, so `clock` runs here
+    // and not in `dispatch`.
+    case "clock":
+      let now = try queue.sync { try clockRequest(request.args) }
+      if request.args["advance"] != nil { tick() }
+      return .success(now)
+    case "followup-add", "followup-ls", "followup-start", "followup-rm", "followup-import", "pr-merged":
+      return .success(try followupRequest(request.op, request.args))
+    case "importable":
+      let all = request.args["all"]?.bool ?? false
+      return .success(try JSON(encoding: importList(all: all, repo: request.args["repo"]?.string)))
+    case "import":
+      return .success(try JSON(encoding: importSessions(request.args)))
+    case "triage", "choose", "reply", "summary-set":
+      return try triageRequest(request, origin: origin)
+    case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard":
+      return try decisionRequest(request.op, request.args)
+    case "plan-attach", "plan-update":
+      return .success(try planDocumentRequest(request.op, request.args))
+    case "plan-propose", "plan-apply":
+      return .success(try planProposalDocumentRequest(request.op, request.args))
+    case "plan-artifact-read", "plan-artifact-rewrite", "plan-artifact-apply":
+      return .success(try artifactTurnRequest(request.op, request.args))
+    case "plan-followup":
+      // `planFollowup` takes the state queue itself.
+      return .success(try JSON(encoding: planFollowup(request.args)))
+    case "issues-refresh", "issues-start", "issues-clone":
+      return .success(try issueWorkRequest(request.op, request.args))
+    case "poll":
+      // A poll waits on GitHub, so it runs off the state queue.
+      return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
+    case "docket-start":
+      return .success(try JSON(encoding: startDocket(request.args)))
+    case "usage":
+      // `usage` runs off the state queue. The reader takes that queue itself
+      // to list the accounts, and a refresh waits on the network.
+      return .success(try JSON(encoding: usageRequest(request.args)))
+    case "send" where request.args["images"] != nil:
+      return try sendWithImages(request, hookGone: hookGone)
+    case "account-use", "account-move", "group-account":
+      try requireSignedIn(request.args)
+    default:
+      break
+    }
+    return try .success(prepared(request, origin: origin) { try dispatch(request.op, request.args, origin: origin) })
   }
 
   /// Takes the steps that `request` needs before it acts, then runs `body`
   /// on the state queue.
-  func prepared(_ request: Request, _ body: () throws -> JSON) throws -> JSON {
+  func prepared(_ request: Request, origin: RequestOrigin, _ body: () throws -> JSON) throws -> JSON {
     let hostRead = try readHost(for: request)
     if Service.settles.contains(request.op), let id = try? queue.sync(execute: { try lookup(request.args) }) {
       settle(id)
@@ -472,9 +504,20 @@ public final class Service {
     let fresh =
       Service.actsOnProcesses.contains(request.op) && (hostRead == nil || sendsGroupMessage) ? buildSnapshot() : nil
     return try queue.sync {
+      try requireOnHost(request, origin: origin)
       if let fresh { install(fresh) }
       if let hostRead { install(hostRead.snapshot, onHost: hostRead.host) }
       return try body()
+    }
+  }
+
+  /// For a request from a host: throws unless each session that the request names is still on that host. A
+  /// session can leave the host, and another can take its id, between `HostScope.authorize` and the op, so each op
+  /// calls this in the state queue block that runs it. It runs on the state queue.
+  func requireOnHost(_ request: Request, origin: RequestOrigin) throws {
+    guard case .remote(let host) = origin else { return }
+    for id in HostScope.sessionIds(of: request) where entries[id]?.session.host != host {
+      throw HostScope.notOnHost(host)
     }
   }
 
@@ -502,7 +545,7 @@ public final class Service {
     }
   }
 
-  private func dispatch(_ op: String, _ args: JSON) throws -> JSON {
+  private func dispatch(_ op: String, _ args: JSON, origin: RequestOrigin) throws -> JSON {
     switch op {
     case "ping":
       var ping: [String: JSON] = [
@@ -511,20 +554,21 @@ public final class Service {
       if let trunkProblem { ping["trunk"] = .string(trunkProblem) }
       return .object(ping)
     case "ls":
-      return try JSON(encoding: summaries().filter { $0.state != .notStarted })
+      return try JSON(
+        encoding: summaries(for: origin).filter { $0.state != .notStarted && origin.reaches($0.host) })
     case "removed-ls":
       return try JSON(encoding: store.removedSessions())
     case "get":
-      return try JSON(encoding: summary(try lookup(args)))
+      return try JSON(encoding: summary(try lookup(args), for: origin))
     case "terminals":
       return try JSON(encoding: terminals(try lookup(args)))
     case "shell":
-      return try shellRequest(args)
+      return try shellRequest(args, origin: origin)
     case "open":
       let id = try lookup(args)
       try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "send":
       let id = try lookup(args)
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
@@ -544,23 +588,23 @@ public final class Service {
     case "stop":
       let id = try lookup(args)
       try stop(id, reason: "asked")
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "resume":
       let id = try lookup(args)
       try launch(id, prompt: args["prompt"]?.string, trigger: .resume)
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "done":
       let id = try lookup(args)
       let done = args["done"]?.bool ?? true
       try update(id) { $0.done = done }
       record(id, done ? "done" : "undone")
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "ack":
       return try acknowledgeRequest(args)
     case "wait", "clear-wait", "resolve-wait":
-      return try waitRequest(op, args)
+      return try waitRequest(op, args, origin: origin)
     case "note", "remove-note", "resolve-note":
-      return try noteRequest(op, args)
+      return try noteRequest(op, args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "manager-ls":
@@ -571,7 +615,7 @@ public final class Service {
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
       try update(id) { $0.name = name }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "issue":
       let id = try lookup(args)
       let session = entries[id]!.session
@@ -583,19 +627,24 @@ public final class Service {
       guard clear != (text != nil) else { throw APIError("issue needs an issue or clear, not both") }
       let issue = try text.map(IssueRef.parse)
       try update(id) { $0.issue = issue }
-      return try JSON(encoding: summary(id))
+      return try JSON(encoding: summary(id, for: origin))
     case "events":
       let session = try args["session"].map { _ in try lookup(args) }
-      let sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
+      var sessions = try args["sessions"]?.array.map { try $0.map { try lookup(["session": $0]) } }
+      // A host that names no session reads the events of its own sessions only.
+      if case .remote = origin, session == nil, sessions == nil {
+        sessions = entries.values.filter { origin.reaches($0.session.host) }.map(\.session.id)
+      }
       let limit = args["limit"]?.int ?? Event.defaultLimit
       // Without `since`, the newest events, so `sb events` shows what just happened.
-      if let since = args["since"]?.int {
-        return try JSON(
-          encoding: store.events(since: Int64(since), session: session, sessions: sessions, limit: limit))
-      }
-      return try JSON(encoding: store.events(session: session, sessions: sessions, limit: limit, newest: true))
+      let events =
+        try args["since"]?.int.map {
+          try store.events(since: Int64($0), session: session, sessions: sessions, limit: limit)
+        } ?? store.events(session: session, sessions: sessions, limit: limit, newest: true)
+      guard case .remote(let host) = origin else { return try JSON(encoding: events) }
+      return try JSON(encoding: events.map { event($0, shownTo: host) })
     case "answer":
-      return try answer(args)
+      return try answer(args, origin: origin)
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
@@ -936,9 +985,24 @@ public final class Service {
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
+  /// Starts the session that a `new` request asks for, on the host that `SessionHost.choose` picks. A request
+  /// from this Mac with no host and a parent on a host fails, because `sb new` resolved its folder on this Mac.
+  func newSession(_ args: NewSession, origin: RequestOrigin = .mac) throws -> SessionSummary {
+    let parentHost = queue.sync { host(ofParent: args.parent) }
+    if origin == .mac, args.host == nil, let parentHost {
+      throw APIError(
+        "name --host \(parentHost) or --host local: a folder typed on this Mac is not a folder on \(parentHost)")
+    }
+    var args = args
+    args.host = try SessionHost.choose(named: args.host, parent: parentHost, origin: origin)
+    return try startSession(args, origin: origin)
+  }
+
   /// Makes the session's folder and worktree off the state queue, then creates the session and launches claude.
-  func newSession(_ args: NewSession) throws -> SessionSummary {
-    if let host = args.host { return try newSession(args, onHost: host) }
+  /// `args.host` is a host of config.json, or nil for this Mac. `origin` is the machine that asked, which `create`
+  /// checks the parent against.
+  func startSession(_ args: NewSession, origin: RequestOrigin) throws -> SessionSummary {
+    if let host = args.host { return try startSession(args, onHost: host, origin: origin) }
     var args = args
     args.branch = branch(of: args, repo: (args.path as NSString).standardizingPath, at: mac)
     // An unknown group, an unknown account, or an account that differs from
@@ -955,7 +1019,7 @@ public final class Service {
     return try queue.sync {
       // The launch reads the cached checkout, so git doesn't run on the state queue.
       if let main { memoryCheckouts[folder.cwd] = main }
-      let summary = try create(args, folder)
+      let summary = try create(args, folder, origin: origin)
       // The session's creation time keeps the repo in its place in the list after the session is removed.
       if let main { try? store.remember(repo: main, used: summary.created ?? nowMs()) }
       return summary
@@ -965,11 +1029,11 @@ public final class Service {
   /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
   /// It waits for the host, makes the folder and worktree there off the state queue, and reads the host's
   /// panes and processes before it creates the session.
-  private func newSession(_ args: NewSession, onHost host: String) throws -> SessionSummary {
+  private func startSession(_ args: NewSession, onHost host: String, origin: RequestOrigin) throws
+    -> SessionSummary
+  {
     let site = try remoteSite(host)
-    if args.account?.isEmpty == false {
-      throw APIError("a session on \(host) takes no account: it runs under the Claude login of \(host)")
-    }
+    if args.account?.isEmpty == false { throw Self.noAccount(on: host) }
     try queue.sync {
       let parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
       _ = try groupOfNew(args.group, parent: parent)
@@ -992,8 +1056,18 @@ public final class Service {
     let read = try readSnapshot(onHost: host)
     return try queue.sync {
       install(read, onHost: host)
-      return try create(args, folder)
+      return try create(args, folder, origin: origin)
     }
+  }
+
+  static func noAccount(on host: String) -> APIError {
+    APIError("a session on \(host) takes no account: it runs under the Claude login of \(host)")
+  }
+
+  /// The host of the session that `parent` names, nil when it runs on this Mac or names no session.
+  /// It runs on the state queue.
+  func host(ofParent parent: String?) -> String? {
+    parent.flatMap { try? lookup(["session": .string($0)]) }.flatMap { entries[$0]?.session.host }
   }
 
   /// The branch of a new session: a free branch at the site for a worktree that names none, else the one it names.
@@ -1015,9 +1089,10 @@ public final class Service {
     shortId("s", taken: Set(entries.keys).union(removedNames.keys), using: &generator)
   }
 
-  /// `configure` changes the session before its first launch.
+  /// `configure` changes the session before its first launch. A session that host h asked for takes a parent only
+  /// on h, which this checks in the state queue block that saves the record.
   func create(
-    _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?),
+    _ args: NewSession, _ folder: (cwd: String, branch: String?, repo: String?), origin: RequestOrigin = .mac,
     configure: (inout Session) -> Void = { _ in }
   ) throws -> SessionSummary {
     let id = newSessionID()
@@ -1027,6 +1102,9 @@ public final class Service {
       created: nowMs())
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
+    if case .remote(let host) = origin, let parent = session.parent, entries[parent]?.session.host != host {
+      throw APIError("the parent \(parent) is not on \(host)")
+    }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.setStartModes(
       auto: args.autoMode, plan: args.planMode, manual: args.manualMode, defaultAuto: config.autoMode)
@@ -1111,7 +1189,8 @@ public final class Service {
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?, trigger: LaunchTrigger) throws {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
-    // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
+    // MCP servers or `claudeArgs` of this Mac. It gets the triage nudge, because claude on the host runs `sb`
+    // through the host's wrapper. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
     entries[id]?.jumpedAt = nil
     if local {
@@ -1134,7 +1213,7 @@ public final class Service {
     // After claudeArgs, so that the session's mode wins over a global one.
     let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
     if let mode { args += ["--permission-mode", mode] }
-    if local, !config.triage.systemPrompt.isEmpty {
+    if !config.triage.systemPrompt.isEmpty {
       args += ["--append-system-prompt", config.triage.systemPrompt]
     }
     // `--` keeps a prompt that starts with a dash from reading as an option.
@@ -1142,8 +1221,10 @@ public final class Service {
     let site = self.site(for: session)
     let terminals = try site.terminals()
     let env = try newPaneEnv(id)
+    // On a host, `$SB_HOME/bin` goes first on PATH, so claude and its tools run the host's `sb` wrapper.
+    let path = local ? "" : #"export PATH="$SB_HOME/bin:$PATH""# + "\n"
     try writeLauncher(
-      "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
+      path + "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
         + args.map(shellQuote).joined(separator: " ") + "\n",
       for: id, at: site)
     let command =
@@ -2144,25 +2225,30 @@ public final class Service {
 
   // MARK: Summaries
 
-  func summaries() -> [SessionSummary] {
+  func summaries(for origin: RequestOrigin = .mac) -> [SessionSummary] {
     let rowFollowups = planRowFollowups()
-    return entries.keys.map { summary($0, rowFollowups: rowFollowups) }.sorted {
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups, for: origin) }.sorted {
       $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
     }
   }
 
-  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> SessionSummary {
+  /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
+  /// data only where `showsGitHub` allows it.
+  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil, for origin: RequestOrigin = .mac)
+    -> SessionSummary
+  {
     let e = entries[id]!
-    let verdict = shown(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
+    let facts = shownFacts(id, for: origin)
+    let verdict = shown(id, Attention.evaluate(e.session, facts, now: nowMs(), stateOf: lastState), facts: facts)
     let s = e.session
     var out = SessionSummary(
       id: id, name: s.name, cwd: s.cwd, repo: s.repo, branch: e.branch,
-      claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: e.facts.stateSince,
-      lastActivity: e.facts.lastActivity,
-      live: e.facts.live, claudePid: claudePid(id),
-      attached: attached(id), lastReply: e.facts.lastReply,
-      waits: s.waits ?? [], notes: s.notes ?? [], cards: e.facts.cards,
-      openPrompt: e.facts.openPermission != nil || e.facts.openQuestion != nil, pr: e.facts.pr.map(PRSummary.init),
+      claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: facts.stateSince,
+      lastActivity: facts.lastActivity,
+      live: facts.live, claudePid: claudePid(id),
+      attached: attached(id), lastReply: facts.lastReply,
+      waits: s.waits ?? [], notes: s.notes ?? [], cards: facts.cards,
+      openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)
     if s.kind == .work {
       out.checkout = checkout(s)
@@ -2174,7 +2260,7 @@ public final class Service {
     out.mcp = s.mcp
     out.kind = s.kind
     out.chat = s.chat
-    let shown = Triage.itemAndDecisions(e.facts, verdict, kind: s.kind)
+    let shown = Triage.itemAndDecisions(facts, verdict, kind: s.kind)
     out.triage = shown.item
     if out.triage != nil {
       let details = Triage.details(for: out)
@@ -2183,25 +2269,25 @@ public final class Service {
     }
     out.decisions = shown.decisions
     if shown.decisionsSent { out.decisionsSent = true }
-    out.decisionsDelivery = e.facts.decisionsDelivery
+    out.decisionsDelivery = facts.decisionsDelivery
     out.followup = s.followup
     out.created = s.created
     out.account = s.claudeConfigDir
-    out.cleanup = e.facts.cleanup
+    out.cleanup = facts.cleanup
     out.group = s.group
     if let group = s.group.flatMap({ groups[$0] }) {
       out.groupName = group.name
       out.groupDescription = group.description
     }
-    if !e.facts.dependencies.isEmpty { out.dependencies = e.facts.dependencies }
+    if !facts.dependencies.isEmpty { out.dependencies = facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
-    out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
-    out.mergeError = e.facts.mergeError
+    out.docket = s.docket.map { DocketSummary($0, facts.docket) }
+    out.mergeError = facts.mergeError
     if verdict.acknowledged { out.acknowledged = true }
     if verdict.requested { out.requested = true }
-    out.permissionMode = e.facts.permissionMode
-    out.pr?.mergeMethod = e.facts.mergeMethod
-    if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
+    out.permissionMode = facts.permissionMode
+    out.pr?.mergeMethod = facts.mergeMethod
+    if verdict.state == .readyToMerge, let since = facts.readyToMergeSince { out.since = since }
     if e.queuedSince != nil {
       out.reason = queuedReason(onHost: e.session.host)
       out.queued = true
@@ -2215,12 +2301,12 @@ public final class Service {
     // A follow-up has been Not started since it was added, which for an
     // imported one is the date of its line.
     if verdict.state == .notStarted { out.since = s.created }
-    if verdict.state == .readyForReview, let ready = e.facts.readySince { out.since = ready }
+    if verdict.state == .readyForReview, let ready = facts.readySince { out.since = ready }
     if s.kind == .work && s.docket == nil {
       out.board = BoardColumn.place(
         state: verdict.state, acknowledged: verdict.acknowledged, stateSince: out.since, waits: s.waits ?? [],
-        facts: e.facts, created: s.created)
-      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: e.facts.pr, branch: e.branch) }
+        facts: facts, created: s.created)
+      if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: facts.pr, branch: e.branch) }
     }
     return out
   }

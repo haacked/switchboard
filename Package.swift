@@ -37,7 +37,7 @@ let package = Package(
     .testTarget(
       name: "SwitchboardAppTests", dependencies: ["SwitchboardApp", "SwitchboardCore"], swiftSettings: swift5),
     .testTarget(
-      name: "IntegrationTests", dependencies: ["SwitchboardCore", "sbd", "sb"],
+      name: "IntegrationTests", dependencies: ["SwitchboardCore", "SwitchboardService", "sbd", "sb"],
       exclude: ["Fixtures"], swiftSettings: swift5),
   ]
 )

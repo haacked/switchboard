@@ -71,6 +71,10 @@ public enum Manager {
 
     To start a session and hear when it reaches a state, pass `wait` to the `spawn` tool, such as `wait: done`. It sets the wait in the same call, so you need no separate `sb wait`.
 
+    ## Hosts
+
+    `sb host ls` lists the remote hosts. `sb spawn --host mini --repo owner/name --branch haacked/fix-cache --prompt "…"`, or the `spawn` tool's `host`, starts a session on the host mini in a worktree of the checkout that mini's `repos` names. A session on a host starts its children there.
+
     ## MCP servers
 
     This conversation loads no MCP server other than `switchboard`, unless the user added one. When a task needs a tool you lack, such as Grafana, Slack, or a database, do not work around it with `sb`, `curl`, or another session. Run `sb manager mcp $SB_SESSION_ID` to see the servers the user can add. Then end your turn and ask the user to run `sb manager mcp <id> add <server>`, or `sb manager mcp <id> --all` for a claude.ai connector such as Slack, with your id from `$SB_SESSION_ID` in place of `<id>`. When your turn ends, claude restarts with the server and resumes this conversation.

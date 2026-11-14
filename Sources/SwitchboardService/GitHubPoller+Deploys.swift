@@ -39,8 +39,9 @@ extension GitHubPoller {
 
   private func serviceWaits(_ interest: Interest) -> [ServiceWait] {
     interest.waits.compactMap { session, wait in
-      guard wait.kind == .deploy, let service = wait.service, let id = prId(of: wait, session: session.id),
-        let pr = prs[id]?.pr, pr.state == .merged, let merge = pr.mergeCommit
+      guard wait.kind == .deploy, let service = wait.service, mayRead(Wait.chartsRepository, for: session.host),
+        let id = prId(of: wait, session: session), let pr = prs[id]?.pr, pr.state == .merged,
+        let merge = pr.mergeCommit
       else { return nil }
       return ServiceWait(wait: wait, service: service, pr: pr, merge: merge)
     }
@@ -114,11 +115,12 @@ extension GitHubPoller {
 
   /// What happened to a deploy wait, from its PR and comments, or from the
   /// last check of its service. A service whose state file the poller read
-  /// before the wait was set keeps the wait open.
-  func deployOutcome(_ wait: Wait, _ pr: PullRequest, _ comments: [PRComment]) -> String? {
+  /// before the wait was set keeps the wait open. The state files are shared by every session, so a session on a
+  /// host whose `repos` don't list the charts repo gets no outcome from them.
+  func deployOutcome(_ wait: Wait, _ pr: PullRequest, _ comments: [PRComment], host: String?) -> String? {
     if let outcome = wait.deployResolution(of: pr, comments: comments) { return outcome }
-    guard pr.state == .merged, let service = wait.service, let read = deploys.files[service],
-      read.checked >= wait.created
+    guard pr.state == .merged, let service = wait.service, mayRead(Wait.chartsRepository, for: host),
+      let read = deploys.files[service], read.checked >= wait.created
     else { return nil }
     switch read.file {
     case .missing: return wait.serviceDeployResolution(nil, pr: pr, environments: [:])

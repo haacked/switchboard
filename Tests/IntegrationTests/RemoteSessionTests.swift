@@ -470,9 +470,9 @@ private struct Lifecycle {
 
   // MARK: Parity
 
-  /// A remote launch names the box's hook settings in place of this Mac's, leaves out the shared MCP config,
-  /// `claudeArgs`, and the triage nudge, and its pane has no CLAUDE_CONFIG_DIR. Everything else matches a local
-  /// launch with the same arguments.
+  /// A remote launch names the box's hook settings in place of this Mac's, leaves out the shared MCP config and
+  /// `claudeArgs`, and its pane has no CLAUDE_CONFIG_DIR. It gets the triage nudge, because claude on the box can
+  /// run `sb`. Everything else matches a local launch with the same arguments.
   @Test func aRemoteLaunchGetsTheArgumentsOfALocalOneExceptTheListedDifferences() throws {
     let sbd = try Instance.remote(config: ["claudeArgs": ["--verbose"], "triage": ["systemPrompt": "nudge"]])
     try sbd.makeBoxFolder()
@@ -489,7 +489,7 @@ private struct Lifecycle {
 
     var expected = localCall.args.replacingOccurrences(of: localId, with: remoteId).split(separator: " ").map(
       String.init)
-    for (flag, values) in [("--mcp-config", 1), ("--verbose", 0), ("--append-system-prompt", 1)] {
+    for (flag, values) in [("--mcp-config", 1), ("--verbose", 0)] {
       if let at = expected.firstIndex(of: flag) { expected.removeSubrange(at...(at + values)) }
     }
     let remoteArgs = remoteCall.args.split(separator: " ").map(String.init)
@@ -499,13 +499,17 @@ private struct Lifecycle {
     #expect(expected[settings] == sbd.home.claudeSettings(localSession))
     expected[settings] = remoteArgs[settings]
     #expect(remoteArgs == expected)
-    #expect(remoteCall.args == "--session-id \(remoteId) --settings \(remoteArgs[settings]) --model opus -- hello")
+    #expect(
+      remoteCall.args
+        == "--session-id \(remoteId) --settings \(remoteArgs[settings]) --model opus --append-system-prompt nudge -- hello"
+    )
     #expect(localCall.args.contains("--verbose") && localCall.args.contains("--append-system-prompt nudge"))
     #expect(!localCall.account.isEmpty)
     #expect(remoteCall.account.isEmpty)
   }
 
-  /// A resume differs from a local resume in the same ways.
+  /// A resume differs from a local resume in the same ways. The remote `claude.sh` starts with the line that puts
+  /// the box's `sb` on claude's PATH.
   @Test func aRemoteResumeGetsTheArgumentsOfALocalOneExceptTheListedDifferences() throws {
     let sbd = try Instance.remote()
     let remote = try start(sbd)
@@ -525,6 +529,11 @@ private struct Lifecycle {
     try #require(resumed.count == 4, "\(resumed)")
     #expect(Array(resumed.prefix(3)) == ["--resume", remote.claudeSessionId, "--settings"])
     #expect(real(resumed[3]) == real(sbd.boxSettings))
+    let remoteLauncher = try String(contentsOfFile: "\(sbd.boxSB)/sessions/\(remote.id)/claude.sh", encoding: .utf8)
+    let localLauncher = try String(contentsOfFile: "\(sbd.home.sessionFolder(local.id))/claude.sh", encoding: .utf8)
+    #expect(
+      remoteLauncher.split(separator: "\n").first == #"export PATH="$SB_HOME/bin:$PATH""#, "\(remoteLauncher)")
+    #expect(!localLauncher.contains("export PATH"), "\(localLauncher)")
   }
 
   // MARK: The fixtures

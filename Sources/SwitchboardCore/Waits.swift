@@ -452,13 +452,16 @@ extension SessionFacts {
     switch event.kind {
     case "wait":
       waitOutcome = nil
+      waitOutcomeKind = nil
     case "UserPromptSubmit" where userPrompt:
       waitOutcome = nil
+      waitOutcomeKind = nil
     case "wait-resolved":
       guard let json = event.data["wait"], let wait = try? JSONCoding.convert(json, to: Wait.self),
         wait.then == .notify
       else { return }
       waitOutcome = wait.outcomeLine(event.data["outcome"]?.string ?? "")
+      waitOutcomeKind = wait.kind
     default:
       break
     }

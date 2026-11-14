@@ -74,7 +74,8 @@ public struct HostConfig: Codable, Equatable, Sendable {
   /// The host that the value describes. It throws for the first rule that the value breaks, in
   /// the order of the checks below.
   private init(name: String, value: JSON) throws {
-    guard Self.isName(name, first: Self.lowercaseAndDigits, rest: Self.lowercaseAndDigits + "_-"), name != "local"
+    guard Self.isName(name, first: Self.lowercaseAndDigits, rest: Self.lowercaseAndDigits + "_-"),
+      name != SessionHost.local
     else {
       throw APIError("its name may hold only lowercase letters, digits, _ and -, at most 32, and can't be local")
     }

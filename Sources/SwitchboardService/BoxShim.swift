@@ -1,8 +1,8 @@
 import Foundation
 import SwitchboardCore
 
-/// What sbd writes on a host for the hooks of the claudes there: the shim at `~/.sb/bin/sb-shim` and the hook
-/// settings at `~/.sb/claude-settings.json`.
+/// What sbd writes on a host for the claudes there: the shim at `~/.sb/bin/sb-shim`, the hook settings at
+/// `~/.sb/claude-settings.json`, and the `sb` wrapper at `~/.sb/bin/sb`.
 enum BoxShim {
   /// The shim, a Python 3 script. `sb-shim hook` reads a hook payload on stdin, appends the event to
   /// `$SB_HOME/spool.jsonl` under a lock, and sends it to `$SB_HOME/sbd.sock`, the far end of the forward to
@@ -10,9 +10,14 @@ enum BoxShim {
   /// and prints nothing on any failure, because Claude Code shows a failed hook in the conversation.
   /// `sb-shim spool-drop <count> <sha256>` is the spool cut. It exits 0 only after it removed exactly the
   /// first `count` bytes of the spool. See `spool_drop` for what it checks first.
+  /// `sb-shim cli <argv…>` sends the argv in one `cli` request to `$SB_HOME/sbd.sock`, writes the bytes of the
+  /// answer's two streams, and exits with its status. It reads stdin only for `summary set`, the one command
+  /// that reads stdin and runs through a host. It never spools. It exits 1 with the reason on stderr when it
+  /// can't reach sbd or sbd fails the request.
   static let source = #"""
     #!/usr/bin/env python3
     # Written by Switchboard's sbd on each connect. Changes here are overwritten.
+    import base64
     import fcntl
     import hashlib
     import json
@@ -23,6 +28,8 @@ enum BoxShim {
     import time
 
     CONNECT_SECONDS = 2
+    # sbd ends a cli run after 600 s and answers within a few seconds of that.
+    CLI_ANSWER_SECONDS = 660
 
 
     def waits(payload):
@@ -179,7 +186,91 @@ enum BoxShim {
             os.close(lock)
 
 
+    def summary_set(argv):
+        """Whether sb reads argv as `summary set`, the one command of a host that reads stdin."""
+        if argv[:1] != ["summary"]:
+            return False
+        return [word for word in argv[1:] if not word.startswith("--")][:1] == ["set"]
+
+
+    def read_answer(connection):
+        """The bytes of one line, without the newline, or None when the connection ends first."""
+        chunks = []
+        while True:
+            more = connection.recv(1 << 20)
+            if not more:
+                return None
+            end = more.find(b"\n")
+            if end >= 0:
+                chunks.append(more[:end])
+                return b"".join(chunks)
+            chunks.append(more)
+
+
+    def cli(argv):
+        """Runs argv as sb on the Mac and returns the exit status."""
+        # The shim sits at <home>/bin/sb-shim, as spool-drop finds it.
+        home = os.environ.get("SB_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        args = {"argv": argv, "cwd": os.getcwd()}
+        if os.environ.get("SB_SESSION_ID"):
+            args["session"] = os.environ["SB_SESSION_ID"]
+        # sb on the Mac reads CLAUDECODE as sb on this host would, so it goes as set, even when empty.
+        if "CLAUDECODE" in os.environ:
+            args["claudecode"] = os.environ["CLAUDECODE"]
+        if summary_set(argv):
+            args["stdin"] = base64.b64encode(sys.stdin.buffer.read()).decode("ascii")
+        request = encode({"op": "cli", "args": args}) + b"\n"
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(CONNECT_SECONDS)
+        try:
+            connection.connect(os.path.join(home, "sbd.sock"))
+        except OSError as error:
+            sys.stderr.write("sb: can't reach Switchboard on the Mac: %s\n" % error)
+            return 1
+        connection.settimeout(CLI_ANSWER_SECONDS)
+        connection.sendall(request)
+        line = read_answer(connection)
+        if line is None:
+            sys.stderr.write("sb: Switchboard on the Mac closed the connection before it answered\n")
+            return 1
+        answer = json.loads(line.decode("utf-8"))
+        if not isinstance(answer, dict) or answer.get("ok") is not True:
+            error = answer.get("error") if isinstance(answer, dict) else None
+            sys.stderr.write("sb: %s\n" % (error if isinstance(error, str) else "Switchboard on the Mac failed"))
+            return 1
+        result = answer.get("result")
+        status = result.get("status") if isinstance(result, dict) else None
+        if not isinstance(status, int) or isinstance(status, bool):
+            sys.stderr.write("sb: Switchboard on the Mac answered no exit status\n")
+            return 1
+        stdout = base64.b64decode(result.get("stdout", ""), validate=True)
+        stderr = base64.b64decode(result.get("stderr", ""), validate=True)
+        sys.stdout.buffer.write(stdout)
+        sys.stdout.buffer.flush()
+        sys.stderr.buffer.write(stderr)
+        sys.stderr.buffer.flush()
+        return status & 0xFF
+
+
+    def run_cli(argv):
+        try:
+            status = cli(argv)
+        except BaseException as error:
+            try:
+                sys.stderr.write("sb: %s\n" % (error or type(error).__name__))
+            except BaseException:
+                pass
+            status = 1
+        try:
+            sys.stderr.flush()
+        except BaseException:
+            pass
+        os._exit(status)
+
+
     if __name__ == "__main__":
+        if sys.argv[1:2] == ["cli"]:
+            run_cli(sys.argv[2:])
         drops = sys.argv[1:2] == ["spool-drop"]
         status = 1 if drops else 0
         try:
@@ -198,6 +289,17 @@ enum BoxShim {
   static func settings(for facts: BoxFacts) -> String {
     JSON.object(Service.hookSettings(command: "\(shellQuote(facts.python)) \(shellQuote(shimPath(for: facts))) hook"))
       .text
+  }
+
+  /// The text of the host's `~/.sb/bin/sb`, which runs `<python> <home>/.sb/bin/sb-shim cli` with every
+  /// argument.
+  static func wrapper(for facts: BoxFacts) -> String {
+    """
+    #!/bin/sh
+    # Written by Switchboard's sbd on each connect. Changes here are overwritten.
+    exec \(shellQuote(facts.python)) \(shellQuote(shimPath(for: facts))) cli "$@"
+
+    """
   }
 
   static func shimPath(for facts: BoxFacts) -> String { "\(facts.folder)/bin/sb-shim" }

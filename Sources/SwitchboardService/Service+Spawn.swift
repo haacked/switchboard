@@ -5,43 +5,40 @@ extension Service {
   /// Starts a session on a new branch in a new worktree of a repository, or
   /// adds it as a follow-up with `followup`. The repository is `owner/name`,
   /// a bare name, or a path to a checkout that starts with / or ~.
-  func spawn(_ args: JSON) throws -> SessionSummary {
-    func text(_ key: String) -> String? {
-      args[key]?.string.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
-    }
-    guard let ref = text("repository") else { throw APIError("spawn needs a repository") }
-    guard let branch = text("branch") else { throw APIError("spawn needs a branch") }
-    guard let prompt = text("prompt") else { throw APIError("spawn needs a prompt") }
-    let followup = args["followup"]?.bool == true
-    let after = text("after")
-    if after != nil, !followup { throw APIError("--after needs --followup, because a started session has no trigger") }
-    if followup, text("base") != nil {
-      throw APIError(
-        "--base needs a started spawn, because a follow-up keeps no base. Pass --base to sb followup start")
-    }
-
-    let wait = text("wait")
-    if let wait {
-      if followup { throw APIError("wait needs a started spawn, because a follow-up has no state to reach") }
-      guard let parent = text("parent") else { throw APIError("wait needs a calling session to resume") }
+  /// It starts on the host that `host` names, else on its parent's host, and
+  /// there finds the checkout in the host's `repos` or at a path on the host.
+  /// `local` names this Mac. A follow-up starts on this Mac. A request from host h starts on h.
+  func spawn(_ args: JSON, origin: RequestOrigin = .mac) throws -> SessionSummary {
+    let spawn = try SpawnArgs(args)
+    if let wait = spawn.wait, let parent = spawn.parent {
       _ = try queue.sync { try lookup(["session": .string(parent)]) }
       guard AttentionState(rawValue: wait) != nil else {
         throw APIError("wait is a state, one of \(AttentionState.allCases.map(\.rawValue).joined(separator: ", "))")
       }
     }
 
-    let (checkout, named) = try spawnCheckout(ref)
-    if branchOrFolderTaken(checkout, branch, at: mac) {
-      throw APIError("branch \(branch) or its worktree folder exists for \(checkout). Name a new branch")
+    let parentHost = queue.sync { self.host(ofParent: spawn.parent) }
+    // A follow-up starts on this Mac, so it takes no host from its parent.
+    let host = spawn.followup ? nil : try SessionHost.choose(named: spawn.host, parent: parentHost, origin: origin)
+    if let host, spawn.account != nil { throw Self.noAccount(on: host) }
+    let site: any SessionSite = try host.map { try remoteSite($0) } ?? mac
+    try awaitSite(site)
+    let repos = host.map { config.hosts[$0]?.repos ?? [:] } ?? config.repos
+    let (checkout, named) = try site.scoped("the checkout of \(spawn.repository)") { scope in
+      let found = try spawnCheckout(spawn.repository, repos: repos, at: scope.site)
+      if branchOrFolderTaken(found.path, spawn.branch, at: scope.site) {
+        throw APIError("branch \(spawn.branch) or its worktree folder exists for \(found.path). Name a new branch")
+      }
+      return found
     }
 
-    guard followup else {
-      let child = try newSession(
+    guard spawn.followup else {
+      let child = try startSession(
         NewSession(
-          path: checkout, branch: branch, base: text("base"), name: text("name"), prompt: prompt, model: text("model"),
-          parent: text("parent"), account: text("account"), group: text("group"), autoMode: args["autoMode"]?.bool,
-          planMode: args["planMode"]?.bool))
-      guard let wait, let parent = child.parent else { return child }
+          path: checkout, branch: spawn.branch, base: spawn.base, name: spawn.name, prompt: spawn.prompt,
+          model: spawn.model, parent: spawn.parent, account: spawn.account, group: spawn.group,
+          autoMode: spawn.autoMode, planMode: spawn.planMode, host: host), origin: origin)
+      guard let wait = spawn.wait, let parent = child.parent else { return child }
       try queue.sync {
         _ = try waitRequest(
           "wait",
@@ -56,48 +53,82 @@ extension Service {
     guard let repository = named ?? githubRepository(checkout, at: mac) else {
       throw APIError("\(checkout) has no remote on github.com, which a follow-up needs. Spawn it without --followup")
     }
-    var add: [String: JSON] = ["prompt": .string(prompt), "repository": .string(repository), "branch": .string(branch)]
-    if let after { add["after"] = .string(after) }
-    for key in ["autoMode", "planMode"] {
-      if let value = args[key] { add[key] = value }
-    }
-    for (from, to) in ["name": "title", "parent": "parent", "model": "model", "account": "account", "group": "group"] {
-      if let value = text(from) { add[to] = .string(value) }
+    var add: [String: JSON] = [
+      "prompt": .string(spawn.prompt), "repository": .string(repository), "branch": .string(spawn.branch),
+    ]
+    if let after = spawn.after { add["after"] = .string(after) }
+    if let autoMode = spawn.autoMode { add["autoMode"] = .bool(autoMode) }
+    if let planMode = spawn.planMode { add["planMode"] = .bool(planMode) }
+    for (key, value) in [
+      "title": spawn.name, "parent": spawn.parent, "model": spawn.model, "account": spawn.account,
+      "group": spawn.group,
+    ] {
+      if let value { add[key] = .string(value) }
     }
     return try addFollowup(.object(add))
   }
 
   /// The top folder of the checkout that `ref` names, and the `owner/name`
-  /// that `ref` names. A path names no `owner/name`.
-  private func spawnCheckout(_ ref: String) throws -> (path: String, repository: String?) {
+  /// that `ref` names. A path names no `owner/name`. `repos` is the site's
+  /// map from `owner/name` to a checkout, and paths resolve at the site.
+  private func spawnCheckout(
+    _ ref: String, repos: [String: String], at site: any SessionSite
+  ) throws -> (path: String, repository: String?) {
     if ref.hasPrefix("/") || ref.hasPrefix("~") {
-      let path = (ref.expandingTilde as NSString).standardizingPath
-      guard isDirectory(path) else { throw APIError("no folder \(path)") }
-      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"], at: mac) else {
+      let path = try expand(ref, at: site)
+      guard site.machine.isFolder(path) else { throw APIError("no folder \(path)") }
+      guard let top = try? gitOutput(path, ["rev-parse", "--show-toplevel"], at: site) else {
         throw APIError("\(path) isn't a git checkout")
       }
       return (top, nil)
     }
-    let repository = Followup.isRepository(ref) ? ref : try repository(named: ref)
-    return (try checkout(of: repository, hint: "Pass its folder as --repo"), repository)
+    let repository = Followup.isRepository(ref) ? ref : try repository(named: ref, repos: repos, at: site)
+    guard let host = site.hostName else {
+      return (try checkout(of: repository, hint: "Pass its folder as --repo"), repository)
+    }
+    guard let configured = Self.configuredCheckout(repository, in: repos) else {
+      throw APIError(
+        "the repos of \(host) in \(home.config) have no \(repository). Pass its folder on \(host) as --repo, or add it to those repos"
+      )
+    }
+    let path = try expand(configured, at: site)
+    guard site.machine.isFolder(path) else {
+      throw APIError("the repos of \(host) set \(repository) to \(configured), which isn't a folder on \(host)")
+    }
+    guard hasRemote(path, for: repository, at: site) else {
+      throw APIError("\(path) on \(host) has no remote on github.com for \(repository)")
+    }
+    return (try gitOutput(path, ["rev-parse", "--show-toplevel"], at: site), repository)
   }
 
-  /// The `owner/name` of the one repository called `name`: a key of the
-  /// `repos` setting, or a <root>/<owner>/<name> folder under `repoRoots`
-  /// with a github.com remote for owner/name.
-  private func repository(named name: String) throws -> String {
+  /// The checkout that `repos` sets for `repository`, whose key matches it without case.
+  static func configuredCheckout(_ repository: String, in repos: [String: String]) -> String? {
+    repos.first { Dependencies.sameRepo($0.key, repository) }?.value
+  }
+
+  /// The path with `~` resolved at the site. A host refuses `~name`, whose home sbd doesn't know.
+  private func expand(_ path: String, at site: any SessionSite) throws -> String {
+    guard let host = site.hostName else { return (path.expandingTilde as NSString).standardizingPath }
+    return try remoteSite(host).expand(path)
+  }
+
+  /// The `owner/name` of the one repository called `name`: a key of
+  /// `repos`, or, on this Mac, a <root>/<owner>/<name> folder under
+  /// `repoRoots` with a github.com remote for owner/name.
+  private func repository(named name: String, repos: [String: String], at site: any SessionSite) throws -> String {
     guard !name.contains("/"), name != ".", name != ".." else {
       throw APIError("\(name) isn't a repository. Use owner/name, a name, or a folder")
     }
     var found: [String: String] = [:]
-    for key in config.repos.keys where key.split(separator: "/").last?.lowercased() == name.lowercased() {
+    for key in repos.keys where key.split(separator: "/").last?.lowercased() == name.lowercased() {
       found[key.lowercased()] = key
     }
-    for root in config.repoRoots.map({ ($0.expandingTilde as NSString).standardizingPath }) {
+    let roots = site.hostName == nil ? config.repoRoots : []
+    for root in roots.map({ ($0.expandingTilde as NSString).standardizingPath }) {
       for owner in (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? [] where !owner.hasPrefix(".") {
         let repository = "\(owner)/\(name)"
         if found[repository.lowercased()] == nil, isDirectory("\(root)/\(repository)"),
-          hasRemote("\(root)/\(repository)", for: repository)
+          hasRemote("\(root)/\(repository)", for: repository, at: mac)
         {
           found[repository.lowercased()] = repository
         }
@@ -107,8 +138,13 @@ extension Service {
     case 1:
       return found.values.first!
     case 0:
+      guard let host = site.hostName else {
+        throw APIError(
+          "can't find a repository named \(name) in repos or under \(config.repoRoots.joined(separator: ", ")). Use owner/name or its folder"
+        )
+      }
       throw APIError(
-        "can't find a repository named \(name) in repos or under \(config.repoRoots.joined(separator: ", ")). Use owner/name or its folder"
+        "can't find a repository named \(name) in the repos of \(host) in \(home.config). Use owner/name or its folder on \(host)"
       )
     default:
       throw APIError("\(name) matches \(found.values.sorted().joined(separator: ", ")). Use owner/name")

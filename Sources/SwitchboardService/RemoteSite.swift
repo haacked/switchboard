@@ -383,10 +383,10 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     fi
     """#
 
-  /// Writes the shim and the hook settings when their text differs, then removes a socket file that an
-  /// earlier forward left at `sbd.sock`. `$1` is the box's folder, `$2` the shim, and `$3` the settings. It
-  /// exits 1, and writes nothing, when the box's folder or its `bin` is a link or not a folder. It exits 4, and
-  /// removes nothing, when `sbd.sock` exists and is not a socket.
+  /// Writes the shim, the hook settings, and the `sb` wrapper when their text differs, then removes a socket file
+  /// that an earlier forward left at `sbd.sock`. `$1` is the box's folder, `$2` the shim, `$3` the settings, and
+  /// `$4` the wrapper. It exits 1, and writes nothing, when the box's folder or its `bin` is a link or not a
+  /// folder. It exits 4, and removes nothing, when `sbd.sock` exists and is not a socket.
   static let hookScript = #"""
     for d in "$1" "$1/bin"; do
       if [ -L "$d" ] || [ ! -d "$d" ]; then
@@ -401,6 +401,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     }
     put "$1/bin/sb-shim" "$2" 700 || exit 1
     put "$1/claude-settings.json" "$3" 600 || exit 1
+    put "$1/bin/sb" "$4" 700 || exit 1
     s=$1/sbd.sock
     if [ -L "$s" ] || { [ -e "$s" ] && [ ! -S "$s" ]; }; then
       printf '%s exists and is not a socket, so Switchboard did not replace it with its forward\n' "$s" >&2
@@ -409,7 +410,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     if [ -S "$s" ]; then rm -f "$s" || exit 1; fi
     """#
 
-  /// Writes the shim and the hook settings on the host, then forwards the host's `~/.sb/sbd.sock` to the
+  /// Writes the shim, the hook settings, and the `sb` wrapper on the host, then forwards the host's `~/.sb/sbd.sock` to the
   /// host's socket on this Mac. The forward can't start with the master, because its path needs the host's
   /// home.
   private func setUpHooks(_ facts: BoxFacts) throws {
@@ -417,7 +418,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     let r: CommandResult
     do {
       r = try machine.run(
-        "/bin/sh", ["-c", Self.hookScript, "sb", facts.folder, BoxShim.source, BoxShim.settings(for: facts)],
+        "/bin/sh",
+        [
+          "-c", Self.hookScript, "sb", facts.folder, BoxShim.source, BoxShim.settings(for: facts),
+          BoxShim.wrapper(for: facts),
+        ],
         env: nil, input: nil, timeout: Self.setupSeconds)
     } catch {
       throw unread("setup got no answer: \(error)")

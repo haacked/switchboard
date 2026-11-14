@@ -76,8 +76,9 @@ public struct NewSession: Codable, Sendable {
   /// Whether claude starts in manual mode, whatever `autoMode`, `claudeArgs`, and Claude's settings say. It holds
   /// until claude reports another mode.
   public var manualMode: Bool?
-  /// The remote host to run on, by its name in config.json. `path` is then a folder on that host, absolute or
-  /// starting with `~`, which the host resolves.
+  /// The remote host to run on, by its name in config.json, or `local` for this Mac. With a remote host, `path` is
+  /// a folder on that host, absolute or starting with `~`, which the host resolves. A request from this Mac with
+  /// no host and a parent on a host fails. sbd maps `local` to nil, so no record holds it.
   public var host: String?
   /// The issue that the session works on, as `sb issue` reads it. It links the session to an issue in another
   /// repo, or one that the branch name doesn't number.

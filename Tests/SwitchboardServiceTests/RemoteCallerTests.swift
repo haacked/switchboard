@@ -6,6 +6,9 @@ import Testing
 
 // The callers of a remote site's guard: the poller, the launch, the caches by path, and the refusals.
 
+/// The path with its links resolved, or the path itself when it names nothing.
+func real(_ path: String) -> String { realPath(path) ?? path }
+
 private func isUnread(_ error: any Error) -> Bool { (error as? HostUnread)?.hostName == "mini" }
 
 private func sh(_ script: String, in folder: String) throws {
@@ -63,9 +66,9 @@ private func watched(
     id: id, cwd: cwd, claudeSessionId: "u-\(id)", configDir: configDir, site: site, branch: nil, facts: facts)
 }
 
-private func remoteSession(_ id: String, cwd: String = "/srv/repo") -> Session {
+private func remoteSession(_ id: String, cwd: String = "/srv/repo", host: String? = "mini") -> Session {
   var s = Session(id: id, name: id, cwd: cwd, claudeSessionId: "u-\(id)", created: 5)
-  s.host = "mini"
+  s.host = host
   s.started = true
   return s
 }
@@ -357,10 +360,354 @@ private func withBench(scripts: Bool = true, _ body: (SiteBench) throws -> Void)
   }
 }
 
+// MARK: The GitHub reads of a host's session
+
+/// A GitHub GraphQL API that the poller's transport calls. A lookup finds the PR of `prs` in the looked-up repo, with
+/// the same number when the lookup names one, and a read by node id returns it. It records each lookup and each node
+/// id that a request named.
+private final class FakeGraphQL: @unchecked Sendable {
+  struct PR {
+    var id: String
+    var repo: String
+    var number: Int
+    var state = "OPEN"
+    var body = ""
+  }
+
+  private let lock = NSLock()
+  private var looked: [String] = []
+  private var named: [String] = []
+  let prs: [PR]
+
+  init(_ prs: [PR]) { self.prs = prs }
+
+  /// Each lookup, as `owner/name#number` or `owner/name:branch`, lowercased.
+  var lookups: [String] { lock.withLock { looked } }
+
+  /// Whether a lookup named `repo`, or a read by node id named one of its PRs.
+  func asked(_ repo: String) -> Bool {
+    let ids = Set(prs.filter { $0.repo == repo }.map(\.id))
+    return lock.withLock {
+      looked.contains { $0.hasPrefix("\(repo)#") || $0.hasPrefix("\(repo):") } || named.contains(where: ids.contains)
+    }
+  }
+
+  func answer(_ request: URLRequest) -> (Int, [String: String], Data) {
+    let variables = JSON.parse(String(decoding: request.httpBody ?? Data(), as: UTF8.self))?["variables"]
+    var data: [String: JSON] = ["rateLimit": ["cost": 1]]
+    if let ids = variables?["ids"]?.array?.compactMap(\.string) {
+      lock.withLock { named += ids }
+      data["nodes"] = .array(ids.map { id in prs.first { $0.id == id }.map(node) ?? .null })
+    }
+    var i = 0
+    while let owner = variables?["o\(i)"]?.string, let name = variables?["n\(i)"]?.string {
+      let repo = "\(owner)/\(name)".lowercased()
+      let number = variables?["k\(i)"]?.int
+      lock.withLock {
+        looked.append(number.map { "\(repo)#\($0)" } ?? "\(repo):\(variables?["b\(i)"]?.string ?? "")")
+      }
+      let found = prs.first { $0.repo == repo && (number ?? $0.number) == $0.number }
+      data["q\(i)"] = [
+        "pullRequests": [
+          "nodes": .array(
+            found.map {
+              [["id": .string($0.id), "state": .string($0.state), "headRepositoryOwner": ["login": .string(owner)]]]
+            }
+              ?? [])
+        ],
+        "pullRequest": found.map { ["id": .string($0.id)] } ?? .null,
+      ]
+      i += 1
+    }
+    return (200, [:], Data(JSON.object(["data": .object(data)]).text.utf8))
+  }
+
+  private func node(_ pr: PR) -> JSON {
+    [
+      "id": .string(pr.id), "number": .number(Double(pr.number)), "state": .string(pr.state), "headRefName": "feature",
+      "baseRefName": "main", "body": .string(pr.body),
+      "repository": ["nameWithOwner": .string(pr.repo), "defaultBranchRef": ["name": "main"]],
+    ]
+  }
+}
+
+/// The PR in the repo that mini's `repos` don't list.
+private let vaultPR = FakeGraphQL.PR(id: "PR_4242", repo: "secret/vault", number: 4242)
+/// The PR in the repo that mini's `repos` list.
+private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number: 77)
+
+/// This Mac's GitHub login reads a repo for a session on a host only when the host's `repos` list it. A test polls
+/// the host's session and checks that no request named `secret/vault`. Most then add a session on this Mac in the
+/// same repo and check that the next poll reads it.
+@Suite struct HostGitHubReadTests {
+  /// A ready service whose mini lists `Secret/Listed`, and a poller whose GitHub is `github`. gh is echo, so the
+  /// token is "auth token".
+  private func withPoller(
+    _ github: FakeGraphQL, _ body: (Service, GitHubPoller, BoxFacts) throws -> Void
+  ) throws {
+    let config: [String: JSON] = [
+      "claude": "/usr/bin/true", "tmux": "/usr/bin/true", "github": ["gh": "/bin/echo", "pollSeconds": 0],
+      "depot": ["enabled": false],
+    ]
+    try withReadyService(host: ["repos": ["Secret/Listed": "~/listed"]], config: config) { _, service, facts in
+      let p = poller(service)
+      p.transport = github.answer
+      try body(service, p, facts)
+    }
+  }
+
+  /// A git repo on the branch `feature` whose origin is `origin`.
+  private func makeCheckout(_ path: String, origin: String) throws {
+    try makeRepo(path)
+    try sh("git remote set-url origin \(shellQuote(origin))", in: path)
+  }
+
+  private func add(_ service: Service, _ id: String, host: String?, cwd: String, waits: [Wait]? = nil) {
+    var s = remoteSession(id, cwd: cwd, host: host)
+    s.waits = waits
+    // A session on this Mac would otherwise search ~/.claude for its transcript.
+    if host == nil { s.claudeConfigDir = "\(cwd)/claude" }
+    service.queue.sync { service.entries[id] = Service.Entry(session: s) }
+  }
+
+  private func prEvents(_ service: Service, _ id: String) throws -> [Event] {
+    try service.queue.sync { try service.store.events() }.filter { $0.session == id && $0.kind == "pr" }
+  }
+
+  private func poll(_ p: GitHubPoller) {
+    let result = p.poll(all: true)
+    #expect(result["error"] == nil, "\(result)")
+  }
+
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      "https://github.com/secret/vault.git", "https://github.com/Secret/Vault.git", "git@github.com:secret/vault.git",
+    ])
+  func theOriginRemoteOfAnUnlistedRepoIsNotRead(origin: String) throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      try makeCheckout("\(facts.home)/vault", origin: origin)
+      try makeCheckout("\(facts.home)/listed", origin: "https://github.com/secret/listed.git")
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/vault")
+      add(service, "m2", host: "mini", cwd: "\(facts.home)/listed")
+
+      poll(p)
+
+      #expect(p.queue.sync { p.tracked["m1"]?.branch.key?.repo.lowercased() } == "secret/vault")
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(github.asked("secret/listed"), "the host's listed repo is read")
+      #expect(try prEvents(service, "m1").isEmpty)
+      #expect(try prEvents(service, "m2").count == 1)
+
+      let mac = try makeShortTempFolder()
+      defer { try? FileManager.default.removeItem(atPath: mac) }
+      try makeCheckout(mac, origin: origin)
+      add(service, "l1", host: nil, cwd: mac)
+      poll(p)
+
+      #expect(github.asked("secret/vault"), "a session on this Mac reads any repo")
+      #expect(try prEvents(service, "l1").count == 1)
+      #expect(try prEvents(service, "m1").isEmpty, "the Mac's lookup of the same branch never reaches m1")
+      #expect(p.queue.sync { p.tracked["m1"]?.prId } == nil)
+    }
+  }
+
+  /// gh, and so the poller, takes the PR's repo from an `upstream` remote, or from a remote that `gh repo
+  /// set-default` marked, before origin.
+  @Test(.timeLimit(.minutes(1)), arguments: ["upstream", "gh-resolved"])
+  func aTrackingRemoteInAnUnlistedRepoIsNotRead(shape: String) throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      let repo = "\(facts.home)/repo"
+      try makeCheckout(repo, origin: "https://github.com/secret/listed.git")
+      if shape == "upstream" {
+        try sh("git remote add upstream https://github.com/secret/vault.git", in: repo)
+      } else {
+        try sh(
+          "git remote add base https://github.com/secret/vault.git && git config remote.base.gh-resolved base",
+          in: repo)
+      }
+      add(service, "m1", host: "mini", cwd: repo)
+
+      poll(p)
+
+      #expect(p.queue.sync { p.tracked["m1"]?.branch.key?.repo } == "secret/vault")
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(try prEvents(service, "m1").isEmpty)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aTranscriptLinkToAnUnlistedRepoIsNotRead() throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    let link = Data((#"{"type":"pr-link","prRepository":"secret/vault","prNumber":4242}"# + "\n").utf8)
+    try withPoller(github) { service, p, facts in
+      let folder = "\(facts.home)/.claude/projects/elsewhere"
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      try link.write(to: URL(fileURLWithPath: "\(folder)/u-m1.jsonl"))
+      try FileManager.default.createDirectory(atPath: "\(facts.home)/work", withIntermediateDirectories: true)
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/work")
+
+      poll(p)
+
+      #expect(p.queue.sync { p.tracked["m1"]?.transcript.link } != nil, "the poll read the transcript")
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(try prEvents(service, "m1").isEmpty)
+
+      let mac = try makeShortTempFolder()
+      defer { try? FileManager.default.removeItem(atPath: mac) }
+      try FileManager.default.createDirectory(atPath: "\(mac)/claude/projects/x", withIntermediateDirectories: true)
+      try link.write(to: URL(fileURLWithPath: "\(mac)/claude/projects/x/u-l1.jsonl"))
+      add(service, "l1", host: nil, cwd: mac)
+      poll(p)
+
+      #expect(github.asked("secret/vault"), "a session on this Mac reads any repo")
+      #expect(try prEvents(service, "l1").count == 1)
+      #expect(try prEvents(service, "m1").isEmpty)
+    }
+  }
+
+  /// The box writes the body of its listed PR, so a `Depends on` line there can name a PR in an unlisted repo. The
+  /// session also holds a stored edge to that PR, as an older sbd or a host whose `repos` once listed the repo
+  /// leaves.
+  @Test(.timeLimit(.minutes(1)))
+  func aDependsOnLineThatNamesAnUnlistedRepoIsNotRead() throws {
+    var listed = listedPR
+    listed.body = "Depends on secret/vault#4242\nDepends on secret/listed#76"
+    var vault = vaultPR
+    vault.state = "MERGED"
+    let github = FakeGraphQL([vault, listed])
+    try withPoller(github) { service, p, facts in
+      try makeCheckout("\(facts.home)/listed", origin: "https://github.com/secret/listed.git")
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/listed")
+      let held = try JSON(encoding: [Dependency(via: .body, repo: "secret/vault", number: 4242, state: .open)])
+      service.queue.sync { _ = service.record("m1", "dependencies", ["dependencies": held]) }
+
+      // The first poll reads the PR's body, and the second reads the PRs it names.
+      poll(p)
+      poll(p)
+
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(github.lookups.contains("secret/listed#76"), "a dependency in a listed repo is read")
+      let edges = service.queue.sync { service.entries["m1"]?.facts.dependencies.map(\.repo) }
+      #expect(edges == ["secret/listed"])
+
+      // A session on this Mac reads the merged vault PR, which the next poll of m1 must not reuse.
+      let mac = try makeShortTempFolder()
+      defer { try? FileManager.default.removeItem(atPath: mac) }
+      try makeCheckout(mac, origin: "https://github.com/secret/vault.git")
+      add(service, "l1", host: nil, cwd: mac)
+      poll(p)
+
+      #expect(github.asked("secret/vault"))
+      #expect(service.queue.sync { service.entries["m1"]?.facts.dependencies.map(\.repo) } == ["secret/listed"])
+      let sent = try service.queue.sync { try service.store.events() }.filter {
+        $0.session == "m1" && $0.kind == "sent"
+      }
+      #expect(sent.isEmpty, "m1 hears nothing about the vault PR")
+    }
+  }
+
+  /// A wait on a bare number takes the session's repo at each poll, and a wait with no target follows the session's
+  /// own PR. Someone on this Mac can also name an unlisted repo on a host's session.
+  @Test(.timeLimit(.minutes(1)))
+  func aWaitOnAnUnlistedRepoIsNotRead() throws {
+    var vault = vaultPR
+    vault.state = "MERGED"
+    let github = FakeGraphQL([vault, listedPR])
+    try withPoller(github) { service, p, facts in
+      try makeCheckout("\(facts.home)/vault", origin: "https://github.com/secret/vault.git")
+      let waits = [
+        Wait(id: "bare", kind: .merge, pr: Wait.PullRequest(number: 4242), created: 1, then: .notify),
+        Wait(id: "own", kind: .merge, created: 1, then: .notify),
+        Wait(
+          id: "named", kind: .merge, pr: Wait.PullRequest(repository: "secret/vault", number: 4242), created: 1,
+          then: .notify),
+      ]
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/vault", waits: waits)
+
+      poll(p)
+
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+
+      let mac = try makeShortTempFolder()
+      defer { try? FileManager.default.removeItem(atPath: mac) }
+      add(service, "l1", host: nil, cwd: mac, waits: [waits[2]])
+      poll(p)
+      poll(p)
+
+      #expect(github.asked("secret/vault"), "a wait of a session on this Mac reads any repo")
+      #expect(service.queue.sync { service.entries["m1"]?.session.waits?.map(\.id) } == ["bare", "own", "named"])
+      let resolved = try service.queue.sync { try service.store.events() }.filter {
+        $0.session == "m1" && $0.kind == "wait-resolved"
+      }
+      #expect(resolved.isEmpty, "the Mac's read of the vault PR never resolves m1's waits")
+    }
+  }
+
+  /// A host's session holds a recorded PR in an unlisted repo. An older sbd can record one, and so can sbd while the
+  /// host's `repos` still listed the repo. The poll doesn't read it, and the session drops it.
+  @Test(.timeLimit(.minutes(1)))
+  func aRecordedPRInAnUnlistedRepoIsNotReadAndIsDropped() throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      try FileManager.default.createDirectory(atPath: "\(facts.home)/work", withIntermediateDirectories: true)
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/work")
+      let pr = try JSON(
+        encoding: PullRequest(id: vaultPR.id, number: vaultPR.number, url: "", repo: vaultPR.repo))
+      service.queue.sync { _ = service.record("m1", "pr", ["pr": pr]) }
+
+      poll(p)
+
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(service.queue.sync { service.entries["m1"]?.facts.pr } == nil)
+      #expect(try prEvents(service, "m1").last?.data["pr"] == .null)
+    }
+  }
+
+  /// The poller never looks up a branch in an unlisted repo, so the session drops the listed PR that its branch had.
+  @Test(.timeLimit(.minutes(1)))
+  func aBranchThatMovesToAnUnlistedRepoDropsItsListedPR() throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      let repo = "\(facts.home)/repo"
+      try makeCheckout(repo, origin: "https://github.com/secret/listed.git")
+      add(service, "m1", host: "mini", cwd: repo)
+
+      poll(p)
+
+      #expect(service.queue.sync { service.entries["m1"]?.facts.pr?.id } == listedPR.id)
+
+      try sh("git remote set-url origin https://github.com/secret/vault.git", in: repo)
+      poll(p)
+
+      #expect(p.queue.sync { p.tracked["m1"]?.branch.key?.repo } == "secret/vault")
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(service.queue.sync { service.entries["m1"]?.facts.pr } == nil)
+    }
+  }
+
+  /// The same waits on a session whose repo the host lists are read.
+  @Test(.timeLimit(.minutes(1)))
+  func aBareNumberWaitInAListedRepoIsRead() throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      try makeCheckout("\(facts.home)/listed", origin: "https://github.com/secret/listed.git")
+      let wait = Wait(id: "bare", kind: .merge, pr: Wait.PullRequest(number: 76), created: 1, then: .notify)
+      add(service, "m1", host: "mini", cwd: "\(facts.home)/listed", waits: [wait])
+
+      poll(p)
+
+      #expect(github.lookups.contains("secret/listed#76"), "\(github.lookups)")
+    }
+  }
+}
+
 // MARK: The launch
 
 /// A `Service` whose host mini runs through the bench's ssh wrapper, with setup done.
-private func withReadyService(
+func withReadyService(
   host extra: [String: JSON] = [:], config: [String: JSON] = [:],
   _ body: (SiteBench, Service, BoxFacts) throws -> Void
 ) throws {

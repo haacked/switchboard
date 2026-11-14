@@ -140,3 +140,18 @@ import Testing
     #expect(MCPToolServer.pendingWait(timeout) == seconds)
   }
 }
+
+@Suite struct MCPSpawnToolTests {
+  @Test func theSpawnToolTakesAnOptionalHost() throws {
+    let spawn = try #require(MCPToolServer.allTools.first { $0.name == "spawn" })
+
+    #expect(
+      spawn.properties["host"]
+        == [
+          "type": "string",
+          "description":
+            "The remote host from config.json to run on, or local for this Mac. Default: the calling session's host.",
+        ])
+    #expect(!spawn.required.contains("host"))
+  }
+}

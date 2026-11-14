@@ -1,15 +1,6 @@
 import Foundation
 import SwitchboardCore
 
-/// Where a request came from. sbd sets it from the socket that the request arrived on, never from the request.
-public enum RequestOrigin: Equatable, Sendable {
-  /// sbd's own socket, `$SB_HOME/sbd.sock`, which only this Mac's user can reach.
-  case mac
-  /// The socket of the named remote host, `$SB_HOME/hosts/<host>/sbd.sock`, which any program on that host can
-  /// reach through the forward.
-  case remote(String)
-}
-
 /// The listeners on `$SB_HOME/hosts/<host>/sbd.sock`, one for each remote host that has a link. They listen
 /// from the time sbd starts, so a forward always has a near end.
 public enum HostServer {

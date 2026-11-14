@@ -7,7 +7,7 @@ extension Service {
   /// The `wait`, `clear-wait`, and `resolve-wait` requests. `resolve-wait`
   /// acts on processes, so `handle` settles the session and takes a new
   /// snapshot first, as for `send`.
-  func waitRequest(_ op: String, _ args: JSON) throws -> JSON {
+  func waitRequest(_ op: String, _ args: JSON, origin: RequestOrigin = .mac) throws -> JSON {
     let id = try lookup(args)
     let open = entries[id]?.session.waits ?? []
     switch op {
@@ -18,6 +18,7 @@ extension Service {
         let other = try lookup(["session": .string(ref)])
         return Wait.SessionTarget(id: other, name: entries[other]!.session.name)
       }
+      if case .remote(let host) = origin { try requireGitHubWait(wait, on: id, from: host) }
       if wait.kind == .ci && wait.pr == nil {
         wait.headSha = try? checkedOutBranch(entries[id]!.session, at: site(of: id)).tip
       }
@@ -38,7 +39,7 @@ extension Service {
     default:
       throw APIError("unknown request \(op)")
     }
-    return try JSON(encoding: summary(id))
+    return try JSON(encoding: summary(id, for: origin))
   }
 
   /// The open waits of these kinds, with their sessions. A poller calls it on
@@ -144,7 +145,7 @@ extension Service {
       kind: kind == .todo ? .todo : nil)
   }
 
-  func noteRequest(_ op: String, _ args: JSON) throws -> JSON {
+  func noteRequest(_ op: String, _ args: JSON, origin: RequestOrigin = .mac) throws -> JSON {
     let id = try lookup(args)
     let notes = entries[id]?.session.notes ?? []
     switch op {
@@ -165,6 +166,6 @@ extension Service {
     default:
       throw APIError("unknown request \(op)")
     }
-    return try JSON(encoding: summary(id))
+    return try JSON(encoding: summary(id, for: origin))
   }
 }

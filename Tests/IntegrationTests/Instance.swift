@@ -13,6 +13,9 @@ func real(_ path: String) -> String {
   return String(cString: resolved)
 }
 
+/// A command's exit status and both streams, for a failure message.
+func text(_ r: CommandResult) -> String { "exit \(r.status), stdout: \(r.stdout), stderr: \(r.stderr)" }
+
 extension Home {
   /// Names the test process that owns the home, for Fixtures/reap.
   func setOwner(_ pid: pid_t) throws {
@@ -1200,6 +1203,13 @@ extension Instance {
       input: Data(payload.text.utf8), timeout: 15)
   }
 
+  /// Runs the box's `~/.sb/bin/sb` in the box's home, as claude on the box runs `sb`, whatever its exit status. The
+  /// box's environment holds HOME and SB_HOME. A test adds SB_SESSION_ID and CLAUDECODE as a claude has them.
+  func boxSb(_ args: [String], env extra: [String: String] = [:], stdin: Data? = nil) throws -> CommandResult {
+    let env = ["HOME": boxHome, "SB_HOME": boxSB, "PATH": "/usr/local/bin:/usr/bin:/bin"].merging(extra) { $1 }
+    return try runCommand("\(boxSB)/bin/sb", args, env: env, input: stdin, timeout: 60, cwd: boxHome)
+  }
+
   /// Spools a probe for the session through the box's shim.
   func spoolProbe(_ marker: String, session: String) throws {
     let r = try runBoxShim(session: session, payload: Instance.probePayload(marker))
@@ -1233,6 +1243,10 @@ extension Instance {
       "tickSeconds": 1,
     ]
   }
+
+  /// Host keys that list PostHog/posthog in the host's `repos`, so the poller reads that repo's PRs for the host's
+  /// sessions.
+  static let listsPostHog: [String: JSON] = ["repos": ["PostHog/posthog": "~/sb-box-repo"]]
 
   /// A sbd with the host `mini` whose box runs git through `installBoxGit`. The box's git must be in place before
   /// the first session on the host, because setup finds it once per connection.

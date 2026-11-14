@@ -2,16 +2,21 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  func triageRequest(_ op: String, _ args: JSON) throws -> Response {
-    switch op {
+  func triageRequest(_ request: Request, origin: RequestOrigin) throws -> Response {
+    let args = request.args
+    switch request.op {
     case "triage":
       return .success(try queue.sync { try JSON(encoding: Triage.order(summaries())) })
     case "choose":
       return handle(try queue.sync { try chooseRequest(args) })
     case "summary-set":
-      return .success(try queue.sync { try setSummary(args) })
+      return .success(
+        try queue.sync {
+          try requireOnHost(request, origin: origin)
+          return try setSummary(args)
+        })
     default:
-      return .success(try reply(args))
+      return .success(try reply(request, origin: origin))
     }
   }
 
@@ -105,10 +110,11 @@ extension Service {
 
   /// The session's last assistant reply from its transcript, which is read
   /// off the state queue, else the one its Stop hook reported.
-  private func reply(_ args: JSON) throws -> JSON {
+  private func reply(_ request: Request, origin: RequestOrigin) throws -> JSON {
     let (id, findTranscript, machine, hooked) = try queue.sync {
       () -> (String, () -> String?, any Machine, String?) in
-      let id = try lookup(args)
+      try requireOnHost(request, origin: origin)
+      let id = try lookup(request.args)
       return (id, transcriptFinder(id), try site(of: id).machine, entries[id]!.facts.lastReply)
     }
     let text = findTranscript().flatMap { Transcript.tail($0, on: machine).lastReply }
