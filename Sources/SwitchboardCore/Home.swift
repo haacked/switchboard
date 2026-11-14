@@ -82,6 +82,9 @@ public struct Config: Codable, Equatable, Sendable {
   public var idleStopSeconds: Int = 900
   /// The most claude processes that may run at once. Further starts queue.
   public var liveCap = 10
+  /// Orgs and repositories whose sessions get a live slot first, highest
+  /// first (`LivePriority`).
+  public var livePriority: [String] = []
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
   /// The model for new sessions, or nil for claude's default.
@@ -154,10 +157,10 @@ public struct Config: Codable, Equatable, Sendable {
   public init() {}
 
   enum CodingKeys: String, CodingKey {
-    case claude, idleStopSeconds, liveCap, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs, autoMode, env
+    case claude, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs,
+      autoMode, env
     case testClock, machineLog, hostWaitSeconds, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
-      cleanupDeletes,
-      supacode
+      cleanupDeletes, supacode
     case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates
     case issues
     case recheck = "recheckSeconds"
@@ -170,6 +173,10 @@ public struct Config: Codable, Equatable, Sendable {
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
     liveCap = try c.decodeIfPresent(Int.self, forKey: .liveCap) ?? d.liveCap
+    // A bad entry is skipped. Throwing would make sbd ignore all of config.json.
+    let priority = LivePriority.parse(try c.decodeIfPresent(JSON.self, forKey: .livePriority))
+    livePriority = priority.entries
+    for problem in priority.problems { logLine("skipping \(problem)") }
     model = try c.decodeIfPresent(String.self, forKey: .model)
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)

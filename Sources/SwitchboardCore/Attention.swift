@@ -129,6 +129,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
   public var lastTouched: Int64 = 0
+
+  /// When the user last touched the session or, per `viewed`, looked at it.
+  public func lastSeen(viewed: Int64) -> Int64 { max(lastTouched, viewed) }
   /// When sbd continued the session on its own, within the last hour.
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.
@@ -151,6 +154,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The decisions that the user started to answer, from the first answer
   /// until a submit or a discard.
   public var decisionList: DecisionList?
+  /// What sbd found for each draft's reply target.
+  public var draftReplies = DraftReplyFacts()
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.
   public var submittedDecisionsRef: String?
@@ -349,6 +354,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyTriage(event)
     applyMergeBrief(event)
     applyDecisions(event)
+    applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }

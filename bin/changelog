@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Prints one line per first-parent commit in FROM..TO, oldest first, and
+# nothing for an empty range. A GitHub merge commit prints its PR title, which
+# GitHub writes as the first line of the commit's body, and the PR number. Any
+# other commit prints its subject.
+set -euo pipefail
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+  echo "Usage: bin/changelog FROM [TO]" >&2
+  exit 2
+fi
+from=$1
+to=${2:-HEAD}
+pr_merge='^Merge pull request #([0-9]+) '
+
+# Each record is the subject, a unit separator, and the body, ended by a
+# record separator. git log adds a newline after each record, so every subject
+# after the first starts with one.
+log=$(git log --first-parent --reverse --format='%s%x1f%b%x1e' "$from..$to")
+while IFS=$'\x1f' read -r -d $'\x1e' subject body; do
+  subject=${subject#$'\n'}
+  # %b drops the blank lines after the subject, so the title is the first line.
+  title=${body%%$'\n'*}
+  if [[ $subject =~ $pr_merge ]] && [ -n "$title" ]; then
+    printf '%s (#%s)\n' "$title" "${BASH_REMATCH[1]}"
+  else
+    printf '%s\n' "$subject"
+  fi
+done <<<"$log"

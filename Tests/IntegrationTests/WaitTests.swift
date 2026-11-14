@@ -103,14 +103,19 @@ import Testing
   /// `mark` is the id of the last event before the resume.
   func heldResume(_ sbd: Instance) throws -> (session: SessionSummary, hold: String, mark: Int64) {
     let s = try idleSession(sbd)
+    // The reply can come before a snapshot sees the claude. The idle stop can
+    // also come first, and then no pid shows.
+    let first = try sbd.waitFor(s.id, "the first claude's pid") { $0.claudePid != nil || !$0.live }.claudePid
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
     let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
-    try sbd.waitFor(s.id, "the stop", timeout: 10) { $0.claudePid == nil }
+    // A snapshot can miss a claude that still runs. The pid alone then does not
+    // show the stop. The stop's `stopped` event must come before `mark`.
+    try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live && $0.claudePid == nil }
     let hold = "\(sbd.home.path)/hold-start"
     FileManager.default.createFile(atPath: hold, contents: nil)
     let mark = try #require(try sbd.events(s.id).last?.id)
     try sbd.sb("wait", s.id, "--id", waiting.waits[0].id, "--resolve", "#1190 merged")
-    try sbd.waitFor(s.id, "the held claude") { $0.claudePid != nil }
+    try sbd.waitFor(s.id, "the held claude") { $0.claudePid != nil && $0.claudePid != first }
     return (s, hold, mark)
   }
 

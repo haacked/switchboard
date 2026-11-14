@@ -8,9 +8,8 @@ import SwitchboardCore
 func review(_ a: Args) {
   // A session that read injected instructions could otherwise ask people
   // to review its PR. The app's Request review button is the user's click.
-  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
-    die("review needs your click, so it doesn't run inside Claude Code. Use the review card in the app.")
-  }
+  refuseInsideClaudeCode(
+    "review needs your click, so it doesn't run inside Claude Code. Use the review card in the app.")
   let target = a.session("review")
   var args = sessionOrPR(target)
   let reviewers = ReviewRequests.reviewers(in: a.positional.dropFirst().joined(separator: " "))
