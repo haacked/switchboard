@@ -43,7 +43,8 @@ extension Service {
     let e = entries[id]!
     let now = nowMs()
     let shownVerdict = shown(id, Attention.evaluate(e.session, e.facts, now: now, stateOf: lastState))
-    guard let item = Triage.item(e.facts, shownVerdict), item.ref == ref, item.source == .rule else { return nil }
+    guard let item = Triage.item(e.facts, shownVerdict, kind: e.session.kind), item.ref == ref, item.source == .rule
+    else { return nil }
     let verdict = Attention.unheld(e.session, e.facts, now: now, stateOf: lastState)
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
     return InboxRequest(
