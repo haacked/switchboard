@@ -7,6 +7,7 @@
 # it skips in CI or has no .blocking trait, gets weight 0. The script builds
 # the tests and lists their suites to find those.
 #
+#   gh run view <run-id> --log | bin/shard-weights
 #   bin/shard-weights part-1.log part-2.log
 #
 # Take the logs of every swift-test job of one CI run. Each job runs one part

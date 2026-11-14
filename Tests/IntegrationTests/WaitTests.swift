@@ -103,7 +103,9 @@ import Testing
   /// `mark` is the id of the last event before the resume.
   func heldResume(_ sbd: Instance) throws -> (session: SessionSummary, hold: String, mark: Int64) {
     let s = try idleSession(sbd)
-    let first = try sbd.get(s.id).claudePid
+    // The reply can come before a snapshot sees the claude. The idle stop can
+    // also come first, and then no pid shows.
+    let first = try sbd.waitFor(s.id, "the first claude's pid") { $0.claudePid != nil || !$0.live }.claudePid
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
     let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
     // A snapshot can miss a claude that still runs. The pid alone then does not

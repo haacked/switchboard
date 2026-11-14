@@ -117,13 +117,15 @@ private let measure = "IntegrationTests.MeasureTests/m()"
   }
 
   /// The "+" in the suite's name makes its filter match "FxTests" and
-  /// "FxxTests", but not the suite itself.
-  @Test func aTestThatNoFilterMatchesExitsOneAndNamesIt() throws {
-    let r = try plan(["2", "2"], tests: ["IntegrationTests.Fx+Tests/a()", measure])
+  /// "FxxTests", but not the suite itself. FxxTests's tests then match two
+  /// filters, its own and the "Fx+Tests" one.
+  @Test func aTestThatNoFilterOrTwoFiltersMatchExitsOneAndNamesIt() throws {
+    let r = try plan(["2", "2"], tests: ["IntegrationTests.Fx+Tests/a()", "IntegrationTests.FxxTests/b()", measure])
 
     #expect(r.status == 1)
     #expect(r.stdout == "")
     #expect(r.stderr.contains("0 filters match IntegrationTests.Fx+Tests/a()"), "\(r.stderr)")
+    #expect(r.stderr.contains("2 filters match IntegrationTests.FxxTests/b()"), "\(r.stderr)")
   }
 
   @Test(arguments: [["0", "2"], ["2", "0"], ["x", "2"], ["2", "1.5"], ["2"]])
