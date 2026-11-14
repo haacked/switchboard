@@ -98,6 +98,12 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
     return awaits && pr.changesRequestedLine == nil ? .inReview : nil
   }
 
+  /// Whether a review nudge quotes the PR's details, which it does for a PR
+  /// In review. A re-review nudge quotes none.
+  public static func wantsNudgeDetails(_ pr: PullRequest) -> Bool {
+    prColumn(pr) == .inReview
+  }
+
   /// The reviewers that the PR asks, as its code owner requests and
   /// `requestedReviewers` name them, once each. A reviewer that both name keeps
   /// the code owner form, which carries the `@` and a team's org.

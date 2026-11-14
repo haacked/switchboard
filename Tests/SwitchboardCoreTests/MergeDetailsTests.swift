@@ -633,3 +633,30 @@ extension MergeDetailsTests {
     }
   }
 }
+
+// MARK: - Lead
+
+extension MergeDetailsTests {
+  /// `lead` is the gist's first sentence, which a Nudge all bullet shows.
+  @Suite struct Lead {
+    @Test func aOneSentenceGistIsItsOwnLead() {
+      #expect(MergeDetails.lead("It caches flag reads per request.") == "It caches flag reads per request.")
+    }
+
+    @Test func aTwoSentenceGistLeadsWithItsFirstSentence() {
+      let gist = "It caches flag reads per request. It also logs each miss."
+
+      #expect(MergeDetails.lead(gist) == "It caches flag reads per request.")
+    }
+
+    @Test func aGistWithoutASentenceEndIsItsOwnLead() {
+      #expect(MergeDetails.lead("It caches flag reads per request") == "It caches flag reads per request")
+    }
+
+    @Test func aDotInsideANameDoesNotEndTheLead() {
+      let gist = "It reads README.md before the build. It also logs."
+
+      #expect(MergeDetails.lead(gist) == "It reads README.md before the build.")
+    }
+  }
+}

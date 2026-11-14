@@ -597,8 +597,11 @@ struct BoardView: View {
                 }
                 .frame(width: Self.labelWidth)
                 ForEach(layout.columns, id: \.self) { column in
-                  Text(column.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
-                    .frame(width: Self.columnWidth, alignment: .leading)
+                  HStack(spacing: 4) {
+                    Text(column.title.uppercased()).font(.caption.bold()).foregroundStyle(.secondary)
+                    if column == .inReview { NudgeAllMenu(sessions: layout.cards) }
+                  }
+                  .frame(width: Self.columnWidth, alignment: .leading)
                 }
               }
               .padding(.vertical, 4)

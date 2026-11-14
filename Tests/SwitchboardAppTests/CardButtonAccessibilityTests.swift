@@ -34,11 +34,11 @@ private func sessionWithoutPR() -> SessionSummary {
   }
 
   @Test func aNudgeButtonNamesItsPRAndSession() {
-    #expect(readySession(.merge).nudgeButtonLabel == "Copy a nudge for #98 of a")
+    #expect(readySession(.merge).nudgeButtonLabel == "Draft a nudge for #98 of a")
   }
 
   @Test func aNudgeButtonWithoutAPRNamesThePR() {
-    #expect(sessionWithoutPR().nudgeButtonLabel == "Copy a nudge for the PR of a")
+    #expect(sessionWithoutPR().nudgeButtonLabel == "Draft a nudge for the PR of a")
   }
 
   @Test(arguments: ["main", "release/2.0"])
