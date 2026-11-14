@@ -196,26 +196,38 @@ public enum SkillFolders {
   /// The skills in `<folder>/skills/*/SKILL.md` and the commands in
   /// `<folder>/commands/*.md` of the account and of `<cwd>/.claude`, in the
   /// order in which Claude Code picks among entries of one name: a skill
-  /// before a command, and the account's before the cwd's.
-  public static func scan(account: String, cwd: String, on machine: any Machine) -> [ScannedSkill] {
-    let folders = [account, "\(cwd)/.claude"]
+  /// before a command, and the account's before the cwd's. A nil account
+  /// scans only the cwd.
+  public static func scan(account: String?, cwd: String, on machine: any Machine) -> [ScannedSkill] {
+    let folders = [account, "\(cwd)/.claude"].compactMap { $0 }
     let skills = folders.flatMap { folder in
       machine.list("\(folder)/skills").sorted().compactMap { name in
-        machine.text("\(folder)/skills/\(name)/SKILL.md").map { skill($0, named: name) }
+        head("\(folder)/skills/\(name)/SKILL.md", on: machine).map { skill($0, named: name) }
       }
     }
     let commands = folders.flatMap { folder in
       machine.list("\(folder)/commands").filter { $0.hasSuffix(".md") }.sorted().compactMap { file in
-        machine.text("\(folder)/commands/\(file)").map { skill($0, named: String(file.dropLast(3)), isCommand: true) }
+        head("\(folder)/commands/\(file)", on: machine).map {
+          skill($0, named: String(file.dropLast(3)), isCommand: true)
+        }
       }
     }
     return (skills + commands).filter { !$0.name.isEmpty }
   }
 
+  /// The frontmatter and the first body line fit well inside this many bytes.
+  private static let maxFileBytes = 64 << 10
+
+  /// The start of the file. A repo can commit a skill as a symlink to a
+  /// device such as /dev/zero, which never reaches its end.
+  private static func head(_ path: String, on machine: any Machine) -> String? {
+    machine.read(path, from: 0, count: maxFileBytes).map { String(decoding: $0, as: UTF8.self) }
+  }
+
   /// The `skillOverrides` of the account's settings.json, from skill name to
-  /// a state such as "off".
-  public static func overrides(account: String, on machine: any Machine) -> [String: String] {
-    guard let text = machine.text("\(account)/settings.json"),
+  /// a state such as "off". A nil account has none.
+  public static func overrides(account: String?, on machine: any Machine) -> [String: String] {
+    guard let account, let text = machine.text("\(account)/settings.json"),
       let overrides = JSON.parse(text)?["skillOverrides"]?.object
     else { return [:] }
     return overrides.compactMapValues(\.string)

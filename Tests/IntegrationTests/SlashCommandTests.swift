@@ -117,6 +117,26 @@ import Testing
     #expect(Set(rows.filter { $0.source == "builtIn" }.map(\.name)) == Set(SlashCommand.builtIns.map(\.name)))
   }
 
+  @Test func sessionOnAHostAnswersTheScanOfTheHostsAccount() throws {
+    let sbd = try Instance.remote()
+    let repo = try sbd.makeBoxFolder()
+    let id = try sbd.id(of: try sbd.newOnHost("~/sb-box-repo"))
+    // `<box home>/.claude` links to `.sb/claude`, which does not exist until a pane starts.
+    let account = "\(sbd.boxSB)/claude"
+    try write(
+      "---\nname: box-only\ndescription: Box skill.\ndisable-model-invocation: true\n---\nSay hi.\n",
+      to: "\(account)/skills/box-only/SKILL.md")
+    // The repo holds the skill, so only the account's override can hide it.
+    try write(
+      "---\nname: box-off\ndescription: Turned off.\n---\nSay hi.\n", to: "\(repo)/.claude/skills/box-off/SKILL.md")
+    try write(#"{"skillOverrides": {"box-off": "off"}}"#, to: "\(account)/settings.json")
+
+    let rows = try rows(try slash(sbd, id))
+
+    #expect(row("box-only", rows) == Row(name: "box-only", description: "Box skill.", source: "scan"))
+    #expect(row("box-off", rows) == nil)
+  }
+
   @Test func groupChatAndManagerConversationAnswer() throws {
     let sbd = try Instance()
     try useListing(sbd, "manager-launches.jsonl")

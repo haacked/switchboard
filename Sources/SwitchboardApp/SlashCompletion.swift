@@ -61,7 +61,7 @@ final class SlashCompletion: ObservableObject {
     if isRepeat, !composing, let accepting, accepting.key == key, accepting.text == text { return .discard }
     let action = Self.action(
       key: key, modifiers: modifiers, composing: composing, open: open, text: text, highlighted: highlighted)
-    // A repeat whose down press did not accept does what it did before the list existed.
+    // A repeat that would accept is left to the field. Any other repeat keeps its action.
     if isRepeat { return action == .accept ? nil : action }
     accepting = action == .accept ? highlighted.map { (key, Self.accepted($0)) } : nil
     return action

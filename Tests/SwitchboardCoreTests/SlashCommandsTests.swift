@@ -948,6 +948,28 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     #expect(found.isEmpty, "\(found.map(\.name))")
   }
 
+  @Test(.timeLimit(.minutes(1))) func aCommandLinkedToAnEndlessDeviceReadsOnlyItsStart() throws {
+    let folders = try Folders(probe: false)
+    defer { folders.remove() }
+    try FileManager.default.createDirectory(
+      atPath: "\(folders.cwd)/.claude/commands", withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(
+      atPath: "\(folders.cwd)/.claude/commands/zero.md", withDestinationPath: "/dev/zero")
+
+    #expect(folders.scan().map(\.name) == ["zero"])
+  }
+
+  @Test func aNilAccountScansOnlyTheCwd() throws {
+    let folders = try Folders(probe: false)
+    defer { folders.remove() }
+    try write(skillFile("in-account", "In the account."), to: "\(folders.account)/skills/in-account/SKILL.md")
+    try write(skillFile("in-repo", "In the repo."), to: "\(folders.cwd)/.claude/skills/in-repo/SKILL.md")
+    try write(#"{"skillOverrides": {"in-repo": "off"}}"#, to: "\(folders.account)/settings.json")
+
+    #expect(SkillFolders.scan(account: nil, cwd: folders.cwd, on: LocalMachine()).map(\.name) == ["in-repo"])
+    #expect(SkillFolders.overrides(account: nil, on: LocalMachine()).isEmpty)
+  }
+
   @Test func missingFoldersGiveNothing() throws {
     let folders = try Folders(probe: false)
     defer { folders.remove() }

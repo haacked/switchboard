@@ -8,12 +8,13 @@ extension Service {
   /// lines added since the last one.
   func slashCommands(_ args: JSON) throws -> JSON {
     let (id, findTranscript, account, cwd, machine, cached) = try queue.sync {
-      () -> (String, () -> String?, String, String, any Machine, (path: String, state: SkillListing.State)?) in
+      () -> (String, () -> String?, String?, String, any Machine, (path: String, state: SkillListing.State)?) in
       let id = try lookup(args)
-      return (
-        id, transcriptFinder(id), claudeAccount(of: id), entries[id]!.session.cwd, try site(of: id).machine,
-        slashListings[id]
-      )
+      let session = entries[id]!.session
+      // For a host session, claudeAccount returns "<host>:~/.claude", which is no folder on the host.
+      // Until the host answers, its folder is unknown. The scan then reads only the cwd.
+      let account = session.host == nil ? claudeAccount(of: id) : (try? hostClaudeFolder(session))
+      return (id, transcriptFinder(id), account, session.cwd, try site(of: id).machine, slashListings[id])
     }
     var state = SkillListing.State()
     if let path = findTranscript() {

@@ -138,7 +138,7 @@ struct MessageField: View {
   }
 
   /// Return and keypad Enter while the list is open accept the highlighted row, or send when the text already names
-  /// it. `sendsOnReturn` calls this only for a Return that sends today.
+  /// it. `ReturnKey.action` and `onSubmit` decide which Returns reach this.
   private func submit(isRepeat: Bool) {
     let slash = slash
     switch slashAction(.return, isRepeat: isRepeat, slash: slash) {
