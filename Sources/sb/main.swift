@@ -60,6 +60,9 @@ let usage = """
                                   setup, which a claude.ai connector needs. A change
                                   restarts its claude, after the turn when one runs
     get <session>                 show one session
+    slash <session>               the commands that the session's claude takes
+                                  after /: its skills, its commands, and Claude
+                                  Code's built-ins
     send <session> <text>         send a message: paste it, queue it, or resume with it
     send <session> --image <path> [--image <path>…] [<text>]
                                   send images with the message. sbd keeps a copy of
@@ -850,6 +853,8 @@ case "decide":
   decide(a)
 case "reply":
   replyCommand(a)
+case "slash":
+  slashCommand(a)
 case "summary":
   summaryCommand(a)
 case "draft":

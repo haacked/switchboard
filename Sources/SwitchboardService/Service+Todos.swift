@@ -94,6 +94,7 @@ extension Service {
     try store.delete(session: id, resolving: checkTodos(id, resolving: resolving), onHost: entries[id]?.session.host)
     if let removed { markAddressedIssues(removed) }
     entries[id] = nil
+    slashListings[id] = nil
     hostEvents[id] = nil
     pruneDeclinedSuggestions()
   }

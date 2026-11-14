@@ -102,6 +102,8 @@ final class BoardModel: ObservableObject {
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
+  /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
+  @Published var slashCommands: [String: [SlashCommand]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -994,6 +996,19 @@ final class BoardModel: ObservableObject {
         if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
           self.chatLogs[session] = messages
         }
+      }
+    }
+  }
+
+  /// Reads the commands that the session's claude takes after `/`. A failed read keeps the stored rows, which the
+  /// message field shows while sbd answers.
+  func loadSlashCommands(_ session: String) {
+    let send = send
+    poller.async {
+      let commands = try? JSONCoding.convert(
+        send("slash-commands", ["session": .string(session)])["commands"], to: [SlashCommand].self)
+      Task { @MainActor in
+        if let commands, self.slashCommands[session] != commands { self.slashCommands[session] = commands }
       }
     }
   }
