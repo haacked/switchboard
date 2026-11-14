@@ -6,18 +6,6 @@ struct TestError: Error, CustomStringConvertible {
   let description: String
 }
 
-// Temporary: prints how long each phase of an integration test takes, for profiling on CI.
-func profilePhase<T>(_ name: String, _ body: () throws -> T) rethrows -> T {
-  let start = Date()
-  defer {
-    let secs = Date().timeIntervalSince(start)
-    let id = Test.current.map { "\($0.id)" } ?? "?"
-    let phase = name.replacingOccurrences(of: " ", with: "_")
-    FileHandle.standardOutput.write(Data("phase-seconds \(String(format: "%.3f", secs)) \(phase) \(id)\n".utf8))
-  }
-  return try body()
-}
-
 /// The path with every symlink resolved, as `pwd -P` prints it. /tmp is a link to /private/tmp.
 func real(_ path: String) -> String {
   guard let resolved = realpath(path, nil) else { return path }
@@ -140,7 +128,7 @@ final class Instance {
   }
 
   deinit {
-    _ = profilePhase("reap") { try? Instance.reapHome(home.path) }
+    _ = try? Instance.reapHome(home.path)
   }
 
   /// Runs Fixtures/reap on the home.
@@ -160,9 +148,7 @@ final class Instance {
   /// Extra environment for the sbd that `startSbd` starts.
   var sbdEnvironment: [String: String] = [:]
 
-  func startSbd() throws { try profilePhase("startSbd") { try startSbdTimed() } }
-
-  func startSbdTimed() throws {
+  func startSbd() throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sbd")
     // reap finds sbd by the home in its arguments.
@@ -249,10 +235,6 @@ final class Instance {
 
   @discardableResult
   func sb(_ args: [String], env extra: [String: String] = [:]) throws -> String {
-    try profilePhase("sb:" + (args.first ?? "")) { try sbTimed(args, env: extra) }
-  }
-
-  func sbTimed(_ args: [String], env extra: [String: String] = [:]) throws -> String {
     let r = try run(args, env: extra)
     guard r.status == 0 else { throw TestError(description: "sb \(args.joined(separator: " ")) failed: \(r.stderr)") }
     return r.stdout
@@ -274,10 +256,6 @@ final class Instance {
   func run(_ args: String...) throws -> CommandResult { try run(args) }
 
   func run(_ args: [String], env extra: [String: String] = [:]) throws -> CommandResult {
-    try profilePhase("run:" + (args.first ?? "")) { try runTimed(args, env: extra) }
-  }
-
-  func runTimed(_ args: [String], env extra: [String: String] = [:]) throws -> CommandResult {
     try runCommand("\(Instance.bin)/sb", args, env: environment(extra))
   }
 
@@ -478,10 +456,6 @@ final class Instance {
   static let timeoutScale: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 3
 
   func waitFor(_ what: String, timeout: Double = 15, _ condition: () throws -> Bool) throws {
-    try profilePhase("wait:" + String(what.prefix(50))) { try waitForTimed(what, timeout: timeout, condition) }
-  }
-
-  func waitForTimed(_ what: String, timeout: Double = 15, _ condition: () throws -> Bool) throws {
     let deadline = Date().addingTimeInterval(timeout * Instance.timeoutScale)
     while Date() < deadline {
       if try condition() { return }
