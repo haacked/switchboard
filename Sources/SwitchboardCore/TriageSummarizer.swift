@@ -181,6 +181,7 @@ public enum TriageSummarizer {
     }
     let kind = TriageKind(rawValue: payload["kind"]?.string ?? "") ?? .info
     var card = try TriageCard.clean(payload, actions: actions, kind: kind, lines: summaryLines).card
+    // The reply can quote PR comments, so a target that the model names could come from quoted text.
     card.drafts = TriageDrafts.verbatim(card.drafts, in: shown(reply)).kept
     return card
   }

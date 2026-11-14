@@ -44,8 +44,11 @@ public final class Service {
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
-    /// When the tick last saw a terminal on the Claude pane.
-    var lastOnScreen: Int64 = 0
+    /// When the tick last saw a terminal on the Claude pane, or the user last opened the session.
+    var lastViewed: Int64 = 0
+    /// When the user last opened the session, with `open` or `live-next`. The
+    /// live cap never stops the session that the user opened last.
+    var lastOpened: Int64 = 0
     /// The Stop event of the last turn whose summary this sbd started or
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
@@ -57,6 +60,9 @@ public final class Service {
     var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// When the user opened the stopped session, which starts it ahead of
+    /// every queued start. A start of claude clears it.
+    var jumpedAt: Int64?
     /// Set when a running claude's MCP servers changed. `applyMCPChanges`
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
@@ -103,6 +109,18 @@ public final class Service {
   var removing: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The drafts whose reply target a gh read is resolving, or whose unknown
+  /// post a gh read is looking for, each as its session id and its
+  /// `DraftReplies.key`.
+  var resolvingDrafts: Set<String> = []
+  /// The drafts that `draft-post` is posting, keyed as `resolvingDrafts` is.
+  var postingDrafts: Set<String> = []
+  /// The unknown posts that the tick doesn't look for, keyed as
+  /// `resolvingDrafts` is: those that it already looked for in this run,
+  /// and those that this run posted.
+  var checkedUnknown: Set<String> = []
+  /// gh's login, which the look for an unknown post's reply reads.
+  var ghLogin: String?
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   /// The main checkout of each session folder that a lookup read, or nil for
@@ -112,6 +130,10 @@ public final class Service {
   var checkouts: [SitePath: (path: String?, readMs: Int64)] = [:]
   /// The folders whose checkout a lookup off the queue is reading.
   var checkoutLookups: Set<SitePath> = []
+  /// The main checkout that names the auto-memory folder of each local session folder in a git repo, or nil
+  /// for a folder in a bare repo. A folder stays in its repo, so sbd keeps the answer. A folder outside git can
+  /// become a repo, so sbd doesn't keep it.
+  var memoryCheckouts: [String: String?] = [:]
   /// The owner/name that the origin remote of each checkout names on GitHub,
   /// or nil when it names none, with the time of the lookup. sbd reads a
   /// checkout without one again after `checkoutRetryMs`.
@@ -129,6 +151,13 @@ public final class Service {
   let triageJobs: OperationQueue = {
     let jobs = OperationQueue()
     jobs.name = "sbd.triage"
+    jobs.maxConcurrentOperationCount = 2
+    return jobs
+  }()
+  /// Runs the gh reads of draft reply targets.
+  let ghJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.gh"
     jobs.maxConcurrentOperationCount = 2
     return jobs
   }()
@@ -174,6 +203,9 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
+  /// True once a SessionStart showed that claude names its project folders in a way `ClaudeFolder.name` doesn't
+  /// reproduce. Launches then leave out `autoMemoryDirectory` until sbd restarts.
+  var memoryPinOff = false
   /// The most claude processes that may run at once. `sb live --set` changes it.
   var liveCap: Int
   var quota: any QuotaBudget = UnlimitedBudget()
@@ -232,13 +264,11 @@ public final class Service {
 
   public var tickSeconds: Double { config.tickSeconds }
 
-  /// Loads the sessions, rebuilds their facts and queued messages from the
-  /// event log, and writes the hook settings that every session's claude gets.
-  /// It records `delivered` or `delivery_unknown` for each message whose
+  /// Loads the sessions and rebuilds their facts and queued messages from the
+  /// event log. It records `delivered` or `delivery_unknown` for each message whose
   /// paste may have reached claude. Its last step queues the pastes of each
   /// running claude's queued messages on the state queue.
   public func load() throws {
-    try writeClaudeSettings()
     loadChosenAccount()
     loadAutoContinue()
     try store.pruneSnapshots()
@@ -262,6 +292,7 @@ public final class Service {
       // A transcript on a host can't be read before the host's link is up. The reconcile settles those.
       if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
     }
+    markInterruptedPosts()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -269,6 +300,7 @@ public final class Service {
     for (id, e) in entries {
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -288,11 +320,15 @@ public final class Service {
 
   static let actsOnProcesses: Set<String> = [
     "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
-    "dependency-resolved",
+    "dependency-resolved", "live-next",
   ]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  static let launches: Set<String> = [
+    "send", "resume", "open", "resolve-wait", "answer", "dependency-resolved", "live-next",
+  ]
   /// The requests that wait for the host of the session they name, and read its panes and processes first.
-  static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
+  static let needsHost: Set<String> = [
+    "open", "resume", "stop", "send", "answer", "screen", "terminals", "shell", "live-next",
+  ]
   /// The requests that can send claude a message. Each one first waits up to 5 s for a starting claude
   /// to go live. `open` sends nothing, so it doesn't wait.
   static let settles: Set<String> = ["send", "resume", "resolve-wait", "answer", "dependency-resolved"]
@@ -338,6 +374,8 @@ public final class Service {
         return .success(try mergeRequest(request.args))
       case "review":
         return .success(try reviewRequest(request.args))
+      case "draft-post", "draft-check":
+        return .success(try draftReplyRequest(request.op, request.args, caller: caller))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -459,7 +497,7 @@ public final class Service {
       return try shellRequest(args)
     case "open":
       let id = try lookup(args)
-      if claudeState(id) == .stopped { try launch(id, prompt: nil) }
+      try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id))
     case "send":
@@ -546,6 +584,10 @@ public final class Service {
       return try autoContinueRequest(args)
     case "live":
       return try liveRequest(args)
+    case "live-next":
+      // A session that started after the user asked, such as on a second click, is already where it should be.
+      try openSession(try lookup(args))
+      return try liveRequest(.object([:]))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
       "group-suggest",
       "send-group",
@@ -574,7 +616,8 @@ public final class Service {
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
   /// the digest of its children, and the SessionStart of a new Manager
   /// conversation prints the digest of the whole board. sbd records each
-  /// digest as a `digest` event.
+  /// digest as a `digest` event. A work session's UserPromptSubmit prints
+  /// the replies that the user posted from its drafts since it last heard.
   /// `stamp` is set for an event that a host's shim made. Such an event is recorded with its id and its own
   /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
   /// records nothing, when the store can't keep the event.
@@ -611,6 +654,7 @@ public final class Service {
       // the next resume has to open.
       let current = payload["session_id"]?.string ?? session.claudeSessionId
       if current != session.claudeSessionId { try update(id) { $0.claudeSessionId = current } }
+      checkFolderRule(session, payload)
       // claude reads a launch's prompt after SessionStart, and a slow start
       // can outlast the in-flight window. The window starts again here.
       if entries[id]?.inFlight != nil { entries[id]?.inFlight = event.t }
@@ -625,10 +669,11 @@ public final class Service {
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
       try nameConversation(id, prompt: payload["prompt"]?.string)
-      if let text = digest(id, now: event.t) {
-        record(id, "digest", ["text": .string(text)])
-        answer = ParentDigest.hookOutput(text, event: kind)
-      }
+      let digestText = digest(id, now: event.t)
+      if let digestText { record(id, "digest", ["text": .string(digestText)]) }
+      // A host's hook answer never reaches claude, so a host session keeps its replies unheard.
+      let context = [digestText, stamp == nil ? repliesNotice(id) : nil].compactMap { $0 }
+      if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -668,6 +713,7 @@ public final class Service {
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     releaseCards(id)
     return event
@@ -861,10 +907,16 @@ public final class Service {
       _ = try accountForNew(named: args.account, parent: probe.parent, for: probe)
     }
     let folder = try prepareFolder(args, at: mac)
+    let main = try? mainCheckout(of: folder.cwd)
     awaitMCPServers()
-    let summary = try queue.sync { try create(args, folder) }
-    rememberRepo(folder.cwd, used: summary.created ?? nowMs())
-    return summary
+    return try queue.sync {
+      // The launch reads the cached checkout, so git doesn't run on the state queue.
+      if let main { memoryCheckouts[folder.cwd] = main }
+      let summary = try create(args, folder)
+      // The session's creation time keeps the repo in its place in the list after the session is removed.
+      if let main { try? store.remember(repo: main, used: summary.created ?? nowMs()) }
+      return summary
+    }
   }
 
   /// Starts a session on a remote host. The folder is absolute or starts with `~`, and the host resolves it.
@@ -923,6 +975,7 @@ public final class Service {
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
+    session.planMode = args.planMode
     session.host = args.host
     configure(&session)
     if let host = session.host {
@@ -998,6 +1051,7 @@ public final class Service {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
     // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
+    entries[id]?.jumpedAt = nil
     if local {
       moveToGroupAccount(id)
       trustOwnFolder(id)
@@ -1007,7 +1061,8 @@ public final class Service {
     var args = [claudeCommand(for: session)]
     args += resume ? ["--resume", session.claudeSessionId] : ["--session-id", session.claudeSessionId]
     if local {
-      args += ["--settings", home.claudeSettings]
+      try writeClaudeSettings(id, session)
+      args += ["--settings", home.claudeSettings(id)]
       args += launchMCPArgs(id, session)
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
@@ -1015,7 +1070,8 @@ public final class Service {
     if let model = session.model { args += ["--model", model] }
     if local { args += config.claudeArgs }
     // After claudeArgs, so that the session's mode wins over a global one.
-    if session.autoMode == true { args += ["--permission-mode", PermissionMode.auto] }
+    let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
+    if let mode { args += ["--permission-mode", mode] }
     if local, !config.triage.systemPrompt.isEmpty {
       args += ["--append-system-prompt", config.triage.systemPrompt]
     }
@@ -1049,7 +1105,7 @@ public final class Service {
       id, resume ? "resumed" : "started",
       [
         "prompt": prompt.map(JSON.string) ?? .null, "mcp": local ? mcpListening : [],
-        "permission_mode": session.autoMode == true ? .string(PermissionMode.auto) : .null,
+        "permission_mode": mode.map(JSON.string) ?? .null,
       ])
   }
 
@@ -1980,8 +2036,11 @@ public final class Service {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
           startSummaries(id, verdict)
+          resolveDraftTargets(id, verdict)
+          checkUnknownPosts(id)
         }
       }
+      noteViewed(now: now)
       runQueuedStarts(now: now)
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
@@ -2001,6 +2060,11 @@ public final class Service {
   }
 
   var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
+
+  /// Records that each session with a terminal on its Claude pane was viewed now.
+  func noteViewed(now: Int64) {
+    for id in entries.keys where attached(id) { entries[id]?.lastViewed = now }
+  }
 
   /// The session's running claude, as the stop rules see it.
   func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
@@ -2067,7 +2131,10 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason(onHost: e.session.host) }
+    if e.queuedSince != nil {
+      out.reason = queuedReason(onHost: e.session.host)
+      out.queued = true
+    }
     if let host = s.host {
       out.host = host
       out.link = hostLinks[host]?.status.state
@@ -2089,22 +2156,64 @@ public final class Service {
 
   // MARK: Settings
 
-  /// Every hook runs `sb hook`, which forwards the payload to sbd. It exits 0
-  /// with no output when sbd is down, so the session shows no hook errors.
-  private func writeClaudeSettings() throws {
-    let text = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
-    try text.write(toFile: home.claudeSettings, atomically: true, encoding: .utf8)
+  /// Writes the --settings file of a local session's claude. A claude that an
+  /// earlier sbd started reads <SB_HOME>/claude-settings.json. sbd leaves that
+  /// file in place. Its hooks keep working until that claude's next launch.
+  private func writeClaudeSettings(_ id: String, _ session: Session) throws {
+    try FileManager.default.createDirectory(atPath: home.sessionFolder(id), withIntermediateDirectories: true)
+    var settings = Service.hookSettings(command: "\(shellQuote(sbPath)) hook")
+    if !memoryPinOff, let base = memoryBase(session) {
+      settings["autoMemoryDirectory"] = .string(ClaudeFolder.memoryDirectory(base))
+    }
+    try JSON.object(settings).text.write(toFile: home.claudeSettings(id), atomically: true, encoding: .utf8)
   }
 
-  /// The text of a settings file that runs `command` for every hook that sbd reads.
-  static func hookSettings(command: String) -> String {
+  /// The folder that claude names a local session's auto-memory folder after: the main checkout of the git
+  /// repository that holds the session's folder, or the folder's real path when no repository holds it. It is
+  /// nil when git can't name the main checkout of a repository, such as a bare one. `newSession` and
+  /// `rememberRepo` cache the main checkout before the first launch. This runs git on the state queue at the
+  /// first launch in a folder that neither cached, such as one from before sbd restarted, and at each launch
+  /// in a folder outside git.
+  private func memoryBase(_ s: Session) -> String? {
+    if let known = memoryCheckouts[s.cwd] { return known }
+    if let main = try? mainCheckout(of: s.cwd) {
+      memoryCheckouts[s.cwd] = main
+      return main
+    }
+    if (try? gitOutput(s.cwd, ["rev-parse", "--git-dir"], at: mac)) != nil {
+      memoryCheckouts[s.cwd] = .some(nil)
+      return nil
+    }
+    return (try? mac.realPath(s.cwd)) ?? s.cwd
+  }
+
+  /// Makes later launches leave out `autoMemoryDirectory` when claude started a conversation of a local
+  /// session in a folder that `ClaudeFolder.name` doesn't give for its cwd. A resumed conversation keeps the
+  /// folder it started in, so only a new one shows how claude names folders. It checks how claude names a
+  /// folder, not which folder claude names the memory folder after.
+  private func checkFolderRule(_ session: Session, _ payload: JSON) {
+    guard !memoryPinOff, session.host == nil, ["startup", "clear"].contains(payload["source"]?.string),
+      let transcript = payload["transcript_path"]?.string
+    else { return }
+    let cwd = payload["cwd"]?.string ?? session.cwd
+    guard !ClaudeFolder.holds(transcript, startedIn: cwd, realPath: try? mac.realPath(cwd)) else { return }
+    memoryPinOff = true
+    logLine(
+      "stops pinning auto-memory: claude put a conversation that started in \(cwd) in \(transcript), not in \(ClaudeFolder.name(cwd))"
+    )
+  }
+
+  /// The settings that run `command` for every hook that sbd
+  /// reads. Every hook runs `sb hook`, which forwards the payload to sbd. It
+  /// exits 0 with no output when sbd is down, so the session shows no hook errors.
+  static func hookSettings(command: String) -> [String: JSON] {
     var hooks: [String: JSON] = [:]
     for event in SessionFacts.hookKinds {
       let timeout: JSON = event == "PermissionRequest" ? .number(Double(Card.holdSeconds)) : 30
       let handler: JSON = ["type": "command", "command": .string(command), "timeout": timeout]
       hooks[event] = [["matcher": "", "hooks": [handler]]]
     }
-    return JSON.object(["hooks": .object(hooks)]).text
+    return ["hooks": .object(hooks)]
   }
 }
 

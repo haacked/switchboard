@@ -100,7 +100,7 @@ public struct TriageMessage: Codable, Equatable, Sendable {
   public struct Summary: Codable, Equatable, Sendable {
     public var text: String
     public var callouts: [Callout]
-    public var drafts: [TriageDraft]
+    public var drafts: [InboxDraft]
   }
 
   /// The buttons, and the decisions that `sb decide` answers one at a time.

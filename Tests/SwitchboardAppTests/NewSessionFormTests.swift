@@ -92,6 +92,23 @@ import Testing
     #expect(try #require(plain.request(worktree: false, groups: [])).group == nil)
   }
 
+  // MARK: Start in plan mode
+
+  @Test func requestSendsNoPlanModeWhenTheToggleIsOff() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    #expect(try #require(form.request(worktree: false, groups: [])).planMode == nil)
+  }
+
+  @Test func requestSendsPlanModeWhenTheToggleIsOn() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+    form.planMode = true
+
+    #expect(try #require(form.request(worktree: false, groups: [])).planMode == true)
+  }
+
   // MARK: The default repository for a group
 
   @Test func offerSelectsTheRepoMostOfTheGroupsSessionsUse() {
@@ -184,5 +201,23 @@ import Testing
     let r = try #require(form.request(worktree: false, groups: [Self.group("g1")]))
 
     #expect(r.account == nil)
+  }
+
+  @Test func theRequestOfANewTaskNamesTheConversationAsParent() throws {
+    let form = NewSessionView.Form(parent: "m")
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: []))
+
+    #expect(request.parent == "m")
+  }
+
+  @Test func theRequestWithoutAParentNamesNone() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    let request = try #require(form.request(worktree: false, groups: []))
+
+    #expect(request.parent == nil)
   }
 }

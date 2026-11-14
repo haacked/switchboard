@@ -79,6 +79,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var waitOutcome: String?
   /// Open and deferred permission prompts and questions, oldest first.
   public var cards: [Card] = []
+  /// Why the open prompt's card left while the prompt stayed open.
+  public var cardGone: CardGone?
   /// Messages that sbd sent on its own, such as a wait's outcome, until
   /// claude reports each one as a prompt.
   public var sbdMessages: [String] = []
@@ -127,6 +129,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
   public var lastTouched: Int64 = 0
+
+  /// When the user last touched the session or, per `viewed`, looked at it.
+  public func lastSeen(viewed: Int64) -> Int64 { max(lastTouched, viewed) }
   /// When sbd continued the session on its own, within the last hour.
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.
@@ -149,6 +154,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The decisions that the user started to answer, from the first answer
   /// until a submit or a discard.
   public var decisionList: DecisionList?
+  /// What sbd found for each draft's reply target.
+  public var draftReplies = DraftReplyFacts()
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.
   public var submittedDecisionsRef: String?
@@ -347,6 +354,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyTriage(event)
     applyMergeBrief(event)
     applyDecisions(event)
+    applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }
@@ -466,10 +474,11 @@ public enum Attention {
         state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
     if let p = facts.openPermission {
-      return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
+      return Verdict(
+        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
     }
     if let q = facts.openQuestion {
-      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
     }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {

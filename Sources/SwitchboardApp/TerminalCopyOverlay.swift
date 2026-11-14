@@ -220,7 +220,7 @@ final class TerminalCopyOverlay: NSResponder {
     button.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
     button.setAccessibilityLabel("Copied")
     button.sizeToFit()
-    let until = ContinuousClock.now + .seconds(DraftView.copiedSeconds)
+    let until = ContinuousClock.now + .seconds(DraftCopyButton.copiedSeconds)
     copiedUntil = until
     Task { @MainActor [weak self] in
       try? await Task.sleep(until: until, clock: .continuous)
