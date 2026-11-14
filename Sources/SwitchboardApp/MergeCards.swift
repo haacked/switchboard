@@ -121,7 +121,7 @@ struct MergeBaseButton: View {
 
   var body: some View {
     Button {
-      model.send(session.id, Attention.mergeBaseMessage(base: base))
+      model.send(session.id, Attention.mergeBaseMessage(base: base), ref: session.triage?.ref)
     } label: {
       Image(systemName: "arrow.triangle.2.circlepath")
     }

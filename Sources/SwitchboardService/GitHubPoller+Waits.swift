@@ -86,7 +86,7 @@ extension GitHubPoller {
         case let comments = keptComments(read.comments), let pr = shown(id, last: nil),
         let outcome = wait.kind == .deploy
           ? deployOutcome(wait, pr, comments) : wait.resolution(of: pr) ?? githubQueueOutcome(wait, pr),
-        !(wait.pr == nil && wait.finishedBeforeSet(pr))
+        !(wait.pr == nil && wait.finishedBeforeItCounts(pr))
       else { return nil }
       return Settled(session: session.id, wait: wait, prId: id, pr: pr, outcome: outcome, polled: read.polled)
     }

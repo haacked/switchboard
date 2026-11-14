@@ -276,12 +276,4 @@ import Testing
   @Test func aFolderThatIsGoneHasNoUsers() {
     #expect(Processes.using("\(NSTemporaryDirectory())sb-folder-users-gone-\(UUID().uuidString)").isEmpty)
   }
-
-  @Test func descendantsIncludeTheRootsAndEveryLevelBelow() {
-    let rows = [
-      ProcessRow(pid: 2, ppid: 1, pgid: 2, command: ""), ProcessRow(pid: 3, ppid: 2, pgid: 3, command: ""),
-      ProcessRow(pid: 4, ppid: 9, pgid: 4, command: ""),
-    ]
-    #expect(Processes.descendants(of: [1], in: Dictionary(grouping: rows, by: \.ppid)) == [1, 2, 3])
-  }
 }

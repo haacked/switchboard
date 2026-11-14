@@ -557,7 +557,6 @@ import Testing
     let sbd = try Instance(config: Self.sharedServers)
     let c = try idleConversation(sbd)
     try requireSwitchboardOnly(sbd, c.id)
-    // The stub finishes its sleep before it handles SIGTERM, so the turn is short.
     try sbd.sb("send", c.id, "slow 3")
     try sbd.waitFor(c.id, "the slow turn") { $0.state == .working }
     try sbd.sb("manager", "mcp", c.id, "add", "grafana")

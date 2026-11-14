@@ -9,6 +9,7 @@ extension Wait {
     switch then {
     case .resume: outcome = "resumes claude"
     case .notify: outcome = "moves to Needs you"
+    case .caller: outcome = "ends sb wait --block"
     }
     return [kind.rawValue, by.rawValue, "\(age) ago", outcome].joined(separator: " · ")
   }

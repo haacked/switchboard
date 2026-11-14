@@ -75,9 +75,10 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     let mark = try lastEvent(sbd, s.id)
 
     try drop(sbd, s, after: mark)
+    let failures = try #require(try sbd.hosts().first { $0.name == "mini" }?.failures)
     try tick(sbd)
     // The link retries while it is down. Each retry is not another drop.
-    sleep(3)
+    try sbd.waitForHost("mini", "a failed retry of the link") { ($0.failures ?? 0) > failures }
     try tick(sbd)
 
     let after = try sbd.events(s.id).filter { $0.id > mark }

@@ -6,44 +6,6 @@ private let refusal = "ssh: connect to host mini.local port 22: Operation timed 
 /// The words of the git status that the worktree checks run.
 private let statusRead = "status --porcelain"
 
-/// `sb` in the background, for a request that a gate on the box holds. Its output goes to files in the home, so a
-/// full pipe can't stall it.
-final class BackgroundSb {
-  private let process = Process()
-  private let out: String
-  private let err: String
-
-  init(_ sbd: Instance, _ args: [String]) throws {
-    let tag = UUID().uuidString.prefix(8)
-    out = "\(sbd.home.path)/background-\(tag).out"
-    err = "\(sbd.home.path)/background-\(tag).err"
-    FileManager.default.createFile(atPath: out, contents: nil)
-    FileManager.default.createFile(atPath: err, contents: nil)
-    process.executableURL = URL(fileURLWithPath: "\(Instance.bin)/sb")
-    process.arguments = args
-    process.environment = sbd.environment()
-    process.standardInput = FileHandle.nullDevice
-    process.standardOutput = FileHandle(forWritingAtPath: out)
-    process.standardError = FileHandle(forWritingAtPath: err)
-    try process.run()
-  }
-
-  /// Whether sb exits within the seconds.
-  func exits(within seconds: Double) -> Bool {
-    let deadline = Date().addingTimeInterval(seconds * Instance.timeoutScale)
-    while process.isRunning, Date() < deadline { usleep(50_000) }
-    return !process.isRunning
-  }
-
-  /// Waits for sb to exit and returns what it printed.
-  func result() -> CommandResult {
-    process.waitUntilExit()
-    return CommandResult(
-      status: process.terminationStatus, stdout: (try? String(contentsOfFile: out, encoding: .utf8)) ?? "",
-      stderr: (try? String(contentsOfFile: err, encoding: .utf8)) ?? "")
-  }
-}
-
 extension Instance {
   /// A session on mini in a plain folder under the box's home, whose claude runs and has answered its first
   /// prompt.
@@ -294,7 +256,9 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
     let rm = try BackgroundSb(sbd, ["rm", s.id])
     var forgotWhileUnread = false
     var refusedInTime = false
-    let deadline = Date().addingTimeInterval(20 * Instance.timeoutScale)
+    // A removal that waits for the reconcile runs this loop to its end, so the window does not scale on CI. A
+    // removal that does not wait finishes well within it. A forgotten session also fails the checks below.
+    let deadline = Date().addingTimeInterval(5)
     while Date() < deadline, !refusedInTime {
       if !(try sbd.client.sessions().map(\.id).contains(s.id)) { forgotWhileUnread = true }
       refusedInTime = rm.exits(within: 0.2)

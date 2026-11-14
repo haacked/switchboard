@@ -145,6 +145,7 @@ private final class Strays {
     try #require(r.status != 0, Comment(rawValue: r.stderr))
     for pid in pids {
       #expect(names(r.stderr, pid), Comment(rawValue: "\(pid) is not in: \(r.stderr)"))
+      #expect(!r.stderr.contains("\(pid) (?, "), Comment(rawValue: "no command for \(pid): \(r.stderr)"))
       if startedBySession {
         #expect(
           r.stderr.contains(try Regex("\\b\(pid) \\([^)]*, started by the session\\)")),

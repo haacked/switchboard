@@ -6,6 +6,9 @@
 #   bin/measure --cap 7 25   holds the live stubs to 7
 #   bin/measure --running    measures the sbd that runs now, with real claude
 #   bin/measure --running --json
+#   bin/measure --cpu 300 50 also measures sbd's CPU for 300 seconds
+#   bin/measure --tick 0.2 25 sets sbd's tickSeconds to 0.2
+#   bin/measure --bin DIR 25 uses the sb and sbd in DIR
 #
 # Without --running, it builds sb and sbd in release mode and starts a private
 # sbd under a temporary SB_HOME, with the stub claude from the integration
@@ -15,7 +18,17 @@
 # wall time of `sb ls` and `sb ls --json`. sbd's live cap limits how many
 # stubs run: --cap sets it, and sbd's default applies otherwise. The stub
 # stands in for claude, so its memory says nothing about claude's. The panes
-# run your login shell, as the installed sbd's do.
+# run your login shell, as the installed sbd's do. --bin skips the build and
+# uses the sb and sbd in DIR, such as another worktree's .build/release.
+# --tick writes tickSeconds into the private sbd's config. Without it, sbd's
+# default applies.
+#
+# With --cpu SECONDS, after the last count, it stops the private sbd and
+# starts it again under /usr/bin/time for SECONDS. The tmux server and the
+# panes outlive sbd, so the new sbd serves the same sessions. It then reports
+# sbd's self CPU time, from ps, and its total CPU time, which adds that of the
+# children it reaped, such as ps and tmux, from /usr/bin/time. It gives each
+# in seconds per minute of the time that sbd ran, which includes its start.
 #
 # With --running, it starts and stops nothing. It reads the sbd at SB_HOME
 # (~/.sb by default) through the sb on your PATH, or the one in SB_BIN_DIR, and
@@ -29,11 +42,12 @@
 # maps about 230 MB of its binary, so a sum of resident sizes counts that
 # binary once per process.
 set -euo pipefail
-cd "$(dirname "$0")/.."
-root=$(pwd)
 running=false
 json=false
 cap=
+cpu=
+tick=
+bin=
 counts=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -43,10 +57,43 @@ while [ $# -gt 0 ]; do
       cap=${2:-}
       shift
       ;;
+    --cpu)
+      cpu=${2:-}
+      shift
+      ;;
+    --tick)
+      tick=${2:-}
+      shift
+      ;;
+    --bin)
+      bin=${2:-}
+      shift
+      ;;
     *) counts+=("$1") ;;
   esac
   shift
 done
+if $running && [ -n "$cpu$tick$bin" ]; then
+  echo "bin/measure: --running takes no --cpu, --tick, or --bin" >&2
+  exit 2
+fi
+if [ -n "$cpu" ] && ! [[ $cpu =~ ^[1-9][0-9]*$ ]]; then
+  echo "bin/measure: --cpu needs a whole number of seconds, not '$cpu'" >&2
+  exit 2
+fi
+if [ -n "$tick" ] && ! awk -v t="$tick" 'BEGIN { exit !(t ~ /^[0-9]*\.?[0-9]+$/ && t > 0) }'; then
+  echo "bin/measure: --tick needs a positive number of seconds, not '$tick'" >&2
+  exit 2
+fi
+# A relative DIR names a folder under the caller's directory, so it resolves
+# before the cd.
+if [ -n "$bin" ]; then
+  [ -d "$bin" ] || { echo "bin/measure: $bin is not a folder" >&2; exit 2; }
+  bin=$(cd "$bin" && pwd)
+  [ -x "$bin/sb" ] && [ -x "$bin/sbd" ] || { echo "bin/measure: $bin has no sb and sbd" >&2; exit 2; }
+fi
+cd "$(dirname "$0")/.."
+root=$(pwd)
 if [ ${#counts[@]} -eq 0 ]; then counts=(25 50); fi
 runs=5
 # The pids of the apps that show the sbd at $SB_HOME. An app shows the home in
@@ -128,10 +175,12 @@ if $running; then
   exit
 fi
 
-echo "Building sb and sbd in release mode…"
-bin/lib/swiftpm build -c release --product sb >/dev/null
-bin/lib/swiftpm build -c release --product sbd >/dev/null
-bin=$(swift build -c release --show-bin-path)
+if [ -z "$bin" ]; then
+  echo "Building sb and sbd in release mode…"
+  bin/lib/swiftpm build -c release --product sb >/dev/null
+  bin/lib/swiftpm build -c release --product sbd >/dev/null
+  bin=$(swift build -c release --show-bin-path)
+fi
 sb=$bin/sb
 
 # Fixtures/reap ends a home's processes only for a path of this shape. A
@@ -142,7 +191,7 @@ cleanup() { "$root/Tests/IntegrationTests/Fixtures/reap" || true; }
 trap cleanup EXIT
 mkdir -p "$home/work" "$home/account"
 echo $$ >"$home/owner.pid"
-jq -n --arg root "$root" --arg home "$home" --arg cap "$cap" '{
+jq -n --arg root "$root" --arg home "$home" --arg cap "$cap" --arg tick "$tick" '{
   claude: "\($root)/Tests/IntegrationTests/Fixtures/claude-stub",
   worktreeRoot: "\($home)/worktrees",
   claudeConfigDirs: [],
@@ -150,14 +199,20 @@ jq -n --arg root "$root" --arg home "$home" --arg cap "$cap" '{
   depot: {enabled: false},
   usage: {pollSeconds: 0, keychain: false},
   trunk: {path: "\($home)/trunk"}
-} + (if $cap == "" then {} else {liveCap: ($cap | tonumber)} end)' >"$home/config.json"
-# The stub writes its transcripts into this account, never into yours.
-CLAUDE_CONFIG_DIR="$home/account" "$bin/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
-for _ in $(seq 100); do
-  if "$sb" ping >/dev/null 2>&1; then break; fi
-  sleep 0.1
-done
-"$sb" ping >/dev/null
+} + (if $cap == "" then {} else {liveCap: ($cap | tonumber)} end)
+  + (if $tick == "" then {} else {tickSeconds: ($tick | tonumber)} end)' >"$home/config.json"
+# Starts sbd in the background, with its arguments in front of sbd's command,
+# and waits until sbd answers.
+start_sbd() {
+  # The stub writes its transcripts into this account, never into yours.
+  CLAUDE_CONFIG_DIR="$home/account" "$@" "$bin/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
+  for _ in $(seq 100); do
+    if "$sb" ping >/dev/null 2>&1; then break; fi
+    sleep 0.1
+  done
+  "$sb" ping >/dev/null
+}
+start_sbd
 
 # The median wall time of a command over $runs runs, in milliseconds. One perl
 # times every run, so starting the timer is not part of any run.
@@ -196,3 +251,24 @@ for count in "${counts[@]}"; do
     "$(mb $((sbd_kb + term_kb + stub_kb)))" "$(mb "$resident_kb")" "$(median_ms "$sb" ls)" "$(median_ms "$sb" ls --json)"
 done
 echo "The MB columns are physical footprint, and resident MB is the sum of resident sizes. Times are the median of $runs runs. Load: $(load)"
+[ -n "$cpu" ] || exit 0
+
+sbd=$("$sb" ping --json | jq .pid)
+kill "$sbd"
+# The new sbd can't take the home's lock until the old one exits.
+wait "$sbd"
+times=$home/time.txt
+start_sbd /usr/bin/time -p -o "$times"
+timer=$!
+sbd=$("$sb" ping --json | jq .pid)
+sleep "$cpu"
+# ps prints CPU time as minutes:seconds, with hours in front past an hour.
+self=$(ps -o time= -p "$sbd" | awk -F: '{ s = 0; for (i = 1; i <= NF; i++) s = s * 60 + $i; print s }')
+kill "$sbd"
+wait "$timer"
+# /usr/bin/time -p prints "real 300.02", "user 1.20", and "sys 0.80".
+read -r real total <<<"$(awk '{ t[$1] = $2 } END { print t["real"], t["user"] + t["sys"] }' "$times")"
+awk -v self="$self" -v total="$total" -v real="$real" 'BEGIN {
+  printf "sbd self CPU: %.2f s in %.0f s, %.2f s per minute\n", self, real, self * 60 / real
+  printf "sbd total CPU, with its reaped children: %.2f s in %.0f s, %.2f s per minute\n", total, real, total * 60 / real }'
+echo "Load: $(load)"

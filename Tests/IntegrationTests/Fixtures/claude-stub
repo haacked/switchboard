@@ -11,7 +11,7 @@
 #   mode <name>      switches the permission mode to <name>, as Shift+Tab or
 #                    an approved plan does, and replies "Mode: <name>". The
 #                    turn's hooks report the new mode
-#   slow <n>         runs a Bash tool call of n seconds
+#   slow <n>         runs a Bash tool call of n seconds, which SIGTERM ends
 #   run <name>       runs sh $SB_HOME/<name>.sh as a Bash tool call, a child
 #                    of the stub, and replies "Ran <name>.". Without that
 #                    file, it replies as to anything else
@@ -23,6 +23,10 @@
 #                    job's process exits. With held, the report also waits
 #                    until $SB_HOME/report exists. The job's pid goes to
 #                    $SB_HOME/job.pid
+#   background <n> free
+#                    starts the job as background does, but reports it from
+#                    a subshell, so the stub reads the next prompt while the
+#                    job runs, as claude does
 #   interrupt ...    starts a tool call and stops, as Escape does. Claude
 #                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
@@ -674,7 +678,7 @@ questions='{"questions":[
    "options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}'
 
 turn() {
-  local p=$1 step=turn reply cmd='' marker='' before='' n job held
+  local p=$1 step=turn reply cmd='' marker='' before='' n job held free=''
   case $p in
   "lag held") until [ -e "$SB_HOME/report" ]; do sleep 0.05; done ;;
   lag*) sleep 1 ;;
@@ -692,7 +696,7 @@ turn() {
   slow*)
     n=${p#slow }
     status busy
-    step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
+    step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n & slow_pid=\$!; wait \$slow_pid; slow_pid="
     ;;
   run\ *)
     n=${p#run }
@@ -705,6 +709,7 @@ turn() {
   background*)
     read -r n held two <<<"${p#background }"
     [ "$held" = two ] && two=two held=''
+    [ "$held" = free ] && free=1 held=''
     rm -f "$SB_HOME/job.pid" "$SB_HOME/job2.pid"
     # Claude Code runs each background job in a process group of its own,
     # and its spawn returns after the job is in that group. perl writes the
@@ -798,7 +803,12 @@ turn() {
   esac
   echo "⏺ $reply"
   reply_line "$reply"
-  play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
+  # The subshell shares the stub's process group, so sbd doesn't count it as a job.
+  if [ -n "$free" ]; then
+    play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before" &
+  else
+    play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
+  fi
   status
 }
 
@@ -814,7 +824,10 @@ if [ -e "$SB_HOME/ask-trust" ] &&
   ! jq -e --arg k "$(pwd -P)" '.projects[$k].hasTrustDialogAccepted == true' "$config_dir/.claude.json" >/dev/null 2>&1; then
   trust_dialog
 fi
-trap 'trap "" TERM; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
+# bash runs the trap only after a foreground command ends. The slow tool call
+# sleeps in the background and waits for the sleep. So SIGTERM ends it at
+# once, as SIGTERM ends a tool call of claude.
+trap 'trap "" TERM; [ -n "${slow_pid-}" ] && kill "$slow_pid" 2>/dev/null; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
 printf '\033[?2004h'

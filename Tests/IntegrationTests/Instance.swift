@@ -83,7 +83,7 @@ final class Instance {
   /// Depot poller is off.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
-    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
+    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:], startingSbd: Bool = true
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
@@ -124,7 +124,7 @@ final class Instance {
     FileManager.default.createFile(atPath: home.log, contents: nil)
     client = Client(home: home)
     try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-    try startSbd()
+    if startingSbd { try startSbd() }
   }
 
   deinit {
@@ -264,11 +264,16 @@ final class Instance {
     try #require(JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object)
   }
 
-  /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
-  func restart(setting key: String, to value: JSON) throws {
+  /// Sets one key of config.json. sbd reads the config only when it starts.
+  func set(_ key: String, to value: JSON) throws {
     var config = try config()
     config[key] = value
     try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
+  }
+
+  /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
+  func restart(setting key: String, to value: JSON) throws {
+    try set(key, to: value)
     stopSbd()
     try startSbd()
   }
@@ -309,6 +314,13 @@ final class Instance {
     var args: [String: JSON] = ["path": .string(work), "name": .string(name)]
     if let prompt { args["prompt"] = .string(prompt) }
     return try client.call("new", args, as: SessionSummary.self)
+  }
+
+  /// A session whose first turn has ended.
+  func idleSession(name: String = "t") throws -> SessionSummary {
+    let s = try new(prompt: "hello", name: name)
+    try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    return s
   }
 
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
@@ -654,21 +666,52 @@ extension Instance {
   /// `boxBin` before any other, because the stub's remote shell inherits sbd's PATH.
   static func remote(
     host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
-    boxBin: Bool = false
+    accounts: [String] = [], boxBin: Bool = false
   ) throws -> Instance {
-    let hosts = ["mini": remoteHost(boxDestination, extra)].merging(more) { $1 }
-    let sbd = try Instance(config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 })
-    try sbd.prepareBox()
-    if boxBin {
-      try FileManager.default.createDirectory(atPath: sbd.boxBin, withIntermediateDirectories: true)
-      let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-      sbd.stopSbd()
-      sbd.sbdEnvironment["PATH"] = "\(sbd.boxBin):\(path)"
-      sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = "\(sbd.boxBin):\(path)"
-      try sbd.startSbd()
-    }
+    let sbd = try unstartedRemote(host: extra, hosts: more, config: settings, accounts: accounts, boxBin: boxBin)
+    try sbd.startSbd()
     return sbd
   }
+
+  /// The instance that `remote` returns, before sbd starts. A builder that changes the config or the box's
+  /// programs here does not have to start sbd again.
+  private static func unstartedRemote(
+    host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
+    accounts: [String] = [], boxBin: Bool = false
+  ) throws -> Instance {
+    let hosts = ["mini": remoteHost(boxDestination, extra)].merging(more) { $1 }
+    let sbd = try Instance(
+      accounts: accounts, config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 },
+      startingSbd: false)
+    try sbd.prepareBox()
+    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+    var folders: [String] = []
+    if boxBin {
+      try FileManager.default.createDirectory(atPath: sbd.boxBin, withIntermediateDirectories: true)
+      folders.append(sbd.boxBin)
+    }
+    if let python = Instance.python {
+      let folder = "\(sbd.home.path)/python-bin"
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(atPath: "\(folder)/python3", withDestinationPath: python)
+      folders.append(folder)
+    }
+    let searched = (folders + [path]).joined(separator: ":")
+    sbd.sbdEnvironment["PATH"] = searched
+    if boxBin { sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = searched }
+    return sbd
+  }
+
+  /// The interpreter that `python3` on the PATH runs. The ssh stub and the hooks on the box start python3 many
+  /// times in each test. A version manager's shim, such as pyenv's, adds about 0.4 s to each start, so a remote
+  /// sbd finds this interpreter first on its PATH.
+  static let python: String? = {
+    guard let found = findExecutable("python3"),
+      let r = try? runCommand(found, ["-c", "import sys; print(sys.executable)"]), r.status == 0
+    else { return nil }
+    let path = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    return path.hasPrefix("/") ? path : nil
+  }()
 
   /// Creates the box's home. The claude stub keeps its transcripts in `$SB_HOME/claude` when CLAUDE_CONFIG_DIR is
   /// unset, which is `<box home>/.sb/claude` for a remote pane. sbd looks for a remote transcript under
@@ -1040,10 +1083,10 @@ extension Instance {
   /// box's `.sb` as SB_HOME when it has none, as a pane does, so `claude agents` there reads the stub's status
   /// files.
   static func remoteWithGates(config settings: [String: JSON] = [:]) throws -> Instance {
-    let sbd = try remote(config: settings, boxBin: true)
+    let sbd = try unstartedRemote(config: settings, boxBin: true)
     try sbd.installBoxGates()
-    try sbd.restart(
-      setting: "hosts", to: ["mini": remoteHost(boxDestination, ["claude": .string("\(sbd.boxBin)/claude-stub")])])
+    try sbd.set("hosts", to: ["mini": remoteHost(boxDestination, ["claude": .string("\(sbd.boxBin)/claude-stub")])])
+    try sbd.startSbd()
     return sbd
   }
 
@@ -1055,7 +1098,7 @@ extension Instance {
       try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/\(name)")
     }
     var programs = Instance.gatedPrograms
-    let python = try #require(findExecutable("python3"), "python3 is not installed")
+    let python = try #require(Instance.python, "python3 is not installed")
     programs["python3"] = python
     for (name, path) in programs {
       try write(
@@ -1152,7 +1195,7 @@ extension Instance {
   @discardableResult
   func runBoxShim(session: String, payload: JSON) throws -> CommandResult {
     try runCommand(
-      findExecutable("python3") ?? "/usr/bin/python3", [boxShim, "hook"],
+      Instance.python ?? "/usr/bin/python3", [boxShim, "hook"],
       env: ["HOME": boxHome, "SB_HOME": boxSB, "SB_SESSION_ID": session, "PATH": "/usr/local/bin:/usr/bin:/bin"],
       input: Data(payload.text.utf8), timeout: 15)
   }
@@ -1196,8 +1239,9 @@ extension Instance {
   static func remoteForRemoval(host extra: [String: JSON] = [:], config settings: [String: JSON] = [:]) throws
     -> Instance
   {
-    let sbd = try remote(host: extra, config: settings, boxBin: true)
+    let sbd = try unstartedRemote(host: extra, config: settings, boxBin: true)
     try sbd.installBoxGit()
+    try sbd.startSbd()
     return sbd
   }
 

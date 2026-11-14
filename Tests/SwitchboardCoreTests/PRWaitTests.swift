@@ -15,6 +15,18 @@ import Testing
     return w
   }
 
+  /// An hour before the wait was set.
+  static let since = PRWaitTests.set - 3_600_000
+  static let beforeSince = "2030-06-15T10:59:59Z"
+  static let atSince = "2030-06-15T11:00:00Z"
+  static let betweenSinceAndSet = "2030-06-15T11:30:00Z"
+
+  func wait(_ kind: Wait.Kind, who: String? = nil, since: Int64?) -> Wait {
+    var w = wait(kind, who: who)
+    w.since = since
+    return w
+  }
+
   func pr(
     _ state: PRState = .open, checks: String? = nil, draft: Bool = false, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], queue: TrunkQueueState? = nil,
@@ -131,5 +143,95 @@ import Testing
       #expect(queue.resolution(of: pr(queue: held)) == nil)
     }
     #expect(queue.resolution(of: pr()) == nil)
+  }
+
+  @Test(arguments: [PRWaitTests.betweenSinceAndSet, PRWaitTests.before])
+  func aReviewWaitWithSinceCountsAReviewFromBeforeItWasSet(_ at: String) {
+    let w = wait(.review, who: "alex", since: PRWaitTests.since)
+    #expect(w.resolution(of: pr(reviews: [review("alex", "APPROVED", at)])) == "alex approved")
+  }
+
+  @Test(arguments: [nil, "greptile-apps[bot]"], [PRWaitTests.betweenSinceAndSet, PRWaitTests.before])
+  func aBotReviewWaitWithSinceCountsABotReviewFromBeforeItWasSet(_ who: String?, _ at: String) {
+    let w = wait(.botReview, who: who, since: PRWaitTests.since)
+    let reviews = [review("greptile-apps", "COMMENTED", at, bot: true)]
+    #expect(w.resolution(of: pr(reviews: reviews)) == "greptile-apps reviewed")
+  }
+
+  @Test(arguments: [PRWaitTests.beforeSince, PRWaitTests.atSince, "2020-01-01T00:00:00Z"])
+  func aReviewWaitWithSinceIgnoresAReviewAtOrBeforeSince(_ at: String) {
+    #expect(
+      wait(.review, who: "alex", since: PRWaitTests.since).resolution(of: pr(reviews: [review("alex", "APPROVED", at)]))
+        == nil)
+    #expect(
+      wait(.botReview, since: PRWaitTests.since).resolution(
+        of: pr(reviews: [review("greptile-apps", "COMMENTED", at, bot: true)])) == nil)
+  }
+
+  @Test func aBotReviewWaitWithSinceStillIgnoresPeople() {
+    let w = wait(.botReview, since: PRWaitTests.since)
+    #expect(w.resolution(of: pr(reviews: [review("alex", "APPROVED", PRWaitTests.betweenSinceAndSet)])) == nil)
+  }
+
+  @Test func aReviewWaitWithSinceReportsTheNewestReviewAfterSince() {
+    let reviews = [
+      review("alex", "APPROVED", PRWaitTests.beforeSince),
+      review("alex", "CHANGES_REQUESTED", PRWaitTests.betweenSinceAndSet),
+    ]
+    #expect(
+      wait(.review, who: "alex", since: PRWaitTests.since).resolution(of: pr(reviews: reviews))
+        == "alex requested changes")
+  }
+
+  @Test(arguments: [TrunkQueueState.removed, .merged])
+  func aQueueWaitWithSinceCountsAQueueChangeFromBeforeItWasSet(_ state: TrunkQueueState) {
+    let w = wait(.queue, since: PRWaitTests.since)
+    #expect(w.resolution(of: pr(queue: state, queueAt: PRWaitTests.since + 60_000)) != nil)
+  }
+
+  @Test(arguments: [TrunkQueueState.removed, .merged], [PRWaitTests.since - 1000, PRWaitTests.since])
+  func aQueueWaitWithSinceIgnoresAQueueChangeAtOrBeforeSince(_ state: TrunkQueueState, _ at: Int64) {
+    #expect(wait(.queue, since: PRWaitTests.since).resolution(of: pr(queue: state, queueAt: at)) == nil)
+  }
+
+  /// A loop of blocked waits on the session's own PR sets a new wait each
+  /// slice. A merge between `since` and the slice's wait still counts.
+  @Test(arguments: [nil, PRWaitTests.since] as [Int64?])
+  func aMergeAfterSinceButBeforeTheWaitCountsOnlyWithSince(_ since: Int64?) {
+    var merged = pr(.merged)
+    merged.mergedAt = PRWaitTests.betweenSinceAndSet
+    #expect(wait(.queue, since: since).finishedBeforeItCounts(merged) == (since == nil))
+  }
+
+  /// A wait whose `since` is its `created` reads the PR exactly as one with no `since`.
+  @Test(arguments: [
+    PRWaitTests.beforeSince, PRWaitTests.betweenSinceAndSet, PRWaitTests.before, "2030-06-15T12:00:00Z",
+    PRWaitTests.after,
+  ])
+  func sinceAtCreatedAgreesWithNoSinceForReviews(_ at: String) {
+    for (kind, who, bot) in [
+      (Wait.Kind.review, "alex" as String?, false), (.botReview, nil, true), (.botReview, "greptile-apps", true),
+    ] {
+      let reviews = [review(who ?? "greptile-apps", "COMMENTED", at, bot: bot)]
+      let plain = wait(kind, who: who).resolution(of: pr(reviews: reviews))
+      #expect(wait(kind, who: who, since: PRWaitTests.set).resolution(of: pr(reviews: reviews)) == plain)
+    }
+  }
+
+  @Test(arguments: [
+    PRWaitTests.since - 1000, PRWaitTests.since + 60_000, PRWaitTests.set - 1, PRWaitTests.set, PRWaitTests.set + 1,
+  ])
+  func sinceAtCreatedAgreesWithNoSinceForTheQueue(_ at: Int64) {
+    for state in [TrunkQueueState.removed, .merged] {
+      let plain = wait(.queue).resolution(of: pr(queue: state, queueAt: at))
+      #expect(wait(.queue, since: PRWaitTests.set).resolution(of: pr(queue: state, queueAt: at)) == plain)
+    }
+  }
+
+  @Test(arguments: [Wait.Kind.ci, .approval, .merge])
+  func sinceDoesNotChangeTheKindsThatIgnoreTime(_ kind: Wait.Kind) {
+    let read = pr(
+      checks: "PENDING", reviewDecision: .approved, verdicts: [review("alex", "APPROVED", PRWaitTests.beforeSince)])
+    #expect(wait(kind, since: PRWaitTests.since).resolution(of: read) == wait(kind).resolution(of: read))
   }
 }

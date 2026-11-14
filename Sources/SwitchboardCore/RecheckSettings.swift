@@ -1,11 +1,13 @@
 import Foundation
 
 /// The `recheckSeconds` object of config.json. It sets how long each kind of
-/// wait, and an acknowledgment, holds a session out of the Inbox before sbd
-/// moves the session to Needs you. The keys are wait kinds plus
-/// `acknowledged`, and the values are whole seconds.
+/// wait, an acknowledgment, and a request that the user sent from the Inbox
+/// hold a session out of the Inbox before sbd moves the session to Needs
+/// you. The keys are wait kinds plus `acknowledged` and `requested`, and the
+/// values are whole seconds.
 public struct RecheckSettings: Codable, Equatable, Sendable {
   public static let acknowledged = "acknowledged"
+  public static let requested = "requested"
 
   public static let defaults: [String: Int] = [
     Wait.Kind.ci.rawValue: 7200,
@@ -18,6 +20,7 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
     Wait.Kind.session.rawValue: 86400,
     Wait.Kind.manual.rawValue: 86400,
     acknowledged: 3600,
+    requested: 3600,
   ]
 
   /// Ten years. A larger value would overflow Int64 when sbd converts it to ms.
@@ -38,7 +41,9 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
     }
     for (key, value) in entries.sorted(by: { $0.key < $1.key }) {
       guard seconds[key] != nil else {
-        logLine("skipping recheckSeconds.\(key): it is not a wait kind with a recheck time or \(Self.acknowledged)")
+        logLine(
+          "skipping recheckSeconds.\(key): it is not a wait kind with a recheck time, \(Self.acknowledged), or \(Self.requested)"
+        )
         continue
       }
       guard let n = value.int, n > 0, n <= Self.maxSeconds else {
@@ -61,7 +66,7 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
   /// that already has its time keeps it.
   public func stamped(_ wait: Wait, from start: Int64? = nil) -> Wait {
     var out = wait
-    let time = (start ?? wait.created) + Int64(seconds[wait.kind.rawValue] ?? 0) * 1000
+    let time = (start ?? wait.created) + ms(wait.kind.rawValue)
     switch wait.kind {
     case .date: break
     case .manual: out.until = out.until ?? time
@@ -71,5 +76,10 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
   }
 
   /// How long an acknowledgment holds a session in Waiting.
-  public var acknowledgedMs: Int64 { Int64(seconds[Self.acknowledged] ?? 0) * 1000 }
+  public var acknowledgedMs: Int64 { ms(Self.acknowledged) }
+
+  /// How long a request that the user sent from the Inbox can hold a session in Waiting.
+  public var requestedMs: Int64 { ms(Self.requested) }
+
+  private func ms(_ key: String) -> Int64 { Int64(seconds[key] ?? 0) * 1000 }
 }

@@ -243,7 +243,7 @@ public final class Service {
     var panes: [String: PaneRow] = [:]
     /// The claude process in each session's Claude pane, by session id.
     var claudePids: [String: Int] = [:]
-    var children: [Int: [ProcessRow]] = [:]
+    var processes = ProcessTable()
     var taken: Int64 = 0
     /// The connection of the host's link that answered the read. Nil for this Mac.
     var connection: Int?
@@ -530,7 +530,15 @@ public final class Service {
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
       // A sender that sbd no longer knows, or the session itself, goes unrecorded.
       let from = (try? lookup(["session": args["from"] ?? .null])).flatMap { $0 == id ? nil : $0 }
-      return ["delivery": .string(try send(id, text, trigger: from == nil ? .send : .session, from: from).rawValue)]
+      // A message from another session, such as the Manager, doesn't hold the session for the user.
+      let fromSession = args["from"] != nil || args["insideClaude"]?.bool == true
+      // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
+      let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let request = fromSession ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
+      let delivery = try send(id, text, trigger: from == nil ? .send : .session, from: from)
+      if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
+      return ["delivery": .string(delivery.rawValue)]
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "stop":
@@ -662,9 +670,11 @@ public final class Service {
     if kind == "Stop", case .running(let pid) = claudeState(id) {
       // A session on a host counts from the host's last answered read. A process read here would hold the
       // state queue for a round trip, and a read with no answer would count no jobs.
-      let children =
-        session.host == nil ? Processes.byParent(on: site(for: session).machine) : processChildren(of: id)
-      recordJobs(id, backgroundJobs(pid, in: children))
+      let table =
+        session.host == nil
+        ? (try? site(for: session).processes()) ?? ProcessTable()
+        : processes(of: id)
+      recordJobs(id, backgroundJobs(pid, in: table))
     }
     let event: Event
     if let stamp {
@@ -1966,31 +1976,33 @@ public final class Service {
   /// The process nearest the pane's shell whose command names the claude
   /// command. A forked child of claude keeps its command line, so the nearest
   /// one is claude itself.
-  static func findClaude(below pane: Int, program: String, in children: [Int: [ProcessRow]]) -> Int? {
+  static func findClaude(below pane: Int, program: String, in processes: ProcessTable) -> Int? {
     var level = [pane]
     while !level.isEmpty {
-      let kids = level.flatMap { children[$0] ?? [] }
-      if let match = kids.first(where: { runs($0, program: program) }) { return match.pid }
+      let kids = level.flatMap { processes.children(of: $0) }
+      if let match = kids.first(where: { runs(processes.command(of: $0.pid) ?? "", program: program) }) {
+        return match.pid
+      }
       level = kids.map(\.pid)
     }
     return nil
   }
 
-  /// Whether the command of the process names the claude command, in its
+  /// Whether a process's command line names the claude command, in its
   /// first or second word.
-  static func runs(_ row: ProcessRow, program: String) -> Bool {
-    row.command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
+  static func runs(_ command: String, program: String) -> Bool {
+    command.split(separator: " ").prefix(2).contains { ($0 as NSString).lastPathComponent == program }
   }
 
   /// Programs that run a script named in the second word of their command.
   private static let interpreters: Set<String> = ["node", "bun", "deno", "python", "python3", "sh", "bash", "zsh"]
 
-  /// Whether the process is claude itself: its command starts with the claude
+  /// Whether a process's command line is claude itself: it starts with the claude
   /// command, or with an interpreter that runs it. `runs` is looser, because
   /// any argument in the second word matches, such as `tail /tmp/claude`.
   /// Signals use this one.
-  static func isClaude(_ row: ProcessRow, program: String) -> Bool {
-    let words = row.command.split(separator: " ").map { ($0 as NSString).lastPathComponent }
+  static func isClaude(_ command: String, program: String) -> Bool {
+    let words = command.split(separator: " ").map { ($0 as NSString).lastPathComponent }
     guard let first = words.first else { return false }
     return first == program || (interpreters.contains(first) && words.dropFirst().first == program)
   }
@@ -2025,8 +2037,8 @@ public final class Service {
 
   /// The number of background jobs. A job is a child of claude that leads its
   /// own process group, as a background Bash job does.
-  func backgroundJobs(_ pid: Int, in children: [Int: [ProcessRow]]) -> Int {
-    (children[pid] ?? []).filter { $0.pgid == $0.pid }.count
+  func backgroundJobs(_ pid: Int, in processes: ProcessTable) -> Int {
+    processes.children(of: pid).filter { $0.pgid == $0.pid }.count
   }
 
   /// Records the job count when it differs from the one in the session's facts.
@@ -2063,7 +2075,7 @@ public final class Service {
           } else {
             entries[id]?.unreportedSince = now
           }
-          let jobs = backgroundJobs(pid, in: processChildren(of: id))
+          let jobs = backgroundJobs(pid, in: processes(of: id))
           if jobs > 0 { entries[id]?.lastJobSeen = now }
           // A running turn outranks the job rule. The tick records the count after the turn ends.
           if live, entries[id]?.facts.turnRunning == false { recordJobs(id, jobs) }
@@ -2186,6 +2198,7 @@ public final class Service {
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
     if verdict.acknowledged { out.acknowledged = true }
+    if verdict.requested { out.requested = true }
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
