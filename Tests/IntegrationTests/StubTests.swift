@@ -25,6 +25,12 @@ import Testing
     #expect(played == recorded, "the stub's \(step) step", sourceLocation: sourceLocation)
   }
 
+  /// Whether no process runs the stub for the conversation.
+  func stubExited(_ claudeSessionId: String) throws -> Bool {
+    try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
+      .allSatisfy { !($0.contains("claude-stub") && $0.contains(claudeSessionId)) }
+  }
+
   @Test func playsTheRecordedSteps() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "hello")
@@ -89,9 +95,7 @@ import Testing
     kill(pid_t(stub), SIGTERM)
 
     try sbd.waitFor("the stub and its sleep to exit before the 30 s tool call ends", timeout: 5) {
-      try kill(sleepPid, 0) != 0
-        && runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
-          .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+      try kill(sleepPid, 0) != 0 && stubExited(working.claudeSessionId)
     }
     try sbd.waitFor("the SessionEnd hook") {
       try sbd.events(s.id).contains { $0.id > mark && $0.kind == "SessionEnd" }
@@ -107,8 +111,7 @@ import Testing
     try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
     kill(pid_t(working.claudePid!), SIGKILL)
     try sbd.waitFor("the stub's processes to exit") {
-      try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
-        .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+      try stubExited(working.claudeSessionId)
     }
   }
 }
