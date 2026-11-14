@@ -294,7 +294,7 @@ public struct Wait: Codable, Equatable, Sendable {
     case .merge:
       return ended
     case .ci:
-      if pr.checks == "SUCCESS" { return "the checks passed" }
+      if pr.checksPassed { return "the checks passed" }
       if let depot = pr.depotFailure { return depot.outcome }
       return pr.checksFailed ? "the checks failed" : ended
     case .review, .botReview:
@@ -310,7 +310,7 @@ public struct Wait: Codable, Equatable, Sendable {
       return newest.flatMap { r in verbs[r.state].map { "\(r.author) \($0)" } } ?? ended
     case .approval:
       if let who {
-        return pr.verdicts.first { $0.state == "APPROVED" && Wait.sameLogin($0.author, who) }
+        return pr.verdicts.first { $0.isApproval && Wait.sameLogin($0.author, who) }
           .map { "\($0.author) approved" } ?? ended
       }
       guard pr.isApproved else { return ended }
