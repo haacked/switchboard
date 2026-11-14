@@ -70,6 +70,25 @@ import Testing
     try expectRecorded("interrupt", sbd, s.id, after: mark, prompts: ["interrupt it"], commands: ["sleep 100"])
   }
 
+  /// SIGTERM ends a tool call at once, as it ends one of claude's, and the stub plays its sigterm step.
+  @Test func sigtermEndsASlowToolCallAtOnce() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "slow 30")
+    let working = try sbd.waitFor(s.id, "the tool call") { $0.state == .working && $0.claudePid != nil }
+    try sbd.waitFor("the PreToolUse hook") { try sbd.events(s.id).contains { $0.kind == "PreToolUse" } }
+    let mark = try sbd.lastEventId(s.id)
+
+    kill(pid_t(working.claudePid!), SIGTERM)
+
+    try sbd.waitFor("the stub to exit before its 30 s tool call ends", timeout: 5) {
+      try runCommand("/bin/ps", ["-axo", "command="]).stdout.split(separator: "\n")
+        .allSatisfy { !($0.contains("claude-stub") && $0.contains(working.claudeSessionId)) }
+    }
+    try sbd.waitFor("the SessionEnd hook") {
+      try sbd.events(s.id).contains { $0.id > mark && $0.kind == "SessionEnd" }
+    }
+  }
+
   /// A claude that dies mid-turn sends no more hooks, so no process that runs
   /// the stub may outlive it.
   @Test func aKilledStubSendsNoMoreHooks() throws {
