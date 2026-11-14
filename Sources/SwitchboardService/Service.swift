@@ -44,8 +44,11 @@ public final class Service {
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
-    /// When the tick last saw a terminal on the Claude pane.
-    var lastOnScreen: Int64 = 0
+    /// When the tick last saw a terminal on the Claude pane, or the user last opened the session.
+    var lastViewed: Int64 = 0
+    /// When the user last opened the session, with `open` or `live-next`. The
+    /// live cap never stops the session that the user opened last.
+    var lastOpened: Int64 = 0
     /// The Stop event of the last turn whose summary this sbd started or
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
@@ -55,8 +58,13 @@ public final class Service {
     var mergeBriefAttempt: String?
     /// Whether the budget skipped the brief of `mergeBriefAttempt`.
     var mergeBriefSkipped = false
-    /// When a start of claude queued behind the live cap, and what caused it.
-    var queued: (since: Int64, trigger: LaunchTrigger)?
+    /// When a start of claude queued behind the live cap.
+    var queuedSince: Int64?
+    /// What caused the queued start. It is set and cleared with `queuedSince`.
+    var queuedTrigger: LaunchTrigger?
+    /// When the user opened the stopped session, which starts it ahead of
+    /// every queued start. A start of claude clears it.
+    var jumpedAt: Int64?
     /// Set when a running claude's MCP servers changed. `applyMCPChanges`
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
@@ -103,6 +111,18 @@ public final class Service {
   var removing: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The drafts whose reply target a gh read is resolving, or whose unknown
+  /// post a gh read is looking for, each as its session id and its
+  /// `DraftReplies.key`.
+  var resolvingDrafts: Set<String> = []
+  /// The drafts that `draft-post` is posting, keyed as `resolvingDrafts` is.
+  var postingDrafts: Set<String> = []
+  /// The unknown posts that the tick doesn't look for, keyed as
+  /// `resolvingDrafts` is: those that it already looked for in this run,
+  /// and those that this run posted.
+  var checkedUnknown: Set<String> = []
+  /// gh's login, which the look for an unknown post's reply reads.
+  var ghLogin: String?
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   /// The main checkout of each session folder that a lookup read, or nil for
@@ -133,6 +153,13 @@ public final class Service {
   let triageJobs: OperationQueue = {
     let jobs = OperationQueue()
     jobs.name = "sbd.triage"
+    jobs.maxConcurrentOperationCount = 2
+    return jobs
+  }()
+  /// Runs the gh reads of draft reply targets.
+  let ghJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.gh"
     jobs.maxConcurrentOperationCount = 2
     return jobs
   }()
@@ -272,6 +299,7 @@ public final class Service {
       // A transcript on a host can't be read before the host's link is up. The reconcile settles those.
       if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
     }
+    markInterruptedPosts()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -279,6 +307,7 @@ public final class Service {
     for (id, e) in entries {
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -298,11 +327,15 @@ public final class Service {
 
   static let actsOnProcesses: Set<String> = [
     "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
-    "dependency-resolved",
+    "dependency-resolved", "live-next",
   ]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  static let launches: Set<String> = [
+    "send", "resume", "open", "resolve-wait", "answer", "dependency-resolved", "live-next",
+  ]
   /// The requests that wait for the host of the session they name, and read its panes and processes first.
-  static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
+  static let needsHost: Set<String> = [
+    "open", "resume", "stop", "send", "answer", "screen", "terminals", "shell", "live-next",
+  ]
   /// The requests that can send claude a message. Each one first waits up to 5 s for a starting claude
   /// to go live. `open` sends nothing, so it doesn't wait.
   static let settles: Set<String> = ["send", "resume", "resolve-wait", "answer", "dependency-resolved"]
@@ -348,6 +381,8 @@ public final class Service {
         return .success(try mergeRequest(request.args))
       case "review":
         return .success(try reviewRequest(request.args))
+      case "draft-post", "draft-check":
+        return .success(try draftReplyRequest(request.op, request.args, caller: caller))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -469,7 +504,7 @@ public final class Service {
       return try shellRequest(args)
     case "open":
       let id = try lookup(args)
-      if claudeState(id) == .stopped { try launch(id, prompt: nil, trigger: .open) }
+      try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id))
     case "send":
@@ -562,6 +597,10 @@ public final class Service {
       return try activityClear()
     case "live":
       return try liveRequest(args)
+    case "live-next":
+      // A session that started after the user asked, such as on a second click, is already where it should be.
+      try openSession(try lookup(args))
+      return try liveRequest(.object([:]))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
       "group-suggest",
       "send-group",
@@ -590,7 +629,8 @@ public final class Service {
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
   /// the digest of its children, and the SessionStart of a new Manager
   /// conversation prints the digest of the whole board. sbd records each
-  /// digest as a `digest` event.
+  /// digest as a `digest` event. A work session's UserPromptSubmit prints
+  /// the replies that the user posted from its drafts since it last heard.
   /// `stamp` is set for an event that a host's shim made. Such an event is recorded with its id and its own
   /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
   /// records nothing, when the store can't keep the event.
@@ -647,10 +687,11 @@ public final class Service {
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
       try nameConversation(id, prompt: payload["prompt"]?.string)
-      if let text = digest(id, now: event.t) {
-        record(id, "digest", ["text": .string(text)])
-        answer = ParentDigest.hookOutput(text, event: kind)
-      }
+      let digestText = digest(id, now: event.t)
+      if let digestText { record(id, "digest", ["text": .string(digestText)]) }
+      // A host's hook answer never reaches claude, so a host session keeps its replies unheard.
+      let context = [digestText, stamp == nil ? repliesNotice(id) : nil].compactMap { $0 }
+      if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -690,6 +731,7 @@ public final class Service {
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     releaseCards(id)
     return event
@@ -1027,6 +1069,7 @@ public final class Service {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
     // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
+    entries[id]?.jumpedAt = nil
     if local {
       moveToGroupAccount(id)
       trustOwnFolder(id)
@@ -2013,8 +2056,11 @@ public final class Service {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
           startSummaries(id, verdict)
+          resolveDraftTargets(id, verdict)
+          checkUnknownPosts(id)
         }
       }
+      noteViewed(now: now)
       runQueuedStarts(now: now)
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
@@ -2035,6 +2081,11 @@ public final class Service {
   }
 
   var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
+
+  /// Records that each session with a terminal on its Claude pane was viewed now.
+  func noteViewed(now: Int64) {
+    for id in entries.keys where attached(id) { entries[id]?.lastViewed = now }
+  }
 
   /// The session's running claude, as the stop rules see it.
   func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
@@ -2101,7 +2152,10 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queued != nil { out.reason = queuedReason(onHost: e.session.host) }
+    if e.queuedSince != nil {
+      out.reason = queuedReason(onHost: e.session.host)
+      out.queued = true
+    }
     if let host = s.host {
       out.host = host
       out.link = hostLinks[host]?.status.state

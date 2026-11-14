@@ -10,6 +10,12 @@ import Testing
     #expect(rows["s9azgg-claude"]?.clients == 2)
   }
 
+  @Test func readsTheTmuxServersPid() {
+    let rows = PaneRow.parse("s9azgg-claude\t5601\t0\t2\t5590\n")
+    #expect(rows["s9azgg-claude"]?.server == 5590)
+    #expect(PaneRow.parse("s9azgg-claude\t5601\t0\t2\n")["s9azgg-claude"]?.server == 0)
+  }
+
   /// tmux 3.8 prints no pid for a pane whose program exited. 3.7 printed the
   /// old pid. This is the output of tmux 3.8 on a GitHub Actions runner.
   @Test func keepsADeadPaneThatTmuxGivesNoPid() {

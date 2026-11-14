@@ -181,6 +181,12 @@ let usage = """
     summary set [<session>]       record the session's Inbox card for this turn, as JSON
                                   on stdin. The session defaults to $SB_SESSION_ID
     summary help                  the card's format, for a session to follow
+    draft post <session> <n> [--text <text> | --text -]
+                                  post the item's draft n to GitHub as you, with the draft's
+                                  text, the given text, or stdin. Not inside a session
+    draft check <session> <n>     read the GitHub comment that the item's draft n replies to again,
+                                  after gh couldn't read it, or look on GitHub for the reply
+                                  of a post whose outcome sbd doesn't know
 
   Permission prompts and questions:
     cards [<session>]             list the open ones
@@ -301,12 +307,17 @@ let usage = """
                                   log that sbd keeps \(ActivityLog.retentionMs / Attention.dayMs) days. Off by default
     activity report [--since 3d]  summarize the activity log
     activity clear                delete the activity log
-    live [--set N]                list the sessions whose claude runs and the
+    live [--set N | --next <session>]
+                                  list the sessions whose claude runs and the
                                   starts that queue behind the cap, for this Mac
                                   and for each remote host, whose own cap is its
-                                  liveCap key, else the top-level liveCap. --set
-                                  changes this Mac's cap and saves it in
-                                  config.json
+                                  liveCap key, else the top-level liveCap, with
+                                  each one's livePriority entry and why each
+                                  start waits. --set changes this Mac's cap and
+                                  saves it in config.json. --next starts a
+                                  stopped session now, stopping the
+                                  lowest-priority idle session when the cap is
+                                  full, and leaves a running one as it is
     service install|uninstall|status
     version
 
@@ -343,7 +354,7 @@ struct Args {
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
       "--plan", "--text", "--wait",
-      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
+      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -374,6 +385,10 @@ func warn(_ message: String) {
   FileHandle.standardError.write(Data("sb: \(controlsEscaped(message))\n".utf8))
 }
 
+func refuseInsideClaudeCode(_ message: String) {
+  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil { die(message) }
+}
+
 func die(_ message: String) -> Never {
   warn(message)
   exit(1)
@@ -398,14 +413,6 @@ func decode<T: Decodable>(_ value: JSON, as type: T.Type) -> T {
 }
 
 func summary(_ value: JSON) -> SessionSummary { decode(value, as: SessionSummary.self) }
-
-func ago(_ ms: Int64) -> String {
-  let s = max(0, (nowMs() - ms) / 1000)
-  if s < 60 { return "\(s)s" }
-  if s < 3600 { return "\(s / 60)m" }
-  if s < 86400 { return "\(s / 3600)h" }
-  return "\(s / 86400)d"
-}
 
 func printTable(_ sessions: [SessionSummary]) {
   if sessions.isEmpty {
@@ -830,6 +837,8 @@ case "reply":
   replyCommand(a)
 case "summary":
   summaryCommand(a)
+case "draft":
+  draftCommand(a)
 case "allow", "deny", "answer":
   answer(command, a)
 case "mcp":

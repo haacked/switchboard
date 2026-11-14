@@ -15,12 +15,18 @@ extension Service {
   /// Runs gh and returns its stdout. A non-zero exit throws gh's error, or
   /// its exit status when it printed nothing.
   func runGh(_ args: [String], timeout: TimeInterval) throws -> String {
-    guard let gh = findExecutable(config.github.gh) else { throw APIError("can't find \(config.github.gh)") }
-    let r = try runCommand(gh, args, timeout: timeout)
+    let r = try runGhResult(args, timeout: timeout)
     guard r.status == 0 else {
       let text = [r.stderr, r.stdout].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
       throw APIError(text ?? "gh \(args.prefix(2).joined(separator: " ")) exited with status \(r.status)")
     }
     return r.stdout
+  }
+
+  /// Runs gh and returns how it exited, for a caller that classifies a
+  /// failure. It throws only when gh can't start.
+  func runGhResult(_ args: [String], timeout: TimeInterval) throws -> CommandResult {
+    guard let gh = findExecutable(config.github.gh) else { throw APIError("can't find \(config.github.gh)") }
+    return try runCommand(gh, args, timeout: timeout)
   }
 }

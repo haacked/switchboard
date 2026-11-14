@@ -31,7 +31,7 @@ extension Service {
         return (created.id, created)
       }
       guard let created else { return try openOrSend(id, text) }
-      return try createdAnswer(created, text: text, queued: queue.sync { entries[id]?.queued != nil })
+      return try createdAnswer(created, text: text, queued: queue.sync { entries[id]?.queuedSince != nil })
     } catch {
       return .failure("\(error)")
     }

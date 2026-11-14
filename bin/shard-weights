@@ -7,11 +7,12 @@
 # it skips in CI or has no .blocking trait, gets weight 0. The script builds
 # the tests and lists their suites to find those.
 #
-#   gh run view <run-id> --log --job <job-id> | bin/shard-weights
-#   bin/shard-weights shard-0.log shard-1.log
+#   gh run view <run-id> --log | bin/shard-weights
+#   bin/shard-weights part-1.log part-2.log
 #
-# Take the log from a CI run of bin/test --shards. Every shard of that run
-# shares one machine and one load. The weights then compare suites fairly.
+# Take the logs of every swift-test job of one CI run. Each job runs one part
+# of bin/test --shards on its own runner. The parts' runners have the same
+# size and a similar load, so the weights compare suites fairly.
 # Run the script on the commit that the log tested. On a later commit, a suite
 # added since then gets weight 0.
 set -euo pipefail

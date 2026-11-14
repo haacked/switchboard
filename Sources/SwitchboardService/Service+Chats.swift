@@ -25,7 +25,7 @@ extension Service {
         let folder = home.chatFolder(group)
         let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
         let chat = try create(new, (folder, nil, nil)) { $0.chat = group }
-        return (chat.id, chat, entries[chat.id]?.queued != nil)
+        return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
       guard let created else { return try openOrSend(id, text) }
       return try createdAnswer(created, text: text, queued: queued)

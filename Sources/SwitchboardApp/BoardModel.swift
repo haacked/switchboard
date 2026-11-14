@@ -117,6 +117,10 @@ final class BoardModel: ObservableObject {
   /// Sessions whose message is on its way to sbd. Their Send buttons stay
   /// disabled until sbd replies, so a second press can't send it again.
   @Published var sending: Set<String> = []
+  /// Sessions whose Start Now is on its way to sbd. Their Start Now buttons
+  /// stay disabled until sbd replies, so a second click can't report that
+  /// the first one already started claude.
+  @Published var startingNow: Set<String> = []
   /// Group suggestions whose Accept or Decline is on its way to sbd. Their
   /// rows stay disabled until sbd replies, so a second click can't answer again.
   @Published var answeringSuggestions: Set<String> = []
@@ -130,6 +134,12 @@ final class BoardModel: ObservableObject {
   @Published var deciding: Set<String> = []
   /// sbd's refusal of the last decision request, by session. The card shows it.
   @Published var decisionErrors: [String: String] = [:]
+  /// The reply keys of the drafts whose `draft-post` sbd has not answered.
+  @Published var postingDrafts: Set<String> = []
+  /// The reply keys of the drafts whose `draft-check` sbd has not answered.
+  @Published var checkingDrafts: Set<String> = []
+  /// sbd's refusal of a draft's last post or check, by reply key.
+  @Published var draftErrors: [String: String] = [:]
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -418,7 +428,9 @@ final class BoardModel: ObservableObject {
       // A hidden session keeps its drafts.
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
-      messageDrafts.prune(keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list)))
+      messageDrafts.prune(
+        keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list))
+          .union(MessageDrafts.replyKeys(list)))
       if !sameShown(allSessions, list) { allSessions = list }
       // A filter change that hides the selection clears it in `orgFilter.didSet`.
       // A selected session that is hidden here therefore had no known org until this refresh.
@@ -588,6 +600,23 @@ final class BoardModel: ObservableObject {
   }
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
+  /// Starts a queued session now. When the live cap is full, sbd stops the
+  /// lowest-priority idle session to make room. When the start still waits,
+  /// the error banner shows why.
+  func startNow(_ id: String) {
+    guard startingNow.insert(id).inserted else { return }
+    perform(
+      "live-next", ["session": .string(id)],
+      then: { result in
+        guard let status = try? JSONCoding.convert(result, to: LiveStatus.self),
+          let start = status.queued.first(where: { $0.session == id })
+        else { return }
+        self.actionError = "Start Now: \(start.reason ?? "the start still waits for a slot")"
+      },
+      finally: { self.startingNow.remove(id) })
+  }
+  static let startNowHelp =
+    "Start claude now. When the live cap is full, sbd stops the lowest-priority idle session to make room."
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
   /// Sets the group's description, or clears it when `text` is blank. The
   /// Board shows the new text before sbd answers. It returns false when it
@@ -1004,6 +1033,51 @@ final class BoardModel: ObservableObject {
   /// What the user typed as the Other answer to one decision and has not sent.
   func otherAnswerDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, ref: ref, decision: decision))
+  }
+
+  /// The user's edit of a draft reply. An empty field starts again with `initial`, the session's text.
+  func replyDraft(session: String, ref: String, number: Int, initial: String) -> MessageField.Draft {
+    let field = replyField(session: session, ref: ref, number: number)
+    if field.text.isEmpty { field.text = initial }
+    return field
+  }
+
+  /// The user's edit of a draft reply, as it is. A view reads it here and fills an empty one on appearance, so
+  /// that emptying the field doesn't refill it on the next refresh.
+  func replyField(session: String, ref: String, number: Int) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.replyKey(session: session, ref: ref, number: number))
+  }
+
+  /// Posts `text` as the reply of the item's draft `number`. sbd trims it, so the app sends the same text that
+  /// `sb draft post` would. A second press does nothing until sbd answers the first.
+  func postDraft(_ session: String, ref: String, number: Int, text: String) {
+    let key = MessageDrafts.replyKey(session: session, ref: ref, number: number)
+    guard postingDrafts.insert(key).inserted else { return }
+    let args: [String: JSON] = [
+      "session": .string(session), "ref": .string(ref), "draft": .number(Double(number)), "text": .string(text),
+    ]
+    perform(
+      "draft-post", args, on: merges,
+      then: { _ in
+        self.draftErrors[key] = nil
+        let field = self.replyField(session: session, ref: ref, number: number)
+        if field.text == text { field.text = "" }
+      },
+      failed: { self.draftErrors[key] = "\($0)" },
+      finally: { self.postingDrafts.remove(key) })
+  }
+
+  /// Asks sbd to read the draft's GitHub comment again, or to look for the reply of a post whose outcome it
+  /// doesn't know. `draft-check` takes no ref. The ref only names the draft's error. A second press does nothing
+  /// until sbd answers the first.
+  func checkDraft(_ session: String, ref: String, number: Int) {
+    let key = MessageDrafts.replyKey(session: session, ref: ref, number: number)
+    guard checkingDrafts.insert(key).inserted else { return }
+    perform(
+      "draft-check", ["session": .string(session), "draft": .number(Double(number))], on: merges,
+      then: { _ in self.draftErrors[key] = nil },
+      failed: { self.draftErrors[key] = "\($0)" },
+      finally: { self.checkingDrafts.remove(key) })
   }
 
   func draft(for card: Card) -> CardView.Draft {
