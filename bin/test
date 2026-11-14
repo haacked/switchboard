@@ -6,7 +6,9 @@
 # also runs the tests that drive the installed claude with Haiku, which take
 # minutes and use some of your Claude quota. With --shards N, it splits the
 # integration tests across N swift test processes and runs the other tests in
-# one more, all at once, then runs MeasureTests alone. --shards is for CI. It
+# one more, all at once, then runs MeasureTests alone. With --part K/P after
+# the count, it splits the tests into P parts for P machines, such as the jobs
+# of a CI matrix, and runs part K (bin/lib/shard-plan). --shards is for CI. It
 # prints a warning elsewhere unless --force-shards follows the count.
 # bin/lib/swift-testing.sh sets the flags that swift needs to find Swift
 # Testing.
@@ -29,16 +31,21 @@ else
   [ "$jobs" != 0 ] || jobs="one per core"
   echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
 fi
+sharded= shard_part=1/1
 if [ "${1:-}" = --shards ]; then
-  case "$#:${3-}" in
-  2:) [ "${CI:-}" = true ] ||
-    echo "bin/test: warning: --shards is for CI. Run bin/test without it, or pass --force-shards after the count." >&2 ;;
-  3:--force-shards) ;;
-  *)
-    echo "usage: bin/test --shards N [--force-shards]" >&2
-    exit 2
-    ;;
-  esac
+  shards_usage() { echo "usage: bin/test --shards N [--part K/P] [--force-shards]" >&2; exit 2; }
+  [ $# -ge 2 ] || shards_usage
+  sharded=1 shard_count=$2 forced=
+  shift 2
+  while [ $# -gt 0 ]; do
+    case $1 in
+    --part) [ $# -ge 2 ] || shards_usage; shard_part=$2; shift 2 ;;
+    --force-shards) forced=1; shift ;;
+    *) shards_usage ;;
+    esac
+  done
+  [ "${CI:-}" = true ] || [ -n "$forced" ] ||
+    echo "bin/test: warning: --shards is for CI. Run bin/test without it, or pass --force-shards after the count." >&2
 else
   bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" --limits-shown "$@"
 fi
@@ -63,54 +70,22 @@ export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMU
 # SwiftPM's lock on its build folder for the whole run, so each shard after the
 # first runs from an APFS clone of .build.
 shards() {
-  local n=$1 clones=.build-shards quiet=IntegrationTests.MeasureTests
+  local n=$1 clones=.build-shards
+  # bin/lib/shard-plan checks the count too, but only after the build.
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
+  if ! [[ $2 =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "bin/test: --part needs K/P with 1 <= K <= P, not '$2'" >&2
+    exit 2
+  fi
+  local part=${BASH_REMATCH[1]} parts=${BASH_REMATCH[2]}
   build_tests
-  local list total i pattern matched=0 patterns=()
+  local list total p i pattern plan patterns=()
   list=$(list_tests)
-  total=$(grep -c . <<<"$list")
-  # Each integration suite, slowest first, goes to the shard with the least
-  # time so far. Tests/shard-weights gives each suite's seconds.
-  # bin/shard-weights rebuilds that file from a CI log. A suite the file doesn't
-  # list gets its test count times the mean seconds per test of the suites
-  # with a weight above 0. A suite with weight 0 holds no slot in CI.
-  # Without the file, that splits the suites by test count. The other targets
-  # take seconds and run in shard N. Their time limits then never wait behind
-  # integration tests that block threads.
-  # MeasureTests skips its timing check while the load average is above the
-  # CPU count, as it is while the shards run. It runs last, as shard N+1, once
-  # the load drops.
-  while read -r i pattern; do
-    patterns[i]=$pattern
-    matched=$((matched + $(grep -c -E "$pattern" <<<"$list")))
-  done < <(awk -F/ -v weights=Tests/shard-weights '
-    BEGIN { while ((getline line < weights) > 0) { split(line, f, " "); seconds[f[2]] = f[1] } }
-    { count[$1]++ }
-    END { for (key in count) if ((key in seconds) && seconds[key] > 0) { listed += seconds[key]; tests += count[key] }
-      rate = tests ? listed / tests : 1
-      for (key in count) {
-        w = (key in seconds) ? seconds[key] : count[key] * rate
-        print w, key } }' <<<"$list" |
-    sort -k1,1rn -k2,2 | awk -v n="$n" -v quiet="$quiet" '
-    { key = $2
-      gsub(/\./, "\\.", key)
-      s = n
-      if ($2 == quiet) s = n + 1
-      else if ($2 ~ /^IntegrationTests($|\.)/) {
-        s = 0
-        for (i = 1; i < n; i++) if (load[i] < load[s]) s = i
-        load[s] += $1
-      }
-      keys[s] = (s in keys) ? keys[s] "|" key : key }
-    END { for (s in keys) print s, "^(" keys[s] ")/" }')
-  if [ -z "${patterns[n + 1]:-}" ]; then
-    echo "bin/test: the tests have no $quiet suite to run alone" >&2
-    exit 1
-  fi
-  if [ "$matched" -ne "$total" ]; then
-    echo "bin/test: the shards' filters match $matched of $total tests" >&2
-    exit 1
-  fi
+  plan=$(bin/lib/shard-plan "$n" "$parts" Tests/shard-weights <<<"$list")
+  while read -r p i pattern; do
+    if [ "$p" -eq "$part" ]; then patterns[i]=$pattern; fi
+  done <<<"$plan"
+  total=$(grep -c -E "$(IFS='|'; echo "${patterns[*]}")" <<<"$list")
   rm -rf "$clones"
   mkdir "$clones"
   trap "rm -rf '$clones'" EXIT
@@ -133,11 +108,13 @@ shards() {
   for i in "${!pids[@]}"; do
     wait "${pids[i]}" || status=$?
   done
-  for _ in {1..36}; do
-    sysctl -n vm.loadavg | awk -v c="$(sysctl -n hw.activecpu)" '{ exit !($2 > c) }' || break
-    sleep 5
-  done
-  run_shard $((n + 1)) .build || status=$?
+  if [ -n "${patterns[n + 1]:-}" ]; then
+    for _ in {1..36}; do
+      sysctl -n vm.loadavg | awk -v c="$(sysctl -n hw.activecpu)" '{ exit !($2 > c) }' || break
+      sleep 5
+    done
+    run_shard $((n + 1)) .build || status=$?
+  fi
   local ran=0 count
   for i in "${!patterns[@]}"; do
     count=$(sed -n -E 's/.*Test run with ([0-9]+) tests?.*/\1/p' "$clones/$i.log" | tail -1) || count=
@@ -150,7 +127,7 @@ shards() {
   exit "$status"
 }
 
-if [ "${1:-}" = --shards ]; then shards "$2"; fi
+if [ -n "$sharded" ]; then shards "$shard_count" "$shard_part"; fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
   shift

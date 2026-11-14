@@ -39,7 +39,8 @@ extension Service {
       let child = try newSession(
         NewSession(
           path: checkout, branch: branch, base: text("base"), name: text("name"), prompt: prompt, model: text("model"),
-          parent: text("parent"), account: text("account"), group: text("group"), autoMode: args["autoMode"]?.bool))
+          parent: text("parent"), account: text("account"), group: text("group"), autoMode: args["autoMode"]?.bool,
+          planMode: args["planMode"]?.bool))
       guard let wait, let parent = child.parent else { return child }
       try queue.sync {
         _ = try waitRequest(
@@ -57,7 +58,9 @@ extension Service {
     }
     var add: [String: JSON] = ["prompt": .string(prompt), "repository": .string(repository), "branch": .string(branch)]
     if let after { add["after"] = .string(after) }
-    if let autoMode = args["autoMode"] { add["autoMode"] = autoMode }
+    for key in ["autoMode", "planMode"] {
+      if let value = args[key] { add[key] = value }
+    }
     for (from, to) in ["name": "title", "parent": "parent", "model": "model", "account": "account", "group": "group"] {
       if let value = text(from) { add[to] = .string(value) }
     }

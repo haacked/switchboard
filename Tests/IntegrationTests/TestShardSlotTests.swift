@@ -462,7 +462,7 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     let r = try rig.run(arguments)
 
     #expect(r.status == 2, "\(r.stderr)")
-    #expect(r.stderr.contains("usage: bin/test --shards N [--force-shards]"), "\(r.stderr)")
+    #expect(r.stderr.contains("usage: bin/test --shards N [--part K/P] [--force-shards]"), "\(r.stderr)")
     #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
   }
 
@@ -481,6 +481,7 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     WarningCase(arguments: ["--shards", "2"], ci: nil, warns: true),
     WarningCase(arguments: ["--shards", "2"], ci: "true", warns: false),
     WarningCase(arguments: ["--shards", "2", "--force-shards"], ci: nil, warns: false),
+    WarningCase(arguments: ["--shards", "2", "--part", "1/1", "--force-shards"], ci: nil, warns: false),
     WarningCase(arguments: RunPath.plain.arguments, ci: nil, warns: false),
   ])
   fileprivate func shardsWarnOnlyOutsideCIWithoutForceShards(_ c: WarningCase) throws {

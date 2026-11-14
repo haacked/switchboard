@@ -1,0 +1,40 @@
+ …onal/projects/-Users-someone-dev-someone-switchboard/memory/shared-projects-permissions-status.md
+ This will modify [+100 chars] …rd/00000000-0000-0000-0000-000000000000/scratchpad/cap/home/.claude
+ /projects/-Users-someone-dev-someone-switchboard/memory/shared-projects-permissions-status.md 
+ (outside working directory) via a symlink
+
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   1 ---
+   2 name: shared-projects-permissions-status
+   3 description: Fix for permission prompts from the symlinked projects folders; refactors in 
+     draft PR #256, Stage 1 waits for it to merge
+   4 metadata:
+   5   type: project
+   6 ---
+   7 
+   8 Option C was chosen on 2026-11-12. Each account gets a real `projects` folder, and sbd pins 
+     every session's auto-memory to `~/.claude/proje
+     cts/<ClaudeFolder.name(main checkout)>/memory` through `autoMemoryDirectory` in the 
+     per-session `--settings` file. The refactors (`ClaudeFo
+     lder.name` and the per-session settings file) are in draft PR #256. The plan is 
+     `~/dev/someone/notes/Dev/repositories/someone/switchboard/p
+     lans/shared-projects-permissions.md`.
+   9 
+  10 **Why:** a symlink anywhere on the path removes Claude's built-in allowances. When the target 
+     is under `~/.claude`, writes are refused as "
+     a sensitive file". The user's decisions: accept the memory split for sessions outside sbd, 
+     include memory folders in the clones, and stop s
+     bd, the automation jobs, and the sessions for the migration.
+  11 
+  12 **How to apply:** don't start Stage 1 (pinning memory) until #256 merges. The user asked for 
+     that on 2026-11-12, and an sb wait on the merg
+     e is set. Stage 2 (dotfiles) and Stage 3 (migration) each need the user's approval. Rerun the 
+     Phase 0 probe on `~/.claude-automation` once 
+     its spend limit resets.
+  13 
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create shared-projects-permissions-status.md?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
