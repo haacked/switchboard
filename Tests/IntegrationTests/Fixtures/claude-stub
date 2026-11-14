@@ -23,6 +23,10 @@
 #                    job's process exits. With held, the report also waits
 #                    until $SB_HOME/report exists. The job's pid goes to
 #                    $SB_HOME/job.pid
+#   background <n> free
+#                    starts the job as background does, but reports it from
+#                    a subshell, so the stub reads the next prompt while the
+#                    job runs, as claude does
 #   interrupt ...    starts a tool call and stops, as Escape does. Claude
 #                    Code sends no hook after Escape
 #   fail ...         ends the turn with StopFailure, as an API error does
@@ -674,7 +678,7 @@ questions='{"questions":[
    "options":[{"label":"red"},{"label":"blue"},{"label":"green"}]}]}'
 
 turn() {
-  local p=$1 step=turn reply cmd='' marker='' before='' n job held
+  local p=$1 step=turn reply cmd='' marker='' before='' n job held free=''
   case $p in
   "lag held") until [ -e "$SB_HOME/report" ]; do sleep 0.05; done ;;
   lag*) sleep 1 ;;
@@ -705,6 +709,7 @@ turn() {
   background*)
     read -r n held two <<<"${p#background }"
     [ "$held" = two ] && two=two held=''
+    [ "$held" = free ] && free=1 held=''
     rm -f "$SB_HOME/job.pid" "$SB_HOME/job2.pid"
     # Claude Code runs each background job in a process group of its own,
     # and its spawn returns after the job is in that group. perl writes the
@@ -798,7 +803,12 @@ turn() {
   esac
   echo "⏺ $reply"
   reply_line "$reply"
-  play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
+  # The subshell shares the stub's process group, so sbd doesn't count it as a job.
+  if [ -n "$free" ]; then
+    play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before" &
+  else
+    play "$step" "$(vars "$p" "$reply" "$cmd")" "$marker" "$before"
+  fi
   status
 }
 

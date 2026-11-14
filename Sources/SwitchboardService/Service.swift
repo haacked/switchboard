@@ -526,7 +526,15 @@ public final class Service {
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
       // A sender that sbd no longer knows, or the session itself, goes unrecorded.
       let from = (try? lookup(["session": args["from"] ?? .null])).flatMap { $0 == id ? nil : $0 }
-      return ["delivery": .string(try send(id, text, trigger: from == nil ? .send : .session, from: from).rawValue)]
+      // A message from another session, such as the Manager, doesn't hold the session for the user.
+      let fromSession = args["from"] != nil || args["insideClaude"]?.bool == true
+      // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
+      let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      let request = fromSession ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
+      let delivery = try send(id, text, trigger: from == nil ? .send : .session, from: from)
+      if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
+      return ["delivery": .string(delivery.rawValue)]
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "stop":
@@ -2172,6 +2180,7 @@ public final class Service {
     out.docket = s.docket.map { DocketSummary($0, e.facts.docket) }
     out.mergeError = e.facts.mergeError
     if verdict.acknowledged { out.acknowledged = true }
+    if verdict.requested { out.requested = true }
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }

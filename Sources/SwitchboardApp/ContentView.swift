@@ -951,7 +951,7 @@ struct BoardCard: View {
     let process = s.waitsToStart ? "not started" : !s.runsClaude ? "docket review" : s.live ? "running" : "stopped"
     let parts = [
       s.board.map { "\($0.column.title) \(ago($0.since))" }, process, s.board == nil ? ago(s.since) : nil,
-      s.acknowledged == true ? "acknowledged" : nil,
+      s.acknowledged == true ? "acknowledged" : nil, s.requested == true ? "requested" : nil,
     ]
     return parts.compactMap { $0 }.joined(separator: " · ")
   }

@@ -796,10 +796,15 @@ final class BoardModel: ObservableObject {
 
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first. Each image is a
-  /// file name and the image's bytes.
-  func send(_ id: String, _ text: String, images: [(name: String, data: Data)] = [], sent: (() -> Void)? = nil) {
+  /// file name and the image's bytes. `ref` names the Inbox item that the
+  /// message answers.
+  func send(
+    _ id: String, _ text: String, images: [(name: String, data: Data)] = [], ref: String? = nil,
+    sent: (() -> Void)? = nil
+  ) {
     guard sending.insert(id).inserted else { return }
     var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    if let ref { args["ref"] = .string(ref) }
     if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
     perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
