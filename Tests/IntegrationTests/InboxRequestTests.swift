@@ -50,10 +50,10 @@ extension Instance {
     try sbd.waitFor(s.id, "the reply to the merge request") { $0.lastReply == "Done: \(Self.message)" }
   }
 
-  /// Sends the message as a click would, and waits for its reply when sbd accepts it.
+  /// Sends the message as a click would, and waits for its reply.
   func send(_ sbd: Instance, _ s: SessionSummary, ref: String) throws {
     let args: [String: JSON] = ["session": .string(s.id), "text": .string(Self.message), "ref": .string(ref)]
-    guard (try? sbd.client.call("send", args)) != nil else { return }
+    _ = try sbd.client.call("send", args)
     try sbd.waitFor(s.id, "the reply to the message") { $0.lastReply == "Done: \(Self.message)" }
   }
 
@@ -74,6 +74,18 @@ extension Instance {
     #expect(request.data["reason"]?.string == Self.conflict)
     #expect(request.data["head"]?.string == MergeTests().head(github))
     #expect(request.data["message"]?.string == Self.message)
+  }
+
+  /// A choice made inside Claude Code, as by the Manager, sends the message without holding the session.
+  @Test func chooseInsideClaudeRecordsNoRequest() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withRequestHold(github)
+    let s = try conflictingSession(github, sbd)
+
+    _ = try sbd.client.call("choose", ["session": .string(s.id), "option": "Merge main", "insideClaude": true])
+    try sbd.waitFor(s.id, "the reply to the merge request") { $0.lastReply == "Done: \(Self.message)" }
+
+    #expect(try sbd.count("request", of: s.id) == 0)
   }
 
   @Test func requestEventCarriesItsTimeLimitAndReadWait() throws {
@@ -139,6 +151,20 @@ extension Instance {
     try sbd.sb("choose", s.id, "Acknowledge")
 
     #expect(try sbd.count("request", of: s.id) == 0)
+  }
+
+  /// Ready to merge offers no send option, so a message typed on it doesn't hold the session or block Merge.
+  @Test func sendOnTheReadyToMergeItemRecordsNoRequest() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withMergeStub(github)
+    let s = try MergeTests().readySession(sbd)
+    let item = try #require(try sbd.get(s.id).triage)
+    try #require(item.source == .rule)
+
+    try send(sbd, s, ref: item.ref)
+
+    #expect(try sbd.count("request", of: s.id) == 0)
+    #expect(try sbd.listed(s.id)["state"]?.string == "ready_to_merge")
   }
 
   /// A summary item comes from the reply, not from a rule.
@@ -269,6 +295,15 @@ extension Instance {
         == "\(Self.conflict) (you asked at \(Wait.formatTime(at)); the session stopped without doing it)")
     #expect(row["requested"] == nil)
     #expect(try sbd.get(s.id).triage?.options.map(\.label) == ["Merge main"])
+
+    // A second click matches the rule again, so it holds the session once more.
+    let stops = try sbd.events(s.id).filter { $0.kind == "Stop" }.count
+    try sbd.sb("choose", s.id, "Merge main")
+    try sbd.waitFor("the turn of the second request") {
+      try sbd.events(s.id).filter { $0.kind == "Stop" }.count == stops + 1
+    }
+    #expect(try sbd.count("request", of: s.id) == 2)
+    #expect(try sbd.listed(s.id)["requested"]?.bool == true)
   }
 
   /// A stall: the job exits, claude reports it in a turn of its own,

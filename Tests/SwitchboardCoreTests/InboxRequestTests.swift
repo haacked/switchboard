@@ -170,6 +170,25 @@ extension InboxRequestTests {
       #expect(f.request == nil)
     }
 
+    @Test func userPromptOtherThanTheMessageClearsTheRequest() throws {
+      let f = facts(
+        try before() + [
+          requestEvent(), event("UserPromptSubmit", requestStart, ["prompt": "Fix the flaky test instead."]),
+        ])
+
+      #expect(f.request == nil)
+    }
+
+    /// claude's prompt for a message with an image shows the image as `[Image #1]` after the text.
+    @Test func messagesPromptWithAnImageKeepsTheRequest() throws {
+      let f = facts(
+        try before() + [
+          requestEvent(), event("UserPromptSubmit", requestStart, ["prompt": .string("\(mergeMessage)\n[Image #1]")]),
+        ])
+
+      #expect(f.request != nil)
+    }
+
     @Test func laterRequestReplacesTheEarlierOne() throws {
       let f = facts(try before() + [requestEvent(), requestEvent(requestAt + 5)])
 
@@ -421,6 +440,13 @@ extension InboxRequestTests {
 
       #expect(v == Verdict(state: .needsYou, reason: ended(timeToRecheck)))
       #expect(!v.requested)
+    }
+
+    /// An acknowledgment compares the reason, so a stall's reason must not change at the time limit.
+    @Test func stallsReasonStaysAfterTheTimeLimit() throws {
+      let events = try incident(resultTurn())
+
+      #expect(evaluate(events, at: until) == Verdict(state: .needsYou, reason: ended(stalled)))
     }
 
     @Test func cardThatOpensEndsTheHold() throws {

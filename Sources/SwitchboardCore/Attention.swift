@@ -470,6 +470,7 @@ public enum Attention {
   ) -> Verdict {
     let verdict = unheld(session, facts, now: now, stateOf: stateOf)
     // A held verdict is Waiting. The hold comes after `readyForReview`, which would turn it into Ready for review.
+    // While sbd can't read the host, the hold must not move the kept state either.
     return facts.unread != nil ? verdict : requested(verdict, facts, now: now)
   }
 

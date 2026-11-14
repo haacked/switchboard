@@ -55,7 +55,10 @@ extension SessionFacts {
       request = nil
     case "UserPromptSubmit":
       let prompt = event.data["prompt"]?.string ?? ""
-      if userPrompt, prompt != request?.message { request = nil }
+      // The prompt of a message with images adds `[Image #n]` after the request's text.
+      if userPrompt, let message = request?.message, prompt != message, message.isEmpty || !prompt.hasPrefix(message) {
+        request = nil
+      }
       if Attention.isSubagentResult(prompt) { request?.resultInTurn = true }
     case "PreToolUse" where !event.fromSubagent:
       let tool = event.data["tool_name"]?.string
@@ -103,7 +106,6 @@ extension Attention {
       }
       return "waiting for GitHub to read the PR"
     }
-    if now >= request.until { return released("time to recheck") }
     if let ended = request.ended {
       if classify(facts.lastReply ?? "").isQuestion { return released("it asked a question") }
       let idle = !facts.jobsRunning(now: now) && !facts.subagentsRunning(now: now)
@@ -111,6 +113,9 @@ extension Attention {
         return released("the session stopped without doing it")
       }
     }
+    // The time limit comes last, so a reason that a stall or a question released stays the same at `until` and an
+    // acknowledgment of it still matches.
+    if now >= request.until { return released("time to recheck") }
     return Verdict(state: .waiting, reason: line("\(asked): \(verdict.reason); \(work())"), requested: true)
   }
 }
