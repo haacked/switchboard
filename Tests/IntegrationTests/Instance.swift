@@ -685,22 +685,23 @@ extension Instance {
   /// `boxBin` before any other, because the stub's remote shell inherits sbd's PATH.
   static func remote(
     host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
-    boxBin: Bool = false
+    accounts: [String] = [], boxBin: Bool = false
   ) throws -> Instance {
-    let sbd = try unstartedRemote(host: extra, hosts: more, config: settings, boxBin: boxBin)
+    let sbd = try unstartedRemote(host: extra, hosts: more, config: settings, accounts: accounts, boxBin: boxBin)
     try sbd.startSbd()
     return sbd
   }
 
-  /// The instance that `remote` returns, before sbd starts. A test that changes the config or the box's programs
-  /// here does not have to start sbd again.
-  static func unstartedRemote(
+  /// The instance that `remote` returns, before sbd starts. A builder that changes the config or the box's
+  /// programs here does not have to start sbd again.
+  private static func unstartedRemote(
     host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
-    boxBin: Bool = false
+    accounts: [String] = [], boxBin: Bool = false
   ) throws -> Instance {
     let hosts = ["mini": remoteHost(boxDestination, extra)].merging(more) { $1 }
     let sbd = try Instance(
-      config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 }, startingSbd: false)
+      accounts: accounts, config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 },
+      startingSbd: false)
     try sbd.prepareBox()
     let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
     var folders: [String] = []
@@ -714,9 +715,9 @@ extension Instance {
       try FileManager.default.createSymbolicLink(atPath: "\(folder)/python3", withDestinationPath: python)
       folders.append(folder)
     }
-    let first = folders.map { "\($0):" }.joined()
-    sbd.sbdEnvironment["PATH"] = first + path
-    if boxBin { sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = first + path }
+    let searched = (folders + [path]).joined(separator: ":")
+    sbd.sbdEnvironment["PATH"] = searched
+    if boxBin { sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = searched }
     return sbd
   }
 
@@ -1116,7 +1117,7 @@ extension Instance {
       try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(boxBin)/\(name)")
     }
     var programs = Instance.gatedPrograms
-    let python = try #require(Instance.python ?? findExecutable("python3"), "python3 is not installed")
+    let python = try #require(Instance.python, "python3 is not installed")
     programs["python3"] = python
     for (name, path) in programs {
       try write(
@@ -1213,7 +1214,7 @@ extension Instance {
   @discardableResult
   func runBoxShim(session: String, payload: JSON) throws -> CommandResult {
     try runCommand(
-      findExecutable("python3") ?? "/usr/bin/python3", [boxShim, "hook"],
+      Instance.python ?? "/usr/bin/python3", [boxShim, "hook"],
       env: ["HOME": boxHome, "SB_HOME": boxSB, "SB_SESSION_ID": session, "PATH": "/usr/local/bin:/usr/bin:/bin"],
       input: Data(payload.text.utf8), timeout: 15)
   }
