@@ -115,7 +115,7 @@ import Testing
     }
   }
 
-  @Test func theManagersCardStaysOutOfTheInbox() throws {
+  @Test func theManagersCardIsInTheInboxBesideAWorkSessionsCard() throws {
     let sbd = try Instance()
     let m = try manager(sbd)
     try sbd.waitFor(m.id, "the stub") { $0.live }
@@ -123,8 +123,7 @@ import Testing
     try sbd.waitFor(m.id, "the card") { !$0.cards.isEmpty }
     let other = try sbd.new(prompt: "perm touch y", name: "other")
     try sbd.waitFor(other.id, "the other card") { !$0.cards.isEmpty }
-    #expect(try triaged(sbd) == [other.id])
-    // The card stays on the Manager's own entry, where the user can answer it.
+    #expect(Set(try triaged(sbd)) == [m.id, other.id])
     #expect(try sbd.cards().contains { $0.session == m.id })
   }
 

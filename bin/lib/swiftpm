@@ -2,7 +2,7 @@
 # Runs a SwiftPM command that compiles: `bin/lib/swiftpm build|test args…`.
 # The scripts in bin/ run every compiling swift build and swift test through
 # it. `swift test list` and `--show-bin-path` compile nothing and call swift
-# directly.
+# directly. `bin/lib/swiftpm --jobs` prints the job count and runs nothing.
 #
 # It waits for a machine-wide build slot (bin/lib/build-slot) unless its
 # caller already holds one. It passes --jobs so that one build leaves cores for
@@ -10,8 +10,7 @@
 # is 4, or the CPU count when that is lower. SB_BUILD_JOBS=0 passes no
 # --jobs, and SwiftPM then starts one job per core.
 set -euo pipefail
-[ $# -ge 1 ] || { echo "usage: bin/lib/swiftpm build|test [arguments…]" >&2; exit 2; }
-"${0%/*}/build-slot" --check || exec "${0%/*}/build-slot" -- "$0" "$@"
+[ $# -ge 1 ] || { echo "usage: bin/lib/swiftpm build|test [arguments…] | bin/lib/swiftpm --jobs" >&2; exit 2; }
 jobs=${SB_BUILD_JOBS:-}
 if [ -z "$jobs" ]; then
   cpus=$(sysctl -n hw.activecpu)
@@ -21,6 +20,12 @@ if ! [[ $jobs =~ ^[0-9]+$ ]]; then
   echo "bin/lib/swiftpm: SB_BUILD_JOBS must be a whole number, not '$jobs'" >&2
   exit 2
 fi
+jobs=$((10#$jobs))
+if [ "$1" = --jobs ]; then
+  echo "$jobs"
+  exit 0
+fi
+"${0%/*}/build-slot" --check || exec "${0%/*}/build-slot" -- "$0" "$@"
 sub=$1
 shift
 if [ "$jobs" -eq 0 ]; then exec swift "$sub" "$@"; fi

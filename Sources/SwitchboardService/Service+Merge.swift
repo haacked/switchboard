@@ -49,7 +49,7 @@ extension Service {
         if method.enqueues {
           try waitForQueue(id, pr)
         } else {
-          _ = try send(id, "PR #\(pr.number) merged; finish the post-merge steps", byUser: false)
+          _ = try send(id, "PR #\(pr.number) merged; finish the post-merge steps", byUser: false, trigger: .merge)
         }
       }
       return try JSON(encoding: summary(id))

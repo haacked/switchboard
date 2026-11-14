@@ -54,6 +54,34 @@ private struct Setup {
   }
 }
 
+extension Setup {
+  /// A Done session whose folder had the PR's branch checked out, then made the merged PR's head on
+  /// `<branch>-v2` and pushed it. With `sessionOnV2`, sbd makes the worktree on `-v2`, so the session's own
+  /// branch is `-v2`. Otherwise sbd makes it on the PR's branch, and the folder switches to `-v2`.
+  func doneOnV2(_ pr: RecordedPR, sessionOnV2: Bool) throws -> (session: SessionSummary, v2: String, tip: String) {
+    let v2 = "\(pr.branch)-v2"
+    let s: SessionSummary
+    if sessionOnV2 {
+      s = try sbd.worktreeSession(repo, branch: v2)
+      try sbd.git(s.cwd, "checkout", "-q", "-b", pr.branch)
+      try sbd.git(s.cwd, "checkout", "-q", v2)
+    } else {
+      s = try sbd.worktreeSession(repo, branch: pr.branch)
+      try sbd.git(s.cwd, "checkout", "-q", "-b", v2)
+    }
+    try sbd.commit(s.cwd, "v2.txt")
+    try sbd.git(s.cwd, "push", "-q", "origin", v2)
+    let tip = try sbd.git(s.cwd, "rev-parse", "HEAD")
+    try sbd.link(s, "PostHog/posthog", pr.number)
+    github.change(pr.number) {
+      $0["state"] = "MERGED"
+      $0["headRefOid"] = .string(tip)
+    }
+    try pollUntilDone(s)
+    return (s, v2, tip)
+  }
+}
+
 extension Instance {
   fileprivate func rmDone(_ flags: String..., env: [String: String] = [:]) throws -> CommandResult {
     try run(["rm", "--done"] + flags, env: env)
@@ -187,6 +215,47 @@ private func parse(_ r: CommandResult) throws -> JSON {
     #expect(reason.contains(refusal), Comment(rawValue: reason))
     #expect(FileManager.default.fileExists(atPath: foreign.cwd))
     #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/haacked/no-pr-yet") == tip)
+  }
+
+  /// The folder made the merged PR's head on `-v2`, so the session is Done. The PR merged its own
+  /// branch, not `-v2`, so removal keeps both branches.
+  @Test func keepsTheBranchesOfADoneSessionWhoseMergedPRUsesAnEarlierBranch() throws {
+    let s = try Setup()
+    let (session, v2, tip) = try s.doneOnV2(.breaker, sessionOnV2: false)
+    let original = try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(RecordedPR.breaker.branch)")
+
+    let result = try parse(try s.sbd.rmDone("--worktree", "--yes", "--json"))
+
+    #expect(removed(result).isEmpty, Comment(rawValue: result.text))
+    #expect(skip(result["skipped"], session.id) != nil, Comment(rawValue: result.text))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(RecordedPR.breaker.branch)") == original)
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(v2)") == tip)
+  }
+
+  @Test func skipsADoneSessionOnV2WhoseMergedPRUsesAnotherBranch() throws {
+    let s = try Setup()
+    let (session, v2, tip) = try s.doneOnV2(.breaker, sessionOnV2: true)
+
+    let result = try parse(try s.sbd.rmDone("--worktree", "--yes", "--json"))
+
+    #expect(removed(result).isEmpty)
+    let reason = try #require(skip(result["skipped"], session.id)?["reason"]?.string, Comment(rawValue: result.text))
+    #expect(reason.contains("has no merged PR"), Comment(rawValue: reason))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(v2)") == tip)
+  }
+
+  @Test func cleanupRefusesADoneSessionOnV2WhoseMergedPRUsesAnotherBranch() throws {
+    let s = try Setup()
+    let (session, v2, tip) = try s.doneOnV2(.breaker, sessionOnV2: true)
+
+    let r = try s.sbd.run(["cleanup", session.id, "--json"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("has no merged PR"), Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(v2)") == tip)
   }
 
   @Test func skipsALockedWorktreeAndRemovesTheRest() throws {
@@ -971,5 +1040,20 @@ private func calls(_ log: String) -> [String] {
     #expect(removed(try parse(r)) == [merged.id], Comment(rawValue: r.stdout))
     #expect(try s.sbd.branchExists(s.repo, RecordedPR.breaker.branch))
     #expect(try s.sbd.branchExists(s.origin, RecordedPR.breaker.branch))
+  }
+
+  @Test func cleanupRefusesAWorktreeThatSupacodeLockedWhenItsMergedPRUsesAnotherBranch() throws {
+    let s = try Setup()
+    let (session, v2, tip) = try s.doneOnV2(.breaker, sessionOnV2: true)
+    let log = try s.sbd.useSupacodeStub()
+    try s.sbd.lockForSupacode(s.repo, session.cwd)
+
+    let r = try s.sbd.run(["cleanup", session.id, "--json"])
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("has no merged PR"), Comment(rawValue: r.stderr))
+    #expect(FileManager.default.fileExists(atPath: session.cwd))
+    #expect(calls(log).isEmpty)
+    #expect(try s.sbd.git(s.repo, "rev-parse", "refs/heads/\(v2)") == tip)
   }
 }
