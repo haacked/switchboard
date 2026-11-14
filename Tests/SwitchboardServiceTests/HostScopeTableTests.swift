@@ -81,7 +81,7 @@ enum PlannedScope {
   ]
 
   /// The ops that `handleHostRequest` sends on their own path before the table: `hook` to `handleHostHook`, and
-  /// `cli` to its refusal until stage 4.
+  /// `cli` to `hostCLI`.
   static let ownPaths: Set<String> = ["hook", "cli"]
 
   /// A request of `op` that the table admits, with every session it names on mini.

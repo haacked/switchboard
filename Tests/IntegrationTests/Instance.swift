@@ -1157,6 +1157,13 @@ extension Instance {
       input: Data(payload.text.utf8), timeout: 15)
   }
 
+  /// Runs the box's `~/.sb/bin/sb` in the box's home, as claude on the box runs `sb`, whatever its exit status. The
+  /// box's environment holds HOME and SB_HOME. A test adds SB_SESSION_ID and CLAUDECODE as a claude has them.
+  func boxSb(_ args: [String], env extra: [String: String] = [:], stdin: Data? = nil) throws -> CommandResult {
+    let env = ["HOME": boxHome, "SB_HOME": boxSB, "PATH": "/usr/local/bin:/usr/bin:/bin"].merging(extra) { $1 }
+    return try runCommand("\(boxSB)/bin/sb", args, env: env, input: stdin, timeout: 60, cwd: boxHome)
+  }
+
   /// Spools a probe for the session through the box's shim.
   func spoolProbe(_ marker: String, session: String) throws {
     let r = try runBoxShim(session: session, payload: Instance.probePayload(marker))

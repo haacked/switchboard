@@ -151,6 +151,11 @@ public final class Service {
   /// Runs after `handleHostRequest` authorizes a request and before the request runs, off the state queue. Only
   /// tests set it.
   var afterHostAuthorize: (() -> Void)?
+  /// Runs this Mac's `sb` for the hosts' `cli` requests. Only tests replace it.
+  var hostCLIRunner: HostCLIRunner
+  /// How long a write of an answer on a host's socket may wait for the client to read before sbd drops the
+  /// connection. Only tests change it.
+  var hostSendTimeoutSeconds: Double = 30
   /// When sbd last pruned the recorded ids of the hosts' events.
   var hostEventsPruned: Int64 = 0
   let triageJobs: OperationQueue = {
@@ -266,6 +271,7 @@ public final class Service {
     self.store = try Store(path: home.database)
     self.mac = try MacSite(home: home, config: config)
     self.sbPath = sbPath
+    self.hostCLIRunner = HostCLIRunner(program: sbPath)
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.issueSettings = config.issues
@@ -356,14 +362,30 @@ public final class Service {
     _ request: Request, origin: RequestOrigin = .mac, caller: Caller = .inProcess,
     hookGone: @escaping () -> Bool = { false }
   ) -> Response {
+    var answer = Response.failure("sbd gave no answer")
+    handle(request, origin: origin, caller: caller, hookGone: hookGone) { answer = $0 }
+    return answer
+  }
+
+  /// Runs the request as the other `handle` does and passes its one answer to `reply`, which sends it. A host's
+  /// `cli` request calls `reply` while its run still holds one of the host's slots, so the slot stays taken
+  /// until the answer is sent.
+  public func handle(
+    _ request: Request, origin: RequestOrigin, caller: Caller, hookGone: @escaping () -> Bool,
+    reply: (Response) -> Void
+  ) {
+    var replied = false
     do {
       // A request from a host's socket goes through the host's scope before it reaches `route`.
       if case .remote(let host) = origin {
-        return try handleHostRequest(request, host: host, caller: caller, hookGone: hookGone)
+        return try handleHostRequest(request, host: host, caller: caller, hookGone: hookGone) {
+          replied = true
+          reply($0)
+        }
       }
-      return try route(request, origin: .mac, caller: caller, hookGone: hookGone)
+      reply(try route(request, origin: .mac, caller: caller, hookGone: hookGone))
     } catch {
-      return .failure("\(error)")
+      if !replied { reply(.failure("\(error)")) }
     }
   }
 
@@ -1128,7 +1150,8 @@ public final class Service {
   /// have already found a free slot.
   func startClaude(_ id: String, prompt: String?, trigger: LaunchTrigger) throws {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
-    // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
+    // MCP servers or `claudeArgs` of this Mac. It gets the triage nudge, because claude on the host runs `sb`
+    // through the host's wrapper. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
     entries[id]?.jumpedAt = nil
     if local {
@@ -1151,7 +1174,7 @@ public final class Service {
     // After claudeArgs, so that the session's mode wins over a global one.
     let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
     if let mode { args += ["--permission-mode", mode] }
-    if local, !config.triage.systemPrompt.isEmpty {
+    if !config.triage.systemPrompt.isEmpty {
       args += ["--append-system-prompt", config.triage.systemPrompt]
     }
     // `--` keeps a prompt that starts with a dash from reading as an option.
@@ -1159,8 +1182,10 @@ public final class Service {
     let site = self.site(for: session)
     let terminals = try site.terminals()
     let env = try newPaneEnv(id)
+    // On a host, `$SB_HOME/bin` goes first on PATH, so claude and its tools run the host's `sb` wrapper.
+    let path = local ? "" : #"export PATH="$SB_HOME/bin:$PATH""# + "\n"
     try writeLauncher(
-      "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
+      path + "# Written by sbd. The Claude pane sources it to start or resume claude.\n"
         + args.map(shellQuote).joined(separator: " ") + "\n",
       for: id, at: site)
     let command =

@@ -347,6 +347,13 @@ let usage = """
   session is text, except send's leading --image pairs, so put --json and
   --card before the session. SB_HOME picks the state folder (default ~/.sb).
 
+  On a remote host, ~/.sb/bin/sb runs this Mac's sb through the host's link, in
+  a sandbox that reaches only that host's socket. It sees and acts on only the
+  host's sessions, and new sessions start on the host. It refuses attach, hook,
+  mcp-server, service, rm, cleanup, groups, chats, the Manager, and the commands
+  that act on this Mac or with its GitHub login. Its output arrives when the
+  command ends, which is at most 600 s.
+
   Wait kinds: ci, review (needs --who), bot-review, approval, queue, merge, and
   deploy (--env dev, prod-us, prod-eu, or prod) take a PR as --target, or wait
   on the session's own PR. session takes another session as --target and a
@@ -421,6 +428,11 @@ func printJSON(_ value: JSON) {
 }
 
 let client = Client()
+
+/// The host whose `cli` request runs this `sb`, or nil when it runs on this Mac.
+let cliHost = ProcessInfo.processInfo.environment["SB_CLI_HOST"]
+/// The folder on the host that the host's `sb` ran in, or nil when this `sb` runs on this Mac.
+let cliCwd = cliHost == nil ? nil : ProcessInfo.processInfo.environment["SB_CLI_CWD"] ?? "/"
 
 func call(_ op: String, _ args: [String: JSON] = [:], timeout: TimeInterval = 60) -> JSON {
   do {
@@ -691,6 +703,11 @@ guard let command = argv.popFirst() else {
   print(usage)
   exit(0)
 }
+// sbd sets SB_CLI_HOST when it runs sb for a host's `cli` request. Its sandbox keeps these commands from acting
+// on this Mac. They refuse here first, with a message that names the reason.
+if let host = cliHost, ["attach", "hook", "mcp-server", "service"].contains(command) {
+  die("sb \(command) doesn't run through \(host)'s sb")
+}
 // `Args` reads `--plan` as a valued flag. It would then die on a trailing
 // `--plan` or swallow the next argument. `new` and `spawn` refuse it here.
 if ["new", "spawn"].contains(command), argv.contains("--plan") {
@@ -734,7 +751,9 @@ case "new":
   guard let path = a.positional.first else { die("new needs a folder") }
   // With --host, the folder is on the host, which resolves its ~. sb passes it as typed.
   let host = a.values["--host"]
-  let folder = SessionHost.namesRemote(host) ? path : URL(fileURLWithPath: path.expandingTilde).path
+  let folder =
+    cliCwd.map { SessionHost.hostFolder(path, cwd: $0) }
+    ?? (SessionHost.namesRemote(host) ? path : URL(fileURLWithPath: path.expandingTilde).path)
   let args = NewSession(
     path: folder, branch: a.values["--branch"], base: a.values["--base"], name: a.values["--name"],
     worktree: a.switches.contains("--worktree"),

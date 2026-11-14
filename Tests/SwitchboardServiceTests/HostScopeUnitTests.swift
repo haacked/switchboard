@@ -41,11 +41,13 @@ private let twoHosts: [String: JSON] = [
 ]
 
 /// A service that holds a local session `l1`, mini's `m1`, and other's `o1`. Its order window is `windowMs`. No
-/// link connects unless a request waits for its host.
-private func withSessions(windowMs: Int64 = 20, _ body: (Service) throws -> Void) throws {
+/// link connects unless a request waits for its host. `sbPath` is the `sb` that a `cli` request runs.
+private func withSessions(
+  windowMs: Int64 = 20, sbPath: String = "/usr/bin/true", _ body: (Service) throws -> Void
+) throws {
   // A request that a missing guard lets through runs no claude or tmux on this Mac.
   let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
-  try withHostService(hosts: twoHosts, config: config) { service, _ in
+  try withHostService(hosts: twoHosts, config: config, sbPath: sbPath) { service, _ in
     service.queue.sync {
       service.hostEventWindowMs = windowMs
       service.entries["l1"] = Service.Entry(session: session("l1", host: nil, name: "local"))
@@ -771,17 +773,175 @@ private func ids(_ answer: Response) -> [String] {
 
   // MARK: cli
 
+  /// The request's own fields can't set the subprocess's environment.
   @Test(.timeLimit(.minutes(1)))
-  func aCliRequestFailsUntilStageFourAndChangesNothing() throws {
-    try withSessions { service in
+  func aCliRequestWithAKeyOutsideItsFieldsFailsAndChangesNothing() throws {
+    try withSessions(sbPath: builtSb) { service in
       let before = try service.scopeState()
 
       let answer = service.handle(
-        Request(op: "cli", args: ["argv": ["ls", "--json"], "session": "m1"]), origin: .remote("mini"))
+        Request(op: "cli", args: ["argv": ["ls", "--json"], "cwd": "/srv/repo", "env": ["SB_HOME": "/"]]),
+        origin: .remote("mini"))
 
       #expect(!answer.ok)
-      #expect(answer.error?.contains("not yet") == true, "\(answer.error ?? "")")
       #expect(try service.scopeState() == before)
+    }
+  }
+}
+
+/// A `cli` request from mini that runs the built `sb` with the argv.
+private func cliRequest(_ argv: [String], session: String? = "m1") -> Request {
+  var args: [String: JSON] = ["argv": .array(argv.map(JSON.string)), "cwd": "/srv/repo"]
+  if let session { args["session"] = .string(session) }
+  return Request(op: "cli", args: .object(args))
+}
+
+/// The exit status and the two streams of a `cli` answer.
+private func cliOutput(_ answer: Response) throws -> (status: Int?, stdout: Data, stderr: Data) {
+  try #require(answer.ok, "the cli request failed: \(answer.error ?? "")")
+  let result = try #require(answer.result)
+  let stdout = try #require(Data(base64Encoded: result["stdout"]?.string ?? "-"), "stdout is not base64")
+  let stderr = try #require(Data(base64Encoded: result["stderr"]?.string ?? "-"), "stderr is not base64")
+  return (result["status"]?.int, stdout, stderr)
+}
+
+/// The `cli` request through the real `sb` under the real profile. The subprocess's requests come back on mini's
+/// socket, which the test's listener serves.
+@Suite struct HostScopeCLITests {
+  /// `l1` is the local session's id and also `m1`'s name, and `local` is the local session's name.
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: [
+      (["send", "l1", "hi"], "send", ["session": "l1", "text": "hi"]),
+      (["send", "local", "hi"], "send", ["session": "local", "text": "hi"]),
+      (["get", "l1", "--json"], "get", ["session": "l1"]),
+      (["get", "o1", "--json"], "get", ["session": "o1"]),
+    ] as [([String], String, [String: JSON])])
+  func aCliRequestGetsTheRefusalOfTheSameRawRequestAndChangesNothing(
+    argv: [String], op: String, args: [String: JSON]
+  ) throws {
+    try withSessions(sbPath: builtSb) { service in
+      try HostServer.listen(service: service, host: "mini").run()
+      let before = try service.scopeState()
+
+      let raw = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+      let cli = try cliOutput(service.handle(cliRequest(argv), origin: .remote("mini")))
+      settle(service)
+
+      let refusal = try #require(raw.error, "the raw request was not refused")
+      #expect(refusal.contains("that session is not on mini"), "\(refusal)")
+      #expect(cli.status == 1)
+      #expect(cli.stdout.isEmpty, "\(String(decoding: cli.stdout, as: UTF8.self))")
+      #expect(String(decoding: cli.stderr, as: UTF8.self) == "sb: \(refusal)\n")
+      #expect(try service.scopeState() == before)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func getForTheHostsOwnSessionThroughCliPrintsTheAnswerOfTheRawRequest() throws {
+    try withSessions(sbPath: builtSb) { service in
+      try HostServer.listen(service: service, host: "mini").run()
+
+      let raw = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))
+      let cli = try cliOutput(service.handle(cliRequest(["get", "m1", "--json"]), origin: .remote("mini")))
+
+      let roots = service.benchRoots()
+      #expect(cli.status == 0, "\(String(decoding: cli.stderr, as: UTF8.self))")
+      let printed = JSON.parse(String(decoding: cli.stdout, as: UTF8.self))
+      #expect(comparable(printed, roots) == comparable(raw.result, roots))
+    }
+  }
+
+  /// Claude on a host mostly runs the commands without `--json`, whose text formats dates and names under the
+  /// sandbox.
+  @Test(.timeLimit(.minutes(1)), arguments: [["get", "m1"], ["ls"]])
+  func aCommandWithoutJSONPrintsTheHostsSessionThroughCli(argv: [String]) throws {
+    try withSessions(sbPath: builtSb) { service in
+      try HostServer.listen(service: service, host: "mini").run()
+
+      let cli = try cliOutput(service.handle(cliRequest(argv), origin: .remote("mini")))
+
+      let printed = String(decoding: cli.stdout, as: UTF8.self)
+      #expect(cli.status == 0, "\(String(decoding: cli.stderr, as: UTF8.self))")
+      #expect(printed.contains("m1"), "\(printed)")
+      #expect(!printed.contains("o1"), "\(printed)")
+    }
+  }
+
+  /// A client on mini sends `cli` requests whose answers are far larger than a socket's buffer and never reads
+  /// them. Each unread answer keeps its run's slot until its write ends, so a ninth request is refused instead
+  /// of piling up another answer. The write gives up after the send timeout, which closes the connection and
+  /// frees the slot.
+  @Test(.timeLimit(.minutes(1)))
+  func cliAnswersThatAClientNeverReadsHoldTheirSlotsUntilTheWriteTimesOut() throws {
+    try withSessions(sbPath: builtSb) { service in
+      service.hostCLIRunner = HostCLIRunner(program: "/usr/bin/head")
+      service.hostSendTimeoutSeconds = 4
+      try HostServer.listen(service: service, host: "mini").run()
+      let socket = service.home.hostSocket("mini")
+      let line = Data(
+        (#"{"op":"cli","args":{"argv":["-c","4000000","/dev/zero"],"cwd":"/srv/repo"}}"# + "\n").utf8)
+      /// Sends one request and reads its whole answer.
+      func ask() throws -> Response {
+        let fd = try UnixSocket.connect(path: socket, timeout: 30)
+        defer { close(fd) }
+        try UnixSocket.write(fd, line)
+        var reader = UnixSocket.LineReader(fd: fd)
+        let answer = try #require(try reader.next(), "sbd closed the connection")
+        return try JSONCoding.decoder.decode(Response.self, from: answer)
+      }
+
+      let silent = try (0..<8).map { _ in
+        let fd = try UnixSocket.connect(path: socket, timeout: 30)
+        try UnixSocket.write(fd, line)
+        return fd
+      }
+      defer { silent.forEach { close($0) } }
+      // An answer that has begun to arrive is being written, and its run holds its slot until the write ends.
+      let writing = waitUntil(seconds: 6) {
+        var ready = silent.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
+        return poll(&ready, nfds_t(ready.count), 0) == silent.count
+      }
+      try #require(writing, "the eight answers did not all begin")
+      let refused = try ask()
+
+      #expect(refused.error == "too many sb commands from mini are running", "\(refused)")
+      // A read would let a write go on, so the test reads nothing until every write has had twice its 4 s: the
+      // write that stalls first returns its partial count, and the next write times out. The reads below then show
+      // whether sbd hung up.
+      _ = waitUntil(seconds: 12) {
+        var ends = silent.map { pollfd(fd: $0, events: Int16(POLLIN), revents: 0) }
+        _ = poll(&ends, nfds_t(ends.count), 0)
+        return ends.allSatisfy { $0.revents & Int16(POLLHUP) != 0 }
+      }
+      for fd in silent {
+        var received = 0
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        var n = 0
+        repeat {
+          n = recv(fd, &buffer, buffer.count, 0)
+          received += max(n, 0)
+        } while n > 0
+        #expect(n == 0, "sbd did not close the connection: \(UnixSocket.errnoText())")
+        #expect(received < 4_000_000, "the client got the whole answer of \(received) bytes")
+      }
+      let freed = try ask()
+      #expect(freed.ok, "\(freed.error ?? "")")
+    }
+  }
+
+  /// The subprocess's own request needs the state queue. A `cli` request that held the queue would keep that
+  /// request waiting past the one-second deadline, and the runner would end `sb` with status 1.
+  @Test(.timeLimit(.minutes(1)))
+  func sbGetThroughCliAnswersWithinAOneSecondDeadlineBecauseCliNeverHoldsTheStateQueue() throws {
+    try withSessions(sbPath: builtSb) { service in
+      try HostServer.listen(service: service, host: "mini").run()
+      service.hostCLIRunner = HostCLIRunner(program: service.sbPath, deadline: 1)
+
+      let cli = try cliOutput(service.handle(cliRequest(["get", "m1", "--json"]), origin: .remote("mini")))
+
+      #expect(cli.status == 0, "\(String(decoding: cli.stderr, as: UTF8.self))")
+      #expect(JSON.parse(String(decoding: cli.stdout, as: UTF8.self))?["id"] == "m1")
     }
   }
 }

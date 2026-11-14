@@ -8,9 +8,16 @@ func planMode(_ a: Args) -> Bool? {
 
 func spawn(_ a: Args) {
   var args: [String: JSON] = [:]
-  // A path on a host is passed as typed, and the host resolves its ~.
+  // A path on a host is passed as typed, and the host resolves its ~. On a host, a relative path is joined to the
+  // host's folder.
   if let repo = a.values["--repo"] {
-    args["repository"] = .string(SessionHost.namesRemote(a.values["--host"]) ? repo : repo.repositoryArgument)
+    let path: String
+    if let cwd = cliCwd {
+      path = repo.hasPrefix(".") ? SessionHost.hostFolder(repo, cwd: cwd) : repo
+    } else {
+      path = SessionHost.namesRemote(a.values["--host"]) ? repo : repo.repositoryArgument
+    }
+    args["repository"] = .string(path)
   }
   let flags = [
     "--branch": "branch", "--prompt": "prompt", "--after": "after", "--name": "name", "--base": "base",

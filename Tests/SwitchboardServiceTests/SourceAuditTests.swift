@@ -39,6 +39,16 @@ enum SourceAudit {
   /// `Service+Sites.swift` holds the accessors that every session read of the snapshot goes through.
   static let snapshotReaders = local.union(["\(service)Service+Sites.swift"])
 
+  /// The files of `sb` that may read stdin. The box's `sb` sends stdin through the `cli` request only for `summary
+  /// set`, so a command in any other file would read an empty stdin on a host. `main.swift` reads a hook's payload,
+  /// and a host refuses `hook`. `MCPServer.swift` serves `mcp-server`, which a host refuses. `Groups.swift` and
+  /// `Account.swift` read a terminal's answer after an `isatty` check, which a pipe fails. `Drafts.swift` reads
+  /// `draft post --text -`, which refuses inside Claude Code, and a host refuses every `draft-*` op.
+  static let sbStdinReaders: Set<String> = [
+    "sb/main.swift", "sb/Triage.swift", "sb/MCPServer.swift", "sb/Groups.swift", "sb/Account.swift",
+    "sb/Drafts.swift",
+  ]
+
   /// A name counts as bare when no identifier and no `.` comes before it. `site.realPath(` and
   /// `mac.snapshot.panes` name their site, so they are not bare. `self.` names no site.
   private static let bare = #"(?<![A-Za-z0-9_.])(?:self\.)?"#
@@ -58,6 +68,10 @@ enum SourceAudit {
     // Swift extensions hold no stored properties, so only `Service.swift` can give `Service` one.
     Rule("Service.host", #"\b(?:let|var)\s+host\s*:\s*TerminalHost\b"#, under: serviceFile),
     Rule("Service.git", #"\b(?:let|var)\s+git\s*:\s*String\b"#, under: serviceFile),
+    Rule(
+      "stdin read in sb",
+      #"FileHandle\.standardInput|(?<![A-Za-z0-9_])readLine\(|readDataToEndOfFile\(|(?<![A-Za-z0-9_])read\((?:STDIN_FILENO|0)\b"#,
+      under: "sb/", allowed: sbStdinReaders),
   ]
 
   /// The findings in one file's text. It reads comments too, as `grep` does.
@@ -260,5 +274,60 @@ enum SourceAudit {
     let rules = SourceAudit.scan(file: "SwitchboardService/Service.swift", text: line).map(\.rule)
 
     #expect(rules == ["= LocalMachine()", "LocalMachine()", "Processes.using("])
+  }
+
+  // MARK: stdin in sb
+
+  @Test(arguments: [
+    "  let input = FileHandle.standardInput.readDataToEndOfFile()",
+    "  while let line = readLine() {",
+    "  let rest = try FileHandle.standardInput.readToEnd()",
+    "  let more = FileHandle.standardInput.availableData",
+    "  let n = read(STDIN_FILENO, &buffer, 1)",
+    "  let n = read(0, &buffer, 1)",
+    "  let all = handle.readDataToEndOfFile()",
+  ])
+  func aStdinReadInAnSbFileOutsideTheListFails(line: String) {
+    let rules = SourceAudit.scan(file: "sb/Send.swift", text: line).map(\.rule)
+
+    #expect(rules.contains("stdin read in sb"), "\(line)")
+  }
+
+  @Test func aStdinReadInEachListedSbFilePasses() {
+    let line = "  let input = FileHandle.standardInput.readDataToEndOfFile(); _ = readLine()"
+
+    for file in SourceAudit.sbStdinReaders {
+      #expect(!SourceAudit.scan(file: file, text: line).map(\.rule).contains("stdin read in sb"), "\(file)")
+    }
+  }
+
+  @Test func theStdinRuleCoversOnlySb() {
+    let line = "  let input = FileHandle.standardInput.readDataToEndOfFile()"
+
+    for file in ["sbd/main.swift", "SwitchboardService/Service.swift", "SwitchboardCore/Processes.swift"] {
+      #expect(!SourceAudit.scan(file: file, text: line).map(\.rule).contains("stdin read in sb"), "\(file)")
+    }
+  }
+
+  @Test func anIsattyCheckOrAReadlineLikeNameIsNoStdinRead() {
+    let text = "  guard isatty(STDIN_FILENO) != 0 else { return }\n  let x = threadLine()\n  let y = myread(0)\n"
+
+    #expect(!SourceAudit.scan(file: "sb/Send.swift", text: text).map(\.rule).contains("stdin read in sb"))
+  }
+
+  /// A terminal prompt reads stdin only after its function checks for a terminal. A pipe from the shim fails the
+  /// check.
+  @Test(arguments: ["sb/Groups.swift", "sb/Account.swift"])
+  func eachTerminalPromptInSbReadsStdinOnlyAfterAnIsattyCheckInItsFunction(file: String) throws {
+    let lines = try String(contentsOfFile: "\(SourceAudit.sources)/\(file)", encoding: .utf8)
+      .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let reads = lines.indices.filter { lines[$0].contains("readLine(") }
+
+    try #require(!reads.isEmpty, "\(file) reads no line")
+    for read in reads {
+      let start = lines[..<read].lastIndex { $0.contains("func ") } ?? 0
+      #expect(
+        lines[start..<read].contains { $0.contains("isatty(") }, "\(file):\(read + 1) reads stdin with no isatty check")
+    }
   }
 }

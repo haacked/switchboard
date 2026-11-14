@@ -81,3 +81,20 @@ import Testing
     #expect(SessionHost.namesRemote(named))
   }
 }
+
+/// `sb` on a host passes a folder as the host names it, because this Mac can't read the host's folders.
+@Suite struct SessionHostFolderTests {
+  @Test(arguments: ["/srv/repo", "~/repo", "~", "~u/repo", "/"])
+  func anAbsoluteFolderOrOneThatStartsWithATildeIsKeptAsTyped(path: String) {
+    #expect(SessionHost.hostFolder(path, cwd: "/home/u/work") == path)
+  }
+
+  @Test(arguments: [
+    ("repo", "/home/u/work/repo"), (".", "/home/u/work"), ("./repo/", "/home/u/work/repo"),
+    ("../repo", "/home/u/repo"), ("a/../../b", "/home/u/b"), ("../../../../x", "/x"), ("a//b", "/home/u/work/a/b"),
+    ("x/./y", "/home/u/work/x/y"), ("a~/b", "/home/u/work/a~/b"),
+  ])
+  func aRelativeFolderIsJoinedToTheBoxsFolderLexically(path: String, joined: String) {
+    #expect(SessionHost.hostFolder(path, cwd: "/home/u/work") == joined)
+  }
+}

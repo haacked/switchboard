@@ -4,29 +4,55 @@ import Testing
 @testable import SwitchboardCore
 @testable import SwitchboardService
 
-/// One run of the shim.
+/// One run of the shim. It reads stdout and stderr while the shim runs, so a full pipe can't stall the shim.
 private final class ShimRun {
   let process = Process()
   private let output = Pipe()
+  private let errors = Pipe()
   private let stdin = Pipe()
   private let ended = DispatchSemaphore(value: 0)
+  private let drained = DispatchGroup()
+  private var printed = Data()
+  private var complained = Data()
   let started = Date()
   private(set) var finished: Date?
 
   /// A nil `input` leaves stdin open until `send` writes it.
-  init(python: String, shim: String, arguments: [String], environment: [String: String], input: Data?) throws {
-    process.executableURL = URL(fileURLWithPath: python)
-    process.arguments = [shim] + arguments
+  convenience init(
+    python: String, shim: String, arguments: [String], environment: [String: String], input: Data?,
+    cwd: String? = nil
+  ) throws {
+    try self.init(
+      executable: python, arguments: [shim] + arguments, environment: environment, input: input, cwd: cwd)
+  }
+
+  init(executable: String, arguments: [String], environment: [String: String], input: Data?, cwd: String? = nil)
+    throws
+  {
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
     process.environment = environment
+    if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
     process.standardInput = stdin
     process.standardOutput = output
-    process.standardError = FileHandle.nullDevice
+    process.standardError = errors
     process.terminationHandler = { [self] _ in
       finished = Date()
       ended.signal()
     }
     try process.run()
+    drain(output) { [self] in printed = $0 }
+    drain(errors) { [self] in complained = $0 }
     if let input { try send(input) }
+  }
+
+  private func drain(_ pipe: Pipe, into store: @escaping (Data) -> Void) {
+    drained.enter()
+    let handle = pipe.fileHandleForReading
+    Thread.detachNewThread { [self] in
+      store(handle.readDataToEndOfFile())
+      drained.leave()
+    }
   }
 
   /// Writes the payload to stdin and closes it.
@@ -39,10 +65,16 @@ private final class ShimRun {
 
   /// The exit status and what the shim printed, or nil when it still runs after the seconds.
   func wait(_ seconds: Double) -> (status: Int32, stdout: String, seconds: Double)? {
+    guard let result = waitForBytes(seconds) else { return nil }
+    return (result.status, String(decoding: result.stdout, as: UTF8.self), result.seconds)
+  }
+
+  /// The exit status and the bytes of both streams, or nil when it still runs after the seconds.
+  func waitForBytes(_ seconds: Double) -> (status: Int32, stdout: Data, stderr: Data, seconds: Double)? {
     guard ended.wait(timeout: .now() + seconds) == .success else { return nil }
     ended.signal()
-    let printed = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-    return (process.terminationStatus, printed, (finished ?? Date()).timeIntervalSince(started))
+    drained.wait()
+    return (process.terminationStatus, printed, complained, (finished ?? Date()).timeIntervalSince(started))
   }
 
   func end() {
@@ -111,6 +143,37 @@ private final class ShimBench {
 
   func hook(_ payload: JSON, session: String? = "s1") throws -> ShimRun {
     try hook(Data(payload.text.utf8), session: session)
+  }
+
+  /// The folder that a `cli` run starts in, as claude's folder on the box.
+  var work: String { "\(home)/work" }
+
+  /// Starts `sb-shim cli <argv…>` in `work`. A nil `input` leaves stdin open, so a shim that reads it waits.
+  /// A nil `sbHome` sets SB_HOME to the bench's folder, and `.some(nil)` leaves it out.
+  func cli(_ argv: [String], env more: [String: String] = [:], input: Data? = nil, sbHome: String?? = nil) throws
+    -> ShimRun
+  {
+    try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+    var env = ["PATH": "/usr/bin:/bin", "HOME": home]
+    if let folder = sbHome ?? .some(home) { env["SB_HOME"] = folder }
+    env.merge(more) { $1 }
+    let run = try ShimRun(
+      python: python, shim: shim, arguments: ["cli"] + argv, environment: env, input: input, cwd: work)
+    runs.append(run)
+    return run
+  }
+
+  /// Starts a program with the bench's SB_HOME, as a claude on the box starts `~/.sb/bin/sb`.
+  func start(_ executable: String, _ arguments: [String], input: Data? = nil) throws -> ShimRun {
+    let env = ["PATH": "/usr/bin:/bin", "HOME": home, "SB_HOME": home]
+    let run = try ShimRun(executable: executable, arguments: arguments, environment: env, input: input)
+    runs.append(run)
+    return run
+  }
+
+  /// Answers the request on the connection with one line.
+  func answer(_ fd: Int32, _ line: String) throws {
+    try UnixSocket.write(fd, Data((line + "\n").utf8))
   }
 
   /// The next connection to the listener, or nil when none arrives within the seconds.
@@ -481,6 +544,294 @@ private let noListener: [(socket: ShimBench.Socket, kind: String, tool: String?)
 
       #expect(result.status == 0)
       #expect(result.stdout.isEmpty, "\(result.stdout)")
+    }
+  }
+}
+
+// MARK: sb on the box
+
+/// sbd's answer to a `cli` request: the exit status and both streams in base64.
+private func cliAnswer(status: Int, stdout: Data = Data(), stderr: Data = Data()) -> String {
+  JSON.object([
+    "ok": true,
+    "result": [
+      "status": .number(Double(status)), "stdout": .string(stdout.base64EncodedString()),
+      "stderr": .string(stderr.base64EncodedString()),
+    ],
+  ]).text
+}
+
+/// The bytes of the request's `stdin`, which are none when the key is absent, or nil when it is not base64.
+private func sentStdin(_ request: JSON) -> Data? {
+  guard let field = request["args"]?["stdin"] else { return Data() }
+  return field.string.flatMap { Data(base64Encoded: $0) }
+}
+
+private func realPath(_ path: String) -> String {
+  guard let resolved = realpath(path, nil) else { return path }
+  defer { free(resolved) }
+  return String(cString: resolved)
+}
+
+/// The argv of `sb summary set` in each form that `sb` reads as that command.
+private let summarySets: [[String]] = [
+  ["summary", "set"], ["summary", "set", "--json"], ["summary", "--json", "set"], ["summary", "set", "s1"],
+]
+
+/// Commands that never get the box's stdin.
+private let noStdin: [[String]] = [
+  ["ls", "--json"], ["send", "s1", "hi"], ["summary", "help"], ["summary"], ["hook"],
+  ["draft", "post", "s1", "1", "--text", "-"], ["set", "summary"],
+]
+
+/// `sb-shim cli`, which the box's `~/.sb/bin/sb` runs: it sends its argv in one `cli` request to
+/// `$SB_HOME/sbd.sock`, then writes the answer's bytes and exits with its status. Each test runs it with python3
+/// against a socket that the test owns.
+@Suite struct BoxShimCLITests {
+  // MARK: The request
+
+  @Test(.timeLimit(.minutes(1)))
+  func theShimSendsOneCliRequestWithItsArgvItsFolderItsSessionAndClaudecode() throws {
+    try withBench { b in
+      let argv = ["send", "s1", "a b", "", "$(touch x)", "--json", "é ✓ 🎉", "line\nbreak", "SB_HOME=/x"]
+      let run = try b.cli(argv, env: ["SB_SESSION_ID": "s1a2b3", "CLAUDECODE": "1"])
+      let fd = try #require(b.accept(), "the shim did not connect to $SB_HOME/sbd.sock")
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(Set(request.object?.keys.map { $0 } ?? []) == ["op", "args"])
+      #expect(request["op"] == "cli")
+      let keys = Set(request["args"]?.object?.keys.map { $0 } ?? [])
+      #expect(keys.isSubset(of: ["argv", "cwd", "session", "claudecode", "stdin"]), "\(keys)")
+      #expect(request["args"]?["argv"] == .array(argv.map(JSON.string)))
+      #expect(request["args"]?["cwd"]?.string.map(realPath) == realPath(b.work))
+      #expect(request["args"]?["session"] == "s1a2b3")
+      #expect(request["args"]?["claudecode"] == "1")
+      #expect(sentStdin(request) == Data())
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func withoutSBSessionIdOrClaudecodeTheRequestLeavesThoseKeysOut() throws {
+    try withBench { b in
+      let run = try b.cli(["ls", "--json"])
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(request["args"]?["session"] == nil)
+      #expect(request["args"]?["claudecode"] == nil)
+    }
+  }
+
+  /// Decision 16: a command's answer could be stale after a reconnect.
+  @Test(.timeLimit(.minutes(1)))
+  func theCliRequestIsNeverSpooled() throws {
+    try withBench { b in
+      let run = try b.cli(["ls"], env: ["SB_SESSION_ID": "s1"])
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+      _ = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+
+      _ = try #require(run.wait(5))
+
+      #expect(b.spool.isEmpty)
+    }
+  }
+
+  // MARK: stdin
+
+  @Test(.timeLimit(.minutes(1)), arguments: summarySets)
+  func summarySetSendsTheWholeStdinAsBase64(argv: [String]) throws {
+    try withBench { b in
+      let card = Data([0xFF, 0x00, 0x0A]) + Data(#"{"summary":"Done: \"x\"\nand ✓"}"#.utf8)
+      let run = try b.cli(argv, env: ["SB_SESSION_ID": "s1", "CLAUDECODE": "1"], input: card)
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(sentStdin(request) == card, "\(argv)")
+    }
+  }
+
+  /// stdin stays open, so a shim that read it would never send its request.
+  @Test(.timeLimit(.minutes(1)), arguments: noStdin)
+  func aCommandOtherThanSummarySetSendsNoStdinAndDoesNotReadIt(argv: [String]) throws {
+    try withBench { b in
+      let run = try b.cli(argv, env: ["SB_SESSION_ID": "s1"])
+      let fd = try #require(b.accept(), "the shim sent no request for \(argv)")
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(sentStdin(request) == Data(), "\(argv)")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aCommandOtherThanSummarySetSendsNoneOfAStdinThatIsThere() throws {
+    try withBench { b in
+      let secret = Data("a secret on the box".utf8)
+      let run = try b.cli(["send", "s1", "hi"], input: secret)
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(sentStdin(request) == Data())
+      #expect(!request.text.contains(secret.base64EncodedString()))
+    }
+  }
+
+  // MARK: The answer
+
+  /// The bytes are not UTF-8, and they hold a NUL and no final newline.
+  @Test(.timeLimit(.minutes(1)), arguments: [0, 1, 3, 255])
+  func theShimWritesTheAnswersBytesAndExitsWithItsStatus(status: Int) throws {
+    try withBench { b in
+      let stdout = Data([0xFF, 0xFE, 0x00, 0x61, 0x0A, 0xC3, 0x28])
+      let stderr = Data([0x80, 0x65, 0x00, 0x1B, 0x5B, 0x32, 0x4A])
+      let run = try b.cli(["ls"])
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+      _ = try b.request(fd)
+
+      try b.answer(fd, cliAnswer(status: status, stdout: stdout, stderr: stderr))
+      let result = try #require(run.waitForBytes(5), "the shim still runs 5 s after the answer")
+
+      #expect(result.status == Int32(status))
+      #expect(result.stdout == stdout)
+      #expect(result.stderr == stderr)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func anOutputLargerThanAPipesBufferArrivesWhole() throws {
+    try withBench { b in
+      let stdout = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+      let run = try b.cli(["events", "--json"])
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+      _ = try b.request(fd)
+
+      try b.answer(fd, cliAnswer(status: 0, stdout: stdout))
+      let result = try #require(run.waitForBytes(10))
+
+      #expect(result.status == 0)
+      #expect(result.stdout == stdout)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aFailureAnswerPrintsTheErrorAndExits1() throws {
+    try withBench { b in
+      let run = try b.cli(["send", "l1", "hi"])
+      let fd = try #require(b.accept())
+      defer { close(fd) }
+      _ = try b.request(fd)
+
+      try b.answer(fd, #"{"ok":false,"error":"that session is not on mini"}"#)
+      let result = try #require(run.waitForBytes(5))
+
+      #expect(result.status == 1)
+      #expect(result.stdout.isEmpty)
+      #expect(String(decoding: result.stderr, as: UTF8.self) == "sb: that session is not on mini\n")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["close", "not json", ""])
+  func anAnswerThatSbdNeverFinishedExits1(reply: String) throws {
+    try withBench { b in
+      let run = try b.cli(["ls"])
+      let fd = try #require(b.accept())
+      _ = try b.request(fd)
+
+      if reply != "close" { try b.answer(fd, reply) }
+      close(fd)
+      let result = try #require(run.waitForBytes(5), "the shim still runs 5 s after sbd closed the connection")
+
+      #expect(result.status == 1, "\(reply)")
+      #expect(result.stdout.isEmpty)
+    }
+  }
+
+  // MARK: No listener
+
+  @Test(.timeLimit(.minutes(1)), arguments: ["missing", "stale"])
+  func withNoListenerTheShimExits1Within3SecondsWithTheMessage(socket: String) throws {
+    try withBench(socket == "missing" ? .missing : .stale) { b in
+      let run = try b.cli(["ls", "--json"], env: ["SB_SESSION_ID": "s1"])
+
+      let result = try #require(run.waitForBytes(3), "the shim still runs after 3 s with no listener")
+
+      #expect(result.status == 1)
+      #expect(result.stdout.isEmpty)
+      let stderr = String(decoding: result.stderr, as: UTF8.self)
+      #expect(stderr.hasPrefix("sb: can't reach Switchboard on the Mac"), "\(stderr)")
+      #expect(b.spool.isEmpty, "the shim spooled a cli request")
+    }
+  }
+
+  /// Without SB_HOME, the shim finds the socket next to its own folder, as `spool-drop` does, and not in the
+  /// folder that it runs in.
+  @Test(.timeLimit(.minutes(1)), arguments: ["unset", "empty"])
+  func withoutSBHomeTheShimConnectsToTheSocketOfItsOwnFolder(sbHome: String) throws {
+    try withBench { b in
+      let run = try b.cli(["ls"], sbHome: sbHome == "unset" ? .some(nil) : "")
+      let fd = try #require(b.accept(), "the shim did not connect to the socket of its folder")
+      defer { close(fd) }
+
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 0))
+      _ = run.wait(5)
+
+      #expect(request["op"] == "cli")
+    }
+  }
+
+  // MARK: The wrapper
+
+  /// `~/.sb/bin/sb` runs the shim's `cli` with every argument, so a claude on the box runs `sb` as it does on
+  /// this Mac.
+  @Test(.timeLimit(.minutes(1)))
+  func theSbWrapperRunsTheShimsCliWithEveryArgument() throws {
+    try withBench { b in
+      let boxHome = "\(b.home)/box"
+      try FileManager.default.createDirectory(atPath: boxHome, withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(atPath: "\(boxHome)/.sb", withDestinationPath: b.home)
+      let facts = BoxFacts(
+        epoch: 1, home: boxHome, shell: "/bin/sh", user: "", lang: "", tmux: "/usr/bin/true", git: "/usr/bin/true",
+        python: b.python, clockOffsetMs: 0)
+      let wrapper = "\(b.home)/bin/sb"
+      try Data(BoxShim.wrapper(for: facts).utf8).write(to: URL(fileURLWithPath: wrapper))
+      chmod(wrapper, 0o700)
+      let argv = ["send", "s1", "two words", "", "$HOME", "--json"]
+
+      let run = try b.start(wrapper, argv)
+      let fd = try #require(b.accept(), "the wrapper's shim did not connect")
+      defer { close(fd) }
+      let request = try b.request(fd)
+      try b.answer(fd, cliAnswer(status: 4, stdout: Data("out".utf8)))
+      let result = try #require(run.waitForBytes(5))
+
+      #expect(request["op"] == "cli")
+      #expect(request["args"]?["argv"] == .array(argv.map(JSON.string)))
+      #expect(result.status == 4)
+      #expect(result.stdout == Data("out".utf8))
     }
   }
 }
