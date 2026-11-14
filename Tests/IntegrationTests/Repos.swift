@@ -57,12 +57,13 @@ final class Repos {
     return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
+  /// Arguments that set a test identity and turn off signing for a git command that makes a commit.
+  static let identity = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+
   /// Makes an empty commit in `dir` and returns its sha.
   @discardableResult
   static func commit(_ dir: String, _ message: String) throws -> String {
-    try git(
-      dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty",
-      "-m", message)
+    try git(dir, identity + ["commit", "-q", "--allow-empty", "-m", message])
     return try git(dir, "rev-parse", "HEAD")
   }
 }

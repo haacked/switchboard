@@ -58,6 +58,26 @@ final class MessageDrafts {
       })
   }
 
+  /// The key of the user's edit of a draft reply. A new card is a new ref, so its draft of the same number starts
+  /// from the session's text.
+  static func replyKey(session: String, ref: String, number: Int) -> String {
+    "reply:\(session)/\(ref)/\(number)"
+  }
+
+  /// The reply keys of every draft that shows an editable reply. A posted draft has nothing left to post.
+  static func replyKeys(_ sessions: [SessionSummary]) -> Set<String> {
+    Set(
+      sessions.flatMap { s in
+        guard let item = s.triage else { return [String]() }
+        return item.drafts.filter { draft in
+          switch draft.post {
+          case .copyOnly, .posted: false
+          default: DraftsSection.usesReplyView(draft, in: item)
+          }
+        }.map { replyKey(session: s.id, ref: item.ref, number: $0.number) }
+      })
+  }
+
   func draft(for key: String) -> MessageField.Draft {
     if let draft = drafts[key] { return draft }
     let draft = MessageField.Draft()

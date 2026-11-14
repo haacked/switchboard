@@ -2,6 +2,7 @@
 
     bin/lib/build-slot [--] command [arguments...]
     bin/lib/build-slot --check
+    bin/lib/build-slot --slots
 
 At most SB_BUILD_SLOTS commands (default 3) hold a slot at once. The others
 wait in the order they arrived. A waiting process prints "waiting for a build
@@ -30,6 +31,7 @@ SB_BUILD_SLOT_HELD names a live ticket, or when the queue is off. It exits 1
 otherwise. A script that re-runs itself under the helper when the check fails
 then never loops.
 
+`--slots` prints the slot count that SB_BUILD_SLOTS sets, or the default.
 SB_BUILD_SLOTS=0 turns the queue off. SB_BUILD_SLOT_POLL sets the seconds
 between scans of the queue (default 1).
 """
@@ -270,10 +272,13 @@ def main(argv):
     slots = setting("SB_BUILD_SLOTS", 3, int, lambda v: v >= 0, "a whole number 0 or above")
     if argv == ["--check"]:
         return 0 if exempt(slots) else 1
+    if argv == ["--slots"]:
+        print(slots)
+        return 0
     if argv[:1] == ["--"]:
         argv = argv[1:]
     if not argv:
-        print("usage: build-slot [--] command [arguments...] | build-slot --check", file=sys.stderr)
+        print("usage: build-slot [--] command [arguments...] | build-slot --check | build-slot --slots", file=sys.stderr)
         return 2
     poll = setting("SB_BUILD_SLOT_POLL", 1.0, float, lambda v: 0 < v and math.isfinite(v), "a number of seconds above 0")
     if exempt(slots):

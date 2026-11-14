@@ -33,7 +33,8 @@ final class SlotQueue {
     try? FileManager.default.removeItem(atPath: root)
   }
 
-  static func waiting(_ ahead: Int) -> String { "build-slot: waiting for a build slot (\(ahead) ahead)" }
+  static let waitingPrefix = "build-slot: waiting for a build slot"
+  static func waiting(_ ahead: Int) -> String { "\(waitingPrefix) (\(ahead) ahead)" }
   static let gotSlot = "build-slot: got a build slot after "
 
   /// The test process's environment with the queue's settings. It removes
@@ -253,6 +254,13 @@ private struct StatusCase: Sendable, CustomTestStringConvertible {
   var slots = "1"
 
   var testDescription: String { name }
+}
+
+private struct SlotsCase: Sendable, CustomTestStringConvertible {
+  var value: String?
+  var printed: String
+
+  var testDescription: String { "SB_BUILD_SLOTS=\(value.map { "'\($0)'" } ?? "unset")" }
 }
 
 private struct BadSetting: Sendable, CustomTestStringConvertible {
@@ -678,6 +686,37 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
     #expect(r.status == 2)
     #expect(r.stderr.contains(bad.variable), "\(r.stderr)")
     #expect(!FileManager.default.fileExists(atPath: marker))
+  }
+
+  /// An empty value counts as unset.
+  @Test(arguments: [
+    SlotsCase(value: nil, printed: "3"),
+    SlotsCase(value: "", printed: "3"),
+    SlotsCase(value: "2", printed: "2"),
+    SlotsCase(value: "0", printed: "0"),
+    SlotsCase(value: "12", printed: "12"),
+  ])
+  fileprivate func slotsPrintsTheEffectiveSlotCount(_ c: SlotsCase) throws {
+    let q = try SlotQueue()
+    defer { q.stop() }
+
+    let r = try q.runHelper(["--slots"], env: ["SB_BUILD_SLOTS": c.value])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == c.printed, "\(r.stdout)")
+  }
+
+  @Test(arguments: ["abc", "-1", "1.5"])
+  func slotsRejectsABadSlotCountWithExitTwo(_ value: String) throws {
+    let q = try SlotQueue()
+    defer { q.stop() }
+
+    let r = try q.runHelper(["--slots"], env: ["SB_BUILD_SLOTS": value])
+
+    #expect(r.status == 2)
+    #expect(r.stdout == "", "\(r.stdout)")
+    #expect(
+      r.stderr == "build-slot: SB_BUILD_SLOTS must be a whole number 0 or above, not '\(value)'\n", "\(r.stderr)")
   }
 
   /// The default folder is under ~/Library/Caches, which may not exist yet.

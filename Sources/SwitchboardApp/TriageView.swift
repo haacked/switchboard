@@ -19,9 +19,14 @@ struct TriageDetail: View {
   /// The PR that the bar links to, with the code owners of that PR. A docket
   /// row links to the PR that docket reviews and ignores its `pr`. The bar
   /// therefore never shows one PR's link beside another PR's code owners.
-  static func prLink(for session: SessionSummary) -> (label: String, url: URL, owners: CodeOwnerStatus?)? {
-    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0, nil) } }
-    if let pr = session.pr, let url = pr.link { return (pr.line, url, pr.codeOwners) }
+  /// `head` is the PR's branch when the folder is on another branch.
+  static func prLink(for session: SessionSummary) -> (
+    label: String, url: URL, owners: CodeOwnerStatus?, head: String?
+  )? {
+    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0, nil, nil) } }
+    if let pr = session.pr, let url = pr.link {
+      return (pr.line, url, pr.codeOwners, pr.otherBranch(than: session.branch))
+    }
     return nil
   }
 
@@ -67,7 +72,7 @@ struct TriageDetail: View {
 
   private var bar: some View {
     HStack(spacing: 8) {
-      Text(session.name).fontWeight(.medium)
+      Text(model.inboxName(session)).fontWeight(.medium)
       if let repo = session.repoFolder {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }
@@ -76,6 +81,10 @@ struct TriageDetail: View {
         HStack(spacing: 4) {
           PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link)
           if let owners = link.owners { CodeOwnerShield(status: owners) }
+          if let head = link.head {
+            Text("uses \(head)").font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+              .help("The PR's branch. This folder is on \(session.branch ?? "another branch").")
+          }
         }
       }
       Spacer()

@@ -57,6 +57,8 @@ struct SwitchboardApp: App {
           .keyboardShortcut("1")
         Button("Show Board") { model.show(.board) }
           .keyboardShortcut("2")
+        Button("Show Issues") { model.show(.issues) }
+          .keyboardShortcut("3")
         Button("Filter by Org…") { model.showingOrgFilter.toggle() }
           .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
@@ -191,7 +193,7 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button(Self.title(for: s, names: model.sessionNames)) {
+        Button(Self.title(for: s, name: model.inboxName(s), names: model.sessionNames)) {
           model.selection = s.id
           show()
         }
@@ -202,7 +204,9 @@ struct MenuBarContent: View {
     Button("Quit") { NSApp.terminate(nil) }
   }
 
-  static func title(for s: SessionSummary, names: SessionNames) -> String { "\(s.name): \(names.plainText(s.reason))" }
+  static func title(for s: SessionSummary, name: String, names: SessionNames) -> String {
+    "\(name): \(names.plainText(s.triage?.title ?? s.reason))"
+  }
 
   private func show() {
     openWindow(id: "main")

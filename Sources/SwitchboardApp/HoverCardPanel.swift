@@ -95,7 +95,6 @@ final class HoverCardAnchorView: PointerTrackingView {
 /// session from the model, so the card's text follows each update.
 @MainActor
 final class HoverCardPanel: HoverCardPresenter {
-  static let gap: CGFloat = 4
   weak var model: BoardModel?
   /// Reports when the pointer enters or leaves the card.
   var onPointer: (Bool) -> Void = { _ in }
@@ -108,18 +107,14 @@ final class HoverCardPanel: HoverCardPresenter {
     let panel = self.panel ?? makePanel()
     hosting?.rootView = AnyView(HoverCardView(model: model, id: id))
     self.anchor = anchor
-    if panel.parent !== window {
-      panel.parent?.removeChildWindow(panel)
-      window.addChildWindow(panel, ordered: .above)
-    }
+    ChildPanel.attach(panel, to: window)
     place()
     panel.orderFront(nil)
   }
 
   func hide() {
     guard let panel else { return }
-    panel.parent?.removeChildWindow(panel)
-    panel.orderOut(nil)
+    ChildPanel.detach(panel)
     // A hidden card stops observing the model.
     hosting?.rootView = AnyView(EmptyView())
   }
@@ -134,28 +129,19 @@ final class HoverCardPanel: HoverCardPresenter {
   private func place() {
     guard let anchor, let window = anchor.window, let panel, let hosting else { return }
     let size = hosting.fittingSize
-    let tile = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-    let screen = window.screen?.visibleFrame ?? tile.insetBy(dx: -10_000, dy: -10_000)
-    var origin = NSPoint(x: tile.minX, y: tile.minY - Self.gap - size.height)
-    if origin.y < screen.minY { origin.y = tile.maxY + Self.gap }
-    origin.x = max(screen.minX, min(origin.x, screen.maxX - size.width))
-    let frame = NSRect(origin: origin, size: size)
+    let (tile, screen) = ChildPanel.frames(of: anchor, in: window)
+    let x = max(screen.minX, min(tile.minX, screen.maxX - size.width))
+    let frame = NSRect(
+      origin: NSPoint(x: x, y: ChildPanel.y(height: size.height, anchor: tile, screen: screen)), size: size)
     if frame != panel.frame { panel.setFrame(frame, display: true) }
   }
 
   private func makePanel() -> NSPanel {
-    let panel = NSPanel(
-      contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = true
-    panel.isReleasedWhenClosed = false
-    panel.collectionBehavior = [.transient, .ignoresCycle]
     let container = HoverCardTrackingView { [weak self] inside in self?.onPointer(inside) }
     let hosting = NSHostingView(rootView: AnyView(EmptyView()))
     hosting.autoresizingMask = [.width, .height]
     container.addSubview(hosting)
-    panel.contentView = container
+    let panel = ChildPanel.make(contentView: container)
     self.panel = panel
     self.hosting = hosting
     return panel

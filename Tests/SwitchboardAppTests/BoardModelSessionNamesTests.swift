@@ -384,14 +384,14 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
       model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
 
       #expect(
-        MenuBarContent.title(for: s, names: model.sessionNames) == "\(otherName): Waiting on \(liveName) to merge")
+        MenuBarContent.title(for: s, name: s.name, names: model.sessionNames) == "\(otherName): Waiting on \(liveName) to merge")
     }
 
     @Test func aTitleWithoutIdsIsTheNameAndTheReason() {
       let s = named(otherID, otherName, state: .needsYou, reason: "Asked which flag to remove")
 
       #expect(
-        MenuBarContent.title(for: s, names: SessionNames(live: [:], removed: [:]))
+        MenuBarContent.title(for: s, name: s.name, names: SessionNames(live: [:], removed: [:]))
           == "\(otherName): Asked which flag to remove")
     }
   }

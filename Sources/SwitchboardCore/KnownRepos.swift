@@ -49,4 +49,15 @@ public enum KnownRepos {
     }
     return best?.repo ?? known.first
   }
+
+  /// The group that Start from an issue in `repository` (owner/name) selects: the one that holds the most work
+  /// sessions in that repository, the converse of `preferred`. A tie goes to the group whose id sorts first. It is
+  /// nil when no session in a group works in the repository.
+  public static func preferredGroup(repository: String, sessions: [SessionSummary]) -> String? {
+    var counts: [String: Int] = [:]
+    for s in sessions where s.kind == .work && s.repository?.lowercased() == repository.lowercased() {
+      if let group = s.group { counts[group, default: 0] += 1 }
+    }
+    return counts.max { a, b in a.value != b.value ? a.value < b.value : a.key > b.key }?.key
+  }
 }

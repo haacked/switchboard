@@ -24,6 +24,11 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
     try exec("CREATE TABLE IF NOT EXISTS known_repos (path TEXT PRIMARY KEY, used INTEGER NOT NULL)")
+    // `delete(session:)` leaves a session's activity rows, so the log outlives the session.
+    try exec(
+      "CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL, kind TEXT NOT NULL, session TEXT, data TEXT NOT NULL)"
+    )
+    try exec("CREATE INDEX IF NOT EXISTS activity_t ON activity (t)")
     try exec(
       "CREATE TABLE IF NOT EXISTS resolved_todos (id INTEGER PRIMARY KEY, session TEXT, name TEXT, repo TEXT, branch TEXT, pr INTEGER, note TEXT, text TEXT, by TEXT, added INTEGER, resolved INTEGER, how TEXT)"
     )
@@ -335,6 +340,41 @@ public final class Store {
 
   public func knownRepos() throws -> [(path: String, used: Int64)] {
     try query("SELECT path, used FROM known_repos", []) { ($0.text(0), $0.int(1)) }
+  }
+
+  // MARK: Activity log
+
+  @discardableResult
+  public func append(activity: ActivityEvent) throws -> ActivityEvent {
+    try run(
+      "INSERT INTO activity (t, kind, session, data) VALUES (?, ?, ?, ?)",
+      [activity.t, activity.kind, activity.session as Any, activity.data.text])
+    var stored = activity
+    stored.id = sqlite3_last_insert_rowid(db)
+    return stored
+  }
+
+  /// The activity rows at or after `since`, oldest first.
+  public func activity(since: Int64 = 0) throws -> [ActivityEvent] {
+    try query("SELECT id, t, kind, session, data FROM activity WHERE t >= ? ORDER BY id", [since]) { row in
+      ActivityEvent(
+        id: row.int(0), t: row.int(1), kind: row.text(2), session: row.optionalText(3),
+        data: JSON.parse(row.text(4)) ?? .null)
+    }
+  }
+
+  /// The number of activity rows and the time of the oldest one.
+  public func activitySummary() throws -> (count: Int, oldest: Int64?) {
+    try query("SELECT count(*), min(t) FROM activity", []) { (Int($0.int(0)), $0.optionalInt(1).map(Int64.init)) }
+      .first ?? (0, nil)
+  }
+
+  public func pruneActivity(before t: Int64) throws {
+    try run("DELETE FROM activity WHERE t < ?", [t])
+  }
+
+  public func clearActivity() throws {
+    try run("DELETE FROM activity", [])
   }
 
   // MARK: SQLite

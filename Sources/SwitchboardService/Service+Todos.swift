@@ -92,10 +92,14 @@ extension Service {
   /// remove its leftover lines. It runs on the state queue.
   func forgetSession(_ id: String, resolving: Set<String>) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
+    // Only a merged PR leaves marks. Other removals skip the summary.
+    let removed = entries[id]?.facts.pr?.state == .merged ? summary(id) : nil
     try store.delete(
       session: id, name: session.name, resolving: checkTodos(id, resolving: resolving), onHost: session.host)
     removedNames[id] = session.name
+    if let removed { markAddressedIssues(removed) }
     entries[id] = nil
+    slashListings[id] = nil
     hostEvents[id] = nil
     pruneDeclinedSuggestions()
   }

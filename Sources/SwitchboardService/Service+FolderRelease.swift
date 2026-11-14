@@ -35,15 +35,19 @@ extension Service {
       .filter(Processes.isValidPid)
   }
 
+  /// Whether `ancestry` holds the pid of a live Claude or shell pane of a session on this Mac. A session on a
+  /// host never holds a local caller, because its pane pids belong to the host. It runs on the state queue.
+  func isInside(_ id: String, _ ancestry: Set<Int>) -> Bool {
+    entries[id]?.session.host == nil && !ancestry.isDisjoint(with: livePanePids(id))
+  }
+
   /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
   /// A stop would wait on such a caller, which waits on sbd, so the stop could never
   /// finish. It returns nil for a nil `ancestry`. It runs on the state queue. A client's ancestry holds pids
   /// of this Mac, and a request from a host's socket is only a hook, so a client is never inside a session
   /// on a host. The pids of such a session's panes belong to the host, so it returns nil for it.
   func insideRefusal(_ id: String, _ ancestry: Set<Int>?, command: String) -> APIError? {
-    guard let ancestry, entries[id]?.session.host == nil,
-      !ancestry.isDisjoint(with: livePanePids(id))
-    else { return nil }
+    guard let ancestry, isInside(id, ancestry) else { return nil }
     return APIError(
       "`\(command)` runs inside \(mention(id)), so it would stop itself. Run it from a terminal outside the session.")
   }
