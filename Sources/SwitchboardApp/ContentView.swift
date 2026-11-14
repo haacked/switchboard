@@ -205,26 +205,7 @@ struct Sidebar: View {
     let repos = model.repoLabels
     let activeAccount = model.activeAccountFolder
     List(selection: $model.selection) {
-      if !model.managers.isEmpty {
-        Section {
-          ForEach(model.managers) { manager in
-            SessionRow(session: manager, activeAccount: activeAccount, hoverCard: model.hoverCard).tag(manager.id)
-          }
-        } header: {
-          HStack {
-            Text("Manager")
-            Spacer()
-            Button {
-              model.openManager(new: true)
-            } label: {
-              Image(systemName: "plus")
-            }
-            .buttonStyle(.borderless)
-            .help("Start a Manager conversation")
-            .accessibilityLabel("New Manager conversation")
-          }
-        }
-      }
+      ConversationsSection(activeAccount: activeAccount)
       ForEach(model.sidebarGroups) { group in
         let state = group.state
         Section(isExpanded: expanded(state)) {
@@ -702,11 +683,7 @@ private struct LaneLabel: View {
         .font(.caption).foregroundStyle(.secondary)
       if let group {
         HStack {
-          Button("Chat") { model.openChat(group.id) }
-            .buttonStyle(.link).font(.caption)
-            .help(
-              model.chat(of: group.id) == nil
-                ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+          GroupChatButton(group: group)
           Button("Delete") { model.requestDeleteGroup(group) }
             .buttonStyle(.link).font(.caption)
             .help(group.sessions.isEmpty ? "Delete this group" : "Delete this group and move its sessions to Ungrouped")
