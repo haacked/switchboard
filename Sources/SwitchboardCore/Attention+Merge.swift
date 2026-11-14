@@ -100,7 +100,8 @@ extension Attention {
   }
 
   /// Whether the session's PR is at a merge decision: the rule for its open
-  /// PR is Ready to merge. The poller reads the PR's merge details only then.
+  /// PR is Ready to merge. The poller then reads the PR's merge details
+  /// again after each status read.
   public static func atMergeDecision(_ facts: SessionFacts) -> Bool {
     openPR(facts)?.summarizesPR == true
   }

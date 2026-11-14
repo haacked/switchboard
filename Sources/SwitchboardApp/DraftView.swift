@@ -145,8 +145,6 @@ struct DraftReplyView: View {
     }
   }
 
-  static let editorHeight: CGFloat = 120
-
   @EnvironmentObject var model: BoardModel
   let session: String
   let ref: String
@@ -206,21 +204,9 @@ struct DraftReplyView: View {
     VStack(alignment: .leading, spacing: 6) {
       if let label = draft.label { Text(label).font(.caption.bold()).foregroundStyle(.secondary) }
       if let target { targetLine(target) }
-      HStack(spacing: 0) {
-        QuoteBar()
-        TextEditor(text: $field.text)
-          .font(.body)
-          .scrollContentBackground(.hidden)
-          .disabled(!mode.fieldEditable)
-          .padding(.leading, 6)
-          .padding(.trailing, 36)
-          .padding(.vertical, 6)
-          .frame(maxWidth: .infinity, minHeight: Self.editorHeight, maxHeight: Self.editorHeight)
-          .accessibilityLabel(target.map { "Reply to @\($0.author)" } ?? "Reply")
-      }
-      .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
-      .clipShape(RoundedRectangle(cornerRadius: 6))
-      .overlay(alignment: .topTrailing) { DraftCopyButton(text: field.text).padding(6) }
+      DraftEditor(
+        text: $field.text, editable: mode.fieldEditable,
+        accessibilityLabel: target.map { "Reply to @\($0.author)" } ?? "Reply")
       if let error = shownError {
         Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
           .fixedSize(horizontal: false, vertical: true)
@@ -309,6 +295,34 @@ struct DraftQuote: View {
     }
     .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
     .clipShape(RoundedRectangle(cornerRadius: 6))
+  }
+}
+
+/// An editable draft beside a quote bar, on a rounded background, with a copy button.
+struct DraftEditor: View {
+  static let height: CGFloat = 120
+
+  @Binding var text: String
+  let editable: Bool
+  let accessibilityLabel: String
+
+  var body: some View {
+    HStack(spacing: 0) {
+      QuoteBar()
+      // The trailing padding leaves room for the copy button.
+      TextEditor(text: $text)
+        .font(.body)
+        .scrollContentBackground(.hidden)
+        .disabled(!editable)
+        .padding(.leading, 6)
+        .padding(.trailing, 36)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
+        .accessibilityLabel(accessibilityLabel)
+    }
+    .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .overlay(alignment: .topTrailing) { DraftCopyButton(text: text).padding(6) }
   }
 }
 

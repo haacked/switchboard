@@ -167,7 +167,7 @@ extension Instance {
     #expect(try sbd.mergeSummary(s.id)["text"]?.string?.contains("400") == true)
   }
 
-  @Test func prUnderReviewReadsNoDetails() throws {
+  @Test func prUnderReviewReadsDetailsOncePerHeadForItsNudgeWithoutABrief() throws {
     let github = try github()
     github.change(MergeTests.number) {
       $0["reviewDecision"] = "REVIEW_REQUIRED"
@@ -175,10 +175,44 @@ extension Instance {
     }
     let sbd = try Instance.withMergeStub(github)
     let s = try MergeTests().readySession(sbd)
+    try sbd.poll()
 
+    let pr = try #require(try sbd.get(s.id).pr)
     #expect(try sbd.get(s.id).state != .readyToMerge)
-    #expect(detailsReads(github) == 0)
+    #expect(pr.gist == Self.gist)
+    #expect(pr.additions == 315)
+    #expect(pr.deletions == 208)
+    #expect(detailsReads(github) == 1)
     #expect(sbd.briefCalls().isEmpty)
+  }
+
+  @Test func answeredChangeRequestShowsWhoToAskForAReReview() throws {
+    let github = try github()
+    github.change(MergeTests.number) {
+      $0["author"] = ["__typename": "User", "login": "haacked"]
+      $0["reviewDecision"] = "CHANGES_REQUESTED"
+      let request: JSON = [
+        "author": ["__typename": "User", "login": "mariusandra"], "state": "CHANGES_REQUESTED",
+        "submittedAt": "2026-11-13T08:53:58Z",
+      ]
+      $0["latestOpinionatedReviews"] = ["nodes": [request]]
+      $0["reviews"] = [
+        "nodes": [
+          request,
+          [
+            "author": ["__typename": "User", "login": "haacked"], "state": "COMMENTED",
+            "submittedAt": "2026-11-13T18:07:49Z",
+          ],
+        ]
+      ]
+    }
+    let sbd = try Instance.withMergeStub(github)
+    let s = try MergeTests().readySession(sbd)
+
+    let pr = try #require(try sbd.get(s.id).pr)
+    #expect(pr.rereview?.reviewers == ["mariusandra"])
+    #expect(pr.rereview?.repliedAt == Transcript.milliseconds("2026-11-13T18:07:49Z"))
+    #expect(detailsReads(github) == 0)
   }
 
   @Test func failedBriefKeepsTheGistAndIsNotRetriedForTheSameHead() throws {

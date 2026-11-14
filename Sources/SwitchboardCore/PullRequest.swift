@@ -171,7 +171,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var codeOwnerRequests: [String]?
   /// The size, review threads, and description that the merge card shows.
   /// The poller sets them, like `codeOwners`, from a read at the current head
-  /// commit. It reads them only while the PR is at a merge decision.
+  /// commit. It reads them while the PR is at a merge decision or while a
+  /// review nudge can quote them.
   public var mergeDetails: MergeDetails?
 
   public init(
@@ -296,6 +297,35 @@ public struct PullRequest: Codable, Equatable, Sendable {
     verdicts.filter(\.requestsChanges).map(\.author).sorted()
   }
 
+  /// The change requests that the author answered, or nil unless the PR
+  /// author replied after each requester's newest review and the PR would be
+  /// In review without the change requests. A bot's change request gives nil.
+  /// A reply is a review by the author, which is what a reply in a review
+  /// thread makes. A time that does not parse gives nil.
+  public var rereview: Rereview? {
+    let requested = changesRequestedBy
+    // A person's re-review does not clear a bot's change request.
+    guard let author = author?.lowercased(), !requested.isEmpty,
+      !verdicts.contains(where: { $0.requestsChanges && $0.bot == true })
+    else { return nil }
+    let requesters = Set(requested.map { $0.lowercased() })
+    var newest: [String: Int64] = [:]
+    for review in verdicts + reviews where !review.isPending {
+      let login = review.author.lowercased()
+      guard login == author || requesters.contains(login) else { continue }
+      guard let at = review.submittedAt.flatMap(Transcript.milliseconds) else { return nil }
+      newest[login] = max(newest[login] ?? at, at)
+    }
+    guard let repliedAt = newest[author], requesters.allSatisfy({ (newest[$0] ?? .max) < repliedAt }) else {
+      return nil
+    }
+    var answered = self
+    answered.verdicts.removeAll(where: \.requestsChanges)
+    if answered.reviewDecision == .changesRequested { answered.reviewDecision = .reviewRequired }
+    guard BoardColumn.prColumn(answered) == .inReview else { return nil }
+    return Rereview(reviewers: requested, repliedAt: repliedAt)
+  }
+
   /// Whether something about the PR will change soon: its checks run, or
   /// GitHub hasn't computed its mergeability yet. A merged or closed PR is
   /// never pending.
@@ -312,8 +342,23 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var checksRunning: Bool { checks == "PENDING" || checks == "EXPECTED" }
 }
 
+/// The change requests that a PR's author answered.
+public struct Rereview: Codable, Equatable, Sendable {
+  /// The logins whose last verdict requests changes, sorted, without `@`.
+  public var reviewers: [String]
+  /// The author's newest reply, in milliseconds since the epoch.
+  public var repliedAt: Int64
+
+  public init(reviewers: [String], repliedAt: Int64) {
+    self.reviewers = reviewers
+    self.repliedAt = repliedAt
+  }
+}
+
 /// What `sb ls` and the GUI show of a session's PR. The app asks for every
 /// session each second, so the summary leaves out the reviews and labels.
+/// It carries the description's gist and the PR's size, which a review
+/// nudge quotes.
 public struct PRSummary: Codable, Equatable, Sendable {
   public var number: Int
   public var url: String
@@ -348,6 +393,12 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var mergeMethod: MergeMethod?
   /// nil when the PR has no known code owner requirement.
   public var codeOwners: CodeOwnerStatus?
+  /// The description's first sentences. nil until sbd reads the PR's details.
+  public var gist: String?
+  /// Lines added and deleted. nil until sbd reads the PR's details.
+  public var additions: Int?
+  public var deletions: Int?
+  public var rereview: Rereview?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -370,6 +421,10 @@ public struct PRSummary: Codable, Equatable, Sendable {
     approvedAt = pr.approvedAt
     inMergeQueue = pr.inMergeQueue
     codeOwners = CodeOwnerStatus(pr)
+    gist = pr.mergeDetails?.gist
+    additions = pr.mergeDetails?.additions
+    deletions = pr.mergeDetails?.deletions
+    rereview = pr.rereview
   }
 
   /// The PR's branch when it differs from `branch`, the folder's branch.

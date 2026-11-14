@@ -1,8 +1,9 @@
 import Foundation
 
 /// What the merge card says about a PR beyond its status: its size, its
-/// review threads, and its description. The poller reads them only for a PR
-/// at a merge decision, once per head commit and again on each status read.
+/// review threads, and its description. The poller reads them for a PR at a
+/// merge decision, once per head commit and again on each status read. It
+/// reads them once per head commit for a PR that a review nudge quotes.
 public struct MergeDetails: Codable, Equatable, Sendable {
   public var additions: Int
   public var deletions: Int
@@ -67,6 +68,11 @@ public struct MergeDetails: Codable, Equatable, Sendable {
     var section: Int
     /// A table is not prose, so the gist skips it.
     var prose: Bool
+  }
+
+  /// The gist's first sentence, or the whole gist when it has no sentence end.
+  public static func lead(_ gist: String) -> String {
+    Attention.sentences(gist, trimming: .whitespaces).first ?? gist
   }
 
   /// Reads the body into the description, the gist, and the test gaps.
