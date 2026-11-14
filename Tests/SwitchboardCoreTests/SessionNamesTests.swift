@@ -497,6 +497,10 @@ private let changedMarkdown: [(String, [Piece])] = [
   private static let filler =
     " to rebase, then check the café ☕ build log for the stream, switch, and submit steps on main street; "
 
+  /// A linear scan takes well under a second, even on a loaded CI runner. A quadratic scan of 200 KB takes
+  /// minutes, so this bound still catches one.
+  private static let linearBound = Duration.seconds(5)
+
   @Test func matchingTwoThousandIdsInOneRunIsFast() {
     let string = Self.manyIds.map { "Ask \($0)\(Self.filler)" }.joined()
     let text = MarkdownText(stringLiteral: string)
@@ -507,7 +511,7 @@ private let changedMarkdown: [(String, [Piece])] = [
 
     #expect(string.utf8.count >= 200_000)
     #expect(matched == 2_000)
-    #expect(elapsed < .seconds(1))
+    #expect(elapsed < Self.linearBound)
   }
 
   @Test func matchingTwoThousandIdsAcrossManyRunsIsFast() {
@@ -520,6 +524,6 @@ private let changedMarkdown: [(String, [Piece])] = [
 
     #expect(text.plain.utf8.count >= 200_000)
     #expect(matched == 2_000)
-    #expect(elapsed < .seconds(1))
+    #expect(elapsed < Self.linearBound)
   }
 }
