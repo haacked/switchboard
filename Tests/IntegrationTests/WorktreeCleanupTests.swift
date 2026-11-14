@@ -255,7 +255,9 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     try FileManager.default.removeItem(atPath: s.cwd)
 
     for op in ["resume", "terminals"] {
-      #expect(failure(sbd, op, ["session": .string(s.id)]).contains("is gone"), "\(op)")
+      let message = failure(sbd, op, ["session": .string(s.id)])
+      #expect(message.contains("is gone"), "\(op)")
+      #expect(message.contains("so \(s.name) (\(s.id)) can't start there"), "\(op): \(message)")
     }
   }
 
@@ -266,9 +268,21 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(try sbd.cleanup(s.id).status == 0)
 
     for op in ["resume", "terminals"] {
-      #expect(failure(sbd, op, ["session": .string(s.id)]).contains("cleaned up"), "\(op)")
+      let message = failure(sbd, op, ["session": .string(s.id)])
+      #expect(message.contains("\(s.name) (\(s.id)) was cleaned up"), "\(op): \(message)")
     }
     #expect(try sbd.get(s.id).live == false)
+  }
+
+  @Test func aSecondCleanupNamesTheSessionFirst() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    #expect(try sbd.cleanup(s.id).status == 0)
+
+    let r = try sbd.cleanup(s.id)
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("\(s.name) (\(s.id)) is already cleaned up"), Comment(rawValue: r.stderr))
   }
 
   @Test func cleanupOpAnswersLikeTheCommand() throws {
@@ -593,7 +607,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
       try sbd.events(s.id).contains { $0.kind == "UserPromptSubmit" && $0.data["prompt"]?.string == "slow 30" }
     }
 
-    try expectRefusal(sbd, repo, s, ["running a turn"])
+    try expectRefusal(sbd, repo, s, ["\(s.name) (\(s.id)) is running a turn"])
     try sbd.poll(all: true)
 
     let after = try sbd.get(s.id)
@@ -643,7 +657,7 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     let repo = try sbd.repoWithOrigin()
     let s = try sbd.worktreeSession(repo)
 
-    try expectRefusal(sbd, repo, s, ["no merged PR"], ref: "haacked/feature")
+    try expectRefusal(sbd, repo, s, ["\(s.name) (\(s.id)) has no merged PR."], ref: "haacked/feature")
 
     #expect(try sbd.hasBranch(repo, "haacked/feature"))
   }

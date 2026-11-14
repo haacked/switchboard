@@ -178,7 +178,8 @@ final class Outcome<T>: @unchecked Sendable {
     }
 
     for op in ["followup-start", "followup-rm", "rm"] {
-      #expect(failure(sbd, op, ["session": .string(f.id)]).contains("is starting"))
+      let message = failure(sbd, op, ["session": .string(f.id)])
+      #expect(message.contains("\(f.name) (\(f.id)) is starting"), "\(op): \(message)")
     }
     #expect(try sbd.client.call("followup-ls", as: [SessionSummary].self).map(\.state) == [.notStarted])
     #expect(try sbd.client.sessions().isEmpty)

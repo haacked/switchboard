@@ -40,7 +40,7 @@ private func stop(_ session: String) -> Event { Event(session: session, t: 1_000
       let id = try eventId(clock)
       _ = try store.append(stop("s1"), hostEvent: id, host: "mini")
 
-      try store.delete(session: "s1")
+      try store.delete(session: "s1", name: "one")
 
       #expect(try store.hasHostEvent(id, host: "mini", session: "s1"))
     }

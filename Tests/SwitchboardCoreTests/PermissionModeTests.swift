@@ -62,6 +62,9 @@ import Testing
     #expect(facts(turn("default")).cards[0].hookClosedRefusal(.autoMode) == closed.refusal(.autoMode))
     #expect(facts(turn(nil)).cards[0].refusal(.autoMode) == "card 3's hook didn't report the permission mode")
     #expect(facts(turn("auto")).cards[0].refusal(.autoMode) == "s1 is already in auto mode")
+    #expect(
+      facts(turn("auto")).cards[0].refusal(.autoMode, sessionName: "flag-cache")
+        == "flag-cache (s1) is already in auto mode")
     #expect(facts(turn("plan")).cards[0].refusal(.autoMode) == "card 3 came from plan mode")
     #expect(facts(turn("default")).cards[0].refusal(.autoMode) == nil)
   }

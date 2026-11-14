@@ -204,7 +204,7 @@ func followup(_ f: Followup, done: Bool = false) -> Session {
     }
     let store = try Store(path: "\(dir)/sb.db")
     #expect(try store.sessions() == [s])
-    try store.delete(session: "s1")
+    try store.delete(session: s.id, name: s.name)
     #expect(try store.importedLines() == ["2026-10-24 · [a/b] x"])
   }
 

@@ -294,7 +294,7 @@ public struct Wait: Codable, Equatable, Sendable {
     case .merge:
       return ended
     case .ci:
-      if pr.checks == "SUCCESS" { return "the checks passed" }
+      if pr.checksPassed { return "the checks passed" }
       if let depot = pr.depotFailure { return depot.outcome }
       return pr.checksFailed ? "the checks failed" : ended
     case .review, .botReview:
@@ -310,7 +310,7 @@ public struct Wait: Codable, Equatable, Sendable {
       return newest.flatMap { r in verbs[r.state].map { "\(r.author) \($0)" } } ?? ended
     case .approval:
       if let who {
-        return pr.verdicts.first { $0.state == "APPROVED" && Wait.sameLogin($0.author, who) }
+        return pr.verdicts.first { $0.isApproval && Wait.sameLogin($0.author, who) }
           .map { "\($0.author) approved" } ?? ended
       }
       guard pr.isApproved else { return ended }
@@ -421,11 +421,27 @@ public struct Wait: Codable, Equatable, Sendable {
   }
 }
 
+/// The characters of the ids that `shortId` makes.
+enum ShortId {
+  /// It leaves out `l`, `o`, `0`, and `1`, because each reads like another character.
+  static let alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+  /// The number of characters after the prefix.
+  static let length = 5
+}
+
 /// A prefix and 5 random characters that aren't in `taken`, such as `w3k9ap`.
 public func shortId(_ prefix: String, taken: some Collection<String> = [String]()) -> String {
+  var generator = SystemRandomNumberGenerator()
+  return shortId(prefix, taken: taken, using: &generator)
+}
+
+/// A prefix and 5 characters drawn from `generator` that aren't in `taken`.
+public func shortId(
+  _ prefix: String, taken: some Collection<String>, using generator: inout some RandomNumberGenerator
+) -> String {
   var id: String
   repeat {
-    id = prefix + String((0..<5).map { _ in "abcdefghijkmnpqrstuvwxyz23456789".randomElement()! })
+    id = prefix + String((0..<ShortId.length).map { _ in ShortId.alphabet.randomElement(using: &generator)! })
   } while taken.contains(id)
   return id
 }

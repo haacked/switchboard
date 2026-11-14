@@ -106,7 +106,7 @@ extension Service {
       guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
         throw APIError("card \(card.id): \(extra.argument) goes only with a behavior of allow")
       }
-      if let refusal = card.refusal(extra) { throw refused(refusal, extra) }
+      if let refusal = card.refusal(extra, sessionName: entries[id]?.session.name) { throw refused(refusal, extra) }
     }
     if let message = card.send {
       if case .remote(let host) = origin,
@@ -177,7 +177,7 @@ extension Service {
     // The hook can close after the check above.
     if let extra { throw refused(card.hookClosedRefusal(extra), extra) }
     guard !card.deferred else {
-      throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
+      throw APIError("card \(card.id) was deferred, so answer its questions or send \(mention(id)) a message")
     }
     try type(reply.typed, card)
     switch reply.typed {

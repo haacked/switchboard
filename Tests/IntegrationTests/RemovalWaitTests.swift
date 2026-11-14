@@ -411,7 +411,8 @@ private final class Strays {
 
     #expect(r.status != 0)
     #expect(
-      r.stderr.contains("Removed the worktree of \(s.id) and kept the session, because it has an open to-do"),
+      r.stderr.contains(
+        "Removed the worktree of \(s.name) (\(s.id)) and kept the session, because it has an open to-do"),
       Comment(rawValue: r.stderr))
     #expect(r.stderr.contains(todo.id), Comment(rawValue: r.stderr))
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
@@ -444,7 +445,8 @@ private final class Strays {
     #expect(r.status != 0)
     #expect(
       r.stderr.contains(
-        "Removed the worktree and the local branch of \(s.id) and kept the session, because it has an open to-do"),
+        "Removed the worktree and the local branch of \(s.name) (\(s.id)) and kept the session, because it has an open to-do"
+      ),
       Comment(rawValue: r.stderr))
     #expect(try !sbd.localBranchExists(repo, mergedBranch))
     #expect(try sbd.client.sessions().map(\.id).contains(s.id))
@@ -501,7 +503,7 @@ private final class Strays {
     let r = try runFrom(pane, sbd, s.id, terminals, "self-stop")
 
     #expect(r.status != 0, Comment(rawValue: r.stdout))
-    #expect(r.stderr.contains(insideRefusal(command, s.id)), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains(insideRefusal(command, s)), Comment(rawValue: r.stderr))
     #expect(try paneExists(terminals, terminals.claude))
     #expect(try paneExists(terminals, terminals.shell))
     #expect(Processes.exists(claude), "sbd ended claude")

@@ -9,7 +9,17 @@ extension View {
     -> some View
   {
     background(HoverCardAnchor(id: session.id, card: card, pinned: pinned))
-      .accessibilityHint(HoverCardContent(session, activeAccount: activeAccount).accessibilityText)
+      .modifier(HoverCardHint(session: session, activeAccount: activeAccount))
+  }
+}
+
+private struct HoverCardHint: ViewModifier {
+  @Environment(\.sessionNames) private var names
+  let session: SessionSummary
+  let activeAccount: String
+
+  func body(content: Content) -> some View {
+    content.accessibilityHint(HoverCardContent(session, activeAccount: activeAccount, names: names).accessibilityText)
   }
 }
 
@@ -185,7 +195,7 @@ private struct HoverCardView: View {
 
   var body: some View {
     if let s = model.board.first(where: { $0.id == id }) {
-      HoverCardBody(content: HoverCardContent(s, activeAccount: model.activeAccountFolder))
+      HoverCardBody(content: HoverCardContent(s, activeAccount: model.activeAccountFolder, names: model.sessionNames))
     }
   }
 }
@@ -215,7 +225,9 @@ struct HoverCardBody: View {
         .background(Capsule().fill(pr.status.color.opacity(0.14)))
       }
       if let summary = content.summary {
-        Text(verbatim: summary).font(.callout).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+        // `HoverCardContent` already put the names in. A name is never scanned again.
+        Text(verbatim: summary).font(.callout).lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
     .padding(12)

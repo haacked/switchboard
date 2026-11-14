@@ -18,9 +18,9 @@ extension Service {
     let ancestry = try caller.ancestry(command: command)
     let (session, pr, sharedWith): (Session, PullRequest?, String?) = try queue.sync {
       let id = try lookup(args)
-      guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      guard !starting.contains(id) else { throw APIError("\(mention(id)) is starting") }
       let e = entries[id]!
-      if e.facts.cleanedUp != nil { throw APIError("\(id) is already cleaned up") }
+      if e.facts.cleanedUp != nil { throw APIError("\(mention(id)) is already cleaned up") }
       try requireNoTurn(e)
       return (e.session, e.facts.pr, sharedSession(e.session))
     }
@@ -40,7 +40,8 @@ extension Service {
         let fresh = try freshSnapshot(of: session)
         let stop: PaneStop = try queue.sync {
           guard let e = entries[session.id], e.session.cwd == session.cwd, !starting.contains(session.id) else {
-            throw APIError("\(session.id) changed while it was being cleaned up")
+            throw APIError(
+              "\(session.mention) changed while it was being cleaned up")
           }
           try requireNoTurn(e)
           install(fresh, of: session)
@@ -73,7 +74,9 @@ extension Service {
         ])
     }
     if let branchError {
-      throw APIError("Removed the worktree of \(session.id), and kept \(branchName): \(branchError)")
+      throw APIError(
+        "Removed the worktree of \(session.mention), and kept \(branchName): \(branchError)"
+      )
     }
     return ["cleaned": .string(session.id), "worktree": .string(session.cwd), "branch": .string(branchName)]
   }
@@ -84,12 +87,13 @@ extension Service {
   /// It runs git, so it runs off the state queue. For a session on a host, it
   /// does not wait for the host, and a host that is not ready blocks cleanup.
   func cleanupBlocker(_ id: String, pr: PullRequest) -> String? {
-    let found: (Session, String?)? = queue.sync {
-      entries[id].map { ($0.session, sharedSession($0.session)) }
+    let (found, gone): ((Session, String?)?, String?) = queue.sync {
+      guard let e = entries[id] else { return (nil, "\(mention(id)) is gone") }
+      return ((e.session, sharedSession(e.session)), nil)
     }
-    guard let (session, sharedWith) = found else { return "\(id) is gone" }
+    guard let (session, sharedWith) = found else { return gone }
     do {
-      _ = try site(for: session).scoped("the cleanup check of \(id)") {
+      _ = try site(for: session).scoped("the cleanup check of \(session.mention)") {
         try checkCleanup(session, pr: pr, sharedWith: sharedWith, at: $0.site)
       }
       return nil
@@ -109,12 +113,16 @@ extension Service {
   private func checkCleanup(_ session: Session, pr: PullRequest?, sharedWith: String?, at site: any SessionSite)
     throws -> (repo: String, branch: (name: String, tip: String)?, supacode: Bool, pr: PullRequest)
   {
-    guard let pr, pr.state != .open else { throw APIError("\(session.id) has no merged PR.") }
+    guard let pr, pr.state != .open else {
+      throw APIError("\(session.mention) has no merged PR.")
+    }
     guard pr.state == .merged else {
       throw APIError("#\(pr.number) closed without merging, so its branch may hold the only copy of the work.")
     }
     guard session.repo != nil else {
-      throw APIError("sbd didn't make the worktree of \(session.id) at \(session.cwd), so cleanup leaves it alone.")
+      throw APIError(
+        "sbd didn't make the worktree of \(session.mention) at \(session.cwd), so cleanup leaves it alone."
+      )
     }
     guard try !folderIsGone(session.cwd, at: site) else {
       throw APIError("\(session.cwd) is gone. `sb rm --worktree` removes the session and the worktree's record.")
@@ -141,14 +149,16 @@ extension Service {
     let exists = try site(for: session).confirmed("the folder of \(session.id)") { $0.exists(session.cwd) }
     guard !exists else { return }
     if entries[session.id]?.facts.cleanedUp != nil {
-      throw APIError("\(session.id) was cleaned up, and its worktree is gone.")
+      throw APIError("\(session.mention) was cleaned up, and its worktree is gone.")
     }
-    throw APIError("\(session.cwd) is gone, so \(session.id) can't start there.")
+    throw APIError(
+      "\(session.cwd) is gone, so \(session.mention) can't start there.")
   }
 
   private func requireNoTurn(_ e: Entry) throws {
     if e.facts.turnRunning {
-      throw APIError("\(e.session.id) is running a turn. Clean it up once the turn ends.")
+      throw APIError(
+        "\(e.session.mention) is running a turn. Clean it up once the turn ends.")
     }
   }
 }

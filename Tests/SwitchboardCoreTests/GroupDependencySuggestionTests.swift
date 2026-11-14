@@ -674,7 +674,7 @@ private let posthog = "PostHog/posthog"
     let two = GroupSuggestion(id: "m", name: "Flags", group: "g1", sessions: ["a"], reason: "", stays: ["b", "c"])
 
     #expect(one.staying() == "b stays, placed by hand")
-    #expect(two.staying { $0.uppercased() } == "B, C stay, placed by hand")
+    #expect(two.staying() == "b, c stay, placed by hand")
   }
 
   @Test func absorbingAddsTheOtherGroupsNotesOldestFirstWithoutRepeatingAnId() {

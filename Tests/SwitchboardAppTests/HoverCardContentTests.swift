@@ -791,3 +791,83 @@ private func everything() -> SessionSummary {
     }
   }
 }
+
+// MARK: - Session names
+
+private let mentionedID = "seb4ec"
+private let mentionedName = "zsh-startup-for-switchboard"
+private let removedID = "sgcctv"
+private let removedName = "old-flag-cleanup"
+private let names = SessionNames(live: [mentionedID: mentionedName], removed: [removedID: removedName])
+
+private func named(_ s: SessionSummary, _ names: SessionNames = names) -> HoverCardContent {
+  HoverCardContent(s, activeAccount: ClaudeAccount.defaultFolder, names: names, now: now)
+}
+
+extension HoverCardContentTests {
+  @Suite struct Names {
+    @Test func aSummaryThatNamesASessionIdShowsTheSessionsName() {
+      var s = bare(state: .needsYou)
+      s.triage = summary("Waiting on \(mentionedID) to merge its PR.")
+
+      let c = named(s)
+
+      #expect(c.summary == "Waiting on \(mentionedName) to merge its PR.")
+    }
+
+    @Test func aSummaryThatNamesARemovedSessionShowsItsName() {
+      var s = bare(state: .needsYou)
+      s.triage = summary("Waiting on \(removedID) to merge its PR.")
+
+      let c = named(s)
+
+      #expect(c.summary == "Waiting on \(removedName) to merge its PR.")
+    }
+
+    @Test func aReasonThatNamesASessionIdShowsTheSessionsName() {
+      let c = named(bare(state: .needsYou, reason: "answer: should \(mentionedID) rebase first?"))
+
+      #expect(c.summary?.contains(mentionedName) == true)
+      #expect(c.summary?.contains(mentionedID) == false)
+    }
+
+    /// The summary capitalizes its first letter. An id that is capitalized
+    /// first no longer matches, because the matcher is case-sensitive.
+    @Test func aSummaryThatStartsWithASessionIdShowsTheSessionsName() throws {
+      var s = bare(state: .needsYou)
+      s.triage = summary("\(mentionedID) finished the migration.")
+
+      let text = try #require(named(s).summary)
+
+      #expect(text.lowercased().hasPrefix("\(mentionedName) finished"))
+    }
+
+    @Test func accessibilityTextNamesTheSessionNotItsId() {
+      var s = bare(state: .needsYou)
+      s.triage = summary("Waiting on \(mentionedID) to merge its PR.")
+
+      let c = named(s)
+
+      #expect(c.accessibilityText.contains(mentionedName))
+      #expect(!c.accessibilityText.contains(mentionedID))
+    }
+
+    @Test func anUnknownIdInTheSummaryStaysAsWritten() {
+      var s = bare(state: .needsYou)
+      s.triage = summary("Waiting on sgxxxx to merge its PR.")
+
+      let c = named(s)
+
+      #expect(c.summary == "Waiting on sgxxxx to merge its PR.")
+    }
+
+    @Test func anEmptyDirectoryLeavesTheSummaryAsWritten() {
+      var s = bare(state: .needsYou)
+      s.triage = summary("Waiting on \(mentionedID) to merge its PR.")
+
+      let c = named(s, SessionNames(live: [:], removed: [:]))
+
+      #expect(c.summary == "Waiting on \(mentionedID) to merge its PR.")
+    }
+  }
+}

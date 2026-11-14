@@ -153,7 +153,7 @@ struct SearchResultRow: View {
         Text(place).font(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.leading, 14)
       }
       if let hint = result.hint {
-        Text("\(hint.field.title): \(oneLine(hint.text, max: 90))")
+        InlineText(plain: "\(hint.field.title): \(oneLine(hint.text, max: 90))", links: false)
           .font(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.leading, 14)
       }
     }

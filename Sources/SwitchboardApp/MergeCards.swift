@@ -41,12 +41,18 @@ func mergeBatchTitle(_ sessions: [SessionSummary]) -> String {
 
 /// gh's error from a failed merge, or nothing.
 struct MergeNote: View {
+  @Environment(\.sessionNames) private var names
   let session: SessionSummary
 
   var body: some View {
     if let error = session.mergeError {
-      Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
-        .lineLimit(2).help(error)
+      Label {
+        InlineText(plain: error, links: false)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle")
+      }
+      .font(.caption).foregroundStyle(.red)
+      .lineLimit(2).help(names.replacingIDs(in: error))
     }
   }
 }

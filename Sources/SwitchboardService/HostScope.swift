@@ -89,7 +89,7 @@ enum HostScope {
     }
     for op in [
       "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp", "hosts", "host-connect",
-      "slash-commands",
+      "slash-commands", "removed-ls",
       "host-disconnect", "live", "live-next", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
       "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
       "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",

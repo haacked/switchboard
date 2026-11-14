@@ -62,7 +62,7 @@ import Testing
     var t: Int64 = 0
     let events = history(&t)
     for cut in 1..<events.count {
-      try store.delete(session: session.id)
+      try store.delete(session: session.id, name: session.name)
       try store.save(session)
       try append(Array(events[..<cut]), to: store)
       let first = try Snapshots.refresh(store, session, build: "b1")
@@ -161,7 +161,7 @@ import Testing
     try append(history(&t), to: store)
     try Snapshots.refresh(store, session, build: "b1")
     #expect(try store.snapshot(session: "s1") != nil)
-    try store.delete(session: "s1")
+    try store.delete(session: "s1", name: "one")
     #expect(try store.snapshot(session: "s1") == nil)
   }
 

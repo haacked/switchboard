@@ -375,7 +375,8 @@ private let otherDestination = "haacked@other.local"
   private static let refusedOps = [
     "rm", "cleanup", "rm-done", "send-group", "send-pending", "group-ls", "group-add", "group-rm", "group-move",
     "group-note", "group-describe", "group-account", "group-suggest", "manager", "manager-ls", "manager-mcp", "chat",
-    "chat-log", "slash-commands", "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp",
+    "chat-log", "slash-commands", "removed-ls", "import", "importable", "accounts", "account-use", "account-move",
+    "usage", "mcp",
     "hosts",
     "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",

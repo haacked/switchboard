@@ -22,7 +22,7 @@ struct DocketView: View {
             Text(session.name).font(.title3.bold()).textSelection(.enabled)
             StateBadge(state: session.state)
           }
-          Text(session.reason).foregroundStyle(.secondary)
+          InlineText(plain: session.reason).foregroundStyle(.secondary)
         }
         Spacer()
         if let url = docket.link {
@@ -57,7 +57,7 @@ struct DocketView: View {
           ForEach(log.reversed(), id: \.id) { event in
             HStack(alignment: .firstTextBaseline, spacing: 8) {
               Text(ago(event.t) + " ago").foregroundStyle(.secondary).frame(width: 70, alignment: .leading)
-              Text(DocketView.line(event.data)).textSelection(.enabled)
+              InlineText(plain: DocketView.line(event.data)).textSelection(.enabled)
             }
           }
         }
@@ -70,7 +70,9 @@ struct DocketView: View {
     .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
-      Text(todos.message(before: "docket keeps the review. Open docket to abandon it."))
+      Text(
+        model.sessionNames.replacingIDs(
+          in: todos.message(before: "docket keeps the review. Open docket to abandon it.")))
     }
   }
 

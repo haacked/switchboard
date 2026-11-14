@@ -45,7 +45,7 @@ extension Service {
       }
       let (parent, group) = try placement()
       var session = Session(
-        id: shortId("s", taken: entries.keys), name: args["name"]?.string ?? "review \(review.pullRequest)", cwd: "",
+        id: newSessionID(), name: args["name"]?.string ?? "review \(review.pullRequest)", cwd: "",
         claudeSessionId: UUID().uuidString.lowercased(), created: nowMs())
       session.parent = parent
       session.group = group
