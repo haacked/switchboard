@@ -179,6 +179,8 @@ private let trickyText = ["-n", "-e", "50% done", #"back\nslash"#, "$HOME and `d
     let repo = try ChangelogRepo()
     for text in trickyText { try repo.commit(text) }
     for (i, text) in trickyText.enumerated() { try repo.mergePullRequest(i + 1, title: text, branch: "odd\(i)") }
+    // An unquoted `*` in bin/changelog would expand to this file's name. Without the file it stays a literal `*`.
+    FileManager.default.createFile(atPath: "\(repo.dir)/glob-target", contents: nil)
 
     let r = try repo.changelog(repo.first)
 

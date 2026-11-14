@@ -8,7 +8,7 @@ if [ $# -ne 1 ]; then
   exit 2
 fi
 types='feat|fix|perf|refactor|docs|test|build|ci|chore'
-form="^($types)(\([^()]+\))?!?: [A-Z]"
+form="^($types)(\([^()]+\))?!?: [[:upper:]]"
 if [[ $1 =~ $form ]]; then
   exit 0
 fi
