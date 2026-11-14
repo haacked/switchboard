@@ -103,15 +103,29 @@ private func conversation(
   @Test(arguments: [
     ("First line\nSecond line", "First line"),
     ("\n\nAfter blank lines\nmore", "After blank lines"),
+    ("   \nAfter spaces", "After spaces"),
     ("Only line", "Only line"),
   ])
   func theRowPreviewIsTheFirstNonEmptyLineOfTheLastReply(_ reply: String, _ preview: String) {
     #expect(firstLine(reply) == preview)
   }
 
-  @Test(arguments: [nil, "", "\n\n"] as [String?])
+  @Test(arguments: [nil, "", "\n\n", "   "] as [String?])
   func aConversationWithNoReplyTextHasNoPreview(_ reply: String?) {
     #expect(reply.flatMap(firstLine) == nil)
+  }
+
+  /// The row's dot shows unread replies, so the mark beside the title leaves out the unread count.
+  @Test(arguments: [
+    (ChatMark.unread(2, working: true), ChatMark?.some(.working)),
+    (.unread(2, working: false), nil),
+    (.working, .working),
+    (.needsMe("approve"), .needsMe("approve")),
+    (.idle(lastMessageAt: 1), nil),
+    (.none, nil),
+  ])
+  func theRowShowsOnlyTheProgressOrNeedsMeMarkBesideTheTitle(_ mark: ChatMark, _ shown: ChatMark?) {
+    #expect(ConversationRow.trailingMark(mark) == shown)
   }
 
   // MARK: Pin
@@ -208,5 +222,19 @@ private func conversation(
     let found = SessionSearch.rank(model.board, query: "cache key")
 
     #expect(found.map(\.id).contains("z"))
+  }
+
+  @Test func openingAnArchivedConversationFromSearchOpensTheArchive() throws {
+    let model = appliedModel([
+      conversation("a", lastActivity: 30), conversation("z", lastActivity: 2, archived: true),
+      needsItem("w", state: .working),
+    ])
+    try #require(!model.sidebarOrder.contains("z"))
+
+    model.openFromSearch("z")
+
+    #expect(model.selection == "z")
+    #expect(model.showingArchive)
+    #expect(model.sidebarOrder.contains("z"))
   }
 }

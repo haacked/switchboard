@@ -6,9 +6,10 @@ import SwitchboardCore
 extension Service {
   /// The `chat-read` request, which marks the replies of the chat that
   /// `group` or `session` names read, up to `replies`, or all of them without
-  /// it. It refuses any request from a session, because a session could
-  /// otherwise hide a chat's replies from the user. It records nothing when
-  /// no new reply would be read.
+  /// it. It refuses a request that names a `caller`, because a session could
+  /// otherwise hide a chat's replies from the user. `sb` sends `caller` from
+  /// `SB_SESSION_ID`, so a session that unsets it is not refused, as with
+  /// `ack`. It records nothing when no new reply would be read.
   func chatReadRequest(_ args: JSON) throws -> JSON {
     if let caller = args["caller"]?.string {
       let name = entries[caller]?.session.name ?? caller
@@ -39,11 +40,9 @@ extension Service {
   /// `session` names to the top of the sidebar, or with `pinned` false unpins
   /// it. A pin is not activity, so it doesn't reorder the list.
   func managerPin(_ args: JSON) throws -> JSON {
-    let id = try lookup(args)
+    guard let ref = args["session"]?.string, !ref.isEmpty else { throw APIError("name a Manager conversation") }
+    let id = try managerConversation(ref)
     let session = entries[id]!.session
-    guard session.kind == .manager else {
-      throw APIError("\(session.name) is not a Manager conversation. Only a conversation can be pinned")
-    }
     let pinned = args["pinned"]?.bool ?? true
     if (session.pinned == true) != pinned {
       try update(id) { $0.pinned = pinned ? true : nil }

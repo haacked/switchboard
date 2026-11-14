@@ -131,6 +131,7 @@ private let quietSince: Int64 = 1_000_000
       conversation(lastActivity: quietSince, cards: [sendCard()]),
       conversation(lastActivity: quietSince, openPrompt: true),
     ]
+    #expect(Conversations.isArchived(shapes[0], now: quietSince + 10 * Conversations.archiveAfterMs))
 
     for s in shapes where Conversations.isArchived(s, now: quietSince + 10 * Conversations.archiveAfterMs) {
       guard case .idle = ChatMark(s) else {

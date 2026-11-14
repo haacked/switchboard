@@ -56,23 +56,19 @@ private func quiet() async { try? await Task.sleep(nanoseconds: 300_000_000) }
   // MARK: The rule
 
   @Test func readThroughIsTheSummarysReplyCountForAnUnreadChatInTheActiveApp() {
-    #expect(BoardModel.readThrough(readable("c"), appActive: true) == 3)
+    #expect(BoardModel.readThrough(readable("c")) == 3)
   }
 
   @Test func readThroughIsTheReplyCountForAConversation() {
-    #expect(BoardModel.readThrough(readable("m", manager: true), appActive: true) == 3)
-  }
-
-  @Test func readThroughIsNilWhileTheAppIsInactive() {
-    #expect(BoardModel.readThrough(readable("c"), appActive: false) == nil)
+    #expect(BoardModel.readThrough(readable("m", manager: true)) == 3)
   }
 
   @Test func readThroughIsNilWithNothingUnread() {
-    #expect(BoardModel.readThrough(readable("c", unread: 0), appActive: true) == nil)
+    #expect(BoardModel.readThrough(readable("c", unread: 0)) == nil)
   }
 
   @Test func readThroughIsNilWithoutActivity() {
-    #expect(BoardModel.readThrough(readable("c", replies: nil), appActive: true) == nil)
+    #expect(BoardModel.readThrough(readable("c", replies: nil)) == nil)
   }
 
   /// A work session has no read state, even if a summary carried activity.
@@ -80,7 +76,7 @@ private func quiet() async { try? await Task.sleep(nanoseconds: 300_000_000) }
     var work = needsItem("w")
     work.activity = ChatActivity(replies: 3, unread: 2)
 
-    #expect(BoardModel.readThrough(work, appActive: true) == nil)
+    #expect(BoardModel.readThrough(work) == nil)
   }
 
   // MARK: What markSelectedChatRead sends
@@ -228,14 +224,17 @@ private func quiet() async { try? await Task.sleep(nanoseconds: 300_000_000) }
 
   /// `apply` runs every second, so a failed read must not show the error banner. An older sbd has no `chat-read`.
   @Test func aFailedReadLeavesNoActionError() async {
-    let model = offlineModel()
-    model.isAppActive = { true }
-    model.apply(.success([readable("c")]), followups: nil)
-    model.selection = "c"
+    let (model, sent) = readingModel([readable("c")], selection: "c")
+    model.send = { op, args in
+      sent.append(op, args)
+      throw Boom()
+    }
 
     model.markSelectedChatRead()
+    await settle { !sent.reads.isEmpty }
     await quiet()
 
+    #expect(sent.reads.count == 1)
     #expect(model.actionError == nil)
   }
 

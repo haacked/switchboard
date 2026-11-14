@@ -19,10 +19,10 @@ extension BoardModel {
   }
 
   /// The reply count to mark read for a chat or a conversation whose pane
-  /// shows, or nil when nothing should be marked: the app is not active, the
-  /// session is a work session, or no reply is unread.
-  static func readThrough(_ s: SessionSummary, appActive: Bool) -> Int? {
-    guard appActive, s.kind.showsAsChat, let activity = s.activity, activity.unread > 0 else { return nil }
+  /// shows, or nil when nothing should be marked: the session is a work
+  /// session, or no reply is unread.
+  static func readThrough(_ s: SessionSummary) -> Int? {
+    guard s.kind.showsAsChat, let activity = s.activity, activity.unread > 0 else { return nil }
     return activity.replies
   }
 
@@ -31,7 +31,7 @@ extension BoardModel {
   /// that selection. A reply that arrives later stays unread.
   func markSelectedChatRead() {
     // `selected` filters every session, so the cheap checks run first.
-    guard selection != nil, isAppActive(), let s = selected, let replies = BoardModel.readThrough(s, appActive: true)
+    guard selection != nil, isAppActive(), let s = selected, let replies = BoardModel.readThrough(s)
     else { return }
     if let last = lastChatRead, last.session == s.id, last.replies == replies { return }
     lastChatRead = (s.id, replies)

@@ -389,7 +389,6 @@ public func nowMs() -> Int64 {
   Clock.now()
 }
 
-/// The text on one line, cut to `max` characters with an ellipsis.
 /// The first line of the text that has more than spaces, trimmed. It reads no further than that line.
 public func firstLine(_ text: String) -> String? {
   var rest = text[...]
@@ -402,6 +401,7 @@ public func firstLine(_ text: String) -> String? {
   return nil
 }
 
+/// The text on one line, cut to `max` characters with an ellipsis.
 public func oneLine(_ text: String, max: Int = 70) -> String {
   let line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     .filter { !$0.isEmpty }.joined(separator: " ")
