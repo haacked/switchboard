@@ -244,13 +244,13 @@ private func quiet() async { try? await Task.sleep(nanoseconds: 300_000_000) }
   @Test func chatMarkOfAGroupWithNoChatIsNone() {
     let model = appliedModel([needsItem("a")])
 
-    #expect(model.chatMark(of: "g1") == .none)
+    #expect(ChatMark(model.chat(of: "g1")) == .none)
   }
 
   @Test func chatMarkOfAGroupWithTwoUnreadRepliesIsUnread() {
     let model = appliedModel([readable("c"), needsItem("a")])
 
-    #expect(model.chatMark(of: "g1") == .unread(2, working: false))
+    #expect(ChatMark(model.chat(of: "g1")) == .unread(2, working: false))
   }
 
   @Test func chatMarkOfAGroupIsWhatChatMarkGivesForItsChat() throws {
@@ -261,13 +261,13 @@ private func quiet() async { try? await Task.sleep(nanoseconds: 300_000_000) }
     for c in chats {
       let model = appliedModel([c])
 
-      #expect(model.chatMark(of: "g1") == ChatMark(c))
+      #expect(ChatMark(model.chat(of: "g1")) == ChatMark(c))
     }
   }
 
   @Test func chatMarkOfAnotherGroupIgnoresThisGroupsChat() {
     let model = appliedModel([readable("c")])
 
-    #expect(model.chatMark(of: "g2") == .none)
+    #expect(ChatMark(model.chat(of: "g2")) == .none)
   }
 }

@@ -29,24 +29,19 @@ struct GroupChatButton: View {
 
 /// The words of a group's Chat button for each `ChatMark`.
 struct ChatButtonText: Equatable {
-  var label: String
-  var help: String
-  var value: String
+  let label: String
+  let help: String
+  let value: String
 
   init(_ mark: ChatMark, lastMessageAt: Int64?, now: Int64 = nowMs()) {
-    guard mark != .none else {
-      self.init(label: "Start chat", help: "Start a chat that manages this group's sessions", value: "No chat")
-      return
+    value = ChatButtonText.value(mark)
+    if mark == .none {
+      label = "Start chat"
+      help = "Start a chat that manages this group's sessions"
+    } else {
+      label = "Chat"
+      help = "Open this group's chat. \(value).\(lastMessageAt.map { " Last message \(ago($0, now: now)) ago." } ?? "")"
     }
-    let last = lastMessageAt.map { " Last message \(ago($0, now: now)) ago." } ?? ""
-    let value = ChatButtonText.value(mark)
-    self.init(label: "Chat", help: "Open this group's chat. \(value).\(last)", value: value)
-  }
-
-  private init(label: String, help: String, value: String) {
-    self.label = label
-    self.help = help
-    self.value = value
   }
 
   /// What the mark says, for VoiceOver and the help text.
@@ -54,8 +49,7 @@ struct ChatButtonText: Equatable {
     switch mark {
     case .none: "No chat"
     case .needsMe(let reason): "Needs you: \(reason)"
-    case .unread(let n, let working):
-      (n == 1 ? "1 unread reply" : "\(n) unread replies") + (working ? ", working" : "")
+    case .unread(let n, let working): ChatActivity.unreadText(n) + (working ? ", working" : "")
     case .working: "Working"
     case .idle: "No unread replies"
     }

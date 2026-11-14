@@ -40,8 +40,9 @@ func manager(_ a: Args) {
   }
   var args: [String: JSON] = [:]
   if let ref = words.popFirst() { args["session"] = .string(ref) }
-  if a.switches.contains("--log") { return printChatLog(a, args.merging(["manager": true]) { $1 }) }
-  if a.switches.contains("--read") { return markRead(a, args.merging(["manager": true]) { $1 }) }
+  let conversation = args.merging(["manager": true]) { $1 }
+  if a.switches.contains("--log") { return printChatLog(a, conversation) }
+  if a.switches.contains("--read") { return markRead(a, conversation) }
   let text = words.joined(separator: " ")
   if !text.isEmpty { args["text"] = .string(text) }
   printOpenOrSend(a, call("manager", args, timeout: 300))

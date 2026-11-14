@@ -82,7 +82,7 @@ struct ConversationRow: View {
           .help(pinned ? "Unpin this conversation" : "Pin this conversation to the top")
           .accessibilityLabel(pinned ? "Unpin \(session.name)" : "Pin \(session.name)")
         }
-        if let preview = ConversationRow.preview(session.lastReply) {
+        if let preview = session.lastReply.flatMap(firstLine) {
           Text(verbatim: preview).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
         }
       }
@@ -99,11 +99,5 @@ struct ConversationRow: View {
     case .unread(_, let working): working ? .working : nil
     case .none, .idle: nil
     }
-  }
-
-  /// The first line of Claude's last reply that has text.
-  static func preview(_ reply: String?) -> String? {
-    reply?.split(whereSeparator: \.isNewline).lazy
-      .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
   }
 }

@@ -20,6 +20,11 @@ public struct ChatActivity: Codable, Equatable, Sendable {
     self.archived = archived
   }
 
+  /// "no unread replies", "1 unread reply", or "3 unread replies".
+  public static func unreadText(_ n: Int) -> String {
+    n == 0 ? "no unread replies" : n == 1 ? "1 unread reply" : "\(n) unread replies"
+  }
+
   public init(_ facts: SessionFacts) {
     self.init(
       replies: facts.replies, unread: max(0, facts.replies - (facts.repliesRead ?? 0)),

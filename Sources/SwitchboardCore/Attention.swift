@@ -376,8 +376,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   }
 
   /// A reply is a main-session Stop with a message. A `chat-read` event marks
-  /// replies read up to its count, clamped to the replies there are, and
-  /// never lowers the count already read.
+  /// replies read up to its count. The count read never exceeds the replies
+  /// and never goes down.
   private mutating func applyReplies(_ event: Event, userPrompt: Bool) {
     switch event.kind {
     case "Stop" where !event.fromSubagent:

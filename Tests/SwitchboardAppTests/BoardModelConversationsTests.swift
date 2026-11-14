@@ -106,12 +106,12 @@ private func conversation(
     ("Only line", "Only line"),
   ])
   func theRowPreviewIsTheFirstNonEmptyLineOfTheLastReply(_ reply: String, _ preview: String) {
-    #expect(ConversationRow.preview(reply) == preview)
+    #expect(firstLine(reply) == preview)
   }
 
   @Test(arguments: [nil, "", "\n\n"] as [String?])
   func aConversationWithNoReplyTextHasNoPreview(_ reply: String?) {
-    #expect(ConversationRow.preview(reply) == nil)
+    #expect(reply.flatMap(firstLine) == nil)
   }
 
   // MARK: Pin

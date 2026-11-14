@@ -33,9 +33,7 @@ func printOpenOrSend(_ a: Args, _ result: JSON) {
 /// Runs `chat-read`, which marks every reply of the chat that `args` names
 /// read. sbd refuses it inside a session, because only the user reads a chat.
 func markRead(_ a: Args, _ args: [String: JSON]) {
-  var args = args
-  if let caller = ProcessInfo.processInfo.environment["SB_SESSION_ID"] { args["caller"] = .string(caller) }
-  let result = call(ChatActivity.readEvent, args)
+  let result = call(ChatActivity.readEvent, args.merging(callerArg) { $1 })
   if a.json { return printJSON(result) }
   let s = summary(result)
   print("\(s.name): \(s.activity?.text ?? "read")".printable)
@@ -44,7 +42,7 @@ func markRead(_ a: Args, _ args: [String: JSON]) {
 extension ChatActivity {
   /// The unread count and the time of the last message.
   var text: String {
-    let unreadText = unread == 0 ? "no unread replies" : unread == 1 ? "1 unread reply" : "\(unread) unread replies"
+    let unreadText = ChatActivity.unreadText(unread)
     return lastMessageAt.map { "\(unreadText), last message \(ago($0)) ago" } ?? unreadText
   }
 }

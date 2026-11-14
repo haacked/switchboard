@@ -373,17 +373,9 @@ struct DeleteButton: View {
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
-  private var waiting: SessionSummary? { model.waitingManager }
-
-  private var tooltip: String {
-    if let waiting { return "\(waiting.name) needs you: \(ChatMark(waiting).needsMeReason ?? waiting.reason) (⇧⌘M)" }
-    if ManagerStar(model.managers) == .unread { return "A Manager conversation has unread replies (⇧⌘M)" }
-    return model.managers.isEmpty
-      ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
-  }
-
   var body: some View {
-    let star = ManagerStar(model.managers)
+    let managers = model.managers
+    let star = ManagerStar(managers)
     Button {
       model.openManager()
     } label: {
@@ -391,7 +383,54 @@ struct ManagerButton: View {
         .foregroundStyle(star.color)
     }
     .accessibilityValue(star.value)
-    .help(tooltip)
+    .help(tooltip(star, managers))
+  }
+
+  private func tooltip(_ star: ManagerStar, _ managers: [SessionSummary]) -> String {
+    switch star {
+    case .needsMe:
+      guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
+        return "A Manager conversation needs you (⇧⌘M)"
+      }
+      return "\(waiting.name) needs you: \(reason) (⇧⌘M)"
+    case .unread: return "A Manager conversation has unread replies (⇧⌘M)"
+    case .outline:
+      return managers.isEmpty
+        ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
+    }
+  }
+}
+
+/// How the toolbar star looks: orange while a conversation waits on the
+/// user, blue while one has unread replies, and an outline otherwise.
+enum ManagerStar: Equatable {
+  case needsMe, unread, outline
+
+  init(_ managers: [SessionSummary]) {
+    let marks = managers.map(ChatMark.init)
+    if marks.contains(where: { $0.needsMeReason != nil }) {
+      self = .needsMe
+    } else if marks.contains(where: { if case .unread = $0 { true } else { false } }) {
+      self = .unread
+    } else {
+      self = .outline
+    }
+  }
+
+  var color: Color {
+    switch self {
+    case .needsMe: AttentionState.needsYou.color
+    case .unread: .accentColor
+    case .outline: .primary
+    }
+  }
+
+  var value: String {
+    switch self {
+    case .needsMe: AttentionState.needsYou.title
+    case .unread: "Unread replies"
+    case .outline: ""
+    }
   }
 }
 
