@@ -60,6 +60,12 @@ public struct SessionNames: Equatable, Sendable {
 
   public var isEmpty: Bool { entries.isEmpty }
 
+  /// Whether `s` has the format of a session id: `s` and five characters from the `shortId` alphabet.
+  public static func isSessionID(_ s: String) -> Bool {
+    let scalars = Array(s.unicodeScalars)
+    return scalars.count == 6 && scalars[0] == "s" && scalars[1...].allSatisfy(inIdAlphabet)
+  }
+
   public func entry(_ id: String) -> Entry? { entries[id] }
 
   /// The text split at each session id that is a whole token and resolves. A

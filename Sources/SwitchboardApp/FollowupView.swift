@@ -55,9 +55,12 @@ struct FollowupView: View {
         if let parent = session.parent {
           GridRow {
             Text("Parent").foregroundStyle(.secondary)
-            if let p = model.allBoard.first(where: { $0.id == parent }) {
+            switch model.sessionNames.entry(parent) {
+            case let p? where !p.removed:
               Button(p.name) { model.selection = parent }.buttonStyle(.link)
-            } else {
+            case let p?:
+              Text("\(p.name) (removed)").foregroundStyle(.secondary)
+            case nil:
               Text("\(parent) (removed)").foregroundStyle(.secondary)
             }
           }
@@ -76,7 +79,7 @@ struct FollowupView: View {
     .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Follow-up"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
-      Text(todos.message(before: "An import of Followups.md won't add it again."))
+      Text(model.sessionNames.plainText(todos.message(before: "An import of Followups.md won't add it again.")))
     }
   }
 

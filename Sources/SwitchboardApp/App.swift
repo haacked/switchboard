@@ -191,7 +191,7 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button("\(s.name): \(s.reason)") {
+        Button(Self.title(for: s, names: model.sessionNames)) {
           model.selection = s.id
           show()
         }
@@ -201,6 +201,8 @@ struct MenuBarContent: View {
     Button("Open Switchboard") { show() }
     Button("Quit") { NSApp.terminate(nil) }
   }
+
+  static func title(for s: SessionSummary, names: SessionNames) -> String { "\(s.name): \(names.plainText(s.reason))" }
 
   private func show() {
     openWindow(id: "main")

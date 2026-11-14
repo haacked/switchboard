@@ -148,9 +148,14 @@ struct RefusalLabel: View {
 
   var body: some View {
     if let refusal {
-      Label(refusal, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
-        .fixedSize(horizontal: false, vertical: true)
-        .textSelection(.enabled)
+      Label {
+        InlineText(plain: refusal)
+      } icon: {
+        Image(systemName: "exclamationmark.triangle.fill")
+      }
+      .foregroundStyle(.red).font(.callout)
+      .fixedSize(horizontal: false, vertical: true)
+      .textSelection(.enabled)
     }
   }
 }

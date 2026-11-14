@@ -121,7 +121,7 @@ struct ContentView: View {
       ) { offer in
         Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
       } message: { offer in
-        Text(offer.message)
+        Text(model.sessionNames.plainText(offer.message))
       }
     }
     .toolbar {
@@ -162,7 +162,7 @@ struct ContentView: View {
     ) { session, todos in
       Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
     } message: { session, todos in
-      Text(todos.message(before: BoardModel.deletePlan(session).message))
+      Text(model.sessionNames.plainText(todos.message(before: BoardModel.deletePlan(session).message)))
     }
     .sheet(item: $model.newSession) {
       NewSessionView(request: $0).environmentObject(model)
@@ -174,8 +174,9 @@ struct ContentView: View {
       SessionSearchView().environmentObject(model)
     }
     .sheet(isPresented: isShowingDoneRemoval) {
-      if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
+      if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model).sessionLinks(model) }
     }
+    .sessionLinks(model)
   }
 }
 
@@ -861,8 +862,8 @@ struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    let names = Dictionary(model.allBoard.map { ($0.id, $0.name) }) { first, _ in first }
-    let name = { (id: String) in names[id] ?? id }
+    let names = model.sessionNames
+    let name = { (id: String) in names.entry(id)?.name ?? id }
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
         ForEach(model.shownSuggestions) { s in
@@ -872,7 +873,8 @@ struct GroupSuggestionList: View {
             VStack(alignment: .leading, spacing: 2) {
               Text("\(action): \(s.sessions.map(name).joined(separator: ", "))")
                 .fontWeight(.medium)
-              InlineText(plain: [s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
+              // The ids stay in, so that `InlineText` draws each one as a linked name.
+              InlineText(plain: [s.reason, s.staying()].compactMap { $0 }.joined(separator: ". "))
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

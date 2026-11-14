@@ -19,7 +19,10 @@ struct HoverCardContent: Equatable {
   /// The account appears only when the session records an account other than
   /// `activeAccount`. A session without a recorded account runs under sbd's
   /// own account, which the app can't name.
-  init(_ s: SessionSummary, activeAccount: String, now: Int64 = nowMs()) {
+  init(
+    _ s: SessionSummary, activeAccount: String, names: SessionNames = SessionNames(live: [:], removed: [:]),
+    now: Int64 = nowMs()
+  ) {
     title = s.name
     let repo = s.pr?.repo ?? s.repoFolder.map { ($0 as NSString).lastPathComponent }
     let branch = s.branch == s.name ? nil : s.branch
@@ -36,7 +39,7 @@ struct HoverCardContent: Equatable {
       Self.joined(meta),
     ].compactMap { $0 }
     pr = s.pr.map { PRChip(text: $0.line, status: $0.status) }
-    summary = Self.summary(s)
+    summary = Self.summary(s, names: names)
   }
 
   /// Every fact in one string, for VoiceOver, which reads no hover card.
@@ -51,13 +54,17 @@ struct HoverCardContent: Equatable {
 
   /// The triage summary, else the reason, else the start of the last reply.
   /// The reply can run to many kilobytes, so only its start goes through `oneLine`.
-  private static func summary(_ s: SessionSummary) -> String? {
+  /// Names replace ids before `capitalized`, which would stop an id at the start from matching.
+  private static func summary(_ s: SessionSummary, names: SessionNames) -> String? {
     let candidates = [
       s.triage?.summary,
       Attention.plainReason(s.reason, working: s.state == .working),
       s.lastReply.map { String($0.drop(while: \.isWhitespace).prefix(400)) },
     ]
-    guard let text = candidates.lazy.compactMap({ $0.map { oneLine($0, max: 160) } }).first(where: { !$0.isEmpty })
+    guard
+      let text = candidates.lazy.compactMap({ $0.map { oneLine(names.plainText($0), max: 160) } }).first(where: {
+        !$0.isEmpty
+      })
     else { return nil }
     return Triage.capitalized(text)
   }

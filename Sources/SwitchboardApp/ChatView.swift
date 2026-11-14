@@ -115,16 +115,19 @@ private struct ChatBubble: View {
   }
 }
 
+/// A notice or command output, cut to its first line. The full text is the
+/// tooltip, so the line draws names without links, whose tooltip would compete with it.
 private struct GreyLine: View {
+  @Environment(\.sessionNames) private var names
   let text: String
 
   var body: some View {
-    Text(text.prefix { !$0.isNewline })
+    InlineText(plain: String(text.prefix { !$0.isNewline }), links: false)
       .font(.caption)
       .foregroundStyle(.secondary)
       .lineLimit(1)
       .truncationMode(.tail)
-      .help(text)
+      .help(names.plainText(text))
       .padding(.horizontal, 10)
   }
 }
