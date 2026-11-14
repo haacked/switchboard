@@ -292,7 +292,7 @@ struct IssueStart: View {
       }
       if !model.trustsIssue(row) {
         Text(
-          "Starts without auto mode, because \(row.issue.author.map { "@\($0)" } ?? "an unknown author") isn't you or on your team."
+          "Starts in manual mode, because \(row.issue.author.map { "@\($0)" } ?? "an unknown author") isn't you or on your team."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

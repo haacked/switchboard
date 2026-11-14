@@ -140,19 +140,19 @@ private let rows = [
     #expect(request?.group == "g1")
   }
 
-  @Test(arguments: [("robin-k", nil), ("zed-q", false), (nil, false)] as [(String?, Bool?)])
-  func editThePromptFirstStartsWithoutAutoModeForAnOutsideAuthor(author: String?, autoMode: Bool?) {
+  @Test(arguments: [("robin-k", false), ("zed-q", true), (nil, true)] as [(String?, Bool)])
+  func editThePromptFirstStartsInManualModeForAnOutsideAuthor(author: String?, manual: Bool) {
     let model = model()
     var issue = rows[0]
     issue.issue.author = author
     model.editIssuePrompt(issue, preset: IssuePreset(name: "go", prompt: "/go --yolo {url}"))
 
-    #expect(model.newSession?.autoMode == autoMode)
+    #expect(model.newSession?.manualMode == manual)
   }
 
-  @Test(arguments: [("robin-k", nil), ("zed-q", false), (nil, false)] as [(String?, Bool?)])
-  func followUpFencesTheTitleOnTheIssuesBranchAndStartsWithoutAutoModeForAnOutsideAuthor(
-    author: String?, autoMode: Bool?
+  @Test(arguments: [("robin-k", false), ("zed-q", true), (nil, true)] as [(String?, Bool)])
+  func followUpFencesTheTitleOnTheIssuesBranchAndStartsInManualModeForAnOutsideAuthor(
+    author: String?, manual: Bool
   ) async {
     var issue = rows[0]
     issue.issue.author = author
@@ -164,15 +164,16 @@ private let rows = [
     #expect(sent.op == "followup-add")
     #expect(sent.args["prompt"]?.string?.contains("<issue-title>Issue 1</issue-title>") == true)
     #expect(sent.args["branch"] == "robin/1-issue-1")
-    #expect(sent.args["autoMode"] == autoMode.map(JSON.bool))
+    #expect(sent.args["manualMode"] == (manual ? .bool(true) : nil))
+    #expect(sent.args["autoMode"] == nil)
   }
 
-  @Test(arguments: [nil, false] as [Bool?])
-  func theSheetSendsTheRequestsAutoMode(autoMode: Bool?) {
-    let form = NewSessionView.Form(request: NewSessionRequest(repo: "acme/ledger", autoMode: autoMode))
+  @Test(arguments: [false, true])
+  func theSheetSendsTheRequestsManualMode(manual: Bool) {
+    let form = NewSessionView.Form(request: NewSessionRequest(repo: "acme/ledger", manualMode: manual))
     form.offer([KnownRepo(path: "/dev/acme/ledger", name: "acme/ledger")])
 
-    #expect(form.request(worktree: false, groups: [])?.autoMode == autoMode)
+    #expect(form.request(worktree: false, groups: [])?.manualMode == (manual ? true : nil))
   }
 
   @Test func aWorkedOnIssueDoesNotStart() async {

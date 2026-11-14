@@ -196,12 +196,12 @@ extension BoardModel {
       "title": .string(issue.title), "repository": .string(issue.repo),
       "branch": .string(issue.branch(prefix: issueList?.branchPrefix ?? "")),
     ]
-    if !trustsIssue(row) { args["autoMode"] = .bool(false) }
+    if !trustsIssue(row) { args["manualMode"] = .bool(true) }
     perform("followup-add", args)
   }
 
-  /// Whether the viewer or a teammate wrote the issue, so its session may start in auto mode. sbd's Start uses the
-  /// same rule.
+  /// Whether the viewer or a teammate wrote the issue. Any other issue's session starts in manual mode. sbd's Start
+  /// uses the same rule.
   func trustsIssue(_ row: ListedIssue) -> Bool {
     IssueInbox(viewer: issueList?.viewer, team: issueList?.team ?? IssueTeam()).trusts(row.issue)
   }
@@ -211,7 +211,7 @@ extension BoardModel {
     newSession = NewSessionRequest(
       group: issueGroup(row), repo: row.issue.repo, branch: row.issue.branch(prefix: issueList?.branchPrefix ?? ""),
       prompt: preset.prompt(for: row.issue), issue: IssueRef(repo: row.issue.repo, number: row.issue.number),
-      autoMode: trustsIssue(row) ? nil : false)
+      manualMode: !trustsIssue(row))
   }
 }
 

@@ -2,6 +2,8 @@
 public enum PermissionMode {
   public static let auto = "auto"
   public static let plan = "plan"
+  /// Manual mode, which hook payloads call `default`.
+  public static let manual = "default"
   /// The modes whose permission prompts offer to switch to auto mode: manual and accept edits.
   public static let offeringAutoMode: Set = ["default", "acceptEdits"]
 
@@ -20,6 +22,8 @@ public enum PermissionMode {
   /// mode. It does not bring plan mode back.
   public static func forLaunch(_ session: Session, resume: Bool, lastReported: String?) -> String? {
     if session.planMode == true, !resume || lastReported == plan { return plan }
+    // Manual mode holds the same way, so a resume doesn't fall back to a default of auto from Claude's settings.
+    if session.manualMode == true, !resume || lastReported == manual { return manual }
     return session.autoMode == true ? auto : nil
   }
 

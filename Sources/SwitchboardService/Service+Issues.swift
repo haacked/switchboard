@@ -174,7 +174,7 @@ extension Service {
 
   /// Starts a session on a cached issue: a worktree on `<branchPrefix><number>-<slug>` in the repository's checkout,
   /// the session's issue set to the issue, and the preset's prompt as its first message. An issue that the viewer or a
-  /// teammate didn't write starts its session without auto mode.
+  /// teammate didn't write starts its session in manual mode.
   private func startIssue(_ args: JSON) throws -> SessionSummary {
     let (issue, presets, defaultPreset, trusted) = try queue.sync {
       let issue = try cachedIssue(args["issue"]?.string ?? "")
@@ -202,7 +202,7 @@ extension Service {
       NewSession(
         path: repo, branch: branch, name: issueSessionName(issue),
         worktree: true, prompt: preset.prompt(for: issue), group: args["group"]?.string,
-        autoMode: trusted ? nil : false, issue: IssueRef(repo: issue.repo, number: issue.number)))
+        manualMode: trusted ? nil : true, issue: IssueRef(repo: issue.repo, number: issue.number)))
   }
 
   /// A slug of the title, or `issue-<N>` for a title with no ASCII letters or digits.

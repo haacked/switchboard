@@ -13,9 +13,9 @@ struct NewSessionRequest: Identifiable {
   var prompt: String?
   /// The issue that the session works on.
   var issue: IssueRef?
-  /// False starts the session without auto mode, as for an issue that someone outside the team wrote. Nil leaves it
-  /// to the `autoMode` setting.
-  var autoMode: Bool?
+  /// True starts the session in manual mode, whatever the settings say, as for an issue that someone outside the
+  /// team wrote.
+  var manualMode = false
   /// The id of the Manager conversation that starts the new session, from its pane's New Task button.
   var parent: String?
 }
@@ -38,7 +38,7 @@ struct NewSessionView: View {
     private let repoName: String?
     /// The issue that the session works on.
     let issue: IssueRef?
-    let autoMode: Bool?
+    let manualMode: Bool
     /// The id of the conversation that starts the session, or nil for none.
     let parent: String?
     /// The last offer, which a group change selects from again.
@@ -53,7 +53,7 @@ struct NewSessionView: View {
       parent = request.parent
       repoName = request.repo
       issue = request.issue
-      autoMode = request.autoMode
+      manualMode = request.manualMode
       branch = request.branch ?? ""
       prompt = request.prompt ?? ""
     }
@@ -98,7 +98,7 @@ struct NewSessionView: View {
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
         prompt: optional(prompt), parent: parent, account: groupAccount(groups) == nil ? optional(account) : nil,
-        group: group, autoMode: autoMode, planMode: planMode ? true : nil, issue: issue)
+        group: group, planMode: planMode ? true : nil, manualMode: manualMode ? true : nil, issue: issue)
     }
   }
 
@@ -158,8 +158,8 @@ struct NewSessionView: View {
         }
         Toggle("Start in plan mode", isOn: $form.planMode)
           .help("Claude writes a plan and waits for your approval before it edits a file")
-        if form.autoMode == false {
-          Text("Starts without auto mode, because someone outside your team wrote the issue.")
+        if form.manualMode {
+          Text("Starts in manual mode, because someone outside your team wrote the issue.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
