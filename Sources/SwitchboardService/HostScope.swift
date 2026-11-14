@@ -236,13 +236,17 @@ extension Service {
     return shown
   }
 
-  /// Throws when host `host` sets a wait that the GitHub poller resolves on session `id`, and `showsGitHub` keeps
-  /// the host from the session's GitHub data. It runs on the state queue.
+  /// Throws when host `host` sets a wait that the GitHub poller resolves on session `id`, unless the session is on
+  /// `host` and has a PR in a repo that `host` may read. Before a PR exists, the poller takes the repo from the
+  /// branch's tracking remote or the transcript, which the box chooses, so an origin remote alone doesn't count.
+  /// It runs on the state queue.
   func requireGitHubWait(_ wait: Wait, on id: String, from host: String) throws {
-    guard GitHubPoller.waitKinds.contains(wait.kind), !showsGitHub(id, to: .remote(host)) else { return }
-    throw APIError(
-      "a \(wait.kind.rawValue) wait from \(host) reads GitHub with this Mac's login, so the session's repo must be in the repos of \(host) in \(home.config)"
-    )
+    guard GitHubPoller.waitKinds.contains(wait.kind) else { return }
+    guard let e = entries[id], e.session.host == host, hostMayRead(e.facts.pr?.repo, on: host) else {
+      throw APIError(
+        "a \(wait.kind.rawValue) wait from \(host) reads GitHub with this Mac's login, so it needs the session's PR open in a repo that the repos of \(host) in \(home.config) name"
+      )
+    }
   }
 }
 

@@ -945,6 +945,30 @@ private func text(_ answer: Response) -> String {
     }
   }
 
+  /// Before a PR exists, the poller takes the repo from the branch's tracking remote, which the box chooses.
+  @Test(.timeLimit(.minutes(1)))
+  func aGitHubWaitFromTheHostWhoseOriginIsListedButThatHasNoPRIsRefused() throws {
+    try withSessions(hosts: listedHosts) { service in
+      let originCounts = service.queue.sync {
+        let session = service.entries["m1"]!.session
+        let site = service.site(for: session)
+        let checkout = service.checkout(session) ?? session.cwd
+        if session.repo == nil { service.checkouts[SitePath(session.cwd, at: site)] = (checkout, nowMs()) }
+        service.repositories[SitePath(checkout, at: site)] = ("Secret/Listed", nowMs())
+        return service.showsGitHub("m1", to: .remote("mini"))
+      }
+      #expect(originCounts, "the origin remote should name the listed repo")
+      let before = try service.scopeState()
+
+      let answer = service.handle(
+        Request(op: "wait", args: ["session": "m1", "kind": "ci", "target": "12"]), origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("PR open") == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+    }
+  }
+
   @Test(.timeLimit(.minutes(1)))
   func aGitHubWaitFromTheHostOnAListedRepoIsSet() throws {
     try withSessions(hosts: listedHosts) { service in
