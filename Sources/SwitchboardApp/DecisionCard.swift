@@ -57,6 +57,12 @@ struct DecisionCard: View {
     !item.summary.isEmpty && !item.callouts.isEmpty
   }
 
+  /// Whether the Action says that the item has no summary: a fallback item
+  /// with no options whose reply gave no closing section.
+  static func showsMissingSummary(_ item: TriageItem) -> Bool {
+    item.source == .fallback && item.summary.isEmpty && item.options.isEmpty
+  }
+
   private func summary(_ text: String) -> some View {
     MarkdownView(text: text)
   }
@@ -98,7 +104,7 @@ struct DecisionCard: View {
     } else if session.openPrompt {
       // A message would only queue behind the open dialog. The Summary says why the prompt has no card.
       OpenTerminalButton().disabled(!session.runsClaude)
-    } else if item.source == .fallback {
+    } else if Self.showsMissingSummary(item) {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
     // A Ready to merge card offers Acknowledge as one of its options.

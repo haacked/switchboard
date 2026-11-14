@@ -560,16 +560,34 @@ public enum Attention {
   /// Classifies a reply by the last question in its last paragraph, or by a
   /// next step that the paragraph announces.
   public static func classify(_ reply: String) -> ReplyKind {
-    guard let last = lastParagraph(reply) else { return .other }
-    let parts = sentences(last)
-    if let q = parts.last(where: { $0.hasSuffix("?") }) {
-      let lower = q.lowercased()
-      return offerStarts.contains(where: { lower.hasPrefix($0) }) ? .offer(q) : .question(q)
+    if let q = lastQuestion(reply)?.question {
+      return offerPrefix(q) != nil ? .offer(q) : .question(q)
     }
+    let parts = lastParagraph(reply).map { sentences($0) } ?? []
     if let s = parts.first(where: { s in nextStepPhrases.contains { s.lowercased().contains($0) } }) {
       return .offer(s)
     }
     return .other
+  }
+
+  /// The longest entry of `offerStarts` that the sentence starts with,
+  /// matched without regard to case and followed by whitespace. "Should it be
+  /// renamed?" has none, because "should i" ends inside a word there.
+  public static func offerPrefix(_ sentence: String) -> String? {
+    let lower = sentence.lowercased()
+    return offerStarts.filter { start in
+      lower.hasPrefix(start) && lower.dropFirst(start.count).first?.isWhitespace == true
+    }.max { $0.count < $1.count }
+  }
+
+  /// The last question in the reply's last paragraph, and the sentence before
+  /// it in that paragraph. The question is trimmed as `sentences` trims. The
+  /// previous sentence keeps its Markdown, so its code spans survive.
+  public static func lastQuestion(_ reply: String) -> (question: String, previous: String?)? {
+    guard let last = lastParagraph(reply) else { return nil }
+    let parts = sentences(last, trimming: .whitespaces).filter { !$0.trimmingCharacters(in: sentenceTrim).isEmpty }
+    guard let i = parts.lastIndex(where: { $0.trimmingCharacters(in: sentenceTrim).hasSuffix("?") }) else { return nil }
+    return (parts[i].trimmingCharacters(in: sentenceTrim), i > 0 ? parts[i - 1] : nil)
   }
 
   static func lastParagraph(_ reply: String) -> String? {
