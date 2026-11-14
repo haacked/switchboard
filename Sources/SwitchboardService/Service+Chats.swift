@@ -66,26 +66,36 @@ extension Service {
   func chatLog(_ args: JSON) throws -> JSON {
     let assistantOnly = args["role"]?.string == ChatMessage.Role.assistant.rawValue
     let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
-      let manager = args["manager"]?.bool == true
-      let id: String
-      if manager || args["session"] != nil {
-        id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
-        guard let session = entries[id]?.session, assistantOnly || session.kind.showsAsChat else {
-          let name = entries[id]?.session.name ?? id
-          throw APIError("\(name) is not a Manager conversation or a group chat. chat-log reads only those")
-        }
-      } else {
-        let group = try lookupGroup(args)
-        guard let chat = chatID(group) else {
-          throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
-        }
-        id = chat
-      }
+      let id = try chatTarget(args, op: "chat-log", anyKind: assistantOnly)
       return (transcriptFinder(id), try site(of: id).machine)
     }
     let limit = args["limit"]?.int ?? 50
     let messages = findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? []
     return try JSON(encoding: assistantOnly ? messages.filter { $0.role == .assistant } : messages)
+  }
+
+  /// The session that `manager`, `session`, or `group` names, as `chat-log`
+  /// and `chat-read` read them. A group that has no chat is an error, and
+  /// nothing creates one. Unless `anyKind`, a session that is not a Manager
+  /// conversation or a group chat is an error that names `op`.
+  func chatTarget(_ args: JSON, op: String, anyKind: Bool = false) throws -> String {
+    let id: String
+    if args["manager"]?.bool == true {
+      id = try managerConversation(args["session"]?.string)
+    } else if args["session"] != nil {
+      id = try lookup(args)
+    } else {
+      let group = try lookupGroup(args)
+      guard let chat = chatID(group) else {
+        throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
+      }
+      id = chat
+    }
+    let session = entries[id]!.session
+    guard anyKind || session.kind.showsAsChat else {
+      throw APIError("\(session.name) is not a Manager conversation or a group chat. \(op) reads only those")
+    }
+    return id
   }
 
   func chatID(_ group: String) -> String? {

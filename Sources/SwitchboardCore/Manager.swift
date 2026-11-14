@@ -16,10 +16,7 @@ public enum Manager {
 
   /// The first non-empty line of the prompt, cut to 40 characters.
   public static func name(fromPrompt prompt: String) -> String {
-    let line =
-      prompt.split(whereSeparator: \.isNewline).lazy
-      .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
-    return line.isEmpty ? untitled : String(line.prefix(maxNameLength))
+    firstLine(prompt).map { String($0.prefix(maxNameLength)) } ?? untitled
   }
 
   /// Names a conversation's MCP servers for the user. `nil` is the full setup.

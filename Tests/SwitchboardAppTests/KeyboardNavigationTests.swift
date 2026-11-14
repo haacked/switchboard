@@ -409,11 +409,14 @@ import Testing
       Press(KeyEquivalent.return.character, [.command, .shift]), Press("r"),
       Press("q"), Press("w"), Press("h"), Press("h", [.command, .option]), Press("m"), Press(","), Press("c"),
       Press("v"), Press("x"), Press("a"), Press("z"), Press("z", [.command, .shift]), Press("f", [.command, .control]),
-      Press("p"), Self.filterByOrg,
+      Press("p"), Self.filterByOrg, Self.newConversation,
     ]
 
     /// Session > Filter by Org….
     static let filterByOrg = Press("o", [.command, .shift])
+
+    /// File > New Conversation. ⌘T is Move Focus to Terminal, so a new conversation takes ⌥⌘N.
+    static let newConversation = Press("n", [.command, .option])
 
     /// A focused terminal passes only ⌘ keys to the menu bar.
     @Test func everyShortcutUsesCommand() {
@@ -437,6 +440,16 @@ import Testing
     @Test func filterByOrgCollidesWithNoOtherShortcut() {
       #expect(Self.taken.filter { $0 == Self.filterByOrg }.count == 1)
       #expect(!Self.all.map(Press.init).contains(Self.filterByOrg))
+    }
+
+    @Test func newConversationIsOptionCommandN() {
+      #expect(Press(NavShortcuts.newConversation) == Self.newConversation)
+    }
+
+    @Test func newConversationCollidesWithNoOtherShortcut() {
+      #expect(Self.taken.filter { $0 == Self.newConversation }.count == 1)
+      #expect(!Self.all.map(Press.init).contains(Self.newConversation))
+      #expect(Press(NavShortcuts.newConversation) != Press(NavShortcuts.focusTerminal))
     }
 
     @Test func theShortcutsAreTheKeysTheReadmeNames() {

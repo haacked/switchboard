@@ -3,10 +3,11 @@ import SwitchboardCore
 
 extension BoardModel {
   /// The sessions in the order the sidebar lists them: the Manager conversations, then each section's rows. A
-  /// collapsed section's rows are left out, because the sidebar hides them.
+  /// collapsed section's rows are left out, because the sidebar hides them. So are the archived conversations
+  /// while the archive is closed.
   var sidebarOrder: [String] {
     let rows = sidebarGroups.filter { !collapsed.contains($0.state) }.flatMap { $0.rows.map(\.id) }
-    return managers.map(\.id) + rows
+    return conversationOrder.map(\.id) + rows
   }
 
   var listFocusTarget: ListFocus {
@@ -22,11 +23,13 @@ extension BoardModel {
   func requestListFocus() { listFocusRequests += 1 }
 
   /// Closes the search panel and selects `id` as a sidebar click does, even when the session has an Inbox
-  /// item. A work session's collapsed section opens, so the sidebar shows the selected row.
+  /// item. A work session's collapsed section opens, and so does the archive for an archived conversation, so
+  /// the sidebar shows the selected row.
   func openFromSearch(_ id: String) {
     showingSearch = false
     guard let session = board.first(where: { $0.id == id }) else { return }
     if session.kind == .work { collapsed.remove(session.state) }
+    if session.activity?.archived == true { showingArchive = true }
     selection = id
     requestListFocus()
   }

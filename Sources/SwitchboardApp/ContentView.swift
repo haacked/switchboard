@@ -205,26 +205,7 @@ struct Sidebar: View {
     let repos = model.repoLabels
     let activeAccount = model.activeAccountFolder
     List(selection: $model.selection) {
-      if !model.managers.isEmpty {
-        Section {
-          ForEach(model.managers) { manager in
-            SessionRow(session: manager, activeAccount: activeAccount, hoverCard: model.hoverCard).tag(manager.id)
-          }
-        } header: {
-          HStack {
-            Text("Manager")
-            Spacer()
-            Button {
-              model.openManager(new: true)
-            } label: {
-              Image(systemName: "plus")
-            }
-            .buttonStyle(.borderless)
-            .help("Start a Manager conversation")
-            .accessibilityLabel("New Manager conversation")
-          }
-        }
-      }
+      ConversationsSection(activeAccount: activeAccount)
       ForEach(model.sidebarGroups) { group in
         let state = group.state
         Section(isExpanded: expanded(state)) {
@@ -392,24 +373,64 @@ struct DeleteButton: View {
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
-  private var waiting: SessionSummary? { model.waitingManager }
-  private var needsYou: Bool { waiting != nil }
-
-  private var tooltip: String {
-    if let waiting { return "\(waiting.name) needs you: \(waiting.reason) (⇧⌘M)" }
-    return model.managers.isEmpty
-      ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
-  }
-
   var body: some View {
+    let managers = model.managers
+    let star = ManagerStar(managers)
     Button {
       model.openManager()
     } label: {
-      Label("Manager", systemImage: needsYou ? "star.fill" : "star")
-        .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
+      Label("Manager", systemImage: star == .outline ? "star" : "star.fill")
+        .foregroundStyle(star.color)
     }
-    .accessibilityValue(needsYou ? AttentionState.needsYou.title : "")
-    .help(tooltip)
+    .accessibilityValue(star.value)
+    .help(tooltip(star, managers))
+  }
+
+  private func tooltip(_ star: ManagerStar, _ managers: [SessionSummary]) -> String {
+    switch star {
+    case .needsMe:
+      guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
+        return "A Manager conversation needs you (⇧⌘M)"
+      }
+      return "\(waiting.name) needs you: \(reason) (⇧⌘M)"
+    case .unread: return "A Manager conversation has unread replies (⇧⌘M)"
+    case .outline:
+      return managers.isEmpty
+        ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
+    }
+  }
+}
+
+/// How the toolbar star looks: orange while a conversation waits on the
+/// user, blue while one has unread replies, and an outline otherwise.
+enum ManagerStar: Equatable {
+  case needsMe, unread, outline
+
+  init(_ managers: [SessionSummary]) {
+    let marks = managers.map(ChatMark.init)
+    if marks.contains(where: { $0.needsMeReason != nil }) {
+      self = .needsMe
+    } else if marks.contains(where: { if case .unread = $0 { true } else { false } }) {
+      self = .unread
+    } else {
+      self = .outline
+    }
+  }
+
+  var color: Color {
+    switch self {
+    case .needsMe: AttentionState.needsYou.color
+    case .unread: .accentColor
+    case .outline: .primary
+    }
+  }
+
+  var value: String {
+    switch self {
+    case .needsMe: AttentionState.needsYou.title
+    case .unread: "Unread replies"
+    case .outline: ""
+    }
   }
 }
 
@@ -702,11 +723,7 @@ private struct LaneLabel: View {
         .font(.caption).foregroundStyle(.secondary)
       if let group {
         HStack {
-          Button("Chat") { model.openChat(group.id) }
-            .buttonStyle(.link).font(.caption)
-            .help(
-              model.chat(of: group.id) == nil
-                ? "Start a chat that manages this group's sessions" : "Open this group's chat")
+          GroupChatButton(group: group)
           Button("Delete") { model.requestDeleteGroup(group) }
             .buttonStyle(.link).font(.caption)
             .help(group.sessions.isEmpty ? "Delete this group" : "Delete this group and move its sessions to Ungrouped")

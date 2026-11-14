@@ -53,6 +53,9 @@ let usage = """
                                   prompt names it
     manager ls                    list the conversations, newest activity first
     manager <conv> --log          the conversation's last messages
+    manager <conv> --read         mark the conversation's replies read
+    manager pin|unpin <conv>      pin the conversation to the top of the
+                                  app's Conversations list, or unpin it
     manager mcp <conv> [add <server>… | rm <server>… | --all | --none]
                                   show or change the MCP servers that the
                                   conversation loads besides switchboard. A new
@@ -249,6 +252,7 @@ let usage = """
                                   the group's sessions, starting it the first
                                   time. With text, send it a message
     chat <group> --log            the chat's last messages
+    chat <group> --read           mark the chat's replies read
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]
@@ -481,6 +485,7 @@ func printSession(_ s: SessionSummary) {
     "  claude:  \(s.live ? "running, pid \(s.claudePid.map(String.init) ?? "?")" : "stopped")\(s.attached ? ", attached" : "")"
   )
   if let group = s.chat { print("  chat of: group \(group)") }
+  if let activity = s.activity { print("  unread:  \(activity.text)") }
   if let group = s.group {
     let description = s.groupDescription.map { ": \($0)" } ?? ""
     print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
