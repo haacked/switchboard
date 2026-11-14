@@ -119,7 +119,7 @@ extension Service {
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
     guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }
-    _ = try send(id, Chat.describedNotice(groups[group]?.description), byUser: false)
+    _ = try send(id, Chat.describedNotice(groups[group]?.description), byUser: false, trigger: .chat)
   }
 
   /// Marks the group's chat done, because its tools can no longer find the group.

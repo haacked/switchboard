@@ -3,10 +3,11 @@ import Foundation
 import SwitchboardCore
 import UserNotifications
 
-/// The two views that the detail pane shows while no session is selected.
+/// The views that the detail pane shows while no session is selected.
 enum MainView {
   case inbox
   case board
+  case issues
 }
 
 /// The app's view of sbd. It polls `ls` once a second, because sbd keeps
@@ -57,7 +58,9 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
+  var presentingSheet: Bool {
+    newSession != nil || showingImport || showingSearch || doneRemoval != nil || showingIssueSetup
+  }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
   }
@@ -159,6 +162,28 @@ final class BoardModel: ObservableObject {
   @Published var suggestions: [GroupSuggestion] = []
   /// The plan updates and new plan rows that wait for the user, read with the follow-ups.
   @Published var planProposals: [PlanProposal] = []
+  /// The open issues from the configured sources, read with the follow-ups. nil until the first read.
+  @Published var issueList: IssueList?
+  /// The issue that the user last moved to in the Issues view, by id.
+  @Published var issueFocus: String?
+  /// Counts moves in the Issues view. Each one scrolls to the current issue.
+  @Published var issueJumps = 0
+  @Published var issueScope = IssueScope.team
+  @Published var issueSort = IssueSort.updated
+  /// Whether the Issues list has a section per repository instead of a section per bucket.
+  @Published var issuesByRepo = false
+  /// The Issues sections that the user collapsed, by section id.
+  @Published var collapsedIssueSections: Set<String> = IssueSection.collapsedAtFirst
+  /// The issues whose Start is on its way to sbd.
+  @Published var startingIssues: Set<String> = []
+  /// sbd's refusal of the last Start, by issue id. The issue's pane shows it.
+  @Published var issueErrors: [String: String] = [:]
+  /// The session that the last Start made, while the Issues view's notice offers to open it.
+  @Published var startedIssue: StartedIssue?
+  /// The group that the user picked for an issue's Start, by issue id. nil inside picks No Group. An issue with no
+  /// entry starts in `KnownRepos.preferredGroup`.
+  @Published var issueGroupPicks: [String: String?] = [:]
+  @Published var showingIssueSetup = false
   /// Plan proposals whose Apply or Reject is on its way to sbd. Applying
   /// writes to GitHub, so their buttons stay off until sbd replies.
   @Published var answeringProposals: Set<String> = []
@@ -187,6 +212,9 @@ final class BoardModel: ObservableObject {
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
+  /// Issue reads and Starts, which wait on GitHub, gh, or git. They run here so the session list and other
+  /// actions do not wait behind them.
+  let issueWork = DispatchQueue(label: "switchboard.issues", attributes: .concurrent)
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.
@@ -195,7 +223,8 @@ final class BoardModel: ObservableObject {
   /// it runs apart from other actions too.
   private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
-  private var knownStates: [String: AttentionState] = [:]
+  /// Each session as the last refresh listed it.
+  private var lastSeen: [String: SessionSummary] = [:]
   /// The session that `create` or `openManager` selected before a refresh
   /// listed it.
   private(set) var pendingSelection: String?
@@ -292,8 +321,8 @@ final class BoardModel: ObservableObject {
     orgFilter.insert(key)
   }
 
-  /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
-  /// star fills and turns the Needs you color while it needs you.
+  /// The Manager and a group chat count only while a prompt blocks them. The
+  /// toolbar star fills and turns the Needs you color while the Manager needs you.
   var needsUser: [SessionSummary] { sessions.filter(Triage.needsYou) }
 
   /// The Manager conversations, newest activity first, as `sb manager ls` lists them.
@@ -317,6 +346,15 @@ final class BoardModel: ObservableObject {
 
   /// The group's chat, or nil before its first start.
   func chat(of group: String) -> SessionSummary? { sessions.first { $0.kind == .chat && $0.chat == group } }
+
+  /// The current name of the group that the chat manages, or nil for any other session.
+  private func groupName(of s: SessionSummary) -> String? {
+    guard let group = s.chat else { return nil }
+    return groups.first { $0.id == group }?.name
+  }
+
+  /// How the Inbox, the menu bar, and a notification name the session.
+  func inboxName(_ s: SessionSummary) -> String { Triage.inboxName(s, groupName: groupName(of: s)) }
 
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
@@ -344,7 +382,7 @@ final class BoardModel: ObservableObject {
   /// True while the sidebar has no rows and sbd answers.
   var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil }
 
-  /// The Inbox or the Board while no session is selected, else nil.
+  /// The main view while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
 
   /// The focused Inbox session while it exists, else the first item. A session
@@ -380,12 +418,14 @@ final class BoardModel: ObservableObject {
       let groups = try? client.call("group-ls", as: GroupList.self).groups
       let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
       let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
+      let issues = readFollowups ? try? client.call("issues", as: IssueList.self) : nil
       let usage = readUsage ? try? client.usage() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
         if let proposals, self.planProposals != proposals { self.planProposals = proposals }
+        if let issues, self.issueList != issues { self.issueList = issues }
         if let usage, self.usage != usage { self.usage = usage }
         self.apply(result, followups: more)
       }
@@ -422,7 +462,7 @@ final class BoardModel: ObservableObject {
       // refresh every second would redraw the views each time.
       if unreachable != nil { unreachable = nil }
       if let more, allFollowups != more { allFollowups = more }
-      // Only shown sessions notify. The known states cover every session.
+      // Only shown sessions notify. The last seen sessions cover every session.
       // Widening the filter later therefore sends nothing for a change that happened while the session was hidden.
       if loaded { sessionsToNotify(list).forEach(notify) }
       // A hidden session keeps its drafts.
@@ -437,9 +477,9 @@ final class BoardModel: ObservableObject {
       if let id = selection { showOrg(of: id) }
       if let id = pendingSelection, allBoard.contains(where: { $0.id == id }) { pendingSelection = nil }
       clearHiddenSelectionAndUpdateBadge()
-      // A follow-up that fires appears in `ls` as Needs you. The known states
+      // A follow-up that fires appears in `ls` as Needs you. The last seen sessions
       // include the follow-ups, so that change from Not started notifies.
-      knownStates = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0.state) })
+      lastSeen = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0) })
       loaded = true
     case .failure(let error):
       let problem = "\(error)"
@@ -447,21 +487,23 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// The shown sessions that just started needing the user.
+  /// The shown sessions that just entered the Inbox. A chat can need the user
+  /// before its item reaches the Inbox. This therefore compares each session
+  /// with its place in the last refresh's Inbox, not with its last state.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard Triage.needsYou(s), let known = knownStates[s.id], !known.needsUser, orgFilter.shows(s)
+      guard Triage.needsYou(s), let last = lastSeen[s.id], !Triage.needsYou(last), orgFilter.shows(s)
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
-      return known != .notStarted || s.waitsToStart
+      return last.state != .notStarted || s.waitsToStart
     }
   }
 
   private func notify(_ s: SessionSummary) {
     guard Bundle.main.bundleIdentifier != nil else { return }
     let content = UNMutableNotificationContent()
-    content.title = "\(s.name) needs you"
+    content.title = "\(inboxName(s)) needs you"
     content.body = s.triage?.title ?? s.reason
     content.userInfo = ["session": s.id]
     UNUserNotificationCenter.current().add(
@@ -811,7 +853,7 @@ final class BoardModel: ObservableObject {
       "ack", args,
       then: { value in
         // The user put the item back, so the refresh must not notify about it.
-        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.lastSeen[id] = s }
       },
       finally: { self.acknowledging.remove(id) })
   }
@@ -1247,7 +1289,7 @@ final class BoardModel: ObservableObject {
     Result { try client.importSessions(refs, stop: stop) }
   }
 
-  /// Clears the selected session and shows the Inbox or the Board.
+  /// Clears the selected session and shows a main view.
   func show(_ view: MainView) {
     navigate {
       selection = nil

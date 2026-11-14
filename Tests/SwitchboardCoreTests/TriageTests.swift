@@ -19,7 +19,7 @@ func triageEvent(_ stop: Int64, title: String = "Pick a database", options: [JSO
 let postgres: JSON = ["label": "Postgres", "detail": "Already in use", "message": "Use Postgres.", "recommended": true]
 
 func item(_ f: SessionFacts, session s: Session = session(), now: Int64 = 1000) -> TriageItem? {
-  Triage.item(f, Attention.evaluate(s, f, now: now))
+  Triage.item(f, Attention.evaluate(s, f, now: now), kind: s.kind)
 }
 
 let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres or SQLite?"
@@ -28,18 +28,18 @@ let proseQuestion = "I compared both.\n\nWhich database should I use, Postgres o
   @Test func aRuleVerdictKeepsItsKindWhateverItsText() {
     let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     let review = Verdict(state: .needsYou, reason: "tidy the folder", kind: .review)
-    #expect(Triage.item(f, review)?.kind == .review)
-    #expect(Triage.item(f, review)?.source == .rule)
+    #expect(Triage.item(f, review, kind: .work)?.kind == .review)
+    #expect(Triage.item(f, review, kind: .work)?.source == .rule)
     let action = Verdict(state: .needsYou, reason: "commit the uncommitted changes")
-    #expect(Triage.item(f, action)?.kind == .action)
+    #expect(Triage.item(f, action, kind: .work)?.kind == .action)
   }
 
   @Test func aRuleVerdictWithTheReplyTextIsNotTheReply() {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     f.apply(stop(1, 5, proseQuestion))
     let rule = Verdict(state: .needsYou, reason: Attention.replyVerdict(proseQuestion).reason)
-    #expect(Triage.item(f, rule)?.source == .rule)
-    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion))?.source == .fallback)
+    #expect(Triage.item(f, rule, kind: .work)?.source == .rule)
+    #expect(Triage.item(f, Attention.replyVerdict(proseQuestion), kind: .work)?.source == .fallback)
   }
 
   @Test func aPermissionCardGivesAllowAndDeny() {
@@ -413,25 +413,28 @@ func replyFixture(_ name: String) throws -> String {
 @Suite struct TriageOrder {
   func summary(
     _ id: String, _ state: AttentionState, since: Int64, _ source: TriageSource, _ kind: TriageKind?,
-    manager: Bool = false
+    manager: Bool = false, cards: [Card] = []
   ) -> SessionSummary {
     var s = SessionSummary(
       id: id, name: id, cwd: "/", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "", since: since,
-      lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+      lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [], cards: cards,
+      openPrompt: !cards.isEmpty)
     s.triage = kind.map { TriageItem(title: id, kind: $0, summary: "", source: source) }
     s.manager = manager ? true : nil
     if manager { s.kind = .manager }
     return s
   }
 
-  @Test func leavesOutTheManagerWhateverItsItemIs() {
+  @Test func keepsTheManagerOnlyWhileItWaitsOnAPrompt() {
+    let permission = facts(permissionTurn()).cards
     let list = [
-      summary("m1", .needsYou, since: 0, .card, .approval, manager: true),
+      summary("m1", .needsYou, since: 0, .card, .approval, manager: true, cards: permission),
       summary("m2", .needsYou, since: 0, .summary, .decision, manager: true),
       summary("m3", .canContinue, since: 0, .summary, .approval, manager: true),
+      summary("m4", .needsYou, since: 0, .card, .approval, manager: true),
       summary("a", .needsYou, since: 5, .summary, .decision),
     ]
-    #expect(Triage.order(list).map(\.id) == ["a"])
+    #expect(Triage.order(list).map(\.id) == ["m1", "a"])
   }
 
   @Test func groupsComeInOrderAndTheOldestComesFirstInAGroup() {
@@ -611,5 +614,166 @@ func replyFixture(_ name: String) throws -> String {
 
     #expect(trust.source == .rule)
     #expect(trust.summary.hasPrefix("Claude exited at the folder trust prompt"))
+  }
+}
+
+/// The item that a reply's offer gives when no summary exists.
+@Suite struct TriageOfferFallback {
+  func fallback(_ reply: String) -> TriageItem? {
+    item(facts([event("UserPromptSubmit", 0, ["prompt": "go"]), stop(2, 1, reply)]))
+  }
+
+  static let exampleLastParagraph =
+    "The `haacked/round-trip-drop-old-bounds-v2` branch still exists on origin with the same commits. Do you want me to delete it?"
+
+  @Test func theExampleNamesTheBranchInItsTitle() throws {
+    let item = fallback(try replyFixture("offer-delete-branch"))
+
+    #expect(item?.title == "Delete the branch haacked/round-trip-drop-old-bounds-v2?")
+  }
+
+  @Test func theExampleIsAFallbackApproval() throws {
+    let item = fallback(try replyFixture("offer-delete-branch"))
+
+    #expect(item?.source == .fallback)
+    #expect(item?.kind == .approval)
+  }
+
+  @Test func theExampleOffersYesAndNoAsMessages() throws {
+    let item = fallback(try replyFixture("offer-delete-branch"))
+
+    #expect(
+      item?.options == [
+        TriageOption(label: "Yes", action: .send, message: "Yes"),
+        TriageOption(label: "No", action: .send, message: "No"),
+      ])
+  }
+
+  /// ⌘⇧Return must not send Yes to a destructive offer.
+  @Test func theExampleHasNoPrimaryOption() throws {
+    let item = try #require(fallback(try replyFixture("offer-delete-branch")))
+
+    #expect(item.primary == nil)
+    #expect(item.options.allSatisfy { !$0.recommended })
+  }
+
+  @Test func theExamplesSummaryIsItsLastParagraph() throws {
+    let item = fallback(try replyFixture("offer-delete-branch"))
+
+    #expect(item?.summary == Self.exampleLastParagraph)
+  }
+
+  @Test func theExamplesReasonStillSaysOffered() throws {
+    let verdict = Attention.replyVerdict(try replyFixture("offer-delete-branch"))
+
+    #expect(verdict.reason == "offered: Do you want me to delete it?")
+  }
+
+  /// The previous sentence starts with a code span, which a split that
+  /// trims backticks would break.
+  @Test func aPreviousSentenceThatStartsWithACodeSpanStillNamesIt() {
+    let item = fallback("Done.\n\n`haacked/x-v2` still exists on origin. Want me to delete it?")
+
+    #expect(item?.title == "Delete haacked/x-v2?")
+  }
+
+  @Test func codeSpansInAnEarlierParagraphDoNotResolveThePronoun() {
+    let item = fallback("I made `haacked/foo-v2` for the retry.\n\nDo you want me to delete it?")
+
+    #expect(item?.title == "Delete it?")
+  }
+
+  @Test func aNextStepIsItsOwnTitleWithoutOptions() {
+    let item = fallback("Done. Tests pass.\n\nNext, I'll update the docs.")
+
+    #expect(item?.title == "Next, I'll update the docs.")
+    #expect(item?.options.isEmpty == true)
+  }
+
+  @Test(arguments: [
+    "I fixed it.\n\nShould I push now or wait for CI?", "I fixed it.\n\nWant me to push, or keep it local?",
+  ])
+  func aChoiceOfferHasNoOptions(_ reply: String) {
+    #expect(fallback(reply)?.options.isEmpty == true)
+  }
+
+  @Test func aChoiceOfferStillLosesItsOfferStart() {
+    #expect(fallback("I fixed it.\n\nShould I push now or wait for CI?")?.title == "Push now or wait for CI?")
+  }
+
+  @Test func aQuestionHasNoOptions() {
+    let item = fallback("I checked.\n\nIs the staging deploy done?")
+
+    #expect(item?.title == "Answer: Is the staging deploy done?")
+    #expect(item?.options.isEmpty == true)
+  }
+
+  /// "should i" is a prefix of "should it", which is not an offer.
+  @Test func aQuestionThatStartsLikeAnOfferIsAQuestion() {
+    let item = fallback("I renamed the flag.\n\nShould it be renamed?")
+
+    #expect(item?.kind == .question)
+    #expect(item?.title == "Answer: Should it be renamed?")
+    #expect(item?.options.isEmpty == true)
+  }
+
+  @Test(arguments: [
+    "Wrote it. Want me to push?", "Done. Tests pass.\n\nNext, I'll update the docs.",
+    "I fixed it.\n\nShould I push now or wait for CI?", "Want me to " + String(repeating: "update ", count: 20) + "it?",
+    "I fixed it.\n\nOk to merge?",
+  ])
+  func noOfferTitleStartsWithOffered(_ reply: String) throws {
+    let title = try #require(fallback(reply)?.title)
+
+    #expect(!title.lowercased().hasPrefix("offered"), "\(title)")
+    #expect(title.count <= Triage.titleLength)
+  }
+}
+
+@Suite struct TriageSummarizerOffers {
+  /// The `title` bullet of the system prompt, up to the `kind` bullet.
+  static var titleRule: String {
+    let system = TriageSummarizer.system
+    guard let start = system.range(of: "- title:"),
+      let end = system.range(of: "- kind:", range: start.upperBound..<system.endIndex)
+    else { return "" }
+    return String(system[start.lowerBound..<end.lowerBound])
+  }
+
+  @Test func theTitleRuleForbidsTheOfferedLabel() {
+    #expect(Self.titleRule.contains("\"offered:\" label"))
+  }
+
+  @Test func theTitleRuleForbidsCopyingTheStateLine() {
+    #expect(Self.titleRule.contains("State line"))
+  }
+
+  static func session(branch: String?, head: String) -> SessionSummary {
+    let pr = PullRequest(
+      id: "PR_1", number: 18303, url: "https://github.com/PostHog/charts/pull/18303", repo: "PostHog/charts",
+      title: "Runbook", head: head)
+    return SessionSummary(
+      id: "s1", name: "runbook", cwd: "/", repo: "PostHog/charts", branch: branch, claudeSessionId: "u",
+      state: .canContinue, reason: "offered: Do you want me to delete it?", since: 0, lastActivity: 0, live: true,
+      claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [], pr: PRSummary(pr))
+  }
+
+  static func pullRequestLine(_ s: SessionSummary) -> String {
+    TriageSummarizer.input(session: s, reply: "Done.").components(separatedBy: "\n")
+      .first { $0.hasPrefix("Pull request:") } ?? ""
+  }
+
+  @Test func theInputNamesThePRsHeadBranchWhenItDiffersFromTheSessions() {
+    let line = Self.pullRequestLine(Self.session(branch: "haacked/x-v2", head: "haacked/x"))
+
+    #expect(line.contains(", head branch haacked/x"), "\(line)")
+  }
+
+  @Test(arguments: [("haacked/x", "haacked/x"), ("haacked/x", "")])
+  func theInputLeavesOutAHeadBranchThatMatchesOrIsUnknown(_ branch: String, _ head: String) {
+    let line = Self.pullRequestLine(Self.session(branch: branch, head: head))
+
+    #expect(line.hasPrefix("Pull request: PostHog/charts#18303"))
+    #expect(!line.contains("head branch"), "\(line)")
   }
 }

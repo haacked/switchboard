@@ -178,3 +178,54 @@ import Testing
     #expect(option.accessibilityHint(mergeMethod: method) == "Adds the PR to its merge queue")
   }
 }
+
+/// "No summary yet. Details holds the last reply." shows only for a fallback
+/// with no options and no summary.
+@Suite struct DecisionCardMissingSummary {
+  static let yesNo = [
+    TriageOption(label: "Yes", action: .send, message: "Yes"),
+    TriageOption(label: "No", action: .send, message: "No"),
+  ]
+
+  /// The item that the plan's example reply gives.
+  static let example = TriageItem(
+    title: "Delete the branch haacked/round-trip-drop-old-bounds-v2?", kind: .approval,
+    summary:
+      "The `haacked/round-trip-drop-old-bounds-v2` branch still exists on origin with the same commits. Do you want me to delete it?",
+    options: yesNo, source: .fallback)
+
+  @Test func theExampleShowsNoMissingSummaryLine() {
+    #expect(!DecisionCard.showsMissingSummary(Self.example))
+  }
+
+  @Test func aFallbackWithAnEmptySummaryAndNoOptionsShowsTheLine() {
+    let item = TriageItem(title: "Read its last reply", kind: .info, summary: "", source: .fallback)
+
+    #expect(DecisionCard.showsMissingSummary(item))
+  }
+
+  @Test func aFallbackWithASummaryAndNoOptionsShowsNoLine() {
+    let item = TriageItem(
+      title: "Read its last reply", kind: .info, summary: "The flaky test is unrelated.", source: .fallback)
+
+    #expect(!DecisionCard.showsMissingSummary(item))
+  }
+
+  @Test func aFallbackWithOptionsAndAnEmptySummaryShowsNoLine() {
+    let item = TriageItem(title: "Push?", kind: .approval, summary: "", options: Self.yesNo, source: .fallback)
+
+    #expect(!DecisionCard.showsMissingSummary(item))
+  }
+
+  @Test(arguments: [TriageSource.summary, .session, .rule, .card])
+  func anItemThatIsNotAFallbackShowsNoLine(_ source: TriageSource) {
+    let item = TriageItem(title: "Read the reply", kind: .info, summary: "", source: source)
+
+    #expect(!DecisionCard.showsMissingSummary(item))
+  }
+
+  /// The message equals the label, so a button shows no "Sends:" line.
+  @Test func yesAndNoShowNothingMore() {
+    #expect(Self.yesNo.allSatisfy { !$0.showsEffect })
+  }
+}

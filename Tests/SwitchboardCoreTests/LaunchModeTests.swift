@@ -56,4 +56,30 @@ private let fallbacks: [(autoMode: Bool?, mode: String?)] = [(true, "auto"), (fa
       }
     }
   }
+
+  func manualSession(planMode: Bool? = nil) -> Session {
+    var session = session(planMode: planMode, autoMode: false)
+    session.manualMode = true
+    return session
+  }
+
+  @Test(arguments: reportedModes)
+  func aFirstLaunchOfAManualSessionPassesManual(lastReported: String?) {
+    #expect(PermissionMode.forLaunch(manualSession(), resume: false, lastReported: lastReported) == "default")
+  }
+
+  @Test func aResumeThatStillReportsManualPassesManual() {
+    #expect(PermissionMode.forLaunch(manualSession(), resume: true, lastReported: "default") == "default")
+  }
+
+  /// The user switched the session out of manual mode, as with Approve and enable auto mode. A resume keeps that.
+  @Test(arguments: ["auto", "acceptEdits", "plan", nil] as [String?])
+  func aResumeAfterTheModeChangedPassesNoMode(lastReported: String?) {
+    #expect(PermissionMode.forLaunch(manualSession(), resume: true, lastReported: lastReported) == nil)
+  }
+
+  @Test func planModeWinsOverManualModeUntilThePlanIsApproved() {
+    #expect(PermissionMode.forLaunch(manualSession(planMode: true), resume: false, lastReported: nil) == "plan")
+    #expect(PermissionMode.forLaunch(manualSession(planMode: true), resume: true, lastReported: "default") == "default")
+  }
 }

@@ -51,6 +51,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var lastExit: Int64?
   /// The prompt that the last launch passed to claude, if any.
   public var lastLaunchPrompt: String?
+  /// What caused the last launch, when it resumed a conversation.
+  public var lastResumeTrigger: LaunchTrigger?
   /// The launch whose trust dialog opened a trust card. sbd opens one card
   /// per launch.
   public var trustLaunch: Int64?
@@ -226,6 +228,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "started", "resumed":
       lastLaunch = event.t
       lastLaunchPrompt = d["prompt"]?.string
+      lastResumeTrigger = event.kind == "resumed" ? d["trigger"]?.string.flatMap(LaunchTrigger.init) : nil
       exitedAtTrust = false
       hookSinceLaunch = false
       permissionMode = d["permission_mode"]?.string
@@ -435,7 +438,7 @@ public enum ReplyKind: Equatable, Sendable {
 /// they have no rule for a PR that Trunk's queue holds.
 public enum Attention {
   static let notificationPromptTool = "prompt"
-  static let dayMs: Int64 = 24 * 3600 * 1000
+  public static let dayMs: Int64 = 24 * 3600 * 1000
   public static let staleAfterMs: Int64 = 2 * dayMs
   /// A subagent with no event for this long is taken to have lost its
   /// SubagentStop, as when sbd was down.
@@ -459,6 +462,19 @@ public enum Attention {
     return readyForReview(verdict, facts) ?? verdict
   }
 
+  /// The verdict of a Claude Code permission or question dialog that waits
+  /// on the user without a card.
+  public static func openPromptVerdict(_ facts: SessionFacts) -> Verdict? {
+    if let p = facts.openPermission {
+      return Verdict(
+        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
+    }
+    if let q = facts.openQuestion {
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
+    }
+    return nil
+  }
+
   static func rules(
     _ session: Session, _ facts: SessionFacts, now: Int64, stateOf: (String) -> AttentionState?
   ) -> Verdict {
@@ -473,13 +489,7 @@ public enum Attention {
       return Verdict(
         state: .needsYou, reason: "claude exited at the folder trust prompt. Open the session to answer it again")
     }
-    if let p = facts.openPermission {
-      return Verdict(
-        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
-    }
-    if let q = facts.openQuestion {
-      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
-    }
+    if let v = openPromptVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning {
       if let tool = facts.runningTool {
@@ -560,16 +570,34 @@ public enum Attention {
   /// Classifies a reply by the last question in its last paragraph, or by a
   /// next step that the paragraph announces.
   public static func classify(_ reply: String) -> ReplyKind {
-    guard let last = lastParagraph(reply) else { return .other }
-    let parts = sentences(last)
-    if let q = parts.last(where: { $0.hasSuffix("?") }) {
-      let lower = q.lowercased()
-      return offerStarts.contains(where: { lower.hasPrefix($0) }) ? .offer(q) : .question(q)
+    if let q = lastQuestion(reply)?.question {
+      return offerPrefix(q) != nil ? .offer(q) : .question(q)
     }
+    let parts = lastParagraph(reply).map { sentences($0) } ?? []
     if let s = parts.first(where: { s in nextStepPhrases.contains { s.lowercased().contains($0) } }) {
       return .offer(s)
     }
     return .other
+  }
+
+  /// The longest entry of `offerStarts` that the sentence starts with,
+  /// matched without regard to case and followed by whitespace. "Should it be
+  /// renamed?" has none, because "should i" ends inside a word there.
+  public static func offerPrefix(_ sentence: String) -> String? {
+    let lower = sentence.lowercased()
+    return offerStarts.filter { start in
+      lower.hasPrefix(start) && lower.dropFirst(start.count).first?.isWhitespace == true
+    }.max { $0.count < $1.count }
+  }
+
+  /// The last question in the reply's last paragraph, and the sentence before
+  /// it in that paragraph. The question is trimmed as `sentences` trims. The
+  /// previous sentence keeps its Markdown, so its code spans survive.
+  public static func lastQuestion(_ reply: String) -> (question: String, previous: String?)? {
+    guard let last = lastParagraph(reply) else { return nil }
+    let parts = sentences(last, trimming: .whitespaces).filter { !$0.trimmingCharacters(in: sentenceTrim).isEmpty }
+    guard let i = parts.lastIndex(where: { $0.trimmingCharacters(in: sentenceTrim).hasSuffix("?") }) else { return nil }
+    return (parts[i].trimmingCharacters(in: sentenceTrim), i > 0 ? parts[i - 1] : nil)
   }
 
   static func lastParagraph(_ reply: String) -> String? {

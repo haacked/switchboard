@@ -14,6 +14,7 @@ extension BoardModel {
     case nil: return .sidebar
     case .inbox: return .inbox
     case .board: return .board
+    case .issues: return .issues
     }
   }
 
@@ -50,6 +51,8 @@ extension BoardModel {
       if let next = ListStep.step(boardGrid.readingOrder, from: currentBoardCard, by: step, wrap: true) {
         boardFocus = next
       }
+    case .issues:
+      moveIssue(by: step)
     }
     requestListFocus()
   }
@@ -65,6 +68,7 @@ extension BoardModel {
     case .board:
       let id = currentBoardCard
       return board.first { $0.id == id }
+    case .issues: return nil
     }
   }
 

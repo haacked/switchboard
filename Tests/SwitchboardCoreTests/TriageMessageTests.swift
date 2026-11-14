@@ -14,7 +14,7 @@ private func message(
     id: "s1", name: "s1", cwd: "/", repo: nil, branch: nil, claudeSessionId: "s1", state: verdict.state,
     reason: verdict.reason, since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false,
     lastReply: reply ?? facts.lastReply, waits: waits, notes: notes, cards: facts.cards, pr: pr)
-  s.triage = Triage.item(facts, verdict)
+  s.triage = Triage.item(facts, verdict, kind: .work)
   let details = Triage.details(for: s)
   s.triage?.details = details
   return s.triage?.message
@@ -247,7 +247,7 @@ private func longCommandTurn() -> [Event] {
   @Test func theItemEncodesTheMessageBesideItsFlatFields() throws {
     var f = facts([event("UserPromptSubmit", 0, ["prompt": "go"])])
     f.apply(stop(1, 5, proseQuestion))
-    let item = try #require(Triage.item(f, Attention.replyVerdict(proseQuestion)))
+    let item = try #require(Triage.item(f, Attention.replyVerdict(proseQuestion), kind: .work))
     let json = try JSON(encoding: item)
 
     #expect(json["summary"]?.string == item.summary)
@@ -317,5 +317,129 @@ private func longCommandTurn() -> [Event] {
     #expect(TriageSummarizer.system.contains("Details"))
     #expect(TriageCard.instructions.contains("Two to three lines"))
     #expect(TriageSummarizer.system.contains("two to three lines"))
+  }
+}
+
+@Suite struct PRSummaryHead {
+  static func pr(head: String) -> PullRequest {
+    PullRequest(
+      id: "PR_1", number: 18303, url: "https://github.com/PostHog/charts/pull/18303", repo: "PostHog/charts", head: head
+    )
+  }
+
+  @Test func carriesThePRsHeadBranch() {
+    #expect(PRSummary(Self.pr(head: "haacked/x")).head == "haacked/x")
+  }
+
+  @Test func anEmptyHeadIsNil() {
+    #expect(PRSummary(Self.pr(head: "")).head == nil)
+  }
+
+  @Test func decodesJSONThatAnOlderSbdWroteWithoutAHead() throws {
+    let summary = PRSummary(Self.pr(head: "haacked/x"))
+    var object = try #require(try JSON(encoding: summary).object)
+    object["head"] = nil
+
+    let decoded = try JSONCoding.convert(JSON.object(object), to: PRSummary.self)
+
+    #expect(decoded.head == nil)
+    #expect(decoded.number == 18303)
+  }
+
+  @Test func otherBranchIsTheHeadWhenItDiffers() {
+    #expect(PRSummary(Self.pr(head: "haacked/x")).otherBranch(than: "haacked/x-v2") == "haacked/x")
+  }
+
+  @Test(arguments: [("haacked/x", "haacked/x"), ("", "haacked/x-v2")])
+  func otherBranchIsNilWhenTheHeadMatchesOrIsUnknown(_ head: String, _ branch: String) {
+    #expect(PRSummary(Self.pr(head: head)).otherBranch(than: branch) == nil)
+  }
+}
+
+/// The callout that says which branch the session's PR uses.
+@Suite struct TriageBranchCallout {
+  static let expected = Callout(kind: .info, title: "#18303 uses haacked/x", body: "This folder is on haacked/x-v2.")
+
+  static func session(
+    title: String, summary: String = "", source: TriageSource = .fallback, branch: String = "haacked/x-v2",
+    head: String? = "haacked/x"
+  ) -> SessionSummary {
+    let pr = head.map {
+      PRSummary(
+        PullRequest(
+          id: "PR_1", number: 18303, url: "https://github.com/PostHog/charts/pull/18303", repo: "PostHog/charts",
+          head: $0))
+    }
+    var s = SessionSummary(
+      id: "s1", name: "s1", cwd: "/", repo: "PostHog/charts", branch: branch, claudeSessionId: "s1",
+      state: .canContinue, reason: "", since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false,
+      lastReply: nil, waits: [], notes: [], pr: pr)
+    s.triage = TriageItem(title: title, kind: .approval, summary: summary, source: source)
+    return s
+  }
+
+  @Test(arguments: [
+    "Delete the branch haacked/x-v2?",
+    "Delete haacked/x-v2",
+    "Delete haacked/x-v2.",
+    "Delete haacked/x-v2. Then push.",
+    "Delete `haacked/x-v2`?",
+    "Delete it (haacked/x-v2)?",
+    "Merge haacked/x into main?",
+    "Merge `haacked/x`?",
+  ])
+  func aTitleThatNamesEitherBranchGetsTheCallout(_ title: String) {
+    #expect(Triage.branchCallout(for: Self.session(title: title)) == Self.expected)
+  }
+
+  @Test func aSummaryThatNamesEitherBranchGetsTheCallout() {
+    let s = Self.session(
+      title: "Delete it?",
+      summary: "The `haacked/x-v2` branch still exists on origin with the same commits. Do you want me to delete it?")
+
+    #expect(Triage.branchCallout(for: s) == Self.expected)
+  }
+
+  /// A longer name holds the branch's name, but it is another branch.
+  @Test(arguments: [
+    "Delete haacked/x-v2-old?",
+    "Open haacked/x-v2.md?",
+    "Delete haacked/x-v22?",
+    "Delete haacked/x-v2_tmp?",
+    "Push origin/haacked/x-v2?",
+    "Delete my_haacked/x-v2?",
+    "Delete xhaacked/x-v2?",
+    "Delete 1haacked/x-v2?",
+    "Delete -haacked/x-v2?",
+    "Delete haacked/x-old?",
+    "Run the tests?",
+  ])
+  func aTitleThatNamesNeitherBranchAsAWholeTokenGetsNone(_ title: String) {
+    #expect(Triage.branchCallout(for: Self.session(title: title)) == nil)
+  }
+
+  @Test(arguments: [TriageSource.card, .session, .rule, .summary, .fallback])
+  func everyItemSourceGetsTheCallout(_ source: TriageSource) {
+    let s = Self.session(title: "Approve `git push origin --delete haacked/x-v2`", source: source)
+
+    #expect(Triage.branchCallout(for: s) == Self.expected)
+  }
+
+  @Test func aPRWhoseHeadIsTheFoldersBranchGetsNone() {
+    let s = Self.session(title: "Delete haacked/x-v2?", head: "haacked/x-v2")
+
+    #expect(Triage.branchCallout(for: s) == nil)
+  }
+
+  @Test(arguments: [nil, ""] as [String?])
+  func aSessionWithoutAPRHeadGetsNone(_ head: String?) {
+    #expect(Triage.branchCallout(for: Self.session(title: "Delete haacked/x-v2?", head: head)) == nil)
+  }
+
+  @Test func aSessionWithoutAnItemGetsNone() {
+    var s = Self.session(title: "Delete haacked/x-v2?")
+    s.triage = nil
+
+    #expect(Triage.branchCallout(for: s) == nil)
   }
 }

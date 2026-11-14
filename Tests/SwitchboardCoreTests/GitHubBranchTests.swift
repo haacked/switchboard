@@ -245,3 +245,305 @@ import Testing
     #expect(limit.pause == pause)
   }
 }
+
+/// `GitHub.isEarlierWork`, which `earlierStanding` checks first.
+@Suite struct GitHubEarlierWork {
+  static let checkedOut: Set<String> = ["haacked/x", "haacked/x-v2"]
+
+  @Test(
+    arguments: [
+      ("PostHog/charts", "haacked/x", true),
+      ("posthog/CHARTS", "haacked/x", true),
+      ("PostHog/posthog", "haacked/x", false),
+      ("PostHog/charts", "haacked/x-v2", false),
+      ("PostHog/charts", "haacked/elsewhere", false),
+    ] as [(String, String, Bool)])
+  func earlierWorkIsAnotherCheckedOutBranchsPRInTheSameRepo(_ prRepo: String, _ head: String, _ earlier: Bool) {
+    let pr = PullRequest(id: "PR_1", number: 1, url: "", repo: prRepo, head: head)
+
+    let found = GitHub.isEarlierWork(pr, repo: "PostHog/charts", branch: "haacked/x-v2", checkedOut: Self.checkedOut)
+
+    #expect(found == earlier)
+  }
+}
+
+/// A HEAD reflog in git's format: one line per move of HEAD, with the old and
+/// new commit, the committer, and a tab before the message.
+enum Reflog {
+  static func sha(_ prefix: String) -> String { prefix.padding(toLength: 40, withPad: "0", startingAt: 0) }
+
+  static func line(_ old: String, _ new: String, _ message: String) -> String {
+    "\(sha(old)) \(sha(new)) t <t@t> 1700000000 +0000\t\(message)"
+  }
+
+  static func text(_ lines: String...) -> String { lines.joined(separator: "\n") + "\n" }
+
+  static let original = "haacked/round-trip-drop-old-bounds"
+  static let v2 = "haacked/round-trip-drop-old-bounds-v2"
+  static let prHead = "96c41f51ca0162153f325cda85f3f97c99e0e259"
+
+  /// The folder of the plan's example: it switched to `-v2`, then rebased its
+  /// three commits onto origin/main. The last pick made the PR's head commit.
+  static let example = text(
+    line("0", "1a2b3c4d", "commit (initial): first"),
+    line("1a2b3c4d", "1a2b3c4d", "checkout: moving from main to \(original)"),
+    line("1a2b3c4d", "6ec79c44", "commit: Add the statuspage files"),
+    line("6ec79c44", "6ec79c44", "checkout: moving from \(original) to \(v2)"),
+    line("6ec79c44", "53d4849c", "rebase (start): checkout origin/main"),
+    line("53d4849c", "4821863b", "rebase (pick): Add the first statuspage file"),
+    line("4821863b", "97331170", "rebase (pick): Add the second statuspage file"),
+    line("97331170", prHead, "rebase (pick): Drop the old bounds"),
+    line(prHead, prHead, "rebase (finish): returning to refs/heads/\(v2)"))
+
+  /// A switch from `haacked/x` to `haacked/x-v2` at commit `5`, then `after`.
+  static func afterSwitch(_ after: String...) -> String {
+    ([
+      line("0", "1", "commit (initial): first"),
+      line("1", "1", "checkout: moving from main to haacked/x"),
+      line("1", "5", "commit: Work on x"),
+      line("5", "5", "checkout: moving from haacked/x to haacked/x-v2"),
+    ] + after).joined(separator: "\n") + "\n"
+  }
+}
+
+@Suite struct GitHubCommitsSinceSwitch {
+  @Test func theExampleHoldsTheCommitsOfTheRebasePicksAfterTheSwitch() {
+    let made = GitHub.commitsSinceSwitch(reflog: Reflog.example, to: Reflog.v2)
+
+    #expect(made == [Reflog.sha("4821863b"), Reflog.sha("97331170"), Reflog.prHead])
+  }
+
+  @Test func theExampleLeavesOutTheSwitchCommitAndTheRebaseStart() {
+    let made = GitHub.commitsSinceSwitch(reflog: Reflog.example, to: Reflog.v2) ?? []
+
+    #expect(!made.contains(Reflog.sha("6ec79c44")))
+    #expect(!made.contains(Reflog.sha("53d4849c")))
+  }
+
+  @Test(arguments: [
+    "commit: Add a file", "commit (amend): Add a file", "commit (merge): Merge branch 'main'",
+    "commit (initial): first", "rebase (pick): Add a file", "rebase -i (pick): Add a file",
+    "rebase (squash): Add a file", "rebase -i (squash): Add a file", "rebase (fixup): Add a file",
+    "rebase -i (fixup): Add a file", "rebase (reword): Add a file", "rebase -i (reword): Add a file",
+    "rebase (edit): Add a file", "rebase -i (edit): Add a file", "cherry-pick: Add a file",
+    "revert: Revert \"Add a file\"", "merge feature: Merge made by the 'ort' strategy.",
+    "pull --rebase (pick): Add a file", "rebase (continue): Add a file",
+  ])
+  func aCommitCreatingEntryAfterTheSwitchCounts(_ message: String) {
+    let reflog = Reflog.afterSwitch(Reflog.line("5", "abc", message))
+
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2") == [Reflog.sha("abc")])
+  }
+
+  /// These move HEAD to a commit that the folder did not make.
+  @Test(arguments: [
+    "reset: moving to origin/haacked/x", "reset: moving to HEAD~1", "pull: Fast-forward",
+    "merge origin/haacked/x: Fast-forward", "merge haacked/x: Fast-forward", "rebase (start): checkout origin/main",
+    "rebase -i (start): checkout origin/main", "rebase (finish): returning to refs/heads/haacked/x-v2",
+    "rebase -i (finish): returning to refs/heads/haacked/x-v2",
+  ])
+  func anEntryThatMakesNoCommitDoesNotCount(_ message: String) {
+    let reflog = Reflog.afterSwitch(Reflog.line("5", "abc", message))
+
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2") == [])
+  }
+
+  /// `checkout -b next` from the PR branch starts `next` at the PR's head.
+  @Test func theSwitchEntrysOwnCommitDoesNotCount() {
+    let made = GitHub.commitsSinceSwitch(reflog: Reflog.afterSwitch(), to: "haacked/x-v2")
+
+    #expect(made == [])
+  }
+
+  @Test func commitsBeforeTheSwitchDoNotCount() {
+    let reflog = Reflog.afterSwitch(Reflog.line("5", "abc", "commit: More work"))
+
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2")?.contains(Reflog.sha("5")) == false)
+  }
+
+  @Test func aRenameToTheBranchIsTheSwitch() {
+    let reflog = Reflog.text(
+      Reflog.line("0", "1", "commit (initial): first"),
+      Reflog.line("1", "1", "checkout: moving from main to haacked/x"),
+      Reflog.line("1", "5", "commit: Before the rename"),
+      Reflog.line("5", "5", "Branch: renamed refs/heads/haacked/x to refs/heads/haacked/x-v2"),
+      Reflog.line("5", "abc", "commit: After the rename"))
+
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2") == [Reflog.sha("abc")])
+  }
+
+  @Test func theLastOfTwoCheckoutsToTheBranchCounts() {
+    let reflog = Reflog.afterSwitch(
+      Reflog.line("5", "aaa", "commit: First visit"),
+      Reflog.line("aaa", "5", "checkout: moving from haacked/x-v2 to haacked/x"),
+      Reflog.line("5", "aaa", "checkout: moving from haacked/x to haacked/x-v2"),
+      Reflog.line("aaa", "bbb", "commit: Second visit"))
+
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2") == [Reflog.sha("bbb")])
+  }
+
+  @Test(arguments: [
+    "",
+    Reflog.text(Reflog.line("0", "1", "commit (initial): first"), Reflog.line("1", "2", "commit: Work")),
+    Reflog.text(
+      Reflog.line("0", "1", "commit (initial): first"),
+      Reflog.line("1", "1", "checkout: moving from main to haacked/x-v2-old"),
+      Reflog.line("1", "2", "commit: Work on the old branch")),
+    Reflog.text(
+      Reflog.line("0", "1", "commit (initial): first"),
+      Reflog.line("1", "1", "Branch: renamed refs/heads/main to refs/heads/haacked/x-v2-old"),
+      Reflog.line("1", "2", "commit: Work on the old branch")),
+    Reflog.text(
+      Reflog.line("0", "1", "commit (initial): first"),
+      Reflog.line("1", "1", "checkout: moving from haacked/x-v2 to haacked/x"),
+      Reflog.line("1", "2", "commit: Work on x")),
+  ])
+  func isNilWithoutAnEntryThatMovedHEADToTheBranch(_ reflog: String) {
+    #expect(GitHub.commitsSinceSwitch(reflog: reflog, to: "haacked/x-v2") == nil)
+  }
+}
+
+@Suite struct GitHubEarlierStanding {
+  static let repo = "PostHog/charts"
+  static let branch = "haacked/x-v2"
+  static let checkedOut: Set<String> = ["haacked/x", "haacked/x-v2"]
+  static let head = Reflog.sha("feed")
+
+  static func pr(_ state: PRState, repo: String = repo, head: String = "haacked/x") -> PullRequest {
+    PullRequest(id: "PR_1", number: 18303, url: "", repo: repo, state: state, head: head, headSha: Self.head)
+  }
+
+  static func standing(_ pr: PullRequest, made: Set<String>?) -> GitHub.EarlierStanding {
+    GitHub.earlierStanding(pr, repo: repo, branch: branch, checkedOut: checkedOut, made: made)
+  }
+
+  /// A PR that is not the folder's earlier work counts as it does today,
+  /// whatever the reflog shows.
+  @Test(
+    arguments: [
+      ("PostHog/posthog", "haacked/x"),
+      ("PostHog/charts", "haacked/x-v2"),
+      ("PostHog/charts", "haacked/sibling-worktree"),
+    ] as [(String, String)], [PRState.open, .merged, .closed])
+  func aPRThatIsNotEarlierWorkIsCurrent(_ repoAndHead: (String, String), _ state: PRState) {
+    let (prRepo, head) = repoAndHead
+    #expect(Self.standing(Self.pr(state, repo: prRepo, head: head), made: nil) == .current)
+  }
+
+  @Test(arguments: [PRState.open, .merged, .closed])
+  func anEarlierPRWhoseHeadTheFolderMadeIsCurrent(_ state: PRState) {
+    #expect(Self.standing(Self.pr(state), made: [Reflog.sha("aaa"), Self.head]) == .current)
+  }
+
+  @Test(arguments: [nil, [], [Reflog.sha("aaa")]] as [Set<String>?])
+  func anOpenEarlierPRWhoseHeadTheFolderDidNotMakeIsHidden(_ made: Set<String>?) {
+    #expect(Self.standing(Self.pr(.open), made: made) == .hidden)
+  }
+
+  @Test(arguments: [nil, [], [Reflog.sha("aaa")]] as [Set<String>?], [PRState.merged, .closed])
+  func anEndedEarlierPRWhoseHeadTheFolderDidNotMakeIsDropped(_ made: Set<String>?, _ state: PRState) {
+    #expect(Self.standing(Self.pr(state), made: made) == .dropped)
+  }
+
+  @Test func aRepoThatDiffersOnlyInCaseIsStillTheSameRepo() {
+    #expect(Self.standing(Self.pr(.open, repo: "posthog/CHARTS"), made: nil) == .hidden)
+  }
+
+  /// Each Risk 1 reflog shape, as the poller reads it, with the PR's head at
+  /// commit `feed`. `kept` is whether the folder made that commit after it
+  /// switched to `haacked/x-v2`.
+  static let shapes: [(String, String, Bool)] = [
+    (
+      "rebase picks after the switch",
+      Reflog.afterSwitch(
+        Reflog.line("5", "b0", "rebase (start): checkout origin/main"),
+        Reflog.line("b0", "c1", "rebase (pick): One"),
+        Reflog.line("c1", "feed", "rebase (pick): Two"),
+        Reflog.line("feed", "feed", "rebase (finish): returning to refs/heads/haacked/x-v2")),
+      true
+    ),
+    ("a commit after the switch", Reflog.afterSwitch(Reflog.line("5", "feed", "commit: Work")), true),
+    (
+      "a reset to the PR's head", Reflog.afterSwitch(Reflog.line("5", "feed", "reset: moving to origin/haacked/x")),
+      false
+    ),
+    ("a fast-forward pull to the PR's head", Reflog.afterSwitch(Reflog.line("5", "feed", "pull: Fast-forward")), false),
+    (
+      "a fast-forward merge to the PR's head",
+      Reflog.afterSwitch(Reflog.line("5", "feed", "merge origin/haacked/x: Fast-forward")), false
+    ),
+    (
+      "a rebase that starts on the PR's head",
+      Reflog.afterSwitch(
+        Reflog.line("5", "feed", "rebase (start): checkout origin/haacked/x"),
+        Reflog.line("feed", "feed", "rebase (finish): returning to refs/heads/haacked/x-v2")),
+      false
+    ),
+    (
+      "a switch at the PR's head",
+      Reflog.text(
+        Reflog.line("0", "1", "commit (initial): first"),
+        Reflog.line("1", "1", "checkout: moving from main to haacked/x"),
+        Reflog.line("1", "feed", "commit: Work on x"),
+        Reflog.line("feed", "feed", "checkout: moving from haacked/x to haacked/x-v2")),
+      false
+    ),
+    ("other commits after the switch", Reflog.afterSwitch(Reflog.line("5", "abc", "commit: Other work")), false),
+    (
+      "a rename as the switch, then the PR's head",
+      Reflog.text(
+        Reflog.line("0", "1", "commit (initial): first"),
+        Reflog.line("1", "1", "checkout: moving from main to haacked/x"),
+        Reflog.line("1", "1", "Branch: renamed refs/heads/haacked/x to refs/heads/haacked/x-v2"),
+        Reflog.line("1", "feed", "commit: Work")),
+      true
+    ),
+    (
+      "the PR's head made before the last of two checkouts",
+      Reflog.afterSwitch(
+        Reflog.line("5", "feed", "commit: First visit"),
+        Reflog.line("feed", "5", "checkout: moving from haacked/x-v2 to haacked/x"),
+        Reflog.line("5", "feed", "checkout: moving from haacked/x to haacked/x-v2"),
+        Reflog.line("feed", "abc", "commit: Second visit")),
+      false
+    ),
+    (
+      "no switch to the branch",
+      Reflog.text(Reflog.line("0", "1", "commit (initial): first"), Reflog.line("1", "feed", "commit: Work")), false
+    ),
+    (
+      "a switch to a longer name",
+      Reflog.text(
+        Reflog.line("0", "1", "commit (initial): first"),
+        Reflog.line("1", "1", "checkout: moving from haacked/x to haacked/x-v2-old"),
+        Reflog.line("1", "feed", "commit: Work")),
+      false
+    ),
+    ("an unreadable reflog", "", false),
+  ]
+
+  @Test(arguments: shapes, [PRState.open, .merged, .closed])
+  func theReflogDecidesWhetherAnEarlierPRCounts(_ shape: (String, String, Bool), _ state: PRState) {
+    let (name, reflog, kept) = shape
+    let made = GitHub.commitsSinceSwitch(reflog: reflog, to: Self.branch)
+
+    let standing = Self.standing(Self.pr(state), made: made)
+
+    let expected: GitHub.EarlierStanding = kept ? .current : state == .open ? .hidden : .dropped
+    #expect(standing == expected, "\(name)")
+  }
+
+  @Test(arguments: [PRState.open, .merged])
+  func theExamplesPRIsTheSessions(_ state: PRState) {
+    let pr = PullRequest(
+      id: "PR_1", number: 20493, url: "", repo: "PostHog/charts", state: state, head: Reflog.original,
+      headSha: Reflog.prHead)
+    let made = GitHub.commitsSinceSwitch(reflog: Reflog.example, to: Reflog.v2)
+
+    let standing = GitHub.earlierStanding(
+      pr, repo: "PostHog/charts", branch: Reflog.v2, checkedOut: GitHub.checkedOutBranches(reflog: Reflog.example),
+      made: made)
+
+    #expect(standing == .current)
+  }
+}

@@ -11,6 +11,14 @@ public struct IssueRef: Codable, Equatable, Hashable, Sendable {
     self.number = number
   }
 
+  /// `init(parsing:)`, which throws an error that names the accepted forms.
+  public static func parse(_ text: String) throws -> IssueRef {
+    guard let ref = IssueRef(parsing: text) else {
+      throw APIError("can't read \"\(text)\" as an issue. Use 123, #123, owner/name#123, or an issue URL.")
+    }
+    return ref
+  }
+
   /// Reads `123`, `#123`, `owner/name#123`, or
   /// `https://github.com/owner/name/issues/123`, which may end in a further
   /// path, a query, or a fragment. A `/pull/` URL is not an issue.

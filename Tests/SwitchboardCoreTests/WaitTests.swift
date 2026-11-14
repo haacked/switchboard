@@ -253,6 +253,16 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
     #expect(Wait.parseTime(text, now: fixedNow) == fixedNow + Int64(seconds) * 1000)
   }
 
+  @Test(arguments: [("90s", 90), ("1w", 604_800)])
+  func durationMsIsTheLengthAlone(_ text: String, _ seconds: Int) {
+    #expect(Wait.durationMs(text) == Int64(seconds) * 1000)
+  }
+
+  @Test(arguments: ["", "2", " 2h", "2026-10-26", "9223372036854775807s"])
+  func durationMsRefusesWhatIsNotADuration(_ text: String) {
+    #expect(Wait.durationMs(text) == nil)
+  }
+
   @Test(arguments: [utc, losAngeles, kolkata])
   func dateIsMidnightInTheZone(_ zone: TimeZone) {
     #expect(Wait.parseTime("2026-10-26", now: fixedNow, zone: zone) == epochMs(2026, 10, 26, zone: zone))
@@ -279,7 +289,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
 
   @Test(arguments: [
     "", "soon", "2h30m", "12x", "-2h", "h", "2026-13-01", "2026-02-30", "2026-10-26T25:00", "2026-10-26T09:60",
-    "99999999999999999w", "9223372036854775807s",
+    "99999999999999999w", "9223372036854775807s", "9223372036854775s",
   ])
   func refusesWhatIsNotATime(_ text: String) {
     #expect(Wait.parseTime(text, now: fixedNow, zone: utc) == nil)
