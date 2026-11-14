@@ -6,7 +6,7 @@ import Testing
 /// The default recheck times, written out so that a changed default fails here.
 private let defaultSeconds: [String: Int] = [
   "ci": 7200, "bot-review": 3600, "review": 86400, "approval": 86400, "queue": 14400, "merge": 86400,
-  "deploy": 14400, "session": 86400, "manual": 86400, "acknowledged": 3600,
+  "deploy": 14400, "session": 86400, "manual": 86400, "acknowledged": 3600, "requested": 3600,
 ]
 
 /// The kinds that take a recheck time from the settings.
@@ -37,6 +37,10 @@ extension RecheckSettingsTests {
     @Test func acknowledgedMsIsAnHour() {
       #expect(RecheckSettings().acknowledgedMs == 3_600_000)
     }
+
+    @Test func requestedMsIsAnHour() {
+      #expect(RecheckSettings().requestedMs == 3_600_000)
+    }
   }
 }
 
@@ -53,6 +57,10 @@ extension RecheckSettingsTests {
 
     @Test func acknowledgedOverrideSetsAcknowledgedMs() throws {
       #expect(try configWith(recheck: #"{"acknowledged": 120}"#).recheck.acknowledgedMs == 120_000)
+    }
+
+    @Test func requestedOverrideSetsRequestedMs() throws {
+      #expect(try configWith(recheck: #"{"requested": 120}"#).recheck.requestedMs == 120_000)
     }
 
     @Test func largestValueIsKept() throws {

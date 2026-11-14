@@ -1,10 +1,26 @@
 import Foundation
 
+/// An Inbox verdict that the user acted on, as the state, the reason, and the
+/// PR's head commit that the user saw.
+public protocol SeenVerdict {
+  var state: AttentionState { get }
+  var reason: String { get }
+  /// The PR's head commit when the user acted, or nil without a PR.
+  var head: String? { get }
+}
+
+extension SeenVerdict {
+  /// Whether the user saw this verdict for a session with these facts: the
+  /// state, the reason, and the PR's head commit are the ones that the user saw.
+  public func covers(_ verdict: Verdict, _ facts: SessionFacts) -> Bool {
+    state == verdict.state && reason == verdict.reason && head == facts.pr?.headSha
+  }
+}
+
 /// The Inbox item that the user marked as seen, as an `ack` event recorded it.
-public struct Acknowledgment: Codable, Equatable, Sendable {
+public struct Acknowledgment: Codable, Equatable, Sendable, SeenVerdict {
   public var state: AttentionState
   public var reason: String
-  /// The PR's head commit when the user acknowledged, or nil without a PR.
   public var head: String?
   /// When the `ack` event was recorded. The event's time sets it, so the
   /// event's data leaves it out.
@@ -20,13 +36,6 @@ public struct Acknowledgment: Codable, Equatable, Sendable {
   /// The acknowledgment of the verdict for a session with these facts.
   public init(_ verdict: Verdict, _ facts: SessionFacts) {
     self.init(state: verdict.state, reason: verdict.reason, head: facts.pr?.headSha)
-  }
-
-  /// Whether this acknowledgment is of the verdict for a session with these
-  /// facts: the state, the reason, and the PR's head commit are the ones that
-  /// the user saw.
-  public func covers(_ verdict: Verdict, _ facts: SessionFacts) -> Bool {
-    state == verdict.state && reason == verdict.reason && head == facts.pr?.headSha
   }
 }
 

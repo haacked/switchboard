@@ -217,6 +217,12 @@ final class GitHubPoller {
       // An edge that `recordDependencies` kept reads its PR at once, as a new wait does.
       var waited = waitedOn(interest)
       for id in recheck { waited.created[id] = max(waited.created[id] ?? 0, now) }
+      // A request's hold ends `readMs` after a turn ends. The PR reads once after each such turn, so the hold sees
+      // a push that the turn made even when the PR polls at the idle rate.
+      for s in sessions {
+        guard let ended = s.facts.request?.ended, let id = s.facts.pr?.id else { continue }
+        waited.created[id] = max(waited.created[id] ?? 0, ended)
+      }
       try readPRs(all: all, now: now, waited: waited, queued: queuedPRs(), stats: &stats)
       try checkDeploys(interest, all: all, now: now, stats: &stats)
     } catch {

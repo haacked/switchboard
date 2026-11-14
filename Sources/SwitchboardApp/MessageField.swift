@@ -9,6 +9,9 @@ struct MessageField: View {
   /// From `BoardModel.messageDraft(for:)`, so that the text survives a switch to another view.
   @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
+  /// The ref of the Inbox item that the field answers, so sbd can hold the session while it works on the
+  /// message.
+  var ref: String?
   @FocusState private var focused: Bool
   /// The paste monitor reads this view's focus here. The draft can't hold it, because several views share one draft.
   @State private var focus = Focus()
@@ -178,7 +181,7 @@ struct MessageField: View {
     .accessibilityAction { draft.remove(image.id) }
   }
 
-  private func send() { draft.submit(session, to: model) }
+  private func send() { draft.submit(session, ref: ref, to: model) }
 
   /// The chip's VoiceOver label. Activating the chip removes the image.
   static func chipLabel(_ name: String) -> String { "Image: \(name), remove" }
