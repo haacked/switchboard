@@ -9,7 +9,8 @@ enum BackgroundLaunch {
   /// A new hook that drives the app with no one watching belongs here. A hook that only chooses what to show, such
   /// as SB_SELECT, does not.
   static let hooks = [
-    "SB_SNAPSHOT", "SB_TERMINAL_TEST", "SB_DRAFT_TEST", "SB_SHELL_TEST", "SB_DROP_TEST", "SB_KEY_TEST", "SB_QUIT_FILE",
+    "SB_SNAPSHOT", "SB_TERMINAL_TEST", "SB_DRAFT_TEST", "SB_SHELL_TEST", "SB_DROP_TEST", "SB_KEY_TEST", "SB_SLASH_TEST",
+    "SB_QUIT_FILE",
   ]
 
   static func applies(to env: [String: String]) -> Bool {

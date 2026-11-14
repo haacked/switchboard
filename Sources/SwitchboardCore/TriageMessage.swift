@@ -187,4 +187,34 @@ extension Triage {
     details.notes = s.notes.map(\.text)
     return details
   }
+
+  /// A callout that says which branch the PR uses, when the folder is on
+  /// another branch and the item names either one. A decision about one of
+  /// the two branches needs to know which one the PR uses.
+  public static func branchCallout(for s: SessionSummary) -> Callout? {
+    guard let pr = s.pr, let branch = s.branch, let head = pr.otherBranch(than: branch), let item = s.triage else {
+      return nil
+    }
+    let text = item.title + "\n" + item.summary
+    guard names(text, branch) || names(text, head) else { return nil }
+    return Callout(kind: .info, title: "#\(pr.number) uses \(head)", body: "This folder is on \(branch).")
+  }
+
+  /// Whether the text holds the name as a whole token: no letter, digit,
+  /// "/", "-", or "_" on either side, and no "." with a letter or digit after
+  /// it, which would make the name part of a longer one.
+  static func names(_ text: String, _ name: String) -> Bool {
+    let chars = Array(text)
+    let target = Array(name)
+    guard !target.isEmpty, chars.count >= target.count else { return false }
+    let joins: (Character) -> Bool = { $0.isLetter || $0.isNumber || "/-_".contains($0) }
+    for start in 0...(chars.count - target.count) where chars[start..<start + target.count].elementsEqual(target) {
+      let end = start + target.count
+      if start > 0, joins(chars[start - 1]) { continue }
+      if end < chars.count, joins(chars[end]) { continue }
+      if end + 1 < chars.count, chars[end] == ".", chars[end + 1].isLetter || chars[end + 1].isNumber { continue }
+      return true
+    }
+    return false
+  }
 }

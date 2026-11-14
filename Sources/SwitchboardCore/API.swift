@@ -27,6 +27,17 @@ public struct APIError: Error, CustomStringConvertible {
   public init(_ description: String) { self.description = description }
 }
 
+/// `Client.call` throws it when it can't connect to sbd's socket, or when
+/// sbd goes away before it answers, as when launchd restarts it.
+public struct SbdUnreachable: Error, CustomStringConvertible {
+  public let description: String
+}
+
+/// Runs `body` and throws its error as `SbdUnreachable`.
+private func unreachable<T>(_ body: () throws -> T) throws -> T {
+  do { return try body() } catch { throw SbdUnreachable(description: "\(error)") }
+}
+
 /// The id that `key` names: an id, a unique id prefix, or a unique name.
 public func resolveRef(_ key: String, _ noun: String, _ items: [(id: String, name: String)]) throws -> String {
   if items.contains(where: { $0.id == key }) { return key }
@@ -62,14 +73,21 @@ public struct NewSession: Codable, Sendable {
   public var autoMode: Bool?
   /// Whether claude starts in plan mode. It wins over `autoMode` until the plan is approved.
   public var planMode: Bool?
+  /// Whether claude starts in manual mode, whatever `autoMode`, `claudeArgs`, and Claude's settings say. It holds
+  /// until claude reports another mode.
+  public var manualMode: Bool?
   /// The remote host to run on, by its name in config.json. `path` is then a folder on that host, absolute or
   /// starting with `~`, which the host resolves.
   public var host: String?
+  /// The issue that the session works on, as `sb issue` reads it. It links the session to an issue in another
+  /// repo, or one that the branch name doesn't number.
+  public var issue: IssueRef?
 
   public init(
     path: String, branch: String? = nil, base: String? = nil, name: String? = nil, worktree: Bool? = nil,
     prompt: String? = nil, model: String? = nil, parent: String? = nil, account: String? = nil, group: String? = nil,
-    autoMode: Bool? = nil, planMode: Bool? = nil, host: String? = nil
+    autoMode: Bool? = nil, planMode: Bool? = nil, manualMode: Bool? = nil, host: String? = nil,
+    issue: IssueRef? = nil
   ) {
     self.path = path
     self.branch = branch
@@ -83,7 +101,9 @@ public struct NewSession: Codable, Sendable {
     self.group = group
     self.autoMode = autoMode
     self.planMode = planMode
+    self.manualMode = manualMode
     self.host = host
+    self.issue = issue
   }
 }
 
@@ -265,12 +285,12 @@ public final class Client: Sendable {
   }
 
   public func call(_ op: String, _ args: [String: JSON] = [:], timeout: TimeInterval = 30) throws -> JSON {
-    let fd = try UnixSocket.connect(path: home.socket, timeout: timeout)
+    let fd = try unreachable { try UnixSocket.connect(path: home.socket, timeout: timeout) }
     defer { close(fd) }
     let line = try JSONCoding.encode(Request(op: op, args: .object(args))) + "\n"
-    try UnixSocket.write(fd, Data(line.utf8))
+    try unreachable { try UnixSocket.write(fd, Data(line.utf8)) }
     var reader = UnixSocket.LineReader(fd: fd)
-    guard let reply = try reader.next() else { throw APIError("sbd closed the connection") }
+    guard let reply = try reader.next() else { throw SbdUnreachable(description: "sbd closed the connection") }
     let response = try JSONCoding.decoder.decode(Response.self, from: reply)
     guard response.ok else { throw APIError(response.error ?? "sbd failed") }
     return response.result ?? .null

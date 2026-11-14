@@ -11,6 +11,9 @@ public struct WaitRequest: Codable, Equatable, Sendable {
   public var service: String?
   public var state: String?
   public var until: String?
+  /// For a `review`, `bot-review`, or `queue` wait, the time after which a
+  /// review or a queue change counts.
+  public var since: String?
   public var note: String?
   public var then: String?
   public var by: String?
@@ -25,7 +28,7 @@ public struct WaitRequest: Codable, Equatable, Sendable {
     let kind = try oneOf("wait kind", self.kind ?? Wait.Kind.manual.rawValue, Wait.Kind.allCases, \.rawValue)
     let given = [
       ("target", target), ("who", who), ("environment", environment), ("service", service), ("state", state),
-      ("until", until),
+      ("until", until), ("since", since),
     ]
     if let (field, _) = given.first(where: { $0.1 != nil && !kind.fields.contains($0.0) }) {
       throw APIError("a \(kind.rawValue) wait doesn't take \(field)")
@@ -37,6 +40,11 @@ public struct WaitRequest: Codable, Equatable, Sendable {
     if let then {
       guard let value = Wait.Then(rawValue: then) else { throw APIError("then is resume or notify, not \(then)") }
       wait.then = value
+    }
+    if let since {
+      guard let time = Wait.parseTime(since, now: now) else { throw APIError("can't read the time \(since)") }
+      guard time <= now else { throw APIError("since \(since) hasn't come yet") }
+      wait.since = time
     }
     switch kind {
     case .session:

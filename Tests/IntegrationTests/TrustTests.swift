@@ -233,6 +233,23 @@ private func canonicalJSON(_ value: Any) throws -> String {
     #expect(try events(sbd, c.id, "folder-trusted").isEmpty)
   }
 
+  /// The chat waits at the dialog as in `anAccountWithoutAConfigFileGetsNoFile`.
+  @Test func aChatAtTheTrustDialogIsInTriage() throws {
+    let sbd = try Instance()
+    let account = try #require(sbd.inheritedAccount)
+    try #require(!ClaudeAccount.isDefault(account))
+    FileManager.default.createFile(atPath: "\(sbd.home.path)/ask-trust", contents: nil)
+    let flags = try addGroup(sbd)
+    let c = try decode(SessionSummary.self, sbd.sb("chat", flags.id, "--json"))
+    try waitForTrustCard(sbd, c.id)
+
+    let triage = try sbd.triage()
+
+    #expect(triage.map(\.id) == [c.id])
+    #expect(triage.first?.triage?.source == .card)
+    #expect(triage.first?.triage?.options.map(\.label) == ["Trust", "Exit"])
+  }
+
   // MARK: The trust card
 
   @Test func aWorkSessionAtTheTrustDialogShowsATrustCard() throws {

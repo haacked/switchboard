@@ -29,6 +29,11 @@ extension Instance {
 let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCoreTests/Fixtures/replies/decisions.md")
   .path
 
+/// The plan's example reply, which ends by offering to delete a branch.
+let offerDeleteBranchReply = Instance.root.appendingPathComponent(
+  "Tests/SwitchboardCoreTests/Fixtures/replies/offer-delete-branch.md"
+).path
+
 @Suite(.blocking(timeLimit: .seconds(120))) struct TriageTests {
   @Test func summarizesATurnThatEndsInProse() throws {
     let sbd = try Instance()
@@ -144,6 +149,30 @@ let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCore
     #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
   }
 
+  @Test func aManagersPermissionPromptIsInTriage() throws {
+    let sbd = try Instance()
+    let m = try JSONCoding.decode(SessionSummary.self, from: sbd.sb("manager", "--json"))
+    try sbd.waitFor(m.id, "the stub") { $0.live }
+    try sbd.sb("send", m.id, "perm touch x")
+    try sbd.waitFor(m.id, "the card") { !$0.cards.isEmpty }
+
+    let triage = try sbd.triage()
+    let result = try JSON.parse(sbd.sb("choose", "--json", m.id, "allow"))
+
+    #expect(triage.map(\.id) == [m.id])
+    #expect(triage.first?.triage?.source == .card)
+    #expect(triage.first?.triage?.title == "Approve `touch x`")
+    #expect(result?["delivery"]?.string == "hook")
+    try sbd.waitFor(m.id, "the command's reply") { $0.lastReply == "Ran touch x" }
+    // The other session's call runs after the Manager's would have, so the
+    // log holds both calls by the time its summary arrives.
+    let s = try sbd.new(prompt: "ask", name: "review-code")
+    try sbd.waitForTriageEvent(s.id)
+    #expect(sbd.summaryCalls().count == 1)
+    #expect(try sbd.events(m.id).allSatisfy { $0.kind != "triage" })
+    #expect(try !sbd.triage().map(\.id).contains(m.id))
+  }
+
   @Test func summarizesAgainAfterARestartThatLostTheCall() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "ask", name: "FAIL-SUMMARY")
@@ -247,6 +276,29 @@ let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCore
     let item = try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }.triage!
     #expect(item.kind == .decision)
     #expect(item.summary == summary)
+  }
+
+  /// The budget skips the summary, so the item comes from the reply's offer.
+  @Test func anOfferWithoutASummaryGetsYesNoAndANamedTitle() throws {
+    let sbd = try Instance(config: ["triage": ["perHour": 0]])
+    try FileManager.default.copyItem(atPath: offerDeleteBranchReply, toPath: "\(sbd.home.path)/offer-delete-branch.md")
+    let s = try sbd.new(prompt: "reply offer-delete-branch")
+
+    let event = try sbd.waitForTriageEvent(s.id)
+
+    #expect(event.data["skipped"]?.string?.contains("summaries in the last hour") == true)
+    let got = try #require(JSON.parse(try sbd.sb("get", "--json", s.id)))
+    let item = try #require(got["triage"])
+    #expect(item["source"]?.string == "fallback")
+    #expect(item["title"]?.string == "Delete the branch haacked/round-trip-drop-old-bounds-v2?")
+    #expect(item["options"]?.array?.compactMap { $0["label"]?.string } == ["Yes", "No"])
+    #expect(item["options"]?.array?.compactMap { $0["message"]?.string } == ["Yes", "No"])
+    #expect(item["message"]?["action"]?["primary"] == .null)
+    #expect(got["reason"]?.string == "offered: Do you want me to delete it?")
+
+    try sbd.sb("choose", s.id, "No")
+
+    try sbd.waitFor("the sent No") { try sbd.events(s.id).contains { $0.kind == "sent" && $0.data["text"] == "No" } }
   }
 
   @Test func aSummaryThatTimesOutFallsBack() throws {

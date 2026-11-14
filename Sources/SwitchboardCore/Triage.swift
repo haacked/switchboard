@@ -404,17 +404,52 @@ public enum Triage {
   /// replace the answers. A held prompt's item keeps none, because the
   /// prompt needs its own answer first. Each draft's `post` comes from the
   /// session's PR and the draft reply facts.
-  public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    item(facts, live: liveItem(facts, verdict))
+  public static func item(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> TriageItem? {
+    itemAndDecisions(facts, verdict, kind: kind).item
   }
 
   /// The session's item, its open decision list, and whether a submit sent
   /// the item's decisions, all from one live item.
-  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> (
     item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
   ) {
-    let live = liveItem(facts, verdict)
-    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    switch kind.inboxItems {
+    case .all:
+      let live = liveItem(facts, verdict)
+      return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    case .blockingPrompts:
+      return (promptItem(facts, verdict), nil, false)
+    }
+  }
+
+  /// The item of the first prompt that blocks the session, or nil when none
+  /// does. A send card that came first does not hide a later permission card.
+  static func promptItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
+    guard AttentionState.inbox.contains(verdict.state) else { return nil }
+    if let card = facts.cards.first(where: { blocks($0.kind) }) {
+      var item = cardItem(card)
+      item.ref = card.ref
+      return item
+    }
+    guard let open = Attention.openPromptVerdict(facts) else { return nil }
+    var item = ruleItem(open)
+    item.ref = "rule:\(item.title)"
+    return item
+  }
+
+  /// Whether a card of this kind stops the session's turn until the user
+  /// answers it. A send card does not: the turn goes on, and the card expires.
+  static func blocks(_ kind: Card.Kind) -> Bool {
+    switch kind {
+    case .permission, .question, .trust: true
+    case .send: false
+    }
+  }
+
+  /// Whether the session waits on a prompt that only the user can answer:
+  /// a card that blocks it, or a Claude Code dialog that is open without a card.
+  public static func hasBlockingPrompt(cards: [Card], openPrompt: Bool) -> Bool {
+    openPrompt || cards.contains { blocks($0.kind) }
   }
 
   private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
@@ -563,15 +598,26 @@ public enum Triage {
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
-  /// The reply's closing section as the summary, with no options.
+  /// The reply's closing section as the summary. An offer's title starts
+  /// with its verb, and an offer that a yes or no answers gets Yes and No.
+  /// Neither is the main option, because the offer can be a delete.
   static func fallbackItem(_ reply: String, _ verdict: Verdict) -> TriageItem {
-    let kind: TriageKind
+    let summary = closingSection(reply)
     switch Attention.classify(reply) {
-    case .question: kind = .question
-    case .offer: kind = .approval
-    case .other: kind = .info
+    case .question:
+      return TriageItem(title: title(verdict.reason), kind: .question, summary: summary, source: .fallback)
+    case .offer(let step):
+      guard let asked = Attention.lastQuestion(reply), asked.question == step else {
+        return TriageItem(title: title(step), kind: .approval, summary: summary, source: .fallback)
+      }
+      let options =
+        OfferText.isYesNo(step) ? ["Yes", "No"].map { TriageOption(label: $0, action: .send, message: $0) } : []
+      return TriageItem(
+        title: OfferText.title(question: step, previous: asked.previous), kind: .approval,
+        summary: summary, options: options, source: .fallback)
+    case .other:
+      return TriageItem(title: title(verdict.reason), kind: .info, summary: summary, source: .fallback)
     }
-    return TriageItem(title: title(verdict.reason), kind: kind, summary: closingSection(reply), source: .fallback)
   }
 
   /// A fallback summary lists at most this many items of a list.
@@ -670,20 +716,38 @@ public enum Triage {
     }
   }
 
-  /// Whether the session may put an item in the Inbox, the badge, the menu
-  /// bar, a notification, or Next Needing You. The Manager and the group chats
-  /// may not, because their replies and cards repeat or name the sessions they
-  /// manage, which have their own entries. Nothing reports a problem with sb
-  /// itself, such as an out-of-date sbd. This refuses every item of theirs.
-  public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.kind == .work }
+  /// Whether the session's item may reach the Inbox, the badge, the menu bar,
+  /// a notification, or Next Needing You. The app checks this itself, so a
+  /// summary from an older sbd cannot add an item that this rule leaves out.
+  public static func inInbox(_ s: SessionSummary) -> Bool {
+    switch s.kind.inboxItems {
+    case .all: true
+    case .blockingPrompts: s.triage != nil && hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
+    }
+  }
+
+  /// How the Inbox, the menu bar, and a notification name the session. A
+  /// group chat goes by its group's current name, and a Manager conversation
+  /// says that it is one.
+  public static func inboxName(_ s: SessionSummary, groupName: String?) -> String {
+    switch s.kind {
+    case .work: s.name
+    case .chat: groupName.map { Chat.name(group: $0) } ?? s.name
+    case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
+    }
+  }
+
+  /// Whether sbd asks a model to summarize the session's turns. A summary
+  /// feeds only an item that a turn's reply may give.
+  public static func summarizes(_ kind: SessionKind) -> Bool { kind.inboxItems == .all }
 
   /// Whether the session needs the user and counts toward the Inbox and the badge.
-  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && mayHaveItem(s) }
+  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && inInbox(s) }
 
   /// The sessions that have an item, by group and then oldest first.
   public static func order(_ sessions: [SessionSummary]) -> [SessionSummary] {
     var ranked: [(session: SessionSummary, rank: Int)] = []
-    for s in sessions where mayHaveItem(s) {
+    for s in sessions where inInbox(s) {
       if let r = rank(s) { ranked.append((s, r)) }
     }
     ranked.sort { a, b in

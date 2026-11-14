@@ -57,6 +57,12 @@ struct DecisionCard: View {
     !item.summary.isEmpty && !item.callouts.isEmpty
   }
 
+  /// Whether the Action says that the item has no summary: a fallback item
+  /// with no options whose reply gave no closing section.
+  static func showsMissingSummary(_ item: TriageItem) -> Bool {
+    item.source == .fallback && item.summary.isEmpty && item.options.isEmpty
+  }
+
   private func summary(_ text: String) -> some View {
     MarkdownView(text: text)
   }
@@ -85,20 +91,21 @@ struct DecisionCard: View {
     }
     if item.source == .card {
       // Every other card shows its whole tool call, which an approval needs to see.
-      let cards = Card.inbox(session, all: model.sessions)
+      let inbox = Card.inbox(session, all: model.sessions)
+      // A chat's item can be a later card than a group message, so the item's card leads.
+      let own = { (card: Card) in card.session == session.id && card.ref == item.ref }
+      let cards = inbox.filter(own) + inbox.filter { !own($0) }
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       // Details holds the call and message text of the item's own card only.
       ForEach(cards) {
-        CardView(
-          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref,
-          offersTerminal: true)
+        CardView(card: $0, draft: model.draft(for: $0), compact: own($0), offersTerminal: true)
       }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)
     } else if session.openPrompt {
       // A message would only queue behind the open dialog. The Summary says why the prompt has no card.
       OpenTerminalButton().disabled(!session.runsClaude)
-    } else if item.source == .fallback {
+    } else if Self.showsMissingSummary(item) {
       Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
     }
     // A Ready to merge card offers Acknowledge as one of its options.

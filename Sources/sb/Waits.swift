@@ -8,17 +8,26 @@ let author = ProcessInfo.processInfo.environment["CLAUDECODE"] == "1" ? Author.c
 /// The flags of a typed wait and the request field that each one sets.
 let waitFlags = [
   "--kind": "kind", "--target": "target", "--who": "who", "--env": "environment", "--service": "service",
-  "--state": "state", "--until": "until", "--note": "note", "--then": "then",
+  "--state": "state", "--until": "until", "--since": "since", "--note": "note", "--then": "then",
 ]
 
 /// `sb wait <session> <note>` sets a manual wait. With flags after the
 /// session, or with no session inside one, it sets a typed wait, clears
-/// waits, or resolves one.
+/// waits, or resolves one. `--block` waits for the wait to resolve.
 func waitCommand(_ a: Args) {
   let resolve = a.values["--resolve"]
   let clearing = a.switches.contains("--clear") || resolve != nil
+  let block = a.switches.contains("--block")
   let words = a.positional.dropFirst().joined(separator: " ")
   if !words.isEmpty && (clearing || a.values["--note"] != nil) { refuse(words, "wait") }
+  if block && clearing { die("--block sets a wait, so it doesn't go with --clear or --resolve") }
+  if block && a.values["--then"] != nil { die("--block reports the outcome itself, so it doesn't take --then") }
+  if a.values["--then"] == Wait.Then.caller.rawValue { die("then is resume or notify, not caller") }
+  if !block && a.values["--timeout"] != nil { die("--timeout goes with --block") }
+  let timeout = a.values["--timeout"].map { text in
+    guard let seconds = TimeInterval(text), seconds > 0 else { die("--timeout needs a positive number of seconds") }
+    return seconds
+  }
   if clearing {
     var extra: [String: JSON] = [:]
     if let id = a.values["--id"] { extra["wait"] = .string(id) }
@@ -36,6 +45,7 @@ func waitCommand(_ a: Args) {
   }
   args["session"] = .string(session)
   args["by"] = .string(author.rawValue)
+  if block { BlockingWait(session: session).run(args, timeout: timeout) }
   let result = call("wait", args)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 }
