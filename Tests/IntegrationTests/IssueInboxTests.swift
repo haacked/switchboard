@@ -169,6 +169,22 @@ private final class Inbox {
     #expect(try inbox.sources() == [IssueSource(name: ledgerWeb)])
   }
 
+  @Test func sourceRmOfANameThatTwoSourcesShareNeedsTheFilterAndRemovesOnlyThatOne() throws {
+    let inbox = try Inbox()
+    try inbox.sbd.sb("issues", "source", "add", "acme", "--label", "team/billing")
+    try inbox.sbd.sb("issues", "source", "add", "acme", "--person", "ana-m")
+    try inbox.sbd.sb("issues", "source", "add", ledgerWeb)
+
+    let r = try inbox.sbd.run("issues", "source", "rm", "acme")
+    let printed = try inbox.sbd.sb("issues", "source", "rm", "acme", "--label", "team/billing", "--json")
+
+    #expect(r.status != 0)
+    #expect(r.stderr.contains("names 2 sources"))
+    let rest = [IssueSource(name: "acme", person: "ana-m"), IssueSource(name: ledgerWeb)]
+    #expect(try JSONCoding.decode([IssueSource].self, from: printed) == rest)
+    #expect(try inbox.sources() == rest)
+  }
+
   @Test func sourceRmOfASourceThatIsNotThereIsAnError() throws {
     let inbox = try Inbox()
     try inbox.sbd.sb("issues", "source", "add", ledger)
@@ -254,6 +270,17 @@ private final class Inbox {
     #expect(try inbox.buckets()["acme/ledger#4312"] == IssueBucket.mine.rawValue)
   }
 
+  @Test func laterPollWithinTheHourReadsOnlyTheUpdatesSinceTheLastPoll() throws {
+    let inbox = try Inbox()
+    try inbox.seed(fourBuckets)
+
+    // The rename keeps the old updatedAt, so only a full read would see it.
+    inbox.github.put(fakeIssue(4312, title: "Renamed on GitHub", body: "Totals show USD.", assignees: ["robin-k"]))
+    try inbox.sbd.poll(all: true)
+
+    #expect(try inbox.list().issues.first { $0.issue.number == 4312 }?.issue.title == "Invoice PDF currency")
+  }
+
   @Test func orgSourceReadsTheIssuesWithItsLabel() throws {
     let inbox = try Inbox()
     for issue in fourBuckets { inbox.github.put(issue) }
@@ -278,6 +305,32 @@ private final class Inbox {
     let list = try inbox.list()
     #expect(list.issues.count == 1000)
     #expect(list.sourceErrors[ledger]?.contains("more than 1000 open issues") == true)
+    // The next poll reads only updates, and still reports that the full read stopped short.
+    let next = try inbox.sbd.poll(all: true)
+    #expect(next["issuesError"]?.string?.contains("more than 1000 open issues") == true)
+  }
+
+  @Test func refreshReadsPresetsEditedInConfigWithoutARestart() throws {
+    let inbox = try Inbox()
+    var config = try inbox.sbd.config()
+    var issues = try #require(config["issues"]?.object)
+    issues["presets"] = [goPreset, ["name": "plan", "prompt": "Plan {url}"]]
+    config["issues"] = .object(issues)
+    try JSON.object(config).text.write(toFile: inbox.sbd.home.config, atomically: true, encoding: .utf8)
+
+    let list = try inbox.sbd.client.call("issues-refresh", ["maxAgeSeconds": 3600], as: IssueList.self)
+
+    #expect(list.presets.map(\.name) == ["go", "plan"])
+  }
+
+  @Test func refreshAfterARecentPollAsksGitHubNothing() throws {
+    let inbox = try Inbox()
+    try inbox.seed(fourBuckets)
+    let before = inbox.github.requests.filter { $0.kind == "issues" }.count
+
+    _ = try inbox.sbd.client.call("issues-refresh", ["maxAgeSeconds": 3600])
+
+    #expect(inbox.github.requests.filter { $0.kind == "issues" }.count == before)
   }
 
   @Test func repoSourceReadsOnlyTheIssuesWithItsLabel() throws {
@@ -459,6 +512,42 @@ private final class Inbox {
     let s = try inbox.start("acme/ledger#4312")
 
     #expect(try inbox.firstPrompt(s) == "/go --yolo \(issueURL)")
+  }
+
+  @Test func startWithoutAPresetUsesTheDefaultPreset() throws {
+    let inbox = try Inbox(presets: [goPreset, ["name": "link", "prompt": "{url}"]])
+    try inbox.seed(fourBuckets)
+    _ = try inbox.sbd.client.call("issues-settings", ["defaultPreset": "link"])
+
+    let s = try inbox.start("acme/ledger#4312")
+
+    #expect(try inbox.firstPrompt(s) == issueURL)
+  }
+
+  @Test func settingADefaultPresetThatIsNotThereIsRefused() throws {
+    let inbox = try Inbox()
+
+    #expect(throws: (any Error).self) { try inbox.sbd.client.call("issues-settings", ["defaultPreset": "nope"]) }
+  }
+
+  @Test func cloneOfAnInvalidNameOrAnExistingCheckoutIsRefusedAndRunsNoClone() throws {
+    let inbox = try Inbox()
+
+    #expect(throws: (any Error).self) { try inbox.sbd.client.call("issues-clone", ["repo": .string(ledger)]) }
+    #expect(throws: (any Error).self) { try inbox.sbd.client.call("issues-clone", ["repo": "acme/../x"]) }
+    #expect(inbox.sbd.ghCalls("repo clone").isEmpty)
+  }
+
+  @Test func cloneAsksGhToCloneIntoTheFirstRepoRoot() throws {
+    let inbox = try Inbox()
+
+    // The stub gh fails every clone, but it logs the call.
+    _ = try? inbox.sbd.client.call("issues-clone", ["repo": .string(ledgerWeb)])
+
+    let calls = inbox.sbd.ghCalls("repo clone")
+    #expect(calls.count == 1)
+    #expect(calls.first?.hasPrefix("repo clone \(ledgerWeb) ") == true)
+    #expect(calls.first?.hasSuffix("/\(ledgerWeb)") == true)
   }
 
   @Test func startWithThePlainPresetSendsTheIssueAsThePrompt() throws {

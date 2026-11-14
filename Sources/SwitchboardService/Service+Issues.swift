@@ -22,6 +22,11 @@ extension Service {
       let source = try issueSource(args)
       try updateIssueSettings { $0.sources.removeAll { $0 == source } }
       issueCache.remove(source: source.key)
+      // With no sources, no poll runs to replace the last poll's error.
+      if issueSettings.sources.isEmpty {
+        issueCache.error = nil
+        issueCache.pausedUntil = nil
+      }
       saveIssueCache()
       return try JSON(encoding: issueSettings.sources)
     case "issues-settings":
@@ -176,9 +181,10 @@ extension Service {
       let inbox = IssueInbox(viewer: issueCache.viewer, team: issueSettings.team)
       return (issue, issueSettings.allPresets, issueSettings.defaultPreset, inbox.trusts(issue))
     }
-    let preset =
-      try args["preset"]?.string.map { try IssuePreset.named($0, in: presets) }
-      ?? IssuePreset.choose(presets, last: nil, default: defaultPreset) ?? presets[0]
+    guard
+      let preset = try args["preset"]?.string.map({ try IssuePreset.named($0, in: presets) })
+        ?? IssuePreset.choose(presets, last: nil, default: defaultPreset)
+    else { throw APIError("no issue presets") }
     let repo: String
     if let path = args["path"]?.string {
       repo = (path.expandingTilde as NSString).standardizingPath

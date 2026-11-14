@@ -96,16 +96,17 @@ extension BoardModel {
   }
 
   /// Asks sbd to poll the sources when its last poll is over a minute old, as the Issues view opens.
-  func refreshIssues() { readIssues("issues-refresh", ["maxAgeSeconds": 60]) }
+  func refreshIssues() { refreshIssues(olderThan: 60) }
 
   /// Polls the sources at once, as after a new source.
-  func pollIssueSources() { readIssues("issues-refresh", ["maxAgeSeconds": 0]) }
+  func pollIssueSources() { refreshIssues(olderThan: 0) }
 
-  /// Reads the issue list off the main thread with `op`, which answers one.
-  private func readIssues(_ op: String, _ args: [String: JSON] = [:]) {
+  /// Reads the issue list off the main thread. sbd polls the sources first when its last poll is older than
+  /// `seconds`.
+  private func refreshIssues(olderThan seconds: Int) {
     let send = send
     issueWork.async {
-      let reply = try? send(op, args)
+      let reply = try? send("issues-refresh", ["maxAgeSeconds": .number(Double(seconds))])
       Task { @MainActor in if let reply { self.apply(issueReply: reply) } }
     }
   }
@@ -186,24 +187,26 @@ extension BoardModel {
     perform("issues-dismiss", ["issue": .string(row.issue.ref)]) { self.apply(issueReply: $0) }
   }
 
-  /// Queues the issue as a follow-up that hasn't started.
+  /// Queues the issue as a follow-up that hasn't started. Its branch carries the issue's number, so the issue moves to
+  /// Being worked on once the follow-up starts.
   func followUpIssue(_ row: ListedIssue) {
     let issue = row.issue
-    perform(
-      "followup-add",
-      [
-        "prompt": .string("\(issue.title)\n\n\(issue.url)"), "title": .string(issue.title),
-        "repository": .string(issue.repo),
-      ])
+    var args: [String: JSON] = [
+      "prompt": .string(IssuePreset(name: "followup", prompt: "{title}\n\n{url}").prompt(for: issue)),
+      "title": .string(issue.title), "repository": .string(issue.repo),
+      "branch": .string(issue.branch(prefix: issueList?.branchPrefix ?? "")),
+    ]
+    if !trustsIssue(row) { args["autoMode"] = .bool(false) }
+    perform("followup-add", args)
   }
 
-  /// Opens the New Session sheet filled in with the issue's checkout, branch, and the preset's prompt.
   /// Whether the viewer or a teammate wrote the issue, so its session may start in auto mode. sbd's Start uses the
   /// same rule.
   func trustsIssue(_ row: ListedIssue) -> Bool {
     IssueInbox(viewer: issueList?.viewer, team: issueList?.team ?? IssueTeam()).trusts(row.issue)
   }
 
+  /// Opens the New Session sheet filled in with the issue's checkout, branch, and the preset's prompt.
   func editIssuePrompt(_ row: ListedIssue, preset: IssuePreset) {
     newSession = NewSessionRequest(
       group: issueGroup(row), repo: row.issue.repo, branch: row.issue.branch(prefix: issueList?.branchPrefix ?? ""),

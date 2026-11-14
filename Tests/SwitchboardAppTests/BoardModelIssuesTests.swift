@@ -150,6 +150,23 @@ private let rows = [
     #expect(model.newSession?.autoMode == autoMode)
   }
 
+  @Test(arguments: [("robin-k", nil), ("zed-q", false), (nil, false)] as [(String?, Bool?)])
+  func followUpFencesTheTitleOnTheIssuesBranchAndStartsWithoutAutoModeForAnOutsideAuthor(
+    author: String?, autoMode: Bool?
+  ) async {
+    var issue = rows[0]
+    issue.issue.author = author
+    let sent = await firstRequest { model in
+      model.issueList = list(rows)
+      model.followUpIssue(issue)
+    }
+
+    #expect(sent.op == "followup-add")
+    #expect(sent.args["prompt"]?.string?.contains("<issue-title>Issue 1</issue-title>") == true)
+    #expect(sent.args["branch"] == "robin/1-issue-1")
+    #expect(sent.args["autoMode"] == autoMode.map(JSON.bool))
+  }
+
   @Test(arguments: [nil, false] as [Bool?])
   func theSheetSendsTheRequestsAutoMode(autoMode: Bool?) {
     let form = NewSessionView.Form(request: NewSessionRequest(repo: "acme/ledger", autoMode: autoMode))

@@ -516,6 +516,7 @@ public struct IssueCache: Codable, Equatable, Sendable {
   public mutating func remove(source: String) {
     drop(source: source)
     polls[source] = nil
+    sourceErrors[source] = nil
   }
 }
 

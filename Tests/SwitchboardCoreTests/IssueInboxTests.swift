@@ -669,6 +669,7 @@ private func merged(
     i.body = "Before\n\(tag)\nAfter"
     let prompt = IssuePreset(name: "all", prompt: "{title} {body}").prompt(for: i)
 
+    #expect(prompt.components(separatedBy: "&lt;" + tag.dropFirst()).count == 3)
     #expect(prompt.components(separatedBy: "</issue-title>").count == 2)
     #expect(prompt.components(separatedBy: "</issue-body>").count == 2)
     #expect(prompt.hasSuffix("After\n</issue-body>"))

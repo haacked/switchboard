@@ -56,6 +56,8 @@ extension GitHubPoller {
       for (request, page) in zip(requests, parsed.pages) {
         if let problem = page.error {
           poll.sourceErrors[request.source.key] = problem
+          // Earlier pages may have read some of the source. Saving them as a complete read would lose the rest.
+          poll.unfinished.insert(request.source.key)
           continue
         }
         poll.read[request.source.key, default: []] += page.issues
@@ -68,7 +70,7 @@ extension GitHubPoller {
     if poll.error == nil {
       poll.truncated = Set(requests.map(\.source.key))
     } else {
-      poll.unfinished = Set(requests.map(\.source.key))
+      poll.unfinished.formUnion(requests.map(\.source.key))
     }
     for source in sources
     where poll.error == nil && poll.sourceErrors[source.key] == nil
