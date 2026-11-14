@@ -99,9 +99,8 @@ actor Slots {
   /// lower. The width never exceeds one less than the processor count, so no
   /// integration test holds the last thread of the pool. It is at least 1.
   static func width(environment: [String: String], processors: Int) -> Int {
-    let most = max(1, processors - 1)
-    guard let asked = environment["SB_TEST_SLOTS"].flatMap({ Int($0) }), asked > 0 else { return min(4, most) }
-    return min(asked, most)
+    let asked = environment["SB_TEST_SLOTS"].flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
+    return min(asked ?? 4, max(1, processors - 1))
   }
 
   private var free: Int

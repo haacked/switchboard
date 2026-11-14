@@ -181,20 +181,13 @@ import Testing
 
   // MARK: Empty tables
 
-  @Test func anEmptyTableHasNoRows() {
-    #expect(ProcessTable().all.isEmpty)
-  }
+  @Test func anEmptyTableHasNoRowsChildrenOrCommands() {
+    let table = ProcessTable()
 
-  @Test func anEmptyTableHasNoChildren() {
-    #expect(ProcessTable().children(of: 1).isEmpty)
-  }
-
-  @Test func anEmptyTableHasNoCommands() {
-    #expect(ProcessTable().command(of: 1) == nil)
-  }
-
-  @Test func descendantsInAnEmptyTableHoldOnlyTheRoots() {
-    #expect(ProcessTable().descendants(of: [1, 2]) == [1, 2])
+    #expect(table.all.isEmpty)
+    #expect(table.children(of: 1).isEmpty)
+    #expect(table.command(of: 1) == nil)
+    #expect(table.descendants(of: [1, 2]) == [1, 2])
   }
 
   @Test func parsingNoTextGivesAnEmptyTable() {
@@ -202,6 +195,8 @@ import Testing
 
     #expect(table.all.isEmpty)
     #expect(table.children(of: 0).isEmpty)
+    #expect(table.command(of: 1) == nil)
+    #expect(table.descendants(of: [1, 2]) == [1, 2])
   }
 
   // MARK: readLocal

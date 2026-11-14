@@ -11,7 +11,7 @@ import Testing
 @Suite(.serialized, .timeLimit(.minutes(2))) struct ProcessTableNativeTests {
   // MARK: Equivalence with ps
 
-  @Test func aScriptRunByAnInterpreterWithASpacedArgumentMatchesPs() throws {
+  @Test func aScriptRunByAnInterpreterWithASpacedArgumentMatchesPsAndIsClaudeInBothTables() throws {
     let folder = try makeShortTempFolder()
     defer { try? FileManager.default.removeItem(atPath: folder) }
     try "/bin/sleep 120\n".write(toFile: "\(folder)/claude", atomically: true, encoding: .utf8)
@@ -25,20 +25,6 @@ import Testing
     let (native, ps) = try readBoth()
 
     try expectSameRows(below: sh.pid, native: native, ps: ps)
-  }
-
-  @Test func aScriptRunByAnInterpreterIsClaudeInBothTables() throws {
-    let folder = try makeShortTempFolder()
-    defer { try? FileManager.default.removeItem(atPath: folder) }
-    try "/bin/sleep 120\n".write(toFile: "\(folder)/claude", atomically: true, encoding: .utf8)
-    let sh = try Child("/bin/sh", ["\(folder)/claude", "a b"])
-    defer { sh.stop() }
-    try waitForPs("the script's sleep below \(sh.pid)") { ps in
-      ps.command(of: sh.pid) == "/bin/sh \(folder)/claude a b" && !ps.children(of: sh.pid).isEmpty
-    }
-
-    let (native, ps) = try readBoth()
-
     let nativeAnswer = Service.isClaude(native.command(of: sh.pid) ?? "", program: "claude")
     let psAnswer = Service.isClaude(ps.command(of: sh.pid) ?? "", program: "claude")
     #expect(nativeAnswer == psAnswer, "native: \(String(describing: native.command(of: sh.pid)))")
@@ -80,7 +66,7 @@ import Testing
     try expectSameRows(below: sh.pid, native: native, ps: ps)
   }
 
-  @Test func aChildThatLeadsItsOwnProcessGroupMatchesPs() throws {
+  @Test func aChildThatLeadsItsOwnProcessGroupMatchesPsAndCountsAsOneJobInBothTables() throws {
     let sh = try Child("/bin/sh", ["-c", "set -m; /bin/sleep 120 & wait"])
     defer { sh.stop() }
     try waitForPs("a group-leading sleep below \(sh.pid)") { ps in
@@ -90,18 +76,7 @@ import Testing
     let (native, ps) = try readBoth()
 
     try expectSameRows(below: sh.pid, native: native, ps: ps)
-  }
-
-  @Test func aChildThatLeadsItsOwnProcessGroupCountsAsOneJobInBothTables() throws {
-    let sh = try Child("/bin/sh", ["-c", "set -m; /bin/sleep 120 & wait"])
-    defer { sh.stop() }
-    try waitForPs("a group-leading sleep below \(sh.pid)") { ps in
-      ps.children(of: sh.pid).contains { $0.pgid == $0.pid && ps.command(of: $0.pid) == "/bin/sleep 120" }
-    }
-
-    let (native, ps) = try readBoth()
-
-    try withService { service in
+    try withService { service, _ in
       #expect(service.backgroundJobs(sh.pid, in: native) == service.backgroundJobs(sh.pid, in: ps))
       #expect(service.backgroundJobs(sh.pid, in: native) == 1)
     }
@@ -112,7 +87,7 @@ import Testing
   static let zombieScripts = ["/usr/bin/true & exec /bin/sleep 120", "set -m; /usr/bin/true & exec /bin/sleep 120"]
 
   @Test(arguments: zombieScripts)
-  func aZombieMatchesPs(script: String) throws {
+  func aZombieMatchesPsIsDefunctAndCountsTheSameJobsInBothTables(script: String) throws {
     let sleep = try Child("/bin/sh", ["-c", script])
     defer { sleep.stop() }
     try waitForZombie(below: sleep.pid)
@@ -120,34 +95,11 @@ import Testing
     let (native, ps) = try readBoth()
 
     try expectSameRows(below: sleep.pid, native: native, ps: ps)
-    for zombie in ps.children(of: sleep.pid) {
-      print("ZOMBIE \(script): ps pgid \(zombie.pgid), native pgid \(String(describing: native.row(zombie.pid)?.pgid))")
-    }
-  }
-
-  @Test(arguments: zombieScripts)
-  func aZombiesCommandIsDefunctInTheNativeTable(script: String) throws {
-    let sleep = try Child("/bin/sh", ["-c", script])
-    defer { sleep.stop() }
-    try waitForZombie(below: sleep.pid)
-
-    let native = ProcessTable.readLocal()
-
-    let zombie = try #require(native.children(of: sleep.pid).first, "no child of \(sleep.pid) in the native table")
-    #expect(native.command(of: zombie.pid) == "<defunct>")
-  }
-
-  @Test(arguments: zombieScripts)
-  func aZombieChildCountsTheSameJobsInBothTables(script: String) throws {
-    let sleep = try Child("/bin/sh", ["-c", script])
-    defer { sleep.stop() }
-    try waitForZombie(below: sleep.pid)
-
-    let (native, ps) = try readBoth()
-
-    try withService { service in
+    try withService { service, _ in
       #expect(service.backgroundJobs(sleep.pid, in: native) == service.backgroundJobs(sleep.pid, in: ps))
     }
+    let zombie = try #require(native.children(of: sleep.pid).first, "no child of \(sleep.pid) in the native table")
+    #expect(native.command(of: zombie.pid) == "<defunct>")
   }
 
   /// Perl writes the new title over its argv and pads the rest with spaces, so the argc strings that ps joins end
@@ -209,7 +161,8 @@ import Testing
     let second = ProcessTable.readLocal()
 
     let stable = first.all.filter { row in
-      row.uid != getuid() && second.row(row.pid) == row && ps.row(row.pid) != nil
+      let uid = Processes.info(of: pid_t(row.pid))?.kp_eproc.e_ucred.cr_uid
+      return uid.map { $0 != getuid() } == true && second.row(row.pid) == row && ps.row(row.pid) != nil
     }
 
     #expect(stable.contains { $0.pid == 1 }, "pid 1 is not among the other users' rows")
@@ -228,7 +181,6 @@ import Testing
     let command = native.command(of: 1)
 
     #expect(command != nil, "ps prints \(String(describing: ps.command(of: 1)))")
-    print("PID 1: native \(String(describing: command)), ps \(String(describing: ps.command(of: 1)))")
   }
 
   // MARK: The start-time guard on command(of:)
@@ -338,30 +290,6 @@ import Testing
   func argvOfABufferWithNoArgumentsIsEmpty(_ what: String, buffer: [UInt8]) {
     #expect(ProcessTable.argv(fromProcArgs: buffer) == [], "\(what)")
   }
-
-  // MARK: Cost
-
-  /// It asserts nothing. The plan's notes record the numbers that it prints.
-  @Test func printsTheCostOfAReadAndOfACommandLookup() {
-    let clock = ContinuousClock()
-    var table = ProcessTable()
-    let reads = 20
-
-    let readTime = clock.measure { for _ in 0..<reads { table = ProcessTable.readLocal() } }
-    let own = table.all.filter { $0.uid == getuid() }.prefix(20).map(\.pid)
-    let lookupTime = clock.measure { for pid in own { _ = table.command(of: pid) } }
-
-    print("PERF readLocal: \(readTime / reads) each over \(reads) reads of \(table.all.count) rows")
-    print("PERF command(of:): \(lookupTime / max(own.count, 1)) each over \(own.count) own pids")
-    // The thread's CPU time leaves out the time that other processes take the core, as they do under load.
-    let cpuStart = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-    for _ in 0..<reads { table = ProcessTable.readLocal() }
-    let cpuRead = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-    for pid in own { _ = table.command(of: pid) }
-    let cpuEnd = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-    print("PERF CPU readLocal: \((cpuRead - cpuStart) / UInt64(reads)) ns each")
-    print("PERF CPU command(of:): \((cpuEnd - cpuRead) / UInt64(max(own.count, 1))) ns each")
-  }
 }
 
 // MARK: Helpers
@@ -394,25 +322,26 @@ private final class Child {
   }
 }
 
-private struct PsTimeout: Error, CustomStringConvertible {
-  var description: String
-}
-
 private func psTable() throws -> ProcessTable {
   let r = try runCommand("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="])
   try #require(r.status == 0, "ps failed: \(r.stderr)")
   return ProcessTable.parse(r.stdout)
 }
 
-/// Polls ps until `ready` holds, so that both reads see the processes after their last exec.
-private func waitForPs(_ what: String, timeout: Double = 30, _ ready: (ProcessTable) -> Bool) throws {
-  let deadline = Date().addingTimeInterval(timeout)
-  while Date() < deadline {
-    let ps = try psTable()
-    if ready(ps) { return }
-    Thread.sleep(forTimeInterval: 0.05)
+/// Polls ps until `ready` holds, so that both reads see the processes after their last exec. A failed ps ends the
+/// wait with its error.
+private func waitForPs(_ what: String, _ ready: (ProcessTable) -> Bool) throws {
+  var failure: (any Error)?
+  let shown = waitUntil(seconds: 30) {
+    do {
+      return ready(try psTable())
+    } catch {
+      failure = error
+      return true
+    }
   }
-  throw PsTimeout(description: "ps never showed \(what)")
+  if let failure { throw failure }
+  guard shown else { throw APIError("ps never showed \(what)") }
 }
 
 private func waitForZombie(below pid: Int) throws {
@@ -421,7 +350,6 @@ private func waitForZombie(below pid: Int) throws {
   }
 }
 
-/// The native read first, then ps, as Stage 2's equivalence tests define.
 private func readBoth() throws -> (native: ProcessTable, ps: ProcessTable) {
   let native = ProcessTable.readLocal()
   let ps = try psTable()
@@ -442,12 +370,6 @@ private func expectSameRows(
       native.children(of: pid).map(\.pid) == ps.children(of: pid).map(\.pid), "children of \(pid)",
       sourceLocation: sourceLocation)
   }
-}
-
-private func withService(_ body: (Service) throws -> Void) throws {
-  let home = Home(path: try makeShortTempFolder())
-  defer { try? FileManager.default.removeItem(atPath: home.path) }
-  try body(try Service(home: home, sbPath: "/usr/bin/true"))
 }
 
 /// A `KERN_PROCARGS2` buffer: argc, the program path and its NUL, `padding` more NULs, then each string and its NUL.

@@ -32,12 +32,6 @@ import Testing
     func stopClaude(_ pid: Int, below pane: Int, program: String) throws { throw Unused() }
   }
 
-  private func withService(_ body: (Service, Home) throws -> Void) throws {
-    let home = Home(path: try makeShortTempFolder())
-    defer { try? FileManager.default.removeItem(atPath: home.path) }
-    try body(try Service(home: home, sbPath: "/usr/bin/true"), home)
-  }
-
   @Test(.timeLimit(.minutes(1)))
   func theSiteOfAnIdThatSbdDoesNotHoldThrows() throws {
     try withService { service, _ in

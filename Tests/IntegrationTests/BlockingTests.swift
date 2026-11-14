@@ -90,42 +90,25 @@ import os
     try await scope(Blocking(slots: Slots(width: 1))) { Blocking.requireSlot() }
   }
 
-  @Test(arguments: [3, 5, 18, 64])
-  func runsAtMostFourAtOnceWhenTheVariableIsUnset(processors: Int) {
-    #expect(Slots.width(environment: [:], processors: processors) == min(4, processors - 1))
-  }
+  /// Each row holds the environment, the processor count, and the width. The clamp to one less than the processor
+  /// count keeps the last thread of the pool free of integration tests.
+  static let widthRows: [([String: String], Int, Int)] = {
+    let unset: [([String: String], Int, Int)] = [([:], 3, 2), ([:], 5, 4), ([:], 18, 4), ([:], 64, 4)]
+    let valid: [([String: String], Int, Int)] = [("1", 1), ("2", 2), ("10", 10), ("17", 17), ("18", 17), ("100", 17)]
+      .map { (["SB_TEST_SLOTS": $0], 18, $1) }
+    let invalid: [([String: String], Int, Int)] = ["0", "-1", "x", "", " 2", "2.5", "two"]
+      .map { (["SB_TEST_SLOTS": $0], 18, 4) }
+    let fewProcessors: [([String: String], Int, Int)] = [1, 2].flatMap { processors in
+      ([nil, "1", "2", "4", "0", "x"] as [String?]).map { value in
+        (value.map { ["SB_TEST_SLOTS": $0] } ?? [:], processors, 1)
+      }
+    }
+    let otherNames: [([String: String], Int, Int)] = [(["SB_TEST_SLOT": "2", "SB_SLOTS": "2"], 18, 4)]
+    return unset + valid + invalid + fewProcessors + otherNames
+  }()
 
-  @Test func takesThePositiveWidthThatTheVariableSets() {
-    #expect(Slots.width(environment: ["SB_TEST_SLOTS": "2"], processors: 18) == 2)
-  }
-
-  @Test func takesAWidthOfOne() {
-    #expect(Slots.width(environment: ["SB_TEST_SLOTS": "1"], processors: 18) == 1)
-  }
-
-  @Test func takesAWidthAboveTheDefault() {
-    #expect(Slots.width(environment: ["SB_TEST_SLOTS": "10"], processors: 18) == 10)
-  }
-
-  @Test(arguments: ["0", "-1", "x", "", " 2", "2.5", "two"])
-  func runsAtMostFourAtOnceWhenTheVariableIsInvalid(value: String) {
-    #expect(Slots.width(environment: ["SB_TEST_SLOTS": value], processors: 18) == 4)
-  }
-
-  // The clamp keeps the last thread of the pool free of integration tests.
-  @Test(arguments: ["17", "18", "100"])
-  func leavesOneProcessorFreeOfIntegrationTests(value: String) {
-    #expect(Slots.width(environment: ["SB_TEST_SLOTS": value], processors: 18) == 17)
-  }
-
-  @Test(arguments: [nil, "1", "2", "4", "0", "x"] as [String?], [1, 2])
-  func runsOneAtATimeOnOneOrTwoProcessors(value: String?, processors: Int) {
-    let environment = value.map { ["SB_TEST_SLOTS": $0] } ?? [:]
-    #expect(Slots.width(environment: environment, processors: processors) == 1)
-  }
-
-  @Test func ignoresOtherVariables() {
-    let environment = ["SB_TEST_SLOT": "2", "SB_SLOTS": "2"]
-    #expect(Slots.width(environment: environment, processors: 18) == 4)
+  @Test(arguments: widthRows)
+  func slotsWidthFollowsTheVariableAndTheProcessorCount(environment: [String: String], processors: Int, width: Int) {
+    #expect(Slots.width(environment: environment, processors: processors) == width)
   }
 }

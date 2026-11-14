@@ -8,8 +8,6 @@ public struct ProcessRow: Sendable, Equatable {
   public var pgid: Int
   /// Microseconds since the epoch. A row parsed from `ps` text holds 0.
   var startTime: Int64 = 0
-  /// The owner. A row parsed from `ps` text holds nil.
-  var uid: uid_t?
   var isZombie = false
 }
 
@@ -19,15 +17,16 @@ public struct ProcessTable: Sendable {
   public private(set) var all: [ProcessRow] = []
   private var rows: [Int: ProcessRow] = [:]
   private var childRows: [Int: [ProcessRow]] = [:]
-  private var commands: [Int: String] = [:]
-  /// Whether `command(of:)` reads each command from the kernel when asked, instead of from `commands`.
-  private var readsCommandsLive = false
+  /// The command of each pid. When it is nil, `command(of:)` reads each command from the kernel when asked.
+  private var commands: [Int: String]? = [:]
 
   public init() {}
 
   /// A table whose commands `command(of:)` reads from the kernel, with the rows in the given order.
   init(nativeRows: [ProcessRow]) {
-    readsCommandsLive = true
+    commands = nil
+    all.reserveCapacity(nativeRows.count)
+    rows.reserveCapacity(nativeRows.count)
     for row in nativeRows { append(row) }
   }
 
@@ -39,24 +38,30 @@ public struct ProcessTable: Sendable {
     for _ in 0..<3 {
       var size = 0
       guard sysctl(&mib, 3, nil, &size, nil, 0) == 0 else { return ProcessTable() }
-      var procs = [kinfo_proc](repeating: kinfo_proc(), count: (size + size / 10) / stride + 1)
-      size = procs.count * stride
-      let status = procs.withUnsafeMutableBytes { sysctl(&mib, 3, $0.baseAddress, &size, nil, 0) }
-      if status == 0 { return ProcessTable(listing: procs.prefix(size / stride)) }
-      guard errno == ENOMEM else { return ProcessTable() }
+      let capacity = (size + size / 10) / stride + 1
+      var status: Int32 = 0
+      var error: Int32 = 0
+      let procs = [kinfo_proc](unsafeUninitializedCapacity: capacity) { buffer, count in
+        size = capacity * stride
+        status = sysctl(&mib, 3, buffer.baseAddress, &size, nil, 0)
+        error = errno
+        count = status == 0 ? size / stride : 0
+      }
+      if status == 0 { return ProcessTable(listing: procs) }
+      guard error == ENOMEM else { return ProcessTable() }
     }
     return ProcessTable()
   }
 
   /// The rows sorted as `ps` sorts them: by terminal device, then pid. A process without a terminal has device -1,
   /// so it comes first. `ps` never lists pid 0, the kernel.
-  private init(listing procs: ArraySlice<kinfo_proc>) {
+  private init(listing procs: [kinfo_proc]) {
     let listed = procs.lazy.filter { $0.kp_proc.p_pid != 0 }.map { kp in
       (
         tty: kp.kp_eproc.e_tdev,
         row: ProcessRow(
           pid: Int(kp.kp_proc.p_pid), ppid: Int(kp.kp_eproc.e_ppid), pgid: Int(kp.kp_eproc.e_pgid),
-          startTime: Self.startTime(kp), uid: kp.kp_eproc.e_ucred.cr_uid, isZombie: Int32(kp.kp_proc.p_stat) == SZOMB)
+          startTime: Self.startTime(kp), isZombie: Int32(kp.kp_proc.p_stat) == SZOMB)
       )
     }
     self.init(nativeRows: listed.sorted { ($0.tty, $0.row.pid) < ($1.tty, $1.row.pid) }.map(\.row))
@@ -66,14 +71,16 @@ public struct ProcessTable: Sendable {
   /// is skipped. When two lines name the same pid, `row(_:)` and `command(of:)` answer from the first.
   public static func parse(_ psOutput: String) -> ProcessTable {
     var table = ProcessTable()
+    var commands: [Int: String] = [:]
     for line in psOutput.split(separator: "\n") {
       let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
       guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
         continue
       }
       table.append(ProcessRow(pid: pid, ppid: ppid, pgid: pgid))
-      if table.commands[pid] == nil { table.commands[pid] = parts.count > 3 ? String(parts[3]) : "" }
+      if commands[pid] == nil { commands[pid] = parts.count > 3 ? String(parts[3]) : "" }
     }
+    table.commands = commands
     return table
   }
 
@@ -92,11 +99,11 @@ public struct ProcessTable: Sendable {
   ///
   /// A table from `readLocal()` reads the command when asked, as `ps` prints it. A row that the read listed as a
   /// zombie gives `<defunct>`. For any other row, the command is argv joined with spaces. When argv is unreadable, as
-  /// another user's is, the command is the program's path, else the process's name in parentheses. The kernel reads
-  /// the process's start time after the command. The command is nil when that start time differs from the row's or
-  /// when the process is gone, because then the pid names another process or none.
+  /// another user's is, the command is the program's path, else the process's name in parentheses. After it reads the
+  /// command, it reads the process's start time again. The command is nil when that start time differs from the
+  /// row's or when the process is gone, because then the pid names another process or none.
   public func command(of pid: Int) -> String? {
-    guard readsCommandsLive else { return commands[pid] }
+    if let commands { return commands[pid] }
     guard let row = rows[pid], let id = pid_t(exactly: pid) else { return nil }
     if row.isZombie { return "<defunct>" }
     let argv = Self.argv(of: id)
@@ -129,9 +136,10 @@ public struct ProcessTable: Sendable {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
     guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
-    var buffer = [UInt8](repeating: 0, count: size)
-    guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return [] }
-    return argv(fromProcArgs: Array(buffer.prefix(size)))
+    let buffer = [UInt8](unsafeUninitializedCapacity: size) { buffer, count in
+      count = sysctl(&mib, 3, buffer.baseAddress, &size, nil, 0) == 0 ? size : 0
+    }
+    return argv(fromProcArgs: buffer)
   }
 
   /// The argv in a `KERN_PROCARGS2` buffer, read as `ps` reads it. The buffer holds argc, the program path, NUL
