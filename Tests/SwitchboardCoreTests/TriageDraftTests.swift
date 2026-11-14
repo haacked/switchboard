@@ -515,7 +515,7 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
   @Test func theSessionsCardGivesTheItemItsDrafts() throws {
     let item = try #require(itemOf(try drafted()))
 
-    #expect(item.drafts == [reviewDraft])
+    #expect(item.drafts == [InboxDraft(reviewDraft, number: 1)])
   }
 
   @Test func theMessageSummaryCarriesTheItemsDrafts() throws {
@@ -543,6 +543,39 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
     #expect(decoded.drafts.count == 2)
   }
 
+  /// The item's JSON. Each draft carries its number, which equals its
+  /// 1-based position, and its post state.
+  static let draftItemJSON =
+    #"{"callouts":[],"decisions":[],"kind":"info","message":{"action":{"decisions":[],"multiSelect":false,"options":[],"primary":null},"details":{"openByDefault":false},"summary":{"callouts":[],"drafts":[{"label":"Review request","number":1,"post":{"state":"copyOnly"},"text":"Could someone review #1?"},{"number":2,"post":{"state":"copyOnly"},"text":"No label.\n\nTwo lines."}],"text":"It drafted two."}},"multiSelect":false,"options":[],"ref":"summary:2","source":"card","summary":"It drafted two.","title":"Send the review request"}"#
+
+  /// The item's JSON as an sbd wrote it before drafts had a number and a state.
+  static let olderDraftItemJSON =
+    #"{"callouts":[],"decisions":[],"kind":"info","message":{"action":{"decisions":[],"multiSelect":false,"options":[],"primary":null},"details":{"openByDefault":false},"summary":{"callouts":[],"drafts":[{"label":"Review request","text":"Could someone review #1?"},{"text":"No label.\n\nTwo lines."}],"text":"It drafted two."}},"multiSelect":false,"options":[],"ref":"summary:2","source":"card","summary":"It drafted two.","title":"Send the review request"}"#
+
+  static func draftItem() -> TriageItem {
+    let summary = TriageSummary(
+      title: "Send the review request", kind: .info, summary: "It drafted two.",
+      drafts: [reviewDraft, TriageDraft(text: "No label.\n\nTwo lines.")])
+    return TriageItem(summary, source: .card, ref: "summary:2")
+  }
+
+  @Test func anItemWithDraftsKeepsItsJSON() throws {
+    let item = Self.draftItem()
+
+    let decoded = try JSONCoding.decode(TriageItem.self, from: Self.draftItemJSON)
+
+    #expect(try JSONCoding.encode(item) == Self.draftItemJSON)
+    #expect(decoded == item)
+    #expect(try JSONCoding.encode(decoded) == Self.draftItemJSON)
+  }
+
+  /// An older item's drafts take their numbers from their positions and only copy.
+  @Test func anOlderItemsDraftsDecodeWithNumbersAndCopyOnly() throws {
+    let decoded = try JSONCoding.decode(TriageItem.self, from: Self.olderDraftItemJSON)
+
+    #expect(decoded == Self.draftItem())
+  }
+
   @Test func anItemWithoutDraftsHasNone() throws {
     let item = try #require(itemOf(try drafted([])))
 
@@ -565,6 +598,76 @@ private let reviewDraft = TriageDraft(label: "Review request", text: "Could some
     let item = try #require(itemOf(f))
 
     #expect(item.source == .summary)
-    #expect(item.drafts == [reviewDraft])
+    #expect(item.drafts == [InboxDraft(reviewDraft, number: 1)])
+  }
+}
+
+// MARK: Reply targets
+
+/// Only the session's own card names a draft's target. The model reads reply
+/// text that can quote PR comments, so a target that it names could come
+/// from quoted text.
+@Suite struct TriageDraftTests {
+  static let url = "https://github.com/acme/widgets/pull/42#discussion_r1001"
+  static let reply = "Here's a reply you can post:\n\nGood catch, fixed in abc123.\n\nPost it when ready."
+
+  /// The model's answer with one draft that is in `reply`, with `replyTo`.
+  static func outputWithReplyTo(_ replyTo: JSON) -> String {
+    modelOutput([["label": "Reply to ann", "text": "Good catch, fixed in abc123.", "replyTo": replyTo]])
+  }
+
+  @Test(arguments: [JSON.string(url), .string("anything"), .number(1001), .null])
+  func theModelsDraftNeverHasReplyTo(_ replyTo: JSON) throws {
+    let summary = try TriageSummarizer.parse(Self.outputWithReplyTo(replyTo), reply: Self.reply)
+
+    #expect(summary.drafts.map(\.text) == ["Good catch, fixed in abc123."])
+    #expect(summary.drafts.allSatisfy { $0.replyTo == nil })
+  }
+
+  @Test func theItemFromTheModelsDraftIsCopyOnlyWithoutAReason() throws {
+    let summary = try TriageSummarizer.parse(Self.outputWithReplyTo(.string(Self.url)), reply: Self.reply)
+    var data = try #require(try JSON(encoding: summary).object)
+    data["stop"] = 2
+    let f = facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]), stop(2, 1, Self.reply),
+      Event(id: 3, session: "s1", t: 100, kind: "triage", data: .object(data)),
+    ])
+
+    let item = try #require(itemOf(f))
+
+    #expect(item.source == .summary)
+    #expect(item.drafts.map(\.post) == [DraftPost.copyOnly(reason: nil)])
+  }
+
+  @Test func theSchemaGivesTheModelNoReplyTo() throws {
+    let properties = try #require(TriageSummarizer.schema["properties"]?["drafts"]?["items"]?["properties"])
+
+    #expect(properties["replyTo"] == nil)
+  }
+
+  /// The card and the model keep the same text. Only the card keeps the target.
+  @Test func theCardKeepsReplyToAndTheModelDropsIt() throws {
+    let draft: JSON = ["label": "Reply to ann", "text": "Good catch, fixed in abc123.", "replyTo": .string(Self.url)]
+
+    let card = try TriageCard.clean(draftCard([draft])).card.drafts
+    let model = try TriageSummarizer.parse(modelOutput([draft]), reply: Self.reply).drafts
+
+    #expect(card.map(\.text) == model.map(\.text))
+    #expect(card.map(\.replyTo) == [Self.url])
+    #expect(model.map(\.replyTo) == [nil])
+  }
+
+  @Test func anInboxDraftTakesTheCardDraftsReplyTo() {
+    let draft = InboxDraft(TriageDraft(label: "Reply", text: "Thanks!", replyTo: Self.url), number: 2)
+
+    #expect(draft.replyTo == Self.url)
+    #expect(draft.number == 2)
+  }
+
+  /// A `summary` event that an older sbd recorded has no `replyTo`.
+  @Test func aDraftWithoutTheKeyDecodesWithoutReplyTo() throws {
+    let decoded = try JSONCoding.decode(TriageDraft.self, from: #"{"label":"Reply","text":"Thanks!"}"#)
+
+    #expect(decoded.replyTo == nil)
   }
 }

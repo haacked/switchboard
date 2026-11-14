@@ -109,6 +109,18 @@ public final class Service {
   var removing: Set<String> = []
   /// The sessions whose PR `review` is asking gh to request a review of.
   var requestingReview: Set<String> = []
+  /// The drafts whose reply target a gh read is resolving, or whose unknown
+  /// post a gh read is looking for, each as its session id and its
+  /// `DraftReplies.key`.
+  var resolvingDrafts: Set<String> = []
+  /// The drafts that `draft-post` is posting, keyed as `resolvingDrafts` is.
+  var postingDrafts: Set<String> = []
+  /// The unknown posts that the tick doesn't look for, keyed as
+  /// `resolvingDrafts` is: those that it already looked for in this run,
+  /// and those that this run posted.
+  var checkedUnknown: Set<String> = []
+  /// gh's login, which the look for an unknown post's reply reads.
+  var ghLogin: String?
   /// The sessions whose decision list `decision-submit` is sending.
   var submittingDecisions: Set<String> = []
   /// The main checkout of each session folder that a lookup read, or nil for
@@ -139,6 +151,13 @@ public final class Service {
   let triageJobs: OperationQueue = {
     let jobs = OperationQueue()
     jobs.name = "sbd.triage"
+    jobs.maxConcurrentOperationCount = 2
+    return jobs
+  }()
+  /// Runs the gh reads of draft reply targets.
+  let ghJobs: OperationQueue = {
+    let jobs = OperationQueue()
+    jobs.name = "sbd.gh"
     jobs.maxConcurrentOperationCount = 2
     return jobs
   }()
@@ -273,6 +292,7 @@ public final class Service {
       // A transcript on a host can't be read before the host's link is up. The reconcile settles those.
       if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
     }
+    markInterruptedPosts()
     seedParentMarks(now: nowMs())
     try? refreshManagerGuide()
     try? refreshChatGuides()
@@ -280,6 +300,7 @@ public final class Service {
     for (id, e) in entries {
       let verdict = Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState)
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     try startMCPServers()
     github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
@@ -353,6 +374,8 @@ public final class Service {
         return .success(try mergeRequest(request.args))
       case "review":
         return .success(try reviewRequest(request.args))
+      case "draft-post", "draft-check":
+        return .success(try draftReplyRequest(request.op, request.args, caller: caller))
       // An advance runs a tick before the reply, so the stop rule sees the
       // new time. `tick` takes the state queue itself, so `clock` runs here
       // and not in `dispatch`.
@@ -593,7 +616,8 @@ public final class Service {
   /// for an unknown session. A UserPromptSubmit of a Manager or a chat prints
   /// the digest of its children, and the SessionStart of a new Manager
   /// conversation prints the digest of the whole board. sbd records each
-  /// digest as a `digest` event.
+  /// digest as a `digest` event. A work session's UserPromptSubmit prints
+  /// the replies that the user posted from its drafts since it last heard.
   /// `stamp` is set for an event that a host's shim made. Such an event is recorded with its id and its own
   /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
   /// records nothing, when the store can't keep the event.
@@ -645,10 +669,11 @@ public final class Service {
     case "UserPromptSubmit":
       entries[id]?.inFlight = nil
       try nameConversation(id, prompt: payload["prompt"]?.string)
-      if let text = digest(id, now: event.t) {
-        record(id, "digest", ["text": .string(text)])
-        answer = ParentDigest.hookOutput(text, event: kind)
-      }
+      let digestText = digest(id, now: event.t)
+      if let digestText { record(id, "digest", ["text": .string(digestText)]) }
+      // A host's hook answer never reaches claude, so a host session keeps its replies unheard.
+      let context = [digestText, stamp == nil ? repliesNotice(id) : nil].compactMap { $0 }
+      if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "Stop", "StopFailure":
       deliverPending(id, after: 0.5)
     case "Notification" where payload["notification_type"]?.string == "idle_prompt":
@@ -688,6 +713,7 @@ public final class Service {
       // A reply can decide the state after its turn ended, as when a
       // background job outlasts the turn or a PR rule stops applying.
       startSummaries(id, verdict)
+      resolveDraftTargets(id, verdict)
     }
     releaseCards(id)
     return event
@@ -2010,6 +2036,8 @@ public final class Service {
           let verdict = Attention.track(e.session, &e.facts, now: now, stateOf: lastState)
           entries[id] = e
           startSummaries(id, verdict)
+          resolveDraftTargets(id, verdict)
+          checkUnknownPosts(id)
         }
       }
       noteViewed(now: now)

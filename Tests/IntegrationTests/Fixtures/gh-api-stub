@@ -1,0 +1,99 @@
+#!/bin/bash
+# A stand-in for gh in sbd's draft reply tests. It records the first line of
+# each call's arguments in $SB_HOME/gh-calls.log. `gh auth token` prints a
+# token.
+#
+# `gh api` answers from route files under $SB_HOME/gh-api. A route's base is
+# <METHOD>_<path>, where the path has no leading slash and no query, and each
+# / in it is _. The method is the one that -X or --method names. Without one
+# it is POST when any -f or -F is present, and GET otherwise. The stub writes
+# each `-f body=<text>` value to $SB_HOME/gh-bodies/<seq> with printf %s.
+#
+# For a route base, the stub reads one line from <base>.gate when that file is
+# a FIFO, so a test can keep the call running. It then sleeps for the seconds
+# in <base>.sleep when that file exists. It prints <base>.error to stderr and
+# exits with the status in <base>.status (1 without that file) when
+# <base>.error exists. Otherwise it prints <base>.json when that file exists.
+# Otherwise it prints `gh: Not Found (HTTP 404)` to stderr and exits 1. With
+# --jq, the stub still prints <base>.json as it is, so a test writes that file
+# in the form that the jq filter would print.
+first=${*%%$'\n'*}
+printf '%s\n' "$first" >>"$SB_HOME/gh-calls.log"
+
+case "$1 $2" in
+"auth token")
+  echo "token-1"
+  exit 0
+  ;;
+esac
+
+[ "$1" = "api" ] || exit 1
+shift
+
+method=""
+path=""
+fields=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -X | --method)
+    method=$2
+    shift 2
+    ;;
+  -X*)
+    method=${1#-X}
+    shift
+    ;;
+  --method=*)
+    method=${1#--method=}
+    shift
+    ;;
+  -f | --raw-field)
+    fields=1
+    case "$2" in
+    body=*)
+      mkdir -p "$SB_HOME/gh-bodies"
+      seq=$(($(find "$SB_HOME/gh-bodies" -type f | wc -l) + 1))
+      printf %s "${2#body=}" >"$SB_HOME/gh-bodies/$seq"
+      ;;
+    esac
+    shift 2
+    ;;
+  -F | --field)
+    fields=1
+    shift 2
+    ;;
+  --jq | -q | -H | --header | -t | --template | --input | --hostname | --cache | -p | --preview)
+    shift 2
+    ;;
+  --paginate | --slurp | -i | --include | --silent | --verbose)
+    shift
+    ;;
+  -*)
+    shift
+    ;;
+  *)
+    [ -z "$path" ] && path=$1
+    shift
+    ;;
+  esac
+done
+
+if [ -z "$method" ]; then
+  if [ "$fields" = 1 ]; then method=POST; else method=GET; fi
+fi
+path=${path#/}
+path=${path%%\?*}
+base="$SB_HOME/gh-api/${method}_${path//\//_}"
+
+if [ -p "$base.gate" ]; then read -r _ <"$base.gate"; fi
+if [ -f "$base.sleep" ]; then sleep "$(cat "$base.sleep")"; fi
+if [ -f "$base.error" ]; then
+  cat "$base.error" >&2
+  exit "$(cat "$base.status" 2>/dev/null || echo 1)"
+fi
+if [ -f "$base.json" ]; then
+  cat "$base.json"
+  exit 0
+fi
+echo "gh: Not Found (HTTP 404)" >&2
+exit 1

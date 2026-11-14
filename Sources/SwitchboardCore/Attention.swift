@@ -154,6 +154,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The decisions that the user started to answer, from the first answer
   /// until a submit or a discard.
   public var decisionList: DecisionList?
+  /// What sbd found for each draft's reply target.
+  public var draftReplies = DraftReplyFacts()
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.
   public var submittedDecisionsRef: String?
@@ -352,6 +354,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyTriage(event)
     applyMergeBrief(event)
     applyDecisions(event)
+    applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
   }
