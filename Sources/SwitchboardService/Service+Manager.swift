@@ -192,7 +192,7 @@ extension Service {
       case (.running(let pid), .pending):
         // A stop would lose a background job's result or an open trust dialog.
         guard canTakeNotice(e, now: now), !e.facts.exiting,
-          backgroundJobs(pid, in: processChildren(of: id)) == 0, e.facts.trustCard == nil
+          backgroundJobs(pid, in: processes(of: id)) == 0, e.facts.trustCard == nil
         else { continue }
         entries[id]?.mcpRelaunch = .stopping
         try? stop(id, reason: "its MCP servers changed")

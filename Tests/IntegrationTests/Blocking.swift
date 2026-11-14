@@ -83,8 +83,25 @@ extension Trait where Self == Blocking {
 
 /// A counting semaphore whose waiters suspend instead of blocking a thread.
 actor Slots {
-  /// No integration test holds the last thread of the pool.
-  static let shared = Slots(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 1))
+  /// The slots of every integration suite in this test process. A test that
+  /// starts sbd records an issue unless it holds a slot, so the width caps how
+  /// many test sbds run at once. Each such test keeps its tmux server and stub
+  /// claudes until it releases the slot, so the width caps those too. A cap
+  /// around Instance.init alone would block a pool thread while it waits, and
+  /// it would cover only the start of sbd. bin/test --shards N starts N test
+  /// processes, so N times the width run at once.
+  static let shared = Slots(
+    width: width(
+      environment: ProcessInfo.processInfo.environment, processors: ProcessInfo.processInfo.activeProcessorCount))
+
+  /// SB_TEST_SLOTS sets the width as a positive integer. Without a valid
+  /// value, the width is 4, or one less than the processor count when that is
+  /// lower. The width never exceeds one less than the processor count, so no
+  /// integration test holds the last thread of the pool. It is at least 1.
+  static func width(environment: [String: String], processors: Int) -> Int {
+    let asked = environment["SB_TEST_SLOTS"].flatMap { Int($0) }.flatMap { $0 > 0 ? $0 : nil }
+    return min(asked ?? 4, max(1, processors - 1))
+  }
 
   private var free: Int
   private var waiting: [CheckedContinuation<Void, Never>] = []

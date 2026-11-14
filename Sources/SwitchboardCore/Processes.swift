@@ -122,33 +122,7 @@ public func siblingExecutable(_ name: String) -> String {
   return me.deletingLastPathComponent().appendingPathComponent(name).path
 }
 
-/// A process from `ps`.
-public struct ProcessRow: Sendable {
-  public var pid: Int
-  public var ppid: Int
-  public var pgid: Int
-  public var command: String
-}
-
 public enum Processes {
-  /// Every process on the machine, grouped by parent pid.
-  public static func byParent(on machine: any Machine) -> [Int: [ProcessRow]] {
-    guard let r = try? machine.run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="]) else { return [:] }
-    return parse(r.stdout)
-  }
-
-  /// The rows of `ps` output whose columns are pid, ppid, pgid, and the command, grouped by parent pid.
-  public static func parse(_ output: String) -> [Int: [ProcessRow]] {
-    let rows = output.split(separator: "\n").compactMap { line -> ProcessRow? in
-      let parts = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-      guard parts.count >= 3, let pid = Int(parts[0]), let ppid = Int(parts[1]), let pgid = Int(parts[2]) else {
-        return nil
-      }
-      return ProcessRow(pid: pid, ppid: ppid, pgid: pgid, command: parts.count > 3 ? String(parts[3]) : "")
-    }
-    return Dictionary(grouping: rows, by: \.ppid)
-  }
-
   /// Whether the number can name one process. A pid below 1 names a process
   /// group, and a pid above `Int32.max` names no process.
   public static func isValidPid(_ pid: Int) -> Bool { pid >= 1 && pid <= Int(Int32.max) }
@@ -176,11 +150,17 @@ public enum Processes {
 
   /// The parent pid from sysctl, which reads processes of every user, as `ps` does.
   private static func parent(of pid: Int) -> Int? {
+    info(of: pid_t(pid)).map { Int($0.kp_eproc.e_ppid) }
+  }
+
+  /// The process's entry in the kernel's process table, which `sysctl` reads for every user's process. It is nil when
+  /// no process has the pid.
+  static func info(of pid: pid_t) -> kinfo_proc? {
     var info = kinfo_proc()
     var size = MemoryLayout<kinfo_proc>.stride
-    var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+    var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
     guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
-    return Int(info.kp_eproc.e_ppid)
+    return info
   }
 
   /// Waits up to `seconds` for every pid to exit. Returns the pids that still exist.

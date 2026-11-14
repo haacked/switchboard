@@ -555,7 +555,7 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
 
   /// The snapshot in one answer of `readScript`. It throws unless ps exited 0 and tmux either exited 0 or
   /// reported that no server runs, which means no panes.
-  static func parseBatchedRead(_ answer: Data, claudeProgram: String) throws -> Service.Snapshot {
+  static func parseBatchedRead(_ answer: Data) throws -> Service.Snapshot {
     let f = try fields(answer, count: 4, of: "the pane and process read")
     guard let tmuxStatus = Int(f[0]), let psStatus = Int(f[2]) else {
       throw APIError("the pane and process read holds no exit status")
@@ -567,12 +567,11 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
     } else if !TerminalHost.saysNoServer(f[1]) {
       throw APIError("tmux list-panes: \(f[1].trimmingCharacters(in: .whitespacesAndNewlines))")
     }
-    read.children = Processes.parse(f[3])
-    read.findClaudes(program: claudeProgram)
+    read.processes = ProcessTable.parse(f[3])
     return read
   }
 
-  private func batchedRead(_ machine: any Machine, claudeProgram: String) throws -> Service.Snapshot {
+  private func batchedRead(_ machine: any Machine) throws -> Service.Snapshot {
     let ready = try current()
     let server = ready.terminals
     let taken = nowMs()
@@ -580,14 +579,20 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
       "/bin/sh", ["-c", Self.readScript, "sb", server.tmux, server.socket, server.conf, TerminalHost.paneFormat],
       env: nil, input: nil, timeout: Self.commandSeconds)
     guard r.status == 0 else { throw APIError("the pane and process read on \(name) failed: \(r.problem)") }
-    var read = try Self.parseBatchedRead(Data(r.stdout.utf8), claudeProgram: claudeProgram)
+    var read = try Self.parseBatchedRead(Data(r.stdout.utf8))
     read.taken = taken
     read.connection = ready.facts.epoch
     return read
   }
 
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot {
-    try confirmed("the pane and process read") { try batchedRead($0, claudeProgram: claudeProgram) }
+    var read = try confirmed("the pane and process read") { try batchedRead($0) }
+    read.findClaudes(program: claudeProgram)
+    return read
+  }
+
+  func processes() throws -> ProcessTable {
+    try confirmed("the pane and process read") { try batchedRead($0) }.processes
   }
 
   /// Exits 3 without a signal unless the parent of pid `$1` is still `$2`.
@@ -603,12 +608,12 @@ final class RemoteSite: SessionSite, @unchecked Sendable {
       throw APIError("\(pid) below \(pane) names no claude process on \(name), so nothing was signalled")
     }
     try confirmed("the stop of claude") { machine in
-      let read = try batchedRead(machine, claudeProgram: program)
+      var read = try batchedRead(machine)
+      read.findClaudes(program: program)
       let changed = APIError("the claude process changed, so nothing was signalled")
       let row = read.panes.first { $0.key.hasSuffix("-claude") && !$0.value.dead && $0.value.pid == pane }
       guard let session = row.map({ String($0.key.dropLast("-claude".count)) }), read.claudePids[session] == pid,
-        let process = read.children.values.joined().first(where: { $0.pid == pid }),
-        Service.isClaude(process, program: program)
+        let process = read.processes.row(pid), Service.isClaude(read.processes.command(of: pid) ?? "", program: program)
       else { throw changed }
       let r = try machine.run(
         "/bin/sh", ["-c", Self.killScript, "sb", String(pid), String(process.ppid)], env: nil, input: nil,
