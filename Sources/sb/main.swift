@@ -395,14 +395,6 @@ func decode<T: Decodable>(_ value: JSON, as type: T.Type) -> T {
 
 func summary(_ value: JSON) -> SessionSummary { decode(value, as: SessionSummary.self) }
 
-func ago(_ ms: Int64) -> String {
-  let s = max(0, (nowMs() - ms) / 1000)
-  if s < 60 { return "\(s)s" }
-  if s < 3600 { return "\(s / 60)m" }
-  if s < 86400 { return "\(s / 3600)h" }
-  return "\(s / 86400)d"
-}
-
 func printTable(_ sessions: [SessionSummary]) {
   if sessions.isEmpty {
     print("No sessions. Start one with: sb new <folder>")
