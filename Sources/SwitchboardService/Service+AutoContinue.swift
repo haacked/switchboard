@@ -2,20 +2,11 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  /// Reads the switch that `sb autocontinue` saved. A missing file means off.
-  func loadAutoContinue() {
-    let text = try? String(contentsOfFile: home.autoContinue, encoding: .utf8)
-    autoContinueOn = text?.trimmingCharacters(in: .whitespacesAndNewlines) == "on"
-  }
+  var autoContinueSwitch: SwitchFile { SwitchFile(home.autoContinue, label: "auto-continue") }
 
   /// Sets the switch when the request names `enabled`, and returns the status.
   func autoContinueRequest(_ args: JSON) throws -> JSON {
-    if let enabled = args["enabled"] {
-      guard let on = enabled.bool else { throw APIError("enabled is true or false") }
-      try (on ? "on\n" : "off\n").write(toFile: home.autoContinue, atomically: true, encoding: .utf8)
-      autoContinueOn = on
-      logLine("auto-continue is \(on ? "on" : "off")")
-    }
+    if let on = try autoContinueSwitch.apply(args) { autoContinueOn = on }
     let now = nowMs()
     let live = liveCount(onHost: nil)
     let sessions = autoContinueCandidates(now: now).map { id, verdict in
@@ -46,7 +37,7 @@ extension Service {
     var data: [String: JSON] = ["text": .string(message), "offer": .string(offer)]
     var delivery: Delivery?
     do {
-      let sent = try send(id, message, byUser: false)
+      let sent = try send(id, message, byUser: false, trigger: .autoContinue)
       data["delivery"] = .string(sent.rawValue)
       delivery = sent
     } catch {

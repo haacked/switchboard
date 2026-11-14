@@ -50,15 +50,19 @@ extension Service {
   /// that a restart of sbd keeps it. A start that the user opened or that
   /// `livePriority` ranks runs the live plan at once, so it stops an idle
   /// session and starts now. Other starts wait for the tick to find a free slot.
-  func launch(_ id: String, prompt: String?) throws {
+  func launch(_ id: String, prompt: String?, trigger: LaunchTrigger) throws {
     let host = entries[id]?.session.host
-    if hasRoom(onHost: host) { return try startClaude(id, prompt: prompt) }
+    if hasRoom(onHost: host) { return try startClaude(id, prompt: prompt, trigger: trigger) }
     _ = try requireStartable(id)
     if entries[id]?.queuedSince == nil {
       entries[id]?.queuedSince = nowMs()
+      entries[id]?.queuedTrigger = trigger
       record(
         id, "start-queued",
         ["live": .number(Double(liveCount(onHost: host))), "cap": .number(Double(liveCap(onHost: host)))])
+    } else if trigger.userCaused, entries[id]?.queuedTrigger?.userCaused == false {
+      // The user now waits on the queued start, so the activity log records the user's trigger.
+      entries[id]?.queuedTrigger = trigger
     }
     if let prompt, !prompt.isEmpty { try queueMessage(id, prompt, byUser: true) }
     if entries[id].flatMap(liveStart)?.urgent == true { runQueuedStarts(now: nowMs()) }
@@ -75,12 +79,15 @@ extension Service {
       for id in plan.stops { try? stop(id, reason: reason) }
       for id in plan.starts {
         let since = entries[id]?.queuedSince
+        let trigger = entries[id]?.queuedTrigger ?? .pending
         entries[id]?.queuedSince = nil
+        entries[id]?.queuedTrigger = nil
         do {
-          try startClaude(id, prompt: nil)
+          try startClaude(id, prompt: nil, trigger: trigger)
         } catch let error as HostUnread {
           // The host may answer later, so the start keeps its place.
           entries[id]?.queuedSince = since
+          entries[id]?.queuedTrigger = trigger
           logLine("can't start queued \(id) yet: \(error)")
         } catch {
           logLine("can't start queued \(id): \(error)")
@@ -158,7 +165,7 @@ extension Service {
     entries[id]?.lastOpened = now
     guard stopped else { return }
     entries[id]?.jumpedAt = now
-    try launch(id, prompt: nil)
+    try launch(id, prompt: nil, trigger: .open)
   }
 
   /// Sets the cap when the request names `cap`, and returns the status. A

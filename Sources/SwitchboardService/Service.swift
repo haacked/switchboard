@@ -60,6 +60,8 @@ public final class Service {
     var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// What caused the queued start. It is set and cleared with `queuedSince`.
+    var queuedTrigger: LaunchTrigger?
     /// When the user opened the stopped session, which starts it ahead of
     /// every queued start. A start of claude clears it.
     var jumpedAt: Int64?
@@ -203,6 +205,10 @@ public final class Service {
   var parentNotices = ParentNotices()
   /// Whether `sb autocontinue on` is in force.
   var autoContinueOn = false
+  /// Whether `sb activity on` is in force.
+  var activityOn = false
+  /// When sbd last deleted activity rows past their retention.
+  var activityPruned: Int64 = 0
   /// True once a SessionStart showed that claude names its project folders in a way `ClaudeFolder.name` doesn't
   /// reproduce. Launches then leave out `autoMemoryDirectory` until sbd restarts.
   var memoryPinOff = false
@@ -275,7 +281,8 @@ public final class Service {
   /// running claude's queued messages on the state queue.
   public func load() throws {
     loadChosenAccount()
-    loadAutoContinue()
+    autoContinueOn = autoContinueSwitch.isOn
+    activityOn = activitySwitch.isOn
     loadIssueCache()
     try store.pruneSnapshots()
     var uncertain: [String: [String]] = [:]
@@ -513,7 +520,7 @@ public final class Service {
       guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
       // A sender that sbd no longer knows, or the session itself, goes unrecorded.
       let from = (try? lookup(["session": args["from"] ?? .null])).flatMap { $0 == id ? nil : $0 }
-      return ["delivery": .string(try send(id, text, from: from).rawValue)]
+      return ["delivery": .string(try send(id, text, trigger: from == nil ? .send : .session, from: from).rawValue)]
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "stop":
@@ -522,7 +529,7 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "resume":
       let id = try lookup(args)
-      try launch(id, prompt: args["prompt"]?.string)
+      try launch(id, prompt: args["prompt"]?.string, trigger: .resume)
       return try JSON(encoding: summary(id))
     case "done":
       let id = try lookup(args)
@@ -585,6 +592,12 @@ public final class Service {
       return try snapshotRequest(args)
     case "autocontinue":
       return try autoContinueRequest(args)
+    case "activity":
+      return try activityRequest(args)
+    case "activity-report":
+      return try activityReport(args)
+    case "activity-clear":
+      return try activityClear()
     case "live":
       return try liveRequest(args)
     case "live-next":
@@ -632,6 +645,7 @@ public final class Service {
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
     if let stamp, try store.hasHostEvent(stamp.id) { return nil }
+    let before = entries[id]!.facts
     // A job starts inside a turn, and the tick skips a running turn. The count
     // is recorded before the Stop, so the session never shows Needs you
     // between the Stop and the next tick.
@@ -658,7 +672,11 @@ public final class Service {
       // `/clear` and `/resume` in the pane start another conversation, which
       // the next resume has to open.
       let current = payload["session_id"]?.string ?? session.claudeSessionId
-      if current != session.claudeSessionId { try update(id) { $0.claudeSessionId = current } }
+      if current == session.claudeSessionId {
+        recordResumeReady(id, before, at: event.t)
+      } else {
+        try update(id) { $0.claudeSessionId = current }
+      }
       checkFolderRule(session, payload)
       // claude reads a launch's prompt after SessionStart, and a slow start
       // can outlast the in-flight window. The window starts again here.
@@ -998,7 +1016,7 @@ public final class Service {
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
     try site(for: session).terminals().create(paneName(id, .shell), cwd: folder.cwd, env: newPaneEnv(id))
-    try launch(id, prompt: args.prompt)
+    try launch(id, prompt: args.prompt, trigger: .create)
     return summary(id)
   }
 
@@ -1042,7 +1060,7 @@ public final class Service {
     let shell = paneName(id, .shell)
     if paneRow(id, .shell)?.dead == true { try closeShell(id) }
     if entries[id]?.session.shellClosed != true { try startShell(id) }
-    if paneRow(id, .claude) == nil { try launch(id, prompt: nil) }
+    if paneRow(id, .claude) == nil { try launch(id, prompt: nil, trigger: .open) }
     let terminals = try site(for: session).terminals()
     return Terminals(
       tmux: terminals.tmux, socket: terminals.socket, claude: paneName(id, .claude), shell: shell, host: session.host)
@@ -1054,7 +1072,7 @@ public final class Service {
   /// dies when claude exits. tmux keeps the dead pane's last screen until the
   /// next launch. It ignores the live cap. Callers use `launch` unless they
   /// have already found a free slot.
-  func startClaude(_ id: String, prompt: String?) throws {
+  func startClaude(_ id: String, prompt: String?, trigger: LaunchTrigger) throws {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
     // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
@@ -1113,6 +1131,7 @@ public final class Service {
       [
         "prompt": prompt.map(JSON.string) ?? .null, "mcp": local ? mcpListening : [],
         "permission_mode": mode.map(JSON.string) ?? .null,
+        "trigger": .string(trigger.rawValue),
       ])
   }
 
@@ -1169,7 +1188,8 @@ public final class Service {
   /// nothing, when the store can't keep the `sent` event.
   /// `from` is the session that sent the message, which the `sent` event records.
   func send(
-    _ id: String, _ text: String, byUser: Bool = true, launchesWithPrompt: Bool = true, from: String? = nil
+    _ id: String, _ text: String, byUser: Bool = true, launchesWithPrompt: Bool = true, trigger: LaunchTrigger,
+    from: String? = nil
   ) throws -> Delivery {
     guard entries[id] != nil else { throw APIError("no session \(id)") }
     let now = nowMs()
@@ -1182,7 +1202,7 @@ public final class Service {
       // startClaude's checks come before `sent` is stored, so a start that they refuse stores no message.
       _ = try requireStartable(id)
       try recordSent(id, text, .resumed, byUser: byUser, from: from)
-      try startClaude(id, prompt: text)
+      try startClaude(id, prompt: text, trigger: trigger)
       return .resumed
     } else if case .running = claudeState(id), entries[id]!.pending.isEmpty, readyForPaste(id, now: now) {
       let sent = try recordSent(id, text, .pasted, byUser: byUser, from: from)
@@ -1192,7 +1212,7 @@ public final class Service {
       // A stopped session launches without a prompt when older messages wait,
       // the message has images, the live cap is full, or another start is
       // queued. Its messages arrive in order after SessionStart.
-      if claudeState(id) == .stopped { try launch(id, prompt: nil) }
+      if claudeState(id) == .stopped { try launch(id, prompt: nil, trigger: trigger) }
       try queueMessage(id, text, byUser: byUser, from: from)
       return .queued
     }
@@ -2032,7 +2052,7 @@ public final class Service {
           if let e = entries[id], !e.pending.isEmpty, e.facts.startedSinceLaunch,
             now - (e.facts.lastLaunch ?? 0) >= 5_000, !mcpStarting(now: now)
           {
-            try? launch(id, prompt: nil)
+            try? launch(id, prompt: nil, trigger: .pending)
           }
         case .starting:
           entries[id]?.unreportedSince = nil
@@ -2058,6 +2078,7 @@ public final class Service {
       notifyParents(now: now)
       applyMCPChanges(now: now)
       autoContinueSessions(now: now)
+      pruneActivityIfDue(now: now)
       compactSnapshots()
       pruneHostEvents(now: now)
     }
@@ -2117,6 +2138,7 @@ public final class Service {
       out.triage = shown.item
       let details = Triage.details(for: out)
       out.triage?.details = details
+      if let callout = Triage.branchCallout(for: out) { out.triage?.callouts.append(callout) }
       out.decisions = shown.decisions
       if shown.decisionsSent { out.decisionsSent = true }
     }

@@ -29,6 +29,8 @@ public struct Home: Sendable {
   public var autoContinue: String { "\(path)/auto-continue" }
   /// sbd's cache of open issues from the configured sources.
   public var issues: String { "\(path)/issues.json" }
+  /// Holds `on` while `sb activity on` is in force.
+  public var activityLog: String { "\(path)/activity-log" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
   public var mcpConfig: String { "\(path)/mcp-config.json" }
   /// Where sbd writes each shared MCP server's launcher script.

@@ -12,7 +12,7 @@ extension Service {
   func dependencyResolved(_ args: JSON) throws -> JSON {
     let id = try lookup(args)
     if let message = args["message"]?.string, entries[id]?.session.done == false {
-      _ = try send(id, message, byUser: false)
+      _ = try send(id, message, byUser: false, trigger: .dependency)
     }
     record(id, "dependencies", ["dependencies": args["dependencies"] ?? []])
     return try JSON(encoding: summary(id))
