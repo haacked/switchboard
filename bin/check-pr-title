@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Exits 0 when TITLE is a Conventional Commits title in the form that
+# CLAUDE.md's "PR titles" section asks for. Otherwise it explains the form on
+# stderr and exits 1.
+set -euo pipefail
+if [ $# -ne 1 ]; then
+  echo "Usage: bin/check-pr-title TITLE" >&2
+  exit 2
+fi
+types='feat|fix|perf|refactor|docs|test|build|ci|chore'
+form="^($types)(\([^()]+\))?!?: [[:upper:]]"
+if [[ $1 =~ $form ]]; then
+  exit 0
+fi
+cat >&2 <<EOF
+The PR title "$1" is not a Conventional Commits title.
+Write it as "type: Summary" or "type(scope): Summary", with "!" after the type or scope for a breaking change.
+The type is one of: ${types//|/, }. The summary starts with a capital letter.
+For example: feat: Print the changes since the last update
+EOF
+exit 1
