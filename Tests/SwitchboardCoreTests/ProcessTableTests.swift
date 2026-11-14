@@ -203,4 +203,15 @@ import Testing
     #expect(table.all.isEmpty)
     #expect(table.children(of: 0).isEmpty)
   }
+
+  // MARK: readLocal
+
+  @Test func readingThisMacListsThisProcessBelowItsParent() {
+    let table = ProcessTable.readLocal()
+
+    let me = Int(getpid())
+    #expect(table.row(me)?.ppid == Int(getppid()))
+    #expect(table.children(of: Int(getppid())).contains { $0.pid == me })
+    #expect(table.command(of: me) == CommandLine.arguments.joined(separator: " "))
+  }
 }

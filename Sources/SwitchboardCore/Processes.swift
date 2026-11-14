@@ -150,11 +150,17 @@ public enum Processes {
 
   /// The parent pid from sysctl, which reads processes of every user, as `ps` does.
   private static func parent(of pid: Int) -> Int? {
+    info(of: pid_t(pid)).map { Int($0.kp_eproc.e_ppid) }
+  }
+
+  /// The process's entry in the kernel's process table, which `sysctl` reads for every user's process. It is nil when
+  /// no process has the pid.
+  static func info(of pid: pid_t) -> kinfo_proc? {
     var info = kinfo_proc()
     var size = MemoryLayout<kinfo_proc>.stride
-    var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
+    var name: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
     guard sysctl(&name, UInt32(name.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
-    return Int(info.kp_eproc.e_ppid)
+    return info
   }
 
   /// Waits up to `seconds` for every pid to exit. Returns the pids that still exist.

@@ -59,9 +59,7 @@ extension Processes {
 
   /// The process's working folder, program, or open file path that matches, checked in that order.
   private static func firstUse(of pid: pid_t, where matches: (String) -> Bool) -> (use: FolderUse, path: String)? {
-    var programBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
-    let program =
-      proc_pidpath(pid, &programBuffer, UInt32(programBuffer.count)) > 0 ? String(cString: programBuffer) : nil
+    let program = ProcessTable.programPath(of: pid)
     var vnodes = proc_vnodepathinfo()
     let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
     if proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vnodes, size) == size {
@@ -90,26 +88,12 @@ extension Processes {
   /// ControlPersist. That master renames itself `ssh: <socket> [mux]`.
   private static func isSSHMultiplexer(_ pid: pid_t, program: String?) -> Bool {
     guard let program, (program as NSString).lastPathComponent == "ssh",
-      let name = firstArgument(of: pid)
+      let name = ProcessTable.argv(of: pid).first
     else { return false }
     return name.hasPrefix("ssh: ") && name.hasSuffix(" [mux]")
   }
 
-  /// The process's argv[0] as it reads now, which a process can overwrite to rename itself.
-  private static func firstArgument(of pid: pid_t) -> String? {
-    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
-    var size = 0
-    guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
-    var buffer = [UInt8](repeating: 0, count: size)
-    guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
-    // The buffer holds argc, the program path, NUL padding, and then argv.
-    var rest = buffer.prefix(size).dropFirst(MemoryLayout<Int32>.size)
-    rest = rest.drop { $0 != 0 }.drop { $0 == 0 }
-    let first = rest.prefix { $0 != 0 }
-    return first.isEmpty ? nil : String(decoding: first, as: UTF8.self)
-  }
-
-  private static func pathString<T>(_ tuple: inout T) -> String {
+  static func pathString<T>(_ tuple: inout T) -> String {
     withUnsafeBytes(of: &tuple) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
   }
 }

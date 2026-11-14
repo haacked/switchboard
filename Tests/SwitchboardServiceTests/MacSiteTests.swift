@@ -394,7 +394,7 @@ import Testing
     var child: Int?
     do {
       try waitUntil("the pane's child to run sleep") {
-        let processes = ProcessTable.readLocal(on: LocalMachine())
+        let processes = ProcessTable.readLocal()
         let below = processes.children(of: Int(pane.processIdentifier))
         child = below.first { processes.command(of: $0.pid)?.hasPrefix("/bin/sleep") == true }?.pid
         return child != nil
@@ -425,7 +425,7 @@ import Testing
       let snapshot = try site.readSnapshot(claudeProgram: "sleep")
 
       #expect(snapshot.claudePids == ["s9azgg": child])
-      let processes = ProcessTable.readLocal(on: LocalMachine())
+      let processes = ProcessTable.readLocal()
       #expect(snapshot.claudePids["s9azgg"] == Service.findClaude(below: panePid, program: "sleep", in: processes))
     }
   }

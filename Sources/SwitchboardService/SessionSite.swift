@@ -149,7 +149,10 @@ final class MacSite: SessionSite {
     return s
   }
 
-  func processes(claudeProgram: String) -> ProcessTable { ProcessTable.readLocal(on: machine) }
+  func processes(claudeProgram: String) -> ProcessTable {
+    log?.append("processes")
+    return ProcessTable.readLocal()
+  }
 
   func alive(_ pids: Set<Int>) throws -> Set<Int> {
     log?.append("alive", ["pids": .array(pids.sorted().map { .number(Double($0)) })])

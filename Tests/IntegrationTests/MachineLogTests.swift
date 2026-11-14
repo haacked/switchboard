@@ -69,6 +69,28 @@ import Testing
     #expect(calls.contains { $0.has("samePath") && $0.has(s.cwd) })
   }
 
+  /// The read names no session, so the line holds only the call's name.
+  @Test func aLocalTickLogsTheProcessRead() throws {
+    let sbd = try logging()
+
+    let call = try sbd.waitForMachineCall("a processes call from a tick") { Self.isProcessRead($0) }
+
+    #expect(call.json.object?.keys.sorted() == ["call"], "\(call)")
+  }
+
+  @Test func aLocalTickRunsNoPs() throws {
+    let sbd = try logging()
+
+    let calls = try sbd.waitFor(
+      "two processes calls", fetch: { try sbd.machineCalls() }, until: { $0.filter(Self.isProcessRead).count >= 2 })
+
+    #expect(!calls.contains { $0.runs("ps") }, "\(calls.filter { $0.runs("ps") })")
+  }
+
+  private static func isProcessRead(_ call: Instance.MachineCall) -> Bool {
+    call.json.object?["call"]?.string == "processes"
+  }
+
   @Test func sbdWritesNoLogWhenTheKeyIsOff() throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: "hello")

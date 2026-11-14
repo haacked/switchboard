@@ -49,6 +49,7 @@ enum SourceAudit {
     Rule("Processes.exists(", #"Processes\.exists\("#, under: service, allowed: local),
     Rule("Processes.waitForExit(", #"Processes\.waitForExit\("#, under: service, allowed: local),
     Rule("Processes.using(", #"Processes\.using\("#, under: service, allowed: local),
+    Rule("ProcessTable.readLocal(", #"(?<![A-Za-z0-9_])readLocal(?![A-Za-z0-9_])"#, under: service, allowed: local),
     Rule("realPath(", bare + #"realPath\("#, under: service, allowed: local),
     Rule("snapshot.panes", bare + #"snapshot\.panes\b"#, under: service, allowed: snapshotReaders),
     Rule("snapshot.claudePids", bare + #"snapshot\.claudePids\b"#, under: service, allowed: snapshotReaders),
@@ -146,7 +147,10 @@ enum SourceAudit {
   @Test(arguments: [
     ("SwitchboardService/Service.swift", "    return entries[id] == nil ? LocalMachine() : remote"),
     ("SwitchboardService/Service+Import.swift", "    Transcript.tail(path, on: LocalMachine())"),
-    ("SwitchboardCore/ProcessTable.swift", "    readLocal(on: LocalMachine())"),
+    (
+      "SwitchboardCore/ProcessTable.swift",
+      "    let r = try? LocalMachine().run(\"/bin/ps\", [\"-axo\", \"pid=,ppid=,pgid=,command=\"])"
+    ),
     ("sb/main.swift", "    return LocalMachine().size(path)"),
   ])
   func aLocalMachineBuiltOutsideTheSiteFileFails(file: String, line: String) {
@@ -187,6 +191,31 @@ enum SourceAudit {
     #expect(findings == [SourceAudit.Finding(file: file, line: 1, rule: rule)])
   }
 
+  /// The native read takes no machine, so a session that called it would count this Mac's processes for a host.
+  @Test(arguments: [
+    (SourceAudit.serviceFile, "    s.processes = ProcessTable.readLocal()"),
+    (SourceAudit.serviceFile, "    let table: ProcessTable = .readLocal()"),
+    (SourceAudit.serviceFile, "    return SwitchboardCore.ProcessTable.readLocal()"),
+    ("SwitchboardService/Service+FolderRelease.swift", "    let table = ProcessTable.readLocal()"),
+    ("SwitchboardService/Service+Sites.swift", "    guard id != nil else { return ProcessTable.readLocal() }"),
+    ("SwitchboardService/RemoteSite.swift", "    read.processes = ProcessTable.readLocal()"),
+    (SourceAudit.serviceFile, "    let read: () -> ProcessTable = ProcessTable.readLocal"),
+  ])
+  func aLocalProcessReadInSessionCodeFails(file: String, line: String) {
+    let findings = SourceAudit.scan(file: file, text: line)
+
+    #expect(findings == [SourceAudit.Finding(file: file, line: 1, rule: "ProcessTable.readLocal(")])
+  }
+
+  @Test(arguments: [
+    ("SwitchboardCore/ProcessTable.swift", "    let table = ProcessTable.readLocal()"),
+    ("SwitchboardCore/FolderUsers.swift", "    let rows = ProcessTable.readLocal().all"),
+    ("sb/main.swift", "    print(ProcessTable.readLocal().all.count)"),
+  ])
+  func aLocalProcessReadOutsideTheServicePasses(file: String, line: String) {
+    #expect(SourceAudit.scan(file: file, text: line).isEmpty)
+  }
+
   @Test(arguments: [("  let host: TerminalHost", "Service.host"), ("  let git: String", "Service.git")])
   func aPropertyOfServiceThatHoldsThisMacsToolFails(line: String, rule: String) {
     let file = SourceAudit.serviceFile
@@ -204,6 +233,8 @@ enum SourceAudit {
     "    let gone = snapshot.panes[server.pane] == nil",
     "    let owned = Set(snapshot.claudePids.values)",
     "    if backgroundJobs(pid, in: snapshot.processes) > 0 {",
+    "  func processes(claudeProgram: String) -> ProcessTable { ProcessTable.readLocal() }",
+    "    let table = ProcessTable.readLocal()",
   ])
   func aLocalNameInTheSiteFileAndTheSessionlessFilesPasses(line: String) {
     for file in SourceAudit.local {
@@ -226,7 +257,7 @@ enum SourceAudit {
     "    if let repo = s.repo { return try site(for: s).realPath(repo) ?? repo }",
     "    let gone = mac.snapshot.panes[server.pane] == nil",
     "    let pid = hostSnapshot.claudePids[id]",
-    "    s.processes = ProcessTable.readLocal(on: machine)",
+    "    s.processes = (try? site.processes(claudeProgram: program)) ?? ProcessTable()",
     "    let all = s.processes.descendants(of: pids.filter(Processes.isValidPid))",
     "    try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }",
     "    let rows = snapshot.taken",
