@@ -190,6 +190,17 @@ func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "
     attached: false, lastReply: nil, waits: [], notes: notes)
 }
 
+// MARK: - Cards
+
+/// A permission card that asks to run `ls` in the session.
+func permissionCard(_ id: Int64, session: String, hookClosed: Bool = false) throws -> Card {
+  let json: JSON = [
+    "id": .number(Double(id)), "session": .string(session), "kind": "permission", "tool": "Bash", "summary": "`ls`",
+    "input": [:], "questions": [], "since": 0, "deferred": false, "hookClosed": .bool(hookClosed),
+  ]
+  return try JSONCoding.convert(json, to: Card.self)
+}
+
 // MARK: - Notes and issues
 
 /// A plain note, or a to-do when `kind` is `.todo`. A nil `kind` is a row that an older sbd stored.

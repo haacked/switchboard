@@ -88,7 +88,7 @@ extension Service {
       case .answer: answer["answers"] = [.string(option.message ?? option.label)]
       case .allowAutoMode:
         answer["behavior"] = "allow"
-        answer["autoMode"] = true
+        answer[AllowExtra.autoMode.argument] = true
       default: answer["behavior"] = .string(option.action.rawValue)
       }
       return Request(op: "answer", args: .object(answer))

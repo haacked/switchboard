@@ -79,6 +79,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var waitOutcome: String?
   /// Open and deferred permission prompts and questions, oldest first.
   public var cards: [Card] = []
+  /// Why the open prompt's card left while the prompt stayed open.
+  public var cardGone: CardGone?
   /// Messages that sbd sent on its own, such as a wait's outcome, until
   /// claude reports each one as a prompt.
   public var sbdMessages: [String] = []
@@ -455,10 +457,11 @@ public enum Attention {
   /// on the user without a card.
   public static func openPromptVerdict(_ facts: SessionFacts) -> Verdict? {
     if let p = facts.openPermission {
-      return Verdict(state: .needsYou, reason: oneLine("approve \(p.summary)"))
+      return Verdict(
+        state: .needsYou, reason: oneLine("approve \(p.summary)"), summary: facts.cardlessPromptReason)
     }
     if let q = facts.openQuestion {
-      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"))
+      return Verdict(state: .needsYou, reason: oneLine("answer: \(q.summary)"), summary: facts.cardlessPromptReason)
     }
     return nil
   }

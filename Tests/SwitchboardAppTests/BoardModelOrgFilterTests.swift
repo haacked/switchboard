@@ -422,17 +422,9 @@ let everyFilterShape = [
 
   // MARK: Drafts
 
-  func card(_ id: Int64, _ session: String) throws -> Card {
-    let json: JSON = [
-      "id": .number(Double(id)), "session": .string(session), "kind": "permission", "tool": "Bash", "summary": "`ls`",
-      "input": [:], "questions": [], "since": 0, "deferred": false, "hookClosed": false,
-    ]
-    return try JSONCoding.convert(json, to: Card.self)
-  }
-
   func withCard(_ s: SessionSummary, _ id: Int64) throws -> SessionSummary {
     var s = s
-    s.cards = [try card(id, s.id)]
+    s.cards = [try permissionCard(id, session: s.id)]
     return s
   }
 

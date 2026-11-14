@@ -549,7 +549,10 @@ public enum Triage {
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
-        ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
+        ]
+          + card.offeredExtras.compactMap { extra in
+            extra.triageAction.map { TriageOption(label: extra.label, action: $0) }
+          },
         source: .card,
         details: TriageDetails(
           openByDefault: !summaryShowsCall(card), toolInput: .init(tool: card.tool, text: card.details)))
