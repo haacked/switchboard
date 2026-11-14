@@ -46,7 +46,7 @@ protocol SessionSite: AnyObject {
   /// The panes and the processes, from one read. It throws when tmux can't list the panes.
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot
   /// The processes at the site, from a new read.
-  func processes(claudeProgram: String) throws -> ProcessTable
+  func processes() throws -> ProcessTable
   /// The pids that still run.
   func alive(_ pids: Set<Int>) throws -> Set<Int>
   /// The processes that use the folder, as `Processes.using` defines it.
@@ -144,12 +144,12 @@ final class MacSite: SessionSite {
     // one that began before a launch.
     s.taken = nowMs()
     s.panes = try tmuxServer.checkedPanes()
-    s.processes = processes(claudeProgram: claudeProgram)
+    s.processes = processes()
     s.findClaudes(program: claudeProgram)
     return s
   }
 
-  func processes(claudeProgram: String) -> ProcessTable {
+  func processes() -> ProcessTable {
     log?.append("processes")
     return ProcessTable.readLocal()
   }
@@ -253,7 +253,7 @@ final class UnlistedSite: SessionSite {
   func sessionFolder(_ id: String) throws -> String { throw failure }
   func confirmed<T>(_ what: String, _ body: (any Machine) throws -> T) throws -> T { throw failure }
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot { throw failure }
-  func processes(claudeProgram: String) throws -> ProcessTable { throw failure }
+  func processes() throws -> ProcessTable { throw failure }
   func alive(_ pids: Set<Int>) throws -> Set<Int> { throw failure }
   func folderUsers(_ folder: String) throws -> [FolderUser] { throw failure }
   func samePath(_ a: String, _ b: String) throws -> Bool { throw failure }
@@ -286,7 +286,7 @@ final class CheckedSite: SessionSite {
   func readSnapshot(claudeProgram: String) throws -> Service.Snapshot {
     try base.readSnapshot(claudeProgram: claudeProgram)
   }
-  func processes(claudeProgram: String) throws -> ProcessTable { try base.processes(claudeProgram: claudeProgram) }
+  func processes() throws -> ProcessTable { try base.processes() }
   func alive(_ pids: Set<Int>) throws -> Set<Int> { try base.alive(pids) }
   func folderUsers(_ folder: String) throws -> [FolderUser] { try base.folderUsers(folder) }
   func samePath(_ a: String, _ b: String) throws -> Bool { try base.samePath(a, b) }

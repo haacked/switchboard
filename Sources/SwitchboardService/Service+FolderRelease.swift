@@ -93,7 +93,7 @@ extension Service {
       users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     }
     guard !running.isEmpty || !users.isEmpty else { return }
-    let processes = (try? site.processes(claudeProgram: claudeProgram(for: session))) ?? ProcessTable()
+    let processes = (try? site.processes()) ?? ProcessTable()
     let named =
       running.sorted().map { "\($0) (\(processes.command(of: $0) ?? "?"), started by the session)" }
       + users.map { "\($0.pid) (\(processes.command(of: $0.pid) ?? "?"), \($0.use.rawValue) \($0.path))" }

@@ -654,7 +654,7 @@ public final class Service {
       // state queue for a round trip, and a read with no answer would count no jobs.
       let table =
         session.host == nil
-        ? (try? site(for: session).processes(claudeProgram: claudeProgram(for: session))) ?? ProcessTable()
+        ? (try? site(for: session).processes()) ?? ProcessTable()
         : processes(of: id)
       recordJobs(id, backgroundJobs(pid, in: table))
     }

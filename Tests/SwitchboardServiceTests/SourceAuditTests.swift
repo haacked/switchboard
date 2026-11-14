@@ -233,7 +233,7 @@ enum SourceAudit {
     "    let gone = snapshot.panes[server.pane] == nil",
     "    let owned = Set(snapshot.claudePids.values)",
     "    if backgroundJobs(pid, in: snapshot.processes) > 0 {",
-    "  func processes(claudeProgram: String) -> ProcessTable { ProcessTable.readLocal() }",
+    "  func processes() -> ProcessTable { ProcessTable.readLocal() }",
     "    let table = ProcessTable.readLocal()",
   ])
   func aLocalNameInTheSiteFileAndTheSessionlessFilesPasses(line: String) {
@@ -257,7 +257,7 @@ enum SourceAudit {
     "    if let repo = s.repo { return try site(for: s).realPath(repo) ?? repo }",
     "    let gone = mac.snapshot.panes[server.pane] == nil",
     "    let pid = hostSnapshot.claudePids[id]",
-    "    s.processes = (try? site.processes(claudeProgram: program)) ?? ProcessTable()",
+    "    s.processes = (try? site.processes()) ?? ProcessTable()",
     "    let all = s.processes.descendants(of: pids.filter(Processes.isValidPid))",
     "    try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }",
     "    let rows = snapshot.taken",

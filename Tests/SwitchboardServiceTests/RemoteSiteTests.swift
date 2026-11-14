@@ -197,7 +197,9 @@ private func miniHost(_ extra: [String: JSON] = [:]) throws -> HostConfig {
   static let procpsPanes = "s1-claude\t813\t0\t0\ns1-shell\t814\t0\t0\n"
 
   private func parse(_ answer: Data) throws -> Service.Snapshot {
-    try RemoteSite.parseBatchedRead(answer, claudeProgram: "claude")
+    var read = try RemoteSite.parseBatchedRead(answer)
+    read.findClaudes(program: "claude")
+    return read
   }
 
   @Test func aMacOSAnswerGivesThePanesTheProcessesAndTheClaudeOfEachSession() throws {
