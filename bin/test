@@ -8,13 +8,47 @@
 # integration tests across N swift test processes and runs the other tests in
 # one more, all at once, then runs MeasureTests alone. With --part K/P after
 # the count, it splits the tests into P parts for P machines, such as the jobs
-# of a CI matrix, and runs part K (bin/lib/shard-plan). bin/lib/swift-testing.sh
-# sets the flags that swift needs to find Swift Testing.
-# The whole run, shards included, holds one machine-wide build slot
-# (bin/lib/build-slot). Each swift test caps its compile jobs (bin/lib/swiftpm).
+# of a CI matrix, and runs part K (bin/lib/shard-plan). --shards is for CI. It
+# prints a warning elsewhere unless --force-shards follows the count.
+# bin/lib/swift-testing.sh sets the flags that swift needs to find Swift
+# Testing.
+# A run without --shards holds one machine-wide build slot (bin/lib/build-slot)
+# for its build and its tests. A sharded run holds no slot itself. Its build
+# and each of its shards take their own slot through bin/lib/swiftpm, so every
+# swift test process that runs tests counts against the queue. A caller that
+# already holds a slot runs them all inside it. Each swift build and swift test
+# caps its compile jobs (bin/lib/swiftpm).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" "$@"
+# The run that waits for a slot prints the limits before it waits. It passes
+# --limits-shown to the run inside the slot, which then skips the print.
+if [ "${1:-}" = --limits-shown ]; then
+  shift
+else
+  slots=$(bin/lib/build-slot --slots)
+  jobs=$(bin/lib/swiftpm --jobs)
+  [ "$slots" != 0 ] || slots=off
+  [ "$jobs" != 0 ] || jobs="one per core"
+  echo "bin/test: build slots: $slots, compile jobs: $jobs" >&2
+fi
+sharded= shard_part=1/1
+if [ "${1:-}" = --shards ]; then
+  shards_usage() { echo "usage: bin/test --shards N [--part K/P] [--force-shards]" >&2; exit 2; }
+  [ $# -ge 2 ] || shards_usage
+  sharded=1 shard_count=$2 forced=
+  shift 2
+  while [ $# -gt 0 ]; do
+    case $1 in
+    --part) [ $# -ge 2 ] || shards_usage; shard_part=$2; shift 2 ;;
+    --force-shards) forced=1; shift ;;
+    *) shards_usage ;;
+    esac
+  done
+  [ "${CI:-}" = true ] || [ -n "$forced" ] ||
+    echo "bin/test: warning: --shards is for CI. Run bin/test without it, or pass --force-shards after the count." >&2
+else
+  bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/test" --limits-shown "$@"
+fi
 source bin/lib/swift-testing.sh
 require_swift_testing
 # Swift Testing starts every test at once. A test that blocks a thread, such
@@ -31,9 +65,10 @@ require_swift_testing
 export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH:-2}"
 
 # Each process caps how many tests run at once, so N processes run N times as
-# many integration tests at once. Each process holds SwiftPM's lock on its
-# build folder for the whole run, so each shard after the first runs from an
-# APFS clone of .build.
+# many integration tests at once. Each process waits for its own build slot,
+# so the queue decides how many of them run at once. Each process holds
+# SwiftPM's lock on its build folder for the whole run, so each shard after the
+# first runs from an APFS clone of .build.
 shards() {
   local n=$1 clones=.build-shards
   # bin/lib/shard-plan checks the count too, but only after the build.
@@ -92,10 +127,7 @@ shards() {
   exit "$status"
 }
 
-if [ "${1:-}" = --shards ]; then
-  [ $# -eq 2 ] || { [ $# -eq 4 ] && [ "$3" = --part ]; } || { echo "usage: bin/test --shards N [--part K/P]" >&2; exit 2; }
-  shards "$2" "${4:-1/1}"
-fi
+if [ -n "$sharded" ]; then shards "$shard_count" "$shard_part"; fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1
   shift
