@@ -310,6 +310,7 @@ public final class Service {
     }
     markInterruptedPosts()
     seedParentMarks(now: nowMs())
+    migrateReadState()
     try? refreshManagerGuide()
     try? refreshChatGuides()
     // A summary that was running when sbd stopped never finished.
@@ -544,6 +545,8 @@ public final class Service {
       return try JSON(encoding: summary(id))
     case "ack":
       return try acknowledgeRequest(args)
+    case ChatActivity.readEvent:
+      return try chatReadRequest(args)
     case "wait", "clear-wait", "resolve-wait":
       return try waitRequest(op, args)
     case "note", "remove-note", "resolve-note":
@@ -1021,6 +1024,7 @@ public final class Service {
     entries[id] = Entry(session: session)
     try store.save(session)
     record(id, "created", ["cwd": .string(folder.cwd)])
+    if session.kind.showsAsChat { recordRead(id, 0) }
     try site(for: session).terminals().create(paneName(id, .shell), cwd: folder.cwd, env: newPaneEnv(id))
     try launch(id, prompt: args.prompt, trigger: .create)
     return summary(id)
@@ -2141,6 +2145,7 @@ public final class Service {
     out.mcp = s.mcp
     out.kind = s.kind
     out.chat = s.chat
+    if s.kind.showsAsChat { out.activity = ChatActivity(e.facts) }
     let shown = Triage.itemAndDecisions(e.facts, verdict, kind: s.kind)
     out.triage = shown.item
     if out.triage != nil {

@@ -66,20 +66,10 @@ extension Service {
   func chatLog(_ args: JSON) throws -> JSON {
     let assistantOnly = args["role"]?.string == ChatMessage.Role.assistant.rawValue
     let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
-      let manager = args["manager"]?.bool == true
-      let id: String
-      if manager || args["session"] != nil {
-        id = manager ? try managerConversation(args["session"]?.string) : try lookup(args)
-        guard let session = entries[id]?.session, assistantOnly || session.kind.showsAsChat else {
-          let name = entries[id]?.session.name ?? id
-          throw APIError("\(name) is not a Manager conversation or a group chat. chat-log reads only those")
-        }
-      } else {
-        let group = try lookupGroup(args)
-        guard let chat = chatID(group) else {
-          throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
-        }
-        id = chat
+      let id = try chatTarget(args)
+      guard let session = entries[id]?.session, assistantOnly || session.kind.showsAsChat else {
+        let name = entries[id]?.session.name ?? id
+        throw APIError("\(name) is not a Manager conversation or a group chat. chat-log reads only those")
       }
       return (transcriptFinder(id), try site(of: id).machine)
     }

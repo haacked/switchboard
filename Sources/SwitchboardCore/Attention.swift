@@ -39,6 +39,14 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var prompts = 0
   public var lastReply: String?
   public var lastActivity: Int64 = 0
+  /// The number of replies that claude finished in the main session. Only a
+  /// chat's or a Manager conversation's summary shows it.
+  public var replies = 0
+  /// The replies that the user read, from `chat-read` events. It is nil for a
+  /// session that has no `chat-read` event, which sbd migrates at startup.
+  public var repliesRead: Int?
+  /// The time of the last reply or of the last prompt that the user sent.
+  public var lastMessageAt: Int64?
   /// When claude last reported SessionStart.
   public var lastStart: Int64?
   /// The transcript that the last SessionStart named, in the account that
@@ -353,6 +361,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     default:
       break
     }
+    applyReplies(event, userPrompt: userPrompt)
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
     applyMergeBrief(event)
@@ -360,6 +369,25 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
+  }
+
+  /// A reply is a main-session Stop with a message. A `chat-read` event marks
+  /// replies read up to its count, clamped to the replies there are, and
+  /// never lowers the count already read.
+  private mutating func applyReplies(_ event: Event, userPrompt: Bool) {
+    switch event.kind {
+    case "Stop" where !event.fromSubagent:
+      guard let message = event.data["last_assistant_message"]?.string, !message.isEmpty else { return }
+      replies += 1
+      lastMessageAt = event.t
+    case "UserPromptSubmit" where userPrompt:
+      lastMessageAt = event.t
+    case ChatActivity.readEvent:
+      let read = min(event.data["replies"]?.int ?? replies, replies)
+      repliesRead = max(repliesRead ?? 0, read)
+    default:
+      break
+    }
   }
 
   private mutating func startTurn(_ t: Int64) {

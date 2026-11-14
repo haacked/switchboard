@@ -262,6 +262,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var kind: SessionKind = .work
   /// The id of the group whose chat this session is.
   public var chat: String?
+  /// A chat's or a Manager conversation's replies and unread count. It is nil for a work session.
+  public var activity: ChatActivity?
   public var followup: Followup?
   /// When the session was added, in ms since the epoch. An imported
   /// follow-up was added on the date of its line.

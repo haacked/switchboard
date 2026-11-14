@@ -196,9 +196,12 @@ A group chat is an interactive Claude session that manages one group's sessions.
 sb chat flag-evals                       # start the chat the first time, open it after that
 sb chat flag-evals "What needs me?"      # send it a message; --send <text> does the same
 sb chat flag-evals --log                 # its last messages
+sb chat flag-evals --read                # mark its replies read
 ```
 
 A group's lane on the Board has a Chat button when the Board shows Group lanes. The chat pane shows the chat's messages, its open cards, a message field, and a Terminal toggle. `sb ls` shows a chat with kind `chat`. A chat belongs to no group, never needs a PR, and stays out of auto-continue. A permission prompt, a question, or a folder trust dialog that stops the chat until you answer it shows in the Inbox as "<group> chat", such as "Flag Evaluations chat", and counts in the Inbox count, the Dock badge, the menu bar, notifications, and ⌘J. You answer it there or in the chat pane, and Open shows the chat pane. The chat's replies and its group-message cards stay in the chat pane and out of the Inbox, because a chat that waits on your next message is not stuck. A session that the chat starts joins the chat's group, and the chat is its parent. The chat gets no message when such a session changes. Its next prompt carries the digest that the Manager gets (see The Manager), whose counts cover only the chat's group, and it follows a session through with a wait. A group message from the chat opens a card in the chat pane, and nothing goes out until you send it there. Removing the group, or merging it into another, marks its chat done, and its folder and transcript stay.
+
+sbd counts each chat's and Manager conversation's replies and how many of them you have read. A reply is a turn that ended with a message from Claude. `--json` shows them as `activity` on the session: `replies`, `unread`, and `lastMessageAt`, the time of the last reply or of your last message. `sb get` prints the unread count and the time of the last message, and `sb manager ls` adds the unread count. `sb chat <group> --read` and `sb manager <conv> --read` mark every reply read. sbd refuses them inside a Claude session, so a session can't hide a chat's replies from you. The app marks a chat or a conversation read while its pane shows and Switchboard is the active app. It marks only the replies it has shown, so a reply that arrives after the pane last refreshed stays unread. Chats and conversations from before sbd counted replies start with none unread.
 
 ### Plan documents
 
