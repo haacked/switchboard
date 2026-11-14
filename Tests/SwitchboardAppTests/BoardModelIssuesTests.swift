@@ -140,6 +140,24 @@ private let rows = [
     #expect(request?.group == "g1")
   }
 
+  @Test(arguments: [("robin-k", nil), ("zed-q", false), (nil, false)] as [(String?, Bool?)])
+  func editThePromptFirstStartsWithoutAutoModeForAnOutsideAuthor(author: String?, autoMode: Bool?) {
+    let model = model()
+    var issue = rows[0]
+    issue.issue.author = author
+    model.editIssuePrompt(issue, preset: IssuePreset(name: "go", prompt: "/go --yolo {url}"))
+
+    #expect(model.newSession?.autoMode == autoMode)
+  }
+
+  @Test(arguments: [nil, false] as [Bool?])
+  func theSheetSendsTheRequestsAutoMode(autoMode: Bool?) {
+    let form = NewSessionView.Form(request: NewSessionRequest(repo: "acme/ledger", autoMode: autoMode))
+    form.offer([KnownRepo(path: "/dev/acme/ledger", name: "acme/ledger")])
+
+    #expect(form.request(worktree: false, groups: [])?.autoMode == autoMode)
+  }
+
   @Test func aWorkedOnIssueDoesNotStart() async {
     let (model, release, requests) = heldModel()
     model.startIssue(rows[5], preset: IssuePreset(name: "go", prompt: ""))

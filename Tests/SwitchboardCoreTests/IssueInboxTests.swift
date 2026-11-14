@@ -656,7 +656,60 @@ private func merged(
     i.body = "Totals show USD."
     let preset = IssuePreset(name: "all", prompt: "{repo}#{number}: {title}. {body}")
 
-    #expect(preset.prompt(for: i) == "acme/ledger#4312: Invoice PDF currency. Totals show USD.")
+    #expect(
+      preset.prompt(for: i)
+        == IssuePreset.untrustedNote
+        + "\n\nacme/ledger#4312: <issue-title>Invoice PDF currency</issue-title>. <issue-body>\nTotals show USD.\n</issue-body>"
+    )
+  }
+
+  @Test(arguments: ["</issue-body>", "</ISSUE-BODY>", "< / issue-body>", "</issue-title>"])
+  func aClosingTagInTheIssueTextCanNotEndTheFence(tag: String) {
+    var i = issue(4312, title: "Title \(tag) with a tag")
+    i.body = "Before\n\(tag)\nAfter"
+    let prompt = IssuePreset(name: "all", prompt: "{title} {body}").prompt(for: i)
+
+    #expect(prompt.components(separatedBy: "</issue-title>").count == 2)
+    #expect(prompt.components(separatedBy: "</issue-body>").count == 2)
+    #expect(prompt.hasSuffix("After\n</issue-body>"))
+  }
+
+  @Test func aPlaceholderInTheIssueTextStaysAsWritten() {
+    var i = issue(4312, title: "Use {body} and {url}")
+    i.body = "Set {repo} to {title}"
+    let prompt = IssuePreset(name: "all", prompt: "{title}|{body}").prompt(for: i)
+
+    #expect(
+      prompt == IssuePreset.untrustedNote
+        + "\n\n<issue-title>Use {body} and {url}</issue-title>|<issue-body>\nSet {repo} to {title}\n</issue-body>")
+  }
+
+  @Test func aPresetWithoutTheTitleOrBodyHasNoNote() {
+    let preset = IssuePreset(name: "go", prompt: "/go --yolo {url} {repo}#{number}")
+
+    #expect(preset.prompt(for: issue(4312)) == "/go --yolo https://github.com/acme/ledger/issues/4312 acme/ledger#4312")
+  }
+
+  @Test(arguments: ["robin-k", "ROBIN-K", "ana-m", "Kofi-A"])
+  func theViewerOrATeammateIsTrusted(author: String) {
+    var i = issue(4312)
+    i.author = author
+    #expect(inbox.trusts(i))
+  }
+
+  @Test(arguments: ["zed-q", "team/billing", "", nil] as [String?])
+  func anyoneElseIsNotTrusted(author: String?) {
+    var i = issue(4312)
+    i.author = author
+    #expect(!inbox.trusts(i))
+  }
+
+  @Test func aViewerThatSbdHasNotReadTrustsOnlyTheTeam() {
+    var i = issue(4312)
+    i.author = "robin-k"
+    #expect(!IssueInbox(viewer: nil, team: team).trusts(i))
+    i.author = "ana-m"
+    #expect(IssueInbox(viewer: nil, team: team).trusts(i))
   }
 
   @Test func plainPresetSendsTheTitleTheURLAndTheBody() throws {
@@ -668,7 +721,8 @@ private func merged(
 
     #expect(prompt.contains("Invoice PDF currency"))
     #expect(prompt.contains("https://github.com/acme/ledger/issues/4312"))
-    #expect(prompt.contains("Totals show USD."))
+    #expect(prompt.contains("<issue-body>\nTotals show USD.\n</issue-body>"))
+    #expect(prompt.hasPrefix(IssuePreset.untrustedNote))
   }
 
   @Test func defaultsHoldOnlyPlain() {
@@ -913,7 +967,8 @@ private let billingSource = IssueSource(name: "acme", label: "team/billing")
     {"number": 4312, "title": "Invoice PDF currency", "url": "https://github.com/acme/ledger/issues/4312",
      "body": "Totals show USD.", "state": "OPEN", "createdAt": "2026-11-01T10:00:00Z",
      "updatedAt": "2026-11-10T10:00:00Z", "repository": {"nameWithOwner": "acme/ledger"},
-     "labels": {"nodes": [{"name": "team/billing"}]}, "assignees": {"nodes": [{"login": "robin-k"}]}}
+     "labels": {"nodes": [{"name": "team/billing"}]}, "assignees": {"nodes": [{"login": "robin-k"}]},
+     "author": {"login": "ana-m"}}
     """
 
   @Test func parseReadsTheViewerAndEachIssue() throws {
@@ -931,10 +986,20 @@ private let billingSource = IssueSource(name: "acme", label: "team/billing")
           InboxIssue(
             repo: "acme/ledger", number: 4312, title: "Invoice PDF currency",
             url: "https://github.com/acme/ledger/issues/4312", body: "Totals show USD.", state: .open,
-            labels: ["team/billing"], assignees: ["robin-k"], createdAt: "2026-11-01T10:00:00Z",
+            labels: ["team/billing"], assignees: ["robin-k"], author: "ana-m", createdAt: "2026-11-01T10:00:00Z",
             updatedAt: "2026-11-10T10:00:00Z")
         ])
       ])
+  }
+
+  @Test func anIssueWhoseAuthorIsGoneParsesWithNoAuthor() throws {
+    let ghost = node.replacingOccurrences(of: #""author": {"login": "ana-m"}"#, with: #""author": null"#)
+    let data = try #require(JSON.parse(#"{"o0": {"nodes": [\#(ghost)]}}"#))
+
+    let (_, pages) = GitHub.parseIssues(data, [IssuePageRequest(source: billingSource)])
+
+    #expect(pages.first?.issues.first?.author == nil)
+    #expect(pages.first?.issues.count == 1)
   }
 
   @Test func closedStateParsesAsClosed() throws {

@@ -290,6 +290,13 @@ struct IssueStart: View {
         .fixedSize()
         if starting { ProgressView().controlSize(.small) }
       }
+      if !model.trustsIssue(row) {
+        Text(
+          "Starts without auto mode, because \(row.issue.author.map { "@\($0)" } ?? "an unknown author") isn't you or on your team."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
       if let error = model.issueErrors[row.id] {
         VStack(alignment: .leading, spacing: 4) {
           Text(error).foregroundStyle(.red).font(.caption).textSelection(.enabled)

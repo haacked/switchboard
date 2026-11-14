@@ -198,10 +198,17 @@ extension BoardModel {
   }
 
   /// Opens the New Session sheet filled in with the issue's checkout, branch, and the preset's prompt.
+  /// Whether the viewer or a teammate wrote the issue, so its session may start in auto mode. sbd's Start uses the
+  /// same rule.
+  func trustsIssue(_ row: ListedIssue) -> Bool {
+    IssueInbox(viewer: issueList?.viewer, team: issueList?.team ?? IssueTeam()).trusts(row.issue)
+  }
+
   func editIssuePrompt(_ row: ListedIssue, preset: IssuePreset) {
     newSession = NewSessionRequest(
       group: issueGroup(row), repo: row.issue.repo, branch: row.issue.branch(prefix: issueList?.branchPrefix ?? ""),
-      prompt: preset.prompt(for: row.issue), issue: IssueRef(repo: row.issue.repo, number: row.issue.number))
+      prompt: preset.prompt(for: row.issue), issue: IssueRef(repo: row.issue.repo, number: row.issue.number),
+      autoMode: trustsIssue(row) ? nil : false)
   }
 }
 

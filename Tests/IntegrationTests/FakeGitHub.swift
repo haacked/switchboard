@@ -127,6 +127,8 @@ final class FakeGitHub {
     var open = true
     var labels: [String] = []
     var assignees: [String] = []
+    /// The author's login, or nil for an issue whose author GitHub no longer has.
+    var author: String? = "robin-k"
     var createdAt = "2026-11-01T10:00:00Z"
     var updatedAt = "2026-11-10T10:00:00Z"
 
@@ -138,6 +140,7 @@ final class FakeGitHub {
         "repository": ["nameWithOwner": .string(repo)],
         "labels": ["nodes": .array(labels.map { ["name": .string($0)] })],
         "assignees": ["nodes": .array(assignees.map { ["login": .string($0)] })],
+        "author": author.map { ["login": .string($0)] } ?? .null,
       ]
     }
   }

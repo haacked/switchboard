@@ -38,7 +38,7 @@ extension GitHub {
   /// The labels and assignees past the first 10 and 5 are left out, because each one raises the query's price.
   static let issueFields = """
     fragment issue on Issue {
-      number title url body state createdAt updatedAt repository { nameWithOwner }
+      number title url body state createdAt updatedAt repository { nameWithOwner } author { login }
       labels(first: 10) { nodes { name } }
       assignees(first: 5) { nodes { login } }
     }
@@ -144,7 +144,7 @@ extension GitHub {
       repo: repo, number: number, title: title, url: url, body: node["body"]?.string ?? "",
       state: node["state"]?.string == "OPEN" ? .open : .closed,
       labels: nodes(node["labels"]).compactMap { $0["name"]?.string },
-      assignees: nodes(node["assignees"]).compactMap { $0["login"]?.string },
+      assignees: nodes(node["assignees"]).compactMap { $0["login"]?.string }, author: node["author"]?["login"]?.string,
       createdAt: node["createdAt"]?.string ?? "", updatedAt: node["updatedAt"]?.string ?? "")
   }
 }
