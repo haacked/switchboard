@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SwitchboardCore
 
 /// A field that sends the session's Claude a message, with images dropped on it or pasted into it.
 struct MessageField: View {
@@ -13,6 +14,7 @@ struct MessageField: View {
   @State private var focus = Focus()
   @State private var dropTargeted = false
   @State private var pasteMonitor: Any?
+  @StateObject private var completion = SlashCompletion()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -53,7 +55,8 @@ struct MessageField: View {
   }
 
   private var field: some View {
-    TextField("Message Claude…", text: $draft.text, axis: .vertical)
+    let slash = slash
+    return TextField("Message Claude…", text: $draft.text, axis: .vertical)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
       .onChange(of: focused) { focus.held = focused }
@@ -63,8 +66,34 @@ struct MessageField: View {
           draft.disarmEscape()
           return .ignored
         }
+        if slashAction(press.key, press.modifiers) == .close {
+          completion.dismiss(at: draft.text)
+          return .handled
+        }
         return !TextInput.isComposing && draft.escape(at: Date()) ? .handled : .ignored
       }
+      .onKeyPress(keys: [.upArrow, .downArrow, .tab], phases: [.down, .repeat]) { press in
+        switch slashAction(press.key, press.modifiers, isRepeat: press.phase == .repeat) {
+        case .move(let step): completion.move(step, in: self.slash.rows)
+        case .accept: accept(self.slash.highlighted)
+        case .discard: break
+        default: return .ignored
+        }
+        return .handled
+      }
+      .onChange(of: draft.text) { completion.reset() }
+      // TriageView can reuse this field for another session.
+      .onChange(of: session) { completion.reset() }
+      .onChange(of: SlashCompletion.query(draft.text) == nil ? nil : session, initial: true) { _, querying in
+        if let querying { model.loadSlashCommands(querying) }
+      }
+      // Focus stays in the field, so VoiceOver does not read the highlighted row.
+      .onChange(of: slash.open ? slash.highlighted : nil) { _, name in
+        if let name { AccessibilityNotification.Announcement(name).post() }
+      }
+      .background(
+        SlashCompletionAnchor(rows: slash.rows, highlighted: slash.highlighted, open: slash.open, accept: accept)
+      )
       .overlay {
         if dropTargeted {
           RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: 2)
@@ -77,7 +106,48 @@ struct MessageField: View {
             .padding(.horizontal, 6).background(.background).padding(.trailing, 4).allowsHitTesting(false)
         }
       }
-      .sendsOnReturn(send)
+      .sendsOnReturn(submit)
+  }
+
+  /// The ranked rows for the text's query, whether the list shows them, and the highlighted row.
+  private var slash: (rows: [SlashCommand], open: Bool, highlighted: String?) {
+    let rows =
+      SlashCompletion.query(draft.text).map {
+        SlashCompletion.rows(commands: model.slashCommands[session] ?? SlashCommand.builtIns, query: $0)
+      } ?? []
+    let open = completion.isOpen(text: draft.text, rows: rows, focused: focused, composing: TextInput.isComposing)
+    return (rows, open, completion.highlight(in: rows))
+  }
+
+  private func slashAction(
+    _ key: KeyEquivalent, _ modifiers: EventModifiers = [], isRepeat: Bool = false
+  ) -> SlashCompletion.Action? {
+    let slash = slash
+    return completion.press(
+      key, modifiers: modifiers, isRepeat: isRepeat, composing: TextInput.isComposing, open: slash.open,
+      text: draft.text, highlighted: slash.highlighted)
+  }
+
+  private func accept(_ name: String?) {
+    if let name { draft.text = SlashCompletion.accepted(name) }
+  }
+
+  /// Return and keypad Enter while the list is open accept the highlighted row, or send when the text already names
+  /// it. `sendsOnReturn` calls this only for a Return that sends today.
+  private func submit() {
+    // `sendsOnReturn` calls this for Return's repeats too, and `onSubmit` sees keypad Enter's repeats without a phase.
+    let event = NSApp.currentEvent
+    switch slashAction(.return, isRepeat: event?.type == .keyDown && event?.isARepeat == true) {
+    case .accept:
+      accept(slash.highlighted)
+    case .send:
+      completion.dismiss(at: draft.text)
+      send()
+    case .discard:
+      break
+    default:
+      send()
+    }
   }
 
   private func chip(_ image: Draft.Image) -> some View {

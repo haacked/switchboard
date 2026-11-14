@@ -99,6 +99,8 @@ final class BoardModel: ObservableObject {
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
+  /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
+  @Published var slashCommands: [String: [SlashCommand]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -174,7 +176,7 @@ final class BoardModel: ObservableObject {
   }
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
-  private let poller = DispatchQueue(label: "switchboard.poll")
+  let poller = DispatchQueue(label: "switchboard.poll")
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.

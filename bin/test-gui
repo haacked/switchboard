@@ -28,14 +28,20 @@
 # it checks that Return sees an input method's marked text, then presses
 # Shift+Return and Return, and checks that Claude got one message with the new
 # line in it.
-# Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys). With
+# The slash check types `/` into a session's and a group chat's message field
+# through the app's SlashSelfTest. Each session's folder holds the commands and
+# skills of Tests/SwitchboardCoreTests/Fixtures/SkillListing/probe-repo, and its
+# account folder is empty, so the rows are sbd's folder scan plus the built-ins.
+# It checks the rows, Down, Tab, Return, keypad Enter, Esc, held Tab, Return, and
+# Enter, and what Claude got.
+# Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash). With
 # none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
 # failure it also keeps sbd's log in .build/gui-test/sbd.log.
 # Each launch sets SB_TERMINAL_TEST, SB_QUIT_FILE, SB_DRAFT_TEST, SB_SHELL_TEST,
-# SB_DROP_TEST, or SB_KEY_TEST, so the app runs hidden and never takes focus. SB_TEST_VISIBLE=1
+# SB_DROP_TEST, SB_KEY_TEST, or SB_SLASH_TEST, so the app runs hidden and never takes focus. SB_TEST_VISIBLE=1
 # shows the app as a normal launch does.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -44,9 +50,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, and keys." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, and slash." >&2
     exit 2
     ;;
   esac
@@ -685,3 +691,63 @@ CARD
 }
 
 if wants keys; then check_keys; fi
+
+check_slash() {
+  check=slash
+  local shots="$home/shots/slash" work="$home/slash-work" account="$home/slash-account" chat view folder got
+  local probe='["probe-cmd-plain","probe-cmd-user-only","probe-default","probe-user-only"]'
+  mkdir "$shots" "$work" "$account"
+  echo "Checking the slash command list…"
+  echo "{}" >"$account/.claude.json"
+  cp -R Tests/SwitchboardCoreTests/Fixtures/SkillListing/probe-repo/dot-claude "$work/.claude"
+  session=$(sb new "$work" --name slash --account "$account" --json | jq -r '.id')
+  [ -n "$session" ] && [ "$session" != null ] || fail "sb new returned no session id"
+  wait_for 30 screen_has_stub || fail "the stand-in claude never drew its screen"
+  sb group add slash "$session" >/dev/null
+  sb group account slash "$account" >/dev/null
+  chat=$(sb chat slash --json | jq -r '.id')
+  [ -n "$chat" ] && [ "$chat" != null ] || fail "sb chat returned no session id"
+  folder=$(sb get --json "$chat" | jq -r '.cwd')
+  [ -d "$folder" ] || fail "the chat has no folder: $folder"
+  cp -R "$work/.claude" "$folder/.claude"
+  probe_rows() { sb slash "$1" --json | jq -c '[.commands[].name | select(startswith("probe-"))] | sort'; }
+  for view in session chat; do
+    got=$(probe_rows "${!view}")
+    [ "$got" = "$probe" ] || fail "sb slash gave the $view the probe rows $got, not $probe"
+  done
+  slash_logged() { grep -qxF "slashtest: $2" "$shots/$1.log" || fail "the $1 field did not log: $2"; }
+
+  for view in session chat; do
+    SB_SELECT="${!view}" SB_SLASH_TEST=1 "$bin_dir/Switchboard" >"$shots/$view.log" 2>&1 &
+    app_pid=$!
+    wait_for 120 app_gone || fail "the app did not finish the slash check in the $view"
+    end_app
+    slash_logged "$view" "slash: open true rows true focused true"
+    slash_logged "$view" "probe-: probe-cmd-plain probe-cmd-user-only probe-default probe-user-only focused true"
+    slash_logged "$view" 'down, tab: "/probe-cmd-user-only " open false focused true cursor at end true'
+    slash_logged "$view" 'return on /probe-d: "/probe-default " open false'
+    slash_logged "$view" 'return again: ""'
+    slash_logged "$view" 'enter on /probe-d: "/probe-default " open false focused true'
+    slash_logged "$view" 'enter again: ""'
+    slash_logged "$view" "exact name: open true rows probe-user-only"
+    slash_logged "$view" "return on the exact name: open false"
+    slash_logged "$view" 'sent: ""'
+    slash_logged "$view" "/co: open true"
+    slash_logged "$view" 'esc on /co: "/co" open false hint false'
+    slash_logged "$view" 'two more escs: ""'
+    slash_logged "$view" 'held return on /probe-d: "/probe-default " focused true'
+    slash_logged "$view" 'held enter on /probe-d: "/probe-default " focused true'
+    slash_logged "$view" 'held tab on /probe-d: "/probe-default " focused true'
+    slash_logged "$view" done
+  done
+
+  sent_texts() { sb events --session "$1" --json | jq -c -s '[.[] | select(.kind == "sent") | .data.text]'; }
+  for view in session chat; do
+    got=$(sent_texts "${!view}")
+    [ "$got" = '["/probe-default","/probe-default","/probe-user-only"]' ] || fail "the $view sent $got"
+  done
+  save_shots
+  echo "ok: slash (session, chat)"
+}
+
+if wants slash; then check_slash; fi
