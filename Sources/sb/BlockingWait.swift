@@ -24,8 +24,6 @@ final class BlockingWait: @unchecked Sendable {
     case cleared
   }
 
-  /// The session as the user named it, until sbd's answer gives its id.
-  private var session: String
   /// Whoever exits takes this lock and never releases it, so the main loop
   /// and a signal handler never both print or exit.
   private let exiting = NSLock()
@@ -37,13 +35,15 @@ final class BlockingWait: @unchecked Sendable {
   private var waitId = ""
   /// Guards `cursor`, which the main loop and a signal handler both read.
   private let lock = NSLock()
+  /// Its session is the one the user named until sbd's answer gives its id.
   private var cursor: EventCursor
   private var signalSources: [DispatchSourceSignal] = []
 
   init(session: String) {
-    self.session = session
     cursor = EventCursor(since: nil, session: session)
   }
+
+  private var session: String { lock.withLock { cursor.session ?? "" } }
 
   func run(_ args: [String: JSON], timeout: TimeInterval?) -> Never {
     let deadline = timeout.map { Date().addingTimeInterval($0) }
@@ -57,10 +57,9 @@ final class BlockingWait: @unchecked Sendable {
       let summary = try client.call("wait", request, as: SessionSummary.self)
       // sbd's `wait` request appends the new wait to the session's waits.
       guard let wait = summary.waits.last else { fail(APIError("sbd set no wait")) }
-      session = summary.id
       waitId = wait.id
       // The id names the session after a rename. A typed name or prefix may not.
-      lock.withLock { cursor = EventCursor(since: cursor.since, session: summary.id) }
+      lock.withLock { cursor.session = summary.id }
       registering.unlock()
     } catch {
       fail(error)
@@ -75,12 +74,8 @@ final class BlockingWait: @unchecked Sendable {
         lastAnswer = Date()
       } catch is SbdUnreachable where Date().timeIntervalSince(lastAnswer) < BlockingWait.unreachableSeconds {
         // sbd may be restarting, so the next pass tries again.
-      } catch let error as SbdUnreachable {
-        fail(error)
       } catch {
-        // The wait is set, so sb clears it before it exits.
-        warn("\(error)")
-        cancel(exitCode: 1)
+        fail(error)
       }
       if let deadline, Date() >= deadline { cancel(exitCode: BlockingWait.timedOut) }
       let left = deadline?.timeIntervalSinceNow ?? 1
@@ -140,9 +135,16 @@ final class BlockingWait: @unchecked Sendable {
     }
   }
 
+  /// Exits 3 when sbd can't be reached, and 1 for any other error. Once
+  /// the wait is set, any error but `SbdUnreachable` clears it first.
   private func fail(_ error: Error) -> Never {
+    let unreachable = error is SbdUnreachable
+    if !unreachable && !waitId.isEmpty {
+      warn("\(error)")
+      cancel(exitCode: 1)
+    }
     exiting.lock()
     warn("\(error)")
-    exit(error is SbdUnreachable ? BlockingWait.unreachable : 1)
+    exit(unreachable ? BlockingWait.unreachable : 1)
   }
 }

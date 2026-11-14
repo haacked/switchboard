@@ -5,7 +5,7 @@ import SwitchboardCore
 struct EventCursor {
   /// The id of the last event read. Nil reads the newest events next.
   var since: Int64?
-  let session: String?
+  var session: String?
 
   /// The events after `since`, oldest first, or the newest events when
   /// `since` is nil. It reads at most `limit` events, `Event.defaultLimit`
