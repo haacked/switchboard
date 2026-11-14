@@ -8,7 +8,8 @@ let usage = """
     ls [--org O1,O2] [--local]    list sessions by state, or only those in the
                                   GitHub orgs O1 and O2, or with no GitHub remote
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
-        [--model M] [--account A] [--group G] [--no-auto] [--host H]
+        [--model M] [--account A] [--group G] [--no-auto] [--plan-mode]
+        [--host H]
                                   start a session in the folder, or in a new
                                   worktree of its repo with --branch or
                                   --worktree. --worktree names the branch from
@@ -19,11 +20,14 @@ let usage = """
                                   when the group has an account and A names
                                   another. It starts in auto mode unless
                                   --no-auto or the autoMode setting is false.
+                                  --plan-mode starts it in plan mode, which
+                                  it keeps until the plan is approved.
                                   --host runs it on the remote host H of
                                   config.json, in a folder there that is
                                   absolute or starts with ~
     spawn --repo R --branch B --prompt P [--followup [--after pr:N]] [--name N]
-        [--base REF] [--model M] [--account A] [--no-auto] [--wait STATE]
+        [--base REF] [--model M] [--account A] [--no-auto] [--plan-mode]
+        [--wait STATE]
                                   start a session on a new branch B in a new
                                   worktree of R, which is owner/name, a name, or
                                   a folder. Inside a session, that session is
@@ -654,6 +658,11 @@ guard let command = argv.popFirst() else {
   print(usage)
   exit(0)
 }
+// `Args` reads `--plan` as a valued flag. It would then die on a trailing
+// `--plan` or swallow the next argument. `new` and `spawn` refuse it here.
+if ["new", "spawn"].contains(command), argv.contains("--plan") {
+  die("use --plan-mode to start in plan mode. --plan names a plan document")
+}
 // The text of these commands is everything after the session. All but
 // `send` and `rename` read flags instead when the word after the session is
 // one. `send` reads its leading --image pairs itself, in Send.swift.
@@ -699,7 +708,7 @@ case "new":
     prompt: a.values["--prompt"], model: a.values["--model"],
     parent: author == .claude ? ProcessInfo.processInfo.environment["SB_SESSION_ID"] : nil,
     account: a.values["--account"], group: a.values["--group"],
-    autoMode: a.switches.contains("--no-auto") ? false : nil, host: host)
+    autoMode: a.switches.contains("--no-auto") ? false : nil, planMode: planMode(a), host: host)
   let result = call("new", (try? JSON(encoding: args).object) ?? [:], timeout: 300)
   if a.json { printJSON(result) } else { printSession(summary(result)) }
 case "spawn":
