@@ -1119,6 +1119,12 @@ private func cliOutput(_ answer: Response) throws -> (status: Int?, stdout: Data
   func getForTheHostsOwnSessionThroughCliPrintsTheAnswerOfTheRawRequest() throws {
     try withSessions(sbPath: builtSb) { service in
       try HostServer.listen(service: service, host: "mini").run()
+      // A `get` starts the lookups of the checkout and its origin, and `repositoryRead` changes when they end.
+      let read = waitUntil(seconds: 10) {
+        _ = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))
+        return service.queue.sync { service.checkoutLookups.isEmpty && service.repositoryLookups.isEmpty }
+      }
+      #expect(read, "the lookups of m1's checkout didn't end")
 
       let raw = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))
       let cli = try cliOutput(service.handle(cliRequest(["get", "m1", "--json"]), origin: .remote("mini")))
