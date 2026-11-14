@@ -190,11 +190,20 @@ import Testing
 
   @Test func aBusyParentHearsManyChangesInOneMessage() throws {
     let sbd = try Instance()
-    let parent = try sbd.new(prompt: "slow 4", name: "p")
+    // The parent's turn lasts until the test writes the report file. All three children change during the turn.
+    let parent = try sbd.new(prompt: "slow held", name: "p")
     try sbd.waitFor(parent.id, "its turn") { $0.state == .working }
     let a = try child(sbd, of: parent.id, name: "a")
     let b = try child(sbd, of: parent.id, name: "b")
     let c = try child(sbd, of: parent.id, name: "c")
+    for kid in [a, b, c] {
+      try sbd.waitFor(kid.id, "\(kid.name)'s first reply", timeout: 30) {
+        $0.lastReply == "Done: hello" && $0.state == .needsYou
+      }
+    }
+    try #require(try sbd.get(parent.id).state == .working, "the parent's turn ended before the children's replies")
+    try #require(try sbd.messagesFromSbd(parent.id).isEmpty)
+    sbd.hold("report")
     let told = try sbd.waitFor(parent.id, "the message", timeout: 30) {
       $0.lastReply?.hasPrefix("Done: Switchboard:") == true
     }
