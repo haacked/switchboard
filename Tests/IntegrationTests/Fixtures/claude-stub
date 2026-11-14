@@ -807,8 +807,8 @@ if [ -e "$SB_HOME/ask-trust" ] &&
   trust_dialog
 fi
 # bash runs the trap only after a foreground command ends. The slow tool call
-# sleeps in the background and waits, so SIGTERM ends it at once, as it ends
-# claude's tool call.
+# sleeps in the background and waits for the sleep. So SIGTERM ends it at
+# once, as SIGTERM ends a tool call of claude.
 trap 'trap "" TERM; [ -n "${slow_pid-}" ] && kill "$slow_pid" 2>/dev/null; [ -n "$onterm" ] && echo stopped >"$onterm"; play sigterm; sleep "$linger"; exit 143' TERM
 # The dialog's reader runs in the background, where stdin would be /dev/null.
 exec 3<&0
