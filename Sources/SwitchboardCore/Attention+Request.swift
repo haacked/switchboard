@@ -30,6 +30,17 @@ public struct InboxRequest: Codable, Equatable, Sendable, SeenVerdict {
   /// subagent, or a Monitor.
   public var launchedInTurn: Bool?
 
+  /// Whether claude's prompt is the request's message. claude shows each
+  /// attached image as `[Image #n]` after the text, so only those may follow
+  /// the message. Any other text after it makes another prompt.
+  static func isPrompt(_ prompt: String, of message: String) -> Bool {
+    guard prompt != message else { return true }
+    guard prompt.hasPrefix(message) else { return false }
+    let rest = prompt.dropFirst(message.count).trimmingCharacters(in: .whitespacesAndNewlines)
+    return rest.hasPrefix("[Image #")
+      && rest.split(whereSeparator: \.isWhitespace).allSatisfy { $0.hasPrefix("[Image") || $0.hasPrefix("#") }
+  }
+
   public init(_ verdict: Verdict, _ facts: SessionFacts, message: String, until: Int64, readMs: Int64) {
     state = verdict.state
     reason = verdict.reason
@@ -55,10 +66,7 @@ extension SessionFacts {
       request = nil
     case "UserPromptSubmit":
       let prompt = event.data["prompt"]?.string ?? ""
-      // The prompt of a message with images adds `[Image #n]` after the request's text.
-      if userPrompt, let message = request?.message, prompt != message, message.isEmpty || !prompt.hasPrefix(message) {
-        request = nil
-      }
+      if userPrompt, let message = request?.message, !InboxRequest.isPrompt(prompt, of: message) { request = nil }
       if Attention.isSubagentResult(prompt) { request?.resultInTurn = true }
     case "PreToolUse" where !event.fromSubagent:
       let tool = event.data["tool_name"]?.string

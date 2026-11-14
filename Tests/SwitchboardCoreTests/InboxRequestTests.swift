@@ -189,6 +189,22 @@ extension InboxRequestTests {
       #expect(f.request != nil)
     }
 
+    /// Only image placeholders may follow the message, so a longer prompt that starts with it is another prompt.
+    @Test(arguments: [
+      "\(mergeMessage) Then rebase too.", "\(mergeMessage)\n[Image #1] and rebase too", "[Image #1]",
+    ])
+    func promptThatGoesOnPastTheMessageClearsTheRequest(_ prompt: String) throws {
+      let f = facts(
+        try before() + [requestEvent(), event("UserPromptSubmit", requestStart, ["prompt": .string(prompt)])])
+
+      #expect(f.request == nil)
+    }
+
+    @Test func imageOnlyPromptKeepsAnImageOnlyRequest() {
+      #expect(InboxRequest.isPrompt("[Image #1] [Image #2]", of: ""))
+      #expect(!InboxRequest.isPrompt("go ahead", of: ""))
+    }
+
     @Test func laterRequestReplacesTheEarlierOne() throws {
       let f = facts(try before() + [requestEvent(), requestEvent(requestAt + 5)])
 
