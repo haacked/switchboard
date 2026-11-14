@@ -27,6 +27,8 @@ public struct Home: Sendable {
   public var drafts: String { "\(path)/drafts" }
   /// Holds `on` while `sb autocontinue on` is in force.
   public var autoContinue: String { "\(path)/auto-continue" }
+  /// Holds `on` while `sb activity on` is in force.
+  public var activityLog: String { "\(path)/activity-log" }
   /// The --mcp-config file that every session gets, which lists the shared MCP servers.
   public var mcpConfig: String { "\(path)/mcp-config.json" }
   /// Where sbd writes each shared MCP server's launcher script.

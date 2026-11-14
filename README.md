@@ -7,12 +7,22 @@ Each session is a folder, or a new git worktree, with the real Claude Code termi
 
 ## Install
 
+On a new Mac, run:
+
+```
+curl -fsSL https://raw.githubusercontent.com/haacked/switchboard/main/bin/bootstrap | bash
+```
+
+`bin/bootstrap` checks for the Xcode Command Line Tools, clones the repo to `~/dev/haacked/switchboard` (or to `$SWITCHBOARD_DIR` when that is set), then runs `bin/install` and `bin/start`. It reuses a checkout that is already there. When the app is already installed, it doesn't change anything, so a dotfiles bootstrap can run it every time.
+
+From a checkout, run:
+
 ```
 bin/install
 bin/start
 ```
 
-`bin/install` builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
+`bin/install` first checks for `tmux` and `gh` and lists the command that installs each one it can't find. It looks only in the folders where `sbd` looks: the system folders, `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. For a tool elsewhere, set its full path in `config.json`. It warns when it can't find `claude` or `gh` isn't signed in. Then it builds the app, copies it to `~/Applications`, links `sb` into `~/.local/bin`, and starts `sbd` as a launchd agent that runs at login. `sb service uninstall` removes the agent.
 
 `bin/start` opens the installed app. `bin/update` quits the app, fast-forwards this checkout to `origin/main`, runs `bin/install`, opens the app again, and prints the changes since the last update: one line per merged PR, from the installed build's commit to the new one. It refuses, with the app still running, when the checkout is not on main, has uncommitted changes, or cannot fast-forward. Quitting the app leaves `sbd` and your sessions running. `bin/changelog FROM [TO]` prints the same list for any range.
 
@@ -472,7 +482,7 @@ bin/bundle          # build/Switchboard.app
 bin/icon            # re-renders assets/icon/AppIcon.icns from AppIcon.svg after you edit it; needs rsvg-convert
 ```
 
-`bin/build`, `bin/test`, `bin/bundle`, and the builds in `bin/test-gui`, `bin/measure`, and `bin/shard-weights` wait for a machine-wide build slot (`bin/lib/build-slot`), so many worktrees can build without overloading the CPU. At most 3 hold a slot at once, and the rest wait in the order they arrived and print `waiting for a build slot (N ahead)`. A slot frees when its holder exits, even from `kill -9`. Each compiling `swift build` and `swift test` runs with `--jobs 4`, or the CPU count when that is lower (`bin/lib/swiftpm`). `SB_BUILD_SLOTS` sets the slot count, and `0` turns the queue off. `SB_BUILD_JOBS` sets the job count, and `0` lets SwiftPM start one job per core. `SB_BUILD_SLOTS_DIR` moves the queue's folder from `~/Library/Caches/Switchboard/build-slots`. That folder must hold only the queue's files, because the helper deletes its own stale temp files there and overwrites its `mutex` and `counter` files.
+`bin/build`, `bin/test`, `bin/bundle`, and the builds in `bin/test-gui`, `bin/measure`, and `bin/shard-weights` wait for a machine-wide build slot (`bin/lib/build-slot`), so many worktrees can build without overloading the CPU. At most 3 hold a slot at once, and the rest wait in the order they arrived and print `waiting for a build slot (N ahead)`. `bin/test` holds one slot for its build and its tests. `bin/test --shards N` takes one slot for its build and one for each shard, so each `swift test` process that runs tests counts against the limit. Sharding is for CI, and `bin/test --shards N` prints a warning when `CI` is not `true`, unless `--force-shards` follows the count. `bin/test` prints the slot and job limits in effect when it starts. A slot frees when its holder exits, even from `kill -9`. Each compiling `swift build` and `swift test` runs with `--jobs 4`, or the CPU count when that is lower (`bin/lib/swiftpm`). `SB_BUILD_SLOTS` sets the slot count, and `0` turns the queue off. `SB_BUILD_JOBS` sets the job count, and `0` lets SwiftPM start one job per core. `SB_BUILD_SLOTS_DIR` moves the queue's folder from `~/Library/Caches/Switchboard/build-slots`. That folder must hold only the queue's files, because the helper deletes its own stale temp files there and overwrites its `mutex` and `counter` files.
 
 Integration suites declare `.blocking(timeLimit:)` in place of `.timeLimit`. Each test waits for a free slot without holding a thread, and its time limit starts once it has the slot. The slots run one test fewer than there are CPUs at once, which keeps one of Swift's pool threads free for async tests. A test that starts a private `sbd` in a suite without the trait records an issue. App tests build `BoardModel` with `offlineModel()`, whose client finds no `sbd`, so a test never reads the sessions of the `sbd` you run.
 

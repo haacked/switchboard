@@ -29,6 +29,11 @@ extension Instance {
 let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCoreTests/Fixtures/replies/decisions.md")
   .path
 
+/// The plan's example reply, which ends by offering to delete a branch.
+let offerDeleteBranchReply = Instance.root.appendingPathComponent(
+  "Tests/SwitchboardCoreTests/Fixtures/replies/offer-delete-branch.md"
+).path
+
 @Suite(.blocking(timeLimit: .seconds(120))) struct TriageTests {
   @Test func summarizesATurnThatEndsInProse() throws {
     let sbd = try Instance()
@@ -247,6 +252,29 @@ let decisionsReply = Instance.root.appendingPathComponent("Tests/SwitchboardCore
     let item = try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }.triage!
     #expect(item.kind == .decision)
     #expect(item.summary == summary)
+  }
+
+  /// The budget skips the summary, so the item comes from the reply's offer.
+  @Test func anOfferWithoutASummaryGetsYesNoAndANamedTitle() throws {
+    let sbd = try Instance(config: ["triage": ["perHour": 0]])
+    try FileManager.default.copyItem(atPath: offerDeleteBranchReply, toPath: "\(sbd.home.path)/offer-delete-branch.md")
+    let s = try sbd.new(prompt: "reply offer-delete-branch")
+
+    let event = try sbd.waitForTriageEvent(s.id)
+
+    #expect(event.data["skipped"]?.string?.contains("summaries in the last hour") == true)
+    let got = try #require(JSON.parse(try sbd.sb("get", "--json", s.id)))
+    let item = try #require(got["triage"])
+    #expect(item["source"]?.string == "fallback")
+    #expect(item["title"]?.string == "Delete the branch haacked/round-trip-drop-old-bounds-v2?")
+    #expect(item["options"]?.array?.compactMap { $0["label"]?.string } == ["Yes", "No"])
+    #expect(item["options"]?.array?.compactMap { $0["message"]?.string } == ["Yes", "No"])
+    #expect(item["message"]?["action"]?["primary"] == .null)
+    #expect(got["reason"]?.string == "offered: Do you want me to delete it?")
+
+    try sbd.sb("choose", s.id, "No")
+
+    try sbd.waitFor("the sent No") { try sbd.events(s.id).contains { $0.kind == "sent" && $0.data["text"] == "No" } }
   }
 
   @Test func aSummaryThatTimesOutFallsBack() throws {

@@ -72,9 +72,17 @@ final class GitHubPoller {
     /// branch's lookup finds a PR. It also drops it when the lookup finds none
     /// and the recorded PR is the folder's earlier work, as `readPRs` decides.
     var recordedPRId: String?
+    /// The linked or recorded PRs that are the folder's open earlier work and
+    /// that the folder did not make on its current branch. They do not count,
+    /// but the poller keeps reading them, so a later head that the folder
+    /// made brings them back.
+    var hidden: Set<String> = []
 
     /// The branch's PR comes first, then the transcript's.
-    var prId: String? { branch.prId ?? transcript.prId ?? recordedPRId }
+    var prId: String? { readIds.first { !hidden.contains($0) } }
+
+    /// The PRs that the poller reads for the session, hidden ones included.
+    var readIds: [String] { [branch.prId, transcript.prId, recordedPRId].compactMap { $0 } }
   }
 
   /// The folder's branch and its PR.
@@ -100,6 +108,11 @@ final class GitHubPoller {
     /// the last value while HEAD is detached. It is empty when the reflog
     /// can't be read.
     var checkedOut: Set<String> = []
+    /// The commits that the folder made on its branch since it switched to
+    /// it, from HEAD's reflog. nil when the reflog shows no switch.
+    var made: Set<String>?
+    /// The size of HEAD's reflog when the poller last read it.
+    var reflogSize: UInt64?
   }
 
   /// The session's transcript and the PR of its last pr-link line.
@@ -220,7 +233,7 @@ final class GitHubPoller {
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
     updatePlans(all: all, now: now, stats: &stats)
-    let kept = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId))
+    let kept = Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
     pruneCodeOwners()
@@ -265,7 +278,8 @@ final class GitHubPoller {
     if tracked[s.id] == nil, let pr = s.facts.pr, let run = pr.depot, prs[pr.id] == nil { recordedDepot[pr.id] = run }
     var t =
       tracked[s.id] ?? Tracked(transcript: Transcript(claudeSessionId: s.claudeSessionId), recordedPRId: s.facts.pr?.id)
-    refreshBranch(&t.branch, cwd: s.cwd, at: site, all: all, now: now, configs: &shared.configs)
+    refreshBranch(
+      &t.branch, cwd: s.cwd, at: site, all: all, now: now, watchReflog: !t.hidden.isEmpty, configs: &shared.configs)
     // `/clear` starts another conversation, with its own transcript. The
     // session keeps the PR that the old one linked until the new one links
     // another.
@@ -291,9 +305,11 @@ final class GitHubPoller {
 
   /// Reading the HEAD file and the config's modification time costs less
   /// than running git, so git runs only when either changed. A folder outside
-  /// git is checked again once per idle interval.
+  /// git is checked again once per idle interval. A commit changes HEAD's
+  /// reflog but not the HEAD file, so `watchReflog` also checks the reflog's
+  /// size. Only a session with a hidden PR needs that.
   private func refreshBranch(
-    _ b: inout Branch, cwd: String, at site: any SessionSite, all: Bool, now: Int64,
+    _ b: inout Branch, cwd: String, at site: any SessionSite, all: Bool, now: Int64, watchReflog: Bool,
     configs: inout [SitePath: [String: String]]
   ) {
     let machine = site.machine
@@ -308,7 +324,8 @@ final class GitHubPoller {
       head = b.gitDir.flatMap { read("\($0)/HEAD") }
     }
     let stamp = b.commonDir.flatMap { machine.modified("\($0)/config") }
-    guard all || head != b.head || stamp != b.configStamp else { return }
+    let reflogMoved = watchReflog && b.gitDir.flatMap { machine.size("\($0)/logs/HEAD") } != b.reflogSize
+    guard all || head != b.head || stamp != b.configStamp || reflogMoved else { return }
     b.head = head
     b.configStamp = stamp
     // A rebase or a bisect detaches HEAD for a while, and the session keeps
@@ -333,8 +350,12 @@ final class GitHubPoller {
           GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
         }
       }
-      let local = b.gitDir.flatMap { read("\($0)/logs/HEAD") }.map(GitHub.checkedOutBranches) ?? []
+      let reflogData = b.gitDir.flatMap { machine.read("\($0)/logs/HEAD", from: 0, count: nil) }
+      b.reflogSize = reflogData.map { UInt64($0.count) }
+      let reflog = reflogData.map { String(decoding: $0, as: UTF8.self) }
+      let local = reflog.map(GitHub.checkedOutBranches) ?? []
       b.checkedOut = local.union(local.compactMap { GitHub.upstreamName(of: $0, config: config) })
+      b.made = reflog.flatMap { GitHub.commitsSinceSwitch(reflog: $0, to: branch) }
     }
     if key != b.key {
       b.key = key
@@ -455,7 +476,7 @@ final class GitHubPoller {
     // A PR in `waited.pending` or in Trunk's queue polls at the pending rate. A
     // PR with any open wait also polls at once when the wait is newer than the
     // last read. That read can't show what happened after the wait was set.
-    let ids = Set(tracked.values.compactMap(\.prId)).union(targets.values.compactMap(\.prId)).sorted().filter {
+    let ids = Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId)).sorted().filter {
       all || (waited.created[$0] ?? 0) > (prs[$0]?.polled ?? 0)
         || GitHub.isDue(
           prs[$0]?.pr, lastPolled: prs[$0]?.polled, now: now, pendingMs: settings.pendingMs,
@@ -486,19 +507,26 @@ final class GitHubPoller {
       if let prId = t.transcript.prId, gone.contains(prId) { t.transcript.prId = nil }
       if let prId = t.recordedPRId, gone.contains(prId) { t.recordedPRId = nil }
       // A linked or recorded PR in the branch's repo whose head branch the
-      // folder had checked out before belongs to the session's earlier work.
-      // It no longer counts once GitHub answers that the current branch has
-      // no PR. A PR whose head another checkout made still counts, in this
-      // repo or another, because a session can open its PR from another
-      // worktree.
+      // folder had checked out before belongs to the session's earlier work,
+      // unless the folder made the PR's head commit on its current branch.
+      // Earlier work stops counting once GitHub answers that the current
+      // branch has no PR. A PR whose head another checkout made still counts,
+      // in this repo or another, because a session can open its PR from
+      // another worktree.
+      t.hidden = []
       if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
-        let checkedOut = t.branch.checkedOut
-        let earlier = { (id: String?) -> Bool in
-          guard let pr = id.flatMap({ self.prs[$0]?.pr }) else { return false }
-          return pr.repo.lowercased() == repo.lowercased() && pr.head != branch && checkedOut.contains(pr.head)
+        for id in [t.transcript.prId, t.recordedPRId].compactMap({ $0 }) {
+          guard let pr = prs[id]?.pr else { continue }
+          switch GitHub.earlierStanding(
+            pr, repo: repo, branch: branch, checkedOut: t.branch.checkedOut, made: t.branch.made)
+          {
+          case .current: break
+          case .hidden: t.hidden.insert(id)
+          case .dropped:
+            if t.transcript.prId == id { t.transcript.prId = nil }
+            if t.recordedPRId == id { t.recordedPRId = nil }
+          }
         }
-        if earlier(t.transcript.prId) { t.transcript.prId = nil }
-        if earlier(t.recordedPRId) { t.recordedPRId = nil }
       }
       tracked[id] = t
     }

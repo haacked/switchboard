@@ -178,7 +178,7 @@ extension Service {
         s.followup?.started = nowMs()
       }
       record(session.id, "followup-started", ["cwd": .string(folder.cwd), "branch": .string(branch)])
-      try launch(session.id, prompt: session.followup?.prompt)
+      try launch(session.id, prompt: session.followup?.prompt, trigger: .followup)
       return summary(session.id)
     }
   }

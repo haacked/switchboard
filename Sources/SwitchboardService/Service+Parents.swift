@@ -82,7 +82,7 @@ extension Service {
       }
       guard let lines = parentNotices.unsent[parent], !lines.isEmpty, canTakeNotice(e, now: now) else { continue }
       do {
-        _ = try send(parent, ParentNotice.message(lines), byUser: false)
+        _ = try send(parent, ParentNotice.message(lines), byUser: false, trigger: .notice)
         parentNotices.unsent[parent] = nil
       } catch {
         logLine("can't tell \(parent) about its children: \(error)")
