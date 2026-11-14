@@ -93,7 +93,7 @@ extension Service {
     }
     guard let (session, sharedWith) = found else { return gone }
     do {
-      _ = try site(for: session).scoped("the cleanup check of \(id)") {
+      _ = try site(for: session).scoped("the cleanup check of \(session.mention)") {
         try checkCleanup(session, pr: pr, sharedWith: sharedWith, at: $0.site)
       }
       return nil

@@ -5,6 +5,7 @@ import SwitchboardCore
 /// is the refusal that names each one.
 struct OpenTodoError: Error, CustomStringConvertible {
   let session: String
+  let name: String
   /// The open to-dos that the delete left unresolved.
   let unresolved: [Note]
   /// Every open to-do of the session, which the suggested command resolves.
@@ -37,7 +38,7 @@ struct OpenTodoError: Error, CustomStringConvertible {
   }
 
   var description: String {
-    let subject = kept.map { "\($0), because it" } ?? session
+    let subject = kept.map { "\($0), because it" } ?? sessionMention(name: name, id: session)
     return "\(subject) has an open to-do: \(list). \(hint)\(stayed)"
   }
 }
@@ -68,12 +69,13 @@ extension Service {
     guard let entry = entries[id] else { throw APIError("no session \(id)") }
     let open = entry.session.openTodos
     if let stray = resolving.sorted().first(where: { ref in !open.contains { $0.id == ref } }) {
-      throw APIError("\(stray) is not an open to-do of \(id).")
+      throw APIError("\(stray) is not an open to-do of \(mention(id)).")
     }
     let unresolved = open.filter { !resolving.contains($0.id) }
     guard unresolved.isEmpty else {
       let command = entry.session.waitsToStart ? "sb followup rm" : "sb rm"
-      throw OpenTodoError(session: id, unresolved: unresolved, open: open, command: command)
+      throw OpenTodoError(
+        session: id, name: entry.session.name, unresolved: unresolved, open: open, command: command)
     }
     let resolution = Note.Resolution(t: nowMs(), by: .you, how: "resolved and deleted the session")
     return open.map {

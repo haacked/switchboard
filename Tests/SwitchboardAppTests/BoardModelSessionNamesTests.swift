@@ -201,6 +201,47 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
     #expect(model.sessionNames.entry(liveID)?.removed == false)
   }
 
+  // MARK: Reading removed-ls again
+
+  @Test func aFailedRemovedReadReadsAgain() {
+    let model = offlineModel()
+    _ = model.takeRemovedRead()
+
+    model.apply(.success([named(liveID, liveName)]), followups: nil, removed: nil, readRemoved: true)
+
+    #expect(model.readRemovedNext)
+  }
+
+  /// A failed `ls` drops the `removed-ls` answer, so the next refresh reads it again.
+  @Test func aFailedListReadsRemovedAgain() {
+    let model = offlineModel()
+    _ = model.takeRemovedRead()
+
+    model.apply(.failure(Boom()), followups: nil, removed: [tombstone(goneID, goneName)], readRemoved: true)
+
+    #expect(model.readRemovedNext)
+  }
+
+  @Test func anIdThatLeavesTheListReadsRemovedAgain() {
+    let model = offlineModel()
+    model.apply(.success([named(liveID, liveName), named(otherID, otherName)]), followups: nil, removed: [])
+    _ = model.takeRemovedRead()
+
+    model.apply(.success([named(otherID, otherName)]), followups: nil, removed: nil)
+
+    #expect(model.readRemovedNext)
+  }
+
+  @Test func aSuccessfulReadOfAnUnchangedListDoesNotReadAgain() {
+    let model = offlineModel()
+    model.apply(.success([named(liveID, liveName)]), followups: nil, removed: [])
+    _ = model.takeRemovedRead()
+
+    model.apply(.success([named(liveID, liveName)]), followups: nil, removed: [], readRemoved: true)
+
+    #expect(!model.readRemovedNext)
+  }
+
   // MARK: Publishing
 
   /// A changed reason republishes `allSessions`. It changes no id or name, so
@@ -338,14 +379,14 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
   // MARK: Text outside SwiftUI
 
   @MainActor
-  @Suite struct NotificationBody {
+  @Suite struct InboxLine {
     @Test func aTitleThatNamesASessionIdShowsTheSessionsName() {
       let model = offlineModel()
       var s = named(otherID, otherName, state: .needsYou)
       s.triage = TriageItem(title: "Review \(liveID)'s PR", kind: .decision, summary: "", source: .summary)
       model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
 
-      #expect(model.notificationBody(s) == "Review \(liveName)'s PR")
+      #expect(model.inboxLine(s) == "Review \(liveName)'s PR")
     }
 
     @Test func aReasonThatNamesASessionIdShowsTheSessionsName() {
@@ -354,7 +395,7 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
       s.triage = nil
       model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
 
-      #expect(model.notificationBody(s) == "Waiting on \(liveName) to merge")
+      #expect(model.inboxLine(s) == "Waiting on \(liveName) to merge")
     }
 
     @Test func aRemovedSessionShowsItsTombstoneName() {
@@ -363,7 +404,7 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
       s.triage = nil
       model.apply(.success([s]), followups: nil, removed: [tombstone(goneID, goneName)])
 
-      #expect(model.notificationBody(s) == "Waiting on \(goneName) to merge")
+      #expect(model.inboxLine(s) == "Waiting on \(goneName) to merge")
     }
 
     @Test func aBodyWithoutIdsStaysAsWritten() {
@@ -372,30 +413,7 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
       s.triage = nil
       model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
 
-      #expect(model.notificationBody(s) == "Asked which flag to remove")
-    }
-  }
-
-  @MainActor
-  @Suite struct MenuBarTitle {
-    @Test func aReasonThatNamesASessionIdShowsTheSessionsName() {
-      let model = offlineModel()
-      var s = named(otherID, otherName, state: .needsYou, reason: "Waiting on \(liveID) to merge")
-      s.triage = nil
-      model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
-
-      #expect(
-        MenuBarContent.title(for: s, name: s.name, names: model.sessionNames)
-          == "\(otherName): Waiting on \(liveName) to merge")
-    }
-
-    @Test func aTitleWithoutIdsIsTheNameAndTheReason() {
-      var s = named(otherID, otherName, state: .needsYou, reason: "Asked which flag to remove")
-      s.triage = nil
-
-      #expect(
-        MenuBarContent.title(for: s, name: s.name, names: SessionNames(live: [:], removed: [:]))
-          == "\(otherName): Asked which flag to remove")
+      #expect(model.inboxLine(s) == "Asked which flag to remove")
     }
   }
 

@@ -127,7 +127,7 @@ private struct GreyLine: View {
       .foregroundStyle(.secondary)
       .lineLimit(1)
       .truncationMode(.tail)
-      .help(names.plainText(text))
+      .help(names.replacingIDs(in: text))
       .padding(.horizontal, 10)
   }
 }

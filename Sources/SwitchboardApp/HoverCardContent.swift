@@ -62,7 +62,7 @@ struct HoverCardContent: Equatable {
       s.lastReply.map { String($0.drop(while: \.isWhitespace).prefix(400)) },
     ]
     guard
-      let text = candidates.lazy.compactMap({ $0.map { oneLine(names.plainText($0), max: 160) } }).first(where: {
+      let text = candidates.lazy.compactMap({ $0.map { oneLine(names.replacingIDs(in: $0), max: 160) } }).first(where: {
         !$0.isEmpty
       })
     else { return nil }

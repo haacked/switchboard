@@ -70,7 +70,9 @@ struct DocketView: View {
     .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Row"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
-      Text(model.sessionNames.plainText(todos.message(before: "docket keeps the review. Open docket to abandon it.")))
+      Text(
+        model.sessionNames.replacingIDs(
+          in: todos.message(before: "docket keeps the review. Open docket to abandon it.")))
     }
   }
 

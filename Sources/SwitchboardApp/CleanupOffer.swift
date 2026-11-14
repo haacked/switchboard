@@ -50,6 +50,7 @@ struct CleanupButton: View {
 
 /// A blocked cleanup's failed check, or nothing.
 struct CleanupNote: View {
+  @Environment(\.sessionNames) private var names
   let session: SessionSummary
 
   var body: some View {
@@ -62,7 +63,7 @@ struct CleanupNote: View {
       .font(.caption)
       .foregroundStyle(.secondary)
       .lineLimit(2)
-      .help(note)
+      .help(names.replacingIDs(in: note))
     }
   }
 }

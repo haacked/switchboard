@@ -6,16 +6,16 @@ import Testing
 @testable import SwitchboardApp
 
 @Suite struct InlineTextTests {
-  /// The `AttributedString` that `MarkdownView` drew for the same runs before
-  /// the conversion moved into `InlineText.swift`.
-  @Test func attributedKeepsEmphasisCodeLinksAndFootnotes() {
-    typealias Run = MarkdownText.Run
-    let text = MarkdownText([
-      Run("Read "), Run("this", .emphasis), Run(", run "), Run("sb ls", .code), Run(", see "),
-      Run("the docs", link: "https://example.com/docs"), Run("."), Run("1", .footnote),
-    ])
+  /// Emphasis, code, a link, and a footnote, with no session id.
+  static let styled = MarkdownText([
+    MarkdownText.Run("Read "), MarkdownText.Run("this", .emphasis), MarkdownText.Run(", run "),
+    MarkdownText.Run("sb ls", .code), MarkdownText.Run(", see "),
+    MarkdownText.Run("the docs", link: "https://example.com/docs"), MarkdownText.Run("."),
+    MarkdownText.Run("1", .footnote),
+  ])
 
-    let result = text.attributed
+  @Test func attributedKeepsEmphasisCodeLinksAndFootnotes() {
+    let result = Self.styled.attributed
 
     var emphasis = AttributedString("this")
     emphasis.inlinePresentationIntent = .emphasized
@@ -37,7 +37,7 @@ import Testing
     #expect(result == expected)
   }
 
-  /// `InlineText(plain:)` replaced `Text(String)`, which reads no Markdown.
+  /// Plain text keeps Markdown syntax as literal characters.
   @Test(arguments: ["**x**", "[a](https://example.com)", "`c`", "<a href=\"x\">y</a>", "one\ntwo", "_y_ ~z~", ""])
   func plainKeepsTheTextVerbatim(_ s: String) {
     #expect(MarkdownText(stringLiteral: s).attributed == AttributedString(s))
@@ -186,22 +186,14 @@ extension InlineTextTests {
 
     // MARK: Unchanged output
 
-    /// The Stage 1 fixture: emphasis, code, a link, and a footnote, with no id.
-    static let styled = MarkdownText([
-      MarkdownText.Run("Read "), MarkdownText.Run("this", .emphasis), MarkdownText.Run(", run "),
-      MarkdownText.Run("sb ls", .code), MarkdownText.Run(", see "),
-      MarkdownText.Run("the docs", link: "https://example.com/docs"), MarkdownText.Run("."),
-      MarkdownText.Run("1", .footnote),
-    ])
-
     @Test(arguments: [true, false])
-    func aTextWithoutIdsDrawsWhatStageOneDrew(_ links: Bool) {
-      let result = render(Self.styled, links: links)
+    func aTextWithoutIdsDrawsLikeMarkdownTextAttributed(_ links: Bool) {
+      let result = render(InlineTextTests.styled, links: links)
 
-      #expect(result.text == Self.styled.attributed)
+      #expect(result.text == InlineTextTests.styled.attributed)
     }
 
-    /// Risk 1's rollback: an empty directory draws today's text.
+    /// With no names to resolve, the text draws exactly as `MarkdownText.attributed` draws it.
     @Test func anEmptyDirectoryDrawsTheTextAsWritten() {
       let text = MarkdownText(stringLiteral: "Ask \(liveID) to rebase.")
 
@@ -246,7 +238,7 @@ extension InlineTextTests {
     func linkedCharactersMatchThePlainTextPath(_ s: String) {
       let linked = render(plain: s, links: true)
 
-      #expect(String(linked.text.characters) == names.plainText(s))
+      #expect(String(linked.text.characters) == names.replacingIDs(in: s))
     }
 
     // MARK: Help
@@ -293,7 +285,7 @@ extension InlineTextTests {
 
     // MARK: Environment
 
-    /// A host that never sets the value draws today's text.
+    /// A view whose host never sets `sessionNames` draws ids as written.
     @Test func theEnvironmentDirectoryStartsEmpty() {
       #expect(EnvironmentValues().sessionNames == SessionNames(live: [:], removed: [:]))
     }

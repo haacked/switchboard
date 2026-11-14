@@ -827,7 +827,7 @@ extension Instance {
     let r = try sbd.run(["rm", s.id] + (worktree ? ["--worktree"] : []))
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("\(s.id) has an open to-do"), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("\(s.name) (\(s.id)) has an open to-do"), Comment(rawValue: r.stderr))
     for todo in [first, second] {
       #expect(r.stderr.contains(todo.id), Comment(rawValue: r.stderr))
       #expect(r.stderr.contains("\"\(todo.text)\""), Comment(rawValue: r.stderr))

@@ -107,7 +107,7 @@ struct ContentView: View {
       ) { offer in
         Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
       } message: { offer in
-        Text(model.sessionNames.plainText(offer.message))
+        Text(model.sessionNames.replacingIDs(in: offer.message))
       }
     }
     .toolbar {
@@ -150,7 +150,7 @@ struct ContentView: View {
     ) { session, todos in
       Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
     } message: { session, todos in
-      Text(model.sessionNames.plainText(todos.message(before: BoardModel.deletePlan(session).message)))
+      Text(model.sessionNames.replacingIDs(in: todos.message(before: BoardModel.deletePlan(session).message)))
     }
     .sheet(item: $model.newSession) {
       NewSessionView(request: $0).environmentObject(model)

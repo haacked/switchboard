@@ -196,7 +196,6 @@ private struct HoverCardView: View {
   var body: some View {
     if let s = model.board.first(where: { $0.id == id }) {
       HoverCardBody(content: HoverCardContent(s, activeAccount: model.activeAccountFolder, names: model.sessionNames))
-        .environment(\.sessionNames, model.sessionNames)
     }
   }
 }

@@ -195,15 +195,11 @@ extension Service {
 
   // MARK: Source audit
 
-  static let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-    .deletingLastPathComponent().appendingPathComponent("Sources")
-
   /// Each `shortId("s"` in `Sources`, with the name of the nearest `func` above it.
   static func sessionIdDraws() throws -> [(file: String, function: String?)] {
     let pattern = try Regex(#"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)|shortId\(\s*"s""#)
-    let files = FileManager.default.enumerator(atPath: sources.path)?.compactMap { $0 as? String } ?? []
-    return try files.filter { $0.hasSuffix(".swift") }.sorted().flatMap { file -> [(file: String, function: String?)] in
-      let text = try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8)
+    return try SourceAudit.sourceFiles().flatMap { source -> [(file: String, function: String?)] in
+      let (file, text) = source
       var function: String?
       var draws: [(file: String, function: String?)] = []
       for match in text.matches(of: pattern) {

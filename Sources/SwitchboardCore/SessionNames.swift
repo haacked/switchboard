@@ -111,9 +111,8 @@ public struct SessionNames: Equatable, Sendable {
     return pieces
   }
 
-  public func matches(_ text: MarkdownText) -> [Match] { pieces(text).compactMap(\.match) }
-
-  public func plainText(_ string: String) -> String {
+  /// `string` with each session id that resolves replaced by the session's name. No Markdown in it is parsed.
+  public func replacingIDs(in string: String) -> String {
     pieces(MarkdownText(stringLiteral: string)).map(\.run.text).joined()
   }
 
@@ -177,7 +176,8 @@ public struct SessionNames: Equatable, Sendable {
     let before = name + [" ", "("]
     let start = id.lowerBound - before.count
     if start >= run.lowerBound, id.upperBound < run.upperBound, s[id.upperBound] == ")",
-      s[start..<id.lowerBound].elementsEqual(before), start == 0 || Self.allowedBefore(s[start - 1]),
+      Self.spells(s[start..<id.lowerBound], before, atTextStart: start == 0),
+      start == 0 || Self.allowedBefore(s[start - 1]),
       Self.allowedAfter(id.upperBound + 1, s)
     {
       return Span(range: start..<id.upperBound + 1, match: span.match)
@@ -188,6 +188,17 @@ public struct SessionNames: Equatable, Sendable {
       return Span(range: id.lowerBound..<end, match: span.match)
     }
     return span
+  }
+
+  /// Whether `written` is `expected`. At the start of the text the first letter may differ in case, because a
+  /// title capitalizes it.
+  private static func spells(_ written: ArraySlice<Unicode.Scalar>, _ expected: [Unicode.Scalar], atTextStart: Bool)
+    -> Bool
+  {
+    if written.elementsEqual(expected) { return true }
+    guard atTextStart, let first = written.first, let expectedFirst = expected.first else { return false }
+    return first.properties.lowercaseMapping == expectedFirst.properties.lowercaseMapping
+      && written.dropFirst().elementsEqual(expected.dropFirst())
   }
 
   /// The `s` prefix and the characters that `shortId` adds.

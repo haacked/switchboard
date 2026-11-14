@@ -166,7 +166,7 @@ final class BoardModel: ObservableObject {
   /// The next refresh reads `removed-ls`. It starts true, and an id that
   /// leaves `ls` sets it. A read that fails sets it again. So does a read
   /// that `apply` drops because `ls` failed.
-  private var readRemovedNext = true
+  private(set) var readRemovedNext = true
   /// The ids and names that `updateSessionNames` last built the directory from.
   private var lastListed: [(id: String, name: String)] = []
   /// The groups, read every 5 s with the follow-ups.
@@ -427,8 +427,7 @@ final class BoardModel: ObservableObject {
     if readFollowups { followupsRead = Date() }
     let readUsage = Date().timeIntervalSince(usageRead) >= 60
     if readUsage { usageRead = Date() }
-    let readRemoved = readRemovedNext
-    readRemovedNext = false
+    let readRemoved = takeRemovedRead()
     poller.async {
       let (result, more) = Self.read(
         sessions: client.sessions,
@@ -447,8 +446,7 @@ final class BoardModel: ObservableObject {
         if let proposals, self.planProposals != proposals { self.planProposals = proposals }
         if let issues, self.issueList != issues { self.issueList = issues }
         if let usage, self.usage != usage { self.usage = usage }
-        if readRemoved, removed == nil || (try? result.get()) == nil { self.readRemovedNext = true }
-        self.apply(result, followups: more, removed: removed)
+        self.apply(result, followups: more, removed: removed, readRemoved: readRemoved)
       }
     }
   }
@@ -476,10 +474,19 @@ final class BoardModel: ObservableObject {
       }
   }
 
+  /// Returns whether this refresh reads `removed-ls`, and clears `readRemovedNext`.
+  func takeRemovedRead() -> Bool {
+    defer { readRemovedNext = false }
+    return readRemovedNext
+  }
+
   /// A nil `followups` or `removed` means the refresh did not read that list.
+  /// `readRemoved` says whether it tried to read `removed-ls`.
   func apply(
-    _ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?, removed: [RemovedSession]? = nil
+    _ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?, removed: [RemovedSession]? = nil,
+    readRemoved: Bool = false
   ) {
+    if readRemoved, removed == nil || (try? result.get()) == nil { readRemovedNext = true }
     switch result {
     case .success(let list):
       // Assigning a @Published property republishes even an equal value. A
@@ -540,13 +547,14 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  func notificationBody(_ s: SessionSummary) -> String { sessionNames.plainText(s.triage?.title ?? s.reason) }
+  /// The session's Inbox line, with names in place of ids. The menu bar and the notification both show it.
+  func inboxLine(_ s: SessionSummary) -> String { sessionNames.replacingIDs(in: s.triage?.title ?? s.reason) }
 
   private func notify(_ s: SessionSummary) {
     guard Bundle.main.bundleIdentifier != nil else { return }
     let content = UNMutableNotificationContent()
     content.title = "\(inboxName(s)) needs you"
-    content.body = notificationBody(s)
+    content.body = inboxLine(s)
     content.userInfo = ["session": s.id]
     UNUserNotificationCenter.current().add(
       UNNotificationRequest(identifier: "\(s.id)-\(s.since)", content: content, trigger: nil))

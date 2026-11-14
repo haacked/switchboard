@@ -138,7 +138,7 @@ extension Instance {
     let r = try sbd.run("rm", s.id)
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("has an open to-do"), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("\(Self.name) (\(s.id)) has an open to-do"), Comment(rawValue: r.stderr))
     #expect(try sbd.client.sessions().map(\.id) == [s.id])
     #expect(try sbd.listRemoved().isEmpty)
   }

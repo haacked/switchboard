@@ -1520,7 +1520,7 @@ public final class Service {
       do {
         // On a host, every check and every git command runs on one connection, and the scope's machine refuses
         // each command once one got no answer.
-        try site.scoped("the removal of \(session.id)") { scope in
+        try site.scoped("the removal of \(session.mention)") { scope in
           let at = scope.site
           // Only a removal of the worktree reads the answer, so a plain rm asks a host nothing about the folder.
           let folderGone = removesWorktree ? try folderIsGone(session.cwd, at: at) : false

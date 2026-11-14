@@ -193,7 +193,8 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button(Self.title(for: s, name: model.inboxName(s), names: model.sessionNames)) {
+        let title = "\(model.inboxName(s)): \(model.inboxLine(s))"
+        Button(title) {
           model.selection = s.id
           show()
         }
@@ -202,10 +203,6 @@ struct MenuBarContent: View {
     Divider()
     Button("Open Switchboard") { show() }
     Button("Quit") { NSApp.terminate(nil) }
-  }
-
-  static func title(for s: SessionSummary, name: String, names: SessionNames) -> String {
-    "\(name): \(names.plainText(s.triage?.title ?? s.reason))"
   }
 
   private func show() {

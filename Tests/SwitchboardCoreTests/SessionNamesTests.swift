@@ -165,6 +165,9 @@ private let changedPlain: [(String, String)] = [
   ("sn4mzz (redo sgcctv)", "⟨sn4mzz⟩"),
   ("zsh-startup-for-switchboard (seb4ec) and seb4ec", "⟨seb4ec⟩ and ⟨seb4ec⟩"),
   ("Ask zsh-startup-for-switchboard (seb4ec).", "Ask ⟨seb4ec⟩."),
+  // A title capitalizes its first letter, so the name there may start with a capital.
+  ("Zsh-startup-for-switchboard (seb4ec) is done", "⟨seb4ec⟩ is done"),
+  ("Ask Zsh-startup-for-switchboard (seb4ec)", "Ask Zsh-startup-for-switchboard (⟨seb4ec⟩)"),
   ("Ask seb4ec (zsh-startup-for-switchboard).", "Ask ⟨seb4ec⟩."),
   // Text that touches the closing parenthesis: only the id changes.
   ("zsh-startup-for-switchboard (seb4ec)x", "zsh-startup-for-switchboard (⟨seb4ec⟩)x"),
@@ -233,6 +236,10 @@ private let changedMarkdown: [(String, [Piece])] = [
   (
     "**zsh-startup-for-switchboard** (seb4ec)",
     [piece("zsh-startup-for-switchboard", .strong), piece(" ("), mention("seb4ec"), piece(")")]
+  ),
+  (
+    "seb4ec (*zsh-startup-for-switchboard*)",
+    [mention("seb4ec"), piece(" ("), piece("zsh-startup-for-switchboard", .emphasis), piece(")")]
   ),
   ("zsh-startup-for-switchboard (`seb4ec`)", [piece("zsh-startup-for-switchboard ("), mention("seb4ec"), piece(")")]),
 ]
@@ -312,7 +319,7 @@ private let changedMarkdown: [(String, [Piece])] = [
 
   @Test(arguments: unchangedPlain)
   func plainStringThatMustNotChangeComesBackAsWritten(_ input: String) {
-    #expect(names.plainText(input) == input)
+    #expect(names.replacingIDs(in: input) == input)
   }
 
   @Test(arguments: changedPlain)
@@ -322,14 +329,7 @@ private let changedMarkdown: [(String, [Piece])] = [
 
   @Test(arguments: changedPlain)
   func plainStringIdsBecomeNames(_ input: String, _ expected: String) {
-    #expect(names.plainText(input) == expectedPlain(expected))
-  }
-
-  @Test(arguments: unchangedPlain + changedPlain.map(\.0))
-  func plainTextAndPiecesAgree(_ input: String) {
-    let joined = names.pieces(MarkdownText(stringLiteral: input)).map(\.run.text).joined()
-
-    #expect(names.plainText(input) == joined)
+    #expect(names.replacingIDs(in: input) == expectedPlain(expected))
   }
 
   @Test(arguments: unchangedPlain + changedPlain.map(\.0))
@@ -338,7 +338,7 @@ private let changedMarkdown: [(String, [Piece])] = [
     let text = MarkdownText(stringLiteral: input)
 
     #expect(names.pieces(text) == unchanged(text))
-    #expect(names.plainText(input) == input)
+    #expect(names.replacingIDs(in: input) == input)
   }
 
   @Test(arguments: [
@@ -378,6 +378,12 @@ private let changedMarkdown: [(String, [Piece])] = [
       return
     }
     #expect(code.contains("seb4ec"))
+  }
+
+  @Test func aClosingParenthesisInAnotherRunKeepsTheNameAsWritten() {
+    let text = text(Run("zsh-startup-for-switchboard (seb4ec"), Run(")", .emphasis))
+
+    #expect(names.pieces(text) == [piece("zsh-startup-for-switchboard ("), mention("seb4ec"), piece(")", .emphasis)])
   }
 
   @Test func footnoteRunPassesThrough() {
@@ -421,7 +427,7 @@ private let changedMarkdown: [(String, [Piece])] = [
 
     #expect(names.isEmpty)
     #expect(names.entry("seb4ec") == nil)
-    #expect(names.plainText("seb4ec () and sq7kpm") == "seb4ec () and sq7kpm")
+    #expect(names.replacingIDs(in: "seb4ec () and sq7kpm") == "seb4ec () and sq7kpm")
   }
 
   @Test func collapseThatOverlapsAnEarlierOneStillReplacesItsId() {
@@ -439,25 +445,11 @@ private let changedMarkdown: [(String, [Piece])] = [
 
   @Test(arguments: unchangedPlain)
   func textWithoutIdsHasNoMatches(_ input: String) {
-    #expect(names.matches(MarkdownText(stringLiteral: input)).isEmpty)
-  }
-
-  @Test(arguments: changedPlain.map(\.0))
-  func matchesAgreeWithPiecesForPlainText(_ input: String) {
-    let text = MarkdownText(stringLiteral: input)
-
-    #expect(names.matches(text) == names.pieces(text).compactMap(\.match))
-  }
-
-  @Test(arguments: changedMarkdown.map(\.0) + unchangedMarkdown)
-  func matchesAgreeWithPiecesForMarkdown(_ markdown: String) throws {
-    let text = try paragraph(markdown)
-
-    #expect(names.matches(text) == names.pieces(text).compactMap(\.match))
+    #expect(names.pieces(MarkdownText(stringLiteral: input)).allSatisfy { $0.match == nil })
   }
 
   @Test func matchesReportLiveAndRemovedSessions() {
-    let matches = names.matches("sgcctv and sq7kpm")
+    let matches = names.pieces("sgcctv and sq7kpm").compactMap(\.match)
 
     #expect(
       matches == [
