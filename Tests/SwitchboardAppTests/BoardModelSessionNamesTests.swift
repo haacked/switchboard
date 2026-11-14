@@ -380,15 +380,18 @@ private func tombstone(_ id: String, _ name: String, removed: Int64 = 1_794_377_
   @Suite struct MenuBarTitle {
     @Test func aReasonThatNamesASessionIdShowsTheSessionsName() {
       let model = offlineModel()
-      let s = named(otherID, otherName, state: .needsYou, reason: "Waiting on \(liveID) to merge")
+      var s = named(otherID, otherName, state: .needsYou, reason: "Waiting on \(liveID) to merge")
+      s.triage = nil
       model.apply(.success([named(liveID, liveName), s]), followups: nil, removed: nil)
 
       #expect(
-        MenuBarContent.title(for: s, name: s.name, names: model.sessionNames) == "\(otherName): Waiting on \(liveName) to merge")
+        MenuBarContent.title(for: s, name: s.name, names: model.sessionNames)
+          == "\(otherName): Waiting on \(liveName) to merge")
     }
 
     @Test func aTitleWithoutIdsIsTheNameAndTheReason() {
-      let s = named(otherID, otherName, state: .needsYou, reason: "Asked which flag to remove")
+      var s = named(otherID, otherName, state: .needsYou, reason: "Asked which flag to remove")
+      s.triage = nil
 
       #expect(
         MenuBarContent.title(for: s, name: s.name, names: SessionNames(live: [:], removed: [:]))
