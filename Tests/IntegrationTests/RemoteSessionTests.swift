@@ -401,12 +401,13 @@ private struct Lifecycle {
 
   /// The move may refuse as a whole or skip the session. Either way it names the reason and moves nothing.
   @Test func anAccountMoveLeavesARemoteSessionUnderTheHostsLogin() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.unstartedRemote()
     for name in ["A", "B"] {
       try FileManager.default.createDirectory(atPath: sbd.account(name), withIntermediateDirectories: true)
       FileManager.default.createFile(atPath: "\(sbd.account(name))/.claude.json", contents: Data("{}".utf8))
     }
-    try sbd.restart(setting: "claudeConfigDirs", to: .array(["A", "B"].map { .string(sbd.account($0)) }))
+    try sbd.set("claudeConfigDirs", to: .array(["A", "B"].map { .string(sbd.account($0)) }))
+    try sbd.startSbd()
     let s = try start(sbd)
     try stop(sbd, s.id)
 
@@ -423,12 +424,13 @@ private struct Lifecycle {
   }
 
   @Test func aGroupAccountLeavesARemoteSessionUnderTheHostsLogin() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.unstartedRemote()
     for name in ["A", "B"] {
       try FileManager.default.createDirectory(atPath: sbd.account(name), withIntermediateDirectories: true)
       FileManager.default.createFile(atPath: "\(sbd.account(name))/.claude.json", contents: Data("{}".utf8))
     }
-    try sbd.restart(setting: "claudeConfigDirs", to: .array(["A", "B"].map { .string(sbd.account($0)) }))
+    try sbd.set("claudeConfigDirs", to: .array(["A", "B"].map { .string(sbd.account($0)) }))
+    try sbd.startSbd()
     let s = try start(sbd)
     try stop(sbd, s.id)
     try sbd.sb("group", "add", "--json", "Flags", s.id)

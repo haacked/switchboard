@@ -83,7 +83,7 @@ final class Instance {
   /// Depot poller is off.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
-    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:]
+    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:], startingSbd: Bool = true
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
@@ -124,7 +124,7 @@ final class Instance {
     FileManager.default.createFile(atPath: home.log, contents: nil)
     client = Client(home: home)
     try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
-    try startSbd()
+    if startingSbd { try startSbd() }
   }
 
   deinit {
@@ -264,11 +264,16 @@ final class Instance {
     try #require(JSON.parse(try String(contentsOfFile: home.config, encoding: .utf8))?.object)
   }
 
-  /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
-  func restart(setting key: String, to value: JSON) throws {
+  /// Sets one key of config.json. sbd reads the config only when it starts.
+  func set(_ key: String, to value: JSON) throws {
     var config = try config()
     config[key] = value
     try JSON.object(config).text.write(toFile: home.config, atomically: true, encoding: .utf8)
+  }
+
+  /// Sets one key of config.json and restarts sbd, which reads the config when it starts.
+  func restart(setting key: String, to value: JSON) throws {
+    try set(key, to: value)
     stopSbd()
     try startSbd()
   }
@@ -656,16 +661,26 @@ extension Instance {
     host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
     boxBin: Bool = false
   ) throws -> Instance {
+    let sbd = try unstartedRemote(host: extra, hosts: more, config: settings, boxBin: boxBin)
+    try sbd.startSbd()
+    return sbd
+  }
+
+  /// The instance that `remote` returns, before sbd starts. A test that changes the config or the box's programs
+  /// here does not have to start sbd again.
+  static func unstartedRemote(
+    host extra: [String: JSON] = [:], hosts more: [String: JSON] = [:], config settings: [String: JSON] = [:],
+    boxBin: Bool = false
+  ) throws -> Instance {
     let hosts = ["mini": remoteHost(boxDestination, extra)].merging(more) { $1 }
-    let sbd = try Instance(config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 })
+    let sbd = try Instance(
+      config: hostsConfig(hosts).merging(machineLogConfig) { $1 }.merging(settings) { $1 }, startingSbd: false)
     try sbd.prepareBox()
     if boxBin {
       try FileManager.default.createDirectory(atPath: sbd.boxBin, withIntermediateDirectories: true)
       let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-      sbd.stopSbd()
       sbd.sbdEnvironment["PATH"] = "\(sbd.boxBin):\(path)"
       sbd.sbdEnvironment["SB_SSH_STUB_PATH"] = "\(sbd.boxBin):\(path)"
-      try sbd.startSbd()
     }
     return sbd
   }
@@ -1040,10 +1055,10 @@ extension Instance {
   /// box's `.sb` as SB_HOME when it has none, as a pane does, so `claude agents` there reads the stub's status
   /// files.
   static func remoteWithGates(config settings: [String: JSON] = [:]) throws -> Instance {
-    let sbd = try remote(config: settings, boxBin: true)
+    let sbd = try unstartedRemote(config: settings, boxBin: true)
     try sbd.installBoxGates()
-    try sbd.restart(
-      setting: "hosts", to: ["mini": remoteHost(boxDestination, ["claude": .string("\(sbd.boxBin)/claude-stub")])])
+    try sbd.set("hosts", to: ["mini": remoteHost(boxDestination, ["claude": .string("\(sbd.boxBin)/claude-stub")])])
+    try sbd.startSbd()
     return sbd
   }
 
@@ -1196,8 +1211,9 @@ extension Instance {
   static func remoteForRemoval(host extra: [String: JSON] = [:], config settings: [String: JSON] = [:]) throws
     -> Instance
   {
-    let sbd = try remote(host: extra, config: settings, boxBin: true)
+    let sbd = try unstartedRemote(host: extra, config: settings, boxBin: true)
     try sbd.installBoxGit()
+    try sbd.startSbd()
     return sbd
   }
 

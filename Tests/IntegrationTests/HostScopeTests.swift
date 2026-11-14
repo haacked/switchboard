@@ -297,11 +297,12 @@ private let otherDestination = "haacked@other.local"
   /// A SessionStart names the session's conversation, as after `/clear`. A host can name the id of a conversation
   /// on this Mac that Switchboard does not hold. Import still lists that conversation and still imports it.
   @Test func aHostThatNamesAConversationOfThisMacDoesNotTakeItFromImport() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.unstartedRemote()
     let account = "\(sbd.home.path)/A"
     try FileManager.default.createDirectory(atPath: account, withIntermediateDirectories: true)
     FileManager.default.createFile(atPath: "\(account)/.claude.json", contents: Data("{}".utf8))
-    try sbd.restart(setting: "claudeConfigDirs", to: [.string(account)])
+    try sbd.set("claudeConfigDirs", to: [.string(account)])
+    try sbd.startSbd()
     let mini = try sbd.startOnHost()
     let outside = UUID().uuidString.lowercased()
     try sbd.writeAgents(
