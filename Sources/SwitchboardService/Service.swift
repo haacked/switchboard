@@ -951,6 +951,7 @@ public final class Service {
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.autoMode = args.autoMode ?? config.autoMode
+    session.planMode = args.planMode
     session.host = args.host
     configure(&session)
     if let host = session.host {
@@ -1044,7 +1045,8 @@ public final class Service {
     if let model = session.model { args += ["--model", model] }
     if local { args += config.claudeArgs }
     // After claudeArgs, so that the session's mode wins over a global one.
-    if session.autoMode == true { args += ["--permission-mode", PermissionMode.auto] }
+    let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
+    if let mode { args += ["--permission-mode", mode] }
     if local, !config.triage.systemPrompt.isEmpty {
       args += ["--append-system-prompt", config.triage.systemPrompt]
     }
@@ -1078,7 +1080,7 @@ public final class Service {
       id, resume ? "resumed" : "started",
       [
         "prompt": prompt.map(JSON.string) ?? .null, "mcp": local ? mcpListening : [],
-        "permission_mode": session.autoMode == true ? .string(PermissionMode.auto) : .null,
+        "permission_mode": mode.map(JSON.string) ?? .null,
         "trigger": .string(trigger.rawValue),
       ])
   }

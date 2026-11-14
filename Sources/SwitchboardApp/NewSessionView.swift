@@ -20,6 +20,7 @@ struct NewSessionView: View {
     @Published var branch = ""
     @Published var name = ""
     @Published var prompt = ""
+    @Published var planMode = false
     /// The folder of the chosen account, or empty for the active one.
     @Published var account = ""
     /// The id of the group that the session joins, or nil for none.
@@ -69,7 +70,7 @@ struct NewSessionView: View {
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
         prompt: optional(prompt), parent: parent, account: groupAccount(groups) == nil ? optional(account) : nil,
-        group: group)
+        group: group, planMode: planMode ? true : nil)
     }
   }
 
@@ -114,6 +115,8 @@ struct NewSessionView: View {
             ForEach(model.accounts) { Text($0.name).tag($0.folder) }
           }
         }
+        Toggle("Start in plan mode", isOn: $form.planMode)
+          .help("Claude writes a plan and waits for your approval before it edits a file")
         VStack(alignment: .leading) {
           Text("First prompt")
           TextEditor(text: $form.prompt)

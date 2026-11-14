@@ -92,6 +92,23 @@ import Testing
     #expect(try #require(plain.request(worktree: false, groups: [])).group == nil)
   }
 
+  // MARK: Start in plan mode
+
+  @Test func requestSendsNoPlanModeWhenTheToggleIsOff() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+
+    #expect(try #require(form.request(worktree: false, groups: [])).planMode == nil)
+  }
+
+  @Test func requestSendsPlanModeWhenTheToggleIsOn() throws {
+    let form = NewSessionView.Form()
+    form.pick(Self.alpha)
+    form.planMode = true
+
+    #expect(try #require(form.request(worktree: false, groups: [])).planMode == true)
+  }
+
   // MARK: The default repository for a group
 
   @Test func offerSelectsTheRepoMostOfTheGroupsSessionsUse() {
