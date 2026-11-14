@@ -128,7 +128,7 @@ private func printPlanDocument(_ result: JSON, json: Bool) {
   if let group = p.group { print("  group:   \(group)") }
   if let session = p.session { print("  session: \(session)") }
   print(
-    "  read:    \(p.read.map(ago) ?? "never")\(p.artifact?.stale == true ? " (the copy may be old. Run: sb plan artifact read \(p.id))" : "")"
+    "  read:    \(p.read.map { ago($0) } ?? "never")\(p.artifact?.stale == true ? " (the copy may be old. Run: sb plan artifact read \(p.id))" : "")"
   )
   if let error = p.error { print("  error:   \(oneLine(error, max: 200))".printable) }
   if let note = p.updateNote { print("  update:  \(oneLine(note, max: 200))".printable) }

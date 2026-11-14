@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Updates Switchboard to the latest main: quits the app, fast-forwards this
-# checkout, runs bin/install, and opens the app. It checks the checkout before
-# it quits the app, so a refusal leaves the app running. Quitting the app does
-# not stop sbd or any session. bin/install restarts sbd. --force installs over
-# an app that bin/lib/install-guard.sh refuses to replace.
+# checkout, runs bin/install, opens the app, and prints the changes since the
+# last update. It checks the checkout before it quits the app, so a refusal
+# leaves the app running. Quitting the app does not stop sbd or any session.
+# bin/install restarts sbd. --force installs over an app that
+# bin/lib/install-guard.sh refuses to replace.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source bin/lib/install-guard.sh
@@ -34,6 +35,11 @@ if ! git merge-base --is-ancestor HEAD origin/main; then
   exit 1
 fi
 if [ ${#force[@]} -eq 0 ]; then require_newer_than_installed "$app" origin/main; fi
+# The script takes its build slot before it quits the app, so the app stays
+# open during the wait. The nested bin/bundle then runs without a second slot.
+bin/lib/build-slot --check || exec bin/lib/build-slot -- "$PWD/bin/update" "$@"
+
+since=$(changelog_start "$app" origin/main)
 
 bundle_id=com.haacked.switchboard
 if [ -f "$app/Contents/Info.plist" ]; then
@@ -59,3 +65,11 @@ fi
 git merge --ff-only origin/main
 bin/install ${force[@]+"${force[@]}"}
 bin/start
+echo
+changes=$(bin/changelog "$since")
+if [ -n "$changes" ]; then
+  echo "Changes since the last update:"
+  printf '%s\n' "$changes"
+else
+  echo "No changes since the last update."
+fi

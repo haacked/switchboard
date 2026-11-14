@@ -129,8 +129,8 @@ if $running; then
 fi
 
 echo "Building sb and sbd in release mode…"
-swift build -c release --product sb >/dev/null
-swift build -c release --product sbd >/dev/null
+bin/lib/swiftpm build -c release --product sb >/dev/null
+bin/lib/swiftpm build -c release --product sbd >/dev/null
 bin=$(swift build -c release --show-bin-path)
 sb=$bin/sb
 

@@ -93,6 +93,9 @@ public struct Session: Codable, Equatable, Sendable {
   /// keeps it. Otherwise sbd passes no permission mode, and Claude's settings
   /// choose one. Nil in a session that an older sbd stored.
   public var autoMode: Bool?
+  /// True when the session started in plan mode. `PermissionMode.forLaunch`
+  /// reads it on every launch. It stays set after the plan is approved.
+  public var planMode: Bool?
   /// True after the shell pane's shell exited or the user closed the pane.
   /// sbd then starts no shell for the session until the user opens one.
   public var shellClosed: Bool?
@@ -138,6 +141,16 @@ public enum SessionKind: String, Codable, Sendable {
 
   public init(manager: Bool?, chat: String?) {
     self = manager == true ? .manager : chat != nil ? .chat : .work
+  }
+
+  /// Whether the app shows a session of this kind as a chat. `chat-log`
+  /// reads only these kinds, because a work session's transcript can hold
+  /// what its user never meant to show in the chat pane.
+  public var showsAsChat: Bool {
+    switch self {
+    case .work: false
+    case .manager, .chat: true
+    }
   }
 
   /// How a message names a session of this kind, or nil for a work session.
@@ -264,6 +277,8 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// True when the user acknowledged the session's Inbox item, which moves
   /// it to Waiting until its reason changes or a new turn starts.
   public var acknowledged: Bool?
+  /// True while the session's start of claude waits behind the live cap.
+  public var queued: Bool?
   /// Claude Code's permission mode, such as `default` or `auto`, or nil when
   /// no hook has reported it since claude started.
   public var permissionMode: String?

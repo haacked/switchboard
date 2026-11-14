@@ -359,6 +359,18 @@ final class Instance {
     try waitFor(id, "the idle stop", timeout: 10) { !$0.live }
   }
 
+  /// Passes the idle stop and waits for the stopped claude's SessionEnd. The stop's `stopped` event ends `live`
+  /// before that hook arrives. The hook moves `lastActivity`. A test that moves the clock past the stale time
+  /// calls this first. One move past the stale time also passes the idle stop. The SessionEnd that arrives after
+  /// that tick then ends the Stale state.
+  func passIdleStopToSessionEnd(_ id: String) throws {
+    let mark = try lastEventId(id)
+    try passIdleStop(id)
+    try waitFor("the SessionEnd after the idle stop of \(id)", timeout: 10) {
+      try events(id, after: mark).contains { $0.kind == "SessionEnd" }
+    }
+  }
+
   /// sbd's clock, in ms since the epoch.
   func now() throws -> Int64 {
     Int64(try #require(try client.call("clock")["now"]?.int))
@@ -386,6 +398,14 @@ final class Instance {
 
   /// Types the text into the session's Claude pane without Enter, so it stays in the prompt box.
   func typeDraft(_ id: String, _ text: String) throws { try sendKeys(id, ["-l", text]) }
+
+  /// Sets the height of the session's Claude pane. tmux moves the top rows
+  /// into the history when the pane shrinks, and brings them back when it grows.
+  func resize(_ id: String, rows: Int) throws {
+    let t = try client.terminals(id)
+    let r = try runCommand(t.tmux, ["-S", t.socket, "resize-window", "-t", "=\(t.claude):", "-y", String(rows)])
+    guard r.status == 0 else { throw TestError(description: "tmux resize-window -y \(rows): \(r.stderr)") }
+  }
 
   private func sendKeys(_ id: String, _ keys: [String]) throws {
     let t = try client.terminals(id)
@@ -465,8 +485,18 @@ final class Instance {
   }
 
   /// What the stub's hooks printed for the conversation, oldest first.
-  func hookOutputs(_ claudeSessionId: String) -> [JSON] {
-    let text = (try? String(contentsOfFile: "\(home.path)/hook-output.log", encoding: .utf8)) ?? ""
+  func hookOutputs(_ claudeSessionId: String) -> [JSON] { stubLog("hook-output.log", claudeSessionId) }
+
+  /// The decisions that the conversation's PermissionRequest hooks answered
+  /// with, oldest first.
+  func permissionAnswers(_ claudeSessionId: String) -> [JSON] {
+    stubLog("permission-answers.log", claudeSessionId)
+  }
+
+  /// The JSON records of the conversation in one of the stub's logs. Each
+  /// record is the conversation's id, a tab, and the JSON, with a NUL after it.
+  private func stubLog(_ name: String, _ claudeSessionId: String) -> [JSON] {
+    let text = (try? String(contentsOfFile: "\(home.path)/\(name)", encoding: .utf8)) ?? ""
     return text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().compactMap { record in
       let fields = record.split(separator: "\t", maxSplits: 1).map(String.init)
       guard fields.count == 2, fields[0] == claudeSessionId else { return nil }
@@ -918,11 +948,13 @@ extension Instance {
   }
 
   /// A session on the host whose claude reported its SessionStart through the forward. With a prompt, it does not
-  /// wait for the turn.
+  /// wait for the turn. It connects the host first. `sb new` waits only `hostWaitSeconds` for the link, and a slow
+  /// runner can take longer than that to connect.
   func startOnHost(_ folder: String = "sb-box-repo", host: String = "mini", prompt: String? = nil) throws -> (
     id: String, claudeSessionId: String, cwd: String, pid: Int
   ) {
     try makeBoxFolder(folder)
+    try connectHost(host)
     let summary = try #require(
       JSON.parse(try sb(["new", "~/\(folder)", "--host", host, "--json"] + (prompt.map { ["--prompt", $0] } ?? []))))
     let id = try self.id(of: summary)

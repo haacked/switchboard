@@ -51,7 +51,7 @@ private let hogqlParagraphs = """
     let text = try sbd.sb("triage")
 
     #expect(text.contains("> Could someone review #1?"), "\(text)")
-    let headings = ["Summary:", "Draft: Review request:", "Action:"].map { text.range(of: $0)?.lowerBound }
+    let headings = ["Summary:", "Draft 1: Review request", "Action:"].map { text.range(of: $0)?.lowerBound }
     #expect(headings.allSatisfy { $0 != nil }, "\(text)")
     #expect(headings.compactMap { $0 } == headings.compactMap { $0 }.sorted())
   }
@@ -76,6 +76,6 @@ private let hogqlParagraphs = """
     let s = try sbd.new(prompt: "reply hogql")
 
     let item = try #require(try sbd.waitFor(s.id, "the summary") { $0.triage?.source == .summary }.triage)
-    #expect(item.drafts == [TriageDraft(label: "Quoted", text: hogqlParagraphs)])
+    #expect(item.drafts == [InboxDraft(TriageDraft(label: "Quoted", text: hogqlParagraphs), number: 1)])
   }
 }

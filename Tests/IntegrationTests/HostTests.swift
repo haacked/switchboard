@@ -345,7 +345,8 @@ private func withoutSince(_ value: JSON) -> JSON {
     #expect(done.live)
     #expect(done.state == .needsYou)
     #expect(
-      sbd.stubArgs().first == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings) -- hello there")
+      sbd.stubArgs().first
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello there")
     #expect(try sbd.sb("screen", s.id).contains("⏺ Done: hello there"))
     #expect(sbd.sshStubLog.isEmpty)
   }

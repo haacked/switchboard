@@ -1,6 +1,11 @@
 import Foundation
 import SwitchboardCore
 
+/// The request's `planMode` for `--plan-mode`.
+func planMode(_ a: Args) -> Bool? {
+  a.switches.contains("--plan-mode") ? true : nil
+}
+
 func spawn(_ a: Args) {
   var args: [String: JSON] = [:]
   if let repo = a.values["--repo"] { args["repository"] = .string(repo.repositoryArgument) }
@@ -13,6 +18,7 @@ func spawn(_ a: Args) {
   }
   if a.switches.contains("--followup") { args["followup"] = .bool(true) }
   if a.switches.contains("--no-auto") { args["autoMode"] = .bool(false) }
+  if let planMode = planMode(a) { args["planMode"] = .bool(planMode) }
   if author == .claude, let parent = ProcessInfo.processInfo.environment["SB_SESSION_ID"] {
     args["parent"] = .string(parent)
   }
