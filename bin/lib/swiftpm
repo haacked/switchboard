@@ -20,6 +20,7 @@ if ! [[ $jobs =~ ^[0-9]+$ ]]; then
   echo "bin/lib/swiftpm: SB_BUILD_JOBS must be a whole number, not '$jobs'" >&2
   exit 2
 fi
+jobs=$((10#$jobs))
 if [ "$1" = --jobs ]; then
   echo "$jobs"
   exit 0

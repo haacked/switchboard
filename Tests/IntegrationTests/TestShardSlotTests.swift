@@ -261,7 +261,7 @@ private enum ShardEnd: String, CaseIterable, Sendable, CustomTestStringConvertib
   /// SIGKILL to the fake swift.
   case swiftKilled
   /// SIGKILL to the build-slot helper that runs the fake swift. The fake
-  /// swift keeps running and stays held.
+  /// swift keeps running and keeps waiting for its go file.
   case helperKilled
   /// The fake swift exits 1.
   case failed
@@ -352,7 +352,7 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
 
   /// The first shard to start is one of the three parallel shards, so the
   /// next one starts only when the first one's slot frees. A killed helper
-  /// leaves its fake swift held, so the next start shows that the helper's
+  /// leaves its fake swift running, so the next start shows that the helper's
   /// death freed the slot. The orphan keeps bin/test's pipe to tee open until
   /// the release.
   @Test(arguments: ShardEnd.allCases)
@@ -378,7 +378,7 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     }
     try rig.waitForShards(2)
     if end == .helperKilled {
-      #expect(!rig.queue.logLines().contains("end \(first.id)"), "the orphan should still be held")
+      #expect(!rig.queue.logLines().contains("end \(first.id)"), "the orphaned swift should still be running")
     }
     try rig.releaseEveryCallUntilExit(p)
 

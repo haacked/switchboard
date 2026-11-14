@@ -223,7 +223,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     let r = try rig.swiftpm("--jobs")
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(!r.stderr.contains("waiting for a build slot"), "\(r.stderr)")
+    #expect(!r.stderr.contains(SlotQueue.waitingPrefix), "\(r.stderr)")
     #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
     #expect(!rig.queue.logLines().contains("end H"))
   }
@@ -325,7 +325,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     let r = try rig.run("bin/test", ["--filter", "X"], env: ["SB_BUILD_SLOT_HELD": held])
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(!r.stderr.contains("waiting for a build slot"), "\(r.stderr)")
+    #expect(!r.stderr.contains(SlotQueue.waitingPrefix), "\(r.stderr)")
     let calls = rig.swiftCalls()
     #expect(calls.count == 1, "\(calls)")
     #expect(calls.first?.tickets == 1, "\(calls)")
