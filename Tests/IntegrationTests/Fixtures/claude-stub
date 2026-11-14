@@ -8,6 +8,9 @@
 # prompt. It answers each prompt:
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
+#   mode <name>      switches the permission mode to <name>, as Shift+Tab or
+#                    an approved plan does, and replies "Mode: <name>". The
+#                    turn's hooks report the new mode
 #   slow <n>         runs a Bash tool call of n seconds
 #   run <name>       runs sh $SB_HOME/<name>.sh as a Bash tool call, a child
 #                    of the stub, and replies "Ran <name>.". Without that
@@ -779,6 +782,10 @@ turn() {
   reply\ *) reply=$(cat "$SB_HOME/${p#reply }.md") ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
+  mode\ *)
+    printf '%s' "${p#mode }" >"$mode_file"
+    reply="Mode: ${p#mode }"
+    ;;
   *) reply="Done: $p" ;;
   esac
   echo "⏺ $reply"

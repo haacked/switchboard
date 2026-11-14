@@ -165,17 +165,17 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
   }
 
   @Test func theLastTickOnScreenCountsAsATouch() {
-    #expect(blocker { $0.lastOnScreen = now - 30_000 } == "you touched it 30 s ago")
+    #expect(blocker { $0.lastViewed = now - 30_000 } == "you touched it 30 s ago")
   }
 
   @Test func theLaterOfTheTouchAndTheTickOnScreenCounts() {
     let touchedLater = blocker {
       $0.facts.lastTouched = now - 20_000
-      $0.lastOnScreen = now - 100_000
+      $0.lastViewed = now - 100_000
     }
     let onScreenLater = blocker {
       $0.facts.lastTouched = now - 100_000
-      $0.lastOnScreen = now - 20_000
+      $0.lastViewed = now - 20_000
     }
     #expect(touchedLater == "you touched it 20 s ago")
     #expect(onScreenLater == "you touched it 20 s ago")

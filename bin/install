@@ -6,6 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source bin/lib/install-guard.sh
+source bin/lib/prerequisites.sh
 dest="$HOME/Applications/Switchboard.app"
 force=0
 case "${1:-}" in
@@ -16,6 +17,7 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+check_prerequisites
 if [ "$force" = 0 ]; then require_newer_than_installed "$dest" HEAD; fi
 app=$(bin/bundle | tee /dev/stderr | tail -1)
 # Another session can install a build while this one builds, so the guard runs

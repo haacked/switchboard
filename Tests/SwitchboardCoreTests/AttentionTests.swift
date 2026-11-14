@@ -347,9 +347,74 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     ),
     ("Which of v1.2.3 or v1.3.0 should I ship?", .question("Which of v1.2.3 or v1.3.0 should I ship?")),
     ("Done.\n\nWant me to open https://example.com/a.b?", .offer("Want me to open https://example.com/a.b?")),
+    ("Should it be renamed?", .question("Should it be renamed?")),
+    ("Should I push?", .offer("Should I push?")),
+    ("Okay to merge?", .offer("Okay to merge?")),
   ])
   func classifies(_ reply: String, _ kind: ReplyKind) {
     #expect(Attention.classify(reply) == kind)
+  }
+}
+
+@Suite struct LastQuestion {
+  @Test func givesTheLastParagraphsLastQuestionAndTheSentenceBeforeIt() throws {
+    let reply = "Is this right? I think so.\n\nDone. Want me to push? I can also open the PR."
+
+    let found = try #require(Attention.lastQuestion(reply))
+
+    #expect(found.question == "Want me to push?")
+    #expect(found.previous == "Done.")
+  }
+
+  @Test func picksTheLastOfSeveralQuestions() throws {
+    let found = try #require(Attention.lastQuestion("I fixed it.\n\nShould I push the branch? Or wait?"))
+
+    #expect(found.question == "Or wait?")
+    #expect(found.previous == "Should I push the branch?")
+  }
+
+  @Test func aQuestionThatStartsItsParagraphHasNoPreviousSentence() throws {
+    let found = try #require(Attention.lastQuestion("I made `haacked/x-v2`.\n\nDo you want me to delete it?"))
+
+    #expect(found.question == "Do you want me to delete it?")
+    #expect(found.previous == nil)
+  }
+
+  /// `OfferText` reads the previous sentence's code spans, so its backticks stay.
+  @Test func thePreviousSentenceKeepsALeadingCodeSpan() throws {
+    let found = try #require(Attention.lastQuestion("`haacked/x-v2` still exists on origin. Want me to delete it?"))
+
+    #expect(found.previous?.hasPrefix("`haacked/x-v2`") == true)
+  }
+
+  @Test(arguments: ["All tests pass.", "", "Is this right?\n\nThe build passes.", "Next, I'll update the docs."])
+  func isNilWhenTheLastParagraphAsksNoQuestion(_ reply: String) {
+    #expect(Attention.lastQuestion(reply) == nil)
+  }
+}
+
+@Suite struct OfferPrefix {
+  @Test(arguments: [
+    ("Do you want me to delete it?", "do you want me to"),
+    ("Should I push?", "should i"),
+    ("SHOULD I push?", "should i"),
+    ("Should I\tpush?", "should i"),
+    ("Ok to merge?", "ok to"),
+    ("Okay to merge?", "okay to"),
+    ("Want me to merge it?", "want me to"),
+    ("Want to see it?", "want to"),
+  ])
+  func givesTheOfferStartThatWhitespaceFollows(_ sentence: String, _ prefix: String) {
+    #expect(Attention.offerPrefix(sentence) == prefix)
+  }
+
+  /// A prefix counts only at a word boundary, so these are questions.
+  @Test(arguments: [
+    "Should it be renamed?", "Should Ingrid review it?", "Okay tomorrow?", "Want to?", "Shall weigh in?",
+    "Wanting more?", "Which branch should I use?",
+  ])
+  func givesNothingWhenTheOfferStartRunsIntoAWord(_ sentence: String) {
+    #expect(Attention.offerPrefix(sentence) == nil)
   }
 }
 

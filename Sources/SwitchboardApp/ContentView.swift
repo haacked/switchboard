@@ -44,14 +44,6 @@ struct StateBadge: View {
   }
 }
 
-func ago(_ ms: Int64, now: Int64 = nowMs()) -> String {
-  let s = max(0, (now - ms) / 1000)
-  if s < 60 { return "\(s)s" }
-  if s < 3600 { return "\(s / 60)m" }
-  if s < 86400 { return "\(s / 3600)h" }
-  return "\(s / 86400)d"
-}
-
 struct ContentView: View {
   static let windowMinWidth: CGFloat = 900
   static let sidebarMinWidth: CGFloat = 240
@@ -220,6 +212,11 @@ struct Sidebar: View {
             }
             .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
             .contextMenu {
+              if row.session.queued == true {
+                Button("Start Now") { model.startNow(row.id) }
+                  .disabled(model.startingNow.contains(row.id))
+                  .help(BoardModel.startNowHelp)
+              }
               if CleanupOffer.canCleanUp(row.session) {
                 Button("Clean Up: Delete the Worktree and Branch…") { model.confirmingCleanup = row.id }
                   .disabled(model.cleaningUp.contains(row.id))
