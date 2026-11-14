@@ -85,9 +85,7 @@ extension Service {
     // takes the active account when it starts.
     session.claudeConfigDir = try accountForNew(named: account, parent: parent, for: session)
     session.followup = followup
-    session.autoMode = manualMode == true ? false : autoMode ?? config.autoMode
-    session.planMode = planMode
-    session.manualMode = manualMode
+    session.setStartModes(auto: autoMode, plan: planMode, manual: manualMode, defaultAuto: config.autoMode)
     try save(session)
     return summary(session.id)
   }

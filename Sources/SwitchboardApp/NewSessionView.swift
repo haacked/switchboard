@@ -71,7 +71,7 @@ struct NewSessionView: View {
       offered = (repos, sessions)
       guard !picked else { return }
       if let repoName {
-        repo = repos?.first { $0.name.lowercased() == repoName.lowercased() }
+        repo = repos?.first { Dependencies.sameRepo($0.name, repoName) }
       } else {
         repo = repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) }
       }

@@ -997,9 +997,8 @@ public final class Service {
     session.repo = folder.repo
     session.parent = args.parent.flatMap { try? lookup(["session": .string($0)]) }
     session.group = try groupOfNew(args.group, parent: session.parent)
-    session.autoMode = args.manualMode == true ? false : args.autoMode ?? config.autoMode
-    session.planMode = args.planMode
-    session.manualMode = args.manualMode
+    session.setStartModes(
+      auto: args.autoMode, plan: args.planMode, manual: args.manualMode, defaultAuto: config.autoMode)
     session.host = args.host
     session.issue = args.issue
     configure(&session)

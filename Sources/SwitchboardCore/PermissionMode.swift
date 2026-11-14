@@ -5,7 +5,7 @@ public enum PermissionMode {
   /// Manual mode, which hook payloads call `default`.
   public static let manual = "default"
   /// The modes whose permission prompts offer to switch to auto mode: manual and accept edits.
-  public static let offeringAutoMode: Set = ["default", "acceptEdits"]
+  public static let offeringAutoMode: Set = [manual, "acceptEdits"]
 
   /// The card's action that allows the call and switches the session to auto mode.
   public static let approveLabel = "Approve and enable auto mode"
@@ -30,11 +30,21 @@ public enum PermissionMode {
   /// The mode as Claude Code's status line names it. Its payloads call manual mode `default`.
   public static func title(_ mode: String) -> String {
     switch mode {
-    case "default": "manual"
+    case manual: "manual"
     case "acceptEdits": "accept edits"
     case "bypassPermissions": "bypass permissions"
     case "dontAsk": "don't ask"
     default: mode
     }
+  }
+}
+
+extension Session {
+  /// Sets the modes that `PermissionMode.forLaunch` reads. Manual mode turns auto mode off. Without either,
+  /// `defaultAuto`, the `autoMode` setting, decides.
+  public mutating func setStartModes(auto: Bool?, plan: Bool?, manual: Bool?, defaultAuto: Bool) {
+    autoMode = manual == true ? false : auto ?? defaultAuto
+    planMode = plan
+    manualMode = manual
   }
 }

@@ -85,22 +85,22 @@ public struct IssuePreset: Codable, Equatable, Sendable {
     ]
     var text = ""
     var rest = Substring(prompt)
-    var fenced = false
-    while let match = rest.firstMatch(of: #/\{(url|title|number|repo|body)\}/#) {
+    while let match = rest.firstMatch(of: #/\{(\w+)\}/#) {
       text += rest[..<match.range.lowerBound]
-      text += values[String(match.1)]!
-      fenced = fenced || match.1 == "title" || match.1 == "body"
+      text += values[String(match.1)] ?? String(match.0)
       rest = rest[match.range.upperBound...]
     }
     text += rest
+    let fenced = prompt.contains("{title}") || prompt.contains("{body}")
     return fenced ? Self.untrustedNote + "\n\n" + text : text
   }
 
-  /// The text inside `<tag>` and `</tag>`. A closing tag in the text would end the fence early, so each `</issue-`
-  /// in the text, in any case, loses its `<`.
+  /// A follow-up's prompt: the issue's title and URL.
+  public static let followup = IssuePreset(name: "followup", prompt: "{title}\n\n{url}")
+
+  /// The text inside `<tag>` and `</tag>`, with every `issue-` tag in the text neutralized.
   static func fence(_ tag: String, _ text: String, block: Bool) -> String {
-    let safe = text.replacingOccurrences(
-      of: #"<(\s*/\s*issue-)"#, with: "&lt;$1", options: [.regularExpression, .caseInsensitive])
+    let safe = UntrustedText.untagged(text, tags: "issue-")
     return block ? "<\(tag)>\n\(safe)\n</\(tag)>" : "<\(tag)>\(safe)</\(tag)>"
   }
 
@@ -205,6 +205,8 @@ public struct InboxIssue: Codable, Equatable, Identifiable, Sendable {
 
   /// owner/name#N, as `sb issues start` and `sb issue` read it.
   public var ref: String { "\(repo)#\(number)" }
+
+  public var issueRef: IssueRef { IssueRef(repo: repo, number: number) }
 
   public static func id(_ repo: String, _ number: Int) -> String { "\(repo.lowercased())#\(number)" }
 
@@ -345,8 +347,8 @@ public struct IssueInbox: Sendable {
   /// Whether Start may run the issue's session in auto mode: the viewer or one of the team's people wrote the issue.
   /// Anyone else can write an issue that tells the session to do something, so its session starts in manual mode.
   public func trusts(_ issue: InboxIssue) -> Bool {
-    guard let author = issue.author?.lowercased() else { return false }
-    return author == viewer?.lowercased() || people.contains(author)
+    guard let author = issue.author else { return false }
+    return ([viewer].compactMap { $0 } + team.people).contains { Wait.sameLogin($0, author) }
   }
 
   /// The bucket of an issue that no session lists.

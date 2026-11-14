@@ -181,10 +181,10 @@ extension Service {
       let inbox = IssueInbox(viewer: issueCache.viewer, team: issueSettings.team)
       return (issue, issueSettings.allPresets, issueSettings.defaultPreset, inbox.trusts(issue))
     }
-    guard
-      let preset = try args["preset"]?.string.map({ try IssuePreset.named($0, in: presets) })
-        ?? IssuePreset.choose(presets, last: nil, default: defaultPreset)
-    else { throw APIError("no issue presets") }
+    // `allPresets` falls back to the defaults, so `presets` is never empty.
+    let preset =
+      try args["preset"]?.string.map { try IssuePreset.named($0, in: presets) }
+      ?? IssuePreset.choose(presets, last: nil, default: defaultPreset) ?? presets[0]
     let repo: String
     if let path = args["path"]?.string {
       repo = (path.expandingTilde as NSString).standardizingPath
@@ -202,7 +202,7 @@ extension Service {
       NewSession(
         path: repo, branch: branch, name: issueSessionName(issue),
         worktree: true, prompt: preset.prompt(for: issue), group: args["group"]?.string,
-        manualMode: trusted ? nil : true, issue: IssueRef(repo: issue.repo, number: issue.number)))
+        manualMode: trusted ? nil : true, issue: issue.issueRef))
   }
 
   /// A slug of the title, or `issue-<N>` for a title with no ASCII letters or digits.

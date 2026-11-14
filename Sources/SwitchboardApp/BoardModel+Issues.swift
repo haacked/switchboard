@@ -192,7 +192,7 @@ extension BoardModel {
   func followUpIssue(_ row: ListedIssue) {
     let issue = row.issue
     var args: [String: JSON] = [
-      "prompt": .string(IssuePreset(name: "followup", prompt: "{title}\n\n{url}").prompt(for: issue)),
+      "prompt": .string(IssuePreset.followup.prompt(for: issue)),
       "title": .string(issue.title), "repository": .string(issue.repo),
       "branch": .string(issue.branch(prefix: issueList?.branchPrefix ?? "")),
     ]
@@ -210,7 +210,7 @@ extension BoardModel {
   func editIssuePrompt(_ row: ListedIssue, preset: IssuePreset) {
     newSession = NewSessionRequest(
       group: issueGroup(row), repo: row.issue.repo, branch: row.issue.branch(prefix: issueList?.branchPrefix ?? ""),
-      prompt: preset.prompt(for: row.issue), issue: IssueRef(repo: row.issue.repo, number: row.issue.number),
+      prompt: preset.prompt(for: row.issue), issue: row.issue.issueRef,
       manualMode: !trustsIssue(row))
   }
 }
