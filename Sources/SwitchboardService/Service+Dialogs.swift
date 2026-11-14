@@ -68,14 +68,14 @@ extension Service {
     }
   }
 
-  /// The card's pane and the lines of its dialog. It throws when the screen
-  /// doesn't show the card's dialog, because keys would answer another.
+  /// The card's pane and the lines of its dialog. It throws why when the
+  /// screen doesn't show the card's dialog, because keys would answer another.
   private func shownDialog(_ card: Card) throws -> (pane: String, dialog: [String]) {
     let pane = paneName(card.session, .claude)
-    guard case .running = claudeState(card.session), let dialog = cardDialog(card, pane) else {
-      throw APIError("the terminal doesn't show card \(card.id)'s dialog. Answer it in the terminal")
+    guard case .running = claudeState(card.session) else {
+      return (pane, try ClaudeScreen.typingDialog(card, screen: nil))
     }
-    return (pane, dialog)
+    return (pane, try typingDialog(card, pane))
   }
 
   /// Waits up to 3 s for the card's session to show no dialog, and returns
@@ -116,10 +116,11 @@ extension Service {
   }
 
   /// The lines of the card's dialog, or nil when the screen doesn't show it.
-  private func cardDialog(_ card: Card, _ pane: String) -> [String]? {
-    guard let screen = try? site(of: card.session).screen(pane), let dialog = ClaudeScreen.dialog(screen),
-      ClaudeScreen.shows(card, dialog)
-    else { return nil }
-    return dialog
+  private func cardDialog(_ card: Card, _ pane: String) -> [String]? { try? typingDialog(card, pane) }
+
+  /// The lines of the card's dialog on the pane's screen. Its error says why
+  /// sbd may not type into the dialog.
+  private func typingDialog(_ card: Card, _ pane: String) throws -> [String] {
+    try ClaudeScreen.typingDialog(card, screen: try? site(of: card.session).screen(pane))
   }
 }

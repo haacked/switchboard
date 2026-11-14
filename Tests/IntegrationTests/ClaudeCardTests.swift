@@ -72,6 +72,35 @@ extension ClaudeTests {
     #expect(done.cards.isEmpty)
   }
 
+  /// Claude Code applies the request's suggestions from the hook's
+  /// `updatedPermissions`, so a later Read in the same folder asks nothing.
+  @Test func alwaysAllowLetsALaterReadInTheSameFolderRunWithoutACard() throws {
+    let c = try ClaudeInstance()
+    let outside = "\(real(c.sbd.home.path))/outside"
+    try FileManager.default.createDirectory(atPath: outside, withIntermediateDirectories: true)
+    try "\(c.nonce)-A\n".write(toFile: "\(outside)/a.txt", atomically: true, encoding: .utf8)
+    try "\(c.nonce)-B\n".write(toFile: "\(outside)/b.txt", atomically: true, encoding: .utf8)
+    func read(_ name: String) -> String {
+      "Use the Read tool to read \(outside)/\(name). Then reply with its contents and nothing else."
+    }
+    let s = try c.sbd.new(prompt: read("a.txt"))
+    let asked = try c.waitFor(s.id, "the Read card") { $0.cards.first?.tool == "Read" }
+    let card = try #require(asked.cards.first)
+    let suggestions = card.permissionSuggestions?.text ?? "none"
+    // A rule saved outside this session would reach the user's own settings.
+    let destinations = Set(card.permissionSuggestions?.array?.compactMap { $0["destination"]?.string } ?? [])
+    try #require(destinations.isSubset(of: ["session", "localSettings"]), "suggestions: \(suggestions)")
+    try #require(card.offers(.always), "suggestions: \(suggestions)")
+
+    #expect(try JSON.parse(c.sbd.sb("allow", "--always", "--json", s.id))?["delivery"]?.string == "hook")
+
+    try c.waitFor(s.id, "the first reply") { $0.lastReply?.contains("\(c.nonce)-A") == true }
+    let first = try #require(try c.sbd.hooks(s.id).last { $0.kind == "PermissionRequest" })
+    try c.sbd.sb("send", s.id, read("b.txt"))
+    try c.waitFor(s.id, "the second reply") { $0.lastReply?.contains("\(c.nonce)-B") == true }
+    #expect(try !c.sbd.hooks(s.id, after: first.id).contains { $0.kind == "PermissionRequest" })
+  }
+
   /// Kills the `sb hook` process that holds the session's PermissionRequest,
   /// as the hook's timeout ends it.
   private func killHook(_ c: ClaudeInstance, _ id: String) throws {
