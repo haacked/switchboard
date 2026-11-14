@@ -117,6 +117,10 @@ final class BoardModel: ObservableObject {
   /// Sessions whose message is on its way to sbd. Their Send buttons stay
   /// disabled until sbd replies, so a second press can't send it again.
   @Published var sending: Set<String> = []
+  /// Sessions whose Start Now is on its way to sbd. Their Start Now buttons
+  /// stay disabled until sbd replies, so a second click can't report that
+  /// the first one already started claude.
+  @Published var startingNow: Set<String> = []
   /// Group suggestions whose Accept or Decline is on its way to sbd. Their
   /// rows stay disabled until sbd replies, so a second click can't answer again.
   @Published var answeringSuggestions: Set<String> = []
@@ -588,6 +592,23 @@ final class BoardModel: ObservableObject {
   }
   func stop(_ id: String) { perform("stop", ["session": .string(id)]) }
   func resume(_ id: String) { perform("resume", ["session": .string(id)]) }
+  /// Starts a queued session now. When the live cap is full, sbd stops the
+  /// lowest-priority idle session to make room. When the start still waits,
+  /// the error banner shows why.
+  func startNow(_ id: String) {
+    guard startingNow.insert(id).inserted else { return }
+    perform(
+      "live-next", ["session": .string(id)],
+      then: { result in
+        guard let status = try? JSONCoding.convert(result, to: LiveStatus.self),
+          let start = status.queued.first(where: { $0.session == id })
+        else { return }
+        self.actionError = "Start Now: \(start.reason ?? "the start still waits for a slot")"
+      },
+      finally: { self.startingNow.remove(id) })
+  }
+  static let startNowHelp =
+    "Start claude now. When the live cap is full, sbd stops the lowest-priority idle session to make room."
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
   /// Sets the group's description, or clears it when `text` is blank. The
   /// Board shows the new text before sbd answers. It returns false when it

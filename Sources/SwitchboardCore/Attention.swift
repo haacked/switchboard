@@ -129,6 +129,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
   public var lastTouched: Int64 = 0
+
+  /// When the user last touched the session or, per `viewed`, looked at it.
+  public func lastSeen(viewed: Int64) -> Int64 { max(lastTouched, viewed) }
   /// When sbd continued the session on its own, within the last hour.
   public var autoContinues: [Int64] = []
   /// The PRs that the session's open PR waits on, as the poller last found them.

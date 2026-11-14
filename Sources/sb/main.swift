@@ -297,12 +297,17 @@ let usage = """
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
-    live [--set N]                list the sessions whose claude runs and the
+    live [--set N | --next <session>]
+                                  list the sessions whose claude runs and the
                                   starts that queue behind the cap, for this Mac
                                   and for each remote host, whose own cap is its
-                                  liveCap key, else the top-level liveCap. --set
-                                  changes this Mac's cap and saves it in
-                                  config.json
+                                  liveCap key, else the top-level liveCap, with
+                                  each one's livePriority entry and why each
+                                  start waits. --set changes this Mac's cap and
+                                  saves it in config.json. --next starts a
+                                  stopped session now, stopping the
+                                  lowest-priority idle session when the cap is
+                                  full, and leaves a running one as it is
     service install|uninstall|status
     version
 
@@ -339,7 +344,7 @@ struct Args {
       "--title", "--repo", "--on", "--after", "--link", "--parent", "--path", "--file",
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
       "--plan", "--text", "--wait",
-      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org",
+      "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

@@ -44,8 +44,11 @@ public final class Service {
     /// How many events `facts` includes.
     var events = 0
     var turnProbe = TurnProbe()
-    /// When the tick last saw a terminal on the Claude pane.
-    var lastOnScreen: Int64 = 0
+    /// When the tick last saw a terminal on the Claude pane, or the user last opened the session.
+    var lastViewed: Int64 = 0
+    /// When the user last opened the session, with `open` or `live-next`. The
+    /// live cap never stops the session that the user opened last.
+    var lastOpened: Int64 = 0
     /// The Stop event of the last turn whose summary this sbd started or
     /// skipped. A turn gets one attempt per run of sbd, so a restart retries
     /// a summary that failed.
@@ -57,6 +60,9 @@ public final class Service {
     var mergeBriefSkipped = false
     /// When a start of claude queued behind the live cap.
     var queuedSince: Int64?
+    /// When the user opened the stopped session, which starts it ahead of
+    /// every queued start. A start of claude clears it.
+    var jumpedAt: Int64?
     /// Set when a running claude's MCP servers changed. `applyMCPChanges`
     /// relaunches claude once it can take the change.
     var mcpRelaunch: MCPRelaunch?
@@ -293,11 +299,15 @@ public final class Service {
 
   static let actsOnProcesses: Set<String> = [
     "send", "send-group", "stop", "resume", "open", "terminals", "shell", "resolve-wait", "answer", "account-move",
-    "dependency-resolved",
+    "dependency-resolved", "live-next",
   ]
-  static let launches: Set<String> = ["send", "resume", "open", "resolve-wait", "answer", "dependency-resolved"]
+  static let launches: Set<String> = [
+    "send", "resume", "open", "resolve-wait", "answer", "dependency-resolved", "live-next",
+  ]
   /// The requests that wait for the host of the session they name, and read its panes and processes first.
-  static let needsHost: Set<String> = ["open", "resume", "stop", "send", "answer", "screen", "terminals", "shell"]
+  static let needsHost: Set<String> = [
+    "open", "resume", "stop", "send", "answer", "screen", "terminals", "shell", "live-next",
+  ]
   /// The requests that can send claude a message. Each one first waits up to 5 s for a starting claude
   /// to go live. `open` sends nothing, so it doesn't wait.
   static let settles: Set<String> = ["send", "resume", "resolve-wait", "answer", "dependency-resolved"]
@@ -464,7 +474,7 @@ public final class Service {
       return try shellRequest(args)
     case "open":
       let id = try lookup(args)
-      if claudeState(id) == .stopped { try launch(id, prompt: nil) }
+      try openSession(id)
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id))
     case "send":
@@ -551,6 +561,10 @@ public final class Service {
       return try autoContinueRequest(args)
     case "live":
       return try liveRequest(args)
+    case "live-next":
+      // A session that started after the user asked, such as on a second click, is already where it should be.
+      try openSession(try lookup(args))
+      return try liveRequest(.object([:]))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-account",
       "group-suggest",
       "send-group",
@@ -1011,6 +1025,7 @@ public final class Service {
     // A session on a host runs under the host's Claude login, with the host's hook settings and no shared
     // MCP servers, `claudeArgs`, or triage nudge of this Mac. This Mac's trust file and groups do not apply.
     let local = try requireStartable(id).host == nil
+    entries[id]?.jumpedAt = nil
     if local {
       moveToGroupAccount(id)
       trustOwnFolder(id)
@@ -1997,6 +2012,7 @@ public final class Service {
           startSummaries(id, verdict)
         }
       }
+      noteViewed(now: now)
       runQueuedStarts(now: now)
       // A resolved `resume` wait can launch claude.
       if !mcpStarting(now: now) { resolveDueWaits(now: now) }
@@ -2016,6 +2032,11 @@ public final class Service {
   }
 
   var stopPolicy: StopPolicy { StopPolicy(idleStopSeconds: config.idleStopSeconds) }
+
+  /// Records that each session with a terminal on its Claude pane was viewed now.
+  func noteViewed(now: Int64) {
+    for id in entries.keys where attached(id) { entries[id]?.lastViewed = now }
+  }
 
   /// The session's running claude, as the stop rules see it.
   func stopInput(_ e: Entry, jobs: Int, now: Int64) -> StopPolicy.Claude {
@@ -2082,7 +2103,10 @@ public final class Service {
     out.permissionMode = e.facts.permissionMode
     out.pr?.mergeMethod = e.facts.mergeMethod
     if verdict.state == .readyToMerge, let since = e.facts.readyToMergeSince { out.since = since }
-    if e.queuedSince != nil { out.reason = queuedReason(onHost: e.session.host) }
+    if e.queuedSince != nil {
+      out.reason = queuedReason(onHost: e.session.host)
+      out.queued = true
+    }
     if let host = s.host {
       out.host = host
       out.link = hostLinks[host]?.status.state

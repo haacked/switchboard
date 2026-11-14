@@ -212,6 +212,11 @@ struct Sidebar: View {
             }
             .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
             .contextMenu {
+              if row.session.queued == true {
+                Button("Start Now") { model.startNow(row.id) }
+                  .disabled(model.startingNow.contains(row.id))
+                  .help(BoardModel.startNowHelp)
+              }
               if CleanupOffer.canCleanUp(row.session) {
                 Button("Clean Up: Delete the Worktree and Branch…") { model.confirmingCleanup = row.id }
                   .disabled(model.cleaningUp.contains(row.id))
