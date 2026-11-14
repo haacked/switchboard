@@ -188,7 +188,7 @@ extension Service {
     let repo: String
     if let path = args["path"]?.string {
       repo = (path.expandingTilde as NSString).standardizingPath
-      guard hasRemote(repo, for: issue.repo) else {
+      guard hasRemote(repo, for: issue.repo, at: mac) else {
         throw APIError("\(repo) has no remote on github.com for \(issue.repo)")
       }
     } else {
