@@ -352,6 +352,15 @@ public struct Wait: Codable, Equatable, Sendable {
     "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd",
   ]
 
+  /// The milliseconds in a duration such as `90s`, `30m`, `2h`, `1d`, or `1w`.
+  public static func durationMs(_ text: String) -> Int64? {
+    guard let unit = text.last.flatMap({ units[$0] }) else { return nil }
+    let count = text.dropLast()
+    guard !count.isEmpty, count.allSatisfy({ $0.isASCII && $0.isNumber }), let n = Int64(count) else { return nil }
+    let (ms, overflow) = n.multipliedReportingOverflow(by: unit * 1000)
+    return overflow ? nil : ms
+  }
+
   /// Reads a duration after `now` (`90s`, `30m`, `2h`, `1d`, `1w`), a date
   /// (`2026-10-26`, midnight in `zone`), a date and time in `zone`
   /// (`2026-10-26T09:00`, `2026-10-26 09:00`, optionally with seconds), or an
@@ -361,12 +370,10 @@ public struct Wait: Codable, Equatable, Sendable {
   /// `03:30`.
   public static func parseTime(_ text: String, now: Int64, zone: TimeZone = .current) -> Int64? {
     let text = text.trimmingCharacters(in: .whitespaces)
-    if let unit = text.last.flatMap({ units[$0] }) {
-      let count = text.dropLast()
-      guard !count.isEmpty, count.allSatisfy({ $0.isASCII && $0.isNumber }), let n = Int64(count) else { return nil }
-      let (ms, overflow) = n.multipliedReportingOverflow(by: unit * 1000)
+    if let unit = text.last, units[unit] != nil {
+      guard let ms = durationMs(text) else { return nil }
       let (time, later) = now.addingReportingOverflow(ms)
-      return overflow || later ? nil : time
+      return later ? nil : time
     }
     // The zone formatter reads a time that the zone repeats as the later one.
     // Calendar would read it as the earlier one, so it only handles skips.

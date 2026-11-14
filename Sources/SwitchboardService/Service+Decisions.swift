@@ -164,7 +164,7 @@ extension Service {
           let before = entries[id]
           do {
             return try store.transaction {
-              let delivery = try send(id, message, launchesWithPrompt: false)
+              let delivery = try send(id, message, launchesWithPrompt: false, trigger: .decision)
               try alongside(delivery)
               return ["delivery": .string(delivery.rawValue)]
             }
