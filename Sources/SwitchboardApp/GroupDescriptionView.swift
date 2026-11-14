@@ -37,7 +37,7 @@ struct GroupDescriptionView: View {
         draft = group.description ?? ""
         editing = true
       } label: {
-        Text(group.description ?? "Add a description")
+        InlineText(plain: group.description ?? "Add a description", links: false)
           .font(.caption)
           .foregroundStyle(group.description == nil ? .tertiary : .secondary)
           .lineLimit(2)

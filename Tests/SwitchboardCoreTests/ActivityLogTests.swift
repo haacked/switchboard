@@ -117,7 +117,7 @@ import Testing
       let event = try store.append(
         activity: ActivityEvent(t: 10, kind: "resume.ready", session: "s1", data: ["trigger": "open", "ms": 3500]))
 
-      try store.delete(session: "s1")
+      try store.delete(session: "s1", name: "one")
 
       #expect(try store.sessions().isEmpty)
       #expect(try store.activity() == [event])

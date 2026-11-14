@@ -82,15 +82,17 @@ struct OptionCardLabel: View {
       }
       VStack(alignment: .leading, spacing: 2) {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Text(title).fontWeight(.semibold)
+          InlineText(plain: title, links: false).fontWeight(.semibold)
           if let tag {
             Text(tag).font(.caption2.bold()).padding(.horizontal, 5).padding(.vertical, 1)
               .overlay(Capsule().strokeBorder(.secondary))
               .foregroundStyle(.secondary)
           }
         }
-        if let description, !description.isEmpty { Text(description).font(.callout).foregroundStyle(.secondary) }
-        if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+        if let description, !description.isEmpty {
+          InlineText(plain: description, links: false).font(.callout).foregroundStyle(.secondary)
+        }
+        if let note { InlineText(plain: note, links: false).font(.caption).foregroundStyle(.secondary) }
       }
       .multilineTextAlignment(.leading)
       .fixedSize(horizontal: false, vertical: true)

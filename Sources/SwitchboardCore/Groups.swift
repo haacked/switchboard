@@ -155,11 +155,10 @@ public struct GroupSuggestion: Codable, Equatable, Sendable, Identifiable {
     return group == nil ? "new group \(name)" : "join \(name)"
   }
 
-  /// Such as `s1, s2 stay, placed by hand`, with each session's id passed
-  /// through `name`. Nil when no session stays.
-  public func staying(_ name: (String) -> String = { $0 }) -> String? {
+  /// Such as `s1, s2 stay, placed by hand`. Nil when no session stays.
+  public func staying() -> String? {
     guard let stays, !stays.isEmpty else { return nil }
-    return "\(stays.map(name).joined(separator: ", ")) \(stays.count == 1 ? "stays" : "stay"), placed by hand"
+    return "\(stays.joined(separator: ", ")) \(stays.count == 1 ? "stays" : "stay"), placed by hand"
   }
 }
 

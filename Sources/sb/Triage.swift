@@ -7,7 +7,8 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
   func out(_ line: String) { print(line.printable) }
   let number = position.map { "\($0). " } ?? ""
   out("\(number)\(item.title)  [\(item.kind.rawValue)]")
-  out("   \(s.name) (\(s.id)), \(s.repoFolder.map { ($0 as NSString).lastPathComponent + ", " } ?? "")\(ago(s.since))")
+  let folder = s.repoFolder.map { ($0 as NSString).lastPathComponent + ", " } ?? ""
+  out("   \(sessionMention(name: s.name, id: s.id)), \(folder)\(ago(s.since))")
   out("   Summary:")
   if !item.summary.isEmpty { out("      \(oneLine(item.summary, max: 300))") }
   for c in item.callouts {

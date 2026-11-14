@@ -107,7 +107,7 @@ struct ContentView: View {
       ) { offer in
         Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
       } message: { offer in
-        Text(offer.message)
+        Text(model.sessionNames.replacingIDs(in: offer.message))
       }
     }
     .toolbar {
@@ -150,7 +150,7 @@ struct ContentView: View {
     ) { session, todos in
       Button(todos.button("Delete"), role: .destructive) { model.deleteDone(session, resolve: todos.ids) }
     } message: { session, todos in
-      Text(todos.message(before: BoardModel.deletePlan(session).message))
+      Text(model.sessionNames.replacingIDs(in: todos.message(before: BoardModel.deletePlan(session).message)))
     }
     .sheet(item: $model.newSession) {
       NewSessionView(request: $0).environmentObject(model)
@@ -162,8 +162,9 @@ struct ContentView: View {
       SessionSearchView().environmentObject(model)
     }
     .sheet(isPresented: isShowingDoneRemoval) {
-      if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
+      if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model).sessionLinks(model) }
     }
+    .sessionLinks(model)
   }
 }
 
@@ -180,7 +181,7 @@ struct WarningBanner<Action: View>: View {
   var body: some View {
     HStack {
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-      Text(text).lineLimit(2).textSelection(.enabled)
+      InlineText(plain: text).lineLimit(2).textSelection(.enabled)
       Spacer()
       action()
     }
@@ -887,8 +888,7 @@ struct GroupSuggestionList: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    let names = Dictionary(model.allBoard.map { ($0.id, $0.name) }) { first, _ in first }
-    let name = { (id: String) in names[id] ?? id }
+    let names = model.sessionNames
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
         ForEach(model.shownSuggestions) { s in
@@ -896,9 +896,10 @@ struct GroupSuggestionList: View {
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "lightbulb").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-              Text("\(action): \(s.sessions.map(name).joined(separator: ", "))")
+              Text("\(action): \(s.sessions.map(names.name).joined(separator: ", "))")
                 .fontWeight(.medium)
-              Text([s.reason, s.staying(name)].compactMap { $0 }.joined(separator: ". "))
+              // The ids stay in, so that `InlineText` draws each one as a linked name.
+              InlineText(plain: [s.reason, s.staying()].compactMap { $0 }.joined(separator: ". "))
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -1012,9 +1013,9 @@ struct BoardCard: View {
               }
             }
           }
-          Text(s.boardLine).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+          InlineText(plain: s.boardLine, links: false).font(.caption).foregroundStyle(.secondary).lineLimit(2)
           if let note = s.backNote {
-            Text(note).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+            InlineText(plain: note, links: false).font(.caption2).foregroundStyle(.orange).lineLimit(2)
           }
           CleanupNote(session: s)
           MergeNote(session: s)

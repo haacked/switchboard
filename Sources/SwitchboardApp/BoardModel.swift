@@ -154,6 +154,21 @@ final class BoardModel: ObservableObject {
   var followups: [SessionSummary] { allFollowups.filter(orgFilter.shows) }
   /// Every follow-up that waits to start, whatever the org filter says.
   @Published private(set) var allFollowups: [SessionSummary] = []
+  /// The names of every session that `ls`, `followup-ls`, or `removed-ls`
+  /// listed while the app runs, whatever the org filter says.
+  @Published private(set) var sessionNames = SessionNames.empty
+  /// Each id that `ls` or `followup-ls` listed, with its last name. An id
+  /// that leaves both lists keeps its name, so its mentions do not flicker
+  /// back to the id before `removed-ls` lists it.
+  private var listedNames: [String: String] = [:]
+  /// The names from `removed-ls`. A later read that leaves an id out does not remove it.
+  private var tombstones: [String: String] = [:]
+  /// The next refresh reads `removed-ls`. It starts true, and an id that
+  /// leaves `ls` sets it. A read that fails sets it again. So does a read
+  /// that `apply` drops because `ls` failed.
+  private(set) var readRemovedNext = true
+  /// The ids and names that `updateSessionNames` last built the directory from.
+  private var lastListed: [(id: String, name: String)] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
   /// True while the Board's new group name field is open.
@@ -412,6 +427,7 @@ final class BoardModel: ObservableObject {
     if readFollowups { followupsRead = Date() }
     let readUsage = Date().timeIntervalSince(usageRead) >= 60
     if readUsage { usageRead = Date() }
+    let readRemoved = takeRemovedRead()
     poller.async {
       let (result, more) = Self.read(
         sessions: client.sessions,
@@ -422,6 +438,7 @@ final class BoardModel: ObservableObject {
       let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
       let issues = readFollowups ? try? client.call("issues", as: IssueList.self) : nil
       let usage = readUsage ? try? client.usage() : nil
+      let removed = readRemoved ? try? client.call("removed-ls", as: [RemovedSession].self) : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
@@ -429,7 +446,7 @@ final class BoardModel: ObservableObject {
         if let proposals, self.planProposals != proposals { self.planProposals = proposals }
         if let issues, self.issueList != issues { self.issueList = issues }
         if let usage, self.usage != usage { self.usage = usage }
-        self.apply(result, followups: more)
+        self.apply(result, followups: more, removed: removed, readRemoved: readRemoved)
       }
     }
   }
@@ -457,13 +474,28 @@ final class BoardModel: ObservableObject {
       }
   }
 
-  func apply(_ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?) {
+  /// Returns whether this refresh reads `removed-ls`, and clears `readRemovedNext`.
+  func takeRemovedRead() -> Bool {
+    defer { readRemovedNext = false }
+    return readRemovedNext
+  }
+
+  /// A nil `followups` or `removed` means the refresh did not read that list.
+  /// `readRemoved` says whether it tried to read `removed-ls`.
+  func apply(
+    _ result: Result<[SessionSummary], Error>, followups more: [SessionSummary]?, removed: [RemovedSession]? = nil,
+    readRemoved: Bool = false
+  ) {
+    if readRemoved, removed == nil || (try? result.get()) == nil { readRemovedNext = true }
     switch result {
     case .success(let list):
       // Assigning a @Published property republishes even an equal value. A
       // refresh every second would redraw the views each time.
       if unreachable != nil { unreachable = nil }
       if let more, allFollowups != more { allFollowups = more }
+      if !Set(allSessions.map(\.id)).isSubset(of: list.map(\.id)) { readRemovedNext = true }
+      // Before the notifications, so that a body naming a session from this refresh resolves.
+      updateSessionNames(list + allFollowups, removed: removed)
       // Only shown sessions notify. The last seen sessions cover every session.
       // Widening the filter later therefore sends nothing for a change that happened while the session was hidden.
       if loaded { sessionsToNotify(list).forEach(notify) }
@@ -489,6 +521,19 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  private func updateSessionNames(_ listed: [SessionSummary], removed: [RemovedSession]?) {
+    let unchanged =
+      removed == nil && listed.count == lastListed.count
+      && zip(listed, lastListed).allSatisfy { $0.id == $1.id && $0.name == $1.name }
+    if unchanged { return }
+    lastListed = listed.map { ($0.id, $0.name) }
+    let live = Dictionary(listed.map { ($0.id, $0.name) }) { first, _ in first }
+    listedNames.merge(live) { _, new in new }
+    for r in removed ?? [] { tombstones[r.id] = r.name }
+    let names = SessionNames(live: live, removed: listedNames.merging(tombstones) { _, tombstone in tombstone })
+    if sessionNames != names { sessionNames = names }
+  }
+
   /// The shown sessions that just entered the Inbox. A chat can need the user
   /// before its item reaches the Inbox. This therefore compares each session
   /// with its place in the last refresh's Inbox, not with its last state.
@@ -502,11 +547,14 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// The session's Inbox line, with names in place of ids. The menu bar and the notification both show it.
+  func inboxLine(_ s: SessionSummary) -> String { sessionNames.replacingIDs(in: s.triage?.title ?? s.reason) }
+
   private func notify(_ s: SessionSummary) {
     guard Bundle.main.bundleIdentifier != nil else { return }
     let content = UNMutableNotificationContent()
     content.title = "\(inboxName(s)) needs you"
-    content.body = s.triage?.title ?? s.reason
+    content.body = inboxLine(s)
     content.userInfo = ["session": s.id]
     UNUserNotificationCenter.current().add(
       UNNotificationRequest(identifier: "\(s.id)-\(s.since)", content: content, trigger: nil))
@@ -811,6 +859,15 @@ final class BoardModel: ObservableObject {
     showWindow?()
   }
 
+  /// Reveals the session that a session link names, and returns whether the
+  /// URL is a session link. A link to a session that is gone does nothing,
+  /// because the system cannot open the scheme either.
+  func openSessionLink(_ url: URL) -> Bool {
+    guard let id = SessionLink.id(from: url) else { return false }
+    if sessionNames.entry(id)?.removed == false { reveal(id) }
+    return true
+  }
+
   /// Answers a card: allow, deny with an optional message, or one answer per
   /// question. `extra` with allow also applies that extra, such as auto mode.
   func answer(
@@ -831,7 +888,9 @@ final class BoardModel: ObservableObject {
       then: { result in
         self.actionError = nil
         guard card.kind == .send, let sent = try? JSONCoding.convert(result, to: GroupSend.self) else { return }
-        let failed = (sent.deliveries ?? []).compactMap { d in d.error.map { "\(d.session): \($0)" } }
+        let failed = (sent.deliveries ?? []).compactMap { d in
+          d.error.map { "\(self.sessionNames.name(d.session)): \($0)" }
+        }
         if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
       },
       failed: { self.cardErrors[card.id] = "\($0)" },

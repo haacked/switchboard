@@ -73,11 +73,11 @@ struct DecisionStepView: View {
   private func decisionBody(_ decision: PendingDecision) -> some View {
     let answer = list.answer(decision.number)
     return VStack(alignment: .leading, spacing: 8) {
-      Text(decision.header).font(.headline).textSelection(.enabled)
-      Text(decision.question).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+      InlineText(plain: decision.header).font(.headline).textSelection(.enabled)
+      InlineText(plain: decision.question).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
       if let context = decision.context, !context.isEmpty {
         DisclosureGroup("More from the reply") {
-          Text(context).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+          InlineText(plain: context).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
@@ -176,8 +176,8 @@ struct DecisionStepView: View {
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text("\(d.number)").monospacedDigit().foregroundStyle(.secondary)
       VStack(alignment: .leading, spacing: 2) {
-        Text(d.header).fontWeight(.medium)
-        Text(answer ?? "(unanswered)").font(.callout)
+        InlineText(plain: d.header).fontWeight(.medium)
+        InlineText(plain: answer ?? "(unanswered)").font(.callout)
           .foregroundStyle(answer == nil ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
           .fixedSize(horizontal: false, vertical: true)
       }

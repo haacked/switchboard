@@ -160,10 +160,13 @@ extension Instance {
     let repo = try sbd.repoWithOrigin()
     // Started in the main checkout, as an imported session or one in the
     // user's own folder would be.
-    let s = try sbd.client.call("new", ["path": .string(repo), "prompt": "hello"], as: SessionSummary.self)
+    let s = try sbd.client.call(
+      "new", ["path": .string(repo), "prompt": "hello", "name": "zsh-startup-for-switchboard"],
+      as: SessionSummary.self)
     let r = try sbd.deleteSession(s.id)
     #expect(r.status != 0)
     #expect(r.stderr.contains("didn't make a worktree"))
+    #expect(r.stderr.contains("zsh-startup-for-switchboard (\(s.id)) runs in"), Comment(rawValue: r.stderr))
     #expect(try sbd.intact(s))
     #expect(FileManager.default.fileExists(atPath: "\(repo)/.git"))
   }
@@ -315,6 +318,7 @@ extension Instance {
     let r = try sbd.deleteSessionAndBranch(s.id)
     #expect(r.status != 0)
     #expect(r.stderr.contains(error))
+    #expect(r.stderr.contains("Removed \(s.name) (\(s.id)) and its worktree, and kept"), Comment(rawValue: r.stderr))
     #expect(!r.stderr.contains(".."))
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
     #expect(try sbd.client.sessions().isEmpty)
@@ -336,10 +340,10 @@ extension Instance {
   }
 
   /// The store refuses the delete, so sbd refuses before it stops claude or removes the worktree.
-  private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool) throws {
+  private func refusesWhenTheStoreCannotDelete(_ table: String, branch: Bool, statement: String = "DELETE") throws {
     let github = try FakeGitHub()
     let (sbd, repo, s) = try mergedBranchSession(github)
-    try sbd.block("DELETE", on: table)
+    try sbd.block(statement, on: table)
     let r = try (branch ? sbd.deleteSessionAndBranch(s.id) : sbd.deleteSession(s.id))
     #expect(r.status != 0)
     #expect(r.stderr.contains("store is read-only"))
@@ -356,6 +360,23 @@ extension Instance {
 
   @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheEvents() throws {
     try refusesWhenTheStoreCannotDelete("events", branch: true)
+  }
+
+  /// The dry run in `checkDeletable` writes the removal's name too, so a store that can't record it refuses
+  /// before the worktree goes.
+  @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotRecordTheRemoval() throws {
+    try refusesWhenTheStoreCannotDelete("removed_sessions", branch: true, statement: "INSERT")
+  }
+
+  @Test func aRemovalWithTheWorktreeRecordsTheSessionsName() throws {
+    let sbd = try Instance()
+    let repo = try sbd.repoWithOrigin()
+    let s = try sbd.worktreeSession(repo)
+
+    #expect(try sbd.deleteSession(s.id).status == 0)
+
+    #expect(try sbd.removedSessions().map(\.id) == [s.id])
+    #expect(try sbd.removedSessions().map(\.name) == [s.name])
   }
 
   // MARK: The Done column's delete icon
@@ -806,7 +827,7 @@ extension Instance {
     let r = try sbd.run(["rm", s.id] + (worktree ? ["--worktree"] : []))
 
     #expect(r.status != 0)
-    #expect(r.stderr.contains("\(s.id) has an open to-do"), Comment(rawValue: r.stderr))
+    #expect(r.stderr.contains("\(s.name) (\(s.id)) has an open to-do"), Comment(rawValue: r.stderr))
     for todo in [first, second] {
       #expect(r.stderr.contains(todo.id), Comment(rawValue: r.stderr))
       #expect(r.stderr.contains("\"\(todo.text)\""), Comment(rawValue: r.stderr))

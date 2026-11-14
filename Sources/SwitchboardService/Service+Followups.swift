@@ -76,7 +76,7 @@ extension Service {
   ) throws -> SessionSummary {
     let parent = try ref.map { try lookup(["session": .string($0)]) }
     var session = Session(
-      id: shortId("s", taken: entries.keys), name: title ?? Followup.title(followup.prompt), cwd: "",
+      id: newSessionID(), name: title ?? Followup.title(followup.prompt), cwd: "",
       branch: branch.flatMap { $0.isEmpty ? nil : $0 }, claudeSessionId: UUID().uuidString.lowercased(),
       model: model, created: nowMs())
     session.parent = parent
@@ -142,8 +142,8 @@ extension Service {
     let session: Session = try queue.sync {
       let id = try lookup(args)
       let s = entries[id]!.session
-      guard s.waitsToStart else { throw APIError("\(id) isn't a follow-up that waits to start") }
-      guard starting.insert(id).inserted else { throw APIError("\(id) is starting") }
+      guard s.waitsToStart else { throw APIError("\(mention(id)) isn't a follow-up that waits to start") }
+      guard starting.insert(id).inserted else { throw APIError("\(mention(id)) is starting") }
       return s
     }
     defer { _ = queue.sync { starting.remove(session.id) } }
@@ -189,8 +189,10 @@ extension Service {
     let resolving = try resolveArgument(args)
     return try queue.sync {
       let id = try lookup(args)
-      guard entries[id]!.session.waitsToStart else { throw APIError("\(id) has started. sb rm removes a session") }
-      guard !starting.contains(id) else { throw APIError("\(id) is starting") }
+      guard entries[id]!.session.waitsToStart else {
+        throw APIError("\(mention(id)) has started. sb rm removes a session")
+      }
+      guard !starting.contains(id) else { throw APIError("\(mention(id)) is starting") }
       try forgetSession(id, resolving: resolving)
       try detachPlans { $0.session == id }
       return ["removed": .string(id)]
@@ -300,7 +302,7 @@ extension Service {
       var imported: [SessionSummary] = []
       for (item, title, followup) in items where seen.insert(item.key).inserted {
         var session = Session(
-          id: shortId("s", taken: entries.keys), name: title, cwd: "", claudeSessionId: UUID().uuidString.lowercased(),
+          id: newSessionID(), name: title, cwd: "", claudeSessionId: UUID().uuidString.lowercased(),
           created: item.added ?? now)
         session.followup = followup
         session.autoMode = config.autoMode

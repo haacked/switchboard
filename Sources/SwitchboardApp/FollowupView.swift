@@ -21,7 +21,7 @@ struct FollowupView: View {
             Text(session.name).font(.title3.bold()).textSelection(.enabled)
             StateBadge(state: session.state)
           }
-          Text(session.reason).foregroundStyle(.secondary)
+          InlineText(plain: session.reason).foregroundStyle(.secondary)
         }
         Spacer()
         StartButton(session: session)
@@ -55,10 +55,10 @@ struct FollowupView: View {
         if let parent = session.parent {
           GridRow {
             Text("Parent").foregroundStyle(.secondary)
-            if let p = model.allBoard.first(where: { $0.id == parent }) {
+            if let p = model.sessionNames.entry(parent), !p.removed {
               Button(p.name) { model.selection = parent }.buttonStyle(.link)
             } else {
-              Text("\(parent) (removed)").foregroundStyle(.secondary)
+              Text("\(model.sessionNames.name(parent)) (removed)").foregroundStyle(.secondary)
             }
           }
         }
@@ -67,7 +67,7 @@ struct FollowupView: View {
       .font(.callout)
       Divider()
       ScrollView {
-        Text(followup.prompt)
+        InlineText(plain: followup.prompt)
           .textSelection(.enabled)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -76,7 +76,7 @@ struct FollowupView: View {
     .confirmationDialog("Remove \(session.name)?", isPresented: isConfirmingRemove, presenting: removal) { todos in
       Button(todos.button("Remove Follow-up"), role: .destructive) { model.remove(session.id, resolve: todos.ids) }
     } message: { todos in
-      Text(todos.message(before: "An import of Followups.md won't add it again."))
+      Text(model.sessionNames.replacingIDs(in: todos.message(before: "An import of Followups.md won't add it again.")))
     }
   }
 

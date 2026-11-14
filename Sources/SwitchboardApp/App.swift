@@ -193,7 +193,8 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button("\(model.inboxName(s)): \(s.triage?.title ?? s.reason)") {
+        let title = "\(model.inboxName(s)): \(model.inboxLine(s))"
+        Button(title) {
           model.selection = s.id
           show()
         }

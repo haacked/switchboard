@@ -1519,7 +1519,8 @@ extension Instance {
   }
 }
 
-/// The refusal that sbd sends when the process that sent `command` descends from one of the session's panes.
-func insideRefusal(_ command: String, _ id: String) -> String {
-  "`\(command)` runs inside \(id), so it would stop itself. Run it from a terminal outside the session."
+/// The refusal that sbd sends when the process that sent `command` descends from one of the session's panes. It
+/// names the session first.
+func insideRefusal(_ command: String, _ s: SessionSummary) -> String {
+  "`\(command)` runs inside \(s.name) (\(s.id)), so it would stop itself. Run it from a terminal outside the session."
 }

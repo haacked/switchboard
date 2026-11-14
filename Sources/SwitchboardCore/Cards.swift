@@ -84,15 +84,17 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     "card \(id)'s hook closed, so sbd can't \(extra.hookClosedVerb)"
   }
 
-  /// Why an allow can't apply the extra, or nil when it can.
-  public func refusal(_ extra: AllowExtra) -> String? {
+  /// Why an allow can't apply the extra, or nil when it can. `sessionName`, when given, names the session in
+  /// the text.
+  public func refusal(_ extra: AllowExtra, sessionName: String? = nil) -> String? {
     guard kind == .permission else { return "card \(id) isn't a permission prompt" }
     if hookClosed { return hookClosedRefusal(extra) }
     switch extra {
     case .autoMode:
       guard let mode = permissionMode else { return "card \(id)'s hook didn't report the permission mode" }
       if PermissionMode.offeringAutoMode.contains(mode) { return nil }
-      return mode == PermissionMode.auto ? "\(session) is already in auto mode" : "card \(id) came from \(mode) mode"
+      let named = sessionName.map { sessionMention(name: $0, id: session) } ?? session
+      return mode == PermissionMode.auto ? "\(named) is already in auto mode" : "card \(id) came from \(mode) mode"
     case .always:
       if permissionSuggestions == nil || permissionSuggestions == [] {
         return "card \(id)'s request offered no always-allow rule"
