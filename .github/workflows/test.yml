@@ -9,6 +9,10 @@ permissions:
   contents: read
   pull-requests: read
 
+# Each runner runs one job, so the machine-wide build queue is off.
+env:
+  SB_BUILD_SLOTS: 0
+
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
@@ -62,8 +66,7 @@ jobs:
 
   # The suite takes longer than one 3-CPU runner can finish within the time
   # limit, so the matrix splits it across runners. Each part builds the tests
-  # and runs its share of them (bin/lib/shard-plan). Each runner runs one job,
-  # so the machine-wide build queue is off.
+  # and runs its share of them (bin/lib/shard-plan).
   swift-test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -73,8 +76,6 @@ jobs:
       fail-fast: false
       matrix:
         part: [1, 2]
-    env:
-      SB_BUILD_SLOTS: 0
     steps:
       - uses: actions/checkout@v4
       - run: swift --version

@@ -106,7 +106,7 @@ import Testing
     let first = try sbd.get(s.id).claudePid
     try sbd.sb("wait", s.id, "--kind", "merge", "--target", "1190")
     let waiting = try decode(sbd.sb("wait", "--json", s.id, "--kind", "merge", "--target", "1191"))
-    // A snapshot can miss a claude that still runs, so the pid alone does not
+    // A snapshot can miss a claude that still runs. The pid alone then does not
     // show the stop. The stop's `stopped` event must come before `mark`.
     try sbd.waitFor(s.id, "the stop", timeout: 10) { !$0.live && $0.claudePid == nil }
     let hold = "\(sbd.home.path)/hold-start"

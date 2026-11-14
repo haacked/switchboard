@@ -36,6 +36,7 @@ export SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH="${SWT_EXPERIMENTAL_MAXIMU
 # APFS clone of .build.
 shards() {
   local n=$1 clones=.build-shards
+  # bin/lib/shard-plan checks the count too, but only after the build.
   [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "bin/test: --shards needs a positive count" >&2; exit 2; }
   if ! [[ $2 =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
     echo "bin/test: --part needs K/P with 1 <= K <= P, not '$2'" >&2
@@ -92,9 +93,8 @@ shards() {
 }
 
 if [ "${1:-}" = --shards ]; then
-  if [ $# -eq 2 ]; then shards "$2" 1/1; fi
-  [ $# -eq 4 ] && [ "$3" = --part ] || { echo "usage: bin/test --shards N [--part K/P]" >&2; exit 2; }
-  shards "$2" "$4"
+  [ $# -eq 2 ] || { [ $# -eq 4 ] && [ "$3" = --part ]; } || { echo "usage: bin/test --shards N [--part K/P]" >&2; exit 2; }
+  shards "$2" "${4:-1/1}"
 fi
 if [ "${1:-}" = --claude ]; then
   export SB_TEST_CLAUDE=1

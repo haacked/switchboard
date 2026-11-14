@@ -13,10 +13,8 @@ private struct PlanLine: Equatable, CustomStringConvertible {
 /// Runs bin/lib/shard-plan with `tests` on stdin and a weights file that
 /// holds `weights`.
 private func plan(_ args: [String], weights: [(Int, String)] = [], tests: [String]) throws -> CommandResult {
-  let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shard-plan-\(UUID().uuidString)")
-  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-  defer { try? FileManager.default.removeItem(at: dir) }
-  let file = dir.appendingPathComponent("weights").path
+  let scratch = try Repos()
+  let file = "\(scratch.root)/weights"
   try weights.map { "\($0.0) \($0.1)\n" }.joined().write(toFile: file, atomically: true, encoding: .utf8)
   let script = Instance.root.appendingPathComponent("bin/lib/shard-plan").path
   let input = Data(tests.map { "\($0)\n" }.joined().utf8)
@@ -45,7 +43,7 @@ private let measure = "IntegrationTests.MeasureTests/m()"
   /// With weights 100 to 30 and four shards in all, each shard ends with 130.
   @Test func twoPartsSplitTheSuitesByWeightAcrossTheShardsOfBothParts() throws {
     let suites = ["FxATests", "FxBTests", "FxCTests", "FxDTests", "FxETests", "FxFTests", "FxGTests", "FxHTests"]
-    let weights = zip([100, 90, 80, 70, 60, 50, 40, 30], suites.map { "IntegrationTests.\($0)" }).map { ($0, $1) }
+    let weights = Array(zip([100, 90, 80, 70, 60, 50, 40, 30], suites.map { "IntegrationTests.\($0)" }))
     let tests = suites.map { "IntegrationTests.\($0)/a()" } + ["SwitchboardCoreTests.FxUnitTests/u()", measure]
 
     let r = try plan(["2", "2"], weights: weights, tests: tests)
