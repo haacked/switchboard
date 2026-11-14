@@ -217,17 +217,17 @@ extension Service {
     if worktree { try site.requireReady() }
     if mayRunClaude {
       throw APIError(
-        "\(session.id)'s claude may still run on \(host), which \(home.config) no longer lists, so sbd can't stop it. List \(host) there again to remove \(session.id)."
+        "\(session.mention)'s claude may still run on \(host), which \(home.config) no longer lists, so sbd can't stop it. List \(host) there again to remove \(session.mention)."
       )
     }
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
         !merging.contains(session.id)
       else {
-        throw APIError("\(session.id) changed while it was being removed")
+        throw APIError("\(session.mention) changed while it was being removed")
       }
       guard let entry = entries[session.id], !self.mayRunClaude(entry) else {
-        throw APIError("\(session.id)'s claude may still run on \(host), so sbd can't remove it.")
+        throw APIError("\(session.mention)'s claude may still run on \(host), so sbd can't remove it.")
       }
       try forgetSession(session.id, resolving: resolving)
       try detachPlans { $0.session == session.id }

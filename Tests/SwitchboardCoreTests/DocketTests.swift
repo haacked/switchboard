@@ -398,7 +398,7 @@ struct DocketVerdictCase: Sendable, CustomTestStringConvertible {
       closedEvent(6000),
     ]
     for cut in 1..<events.count {
-      try store.delete(session: row.id)
+      try store.delete(session: row.id, name: row.name)
       try store.save(row)
       for e in events[..<cut] { try store.append(e) }
       try Snapshots.refresh(store, row, build: "b1")

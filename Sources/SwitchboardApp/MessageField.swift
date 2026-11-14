@@ -35,7 +35,7 @@ struct MessageField: View {
           .disabled(model.sending.contains(session) || draft.isEmpty)
       }
       if let error = draft.error {
-        Text(error).font(.caption).foregroundStyle(.red)
+        InlineText(plain: error).font(.caption).foregroundStyle(.red)
       }
     }
     .overlay {

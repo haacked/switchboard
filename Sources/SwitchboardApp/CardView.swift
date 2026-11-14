@@ -61,7 +61,7 @@ struct CardView: View {
     return VStack(alignment: .leading, spacing: 8) {
       Text("Claude wants to use \(card.tool)").font(.headline)
       if let description = card.input["description"]?.string {
-        Text(description).foregroundStyle(.secondary)
+        InlineText(plain: description).foregroundStyle(.secondary)
       }
       if !compact { Self.textBox(card.details, maxHeight: 160) }
       HStack {
@@ -178,13 +178,13 @@ struct CardView: View {
         VStack(alignment: .leading, spacing: 6) {
           HStack(spacing: 6) {
             if let header = q.header {
-              Text(header)
+              InlineText(plain: header)
                 .font(.caption.bold())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Capsule().fill(AttentionState.needsYou.color.opacity(0.18)))
             }
-            Text(q.question).fontWeight(.medium)
+            InlineText(plain: q.question).fontWeight(.medium)
             if q.multiSelect { Text("pick any").font(.caption).foregroundStyle(.secondary) }
           }
           ForEach(q.options, id: \.label) { option in

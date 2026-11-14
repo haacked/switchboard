@@ -134,7 +134,7 @@ struct SessionView: View {
     VStack(alignment: .leading, spacing: 12) {
       Text("Remove \(session.name)?").font(.headline)
       Text("This stops claude and closes both terminals. The conversation's transcript stays.")
-      if let message = todos.message { Text(message) }
+      if let message = todos.message { InlineText(plain: message) }
       if session.repo != nil, let options = ui.removeOptions {
         Toggle(
           isOn: Binding(
@@ -201,7 +201,7 @@ struct SessionView: View {
               .foregroundStyle(.secondary)
           }
         }
-        Text(session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+        InlineText(plain: session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
         if let pr = session.pr, let url = pr.link {
           HStack(spacing: 4) {
             Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")

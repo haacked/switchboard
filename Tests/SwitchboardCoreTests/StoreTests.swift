@@ -93,7 +93,7 @@ func tempFolder() throws -> String {
     #expect(try store.events(since: events[0].id).map(\.session) == ["s2", "s1"])
     #expect(try store.events(session: "s1").count == 2)
     #expect(try store.events(limit: 2, newest: true).map(\.kind) == ["SessionStart", "SessionEnd"])
-    try store.delete(session: "s1")
+    try store.delete(session: "s1", name: "one")
     #expect(try store.sessions().isEmpty)
     #expect(try store.events(session: "s1").isEmpty)
   }
@@ -289,7 +289,8 @@ func tempFolder() throws -> String {
     try store.save(s)
 
     try store.delete(
-      session: s.id, resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")])
+      session: s.id, name: s.name, resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")]
+    )
 
     #expect(try store.sessions().isEmpty)
     let rows = try store.resolvedTodos(limit: 50)
@@ -310,7 +311,8 @@ func tempFolder() throws -> String {
 
     #expect(throws: APIError.self) {
       try store.delete(
-        session: s.id, resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")])
+        session: s.id, name: s.name,
+        resolving: [Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")])
     }
 
     #expect(try store.sessions() == [s])
@@ -344,11 +346,262 @@ func tempFolder() throws -> String {
     var row = Self.record(s, Self.todo("n1"), how: "resolved and deleted the session")
     row.pr = nil
 
-    try store.delete(session: s.id, resolving: [row])
+    try store.delete(session: s.id, name: s.name, resolving: [row])
 
     let read = try #require(try store.resolvedTodos(limit: 50).first)
     #expect(read.repo == nil)
     #expect(read.branch == nil)
     #expect(read.pr == nil)
+  }
+}
+
+/// The `removed_sessions` row keeps a removed session's name. It exists if and only if the session's record was
+/// deleted in the same committed transaction.
+@Suite struct RemovedSessionStoreTests {
+  static let id = "sgcctv"
+  static let name = "zsh-startup-for-switchboard"
+
+  static func session(_ id: String = id, name: String = name) -> Session {
+    Session(id: id, name: name, cwd: "/tmp/a", claudeSessionId: "u1", created: 5)
+  }
+
+  /// Saves the session with an event and a snapshot, so each DELETE of a removal matches a row and fires a
+  /// trigger on its table.
+  static func seed(_ store: Store, _ s: Session) throws {
+    try store.save(s)
+    try store.append(Event(session: s.id, t: 1, kind: "SessionStart"))
+    try store.save(snapshot: "{}", session: s.id)
+  }
+
+  /// Returns once `nowMs()` is past `t`, so the next removal gets a later time.
+  static func waitPast(_ t: Int64) {
+    while nowMs() <= t { Thread.sleep(forTimeInterval: 0.001) }
+  }
+
+  @Test func deleteRecordsTheNameAndTheTimeOfTheRemoval() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try Self.seed(store, Self.session())
+    let before = nowMs()
+
+    try store.delete(session: Self.id, name: Self.name)
+
+    let after = nowMs()
+    let rows = try store.removedSessions()
+    #expect(rows.map(\.id) == [Self.id])
+    #expect(rows.map(\.name) == [Self.name])
+    let removed = try #require(rows.first?.removed)
+    #expect(before <= removed && removed <= after, "\(removed) is outside \(before)...\(after)")
+  }
+
+  @Test func deleteRemovesTheSessionsRecordEventsAndSnapshotAsBefore() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try Self.seed(store, Self.session())
+
+    try store.delete(session: Self.id, name: Self.name)
+
+    #expect(try store.sessions().isEmpty)
+    #expect(try store.events(session: Self.id).isEmpty)
+    #expect(try store.snapshot(session: Self.id) == nil)
+  }
+
+  /// The name is bound, not spliced into the SQL, so quotes and non-ASCII text read back unchanged.
+  @Test(arguments: ["it's a \"name\"; DROP TABLE sessions; --", "café ☕ 名前", "fix (seb4ec)"])
+  func deleteKeepsTheNameExactlyAsGiven(_ name: String) throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try Self.seed(store, Self.session(name: name))
+
+    try store.delete(session: Self.id, name: name)
+
+    #expect(try store.removedSessions().map(\.name) == [name])
+  }
+
+  @Test func deleteOfASessionOnAHostRecordsTheRemovalAndTheHostRow() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try Self.seed(store, Self.session())
+
+    try store.delete(session: Self.id, name: Self.name, onHost: "mini")
+
+    #expect(try store.removedSessions().map(\.id) == [Self.id])
+    #expect(try store.removedHostSessions(host: "mini") == [Self.id])
+  }
+
+  @Test func deleteThatResolvesToDosRecordsTheRemovalAndTheToDos() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    var s = Self.session()
+    s.notes = [ResolvedTodoStoreTests.todo("n1")]
+    try Self.seed(store, s)
+
+    try store.delete(
+      session: s.id, name: s.name,
+      resolving: [ResolvedTodoStoreTests.record(s, ResolvedTodoStoreTests.todo("n1"), how: "resolved and deleted")])
+
+    #expect(try store.removedSessions().map(\.id) == [s.id])
+    #expect(try store.resolvedTodos(limit: 50).map(\.note) == ["n1"])
+  }
+
+  /// `checkDeletable` runs the deletion in a transaction that it rolls back.
+  @Test func checkDeletableLeavesNoRemovalAndKeepsTheSession() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = Self.session()
+    try Self.seed(store, s)
+
+    try store.checkDeletable(session: s.id, name: s.name, resolving: [])
+
+    #expect(try Store(path: "\(dir)/sb.db").removedSessions().isEmpty)
+    #expect(try store.sessions() == [s])
+  }
+
+  /// The dry run exercises the insert too, so `rm` refuses before it removes a worktree whose removal the store
+  /// could not record.
+  @Test func checkDeletableThrowsWhenTheRemovalCannotBeRecorded() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = Self.session()
+    try Self.seed(store, s)
+    try ResolvedTodoStoreTests.block("INSERT", on: "removed_sessions", in: "\(dir)/sb.db")
+
+    #expect(throws: APIError.self) { try store.checkDeletable(session: s.id, name: s.name, resolving: []) }
+
+    #expect(try store.sessions() == [s])
+    #expect(try store.removedSessions().isEmpty)
+  }
+
+  /// Whichever statement of the deletion fails, before or after the insert, the transaction leaves the session's
+  /// record and writes no removal.
+  @Test(
+    arguments: [
+      ("INSERT", "removed_sessions", nil), ("DELETE", "sessions", nil), ("DELETE", "events", nil),
+      ("DELETE", "snapshots", nil), ("INSERT", "removed_host_sessions", "mini"),
+    ] as [(String, String, String?)])
+  func aDeleteThatFailsKeepsTheSessionAndRecordsNoRemoval(_ statement: String, _ table: String, _ host: String?)
+    throws
+  {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = Self.session()
+    try Self.seed(store, s)
+    try ResolvedTodoStoreTests.block(statement, on: table, in: "\(dir)/sb.db")
+
+    #expect(throws: APIError.self) { try store.delete(session: s.id, name: s.name, onHost: host) }
+
+    let reopened = try Store(path: "\(dir)/sb.db")
+    #expect(try reopened.sessions() == [s])
+    #expect(try reopened.removedSessions().isEmpty)
+    #expect(try reopened.events(session: s.id).count == 1)
+  }
+
+  /// Another connection holds the write lock past the busy timeout, so the deletion can't start and changes
+  /// nothing.
+  @Test(.timeLimit(.minutes(1)))
+  func aDeleteThatCantGetTheWriteLockKeepsTheSessionAndRecordsNoRemoval() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let other = try Store(path: "\(dir)/sb.db")
+    let s = Self.session()
+    try Self.seed(store, s)
+
+    _ = try other.transaction {
+      #expect(throws: APIError.self) { try store.delete(session: s.id, name: s.name) }
+    }
+
+    #expect(try store.sessions() == [s])
+    #expect(try store.removedSessions().isEmpty)
+  }
+
+  /// `INSERT OR REPLACE` keeps one row per id, with the name and time of the latest removal.
+  @Test func aSecondRemovalOfTheSameIdReplacesTheRow() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    try Self.seed(store, Self.session(name: "old-name"))
+    try store.delete(session: Self.id, name: "old-name")
+    let first = try #require(try store.removedSessions().first)
+    Self.waitPast(first.removed)
+    try Self.seed(store, Self.session(name: "new-name"))
+
+    try store.delete(session: Self.id, name: "new-name")
+
+    let rows = try store.removedSessions()
+    #expect(rows.map(\.id) == [Self.id])
+    #expect(rows.map(\.name) == ["new-name"])
+    #expect((rows.first?.removed ?? 0) > first.removed)
+  }
+
+  @Test func removedSessionsAreNewestFirst() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let ids = ["sgcctv", "seb4ec", "s2m9qa"]
+    for id in ids {
+      try Self.seed(store, Self.session(id, name: "name of \(id)"))
+      try store.delete(session: id, name: "name of \(id)")
+      Self.waitPast(try #require(try store.removedSessions().first { $0.id == id }).removed)
+    }
+
+    let rows = try store.removedSessions()
+
+    #expect(rows.map(\.id) == ids.reversed())
+    #expect(rows.map(\.removed) == rows.map(\.removed).sorted(by: >))
+  }
+
+  @Test func removedSessionsOutliveReopeningTheStore() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let written: [RemovedSession]
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try Self.seed(store, Self.session())
+      try store.delete(session: Self.id, name: Self.name)
+      written = try store.removedSessions()
+    }
+
+    let read = try Store(path: "\(dir)/sb.db").removedSessions()
+
+    #expect(!written.isEmpty)
+    #expect(read == written)
+  }
+
+  @Test func aNewStoreHasNoRemovedSessions() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.removedSessions().isEmpty)
+  }
+
+  /// A database from before `removed_sessions` existed gets the table when sbd opens it, and keeps its sessions.
+  @Test func openingAnOlderDatabaseAddsTheTableAndKeepsItsSessions() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let s = Self.session()
+    do {
+      let store = try Store(path: "\(dir)/sb.db")
+      try store.save(s)
+    }
+    let r = try runCommand("/usr/bin/sqlite3", ["\(dir)/sb.db", "DROP TABLE IF EXISTS removed_sessions;"])
+    try #require(r.status == 0, Comment(rawValue: r.stderr))
+
+    let store = try Store(path: "\(dir)/sb.db")
+
+    #expect(try store.removedSessions().isEmpty)
+    #expect(try store.sessions() == [s])
+    try store.delete(session: s.id, name: s.name)
+    #expect(try store.removedSessions().map(\.id) == [s.id])
   }
 }

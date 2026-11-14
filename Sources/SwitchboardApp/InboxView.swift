@@ -96,7 +96,7 @@ struct TriageRow: View {
         .padding(.top, 5)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
-        Text(item?.title ?? session.reason).fontWeight(.medium).lineLimit(2)
+        InlineText(plain: item?.title ?? session.reason, links: false).fontWeight(.medium).lineLimit(2)
         Text(
           [repo, model.inboxName(session), ago(session.since)]
             .compactMap { $0 }.joined(separator: " · ")

@@ -69,12 +69,13 @@ public enum ParentNotice {
   public static func lines(
     name: String, id: String, before: ChildMark, after: ChildMark, reason: String, prURL: String?
   ) -> [String] {
-    Change.between(before, after, reason: reason, prURL: prURL).map {
+    let mention = sessionMention(name: name, id: id)
+    return Change.between(before, after, reason: reason, prURL: prURL).map {
       switch $0 {
-      case .pr(let number, let url): "\(name) (\(id)) \(Change.opened(number, url: url))"
-      case .needsYou(let reason): "\(name) (\(id)) needs you: \(reason)"
-      case .readyToMerge(let reason): "\(name) (\(id)): \(reason)"
-      case .done: "\(name) (\(id)) is done"
+      case .pr(let number, let url): "\(mention) \(Change.opened(number, url: url))"
+      case .needsYou(let reason): "\(mention) needs you: \(reason)"
+      case .readyToMerge(let reason): "\(mention): \(reason)"
+      case .done: "\(mention) is done"
       }
     }
   }
@@ -138,7 +139,7 @@ public enum ParentDigest {
       case .done: "done"
       }
     }
-    return parts.isEmpty ? nil : "\(name) (\(id)): " + parts.joined(separator: "; ")
+    return parts.isEmpty ? nil : "\(sessionMention(name: name, id: id)): " + parts.joined(separator: "; ")
   }
 
   public static func text(_ lines: [String], elsewhere: BoardCounts) -> String {
@@ -162,9 +163,9 @@ public enum ParentDigest {
       let rows = sessions.filter { $0.state == state }
       guard !rows.isEmpty else { continue }
       out.append("\(state.title):")
-      out += rows.map { "- \($0.name) (\($0.id)): \(oneLine($0.reason, max: 120))" }
+      out += rows.map { "- \(sessionMention(name: $0.name, id: $0.id)): \(oneLine($0.reason, max: 120))" }
     }
-    let items = inbox.compactMap { s in s.triage.map { "- \(s.name) (\(s.id)): \($0.title)" } }
+    let items = inbox.compactMap { s in s.triage.map { "- \(sessionMention(name: s.name, id: s.id)): \($0.title)" } }
     if !items.isEmpty { out += ["Inbox:"] + items }
     return out.joined(separator: "\n")
   }
