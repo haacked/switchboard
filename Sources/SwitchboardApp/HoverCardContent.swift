@@ -20,7 +20,7 @@ struct HoverCardContent: Equatable {
   /// `activeAccount`. A session without a recorded account runs under sbd's
   /// own account, which the app can't name.
   init(
-    _ s: SessionSummary, activeAccount: String, names: SessionNames = SessionNames(live: [:], removed: [:]),
+    _ s: SessionSummary, activeAccount: String, names: SessionNames = .empty,
     now: Int64 = nowMs()
   ) {
     title = s.name

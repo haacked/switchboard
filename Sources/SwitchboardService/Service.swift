@@ -1436,7 +1436,6 @@ public final class Service {
       }
       try awaitSite(site)
       defer { queue.sync { _ = removing.remove(session.id) } }
-      let named = sessionMention(name: session.name, id: session.id)
       var repo: String?
       var branch: (name: String, tip: String)?
       var worktreeRemoved = false
@@ -1467,7 +1466,7 @@ public final class Service {
             guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
               !merging.contains(session.id)
             else {
-              throw APIError("\(named) changed while it was being removed")
+              throw APIError("\(session.mention) changed while it was being removed")
             }
             // A record that can't be deleted after the worktree is gone would list the session with its folder missing.
             try store.checkDeletable(
@@ -1519,7 +1518,7 @@ public final class Service {
         guard !starting.contains(session.id), !merging.contains(session.id),
           entries[session.id]?.session.cwd == session.cwd
         else {
-          throw APIError("\(named) changed while it was being removed")
+          throw APIError("\(session.mention) changed while it was being removed")
         }
         // A to-do can arrive while the panes stop. The record stays. The refusal names what rm already removed.
         let removed = [
@@ -1528,7 +1527,7 @@ public final class Service {
         ].compactMap { $0 }
         let kept =
           removed.isEmpty
-          ? "Kept \(named)" : "Removed \(englishList(removed)) of \(named) and kept the session"
+          ? "Kept \(session.mention)" : "Removed \(englishList(removed)) of \(session.mention) and kept the session"
         var stayed = ""
         if let branchError, let branch {
           stayed = " It kept \(branch.name): \(branchError)"
@@ -1553,11 +1552,11 @@ public final class Service {
       removeSessionFolder(session.id, at: site)
       if let branchError, let branch {
         let remote = removesRemoteBranch ? " It also kept the remote branch." : ""
-        throw APIError("Removed \(named) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
+        throw APIError("Removed \(session.mention) and its worktree, and kept \(branch.name): \(branchError)\(remote)")
       }
       if let remoteError {
         throw APIError(
-          "Removed \(named), its worktree, and its local branch, and kept the remote branch: \(remoteError)")
+          "Removed \(session.mention), its worktree, and its local branch, and kept the remote branch: \(remoteError)")
       }
       return [
         "removed": .string(session.id), "worktree_removed": .bool(repo != nil), "branch_removed": .bool(branchRemoved),
@@ -1602,7 +1601,7 @@ public final class Service {
   private func worktreeRepo(_ session: Session, at site: any SessionSite) throws -> String {
     guard let repo = session.repo else {
       throw APIError(
-        "\(sessionMention(name: session.name, id: session.id)) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
+        "\(session.mention) runs in \(session.cwd), and sbd didn't make a worktree for it. Remove the session without the worktree instead."
       )
     }
     if site.machine.isFolder(repo) { return repo }
@@ -1620,11 +1619,11 @@ public final class Service {
     if mains.count == 1 { return mains[0] }
     if mains.count > 1 {
       throw APIError(
-        "\(sessionMention(name: session.name, id: session.id))'s repo \(repo) is gone, and \(mains.joined(separator: " and ")) both list its worktree."
+        "\(session.mention)'s repo \(repo) is gone, and \(mains.joined(separator: " and ")) both list its worktree."
       )
     }
     throw APIError(
-      "\(sessionMention(name: session.name, id: session.id))'s repo \(repo) is gone, and no known checkout lists \(session.cwd) as a worktree. Remove the session without the worktree instead."
+      "\(session.mention)'s repo \(repo) is gone, and no known checkout lists \(session.cwd) as a worktree. Remove the session without the worktree instead."
     )
   }
 

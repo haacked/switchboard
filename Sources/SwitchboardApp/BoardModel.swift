@@ -141,15 +141,19 @@ final class BoardModel: ObservableObject {
   @Published private(set) var allFollowups: [SessionSummary] = []
   /// The names of every session that `ls`, `followup-ls`, or `removed-ls`
   /// listed while the app runs, whatever the org filter says.
-  @Published private(set) var sessionNames = SessionNames(live: [:], removed: [:])
+  @Published private(set) var sessionNames = SessionNames.empty
   /// Each id that `ls` or `followup-ls` listed, with its last name. An id
   /// that leaves both lists keeps its name, so its mentions do not flicker
   /// back to the id before `removed-ls` lists it.
   private var listedNames: [String: String] = [:]
   /// The names from `removed-ls`. A later read that leaves an id out does not remove it.
   private var tombstones: [String: String] = [:]
-  /// An id left `ls`, so the next refresh reads `removed-ls` for its tombstone.
-  private var readRemovedNext = false
+  /// The next refresh reads `removed-ls`. It starts true, and an id that
+  /// leaves `ls` sets it. A read that fails sets it again. So does a read
+  /// that `apply` drops because `ls` failed.
+  private var readRemovedNext = true
+  /// The ids and names that `updateSessionNames` last built the directory from.
+  private var lastListed: [(id: String, name: String)] = []
   /// The groups, read every 5 s with the follow-ups.
   @Published var groups: [GroupSummary] = []
   /// True while the Board's new group name field is open.
@@ -373,7 +377,7 @@ final class BoardModel: ObservableObject {
     if readFollowups { followupsRead = Date() }
     let readUsage = Date().timeIntervalSince(usageRead) >= 60
     if readUsage { usageRead = Date() }
-    let readRemoved = readFollowups || readRemovedNext
+    let readRemoved = readRemovedNext
     readRemovedNext = false
     poller.async {
       let (result, more) = Self.read(
@@ -391,6 +395,7 @@ final class BoardModel: ObservableObject {
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
         if let proposals, self.planProposals != proposals { self.planProposals = proposals }
         if let usage, self.usage != usage { self.usage = usage }
+        if readRemoved, removed == nil || (try? result.get()) == nil { self.readRemovedNext = true }
         self.apply(result, followups: more, removed: removed)
       }
     }
@@ -456,6 +461,11 @@ final class BoardModel: ObservableObject {
   }
 
   private func updateSessionNames(_ listed: [SessionSummary], removed: [RemovedSession]?) {
+    let unchanged =
+      removed == nil && listed.count == lastListed.count
+      && zip(listed, lastListed).allSatisfy { $0.id == $1.id && $0.name == $1.name }
+    if unchanged { return }
+    lastListed = listed.map { ($0.id, $0.name) }
     let live = Dictionary(listed.map { ($0.id, $0.name) }) { first, _ in first }
     listedNames.merge(live) { _, new in new }
     for r in removed ?? [] { tombstones[r.id] = r.name }
@@ -793,7 +803,7 @@ final class BoardModel: ObservableObject {
         self.actionError = nil
         guard card.kind == .send, let sent = try? JSONCoding.convert(result, to: GroupSend.self) else { return }
         let failed = (sent.deliveries ?? []).compactMap { d in
-          d.error.map { "\(self.sessionNames.entry(d.session)?.name ?? d.session): \($0)" }
+          d.error.map { "\(self.sessionNames.name(d.session)): \($0)" }
         }
         if !failed.isEmpty { self.actionError = "send: \(failed.joined(separator: "; "))" }
       },

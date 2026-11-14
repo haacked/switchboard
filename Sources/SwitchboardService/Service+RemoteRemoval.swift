@@ -214,21 +214,20 @@ extension Service {
     _ session: Session, resolving: Set<String>, worktree: Bool, mayRunClaude: Bool, site: any SessionSite
   ) throws -> JSON {
     let host = session.host ?? "its host"
-    let named = sessionMention(name: session.name, id: session.id)
     if worktree { try site.requireReady() }
     if mayRunClaude {
       throw APIError(
-        "\(named)'s claude may still run on \(host), which \(home.config) no longer lists, so sbd can't stop it. List \(host) there again to remove \(named)."
+        "\(session.mention)'s claude may still run on \(host), which \(home.config) no longer lists, so sbd can't stop it. List \(host) there again to remove \(session.mention)."
       )
     }
     try queue.sync {
       guard entries[session.id]?.session.cwd == session.cwd, !starting.contains(session.id),
         !merging.contains(session.id)
       else {
-        throw APIError("\(named) changed while it was being removed")
+        throw APIError("\(session.mention) changed while it was being removed")
       }
       guard let entry = entries[session.id], !self.mayRunClaude(entry) else {
-        throw APIError("\(named)'s claude may still run on \(host), so sbd can't remove it.")
+        throw APIError("\(session.mention)'s claude may still run on \(host), so sbd can't remove it.")
       }
       try forgetSession(session.id, resolving: resolving)
       try detachPlans { $0.session == session.id }

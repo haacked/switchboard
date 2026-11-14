@@ -79,7 +79,7 @@ extension Service {
     let site = self.site(for: session)
     if let pid = stop.claudePid, try !waitForExit([pid], seconds: 5, at: site).isEmpty {
       throw APIError(
-        "\(sessionMention(name: session.name, id: session.id))'s claude has not exited. Run `\(command)` again once it has."
+        "\(session.mention)'s claude has not exited. Run `\(command)` again once it has."
       )
     }
     try closePane(session.id, .claude, at: site)
@@ -101,7 +101,7 @@ extension Service {
       running.sorted().map { "\($0) (\(commands[$0] ?? "?"), started by the session)" }
       + users.map { "\($0.pid) (\(commands[$0.pid] ?? "?"), \($0.use.rawValue) \($0.path))" }
     throw APIError(
-      "Processes from \(sessionMention(name: session.name, id: session.id)) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
+      "Processes from \(session.mention) or in \(session.cwd) still run: \(named.joined(separator: ", ")). Stop them, then run `\(command)` again."
     )
   }
 

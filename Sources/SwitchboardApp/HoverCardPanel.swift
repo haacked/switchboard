@@ -240,7 +240,7 @@ struct HoverCardBody: View {
         .background(Capsule().fill(pr.status.color.opacity(0.14)))
       }
       if let summary = content.summary {
-        // `HoverCardContent` already put the names in, and a name is never scanned again.
+        // `HoverCardContent` already put the names in. A name is never scanned again.
         Text(verbatim: summary).font(.callout).lineLimit(2)
           .fixedSize(horizontal: false, vertical: true)
       }

@@ -82,7 +82,7 @@ extension Service {
       if matches.isEmpty { throw APIError("no session has an open PR \(ref)") }
       throw APIError(
         "\(matches.count) sessions have an open PR \(ref), so name one: "
-          + matches.map { sessionMention(name: $0.name, id: $0.id) }.joined(separator: ", "))
+          + matches.map(\.mention).joined(separator: ", "))
     }
     return matches[0].id
   }

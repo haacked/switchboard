@@ -397,6 +397,14 @@ public struct Wait: Codable, Equatable, Sendable {
   }
 }
 
+/// The characters of the ids that `shortId` makes.
+enum ShortId {
+  /// It leaves out `l`, `o`, `0`, and `1`, because each reads like another character.
+  static let alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+  /// The number of characters after the prefix.
+  static let length = 5
+}
+
 /// A prefix and 5 random characters that aren't in `taken`, such as `w3k9ap`.
 public func shortId(_ prefix: String, taken: some Collection<String> = [String]()) -> String {
   var generator = SystemRandomNumberGenerator()
@@ -409,7 +417,7 @@ public func shortId(
 ) -> String {
   var id: String
   repeat {
-    id = prefix + String((0..<5).map { _ in "abcdefghijkmnpqrstuvwxyz23456789".randomElement(using: &generator)! })
+    id = prefix + String((0..<ShortId.length).map { _ in ShortId.alphabet.randomElement(using: &generator)! })
   } while taken.contains(id)
   return id
 }

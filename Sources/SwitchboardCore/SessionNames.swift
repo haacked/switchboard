@@ -2,6 +2,10 @@
 /// stays because an agent needs it to run `sb` commands.
 public func sessionMention(name: String, id: String) -> String { "\(name) (\(id))" }
 
+extension Session {
+  public var mention: String { sessionMention(name: name, id: id) }
+}
+
 /// A session that sbd removed, with the name it had then.
 public struct RemovedSession: Codable, Equatable, Sendable {
   public var id: String
@@ -58,15 +62,20 @@ public struct SessionNames: Equatable, Sendable {
     self.entries = entries
   }
 
+  public static let empty = SessionNames(live: [:], removed: [:])
+
   public var isEmpty: Bool { entries.isEmpty }
 
-  /// Whether `s` has the format of a session id: `s` and five characters from the `shortId` alphabet.
+  /// Whether `s` has the format of a session id: `s` and then `ShortId.length` characters from `ShortId.alphabet`.
   public static func isSessionID(_ s: String) -> Bool {
     let scalars = Array(s.unicodeScalars)
-    return scalars.count == 6 && scalars[0] == "s" && scalars[1...].allSatisfy(inIdAlphabet)
+    return scalars.count == idLength && scalars[0] == "s" && scalars[1...].allSatisfy(inIdAlphabet)
   }
 
   public func entry(_ id: String) -> Entry? { entries[id] }
+
+  /// The session's name, or `id` when no session has it.
+  public func name(_ id: String) -> String { entries[id]?.name ?? id }
 
   /// The text split at each session id that is a whole token and resolves. A
   /// link, image, or footnote run is never rewritten, and a code run only when
@@ -124,14 +133,14 @@ public struct SessionNames: Equatable, Sendable {
     guard run.link == nil, run.image == nil, !run.style.contains(.footnote) else { return [] }
     if run.style.contains(.code) {
       // A code span is rewritten only when its whole text is one id.
-      guard range.count == 6, let match = match(at: range.lowerBound, s) else { return [] }
+      guard range.count == Self.idLength, let match = match(at: range.lowerBound, s) else { return [] }
       return [Span(range: range, match: match)]
     }
     var candidates: [Span] = []
     var i = range.lowerBound
-    while i + 6 <= range.upperBound {
+    while i + Self.idLength <= range.upperBound {
       if let match = match(at: i, s) {
-        let bare = Span(range: i..<i + 6, match: match)
+        let bare = Span(range: i..<i + Self.idLength, match: match)
         let wide = collapsed(bare, within: range, s)
         candidates.append(bare)
         if wide.range != bare.range { candidates.append(wide) }
@@ -150,11 +159,12 @@ public struct SessionNames: Equatable, Sendable {
 
   /// The session whose id starts at `i`, when the id is a whole token and resolves.
   private func match(at i: Int, _ s: [Unicode.Scalar]) -> Match? {
-    guard i + 6 <= s.count, s[i] == "s", s[i + 1..<i + 6].allSatisfy(Self.inIdAlphabet),
+    let end = i + Self.idLength
+    guard end <= s.count, s[i] == "s", s[i + 1..<end].allSatisfy(Self.inIdAlphabet),
       i == 0 || Self.allowedBefore(s[i - 1]),
-      Self.allowedAfter(i + 6, s)
+      Self.allowedAfter(end, s)
     else { return nil }
-    let id = String(String.UnicodeScalarView(s[i..<i + 6]))
+    let id = String(String.UnicodeScalarView(s[i..<end]))
     guard let entry = entries[id] else { return nil }
     return Match(id: id, name: entry.name, removed: entry.removed)
   }
@@ -180,14 +190,17 @@ public struct SessionNames: Equatable, Sendable {
     return span
   }
 
-  /// `abcdefghijkmnpqrstuvwxyz23456789`, the characters `shortId` draws from.
-  private static func inIdAlphabet(_ c: Unicode.Scalar) -> Bool {
-    switch c {
-    case "l", "o": false
-    case "a"..."z", "2"..."9": true
-    default: false
-    }
-  }
+  /// The `s` prefix and the characters that `shortId` adds.
+  private static let idLength = 1 + ShortId.length
+
+  /// A table indexed by ASCII code, so that the matcher's test for each scalar does not hash.
+  private static let idAlphabet: [Bool] = {
+    var table = [Bool](repeating: false, count: 128)
+    for c in ShortId.alphabet.unicodeScalars { table[Int(c.value)] = true }
+    return table
+  }()
+
+  private static func inIdAlphabet(_ c: Unicode.Scalar) -> Bool { c.value < 128 && idAlphabet[Int(c.value)] }
 
   /// A letter, digit, or combining mark joins the id to a longer word.
   private static func isWordScalar(_ c: Unicode.Scalar) -> Bool {

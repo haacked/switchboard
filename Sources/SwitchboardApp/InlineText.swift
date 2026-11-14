@@ -86,7 +86,7 @@ enum SessionLink {
 }
 
 private struct SessionNamesKey: EnvironmentKey {
-  static let defaultValue = SessionNames(live: [:], removed: [:])
+  static let defaultValue = SessionNames.empty
 }
 
 extension EnvironmentValues {

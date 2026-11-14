@@ -863,7 +863,6 @@ struct GroupSuggestionList: View {
 
   var body: some View {
     let names = model.sessionNames
-    let name = { (id: String) in names.entry(id)?.name ?? id }
     ScrollView {
       VStack(alignment: .leading, spacing: 8) {
         ForEach(model.shownSuggestions) { s in
@@ -871,7 +870,7 @@ struct GroupSuggestionList: View {
           HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "lightbulb").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-              Text("\(action): \(s.sessions.map(name).joined(separator: ", "))")
+              Text("\(action): \(s.sessions.map(names.name).joined(separator: ", "))")
                 .fontWeight(.medium)
               // The ids stay in, so that `InlineText` draws each one as a linked name.
               InlineText(plain: [s.reason, s.staying()].compactMap { $0 }.joined(separator: ". "))
