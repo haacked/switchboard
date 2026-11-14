@@ -225,8 +225,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
   func signal(_ pid: Int, _ signal: Int32) { local.signal(pid, signal) }
 }
 
-// MARK: - Items
-
 @Suite struct SkillListingItemTests {
   @Test func projectListingKeepsTheOrderOfTheNamesArray() throws {
     let items = try fixtureItems("project-listing.jsonl")
@@ -366,8 +364,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     #expect(row("missing", in: items)?.description == nil)
   }
 }
-
-// MARK: - Fold
 
 @Suite struct SkillListingFoldTests {
   /// The set that manager-launches.jsonl folds to: the second launch's
@@ -514,8 +510,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     #expect(UInt64(machine.bytesRead) < (try fileSize(path)) / 2)
   }
 }
-
-// MARK: - Reads from an offset
 
 @Suite struct SkillListingOffsetTests {
   @Test func freshReadOfWholeLinesEndsAtTheEndOfTheFile() throws {
@@ -669,8 +663,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
   }
 }
 
-// MARK: - Failed reads
-
 @Suite struct SkillListingFailedReadTests {
   static let filler =
     #"{"type":"user","isSidechain":false,"message":{"role":"user","content":""#
@@ -808,8 +800,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     #expect(names(state.commands).contains("probe-default"))
   }
 }
-
-// MARK: - Frontmatter and folders
 
 @Suite struct SkillFolderScanTests {
   /// What the scan finds in a cwd whose `.claude` holds only the file at `relative`.
@@ -967,8 +957,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
         .isEmpty)
   }
 }
-
-// MARK: - Merge
 
 @Suite struct SlashCommandMergeTests {
   static let probeTypeable: Set<String> = [
@@ -1253,8 +1241,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
   }
 }
 
-// MARK: - Built-ins
-
 @Suite struct SlashCommandBuiltInTests {
   @Test func builtInsHaveUniqueNamesAndDescriptions() {
     let builtIns = SlashCommand.builtIns
@@ -1273,8 +1259,6 @@ private final class FailingMachine: Machine, @unchecked Sendable {
     #expect(!builtInNames.contains(name))
   }
 }
-
-// MARK: - Ranking
 
 @Suite struct SlashCommandRankTests {
   static func commands(_ names: [String]) -> [SlashCommand] {

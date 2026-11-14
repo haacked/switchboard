@@ -5,16 +5,12 @@ import SwitchboardCore
 /// Shows a message field's slash commands in a panel under the field. Put it in the field's background, so that its
 /// frame is the field's frame.
 struct SlashCompletionAnchor: NSViewRepresentable {
-  let rows: [SlashCommand]
-  let highlighted: String?
-  let open: Bool
-  let accept: (String) -> Void
+  /// Nil closes the panel.
+  let list: SlashCompletionList?
 
   func makeNSView(context: Context) -> SlashCompletionAnchorView { SlashCompletionAnchorView() }
 
-  func updateNSView(_ view: SlashCompletionAnchorView, context: Context) {
-    view.list = open ? SlashCompletionList(rows: rows, highlighted: highlighted, accept: accept) : nil
-  }
+  func updateNSView(_ view: SlashCompletionAnchorView, context: Context) { view.list = list }
 
   static func dismantleNSView(_ view: SlashCompletionAnchorView, coordinator: ()) { view.list = nil }
 }
@@ -75,7 +71,6 @@ final class SlashCompletionPanel {
   static let rowHeight: CGFloat = 24
   static let maxRows = 8
   static let padding: CGFloat = 4
-  static let gap: CGFloat = 4
   private var panel: NSPanel?
   private var hosting: FirstClickHostingView<SlashCompletionList>?
 
@@ -86,12 +81,8 @@ final class SlashCompletionPanel {
   func show(_ list: SlashCompletionList, below anchor: NSView, in window: NSWindow) {
     let panel = self.panel ?? makePanel(list)
     hosting?.rootView = list
-    if panel.parent !== window {
-      panel.parent?.removeChildWindow(panel)
-      window.addChildWindow(panel, ordered: .above)
-    }
-    let field = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-    let screen = window.screen?.visibleFrame ?? field.insetBy(dx: -10_000, dy: -10_000)
+    ChildPanel.attach(panel, to: window)
+    let (field, screen) = ChildPanel.frames(of: anchor, in: window)
     let frame = Self.frame(field: field, rows: list.rows.count, screen: screen)
     if frame != panel.frame { panel.setFrame(frame, display: true) }
     if !panel.isVisible { panel.orderFront(nil) }
@@ -99,30 +90,21 @@ final class SlashCompletionPanel {
 
   func hide() {
     guard let panel, panel.isVisible else { return }
-    panel.parent?.removeChildWindow(panel)
-    panel.orderOut(nil)
+    ChildPanel.detach(panel)
   }
 
   /// The panel's frame in screen coordinates: as wide as the field, up to `maxRows` rows tall, and under the field,
   /// or above it when the screen has no room below.
   static func frame(field: NSRect, rows: Int, screen: NSRect) -> NSRect {
     let height = CGFloat(min(rows, maxRows)) * rowHeight + 2 * padding
-    var y = field.minY - gap - height
-    if y < screen.minY { y = field.maxY + gap }
-    return NSRect(x: field.minX, y: y, width: field.width, height: height)
+    return NSRect(
+      x: field.minX, y: ChildPanel.y(height: height, anchor: field, screen: screen), width: field.width, height: height)
   }
 
   private func makePanel(_ list: SlashCompletionList) -> NSPanel {
-    let panel = NSPanel(
-      contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = true
-    panel.isReleasedWhenClosed = false
-    panel.collectionBehavior = [.transient, .ignoresCycle]
     let hosting = FirstClickHostingView(rootView: list)
     hosting.autoresizingMask = [.width, .height]
-    panel.contentView = hosting
+    let panel = ChildPanel.make(contentView: hosting)
     self.panel = panel
     self.hosting = hosting
     return panel

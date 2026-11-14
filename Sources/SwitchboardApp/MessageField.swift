@@ -66,16 +66,17 @@ struct MessageField: View {
           draft.disarmEscape()
           return .ignored
         }
-        if slashAction(press.key, press.modifiers) == .close {
+        if slashAction(press.key, press.modifiers, slash: self.slash) == .close {
           completion.dismiss(at: draft.text)
           return .handled
         }
         return !TextInput.isComposing && draft.escape(at: Date()) ? .handled : .ignored
       }
       .onKeyPress(keys: [.upArrow, .downArrow, .tab], phases: [.down, .repeat]) { press in
-        switch slashAction(press.key, press.modifiers, isRepeat: press.phase == .repeat) {
-        case .move(let step): completion.move(step, in: self.slash.rows)
-        case .accept: accept(self.slash.highlighted)
+        let slash = self.slash
+        switch slashAction(press.key, press.modifiers, isRepeat: press.phase == .repeat, slash: slash) {
+        case .move(let step): completion.move(step, in: slash.rows)
+        case .accept: accept(slash.highlighted)
         case .discard: break
         default: return .ignored
         }
@@ -92,7 +93,9 @@ struct MessageField: View {
         if let name { AccessibilityNotification.Announcement(name).post() }
       }
       .background(
-        SlashCompletionAnchor(rows: slash.rows, highlighted: slash.highlighted, open: slash.open, accept: accept)
+        SlashCompletionAnchor(
+          list: slash.open ? SlashCompletionList(rows: slash.rows, highlighted: slash.highlighted, accept: accept) : nil
+        )
       )
       .overlay {
         if dropTargeted {
@@ -110,20 +113,22 @@ struct MessageField: View {
   }
 
   /// The ranked rows for the text's query, whether the list shows them, and the highlighted row.
-  private var slash: (rows: [SlashCommand], open: Bool, highlighted: String?) {
+  private typealias Slash = (rows: [SlashCommand], open: Bool, highlighted: String?)
+
+  private var slash: Slash {
     let rows =
       SlashCompletion.query(draft.text).map {
-        SlashCompletion.rows(commands: model.slashCommands[session] ?? SlashCommand.builtIns, query: $0)
+        SlashCommands.rank(model.slashCommands[session] ?? SlashCommand.builtIns, query: $0)
       } ?? []
     let open = completion.isOpen(text: draft.text, rows: rows, focused: focused, composing: TextInput.isComposing)
     return (rows, open, completion.highlight(in: rows))
   }
 
   private func slashAction(
-    _ key: KeyEquivalent, _ modifiers: EventModifiers = [], isRepeat: Bool = false
+    _ key: KeyEquivalent, _ modifiers: EventModifiers = [], isRepeat: Bool = false,
+    slash: Slash
   ) -> SlashCompletion.Action? {
-    let slash = slash
-    return completion.press(
+    completion.press(
       key, modifiers: modifiers, isRepeat: isRepeat, composing: TextInput.isComposing, open: slash.open,
       text: draft.text, highlighted: slash.highlighted)
   }
@@ -134,10 +139,9 @@ struct MessageField: View {
 
   /// Return and keypad Enter while the list is open accept the highlighted row, or send when the text already names
   /// it. `sendsOnReturn` calls this only for a Return that sends today.
-  private func submit() {
-    // `sendsOnReturn` calls this for Return's repeats too, and `onSubmit` sees keypad Enter's repeats without a phase.
-    let event = NSApp.currentEvent
-    switch slashAction(.return, isRepeat: event?.type == .keyDown && event?.isARepeat == true) {
+  private func submit(isRepeat: Bool) {
+    let slash = slash
+    switch slashAction(.return, isRepeat: isRepeat, slash: slash) {
     case .accept:
       accept(slash.highlighted)
     case .send:

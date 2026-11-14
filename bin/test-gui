@@ -160,12 +160,19 @@ fail() {
 
 wait_for 30 sb ls >/dev/null 2>&1 || check=sbd fail "sbd did not answer"
 screen_has_stub() { sb screen "$session" 2>/dev/null | grep -q '^sizes '; }
-# Sets $session to a new session, once its stand-in claude has drawn its screen.
+# Sets $session to a new session named $1 in folder $2 (default $home/work), once its stand-in claude has drawn its
+# screen. Further arguments go to sb new.
 new_session() {
-  session=$(sb new "$home/work" --name "$1" --json | jq -r '.id')
+  local name=$1 folder=${2:-$home/work}
+  shift $(($# < 2 ? $# : 2))
+  session=$(sb new "$folder" --name "$name" "$@" --json | jq -r '.id')
   [ -n "$session" ] && [ "$session" != null ] || check=sbd fail "sb new returned no session id"
   wait_for 30 screen_has_stub || check=stub fail "the stand-in claude never drew its screen"
 }
+# The texts that the session sent to its claude, as a JSON array.
+sent_texts() { sb events --session "$1" --json | jq -c -s '[.[] | select(.kind == "sent") | .data.text]'; }
+# Fails unless the log $shots/$2.log has the line "$1: $3". $shots is the calling check's.
+field_logged() { grep -qxF "$1: $3" "$shots/$2.log" || fail "the $2 field did not log: $3"; }
 
 # What the stand-in receives, in order: a b c, Return, Shift-Return, Option-Return, Ctrl-C, Option-b, Up,
 # Down, Left, Backspace, Escape, Tab, Shift-Tab, x, a dead key followed by e
@@ -645,7 +652,6 @@ CARD
   new_session keys-inbox
   inbox=$session
   new_session keys
-  key_logged() { grep -qxF "keytest: $2" "$shots/$1.log" || fail "the $1 field did not log: $2"; }
 
   for view in session inbox chat manager reply decision deny answer prompt; do
     local target=() field="Message Claude…"
@@ -665,17 +671,16 @@ CARD
     wait_for 120 app_gone || fail "the app did not finish the keys in the $view"
     end_app
     if [ "$view" = prompt ]; then
-      key_logged "$view" 'shift-return: "one\ntwo\n"'
-      key_logged "$view" "sheet open: true"
-      key_logged "$view" 'return: "one\ntwo\n\n"'
+      field_logged keytest "$view" 'shift-return: "one\ntwo\n"'
+      field_logged keytest "$view" "sheet open: true"
+      field_logged keytest "$view" 'return: "one\ntwo\n\n"'
     else
-      key_logged "$view" "composing at return: true"
-      key_logged "$view" 'shift-return: "onex\ntwo\n"'
+      field_logged keytest "$view" "composing at return: true"
+      field_logged keytest "$view" 'shift-return: "onex\ntwo\n"'
     fi
-    key_logged "$view" done
+    field_logged keytest "$view" done
   done
 
-  sent_texts() { sb events --session "$1" --json | jq -c -s '[.[] | select(.kind == "sent") | .data.text]'; }
   for view in session inbox chat manager reply; do
     got=$(sent_texts "${!view}")
     [ "$got" = "[$typed]" ] || fail "the $view sent $got, not [$typed]"
@@ -700,9 +705,7 @@ check_slash() {
   echo "Checking the slash command list…"
   echo "{}" >"$account/.claude.json"
   cp -R Tests/SwitchboardCoreTests/Fixtures/SkillListing/probe-repo/dot-claude "$work/.claude"
-  session=$(sb new "$work" --name slash --account "$account" --json | jq -r '.id')
-  [ -n "$session" ] && [ "$session" != null ] || fail "sb new returned no session id"
-  wait_for 30 screen_has_stub || fail "the stand-in claude never drew its screen"
+  new_session slash "$work" --account "$account"
   sb group add slash "$session" >/dev/null
   sb group account slash "$account" >/dev/null
   chat=$(sb chat slash --json | jq -r '.id')
@@ -715,33 +718,30 @@ check_slash() {
     got=$(probe_rows "${!view}")
     [ "$got" = "$probe" ] || fail "sb slash gave the $view the probe rows $got, not $probe"
   done
-  slash_logged() { grep -qxF "slashtest: $2" "$shots/$1.log" || fail "the $1 field did not log: $2"; }
-
   for view in session chat; do
     SB_SELECT="${!view}" SB_SLASH_TEST=1 "$bin_dir/Switchboard" >"$shots/$view.log" 2>&1 &
     app_pid=$!
     wait_for 120 app_gone || fail "the app did not finish the slash check in the $view"
     end_app
-    slash_logged "$view" "slash: open true rows true focused true"
-    slash_logged "$view" "probe-: probe-cmd-plain probe-cmd-user-only probe-default probe-user-only focused true"
-    slash_logged "$view" 'down, tab: "/probe-cmd-user-only " open false focused true cursor at end true'
-    slash_logged "$view" 'return on /probe-d: "/probe-default " open false'
-    slash_logged "$view" 'return again: ""'
-    slash_logged "$view" 'enter on /probe-d: "/probe-default " open false focused true'
-    slash_logged "$view" 'enter again: ""'
-    slash_logged "$view" "exact name: open true rows probe-user-only"
-    slash_logged "$view" "return on the exact name: open false"
-    slash_logged "$view" 'sent: ""'
-    slash_logged "$view" "/co: open true"
-    slash_logged "$view" 'esc on /co: "/co" open false hint false'
-    slash_logged "$view" 'two more escs: ""'
-    slash_logged "$view" 'held return on /probe-d: "/probe-default " focused true'
-    slash_logged "$view" 'held enter on /probe-d: "/probe-default " focused true'
-    slash_logged "$view" 'held tab on /probe-d: "/probe-default " focused true'
-    slash_logged "$view" done
+    field_logged slashtest "$view" "slash: open true rows true focused true"
+    field_logged slashtest "$view" "probe-: probe-cmd-plain probe-cmd-user-only probe-default probe-user-only focused true"
+    field_logged slashtest "$view" 'down, tab: "/probe-cmd-user-only " open false focused true cursor at end true'
+    field_logged slashtest "$view" 'return on /probe-d: "/probe-default " open false'
+    field_logged slashtest "$view" 'return again: ""'
+    field_logged slashtest "$view" 'enter on /probe-d: "/probe-default " open false focused true'
+    field_logged slashtest "$view" 'enter again: ""'
+    field_logged slashtest "$view" "exact name: open true rows probe-user-only"
+    field_logged slashtest "$view" "return on the exact name: open false"
+    field_logged slashtest "$view" 'sent: ""'
+    field_logged slashtest "$view" "/co: open true"
+    field_logged slashtest "$view" 'esc on /co: "/co" open false hint false'
+    field_logged slashtest "$view" 'two more escs: ""'
+    field_logged slashtest "$view" 'held return on /probe-d: "/probe-default " focused true'
+    field_logged slashtest "$view" 'held enter on /probe-d: "/probe-default " focused true'
+    field_logged slashtest "$view" 'held tab on /probe-d: "/probe-default " focused true'
+    field_logged slashtest "$view" done
   done
 
-  sent_texts() { sb events --session "$1" --json | jq -c -s '[.[] | select(.kind == "sent") | .data.text]'; }
   for view in session chat; do
     got=$(sent_texts "${!view}")
     [ "$got" = '["/probe-default","/probe-default","/probe-user-only"]' ] || fail "the $view sent $got"

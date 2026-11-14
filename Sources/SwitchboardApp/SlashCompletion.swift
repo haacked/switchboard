@@ -49,10 +49,6 @@ final class SlashCompletion: ObservableObject {
     return String(text.dropFirst())
   }
 
-  static func rows(commands: [SlashCommand], query: String) -> [SlashCommand] {
-    SlashCommands.rank(commands, query: query)
-  }
-
   /// The trailing space ends the query, so the list closes.
   static func accepted(_ name: String) -> String { "/\(name) " }
 

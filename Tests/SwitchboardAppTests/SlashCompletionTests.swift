@@ -14,8 +14,6 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
   command($0)
 }
 
-// MARK: - Query
-
 @MainActor
 @Suite struct SlashCompletionQueryTests {
   @Test(arguments: [("/", ""), ("/co", "co"), ("/anthropic-skills:pdf", "anthropic-skills:pdf")])
@@ -36,8 +34,6 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
   }
 }
 
-// MARK: - Rows
-
 @MainActor
 @Suite struct SlashCompletionRowsTests {
   static let commands = [
@@ -46,24 +42,21 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
   ]
 
   @Test func anEmptyQueryListsEveryRowByName() {
-    let rows = SlashCompletion.rows(commands: Self.commands, query: "")
+    let rows = SlashCommands.rank(Self.commands, query: "")
 
     #expect(rows.map(\.name) == Self.commands.map(\.name).sorted())
   }
 
-  @Test func rowsAreRankedAsCoreRanksThem() {
-    let rows = SlashCompletion.rows(commands: Self.commands, query: "co")
+  @Test func rowsAreRankedByWhereTheQueryMatches() {
+    let rows = SlashCommands.rank(Self.commands, query: "co")
 
-    #expect(rows == SlashCommands.rank(Self.commands, query: "co"))
     #expect(rows.map(\.name) == ["code-review", "commit", "anthropic-skills:computer-use", "decode"])
   }
 
   @Test func aQueryThatMatchesNothingGivesNoRows() {
-    #expect(SlashCompletion.rows(commands: Self.commands, query: "zzz").isEmpty)
+    #expect(SlashCommands.rank(Self.commands, query: "zzz").isEmpty)
   }
 }
-
-// MARK: - Accept
 
 @MainActor
 @Suite struct SlashCompletionAcceptTests {
@@ -75,8 +68,6 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
     #expect(SlashCompletion.accepted("anthropic-skills:pdf") == "/anthropic-skills:pdf ")
   }
 }
-
-// MARK: - Highlight
 
 @MainActor
 @Suite struct SlashCompletionHighlightTests {
@@ -155,8 +146,6 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
   }
 }
 
-// MARK: - Open and dismissal
-
 @MainActor
 @Suite struct SlashCompletionOpenTests {
   @Test func aQueryWithRowsInAFocusedFieldIsOpen() {
@@ -222,8 +211,6 @@ private let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-defaul
   }
 }
 
-// MARK: - Keys
-
 /// The keys the list takes while it is open.
 private let listKeys: [KeyEquivalent] = [.upArrow, .downArrow, .tab, .return, .escape]
 /// Keys the list never takes.
@@ -231,8 +218,8 @@ private let otherKeys: [KeyEquivalent] = [.leftArrow, .rightArrow, .space, .dele
 private let allKeys = listKeys + otherKeys
 /// Every combination of Command, Option, Control, and Shift that has at least one of them.
 private let anyOfTheFour = ReturnKeyTests.allModifiers.filter { !$0.isEmpty }
-/// Flags that macOS or SwiftUI set without the user holding a modifier. SwiftUI adds the numeric pad flag to arrow
-/// keys. SwiftUI deprecates its function flag for apps, so the tests leave it out.
+/// Flags that macOS or SwiftUI set without the user holding a modifier. SwiftUI adds the function and numeric pad flags
+/// to arrow keys. SwiftUI deprecates the function flag for apps, so the tests leave it out.
 private let passiveFlags: [EventModifiers] = [[], .capsLock, .numericPad, [.capsLock, .numericPad]]
 
 @MainActor
@@ -319,8 +306,6 @@ private let passiveFlags: [EventModifiers] = [[], .capsLock, .numericPad, [.caps
     }
   }
 }
-
-// MARK: - Held keys
 
 /// A held key sends a down press and then repeats. A row is accepted only on the down press.
 @MainActor
@@ -432,8 +417,6 @@ private let passiveFlags: [EventModifiers] = [[], .capsLock, .numericPad, [.caps
   }
 }
 
-// MARK: - Placement
-
 /// Rectangles are in AppKit screen coordinates, where y grows upward. "Under the field" means a lower y.
 @MainActor
 @Suite struct SlashCompletionPanelPlacementTests {
@@ -506,8 +489,6 @@ private let passiveFlags: [EventModifiers] = [[], .capsLock, .numericPad, [.caps
     #expect(more.height == eight.height)
   }
 }
-
-// MARK: - Panel lifetime
 
 /// Risk 6: the panel keeps focus in the field and closes with the field's window.
 @MainActor

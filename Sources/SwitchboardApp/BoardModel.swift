@@ -176,7 +176,7 @@ final class BoardModel: ObservableObject {
   }
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
-  let poller = DispatchQueue(label: "switchboard.poll")
+  private let poller = DispatchQueue(label: "switchboard.poll")
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.
@@ -919,6 +919,19 @@ final class BoardModel: ObservableObject {
         if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
           self.chatLogs[session] = messages
         }
+      }
+    }
+  }
+
+  /// Reads the commands that the session's claude takes after `/`. A failed read keeps the stored rows, which the
+  /// message field shows while sbd answers.
+  func loadSlashCommands(_ session: String) {
+    let send = send
+    poller.async {
+      let commands = try? JSONCoding.convert(
+        send("slash-commands", ["session": .string(session)])["commands"], to: [SlashCommand].self)
+      Task { @MainActor in
+        if let commands, self.slashCommands[session] != commands { self.slashCommands[session] = commands }
       }
     }
   }

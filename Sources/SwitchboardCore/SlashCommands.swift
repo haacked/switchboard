@@ -1,7 +1,7 @@
 import Foundation
 
 /// A command that the user can type after `/` in a session's claude.
-public struct SlashCommand: Codable, Equatable, Hashable, Sendable {
+public struct SlashCommand: Codable, Equatable, Sendable {
   public enum Source: String, Codable, Sendable {
     /// The transcript's latest skill listing, which lists what the model may call.
     case listing
@@ -292,6 +292,8 @@ public enum SlashCommands {
     return rows
   }
 
+  private static let separators: Set<Character> = [":", "-", "_"]
+
   /// The commands whose names hold `query`, ignoring case: first the names
   /// that start with it, then those where a part after ":", "-", or "_"
   /// starts with it, then the rest. Each group sorts by name.
@@ -300,7 +302,6 @@ public enum SlashCommands {
     func tier(_ name: String) -> Int? {
       let name = name.lowercased()
       if name.hasPrefix(query) { return 0 }
-      let separators: Set<Character> = [":", "-", "_"]
       if name.indices.contains(where: {
         separators.contains(name[$0]) && name[name.index(after: $0)...].hasPrefix(query)
       }) {
