@@ -94,6 +94,9 @@
 # same folder. It prints nothing and exits 0.
 # Like claude, it writes a line to the conversation's transcript for each
 # prompt and for clear, at the transcript_path that the hook payloads name.
+# Before the first prompt of each launch, it appends the lines of
+# $SB_HOME/skill-listing.jsonl, a fixture that the test writes, as claude
+# writes its initial skill listing then.
 # --resume fails when no transcript exists, and --session-id fails when one
 # does. Without CLAUDE_CONFIG_DIR, claude would use the user's ~/.claude, so
 # the stub uses $SB_HOME/claude instead.
@@ -181,7 +184,7 @@ folder_jq='
 project="$config_dir/projects/$(jq -rn --arg c "$PWD" "$folder_jq"' $c | folder')"
 
 recordings="$(dirname "$0")/claude"
-settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm='' mode=default
+settings='' mcp_config='' session='' prompt='' source=startup linger=0 onterm='' mode=default listed=''
 while [ $# -gt 0 ]; do
   case $1 in
   --settings) settings=$2 && shift 2 ;;
@@ -677,6 +680,11 @@ turn() {
   lag*) sleep 1 ;;
   esac
   if [ -e "$SB_HOME/hold" ]; then until [ -e "$SB_HOME/report" ]; do sleep 0.05; done; fi
+  if [ -z "$listed" ] && [ -f "$SB_HOME/skill-listing.jsonl" ]; then
+    mkdir -p "$project"
+    awk 1 "$SB_HOME/skill-listing.jsonl" >>"$project/$session.jsonl"
+  fi
+  listed=1
   transcript "$p"
   status
   case $p in

@@ -57,6 +57,8 @@ struct SwitchboardApp: App {
           .keyboardShortcut("1")
         Button("Show Board") { model.show(.board) }
           .keyboardShortcut("2")
+        Button("Show Issues") { model.show(.issues) }
+          .keyboardShortcut("3")
         Button("Filter by Org…") { model.showingOrgFilter.toggle() }
           .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)

@@ -324,9 +324,14 @@ public enum Transcript {
 
   /// Calls `body` with each non-empty line, last line first, until it returns
   /// true. Each read is twice the size of the one before, up to 4 MB, so a
-  /// long line costs few reads.
-  static func eachLineFromEnd(_ path: String, on machine: any Machine, _ body: (Data) -> Bool) {
-    guard var offset = machine.size(path) else { return }
+  /// long line costs few reads. With `end`, it reads only the bytes before `end`.
+  /// It returns false when a read of the machine failed before `body` returned
+  /// true or the walk reached the start of the file.
+  @discardableResult
+  static func eachLineFromEnd(
+    _ path: String, before end: UInt64? = nil, on machine: any Machine, _ body: (Data) -> Bool
+  ) -> Bool {
+    guard var offset = end ?? machine.size(path) else { return false }
     var size: UInt64 = 1 << 16
     // The start of the chunk after the current one, up to its first newline.
     // It ends a line that starts in the current chunk. It is empty when that
@@ -336,13 +341,14 @@ public enum Transcript {
       let count = min(size, offset)
       offset -= count
       size = min(size * 2, 1 << 22)
-      guard let chunk = machine.read(path, from: offset, count: Int(count)) else { return }
+      guard let chunk = machine.read(path, from: offset, count: Int(count)) else { return false }
       var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
       for line in lines.reversed() where !line.isEmpty {
-        if body(Data(line)) { return }
+        if body(Data(line)) { return true }
       }
     }
+    return true
   }
 
   /// Folds one line into the tail, and returns true at the last reply. The
@@ -392,7 +398,8 @@ public enum Transcript {
   }()
   private static let whole = ISO8601DateFormatter()
 
-  static func milliseconds(_ timestamp: String) -> Int64? {
+  /// The time in ms of an ISO 8601 timestamp, with or without fractional seconds.
+  public static func milliseconds(_ timestamp: String) -> Int64? {
     (fractional.date(from: timestamp) ?? whole.date(from: timestamp)).map {
       Int64(($0.timeIntervalSince1970 * 1000).rounded())
     }

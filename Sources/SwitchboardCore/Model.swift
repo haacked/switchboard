@@ -96,6 +96,10 @@ public struct Session: Codable, Equatable, Sendable {
   /// True when the session started in plan mode. `PermissionMode.forLaunch`
   /// reads it on every launch. It stays set after the plan is approved.
   public var planMode: Bool?
+  /// True when the session must start in manual mode, as for an issue that someone outside the team wrote.
+  /// `PermissionMode.forLaunch` then passes manual mode, which wins over `claudeArgs` and Claude's own settings,
+  /// until claude reports another mode.
+  public var manualMode: Bool?
   /// True after the shell pane's shell exited or the user closed the pane.
   /// sbd then starts no shell for the session until the user opens one.
   public var shellClosed: Bool?

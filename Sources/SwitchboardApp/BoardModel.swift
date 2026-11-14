@@ -3,10 +3,11 @@ import Foundation
 import SwitchboardCore
 import UserNotifications
 
-/// The two views that the detail pane shows while no session is selected.
+/// The views that the detail pane shows while no session is selected.
 enum MainView {
   case inbox
   case board
+  case issues
 }
 
 /// The app's view of sbd. It polls `ls` once a second, because sbd keeps
@@ -57,7 +58,9 @@ final class BoardModel: ObservableObject {
   @Published var cleaningUp: Set<String> = []
   /// The Delete All sheet's state, or nil while it is closed.
   @Published var doneRemoval: DoneRemoval?
-  var presentingSheet: Bool { newSession != nil || showingImport || showingSearch || doneRemoval != nil }
+  var presentingSheet: Bool {
+    newSession != nil || showingImport || showingSearch || doneRemoval != nil || showingIssueSetup
+  }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
   }
@@ -99,6 +102,8 @@ final class BoardModel: ObservableObject {
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
+  /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
+  @Published var slashCommands: [String: [SlashCommand]] = [:]
   /// Options whose click is on its way to sbd, as "<session>/<number>".
   @Published var choosing: Set<String> = []
   /// Cards whose answer is on its way to sbd. Their views stay disabled
@@ -159,6 +164,28 @@ final class BoardModel: ObservableObject {
   @Published var suggestions: [GroupSuggestion] = []
   /// The plan updates and new plan rows that wait for the user, read with the follow-ups.
   @Published var planProposals: [PlanProposal] = []
+  /// The open issues from the configured sources, read with the follow-ups. nil until the first read.
+  @Published var issueList: IssueList?
+  /// The issue that the user last moved to in the Issues view, by id.
+  @Published var issueFocus: String?
+  /// Counts moves in the Issues view. Each one scrolls to the current issue.
+  @Published var issueJumps = 0
+  @Published var issueScope = IssueScope.team
+  @Published var issueSort = IssueSort.updated
+  /// Whether the Issues list has a section per repository instead of a section per bucket.
+  @Published var issuesByRepo = false
+  /// The Issues sections that the user collapsed, by section id.
+  @Published var collapsedIssueSections: Set<String> = IssueSection.collapsedAtFirst
+  /// The issues whose Start is on its way to sbd.
+  @Published var startingIssues: Set<String> = []
+  /// sbd's refusal of the last Start, by issue id. The issue's pane shows it.
+  @Published var issueErrors: [String: String] = [:]
+  /// The session that the last Start made, while the Issues view's notice offers to open it.
+  @Published var startedIssue: StartedIssue?
+  /// The group that the user picked for an issue's Start, by issue id. nil inside picks No Group. An issue with no
+  /// entry starts in `KnownRepos.preferredGroup`.
+  @Published var issueGroupPicks: [String: String?] = [:]
+  @Published var showingIssueSetup = false
   /// Plan proposals whose Apply or Reject is on its way to sbd. Applying
   /// writes to GitHub, so their buttons stay off until sbd replies.
   @Published var answeringProposals: Set<String> = []
@@ -187,6 +214,9 @@ final class BoardModel: ObservableObject {
   /// Polls run apart from actions, because an action such as `open` or `new`
   /// can take seconds.
   private let poller = DispatchQueue(label: "switchboard.poll")
+  /// Issue reads and Starts, which wait on GitHub, gh, or git. They run here so the session list and other
+  /// actions do not wait behind them.
+  let issueWork = DispatchQueue(label: "switchboard.issues", attributes: .concurrent)
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.
@@ -354,7 +384,7 @@ final class BoardModel: ObservableObject {
   /// True while the sidebar has no rows and sbd answers.
   var sidebarIsEmpty: Bool { sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil }
 
-  /// The Inbox or the Board while no session is selected, else nil.
+  /// The main view while no session is selected, else nil.
   var visibleView: MainView? { selection == nil ? mainView : nil }
 
   /// The focused Inbox session while it exists, else the first item. A session
@@ -390,12 +420,14 @@ final class BoardModel: ObservableObject {
       let groups = try? client.call("group-ls", as: GroupList.self).groups
       let suggestions = readFollowups ? try? client.call("group-suggest", as: [GroupSuggestion].self) : nil
       let proposals = readFollowups ? try? client.call("plan-proposals", as: [PlanProposal].self) : nil
+      let issues = readFollowups ? try? client.call("issues", as: IssueList.self) : nil
       let usage = readUsage ? try? client.usage() : nil
       Task { @MainActor in
         if let accounts, self.accounts != accounts { self.accounts = accounts }
         if let groups, self.groups != groups { self.groups = groups }
         if let suggestions, self.suggestions != suggestions { self.suggestions = suggestions }
         if let proposals, self.planProposals != proposals { self.planProposals = proposals }
+        if let issues, self.issueList != issues { self.issueList = issues }
         if let usage, self.usage != usage { self.usage = usage }
         self.apply(result, followups: more)
       }
@@ -968,6 +1000,19 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// Reads the commands that the session's claude takes after `/`. A failed read keeps the stored rows, which the
+  /// message field shows while sbd answers.
+  func loadSlashCommands(_ session: String) {
+    let send = send
+    poller.async {
+      let commands = try? JSONCoding.convert(
+        send("slash-commands", ["session": .string(session)])["commands"], to: [SlashCommand].self)
+      Task { @MainActor in
+        if let commands, self.slashCommands[session] != commands { self.slashCommands[session] = commands }
+      }
+    }
+  }
+
   /// Reads which MCP servers the conversation can load. A failed read keeps the last answer and shows no error.
   func loadMCPServers(_ session: String) {
     let send = send
@@ -1259,7 +1304,7 @@ final class BoardModel: ObservableObject {
     Result { try client.importSessions(refs, stop: stop) }
   }
 
-  /// Clears the selected session and shows the Inbox or the Board.
+  /// Clears the selected session and shows a main view.
   func show(_ view: MainView) {
     navigate {
       selection = nil

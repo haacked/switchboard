@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import SwitchboardCore
 import Testing
 
@@ -104,8 +105,8 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
   static let shell = SessionView.shellMinWidth
   static let panel = SidePanel.width
 
-  /// The Inbox's detail pane at its narrowest.
-  static let inboxMinimum = InboxView.detailMinWidth
+  /// The detail pane of the Inbox and the Issues view at its narrowest.
+  static let inboxMinimum = ListDetailSplit<EmptyView, EmptyView>.detailMinWidth
   /// The window's minimum width less the sidebar's minimum width.
   static let sessionViewMinimum = ContentView.windowMinWidth - ContentView.sidebarMinWidth
 

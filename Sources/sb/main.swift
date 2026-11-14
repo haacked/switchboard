@@ -60,6 +60,9 @@ let usage = """
                                   setup, which a claude.ai connector needs. A change
                                   restarts its claude, after the turn when one runs
     get <session>                 show one session
+    slash <session>               the commands that the session's claude takes
+                                  after /: its skills, its commands, and Claude
+                                  Code's built-ins
     send <session> <text>         send a message: paste it, queue it, or resume with it
     send <session> --image <path> [--image <path>…] [<text>]
                                   send images with the message. sbd keeps a copy of
@@ -80,9 +83,16 @@ let usage = """
     done <session>, undone <session>
     wait <session> <note>         wait on something by hand
     wait [<session>] --kind K [--target T] [--who W] [--env E] [--service S]
-         [--state S] [--until WHEN] [--note N] [--then resume|notify]
+         [--state S] [--until WHEN] [--since WHEN] [--note N] [--then resume|notify]
                                   wait on a PR, a deploy, another session, or a
                                   time. Inside a session, the session is optional
+    wait [<session>] --block [--timeout S] --kind K ...
+                                  set the wait and block until it resolves, then
+                                  print the wait-resolved event as JSON. Exits 0
+                                  when it resolves, 2 after S seconds, 3 when sbd
+                                  can't be reached, and 1 when it is cleared. The
+                                  session doesn't resume. The timeout and Ctrl-C
+                                  clear the wait
     wait <session> --clear [--id W]
     wait <session> --resolve <what happened> [--id W]
     note <session> [<text>]       add a note, or list the notes: open to-dos,
@@ -260,6 +270,20 @@ let usage = """
     plan apply <proposal>         write a proposal into the document
     plan reject <proposal>        drop it. A declined row stays declined
 
+  Issues, open GitHub issues from the sources you pick:
+    issues [--mine]               list them by bucket: assigned to you, the team's
+                                  unassigned, the team's assigned to others, other,
+                                  and being worked on by a session
+    issues start <owner/name#N> [--preset P] [--group G] [--path FOLDER]
+                                  start a session on the issue in a worktree on
+                                  <branchPrefix><N>-<slug>, with the preset's prompt
+    issues source add|rm <org|owner/name> [--label L] [--person P]
+                                  add or remove a source. An org needs a label or
+                                  a person
+    issues source ls              list the sources
+    issues team [--label L]... [--person P]...
+                                  show or set the labels and logins of your team
+
   Follow-ups, sessions that haven't started:
     followup add <text> [--title T] [--repo owner/name] [--branch B] [--on WHEN]
                  [--after owner/name#N] [--link URL] [--parent S] [--account A]
@@ -332,7 +356,9 @@ let usage = """
   --state (default done). date needs --until (2h, 2026-10-26, or
   2026-10-26T09:00). manual takes an optional --until that returns it to Needs
   you, a day later without one. --then notify moves the session to Needs you
-  instead of resuming it. A wait still open past its recheck time
+  instead of resuming it. review, bot-review, and queue take --since WHEN, a
+  past time after which a review or a change in Trunk's queue counts, instead
+  of the time the wait was set. A wait still open past its recheck time
   (recheckSeconds in config.json) moves the session to Needs you.
   """
 
@@ -355,6 +381,7 @@ struct Args {
       "--group", "--to", "--note", "--accept", "--decline", "--undecline", "--existing", "--send", "--pending",
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
+      "--preset", "--label", "--person",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -577,12 +604,10 @@ func watch(_ a: Args) -> Never {
 /// Prints the newest events, or the events after --since, and with --follow
 /// keeps printing new ones.
 func events(_ a: Args) -> Never {
-  var since = a.values["--since"].flatMap(Int.init)
+  var cursor = EventCursor(since: a.values["--since"].flatMap(Int64.init), session: a.values["--session"])
   while true {
-    var args: [String: JSON] = [:]
-    if let since { args["since"] = .number(Double(since)) }
-    if let s = a.values["--session"] { args["session"] = .string(s) }
-    let list = decode(call("events", args), as: [Event].self)
+    let list: [Event]
+    do { list = try cursor.next() } catch { die("\(error)") }
     for e in list {
       if a.json {
         printJSON((try? JSON(encoding: e)) ?? .null)
@@ -593,7 +618,6 @@ func events(_ a: Args) -> Never {
         let from = e.data["from"]?.string.map { "from \($0): " } ?? ""
         print("\(e.id)  \(e.session)  \(e.kind)  \(from)\(oneLine(detail, max: 80))".printable)
       }
-      since = Int(e.id)
     }
     if !a.switches.contains("--follow") { exit(0) }
     fflush(stdout)
@@ -835,6 +859,8 @@ case "decide":
   decide(a)
 case "reply":
   replyCommand(a)
+case "slash":
+  slashCommand(a)
 case "summary":
   summaryCommand(a)
 case "draft":
@@ -865,6 +891,8 @@ case "docket":
   docket(a)
 case "followup", "followups":
   followup(a)
+case "issues":
+  issues(a)
 case "poll":
   let result = call("poll", ["all": .bool(a.switches.contains("--all"))], timeout: 300)
   if a.json {
@@ -879,6 +907,7 @@ case "poll":
   if let error = result["depotError"]?.string { warn(error) }
   if let error = result["trunkError"]?.string { warn(error) }
   if let error = result["codeOwnersError"]?.string { warn(error) }
+  if let error = result["issuesError"]?.string { warn(error) }
   if let error = result["error"]?.string { die(error) }
 case "snapshots":
   let result = call("snapshots", ["write": .bool(a.switches.contains("--write"))], timeout: 60)
