@@ -26,6 +26,12 @@ import Testing
     #expect(Date().timeIntervalSince(start) < 10)
   }
 
+  /// Process raises an exception that Swift can't catch for a NUL, which would end the program.
+  @Test func refusesANulInAnArgumentOrTheEnvironment() {
+    #expect(throws: APIError.self) { try runCommand("/bin/echo", ["a\u{0}b"]) }
+    #expect(throws: APIError.self) { try runCommand("/bin/echo", ["hi"], env: ["X": "a\u{0}b"]) }
+  }
+
   @Test func leavesACommandThatFinishesInTimeAlone() throws {
     #expect(try runCommand("/bin/echo", ["hi"], timeout: 30).stdout == "hi\n")
   }

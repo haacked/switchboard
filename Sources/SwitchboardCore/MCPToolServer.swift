@@ -306,7 +306,10 @@ public struct MCPToolServer: Sendable {
   private func spawn(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     var request = pick(
       args,
-      ["repository", "branch", "prompt", "base", "name", "model", "account", "followup", "after", "wait", "host"])
+      [
+        "repository", "branch", "prompt", "base", "name", "model", "account", "followup", "planMode", "after", "wait",
+        "host",
+      ])
     if let repo = args["repository"]?.string, !SessionHost.namesRemote(args["host"]?.string) {
       request["repository"] = .string(repo.repositoryArgument)
     }

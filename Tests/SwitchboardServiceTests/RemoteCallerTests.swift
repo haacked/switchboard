@@ -436,7 +436,9 @@ func withReadyService(
       try makeUnanswered(shape, b, service)
 
       #expect { try service.queue.sync { try service.hasTranscript(session) } } throws: { isUnread($0) }
-      #expect { try service.queue.sync { try service.startClaude("s1", prompt: nil) } } throws: { isUnread($0) }
+      #expect { try service.queue.sync { try service.startClaude("s1", prompt: nil, trigger: .open) } } throws: {
+        isUnread($0)
+      }
       #expect(!FileManager.default.fileExists(atPath: launcher), "no launcher names --session-id or --resume")
       #expect(service.queue.sync { service.paneRow("s1", .claude) } == nil)
     }
@@ -1200,7 +1202,7 @@ private func hold(_ entry: Service.Entry, in service: Service, _ facts: BoxFacts
       try addSession(service, facts)
       service.queue.sync { _ = service.removing.insert("s1") }
 
-      #expect { try service.queue.sync { try service.send("s1", "hello") } } throws: {
+      #expect { try service.queue.sync { try service.send("s1", "hello", trigger: .send) } } throws: {
         "\($0)".contains("is being removed")
       }
 

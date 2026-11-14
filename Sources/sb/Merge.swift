@@ -8,9 +8,7 @@ import SwitchboardCore
 func merge(_ a: Args) {
   // A session that read injected instructions could otherwise merge its own
   // or another session's PR. The app's Merge button is the user's click.
-  if ProcessInfo.processInfo.environment["CLAUDECODE"] != nil {
-    die("merge needs your click, so it doesn't run inside Claude Code. Use the merge card in the app.")
-  }
+  refuseInsideClaudeCode("merge needs your click, so it doesn't run inside Claude Code. Use the merge card in the app.")
   var args = sessionOrPR(a.session("merge"))
   let dismiss = a.switches.contains("--dismiss")
   if dismiss { args["dismiss"] = true }

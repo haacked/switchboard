@@ -87,6 +87,8 @@ extension MCPToolServer {
         "model": string("The model to run, such as sonnet or opus."),
         "account": string("The Claude account, by name or folder."),
         "followup": boolean("Adds a follow-up instead of starting the session."),
+        "planMode": boolean(
+          "Starts claude in plan mode, so it writes a plan and waits for approval before it edits a file."),
         "after": string("For a follow-up, a PR such as pr:123 whose merge moves it to Needs you."),
         "wait": string(
           "A state such as done. Sets a session wait on the new session in the same call, and you resume when it reaches that state."

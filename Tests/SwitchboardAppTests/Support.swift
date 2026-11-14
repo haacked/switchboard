@@ -115,12 +115,50 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   return s
 }
 
+/// A session whose triage item comes from a real card of `kind`, as sbd builds it.
+func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, waitingOn kind: Card.Kind) throws
+  -> SessionSummary
+{
+  try carded(needsItem(id, manager: manager, state: state), kind: kind)
+}
+
 /// The chat of group `group`, whose triage item is a decision.
 func chatItem(_ id: String, group: String, state: AttentionState = .needsYou) -> SessionSummary {
   var s = needsItem(id, state: state)
   s.chat = group
   s.kind = .chat
   return s
+}
+
+/// The chat of group `group`, which waits on card `card` of `kind`.
+func chatCard(
+  _ id: String, group: String, kind: Card.Kind = .permission, state: AttentionState = .needsYou, card: Int64 = 1
+) throws -> SessionSummary {
+  try carded(chatItem(id, group: group, state: state), kind: kind, card: card)
+}
+
+/// The session with one card of `kind` and the item that sbd builds from it.
+/// A permission or question card's dialog also shows.
+func carded(_ s: SessionSummary, kind: Card.Kind, card id: Int64 = 1) throws -> SessionSummary {
+  var s = s
+  s.cards = [try cardFixture(id, session: s.id, kind: kind)]
+  s.openPrompt = kind == .permission || kind == .question
+  s.triage = TriageItem(
+    title: "Card \(id)", kind: kind == .question ? .question : .approval, summary: "", source: .card, ref: "card:\(id)")
+  return s
+}
+
+/// A card as sbd lists it. A send card holds a message to group g1.
+func cardFixture(_ id: Int64, session: String, kind: Card.Kind) throws -> Card {
+  var json: [String: JSON] = [
+    "id": .number(Double(id)), "session": .string(session), "kind": .string(kind.rawValue), "tool": "Bash",
+    "summary": "`touch x`", "input": [:], "questions": [], "since": 0, "deferred": false, "hookClosed": false,
+  ]
+  if kind == .send {
+    json["tool"] = "send_group"
+    json["send"] = ["group": "g1", "groupName": "Flags", "text": "Rebase.", "targets": [], "expires": 0]
+  }
+  return try JSONCoding.convert(JSON.object(json), to: Card.self)
 }
 
 /// A work session in its own folder whose remotes sbd has read, or not read when `read` is nil.

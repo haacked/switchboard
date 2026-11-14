@@ -266,7 +266,7 @@ extension Service {
   func deliver(_ text: String, to ids: [String]) -> [GroupSend.Result] {
     ids.map { id in
       do {
-        return GroupSend.Result(session: id, delivery: try send(id, text, byUser: false))
+        return GroupSend.Result(session: id, delivery: try send(id, text, byUser: false, trigger: .group))
       } catch {
         return GroupSend.Result(session: id, error: "\(error)")
       }

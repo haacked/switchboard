@@ -2,14 +2,47 @@ import Foundation
 
 /// A message that the session wrote for the user to send to someone else,
 /// such as a review request. The Inbox shows its text as written and copies
-/// it as Markdown source.
+/// it as Markdown source. `replyTo` is the `html_url` of the GitHub comment
+/// that the message answers, as the session's card wrote it.
 public struct TriageDraft: Codable, Equatable, Sendable {
   public var label: String?
   public var text: String
+  public var replyTo: String?
 
-  public init(label: String? = nil, text: String) {
+  public init(label: String? = nil, text: String, replyTo: String? = nil) {
     self.label = label
     self.text = text
+    self.replyTo = replyTo
+  }
+}
+
+/// A draft as an Inbox item shows it. `number` is the draft's 1-based
+/// position in the card, so the item's ref and the number name one draft.
+public struct InboxDraft: Codable, Equatable, Sendable {
+  public var number: Int
+  public var label: String?
+  public var text: String
+  public var replyTo: String?
+  public var post: DraftPost
+
+  public init(_ draft: TriageDraft, number: Int, post: DraftPost = .copyOnly(reason: nil)) {
+    self.number = number
+    label = draft.label
+    text = draft.text
+    replyTo = draft.replyTo
+    self.post = post
+  }
+
+  private enum CodingKeys: String, CodingKey { case number, label, text, replyTo, post }
+
+  /// An item that an older sbd wrote has drafts without a number, a target, or a state.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    number = try c.decodeIfPresent(Int.self, forKey: .number) ?? 0
+    label = try c.decodeIfPresent(String.self, forKey: .label)
+    text = try c.decode(String.self, forKey: .text)
+    replyTo = try c.decodeIfPresent(String.self, forKey: .replyTo)
+    post = try c.decodeIfPresent(DraftPost.self, forKey: .post) ?? .copyOnly(reason: nil)
   }
 }
 
@@ -18,15 +51,47 @@ public enum TriageDrafts {
   /// sbd drops a longer draft rather than cut it, because the user would
   /// paste a cut draft as if it were whole.
   public static let maxLength = 10_000
+  public static let replyToLength = 500
 
-  /// The drafts that a card names, as strings or as `{label, text}` objects.
+  /// The drafts that a card names, as strings or as `{label, text, replyTo}` objects.
   /// Each element that fails or doesn't fit adds a line to `dropped`.
   static func read(_ list: JSON?, _ dropped: inout [String]) -> [TriageDraft] {
-    TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { raw in
-      let text = raw.string ?? raw["text"]?.string ?? ""
-      let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
-      return try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
+    var index = 0
+    var targets: [String] = []
+    let drafts = TriageCard.keep(list, "draft", max: maxDrafts, &dropped) { raw in
+      defer { index += 1 }
+      return try draft(raw, index: index, &targets)
     }
+    dropped += targets
+    return drafts
+  }
+
+  /// One element of a card's drafts, as a string or a `{label, text, replyTo}`
+  /// object. A `replyTo` that isn't a string of at most `replyToLength`
+  /// characters adds a line to `dropped`, and the draft stays without it.
+  static func draft(_ raw: JSON, index: Int, _ dropped: inout [String]) throws -> TriageDraft {
+    let text = raw.string ?? raw["text"]?.string ?? ""
+    let label = oneLine(raw["label"]?.string ?? "", max: TriageCard.labelLength)
+    var draft = try checked(TriageDraft(label: label.isEmpty ? nil : label, text: trimBlankLines(text)))
+    func drop(_ reason: String) {
+      dropped.append(TriageCard.droppedLine("replyTo of draft", label: draft.label, index: index, APIError(reason)))
+    }
+    switch raw["replyTo"] {
+    case nil, .null?:
+      break
+    case .string(let url)?:
+      let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+      if url.count > replyToLength {
+        drop("it has \(url.count) characters, and a replyTo has at most \(replyToLength)")
+      } else if url.hasNul {
+        drop("it has a NUL character")
+      } else if !url.isEmpty {
+        draft.replyTo = url
+      }
+    default:
+      drop("it is not text")
+    }
+    return draft
   }
 
   /// The drafts whose text appears in the reply, each with the reply's own
@@ -53,7 +118,7 @@ public enum TriageDrafts {
         } else {
           throw APIError("its text is not in the reply")
         }
-        kept.append(try checked(TriageDraft(label: draft.label, text: text)))
+        kept.append(try checked(TriageDraft(label: draft.label, text: text, replyTo: nil)))
       } catch {
         dropped.append(TriageCard.droppedLine("draft", label: draft.label, index: i, error))
       }
@@ -66,6 +131,7 @@ public enum TriageDrafts {
 
   private static func checked(_ draft: TriageDraft) throws -> TriageDraft {
     guard !draft.text.isEmpty else { throw APIError("it has no text") }
+    guard !draft.text.hasNul else { throw APIError("it has a NUL character") }
     guard draft.text.count <= maxLength else {
       throw APIError("it has \(draft.text.count) characters, and a draft has at most \(maxLength)")
     }
@@ -99,10 +165,15 @@ public enum TriageDrafts {
     return indent + 1 + (line.dropFirst(indent + 1).first == " " ? 1 : 0)
   }
 
-  static func trimBlankLines(_ text: String) -> String {
-    var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    while let first = lines.first, first.allSatisfy(\.isWhitespace) { lines.removeFirst() }
-    while let last = lines.last, last.allSatisfy(\.isWhitespace) { lines.removeLast() }
-    return lines.joined(separator: "\n")
+  /// The text without its leading and trailing blank lines. Line ends inside the text stay as they are.
+  public static func trimBlankLines(_ text: String) -> String {
+    // Swift reads CRLF as one Character, so the split works on scalars to find every line.
+    let lines = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    let blank = { (line: String) in line.allSatisfy(\.isWhitespace) }
+    guard let first = lines.firstIndex(where: { !blank($0) }), let last = lines.lastIndex(where: { !blank($0) })
+    else { return "" }
+    var kept = lines[first...last].joined(separator: "\n")
+    if kept.unicodeScalars.last == "\r" { kept.unicodeScalars.removeLast() }
+    return kept
   }
 }

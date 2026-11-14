@@ -18,6 +18,7 @@ struct SpawnArgs {
   var account: String?
   var group: String?
   var autoMode: Bool?
+  var planMode: Bool?
   /// The host as the request names it, `local` included.
   var host: String?
 
@@ -58,6 +59,7 @@ struct SpawnArgs {
     self.account = text("account")
     self.group = text("group")
     self.autoMode = args["autoMode"]?.bool
+    self.planMode = args["planMode"]?.bool
     self.host = host
   }
 }

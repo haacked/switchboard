@@ -37,7 +37,7 @@ extension Service {
         NewSession(
           path: checkout, branch: spawn.branch, base: spawn.base, name: spawn.name, prompt: spawn.prompt,
           model: spawn.model, parent: spawn.parent, account: spawn.account, group: spawn.group,
-          autoMode: spawn.autoMode, host: host))
+          autoMode: spawn.autoMode, planMode: spawn.planMode, host: host))
       guard let wait = spawn.wait, let parent = child.parent else { return child }
       try queue.sync {
         _ = try waitRequest(
@@ -58,6 +58,7 @@ extension Service {
     ]
     if let after = spawn.after { add["after"] = .string(after) }
     if let autoMode = spawn.autoMode { add["autoMode"] = .bool(autoMode) }
+    if let planMode = spawn.planMode { add["planMode"] = .bool(planMode) }
     for (key, value) in [
       "title": spawn.name, "parent": spawn.parent, "model": spawn.model, "account": spawn.account,
       "group": spawn.group,

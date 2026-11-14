@@ -44,14 +44,6 @@ struct StateBadge: View {
   }
 }
 
-func ago(_ ms: Int64, now: Int64 = nowMs()) -> String {
-  let s = max(0, (now - ms) / 1000)
-  if s < 60 { return "\(s)s" }
-  if s < 3600 { return "\(s / 60)m" }
-  if s < 86400 { return "\(s / 3600)h" }
-  return "\(s / 86400)d"
-}
-
 struct ContentView: View {
   static let windowMinWidth: CGFloat = 900
   static let sidebarMinWidth: CGFloat = 240
@@ -90,14 +82,7 @@ struct ContentView: View {
           ServiceBanner(problem: problem)
         }
         if let error = model.actionError {
-          HStack {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(error).lineLimit(2).textSelection(.enabled)
-            Spacer()
-            Button("Dismiss") { model.actionError = nil }
-          }
-          .padding(8)
-          .background(.orange.opacity(0.12))
+          WarningBanner(error) { Button("Dismiss") { model.actionError = nil } }
         }
         if let s = model.selected, let f = s.followup, f.started == nil {
           FollowupView(session: s, followup: f).id(s.id)
@@ -111,6 +96,7 @@ struct ContentView: View {
           switch model.mainView {
           case .inbox: InboxView()
           case .board: BoardView()
+          case .issues: IssuesView()
           }
         }
       }
@@ -131,10 +117,11 @@ struct ContentView: View {
         Picker("View", selection: viewChoice) {
           Text("Inbox (\(model.triage.count))").tag(MainView?.some(.inbox))
           Text("Board").tag(MainView?.some(.board))
+          Text("Issues (\(model.issueCount))").tag(MainView?.some(.issues))
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .help("Show the Inbox (⌘1) or the Board (⌘2)")
+        .help("Show the Inbox (⌘1), the Board (⌘2), or Issues (⌘3)")
       }
       ToolbarItem(placement: .navigation) { OrgFilterMenu() }
       ToolbarItem { ManagerButton() }
@@ -156,6 +143,7 @@ struct ContentView: View {
         .help("Start a session (⌘N)")
       }
     }
+    .removingToolbarTitle()
     .confirmationDialog(
       "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
       presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
@@ -176,6 +164,36 @@ struct ContentView: View {
     .sheet(isPresented: isShowingDoneRemoval) {
       if let state = model.doneRemoval { DoneRemovalSheet(state: state).environmentObject(model) }
     }
+  }
+}
+
+/// An orange strip across the pane with a warning and an optional button at its end.
+struct WarningBanner<Action: View>: View {
+  let text: String
+  @ViewBuilder let action: () -> Action
+
+  init(_ text: String, @ViewBuilder action: @escaping () -> Action = { EmptyView() }) {
+    self.text = text
+    self.action = action
+  }
+
+  var body: some View {
+    HStack {
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+      Text(text).lineLimit(2).textSelection(.enabled)
+      Spacer()
+      action()
+    }
+    .padding(8)
+    .background(.orange.opacity(0.12))
+  }
+}
+
+extension View {
+  /// The window title takes about 190 pt of the toolbar. Without it, a 1024 pt wide window shows the
+  /// three-segment picker and more of the toolbar's buttons before the overflow menu. macOS 14 keeps the title.
+  @ViewBuilder func removingToolbarTitle() -> some View {
+    if #available(macOS 15, *) { toolbar(removing: .title) } else { self }
   }
 }
 
@@ -220,6 +238,11 @@ struct Sidebar: View {
             }
             .padding(.leading, CGFloat(row.depth) * 14).tag(row.id)
             .contextMenu {
+              if row.session.queued == true {
+                Button("Start Now") { model.startNow(row.id) }
+                  .disabled(model.startingNow.contains(row.id))
+                  .help(BoardModel.startNowHelp)
+              }
               if CleanupOffer.canCleanUp(row.session) {
                 Button("Clean Up: Delete the Worktree and Branch…") { model.confirmingCleanup = row.id }
                   .disabled(model.cleaningUp.contains(row.id))
