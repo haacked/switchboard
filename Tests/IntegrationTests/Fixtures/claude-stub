@@ -11,7 +11,8 @@
 #   mode <name>      switches the permission mode to <name>, as Shift+Tab or
 #                    an approved plan does, and replies "Mode: <name>". The
 #                    turn's hooks report the new mode
-#   slow <n>         runs a Bash tool call of n seconds
+#   slow <n>         runs a Bash tool call of n seconds. slow held runs one
+#                    that lasts until $SB_HOME/report exists
 #   run <name>       runs sh $SB_HOME/<name>.sh as a Bash tool call, a child
 #                    of the stub, and replies "Ran <name>.". Without that
 #                    file, it replies as to anything else
@@ -693,6 +694,7 @@ turn() {
     n=${p#slow }
     status busy
     step=tool reply="Slept $n s." cmd="sleep $n" marker='"hook_event_name":"PostToolUse"' before="sleep $n"
+    [ "$n" = held ] && before="until [ -e '$SB_HOME/report' ]; do sleep 0.05; done"
     ;;
   run\ *)
     n=${p#run }
