@@ -75,9 +75,10 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
     let mark = try lastEvent(sbd, s.id)
 
     try drop(sbd, s, after: mark)
+    let masters = sbd.sshStubMasters().count
     try tick(sbd)
     // The link retries while it is down. Each retry is not another drop.
-    sleep(3)
+    try sbd.waitFor("a retry of the link") { sbd.sshStubMasters().count > masters }
     try tick(sbd)
 
     let after = try sbd.events(s.id).filter { $0.id > mark }

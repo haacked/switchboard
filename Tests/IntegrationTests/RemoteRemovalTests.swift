@@ -294,7 +294,9 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
     let rm = try BackgroundSb(sbd, ["rm", s.id])
     var forgotWhileUnread = false
     var refusedInTime = false
-    let deadline = Date().addingTimeInterval(20 * Instance.timeoutScale)
+    // A removal that waits for the reconcile runs this loop to its end, so the window does not scale on CI. A
+    // removal that does not wait finishes well within it, and a forgotten session fails the checks below too.
+    let deadline = Date().addingTimeInterval(5)
     while Date() < deadline, !refusedInTime {
       if !(try sbd.client.sessions().map(\.id).contains(s.id)) { forgotWhileUnread = true }
       refusedInTime = rm.exits(within: 0.2)
