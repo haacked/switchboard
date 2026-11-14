@@ -195,4 +195,45 @@ import Testing
 
     #expect(KnownRepos.preferred([], group: "g1", sessions: sessions) == nil)
   }
+
+  // MARK: preferredGroup
+
+  /// A session in `group` that works in `repository`.
+  func inRepo(_ id: String, group: String?, repository: String = "acme/ledger", kind: SessionKind = .work)
+    -> SessionSummary
+  {
+    var s = session(id, group: group, checkout: "/dev/ledger", kind: kind)
+    s.repository = repository
+    return s
+  }
+
+  @Test func preferredGroupPicksTheGroupWithTheMostSessionsInTheRepo() {
+    let sessions = [inRepo("s1", group: "g1"), inRepo("s2", group: "g2"), inRepo("s3", group: "g2")]
+
+    #expect(KnownRepos.preferredGroup(repository: "acme/ledger", sessions: sessions) == "g2")
+  }
+
+  @Test(arguments: [false, true])
+  func preferredGroupBreaksATieByTheGroupIdThatSortsFirst(reversed: Bool) {
+    let sessions = [inRepo("s1", group: "g2"), inRepo("s2", group: "g1")]
+
+    let picked = KnownRepos.preferredGroup(
+      repository: "acme/ledger", sessions: reversed ? Array(sessions.reversed()) : sessions)
+
+    #expect(picked == "g1")
+  }
+
+  @Test func preferredGroupMatchesTheRepoWithoutCase() {
+    #expect(KnownRepos.preferredGroup(repository: "Acme/Ledger", sessions: [inRepo("s1", group: "g1")]) == "g1")
+  }
+
+  @Test func preferredGroupIgnoresChatsOtherReposAndUngroupedSessions() {
+    let sessions = [
+      inRepo("c1", group: "g1", kind: .chat),
+      inRepo("s1", group: "g1", repository: "acme/flagship"),
+      inRepo("s2", group: nil),
+    ]
+
+    #expect(KnownRepos.preferredGroup(repository: "acme/ledger", sessions: sessions) == nil)
+  }
 }

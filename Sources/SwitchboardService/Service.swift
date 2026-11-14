@@ -377,8 +377,7 @@ public final class Service {
         // `planFollowup` takes the state queue itself.
         return .success(try JSON(encoding: planFollowup(request.args)))
       case "issues-refresh", "issues-start", "issues-clone":
-        // These wait on GitHub or git. They run off the state queue.
-        return .success(try issuesRequest(request.op, request.args))
+        return .success(try issueWorkRequest(request.op, request.args))
       case "poll":
         // A poll waits on GitHub, so it runs off the state queue.
         return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])

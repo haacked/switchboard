@@ -257,16 +257,10 @@ struct IssueStart: View {
   @AppStorage(BoardModel.lastIssuePresetKey) private var lastPreset = ""
   let row: ListedIssue
 
-  /// The last preset the user ran while it still exists, else config.json's default, else the first.
-  static func preset(_ list: IssueList?, last: String) -> IssuePreset? {
-    let presets = list?.presets ?? []
-    return presets.first { $0.name == last } ?? presets.first { $0.name == list?.defaultPreset } ?? presets.first
-  }
-
   var body: some View {
     let starting = model.startingIssues.contains(row.id)
     let presets = model.issueList?.presets ?? []
-    let current = Self.preset(model.issueList, last: lastPreset)
+    let current = IssuePreset.choose(presets, last: lastPreset, default: model.issueList?.defaultPreset)
     VStack(alignment: .leading, spacing: 6) {
       HStack(spacing: 8) {
         Menu {
@@ -312,6 +306,7 @@ struct IssueStart: View {
         }
       }
     }
+    .announcesRefusal(model.issueErrors[row.id])
   }
 }
 
@@ -340,6 +335,7 @@ private struct StartedIssueNotice: View {
       .shadow(radius: 4)
       .padding(16)
       .task(id: started) {
+        AccessibilityNotification.Announcement("Started \(started.name)").post()
         try? await Task.sleep(for: .seconds(8))
         if model.startedIssue == started { model.startedIssue = nil }
       }

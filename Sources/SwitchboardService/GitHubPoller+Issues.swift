@@ -65,7 +65,19 @@ extension GitHubPoller {
       }
       requests = next
     }
-    poll.unfinished = Set(requests.map(\.source.key))
+    if poll.error == nil {
+      poll.truncated = Set(requests.map(\.source.key))
+    } else {
+      poll.unfinished = Set(requests.map(\.source.key))
+    }
+    for source in sources
+    where poll.error == nil && poll.sourceErrors[source.key] == nil
+      && (poll.full.contains(source.key) ? poll.truncated.contains(source.key) : polls[source.key]?.truncated == true)
+    {
+      let limit = Self.issuePageLimit * IssuePageRequest(source: source).first
+      poll.sourceErrors[source.key] =
+        "has more than \(limit) open issues, so the list shows only some of them. Add a label or a person to the source."
+    }
     poll.ended = nowMs()
     poll.pausedUntil = graphQLPausedUntil > poll.ended ? graphQLPausedUntil : nil
     service.queue.sync { service.applyIssuePoll(poll) }

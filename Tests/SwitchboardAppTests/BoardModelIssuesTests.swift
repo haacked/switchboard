@@ -149,11 +149,11 @@ private let rows = [
   }
 
   @Test func lastPresetWinsThenTheDefaultThenTheFirst() {
-    var list = list(rows, presets: [IssuePreset(name: "go", prompt: ""), IssuePreset(name: "plain", prompt: "")])
-    #expect(IssueStart.preset(list, last: "plain")?.name == "plain")
-    #expect(IssueStart.preset(list, last: "gone")?.name == "go")
-    list.defaultPreset = "plain"
-    #expect(IssueStart.preset(list, last: "gone")?.name == "plain")
+    let presets = [IssuePreset(name: "go", prompt: ""), IssuePreset(name: "plain", prompt: "")]
+    #expect(IssuePreset.choose(presets, last: "plain", default: nil)?.name == "plain")
+    #expect(IssuePreset.choose(presets, last: "gone", default: nil)?.name == "go")
+    #expect(IssuePreset.choose(presets, last: "gone", default: "plain")?.name == "plain")
+    #expect(IssuePreset.choose(presets, last: nil, default: "gone")?.name == "go")
   }
 }
 
@@ -173,5 +173,14 @@ private let rows = [
     #expect(request?.branch == "robin/1-issue-1")
     #expect(request?.prompt == "/go --yolo x")
     #expect(request?.issue == IssueRef(repo: "acme/ledger", number: 1))
+  }
+
+  @Test func requestForARepoWithNoCheckoutSelectsNoRepo() {
+    let form = NewSessionView.Form(
+      request: NewSessionRequest(group: nil, repo: "acme/ledger-web", branch: "robin/1-issue-1", prompt: "x"))
+    form.offer([KnownRepo(path: "/dev/acme/flagship", name: "acme/flagship", used: 2)])
+
+    #expect(form.repo == nil)
+    #expect(form.request(worktree: true, groups: []) == nil)
   }
 }

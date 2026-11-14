@@ -378,6 +378,87 @@ private func merged(
     #expect(Array(cache.polls.keys) == ["acme label:bug"])
   }
 
+  // MARK: Apply
+
+  /// A poll that started at 100 and read `read` from acme/ledger.
+  private func ledgerPoll(_ read: [InboxIssue], full: Bool) -> IssuePoll {
+    var poll = IssuePoll(started: 100, ended: 200, since: "new")
+    poll.read["acme/ledger"] = read
+    if full { poll.full = ["acme/ledger"] }
+    return poll
+  }
+
+  /// A cache that holds #1 and #2 from acme/ledger, last read in full at 1.
+  private func ledgerCache() -> IssueCache {
+    var cache = merged([issue(1), issue(2)], full: true)
+    cache.polls["acme/ledger"] = IssueSourcePoll(since: "old", fullAt: 1)
+    return cache
+  }
+
+  @Test func applyOfAFullReadReplacesTheSourcesIssuesAndMovesItsPoll() {
+    var cache = ledgerCache()
+
+    cache.apply(ledgerPoll([issue(3)], full: true), sources: ["acme/ledger"])
+
+    #expect(refs(cache.issues) == ["acme/ledger#3"])
+    #expect(cache.polls["acme/ledger"] == IssueSourcePoll(since: "new", fullAt: 100))
+    #expect(cache.polledAt == 200)
+  }
+
+  @Test func applyOfAnIncrementalReadKeepsTheLastFullReadTime() {
+    var cache = ledgerCache()
+
+    cache.apply(ledgerPoll([issue(3)], full: false), sources: ["acme/ledger"])
+
+    #expect(refs(cache.issues).sorted() == ["acme/ledger#1", "acme/ledger#2", "acme/ledger#3"])
+    #expect(cache.polls["acme/ledger"] == IssueSourcePoll(since: "new", fullAt: 1))
+  }
+
+  @Test func applyOfATruncatedFullReadKeepsTheCachedIssuesAndMarksTheSource() {
+    var cache = ledgerCache()
+    var poll = ledgerPoll([issue(3)], full: true)
+    poll.truncated = ["acme/ledger"]
+
+    cache.apply(poll, sources: ["acme/ledger"])
+
+    #expect(refs(cache.issues).sorted() == ["acme/ledger#1", "acme/ledger#2", "acme/ledger#3"])
+    #expect(cache.polls["acme/ledger"] == IssueSourcePoll(since: "new", fullAt: 100, truncated: true))
+  }
+
+  @Test func applyOfATruncatedIncrementalReadMakesTheNextPollReadInFull() {
+    var cache = ledgerCache()
+    var poll = ledgerPoll([issue(3)], full: false)
+    poll.truncated = ["acme/ledger"]
+
+    cache.apply(poll, sources: ["acme/ledger"])
+
+    #expect(refs(cache.issues).sorted() == ["acme/ledger#1", "acme/ledger#2", "acme/ledger#3"])
+    #expect(cache.polls["acme/ledger"] == IssueSourcePoll(since: "old", fullAt: 0))
+  }
+
+  @Test func applyOfAPollThatFailedPartwayLeavesTheSourceAlone() {
+    var cache = ledgerCache()
+    var poll = ledgerPoll([issue(3)], full: true)
+    poll.unfinished = ["acme/ledger"]
+    poll.error = "timed out"
+
+    cache.apply(poll, sources: ["acme/ledger"])
+
+    #expect(refs(cache.issues).sorted() == ["acme/ledger#1", "acme/ledger#2"])
+    #expect(cache.polls["acme/ledger"] == IssueSourcePoll(since: "old", fullAt: 1))
+    #expect(cache.polledAt == nil)
+    #expect(cache.error == "timed out")
+  }
+
+  @Test func applyForgetsASourceThatConfigNoLongerLists() {
+    var cache = ledgerCache()
+
+    cache.apply(IssuePoll(started: 100, ended: 200, since: "new"), sources: [])
+
+    #expect(cache.issues == [])
+    #expect(cache.polls.isEmpty)
+  }
+
   @Test(arguments: [
     #"Say "hi""#, "Two\nlines", #"Back\slash and \"escaped\""#, "Ünïcode ✓", "", "null",
   ])
@@ -628,6 +709,14 @@ private func merged(
     #expect(config.issues.allPresets == IssuePreset.defaults)
   }
 
+  @Test func badIssuesSectionKeepsItsDefaultsAndTheRestOfConfig() throws {
+    let config = try JSONCoding.decode(
+      Config.self, from: #"{"branchPrefix": "x/", "issues": {"presets": [{"name": "go"}]}}"#)
+
+    #expect(config.branchPrefix == "x/")
+    #expect(config.issues == IssueSettings())
+  }
+
   @Test func configReadsTheSourcesTeamAndDefaultPreset() throws {
     let config = try JSONCoding.decode(
       Config.self,
@@ -757,6 +846,26 @@ private let billingSource = IssueSource(name: "acme", label: "team/billing")
     #expect(query.contains("$s0: DateTime"))
     #expect(!query.contains("states: [OPEN]"))
     #expect(variables["s0"] == "2026-11-12T10:00:00Z")
+  }
+
+  @Test func repoSourceFiltersByItsLabelAndPerson() {
+    let source = IssueSource(name: "acme/ledger", label: "team/billing", person: "ana-m")
+
+    let (query, variables) = GitHub.issuesQuery([IssuePageRequest(source: source)])
+
+    #expect(query.contains("filterBy: {states: [OPEN], labels: $l0, assignee: $p0}"))
+    #expect(query.contains("$l0: [String!]"))
+    #expect(query.contains("$p0: String"))
+    #expect(variables["l0"] == .array(["team/billing"]))
+    #expect(variables["p0"] == "ana-m")
+  }
+
+  @Test func incrementalReadOfARepoKeepsItsLabel() {
+    let source = IssueSource(name: "acme/ledger", label: "team/billing")
+
+    let (query, _) = GitHub.issuesQuery([IssuePageRequest(source: source, since: "2026-11-12T10:00:00Z")])
+
+    #expect(query.contains("filterBy: {since: $s0, labels: $l0}"))
   }
 
   @Test func laterPageAsksAfterTheCursor() {

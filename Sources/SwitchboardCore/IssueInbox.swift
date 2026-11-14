@@ -80,6 +80,11 @@ public struct IssuePreset: Codable, Equatable, Sendable {
     .reduce(prompt) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
   }
 
+  /// The preset named `last` while it exists, else the one named `defaultName`, else the first.
+  public static func choose(_ presets: [IssuePreset], last: String?, default defaultName: String?) -> IssuePreset? {
+    presets.first { $0.name == last } ?? presets.first { $0.name == defaultName } ?? presets.first
+  }
+
   public static func named(_ name: String, in presets: [IssuePreset]) throws -> IssuePreset {
     guard let preset = presets.first(where: { $0.name == name }) else {
       throw APIError("no preset named \(name). Presets: \(presets.map(\.name).joined(separator: ", "))")
@@ -378,10 +383,13 @@ public struct IssueSourcePoll: Codable, Equatable, Sendable {
   public var since: String
   /// When the last read of all the source's open issues ended, in ms.
   public var fullAt: Int64
+  /// True when the last full read reached the poll's page limit with open issues left unread.
+  public var truncated: Bool?
 
-  public init(since: String, fullAt: Int64) {
+  public init(since: String, fullAt: Int64, truncated: Bool? = nil) {
     self.since = since
     self.fullAt = fullAt
+    self.truncated = truncated
   }
 }
 
@@ -407,14 +415,26 @@ public struct IssueCache: Codable, Equatable, Sendable {
   public init(viewer: String? = nil) { self.viewer = viewer }
 
   /// Folds in a poll. `sources` are the keys of the sources that config.json lists now. A source that config.json
-  /// no longer lists leaves the cache. A source that the poll read to its last page gets its issues merged and a new
-  /// poll mark.
+  /// no longer lists leaves the cache. A source that the poll read gets its issues merged, and its `polls` entry
+  /// moves to this poll's `since` time. A source that the poll stopped partway because of an error keeps its
+  /// `polls` entry, so the next poll asks again for updates since the old time.
   public mutating func apply(_ poll: IssuePoll, sources: Set<String>) {
     for key in Set(polls.keys).union(issues.flatMap(\.sources)) where !sources.contains(key) { remove(source: key) }
     for (key, read) in poll.read where sources.contains(key) && !poll.unfinished.contains(key) {
       let full = poll.full.contains(key)
-      merge(read, source: key, full: full)
-      polls[key] = IssueSourcePoll(since: poll.since, fullAt: full ? poll.started : polls[key]?.fullAt ?? poll.started)
+      let truncated = poll.truncated.contains(key)
+      // A truncated full read did not see every open issue. It can't tell which cached issues are gone.
+      merge(read, source: key, full: full && !truncated)
+      if full {
+        polls[key] = IssueSourcePoll(since: poll.since, fullAt: poll.started, truncated: truncated ? true : nil)
+      } else if truncated {
+        // An incremental read that ran out of pages missed older updates. A `fullAt` of 0 makes the next poll read
+        // the source in full.
+        polls[key]?.fullAt = 0
+      } else {
+        polls[key] = IssueSourcePoll(
+          since: poll.since, fullAt: polls[key]?.fullAt ?? poll.started, truncated: polls[key]?.truncated)
+      }
     }
     if let viewer = poll.viewer { self.viewer = viewer }
     if poll.error == nil { polledAt = poll.ended }
@@ -475,9 +495,11 @@ public struct IssuePoll: Sendable {
   public var read: [String: [InboxIssue]] = [:]
   /// The keys of the sources read in full.
   public var full: Set<String> = []
-  /// The keys of the sources whose pages stopped partway. They keep their old poll mark, so the next poll reads them
-  /// again.
+  /// The keys of the sources whose pages stopped partway because the poll failed. Their `polls` entry stays as it
+  /// was, so the next poll asks again for updates since the old time.
   public var unfinished: Set<String> = []
+  /// The keys of the sources that still had pages left when the poll reached its page limit.
+  public var truncated: Set<String> = []
   public var viewer: String?
   public var error: String?
   public var sourceErrors: [String: String] = [:]

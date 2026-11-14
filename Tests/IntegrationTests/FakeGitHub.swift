@@ -164,9 +164,15 @@ final class FakeGitHub {
     if repository {
       let repo = "\(variables["o\(i)"]?.string ?? "")/\(variables["n\(i)"]?.string ?? "")".lowercased()
       let since = variables["s\(i)"]?.string
+      let label = variables["l\(i)"]?.array?.first?.string
+      let person = variables["p\(i)"]?.string
       return (
         repo,
-        { issue in issue.repo.lowercased() == repo && (since.map { issue.updatedAt >= $0 } ?? issue.open) }
+        { issue in
+          issue.repo.lowercased() == repo && (since.map { issue.updatedAt >= $0 } ?? issue.open)
+            && (label.map { issue.labels.contains($0) } ?? true)
+            && (person.map { issue.assignees.contains($0) } ?? true)
+        }
       )
     }
     let terms = variables["q\(i)"]?.string ?? ""

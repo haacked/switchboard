@@ -66,14 +66,24 @@ extension GitHub {
         params += ["$o\(i): String!", "$n\(i): String!"]
         variables["o\(i)"] = .string(owner)
         variables["n\(i)"] = .string(name)
-        var filter = "states: [OPEN]"
+        var filters = ["states: [OPEN]"]
         if let since = request.since {
           params.append("$s\(i): DateTime")
           variables["s\(i)"] = .string(since)
-          filter = "since: $s\(i)"
+          filters = ["since: $s\(i)"]
+        }
+        if let label = source.label {
+          params.append("$l\(i): [String!]")
+          variables["l\(i)"] = .array([.string(label)])
+          filters.append("labels: $l\(i)")
+        }
+        if let person = source.person {
+          params.append("$p\(i): String")
+          variables["p\(i)"] = .string(person)
+          filters.append("assignee: $p\(i)")
         }
         fields.append(
-          "r\(i): repository(owner: $o\(i), name: $n\(i)) { issues(\(page), filterBy: {\(filter)}, "
+          "r\(i): repository(owner: $o\(i), name: $n\(i)) { issues(\(page), filterBy: {\(filters.joined(separator: ", "))}, "
             + "orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { ...issue } } }"
         )
       }

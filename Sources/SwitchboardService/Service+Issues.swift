@@ -3,22 +3,11 @@ import SwitchboardCore
 
 /// The Issues view: open issues from the configured sources, which the GitHub poller caches in issues.json.
 extension Service {
-  /// `issues`, `issues-source-add`, `issues-source-rm`, `issues-settings`, and `issues-dismiss` run on the state
-  /// queue.
-  /// `issues-refresh`, `issues-start`, and `issues-clone` wait on GitHub or git, so they run off it.
+  /// The requests that change only sbd's state. They run on the state queue.
   func issuesRequest(_ op: String, _ args: JSON) throws -> JSON {
     switch op {
     case "issues":
       return try JSON(encoding: issueList())
-    case "issues-refresh":
-      // The Issues view sends it as it opens. Presets edited in config.json then show without a restart.
-      reloadIssueSettings()
-      // A refresh waits for a running poll. The reply includes that poll's issues. A recent poll needs no refresh.
-      let age = Int64(args["maxAgeSeconds"]?.int ?? 0) * 1000
-      if GitHub.elapsed(since: queue.sync(execute: { issueCache.polledAt }), age, now: nowMs()) {
-        github?.refreshIssues(olderThan: age)
-      }
-      return try queue.sync { try JSON(encoding: issueList()) }
     case "issues-source-add":
       let source = try IssueSource.parse(
         args["source"]?.string ?? "", label: args["label"]?.string, person: args["person"]?.string)
@@ -50,6 +39,23 @@ extension Service {
       issueCache.dismissed[issue.id] = issue.updatedAt
       saveIssueCache()
       return try JSON(encoding: issueList())
+    default:
+      throw APIError("unknown request \(op)")
+    }
+  }
+
+  /// The requests that wait on GitHub, gh, or git. They run off the state queue.
+  func issueWorkRequest(_ op: String, _ args: JSON) throws -> JSON {
+    switch op {
+    case "issues-refresh":
+      // The Issues view sends it as it opens. Presets edited in config.json then show without a restart.
+      reloadIssueSettings()
+      // A refresh waits for a running poll. The reply includes that poll's issues. A recent poll needs no refresh.
+      let age = Int64(args["maxAgeSeconds"]?.int ?? 0) * 1000
+      if GitHub.elapsed(since: queue.sync(execute: { issueCache.polledAt }), age, now: nowMs()) {
+        github?.refreshIssues(olderThan: age)
+      }
+      return try queue.sync { try JSON(encoding: issueList()) }
     case "issues-start":
       return try JSON(encoding: startIssue(args))
     case "issues-clone":
@@ -164,13 +170,12 @@ extension Service {
   /// Starts a session on a cached issue: a worktree on `<branchPrefix><number>-<slug>` in the repository's checkout,
   /// the session's issue set to the issue, and the preset's prompt as its first message.
   private func startIssue(_ args: JSON) throws -> SessionSummary {
-    let (issue, presets, chosen) = try queue.sync {
-      (
-        try cachedIssue(args["issue"]?.string ?? ""), issueSettings.allPresets,
-        args["preset"]?.string ?? issueSettings.defaultPreset
-      )
+    let (issue, presets, defaultPreset) = try queue.sync {
+      (try cachedIssue(args["issue"]?.string ?? ""), issueSettings.allPresets, issueSettings.defaultPreset)
     }
-    let preset = try chosen.map { try IssuePreset.named($0, in: presets) } ?? presets[0]
+    let preset =
+      try args["preset"]?.string.map { try IssuePreset.named($0, in: presets) }
+      ?? IssuePreset.choose(presets, last: nil, default: defaultPreset) ?? presets[0]
     let repo: String
     if let path = args["path"]?.string {
       repo = (path.expandingTilde as NSString).standardizingPath

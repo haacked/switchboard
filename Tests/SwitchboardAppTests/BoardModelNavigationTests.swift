@@ -172,7 +172,7 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
     }
 
     @Test(arguments: [1, -1], [MainView.inbox, .board, .issues])
-    func withNoSessionsTheInboxAndBoardStayEmpty(step: Int, view: MainView) {
+    func withNoSessionsEachMainViewStaysEmpty(step: Int, view: MainView) {
       let model = offlineModel()
       model.show(view)
 

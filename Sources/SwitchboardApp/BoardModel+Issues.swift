@@ -125,7 +125,9 @@ extension BoardModel {
   /// The preset that Start runs: the last one the user ran while it still exists, else config.json's default, else
   /// the first.
   var issuePreset: IssuePreset? {
-    IssueStart.preset(issueList, last: UserDefaults.standard.string(forKey: Self.lastIssuePresetKey) ?? "")
+    IssuePreset.choose(
+      issueList?.presets ?? [], last: UserDefaults.standard.string(forKey: Self.lastIssuePresetKey),
+      default: issueList?.defaultPreset)
   }
 
   /// The group that Start uses for the issue: the user's pick, else the group that holds the most sessions in the

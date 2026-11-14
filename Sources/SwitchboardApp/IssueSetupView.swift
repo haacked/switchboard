@@ -59,12 +59,15 @@ struct IssueSetupView: View {
             TextField("Person", text: $person)
             Button("Add") { add() }
               .disabled(!canAdd || adding)
+              // Return adds a typed source instead of saving the sheet without it.
+              .keyboardShortcut(trimmedName.isEmpty ? nil : .defaultAction)
           }
           if let problem = addProblem ?? addError {
             Text(problem).font(.caption).foregroundStyle(.red)
           }
         }
         .padding(4)
+        .announcesRefusal(addError)
       }
       GroupBox("My Team") {
         VStack(alignment: .leading, spacing: 6) {
@@ -89,7 +92,7 @@ struct IssueSetupView: View {
           model.saveIssueSettings(labels: split(labels), people: split(people), defaultPreset: defaultPreset)
           dismiss()
         }
-        .keyboardShortcut(.defaultAction)
+        .keyboardShortcut(trimmedName.isEmpty ? .defaultAction : nil)
       }
     }
     .padding(20)
@@ -99,7 +102,7 @@ struct IssueSetupView: View {
       loaded = true
       labels = list.team.labels.joined(separator: ", ")
       people = list.team.people.joined(separator: ", ")
-      defaultPreset = IssueStart.preset(list, last: "")?.name
+      defaultPreset = IssuePreset.choose(list.presets, last: nil, default: list.defaultPreset)?.name
     }
   }
 

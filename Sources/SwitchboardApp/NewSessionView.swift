@@ -57,13 +57,18 @@ struct NewSessionView: View {
       picked = true
     }
 
-    /// Selects the repository that `KnownRepos.preferred` names for the group until the user picks one. The
-    /// sheet first offers the list that the app kept from its last opening, then the list that sbd answers.
+    /// Selects the repository that the request names, or else the one that `KnownRepos.preferred` names for the
+    /// group, until the user picks one. A named repository with no known checkout selects none, so Start waits for
+    /// the user's pick. The sheet first offers the list that the app kept from its last opening, then the list that
+    /// sbd answers.
     func offer(_ repos: [KnownRepo]?, sessions: [SessionSummary] = []) {
       offered = (repos, sessions)
       guard !picked else { return }
-      let named = repoName.flatMap { name in repos?.first { $0.name.lowercased() == name.lowercased() } }
-      repo = named ?? repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) }
+      if let repoName {
+        repo = repos?.first { $0.name.lowercased() == repoName.lowercased() }
+      } else {
+        repo = repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) }
+      }
     }
 
     func choose(group: String?) {
@@ -93,15 +98,16 @@ struct NewSessionView: View {
 
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
+  static let createWorktreeKey = "createWorktree"
   /// The user's last choice of the toggle, which a later sheet starts from.
-  @AppStorage("createWorktree") private var createWorktree = false
+  @AppStorage(Self.createWorktreeKey) private var createWorktree = false
   @StateObject private var form: Form
   /// This sheet's toggle. A request that names a branch starts with it on and leaves the saved choice alone.
   @State private var worktree: Bool
 
   init(request: NewSessionRequest) {
     _form = StateObject(wrappedValue: Form(request: request))
-    _worktree = State(initialValue: request.branch != nil || UserDefaults.standard.bool(forKey: "createWorktree"))
+    _worktree = State(initialValue: request.branch != nil || UserDefaults.standard.bool(forKey: Self.createWorktreeKey))
   }
 
   var body: some View {

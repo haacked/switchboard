@@ -261,6 +261,33 @@ private final class Inbox {
     #expect(try inbox.buckets() == ["acme/ledger-web#4400": IssueBucket.teamUnassigned.rawValue])
   }
 
+  @Test func repoSourceWithMoreOpenIssuesThanThePageLimitListsWhatItReadAndReportsIt() throws {
+    let inbox = try Inbox()
+    for number in 1...1001 {
+      let updatedAt = String(format: "2026-11-10T10:%02d:%02dZ", number / 60, number % 60)
+      inbox.github.put(fakeIssue(number, title: "Issue \(number)", updatedAt: updatedAt))
+    }
+    try inbox.sbd.sb("issues", "source", "add", ledger)
+
+    let result = try inbox.sbd.poll(all: true)
+
+    #expect(result["issuesError"]?.string?.contains("more than 1000 open issues") == true)
+    let list = try inbox.list()
+    #expect(list.issues.count == 1000)
+    #expect(list.sourceErrors[ledger]?.contains("more than 1000 open issues") == true)
+  }
+
+  @Test func repoSourceReadsOnlyTheIssuesWithItsLabel() throws {
+    let inbox = try Inbox()
+    for issue in fourBuckets { inbox.github.put(issue) }
+    inbox.github.put(fakeIssue(4700, title: "Card fees", labels: ["team/billing"]))
+    try inbox.sbd.sb("issues", "source", "add", ledger, "--label", "team/billing")
+
+    try inbox.sbd.poll(all: true)
+
+    #expect(try inbox.buckets() == ["acme/ledger#4700": IssueBucket.teamUnassigned.rawValue])
+  }
+
   @Test func missingRepositorySourceReportsAnErrorAndTheOtherSourcesStillLoad() throws {
     let inbox = try Inbox()
     inbox.github.put(fourBuckets[0])

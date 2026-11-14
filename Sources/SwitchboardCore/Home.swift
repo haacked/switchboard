@@ -220,7 +220,12 @@ public struct Config: Codable, Equatable, Sendable {
     docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
     planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
     recheck = try c.decodeIfPresent(RecheckSettings.self, forKey: .recheck) ?? d.recheck
-    issues = try c.decodeIfPresent(IssueSettings.self, forKey: .issues) ?? d.issues
+    // sbd logs a bad `issues` section and keeps the defaults. Throwing would make sbd ignore all of config.json.
+    do {
+      issues = try c.decodeIfPresent(IssueSettings.self, forKey: .issues) ?? d.issues
+    } catch {
+      logLine("skipping issues: \(error)")
+    }
   }
 }
 
