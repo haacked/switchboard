@@ -90,6 +90,17 @@ extension BoardModel {
     focusTerminal()
   }
 
+  /// Shows the session's whole conversation: a chat's messages, or another session's terminal.
+  func openTranscript(_ session: SessionSummary) {
+    switch session.transcriptTarget {
+    case .chat:
+      showingTerminal = false
+      selection = session.id
+    case .terminal: openInboxTerminal()
+    case nil: break
+    }
+  }
+
   /// Clears the terminal focus request while it still names `id`.
   func releaseTerminalFocus(_ id: String) {
     if terminalFocus == id { terminalFocus = nil }
@@ -142,5 +153,19 @@ extension BoardModel {
     return BoardLayout(
       columns: MergeBoard.columns, lanes: lanes, done: board.filter(MergeBoard.isDone),
       grid: BoardGrid(lanes: lanes.map { $0.cells.map { $0.map(\.id) } }))
+  }
+}
+
+/// Where "Open in transcript" shows a session's whole conversation.
+enum TranscriptTarget: Equatable {
+  case chat
+  case terminal
+}
+
+extension SessionSummary {
+  /// A chat's messages, or the terminal of another session that runs claude.
+  var transcriptTarget: TranscriptTarget? {
+    guard runsClaude, !waitsToStart else { return nil }
+    return kind.showsAsChat ? .chat : .terminal
   }
 }

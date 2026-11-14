@@ -563,10 +563,15 @@ answered() {
 
 # call_tool <tool> <input> [input after a pick in the terminal]: runs a call
 # that needs permission, and prints the reply, or nothing when the turn
-# stopped.
+# stopped. Like claude, it writes the call's tool_use line to the transcript
+# before PreToolUse.
 call_tool() {
   local fields
   fields=$(jq -nc --arg t "$1" --argjson i "$2" '{tool_name: $t, tool_input: $i}')
+  mkdir -p "$project"
+  jq -nc --arg t "$1" --argjson i "$2" \
+    '{type: "assistant", message: {role: "assistant", content: [{type: "tool_use", id: "c1", name: $t, input: $i}]}}' \
+    >>"$project/$session.jsonl"
   hook PreToolUse "$(jq -c '. + {tool_use_id: "c1"}' <<<"$fields")"
   answered "$1" "$2" "$(dialog "$fields")" "${3:-}"
 }

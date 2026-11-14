@@ -356,39 +356,25 @@ public enum Transcript {
   /// sidechains, which hold subagents. An api-request-blob line also carries
   /// an assistant message, and its type leaves it out.
   static func fold(_ line: Data, into tail: inout TranscriptTail) -> Bool {
-    guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return false }
-    if tail.lastActivity == nil, let t = object["timestamp"]?.string.flatMap(milliseconds) { tail.lastActivity = t }
-    guard object["type"]?.string == "assistant", object["isSidechain"]?.bool != true else { return false }
+    guard let line = TranscriptLine(line) else { return false }
+    if tail.lastActivity == nil, let t = line.timestamp { tail.lastActivity = t }
+    guard line.type == "assistant", !line.isSidechain else { return false }
     tail.hasReplies = true
-    let text = text(of: object)
+    let text = line.text
     guard !text.isEmpty else { return false }
     tail.lastReply = text
     return true
   }
 
   /// A user or assistant line of the main conversation that has text. A
-  /// user line that holds only tool results has none. A meta line is one
-  /// that claude adds, such as a command's output. Claude Code writes the
-  /// summary of a compacted conversation as a user line that only its
-  /// transcript view shows.
+  /// user line that holds only tool results has none.
   static func message(_ line: Data) -> ChatMessage? {
-    guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line),
-      let role = object["type"]?.string.flatMap(ChatMessage.Role.init(rawValue:)),
-      object["isSidechain"]?.bool != true, object["isMeta"]?.bool != true,
-      object["isCompactSummary"]?.bool != true, object["isVisibleInTranscriptOnly"]?.bool != true
+    guard let line = TranscriptLine(line), line.isMainConversation,
+      let role = line.type.flatMap(ChatMessage.Role.init(rawValue:))
     else { return nil }
-    let text = text(of: object)
+    let text = line.text
     guard !text.isEmpty else { return nil }
-    return ChatMessage(role: role, text: text, t: object["timestamp"]?.string.flatMap(milliseconds))
-  }
-
-  /// The text of a line's message: its string content, or its text blocks.
-  private static func text(of object: JSON) -> String {
-    let content = object["message"]?["content"]
-    let texts =
-      content?.string.map { [$0] }
-      ?? (content?.array ?? []).filter { $0["type"]?.string == "text" }.compactMap { $0["text"]?.string }
-    return texts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    return ChatMessage(role: role, text: text, t: line.timestamp)
   }
 
   private static let fractional: ISO8601DateFormatter = {
@@ -403,5 +389,55 @@ public enum Transcript {
     (fractional.date(from: timestamp) ?? whole.date(from: timestamp)).map {
       Int64(($0.timeIntervalSince1970 * 1000).rounded())
     }
+  }
+}
+
+/// One line of a transcript, parsed once for every reader.
+struct TranscriptLine {
+  enum Block: Equatable {
+    case text(String)
+    case toolUse(id: String?, name: String, input: JSON)
+  }
+
+  let type: String?
+  let isSidechain: Bool
+  /// A line of the main conversation that a chat shows. Sidechains hold
+  /// subagents. A meta line is one that claude adds, such as a command's
+  /// output. Claude Code writes the summary of a compacted conversation as a
+  /// user line that only its transcript view shows.
+  let isMainConversation: Bool
+  private let rawTimestamp: String?
+  /// The message's text and tool_use blocks in order. A string content is
+  /// one text block. Other block types, such as thinking, are left out.
+  let blocks: [Block]
+
+  init?(_ line: Data) {
+    guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return nil }
+    type = object["type"]?.string
+    isSidechain = object["isSidechain"]?.bool == true
+    isMainConversation =
+      !isSidechain
+      && !["isMeta", "isCompactSummary", "isVisibleInTranscriptOnly"].contains { object[$0]?.bool == true }
+    rawTimestamp = object["timestamp"]?.string
+    let content = object["message"]?["content"]
+    blocks =
+      content?.string.map { [.text($0)] }
+      ?? (content?.array ?? []).compactMap { block in
+        switch block["type"]?.string {
+        case "text": block["text"]?.string.map(Block.text)
+        case "tool_use":
+          block["name"]?.string.map { .toolUse(id: block["id"]?.string, name: $0, input: block["input"] ?? .null) }
+        default: nil
+        }
+      }
+  }
+
+  /// The time in ms. It parses only when a reader asks, because most lines go unread.
+  var timestamp: Int64? { rawTimestamp.flatMap(Transcript.milliseconds) }
+
+  /// The text blocks joined by a blank line, trimmed.
+  var text: String {
+    blocks.compactMap { if case .text(let t) = $0 { t } else { nil } }
+      .joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }

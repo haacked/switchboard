@@ -98,6 +98,8 @@ final class BoardModel: ObservableObject {
   /// The newest events of the sessions whose card details the Inbox showed,
   /// oldest first, by session id.
   @Published var recentEvents: [String: [Event]] = [:]
+  /// The transcript steps that lead up to each session's Inbox item, by session id.
+  @Published var itemContexts: [String: ItemContext] = [:]
   /// Each chat's last messages, by session id, read while its pane shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
@@ -217,6 +219,9 @@ final class BoardModel: ObservableObject {
   /// Issue reads and Starts, which wait on GitHub, gh, or git. They run here so the session list and other
   /// actions do not wait behind them.
   let issueWork = DispatchQueue(label: "switchboard.issues", attributes: .concurrent)
+  /// Item-context reads, which can take seconds for a long or remote transcript. They run apart from the poll.
+  /// The queue is serial, so two reads for one session answer in the order the user asked for them.
+  private let contextWork = DispatchQueue(label: "switchboard.context")
   private let worker = DispatchQueue(label: "switchboard.actions")
   /// Merges wait on gh for up to 120 s, and review requests for up to 60 s.
   /// They run apart from other actions and from each other.
@@ -981,6 +986,19 @@ final class BoardModel: ObservableObject {
   }
 
   nonisolated static let recentEventCount = 10
+
+  /// Reads the transcript steps that lead up to the session's Inbox item, with `steps` steps before it. A failed
+  /// read stores nothing, so the card's details show the last reply.
+  func loadItemContext(_ session: String, steps: Int) {
+    let send = send
+    contextWork.async {
+      let context = try? JSONCoding.convert(
+        send("item-context", ["session": .string(session), "steps": .number(Double(steps))]), to: ItemContext.self)
+      Task { @MainActor in
+        if let context, self.itemContexts[session] != context { self.itemContexts[session] = context }
+      }
+    }
+  }
 
   /// Reads the session's events of `kind` among the newest that sbd returns by default, off the main thread.
   func events(_ session: String, kind: String) async -> [Event] {

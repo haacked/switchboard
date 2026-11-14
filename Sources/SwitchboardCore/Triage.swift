@@ -433,7 +433,7 @@ public enum Triage {
     }
     guard let open = Attention.openPromptVerdict(facts) else { return nil }
     var item = ruleItem(open)
-    item.ref = "rule:\(item.title)"
+    item.ref = ruleRef(item.title)
     return item
   }
 
@@ -502,7 +502,7 @@ public enum Triage {
       if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)
-      item.ref = "rule:\(item.title)"
+      item.ref = ruleRef(item.title)
     } else {
       item = facts.triage.map { TriageItem($0, source: .summary) } ?? fallbackItem(facts.lastReply ?? "", verdict)
       item.ref = "stop:\(facts.lastStop)"
@@ -674,6 +674,9 @@ public enum Triage {
 
   /// A reason line as a title: its first letter capitalized, and the first
   /// "; " a colon.
+  /// The ref of a rule item with this title.
+  static func ruleRef(_ title: String) -> String { "rule:\(title)" }
+
   static func title(_ reason: String) -> String {
     let text = capitalized(reason).replacingOccurrences(of: "; ", with: ": ")
     return oneLine(text, max: titleLength)

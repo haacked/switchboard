@@ -360,6 +360,48 @@ private let toolUseBlock: JSON = ["type": "tool_use", "id": "t1", "name": "Bash"
   }
 }
 
+@Suite struct TranscriptLineTests {
+  private func parse(_ object: JSON) -> TranscriptLine? { TranscriptLine(Data(object.text.utf8)) }
+
+  @Test func aLineKeepsItsTextAndToolUseBlocksInOrderAndDropsThinking() throws {
+    let line = try #require(
+      parse(
+        assistantLine(
+          [
+            ["type": "thinking", "thinking": "Hmm."], textBlock("I'll run the tests."), toolUseBlock,
+            textBlock("Then fix them."),
+          ], at: "2026-10-25T10:00:01.000Z")))
+
+    #expect(
+      line.blocks == [
+        .text("I'll run the tests."), .toolUse(id: "t1", name: "Bash", input: ["command": "make test"]),
+        .text("Then fix them."),
+      ])
+    #expect(line.text == "I'll run the tests.\n\nThen fix them.")
+    #expect(line.type == "assistant")
+    #expect(line.timestamp == 1_792_922_401_000)
+    #expect(line.isMainConversation)
+  }
+
+  @Test func aStringContentIsOneTextBlock() throws {
+    let line = try #require(parse(userLine("Fix the parser.", at: "2026-10-25T10:00:00.000Z")))
+
+    #expect(line.blocks == [.text("Fix the parser.")])
+  }
+
+  @Test(arguments: ["isSidechain", "isMeta", "isCompactSummary", "isVisibleInTranscriptOnly"])
+  func aFlaggedLineIsOutsideTheMainConversation(_ flag: String) throws {
+    var object = try #require(userLine("Text.", at: "2026-10-25T10:00:00.000Z").object)
+    object[flag] = true
+
+    #expect(try #require(parse(.object(object))).isMainConversation == false)
+  }
+
+  @Test func invalidJSONIsNoLine() {
+    #expect(TranscriptLine(Data("{not json".utf8)) == nil)
+  }
+}
+
 private let userHome = NSHomeDirectory()
 private let defaultAccountForms = [
   "~/.claude", "~/.claude/", "\(userHome)/.claude", "\(userHome)/.claude/", "\(userHome)//.claude",

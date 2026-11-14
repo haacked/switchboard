@@ -81,13 +81,6 @@ private func childSession(_ id: String, of parent: String) -> SessionSummary {
   return s
 }
 
-private func docketSession(_ id: String) -> SessionSummary {
-  var s = needsItem(id)
-  s.cwd = ""
-  s.docket = DocketSummary(DocketSession(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1"), DocketStatus())
-  return s
-}
-
 /// Search and the sidebar are two ways to open a session. Each test opens one shape of session from search and
 /// checks that the app selects it as a sidebar click does.
 @MainActor

@@ -4,7 +4,7 @@ import SwitchboardCore
 /// The Inbox message of a session, in sections that never change their
 /// order: the Summary (what it did and needs, and what to read before
 /// deciding), the Drafts when the session wrote a message for the user to
-/// send, the Action (the buttons), and the Details (behind a disclosure).
+/// send, the Details (behind a disclosure), and the Action (the buttons).
 /// An item with decisions shows them one step at a time in its Action. Its
 /// Summary shrinks to its first line, and its callouts move into Details.
 /// The step view owns ⌘⇧Return.
@@ -35,6 +35,9 @@ struct DecisionCard: View {
         }
       }
       if !item.drafts.isEmpty { DraftsSection(session: session, item: item) }
+      // A new item starts with its own open or closed Details.
+      CardDetails(session: session, ref: item.ref, details: item.details, callouts: list == nil ? [] : item.callouts)
+        .id(item.ref)
       VStack(alignment: .leading, spacing: 8) {
         SectionTitle(text: "Action")
         if let list {
@@ -46,8 +49,6 @@ struct DecisionCard: View {
         }
         actions
       }
-      // A new item starts with its own open or closed Details.
-      CardDetails(session: session, details: item.details, callouts: list == nil ? [] : item.callouts).id(item.ref)
     }
   }
 
@@ -106,7 +107,7 @@ struct DecisionCard: View {
       // A message would only queue behind the open dialog. The Summary says why the prompt has no card.
       OpenTerminalButton().disabled(!session.runsClaude)
     } else if Self.showsMissingSummary(item) {
-      Text("No summary yet. Details holds the last reply.").font(.caption).foregroundStyle(.secondary)
+      Text("No summary yet. Details shows the reply.").font(.caption).foregroundStyle(.secondary)
     }
     // A Ready to merge card offers Acknowledge as one of its options.
     if session.state != .readyToMerge {
@@ -297,25 +298,51 @@ struct SectionTitle: View {
 }
 
 /// The tool call or group message, the callouts that the step view moves
-/// here, the PR and its checks, waits, the full last reply, and the newest
-/// events. They stay collapsed until the user opens them, except for a
-/// permission call that the Summary shows in part.
+/// here, the transcript steps that lead up to the item, the PR and its
+/// checks, and waits. The last reply stands in for the steps when they don't
+/// load. The newest events show only with the `showsRecentEvents` setting.
+/// They stay collapsed until the user opens them, except for a permission
+/// call that the Summary shows in part.
 struct CardDetails: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  /// The item's ref. Steps read for another item don't show.
+  let ref: String
   let details: TriageDetails
   /// The item's callouts, when the step view takes their place on the card.
   let callouts: [Callout]
   @State private var open: Bool
+  /// How many steps before the item to read.
+  @State private var steps = ItemContext.defaultSteps
+  /// A debug setting with no menu item: `defaults write <bundle id> showsRecentEvents -bool true`.
+  @AppStorage("showsRecentEvents") private var showsRecentEvents = false
 
-  init(session: SessionSummary, details: TriageDetails, callouts: [Callout] = []) {
+  init(session: SessionSummary, ref: String, details: TriageDetails, callouts: [Callout] = []) {
     self.session = session
+    self.ref = ref
     self.details = details
     self.callouts = callouts
     _open = State(initialValue: details.openByDefault || Snapshot.opensDetails)
   }
 
+  /// The step count that "Show more" asks for next: 15, then 30, then 30 more each time, up to the most sbd reads.
+  static func nextSteps(after steps: Int) -> Int {
+    steps < 15 ? 15 : steps < 30 ? 30 : min(steps + 30, ItemContext.maxSteps)
+  }
+
+  /// The loaded steps when they belong to the item that `ref` names.
+  static func context(for ref: String, in context: ItemContext?) -> ItemContext? {
+    context?.ref == ref ? context : nil
+  }
+
+  /// The reply to show when the item's steps did not load or are empty.
+  static func lastReply(context: ItemContext?, reply: String?) -> String? {
+    guard context?.steps.isEmpty ?? true, let reply, !reply.isEmpty else { return nil }
+    return reply
+  }
+
   var body: some View {
+    let context = Self.context(for: ref, in: model.itemContexts[session.id])
     DisclosureGroup(isExpanded: $open) {
       VStack(alignment: .leading, spacing: 12) {
         if let input = details.toolInput {
@@ -331,6 +358,7 @@ struct CardDetails: View {
             ForEach(Array(callouts.enumerated()), id: \.offset) { CalloutView(callout: $1) }
           }
         }
+        if let context, !context.steps.isEmpty { transcript(context) }
         if let pr = session.pr {
           section("Pull request") {
             if let url = pr.link { Link("\(pr.line): \(pr.title)", destination: url) } else { Text(pr.line) }
@@ -339,10 +367,10 @@ struct CardDetails: View {
         if !session.waits.isEmpty {
           section("Waits") { ForEach(session.waits, id: \.id) { Text($0.line) } }
         }
-        if let text = model.replies[session.id] ?? session.lastReply, !text.isEmpty {
+        if let text = Self.lastReply(context: context, reply: model.replies[session.id] ?? session.lastReply) {
           section("Last reply") { MarkdownView(text: text) }
         }
-        if let events = model.recentEvents[session.id], !events.isEmpty {
+        if showsRecentEvents, let events = model.recentEvents[session.id], !events.isEmpty {
           section("Recent events") {
             ForEach(events, id: \.id) { e in
               Text("\(ago(e.t)) · \(e.kind)").font(.caption.monospaced()).foregroundStyle(.secondary)
@@ -354,8 +382,52 @@ struct CardDetails: View {
     } label: {
       SectionTitle(text: "Details")
     }
-    .onAppear { if open { model.loadEvents(session.id) } }
-    .onChange(of: open) { if open { model.loadEvents(session.id) } }
+    .onAppear { if open { load() } }
+    .onChange(of: open) { if open { load() } }
+  }
+
+  private func load() {
+    model.loadItemContext(session.id, steps: steps)
+    if showsRecentEvents { model.loadEvents(session.id) }
+  }
+
+  /// The steps scroll in a box that starts at the bottom, so the item's own step shows first.
+  private func transcript(_ context: ItemContext) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline) {
+        Text(context.anchored ? "Transcript" : "Latest steps").font(.caption.bold()).foregroundStyle(.secondary)
+        Spacer()
+        if session.transcriptTarget != nil {
+          Button("Open in transcript") { model.openTranscript(session) }.buttonStyle(.link).font(.caption)
+        }
+      }
+      if let caption = context.caption {
+        Text(caption).font(.caption).foregroundStyle(.secondary)
+      }
+      ScrollViewReader { proxy in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
+            if context.more && steps < ItemContext.maxSteps {
+              Button("Show more") {
+                steps = Self.nextSteps(after: steps)
+                model.loadItemContext(session.id, steps: steps)
+              }
+              .buttonStyle(.link).font(.caption)
+            }
+            ForEach(Array(context.steps.enumerated()), id: \.offset) { index, step in
+              StepRow(step: step, isAnchor: index == context.anchorIndex).id(index)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Below a tool call box the steps get less room, so Allow and Deny stay in view in a 700 pt window.
+        .frame(maxHeight: details.toolInput == nil ? 260 : 160)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .onAppear { proxy.scrollTo(context.steps.count - 1, anchor: .bottom) }
+      }
+    }
   }
 
   private func section(_ title: String, @ViewBuilder _ content: () -> some View) -> some View {
@@ -363,5 +435,27 @@ struct CardDetails: View {
       Text(title).font(.caption.bold()).foregroundStyle(.secondary)
       content()
     }
+  }
+}
+
+/// One of Claude's steps: its text as Markdown, or a tool call on one line.
+/// The item's own step has an accent bar on its leading edge.
+private struct StepRow: View {
+  let step: TranscriptStep
+  let isAnchor: Bool
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 6) {
+      RoundedRectangle(cornerRadius: 1).fill(isAnchor ? Color.accentColor : .clear).frame(width: 3)
+      if step.kind == .tool {
+        let line = step.summary ?? ""
+        Text(verbatim: line).font(.caption.monospaced()).lineLimit(1).truncationMode(.tail).help(line)
+          .textSelection(.enabled)
+      } else {
+        MarkdownView(text: step.text ?? "")
+      }
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityHint(isAnchor ? "The step this item came from" : "")
   }
 }
