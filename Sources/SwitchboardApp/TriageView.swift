@@ -72,7 +72,7 @@ struct TriageDetail: View {
 
   private var bar: some View {
     HStack(spacing: 8) {
-      Text(session.name).fontWeight(.medium)
+      Text(model.inboxName(session)).fontWeight(.medium)
       if let repo = session.repoFolder {
         Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
       }

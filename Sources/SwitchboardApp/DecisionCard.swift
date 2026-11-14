@@ -91,13 +91,14 @@ struct DecisionCard: View {
     }
     if item.source == .card {
       // Every other card shows its whole tool call, which an approval needs to see.
-      let cards = Card.inbox(session, all: model.sessions)
+      let inbox = Card.inbox(session, all: model.sessions)
+      // A chat's item can be a later card than a group message, so the item's card leads.
+      let own = { (card: Card) in card.session == session.id && card.ref == item.ref }
+      let cards = inbox.filter(own) + inbox.filter { !own($0) }
       GroupMessageBatch(cards: cards.filter { $0.kind == .send })
       // Details holds the call and message text of the item's own card only.
       ForEach(cards) {
-        CardView(
-          card: $0, draft: model.draft(for: $0), compact: $0.session == session.id && $0.ref == item.ref,
-          offersTerminal: true)
+        CardView(card: $0, draft: model.draft(for: $0), compact: own($0), offersTerminal: true)
       }
     } else if !item.options.isEmpty {
       OptionList(session: session, item: item, takesShortcut: !item.hasDecisionList)

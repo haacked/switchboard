@@ -195,7 +195,8 @@ final class BoardModel: ObservableObject {
   /// it runs apart from other actions too.
   private let planWrites = DispatchQueue(label: "switchboard.plan-writes", attributes: .concurrent)
   private var timer: Timer?
-  private var knownStates: [String: AttentionState] = [:]
+  /// Each session as the last refresh listed it.
+  private var lastSeen: [String: SessionSummary] = [:]
   /// The session that `create` or `openManager` selected before a refresh
   /// listed it.
   private(set) var pendingSelection: String?
@@ -292,8 +293,8 @@ final class BoardModel: ObservableObject {
     orgFilter.insert(key)
   }
 
-  /// The Manager stays out of the Inbox, the Dock badge, and ⌘J. The toolbar
-  /// star fills and turns the Needs you color while it needs you.
+  /// The Manager and a group chat count only while a prompt blocks them. The
+  /// toolbar star fills and turns the Needs you color while the Manager needs you.
   var needsUser: [SessionSummary] { sessions.filter(Triage.needsYou) }
 
   /// The Manager conversations, newest activity first, as `sb manager ls` lists them.
@@ -317,6 +318,15 @@ final class BoardModel: ObservableObject {
 
   /// The group's chat, or nil before its first start.
   func chat(of group: String) -> SessionSummary? { sessions.first { $0.kind == .chat && $0.chat == group } }
+
+  /// The current name of the group that the chat manages, or nil for any other session.
+  private func groupName(of s: SessionSummary) -> String? {
+    guard let group = s.chat else { return nil }
+    return groups.first { $0.id == group }?.name
+  }
+
+  /// How the Inbox, the menu bar, and a notification name the session.
+  func inboxName(_ s: SessionSummary) -> String { Triage.inboxName(s, groupName: groupName(of: s)) }
 
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
@@ -422,7 +432,7 @@ final class BoardModel: ObservableObject {
       // refresh every second would redraw the views each time.
       if unreachable != nil { unreachable = nil }
       if let more, allFollowups != more { allFollowups = more }
-      // Only shown sessions notify. The known states cover every session.
+      // Only shown sessions notify. The last seen sessions cover every session.
       // Widening the filter later therefore sends nothing for a change that happened while the session was hidden.
       if loaded { sessionsToNotify(list).forEach(notify) }
       // A hidden session keeps its drafts.
@@ -437,9 +447,9 @@ final class BoardModel: ObservableObject {
       if let id = selection { showOrg(of: id) }
       if let id = pendingSelection, allBoard.contains(where: { $0.id == id }) { pendingSelection = nil }
       clearHiddenSelectionAndUpdateBadge()
-      // A follow-up that fires appears in `ls` as Needs you. The known states
+      // A follow-up that fires appears in `ls` as Needs you. The last seen sessions
       // include the follow-ups, so that change from Not started notifies.
-      knownStates = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0.state) })
+      lastSeen = Dictionary(uniqueKeysWithValues: allBoard.map { ($0.id, $0) })
       loaded = true
     case .failure(let error):
       let problem = "\(error)"
@@ -447,21 +457,23 @@ final class BoardModel: ObservableObject {
     }
   }
 
-  /// The shown sessions that just started needing the user.
+  /// The shown sessions that just entered the Inbox. A chat can need the user
+  /// before its item reaches the Inbox. This therefore compares each session
+  /// with its place in the last refresh's Inbox, not with its last state.
   func sessionsToNotify(_ list: [SessionSummary]) -> [SessionSummary] {
     list.filter { s in
-      guard Triage.needsYou(s), let known = knownStates[s.id], !known.needsUser, orgFilter.shows(s)
+      guard Triage.needsYou(s), let last = lastSeen[s.id], !Triage.needsYou(last), orgFilter.shows(s)
       else { return false }
       // A follow-up that starts passes through Needs you until its first
       // prompt. Only a follow-up that fired and is still unstarted notifies.
-      return known != .notStarted || s.waitsToStart
+      return last.state != .notStarted || s.waitsToStart
     }
   }
 
   private func notify(_ s: SessionSummary) {
     guard Bundle.main.bundleIdentifier != nil else { return }
     let content = UNMutableNotificationContent()
-    content.title = "\(s.name) needs you"
+    content.title = "\(inboxName(s)) needs you"
     content.body = s.triage?.title ?? s.reason
     content.userInfo = ["session": s.id]
     UNUserNotificationCenter.current().add(
@@ -811,7 +823,7 @@ final class BoardModel: ObservableObject {
       "ack", args,
       then: { value in
         // The user put the item back, so the refresh must not notify about it.
-        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.knownStates[id] = s.state }
+        if undo, let s = try? JSONCoding.convert(value, to: SessionSummary.self) { self.lastSeen[id] = s }
       },
       finally: { self.acknowledging.remove(id) })
   }

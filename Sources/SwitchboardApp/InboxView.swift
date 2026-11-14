@@ -120,7 +120,7 @@ struct TriageRow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(item?.title ?? session.reason).fontWeight(.medium).lineLimit(2)
         Text(
-          [repo, session.name, ago(session.since)]
+          [repo, model.inboxName(session), ago(session.since)]
             .compactMap { $0 }.joined(separator: " · ")
         )
         .font(.caption)

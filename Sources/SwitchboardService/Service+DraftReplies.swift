@@ -24,7 +24,7 @@ extension Service {
   /// `draft-check` reads it again. sbd calls this after each event and tick,
   /// and once at startup.
   func resolveDraftTargets(_ id: String, _ verdict: Verdict) {
-    guard let e = entries[id], DraftReplies.mayBeChecking(e.facts), let item = Triage.item(e.facts, verdict) else {
+    guard let e = entries[id], DraftReplies.mayBeChecking(e.facts), let item = Triage.item(e.facts, verdict, kind: e.session.kind) else {
       return
     }
     for draft in item.drafts where draft.post == .checking {

@@ -133,7 +133,7 @@ public struct Session: Codable, Equatable, Sendable {
 }
 
 /// What a session is for. Only a work session belongs to a group, gets a
-/// triage item, or has a worktree and a PR.
+/// triage item for each turn, or has a worktree and a PR.
 public enum SessionKind: String, Codable, Sendable {
   case work
   case manager
@@ -161,6 +161,24 @@ public enum SessionKind: String, Codable, Sendable {
     case .chat: "a group chat"
     }
   }
+
+  /// Which of the session's items may reach the Inbox, the badge, the menu
+  /// bar, a notification, or Next Needing You.
+  public var inboxItems: InboxItems {
+    switch self {
+    case .work: .all
+    case .manager, .chat: .blockingPrompts
+    }
+  }
+}
+
+public enum InboxItems: Sendable {
+  case all
+  /// Only a prompt that stops the conversation until the user answers it.
+  /// The conversation's replies and group messages repeat or name the
+  /// sessions it manages, and those sessions have their own items. A reply
+  /// waits on the user's next message, which the chat pane takes.
+  case blockingPrompts
 }
 
 /// One entry in the event log: a hook payload, or something sbd did.
