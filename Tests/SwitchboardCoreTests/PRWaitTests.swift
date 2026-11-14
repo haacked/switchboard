@@ -200,7 +200,7 @@ import Testing
   func aMergeAfterSinceButBeforeTheWaitCountsOnlyWithSince(_ since: Int64?) {
     var merged = pr(.merged)
     merged.mergedAt = PRWaitTests.betweenSinceAndSet
-    #expect(wait(.queue, since: since).finishedBeforeSet(merged) == (since == nil))
+    #expect(wait(.queue, since: since).finishedBeforeItCounts(merged) == (since == nil))
   }
 
   /// A wait whose `since` is its `created` reads the PR exactly as one with no `since`.

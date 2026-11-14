@@ -108,7 +108,7 @@ extension MCPToolServer {
         "state": string("The state to wait for, for kind session. Default done."),
         "until": string("A duration such as 2h, or a date or time such as 2026-10-26 or 2026-10-26T09:00."),
         "since": string(
-          "For kinds review, bot-review, and queue, a past time after which a review or a queue change counts. Default: when the wait is set."
+          "For kinds review, bot-review, and queue, a past time after which a review or a change in Trunk's queue counts. Default: when the wait is set."
         ),
         "note": string("What the wait is for."),
         "then": string(

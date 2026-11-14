@@ -59,6 +59,8 @@ final class BlockingWait: @unchecked Sendable {
       guard let wait = summary.waits.last else { fail(APIError("sbd set no wait")) }
       session = summary.id
       waitId = wait.id
+      // The id names the session after a rename. A typed name or prefix may not.
+      lock.withLock { cursor = EventCursor(since: cursor.since, session: summary.id) }
       registering.unlock()
     } catch {
       fail(error)
@@ -73,8 +75,12 @@ final class BlockingWait: @unchecked Sendable {
         lastAnswer = Date()
       } catch is SbdUnreachable where Date().timeIntervalSince(lastAnswer) < BlockingWait.unreachableSeconds {
         // sbd may be restarting, so the next pass tries again.
-      } catch {
+      } catch let error as SbdUnreachable {
         fail(error)
+      } catch {
+        // The wait is set, so sb clears it before it exits.
+        warn("\(error)")
+        cancel(exitCode: 1)
       }
       if let deadline, Date() >= deadline { cancel(exitCode: BlockingWait.timedOut) }
       let left = deadline?.timeIntervalSinceNow ?? 1

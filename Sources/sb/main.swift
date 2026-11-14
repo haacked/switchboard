@@ -336,8 +336,8 @@ let usage = """
   2026-10-26T09:00). manual takes an optional --until that returns it to Needs
   you, a day later without one. --then notify moves the session to Needs you
   instead of resuming it. review, bot-review, and queue take --since WHEN, a
-  past time after which a review or a queue change counts, instead of the time
-  the wait was set. A wait still open past its recheck time
+  past time after which a review or a change in Trunk's queue counts, instead
+  of the time the wait was set. A wait still open past its recheck time
   (recheckSeconds in config.json) moves the session to Needs you.
   """
 

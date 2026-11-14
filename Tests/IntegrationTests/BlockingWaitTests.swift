@@ -194,6 +194,38 @@ import Testing
     #expect(cleared.contains { $0.data["waits"]?.array?.contains(.string(id)) == true })
   }
 
+  /// SIGSTOP keeps sb from reading events, so the wait resolves before sb
+  /// handles SIGTERM and its clear finds the wait gone.
+  @Test func aWaitThatResolvedBeforeTheSignalExits0WithTheEvent() throws {
+    let sbd = try Instance()
+    let s = try sbd.idleSession()
+    let (blocked, id) = try blockOnManual(sbd, s)
+
+    kill(blocked.pid, SIGSTOP)
+    try sbd.sb("wait", s.id, "--id", id, "--resolve", "Alex answered")
+    kill(blocked.pid, SIGTERM)
+    kill(blocked.pid, SIGCONT)
+    let r = try blocked.finish(within: 15)
+
+    #expect(blocked.terminationReason == .exit)
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try event(r.stdout).data["wait"]?["id"]?.string == id)
+  }
+
+  @Test func aWaitSetByNameResolvesAfterTheSessionIsRenamed() throws {
+    let sbd = try Instance()
+    let s = try sbd.idleSession(name: "alpha")
+    let blocked = try block(sbd, ["alpha", "--block", "--kind", "manual", "--note", "ask Alex"])
+    let id = try blockedWaitId(sbd, s, blocked)
+
+    try sbd.sb("rename", s.id, "beta")
+    try sbd.sb("wait", s.id, "--id", id, "--resolve", "Alex answered")
+    let r = try blocked.finish(within: 15)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    #expect(try event(r.stdout).data["wait"]?["id"]?.string == id)
+  }
+
   @Test func clearingTheWaitElsewhereExits1WithAMessage() throws {
     let sbd = try Instance()
     let s = try sbd.idleSession()
@@ -307,6 +339,21 @@ import Testing
     #expect(r.status == 1)
     #expect(!r.stderr.isEmpty)
     #expect(try sbd.get(s.id).waits == open)
+  }
+
+  @Test(arguments: [
+    ["--kind", "ci", "--timeout", "540"], ["--block", "--timeout", "0", "--kind", "ci"],
+    ["--block", "--timeout", "-5", "--kind", "ci"], ["--block", "--timeout", "abc", "--kind", "ci"],
+  ])
+  func timeoutIsRefusedWithoutBlockOrAPositiveNumber(_ extra: [String]) throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    let r = try sbd.run(["wait", s.id] + extra)
+
+    #expect(r.status == 1)
+    #expect(r.stderr.contains("--timeout"), Comment(rawValue: r.stderr))
+    #expect(try sbd.get(s.id).waits.isEmpty)
   }
 
   @Test func thenCallerIsRefusedWithoutBlock() throws {
