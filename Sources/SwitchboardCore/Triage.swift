@@ -219,7 +219,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   public var decisions: [PendingDecision]
   /// Messages that the session wrote for the user to send to someone else.
   /// The JSON carries them only in `message.summary`.
-  public var drafts: [TriageDraft]
+  public var drafts: [InboxDraft]
   public var source: TriageSource
   /// What the user can open after the Summary and the Action. The builder
   /// fills in the card's parts. The service adds the session's fields,
@@ -232,7 +232,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
 
   public init(
     title: String, kind: TriageKind, summary: String, options: [TriageOption] = [], callouts: [Callout] = [],
-    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [TriageDraft] = [], source: TriageSource,
+    multiSelect: Bool = false, decisions: [PendingDecision] = [], drafts: [InboxDraft] = [], source: TriageSource,
     ref: String = "", details: TriageDetails = TriageDetails()
   ) {
     self.ref = ref
@@ -252,7 +252,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
     self.init(
       title: summary.title, kind: summary.kind, summary: summary.summary, options: summary.options,
       callouts: summary.callouts, multiSelect: summary.multiSelect, decisions: summary.decisions,
-      drafts: summary.drafts, source: source, ref: ref)
+      drafts: summary.drafts.enumerated().map { InboxDraft($1, number: $0 + 1) }, source: source, ref: ref)
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -260,7 +260,7 @@ public struct TriageItem: Codable, Equatable, Sendable {
   }
 
   private struct Sections: Decodable {
-    struct Summary: Decodable { var drafts: [TriageDraft]? }
+    struct Summary: Decodable { var drafts: [InboxDraft]? }
     var summary: Summary?
     var details: TriageDetails?
   }
@@ -270,7 +270,11 @@ public struct TriageItem: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let sections = try c.decodeIfPresent(Sections.self, forKey: .message)
     details = sections?.details ?? TriageDetails()
-    drafts = sections?.summary?.drafts ?? []
+    drafts = (sections?.summary?.drafts ?? []).enumerated().map { i, draft in
+      var draft = draft
+      draft.number = i + 1
+      return draft
+    }
     title = try c.decode(String.self, forKey: .title)
     kind = try c.decode(TriageKind.self, forKey: .kind)
     summary = try c.decode(String.self, forKey: .summary)
@@ -398,23 +402,68 @@ public enum Triage {
   /// `verdict` is the session's attention verdict. An open decision list
   /// puts its stored decisions on the item, so a later card or rule doesn't
   /// replace the answers. A held prompt's item keeps none, because the
-  /// prompt needs its own answer first.
-  public static func item(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    item(facts, live: liveItem(facts, verdict))
+  /// prompt needs its own answer first. Each draft's `post` comes from the
+  /// session's PR and the draft reply facts.
+  public static func item(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> TriageItem? {
+    itemAndDecisions(facts, verdict, kind: kind).item
   }
 
   /// The session's item, its open decision list, and whether a submit sent
   /// the item's decisions, all from one live item.
-  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict) -> (
+  public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> (
     item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
   ) {
-    let live = liveItem(facts, verdict)
-    return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    switch kind.inboxItems {
+    case .all:
+      let live = liveItem(facts, verdict)
+      return (item(facts, live: live), decisionList(facts, live: live), decisionsSent(facts, live: live))
+    case .blockingPrompts:
+      return (promptItem(facts, verdict), nil, false)
+    }
+  }
+
+  /// The item of the first prompt that blocks the session, or nil when none
+  /// does. A send card that came first does not hide a later permission card.
+  static func promptItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
+    guard AttentionState.inbox.contains(verdict.state) else { return nil }
+    if let card = facts.cards.first(where: { blocks($0.kind) }) {
+      var item = cardItem(card)
+      item.ref = card.ref
+      return item
+    }
+    guard let open = Attention.openPromptVerdict(facts) else { return nil }
+    var item = ruleItem(open)
+    item.ref = "rule:\(item.title)"
+    return item
+  }
+
+  /// Whether a card of this kind stops the session's turn until the user
+  /// answers it. A send card does not: the turn goes on, and the card expires.
+  static func blocks(_ kind: Card.Kind) -> Bool {
+    switch kind {
+    case .permission, .question, .trust: true
+    case .send: false
+    }
+  }
+
+  /// Whether the session waits on a prompt that only the user can answer:
+  /// a card that blocks it, or a Claude Code dialog that is open without a card.
+  public static func hasBlockingPrompt(cards: [Card], openPrompt: Bool) -> Bool {
+    openPrompt || cards.contains { blocks($0.kind) }
   }
 
   private static func item(_ facts: SessionFacts, live: TriageItem?) -> TriageItem? {
     guard var item = live else { return nil }
     if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
+    for i in item.drafts.indices {
+      // Only the session's own card names a target. The model's summary reads text that can quote PR comments.
+      if item.source == .session {
+        item.drafts[i].post = DraftReplies.state(item.drafts[i], ref: item.ref, pr: facts.pr, facts: facts.draftReplies)
+      } else {
+        item.drafts[i].replyTo = nil
+        item.drafts[i].post = .copyOnly(reason: nil)
+      }
+    }
     return item
   }
 
@@ -433,6 +482,14 @@ public enum Triage {
     return live.ref == sent && live.hasDecisionList
   }
 
+  /// The ref of the item that the session's own summary gives, or nil when a
+  /// card, an open permission, or an open question gives the item instead.
+  static func sessionSummaryRef(_ facts: SessionFacts) -> String? {
+    guard facts.cards.isEmpty, facts.sessionSummary != nil, facts.openPermission == nil, facts.openQuestion == nil
+    else { return nil }
+    return "summary:\(facts.sessionSummaryId)"
+  }
+
   /// The item that the session's card, summary, rule, or reply gives.
   static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
@@ -440,8 +497,8 @@ public enum Triage {
     if let card = facts.cards.first {
       item = cardItem(card)
       item.ref = card.ref
-    } else if let own = facts.sessionSummary, facts.openPermission == nil, facts.openQuestion == nil {
-      item = TriageItem(own, source: .session, ref: "summary:\(facts.sessionSummaryId)")
+    } else if let own = facts.sessionSummary, let ref = sessionSummaryRef(facts) {
+      item = TriageItem(own, source: .session, ref: ref)
       if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)
@@ -514,7 +571,10 @@ public enum Triage {
         options: [
           TriageOption(label: "Allow", action: .allow, recommended: true),
           TriageOption(label: "Deny", action: .deny),
-        ] + (card.offersAutoMode ? [TriageOption(label: PermissionMode.approveLabel, action: .allowAutoMode)] : []),
+        ]
+          + card.offeredExtras.compactMap { extra in
+            extra.triageAction.map { TriageOption(label: extra.label, action: $0) }
+          },
         source: .card,
         details: TriageDetails(
           openByDefault: !summaryShowsCall(card), toolInput: .init(tool: card.tool, text: card.details)))
@@ -538,15 +598,26 @@ public enum Triage {
       options: verdict.options, callouts: verdict.callouts, source: .rule)
   }
 
-  /// The reply's closing section as the summary, with no options.
+  /// The reply's closing section as the summary. An offer's title starts
+  /// with its verb, and an offer that a yes or no answers gets Yes and No.
+  /// Neither is the main option, because the offer can be a delete.
   static func fallbackItem(_ reply: String, _ verdict: Verdict) -> TriageItem {
-    let kind: TriageKind
+    let summary = closingSection(reply)
     switch Attention.classify(reply) {
-    case .question: kind = .question
-    case .offer: kind = .approval
-    case .other: kind = .info
+    case .question:
+      return TriageItem(title: title(verdict.reason), kind: .question, summary: summary, source: .fallback)
+    case .offer(let step):
+      guard let asked = Attention.lastQuestion(reply), asked.question == step else {
+        return TriageItem(title: title(step), kind: .approval, summary: summary, source: .fallback)
+      }
+      let options =
+        OfferText.isYesNo(step) ? ["Yes", "No"].map { TriageOption(label: $0, action: .send, message: $0) } : []
+      return TriageItem(
+        title: OfferText.title(question: step, previous: asked.previous), kind: .approval,
+        summary: summary, options: options, source: .fallback)
+    case .other:
+      return TriageItem(title: title(verdict.reason), kind: .info, summary: summary, source: .fallback)
     }
-    return TriageItem(title: title(verdict.reason), kind: kind, summary: closingSection(reply), source: .fallback)
   }
 
   /// A fallback summary lists at most this many items of a list.
@@ -645,20 +716,38 @@ public enum Triage {
     }
   }
 
-  /// Whether the session may put an item in the Inbox, the badge, the menu
-  /// bar, a notification, or Next Needing You. The Manager and the group chats
-  /// may not, because their replies and cards repeat or name the sessions they
-  /// manage, which have their own entries. Nothing reports a problem with sb
-  /// itself, such as an out-of-date sbd. This refuses every item of theirs.
-  public static func mayHaveItem(_ s: SessionSummary) -> Bool { s.kind == .work }
+  /// Whether the session's item may reach the Inbox, the badge, the menu bar,
+  /// a notification, or Next Needing You. The app checks this itself, so a
+  /// summary from an older sbd cannot add an item that this rule leaves out.
+  public static func inInbox(_ s: SessionSummary) -> Bool {
+    switch s.kind.inboxItems {
+    case .all: true
+    case .blockingPrompts: s.triage != nil && hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
+    }
+  }
+
+  /// How the Inbox, the menu bar, and a notification name the session. A
+  /// group chat goes by its group's current name, and a Manager conversation
+  /// says that it is one.
+  public static func inboxName(_ s: SessionSummary, groupName: String?) -> String {
+    switch s.kind {
+    case .work: s.name
+    case .chat: groupName.map { Chat.name(group: $0) } ?? s.name
+    case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
+    }
+  }
+
+  /// Whether sbd asks a model to summarize the session's turns. A summary
+  /// feeds only an item that a turn's reply may give.
+  public static func summarizes(_ kind: SessionKind) -> Bool { kind.inboxItems == .all }
 
   /// Whether the session needs the user and counts toward the Inbox and the badge.
-  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && mayHaveItem(s) }
+  public static func needsYou(_ s: SessionSummary) -> Bool { s.state.needsUser && inInbox(s) }
 
   /// The sessions that have an item, by group and then oldest first.
   public static func order(_ sessions: [SessionSummary]) -> [SessionSummary] {
     var ranked: [(session: SessionSummary, rank: Int)] = []
-    for s in sessions where mayHaveItem(s) {
+    for s in sessions where inInbox(s) {
       if let r = rank(s) { ranked.append((s, r)) }
     }
     ranked.sort { a, b in
@@ -685,7 +774,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   public var perHour = 6
   /// Goes to every claude as `--append-system-prompt`. Empty turns it off.
   public var systemPrompt =
-    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format."
+    "When you need the user to choose between options, ask with the AskUserQuestion tool instead of asking in prose. Put the option you recommend first. The exception is a turn that ends with three or more separate decisions for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a comment or review on your GitHub PR for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, copied as is. Leave `replyTo` out if you don't have that URL. Don't post the reply yourself, because the user's Post button in the Inbox is the approval."
 
   public init() {}
 

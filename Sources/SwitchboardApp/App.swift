@@ -57,6 +57,8 @@ struct SwitchboardApp: App {
           .keyboardShortcut("1")
         Button("Show Board") { model.show(.board) }
           .keyboardShortcut("2")
+        Button("Show Issues") { model.show(.issues) }
+          .keyboardShortcut("3")
         Button("Filter by Org…") { model.showingOrgFilter.toggle() }
           .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
@@ -191,7 +193,7 @@ struct MenuBarContent: View {
       Text("Nothing needs you")
     } else {
       ForEach(model.needsUser) { s in
-        Button("\(s.name): \(s.reason)") {
+        Button("\(model.inboxName(s)): \(s.triage?.title ?? s.reason)") {
           model.selection = s.id
           show()
         }

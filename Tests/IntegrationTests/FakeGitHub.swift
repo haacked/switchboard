@@ -12,11 +12,12 @@ import SwitchboardCore
 final class FakeGitHub {
   struct Request {
     /// lookup, status, base, bodies, codeowners, files, approvals, actions,
-    /// or mergeDetails.
+    /// mergeDetails, or issues.
     var kind: String
     /// The node ids that a status, base, body, files, approvals, or actions query
     /// asked for, each lookup key as owner/name:branch or owner/name#number,
-    /// or the owner/name:branch of a codeowners query.
+    /// the owner/name:branch of a codeowners query, or the aliases of an issues
+    /// query, r<i> for a repository and o<i> for an org search.
     var ids: [String]
     var authorization: String?
   }
@@ -106,11 +107,92 @@ final class FakeGitHub {
   private var codeOwnerConfigs: [String: CodeOwnerConfig] = [:]
   /// The repos whose codeowners query answers a null repository and an error.
   private var failingCodeOwners: Set<String> = []
+  /// By lowercase owner/name#number.
+  private var listedIssues: [String: FakeIssue] = [:]
+  /// The lowercase owner/name of each repository that a repository source can read.
+  private var listedRepos: Set<String> = []
+  private var viewer = "robin-k"
   /// Each PR's changed files, by number, with the `totalCount` that GitHub
   /// reports when it differs from the number of paths.
   private var changedFiles: [Int: (paths: [String], totalCount: Int?)] = [:]
   /// What to run after the next files query.
   private var afterFiles: (() -> Void)?
+
+  /// An issue that the issues query reads.
+  struct FakeIssue {
+    var repo: String
+    var number: Int
+    var title: String
+    var body = ""
+    var open = true
+    var labels: [String] = []
+    var assignees: [String] = []
+    /// The author's login, or nil for an issue whose author GitHub no longer has.
+    var author: String? = "robin-k"
+    var createdAt = "2026-11-01T10:00:00Z"
+    var updatedAt = "2026-11-10T10:00:00Z"
+
+    var node: JSON {
+      [
+        "number": .number(Double(number)), "title": .string(title), "body": .string(body),
+        "url": .string("https://github.com/\(repo)/issues/\(number)"), "state": .string(open ? "OPEN" : "CLOSED"),
+        "createdAt": .string(createdAt), "updatedAt": .string(updatedAt),
+        "repository": ["nameWithOwner": .string(repo)],
+        "labels": ["nodes": .array(labels.map { ["name": .string($0)] })],
+        "assignees": ["nodes": .array(assignees.map { ["login": .string($0)] })],
+        "author": author.map { ["login": .string($0)] } ?? .null,
+      ]
+    }
+  }
+
+  /// Adds the issue, or replaces the one with its repo and number. Its repo then exists for a repository source.
+  func put(_ issue: FakeIssue) {
+    lock.withLock {
+      listedIssues["\(issue.repo.lowercased())#\(issue.number)"] = issue
+      listedRepos.insert(issue.repo.lowercased())
+    }
+  }
+
+  /// Makes a repository exist for a repository source, with no issues.
+  func addRepo(_ repo: String) { _ = lock.withLock { listedRepos.insert(repo.lowercased()) } }
+
+  /// The login that `viewer` answers.
+  func setViewer(_ login: String) { lock.withLock { viewer = login } }
+
+  /// The filter of one alias of an issues query: a repository's open issues or its issues updated
+  /// since a time, or an org search's terms.
+  private func issueRequest(_ repository: Bool, _ i: String, _ variables: [String: JSON]) -> (
+    repo: String, filter: (FakeIssue) -> Bool
+  ) {
+    if repository {
+      let repo = "\(variables["o\(i)"]?.string ?? "")/\(variables["n\(i)"]?.string ?? "")".lowercased()
+      let since = variables["s\(i)"]?.string
+      let label = variables["l\(i)"]?.array?.first?.string
+      let person = variables["p\(i)"]?.string
+      return (
+        repo,
+        { issue in
+          issue.repo.lowercased() == repo && (since.map { issue.updatedAt >= $0 } ?? issue.open)
+            && (label.map { issue.labels.contains($0) } ?? true)
+            && (person.map { issue.assignees.contains($0) } ?? true)
+        }
+      )
+    }
+    let terms = variables["q\(i)"]?.string ?? ""
+    let org = terms.firstMatch(of: #/org:(\S+)/#).map { String($0.1).lowercased() } ?? ""
+    let label = terms.firstMatch(of: #/label:"([^"]*)"/#).map { String($0.1) }
+    let person = terms.firstMatch(of: #/assignee:(\S+)/#).map { String($0.1) }
+    let since = terms.firstMatch(of: #/updated:>=(\S+)/#).map { String($0.1) }
+    let open = terms.contains("is:open")
+    return (
+      org,
+      { issue in
+        issue.repo.lowercased().hasPrefix(org + "/") && (label.map { issue.labels.contains($0) } ?? true)
+          && (person.map { issue.assignees.contains($0) } ?? true) && (!open || issue.open)
+          && (since.map { issue.updatedAt >= $0 } ?? true)
+      }
+    )
+  }
 
   init() throws {
     let listener = socket(AF_INET, SOCK_STREAM, 0)
@@ -657,6 +739,29 @@ final class FakeGitHub {
         } else {
           ids = variables["ids"]?.array?.compactMap(\.string) ?? []
           data["nodes"] = nodes(page, failing: { failing.contains(self.prs[$0]?["number"]?.int ?? 0) })
+        }
+      } else if query.contains("fragment issue on Issue") {
+        kind = "issues"
+        data["viewer"] = ["login": .string(viewer)]
+        for match in query.matches(of: #/([ro])(\d+): \w+\([^\n]*?first: (\d+)/#) {
+          let alias = "\(match.1)\(match.2)"
+          let i = String(match.2)
+          let (repo, filter) = issueRequest(match.1 == "r", i, variables)
+          ids.append(alias)
+          if match.1 == "r", !listedRepos.contains(repo.lowercased()) {
+            data[alias] = .null
+            errors.append(["type": "NOT_FOUND", "path": [.string(alias)], "message": "Could not resolve"])
+            continue
+          }
+          let matching = listedIssues.values.filter(filter).sorted { $0.updatedAt > $1.updatedAt }
+          let start = variables["a\(i)"]?.string.flatMap(Int.init) ?? 0
+          let page = Array(matching.dropFirst(start).prefix(Int(match.3) ?? 100))
+          let end = start + page.count
+          let connection: JSON = [
+            "pageInfo": ["hasNextPage": .bool(end < matching.count), "endCursor": .string(String(end))],
+            "nodes": .array(page.map(\.node)),
+          ]
+          data[alias] = match.1 == "r" ? ["issues": connection] : connection
         }
       } else if let selection = Selection(query: query, on: "PullRequest") {
         let prQuery: PRQuery

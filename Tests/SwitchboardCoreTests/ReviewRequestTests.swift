@@ -76,7 +76,7 @@ extension ReviewRequestTests {
     @Test func cardShowsThePRTitleAndChecks() throws {
       let f = try prFacts(unreviewedPR())
 
-      let item = try #require(Triage.item(f, verdict(f)))
+      let item = try #require(Triage.item(f, verdict(f), kind: .work))
 
       #expect(item.title == "#42 is ready for review")
       #expect(item.summary == "#42 Fix\nChecks success. Nobody has reviewed it, and GitHub asks nobody to.")
@@ -95,7 +95,7 @@ extension ReviewRequestTests {
       let f = try prFacts(pr)
 
       #expect(verdict(f) == card, "\(label)")
-      #expect(Triage.item(f, verdict(f))?.summary.contains(checks) == true, "\(label)")
+      #expect(Triage.item(f, verdict(f), kind: .work)?.summary.contains(checks) == true, "\(label)")
     }
 
     @Test(arguments: [
@@ -229,7 +229,7 @@ extension ReviewRequestTests {
     @Test func requestedSessionIsNotInTheInbox() throws {
       let f = try prFacts(unreviewedPR(), then: [reviewRequestEvent(5, "requested", reviewers: ["alice"])])
 
-      #expect(Triage.item(f, verdict(f)) == nil)
+      #expect(Triage.item(f, verdict(f), kind: .work) == nil)
     }
 
     @Test func gitHubListingTheReviewerGivesTheSameVerdict() throws {

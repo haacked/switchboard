@@ -92,17 +92,20 @@ extension Service {
   /// Answers a card: allow, deny with an optional message, or `answers`, one
   /// per question. A held card answers through its hook. A deferred question
   /// answers with a message to the session. A card whose hook closed answers
-  /// by typing into the terminal. An allow with `autoMode` also switches the
-  /// session to auto mode, which only a held card's hook can do.
+  /// by typing into the terminal. An allow with an extra's argument, such as
+  /// `autoMode` or `always`, also applies that extra, which only a held card's
+  /// hook can do. An allow takes at most one extra.
   func answer(_ args: JSON) throws -> JSON {
     let card = try chosenCard(args)
     let id = card.session
-    let autoMode = args["autoMode"]?.bool == true
-    if autoMode {
+    let extras = AllowExtra.allCases.filter { args[$0.argument]?.bool == true }
+    if extras.count > 1 { throw APIError("card \(card.id): pick one of \(englishList(extras.map(\.argument)))") }
+    let extra = extras.first
+    if let extra {
       guard args["answers"] == nil, args["behavior"]?.string == "allow" else {
-        throw APIError("card \(card.id): autoMode goes only with a behavior of allow")
+        throw APIError("card \(card.id): \(extra.argument) goes only with a behavior of allow")
       }
-      if let refusal = card.autoModeRefusal { throw autoModeRefused(refusal) }
+      if let refusal = card.refusal(extra) { throw refused(refusal, extra) }
     }
     if let message = card.send {
       switch args["behavior"]?.string {
@@ -137,14 +140,17 @@ extension Service {
       guard card.kind == .question else { throw APIError("card \(card.id) is a permission prompt. Allow or deny it") }
       let answers = try card.match(given.map { $0.string ?? "" })
       data["answers"] = .array(answers.map(JSON.string))
-      if card.deferred { return answered(try send(id, card.answerMessage(answers), byUser: false).rawValue) }
+      if card.deferred {
+        return answered(try send(id, card.answerMessage(answers), byUser: false, trigger: .card).rawValue)
+      }
       reply = (card.decision(answers: answers), .escape(then: card.answerMessage(answers)))
     } else {
       let message = args["message"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       switch args["behavior"]?.string {
       case "allow" where card.kind == .permission:
-        if autoMode { data["permission_mode"] = .string(PermissionMode.auto) }
-        reply = (.allow(updatedInput: nil, autoMode: autoMode), .yes)
+        if extra == .autoMode { data["permission_mode"] = .string(PermissionMode.auto) }
+        if extra == .always { data["always"] = true }
+        reply = (.allow(updatedInput: nil, permissions: extra.map(card.permissions) ?? []), .yes)
       case "allow":
         throw APIError("card \(card.id) is a question. Answer it")
       case "deny":
@@ -159,11 +165,11 @@ extension Service {
     // checks again first.
     if let request = held[card.id], !request.hookGone() {
       request.resolve(reply.decision.hookOutput)
-      if autoMode { try update(id) { $0.autoMode = true } }
+      if extra == .autoMode { try update(id) { $0.autoMode = true } }
       return answered("hook")
     }
     // The hook can close after the check above.
-    guard !autoMode else { throw autoModeRefused(card.hookClosedRefusal) }
+    if let extra { throw refused(card.hookClosedRefusal(extra), extra) }
     guard !card.deferred else {
       throw APIError("card \(card.id) was deferred, so answer its questions or send \(card.session) a message")
     }
@@ -181,13 +187,15 @@ extension Service {
             "card \(card.id)'s dialog still shows after Escape, so sbd didn't send the message. Answer it in the terminal"
           )
         }
-        _ = try send(id, message, byUser: false)
+        _ = try send(id, message, byUser: false, trigger: .card)
       }
       return result
     }
   }
 
-  private func autoModeRefused(_ reason: String) -> APIError { APIError("\(reason). Allow it without auto mode") }
+  private func refused(_ reason: String, _ extra: AllowExtra) -> APIError {
+    APIError("\(reason). Allow it without \(extra.withoutPhrase)")
+  }
 
   /// Defers each held question that has been open for `idleStopSeconds`,
   /// unless a terminal shows its session. The stop rule then leaves claude

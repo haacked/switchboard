@@ -64,7 +64,7 @@ enum TextInput {
 
 /// The list that ⌘L focuses.
 enum ListFocus: Equatable {
-  case sidebar, inbox, board
+  case sidebar, inbox, board, issues
 }
 
 enum ListStep {

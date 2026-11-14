@@ -8,6 +8,9 @@
 # prompt. It answers each prompt:
 #   ask ...          replies with a question
 #   offer ...        replies with an offer of a next step
+#   mode <name>      switches the permission mode to <name>, as Shift+Tab or
+#                    an approved plan does, and replies "Mode: <name>". The
+#                    turn's hooks report the new mode
 #   slow <n>         runs a Bash tool call of n seconds
 #   run <name>       runs sh $SB_HOME/<name>.sh as a Bash tool call, a child
 #                    of the stub, and replies "Ran <name>.". Without that
@@ -35,11 +38,13 @@
 #   edit <file> <old> <new>
 #                    asks permission to replace <old> with <new> in <file>
 #                    with the Edit tool, and replaces it after an allow
+#   fetch <url>      asks permission to fetch <url> with the WebFetch tool.
+#                    Its dialog offers only Yes and No
 #   pick             asks two questions with AskUserQuestion, the second
 #                    one multi-select
 #   pick colors      asks only the multi-select question
 #   pick fruit       asks only the single-choice question
-#   For perm, edit, and pick, the PermissionRequest hook runs while a stand-in for
+#   For perm, edit, fetch, and pick, the PermissionRequest hook runs while a stand-in for
 #   Claude Code's dialog shows on the terminal and reads keys: Enter on the
 #   first item or y allows, and Escape, Enter on No, or esc refuses and kills
 #   the hook, as Claude Code closes the request. timeout kills the hook and
@@ -49,7 +54,7 @@
 #   auto mode", as Claude Code 2.1.318 does. Picking it, or a hook's allow
 #   with a setMode, switches the mode. Each payload carries the mode, from
 #   --permission-mode or `default`.
-#   perm, edit, and pick build their tool payloads by hand. The stub does not play
+#   perm, edit, fetch, and pick build their tool payloads by hand. The stub does not play
 #   permission.jsonl or question.jsonl yet.
 #   mcp <name>       fetches that server's URL from the --mcp-config file and
 #                    replies "MCP <name>: <answer>"
@@ -105,6 +110,8 @@
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK and the arguments, split by tabs. A NUL
 # ends the record, because a prompt can hold a newline.
 # What the hooks print goes to $SB_HOME/hook-output.log. See answer.
+# Each decision that a PermissionRequest hook answers with goes to
+# $SB_HOME/permission-answers.log. See answered.
 # Each line it reads from the terminal goes to $SB_HOME/stub-input.log as it
 # arrived, with the paste markers.
 
@@ -302,8 +309,14 @@ keys() {
 # "terminal <word>". A hook that prints nothing made no decision, so the
 # dialog keeps waiting. It prints nothing when the terminal closes, as when
 # the pane dies. The hook's pid goes to $SB_HOME/held-hook.pid. The dialog
-# shows the command, or the first question and its options.
+# shows the command, or the first question and its options. When
+# $SB_HOME/suggestions.json exists, the request carries its JSON as
+# permission_suggestions.
 dialog() {
+  local fields=$1
+  if [ -f "$SB_HOME/suggestions.json" ]; then
+    fields=$(jq -c --slurpfile s "$SB_HOME/suggestions.json" '. + {permission_suggestions: $s[0]}' <<<"$fields")
+  fi
   local out term hook_pid reader_pid open said answer='' tool head items
   out=$(mktemp) term=$(mktemp)
   tool=$(jq -r .tool_name <<<"$1")
@@ -321,6 +334,12 @@ dialog() {
     head=(" Edit file" " $shown" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " 1 -$(jq -r .tool_input.old_string <<<"$1")"
       " 1 +$(jq -r .tool_input.new_string <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " Do you want to make this edit to ${file##*/}?")
     items=("1. Yes" "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)" "3. No")
+  elif [ "$tool" = WebFetch ]; then
+    local url
+    url=$(jq -r .tool_input.url <<<"$1")
+    echo "⏺ Fetch($url)" >&2
+    head=(" Fetch" " $url" " Do you want to allow Claude to fetch this content?")
+    items=("1. Yes" "2. No")
   else
     echo "⏺ $tool($(jq -r .tool_input.command <<<"$1"))" >&2
     head=(" Bash command" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌" " $(jq -r .tool_input.command <<<"$1")" "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌"
@@ -332,7 +351,7 @@ dialog() {
     fi
   fi
   stty -icanon -echo <&3
-  payload PermissionRequest "$(jq -c --arg c "$PWD" '. + {cwd: $c}' <<<"$1")" | sh -c "exec $request_cmd" >"$out" &
+  payload PermissionRequest "$(jq -c --arg c "$PWD" '. + {cwd: $c}' <<<"$fields")" | sh -c "exec $request_cmd" >"$out" &
   hook_pid=$!
   echo "$hook_pid" >"$SB_HOME/held-hook.pid"
   keys 0 &
@@ -478,7 +497,9 @@ event() { jq -c --arg e "$2" 'select(.hook_event_name == $e)' "$recordings/$1.js
 
 # answered <tool> <input> <answer> [terminal input]: finishes a call that
 # dialog answered. It prints the reply, or nothing when the turn stopped or
-# the terminal closed.
+# the terminal closed. A hook's decision goes to
+# $SB_HOME/permission-answers.log as the conversation's id, a tab, and the
+# decision's JSON, with a NUL after it.
 answered() {
   local tool=$1 input=$2 answer=$3 decision cmd
   case $answer in
@@ -495,6 +516,7 @@ answered() {
     ;;
   hook*)
     decision=$(printf '%s' "${answer#hook }" | jq -c .hookSpecificOutput.decision)
+    printf '%s\t%s\0' "$session" "$decision" >>"$SB_HOME/permission-answers.log"
     case $(jq -r .behavior <<<"$decision") in
     allow)
       input=$(jq -c --argjson i "$input" '.updatedInput // $i' <<<"$decision")
@@ -528,6 +550,8 @@ answered() {
     text=${text/"$old"/$new}
     printf '%s\n' "$text" >"$file"
     echo "Edited $file"
+  elif [ "$tool" = WebFetch ]; then
+    echo "Fetched $(jq -r .url <<<"$input")"
   else
     echo "Ran $(jq -r .command <<<"$input")"
   fi
@@ -742,6 +766,10 @@ turn() {
       '{file_path: $f, old_string: $o, new_string: $n}')"
     return
     ;;
+  fetch\ *)
+    asks "$p" WebFetch "$(jq -nc --arg u "${p#fetch }" '{url: $u, prompt: "Summarize the page"}')"
+    return
+    ;;
   "pick colors" | "pick fruit")
     local one
     one=$(jq -c --argjson i "$([ "$p" = "pick colors" ] && echo 1 || echo 0)" '{questions: [.questions[$i]]}' <<<"$questions")
@@ -762,6 +790,10 @@ turn() {
   reply\ *) reply=$(cat "$SB_HOME/${p#reply }.md") ;;
   ask*) reply="Which database should I use, Postgres or SQLite?" ;;
   offer*) reply="I wrote the parser. Want me to run the tests?" ;;
+  mode\ *)
+    printf '%s' "${p#mode }" >"$mode_file"
+    reply="Mode: ${p#mode }"
+    ;;
   *) reply="Done: $p" ;;
   esac
   echo "⏺ $reply"

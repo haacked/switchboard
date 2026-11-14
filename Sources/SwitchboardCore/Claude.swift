@@ -398,7 +398,8 @@ public enum Transcript {
   }()
   private static let whole = ISO8601DateFormatter()
 
-  static func milliseconds(_ timestamp: String) -> Int64? {
+  /// The time in ms of an ISO 8601 timestamp, with or without fractional seconds.
+  public static func milliseconds(_ timestamp: String) -> Int64? {
     (fractional.date(from: timestamp) ?? whole.date(from: timestamp)).map {
       Int64(($0.timeIntervalSince1970 * 1000).rounded())
     }

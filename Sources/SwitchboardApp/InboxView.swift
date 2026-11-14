@@ -2,9 +2,6 @@ import SwiftUI
 import SwitchboardCore
 
 struct InboxView: View {
-  /// The narrowest the pane that holds an item's session view gets.
-  static let detailMinWidth: CGFloat = 340
-
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
@@ -26,14 +23,13 @@ struct InboxView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
-      HSplitView {
+      ListDetailSplit {
         TriageList()
-          .frame(minWidth: 200, idealWidth: 280, maxWidth: 420)
+      } detail: {
         if let id = model.currentInboxItem, let session = model.sessions.first(where: { $0.id == id }) {
           TriageDetail(session: session).id(session.id)
-            .frame(minWidth: Self.detailMinWidth, maxWidth: .infinity)
         } else {
-          Text("Pick an item").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+          Text("Pick an item").foregroundStyle(.secondary)
         }
       }
     }
@@ -59,12 +55,7 @@ struct TriageList: View {
           ForEach(AttentionState.inbox, id: \.self) { state in
             let group = items.filter { $0.state == state }
             if !group.isEmpty {
-              Text("\(state.title) (\(group.count))")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+              ListSectionHeader(title: state.title, count: group.count)
               ForEach(group) { s in
                 TriageRow(session: s, repo: repos[s.id], current: s.id == current).id(s.id)
                   .simultaneousGesture(TapGesture().onEnded { focused = true })
@@ -74,24 +65,11 @@ struct TriageList: View {
         }
         .padding(.vertical, 6)
       }
-      .focusable()
-      .focused($focused)
-      .focusEffectDisabled()
-      .onKeyPress(characters: CharacterSet(charactersIn: "jk"), phases: .down) { press in
-        model.moveInbox(by: press.characters == "j" ? 1 : -1)
-        return .handled
+      .listKeys(.inbox, $focused, model: model) {
+        model.moveInbox(by: $0, wrap: $1)
+      } open: {
+        model.focusTerminal()
       }
-      .onKeyPress(keys: [.upArrow, .downArrow, .return], phases: [.down, .repeat]) { press in
-        switch NavKey.action(press.key, modifiers: press.modifiers) {
-        case .move(.down): model.moveInbox(by: 1, wrap: false)
-        case .move(.up): model.moveInbox(by: -1, wrap: false)
-        case .open: model.focusTerminal()
-        default: return .ignored
-        }
-        return .handled
-      }
-      .takesListFocus(.inbox, $focused, model: model)
-      .onAppear { focused = true }
       .onChange(of: model.inboxJumps, initial: true) {
         // The rows have no layout yet when the Inbox replaces the Board. A scroll
         // right away often does nothing, so this waits 0.3 s.
@@ -120,7 +98,7 @@ struct TriageRow: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(item?.title ?? session.reason).fontWeight(.medium).lineLimit(2)
         Text(
-          [repo, session.name, ago(session.since)]
+          [repo, model.inboxName(session), ago(session.since)]
             .compactMap { $0 }.joined(separator: " · ")
         )
         .font(.caption)
@@ -131,12 +109,7 @@ struct TriageRow: View {
       IssueBadge(session: session)
       NotesButton(session: session)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 6)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RoundedRectangle(cornerRadius: 8).fill(current ? Color.accentColor.opacity(0.14) : Color.clear))
-    .padding(.horizontal, 6)
-    .contentShape(Rectangle())
+    .listRowChrome(current: current)
     .hoverCard(session, activeAccount: model.activeAccountFolder, card: model.hoverCard)
     .onTapGesture { model.inboxFocus = session.id }
     .accessibilityElement(children: .combine)

@@ -347,9 +347,74 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     ),
     ("Which of v1.2.3 or v1.3.0 should I ship?", .question("Which of v1.2.3 or v1.3.0 should I ship?")),
     ("Done.\n\nWant me to open https://example.com/a.b?", .offer("Want me to open https://example.com/a.b?")),
+    ("Should it be renamed?", .question("Should it be renamed?")),
+    ("Should I push?", .offer("Should I push?")),
+    ("Okay to merge?", .offer("Okay to merge?")),
   ])
   func classifies(_ reply: String, _ kind: ReplyKind) {
     #expect(Attention.classify(reply) == kind)
+  }
+}
+
+@Suite struct LastQuestion {
+  @Test func givesTheLastParagraphsLastQuestionAndTheSentenceBeforeIt() throws {
+    let reply = "Is this right? I think so.\n\nDone. Want me to push? I can also open the PR."
+
+    let found = try #require(Attention.lastQuestion(reply))
+
+    #expect(found.question == "Want me to push?")
+    #expect(found.previous == "Done.")
+  }
+
+  @Test func picksTheLastOfSeveralQuestions() throws {
+    let found = try #require(Attention.lastQuestion("I fixed it.\n\nShould I push the branch? Or wait?"))
+
+    #expect(found.question == "Or wait?")
+    #expect(found.previous == "Should I push the branch?")
+  }
+
+  @Test func aQuestionThatStartsItsParagraphHasNoPreviousSentence() throws {
+    let found = try #require(Attention.lastQuestion("I made `haacked/x-v2`.\n\nDo you want me to delete it?"))
+
+    #expect(found.question == "Do you want me to delete it?")
+    #expect(found.previous == nil)
+  }
+
+  /// `OfferText` reads the previous sentence's code spans, so its backticks stay.
+  @Test func thePreviousSentenceKeepsALeadingCodeSpan() throws {
+    let found = try #require(Attention.lastQuestion("`haacked/x-v2` still exists on origin. Want me to delete it?"))
+
+    #expect(found.previous?.hasPrefix("`haacked/x-v2`") == true)
+  }
+
+  @Test(arguments: ["All tests pass.", "", "Is this right?\n\nThe build passes.", "Next, I'll update the docs."])
+  func isNilWhenTheLastParagraphAsksNoQuestion(_ reply: String) {
+    #expect(Attention.lastQuestion(reply) == nil)
+  }
+}
+
+@Suite struct OfferPrefix {
+  @Test(arguments: [
+    ("Do you want me to delete it?", "do you want me to"),
+    ("Should I push?", "should i"),
+    ("SHOULD I push?", "should i"),
+    ("Should I\tpush?", "should i"),
+    ("Ok to merge?", "ok to"),
+    ("Okay to merge?", "okay to"),
+    ("Want me to merge it?", "want me to"),
+    ("Want to see it?", "want to"),
+  ])
+  func givesTheOfferStartThatWhitespaceFollows(_ sentence: String, _ prefix: String) {
+    #expect(Attention.offerPrefix(sentence) == prefix)
+  }
+
+  /// A prefix counts only at a word boundary, so these are questions.
+  @Test(arguments: [
+    "Should it be renamed?", "Should Ingrid review it?", "Okay tomorrow?", "Want to?", "Shall weigh in?",
+    "Wanting more?", "Which branch should I use?",
+  ])
+  func givesNothingWhenTheOfferStartRunsIntoAWord(_ sentence: String) {
+    #expect(Attention.offerPrefix(sentence) == nil)
   }
 }
 
@@ -516,6 +581,233 @@ let exitedAtTrustReason = "claude exited at the folder trust prompt. Open the se
     let f = facts([event("started", 1), event("SessionStart", 2), event(kind, 5, ["prompt": .null])])
 
     #expect(!f.hookSinceLaunch)
+  }
+}
+
+/// Why an open prompt has no card, which the Inbox item says in its summary.
+@Suite struct CardlessPrompt {
+  static let notificationOnly =
+    "Claude Code didn't send Switchboard this prompt's tool call, so Switchboard has no card for it. "
+    + "Answer it in the terminal."
+  static let unreadable =
+    "Claude Code stopped waiting on Switchboard for this prompt. That happens when sbd restarts, when the request "
+    + "times out, or when the prompt is answered in the terminal. Switchboard can't read this tool's dialog on the "
+    + "screen. If the dialog still shows, answer it in the terminal."
+  static let dialogLeft =
+    "The dialog left the terminal without an answer from Switchboard, as No or Escape in the terminal does. "
+    + "Open the Terminal to see where the session stands."
+  static let dialogLeftAfterHookClosed =
+    "The dialog left the terminal after Claude Code stopped waiting on Switchboard, so Switchboard can't tell "
+    + "whether it was allowed. Open the Terminal to see where the session stands."
+  static let noCard = "Switchboard has no card for this prompt. Answer it in the terminal."
+
+  /// The facts after `events` and an sbd restart, then `after`.
+  static func restarted(_ events: [Event], then after: [Event] = []) -> SessionFacts {
+    var replay = SessionReplay.replaying(events, session: session())
+    replay.restarted()
+    for e in after { replay.apply(e, session: session()) }
+    return replay.facts
+  }
+
+  /// A question whose PreToolUse opens it before any PermissionRequest
+  /// gives it a card.
+  static let questionWithoutACard = event("PreToolUse", 20, ask())
+
+  static let permissionNotification = event(
+    "Notification", 10, ["notification_type": "permission_prompt", "message": "Claude needs your permission"])
+
+  /// A question with no text, so the card has no marks.
+  static func unmarkedQuestionTurn() -> [Event] {
+    let questions: JSON = ["questions": [["options": [["label": "a"]]]]]
+    return promptTurn(ask(questions), ask(questions, id: nil))
+  }
+
+  enum Cause: CaseIterable {
+    case fetchRestarted, fetchHookClosed, editDialogLeft, editRestartedThenDialogLeft, notificationOnly
+    case unmarkedQuestionRestarted, notificationAfterTheFetchCardWent
+
+    var sessionFacts: SessionFacts {
+      switch self {
+      case .fetchRestarted:
+        return CardlessPrompt.restarted(fetchTurn())
+      case .fetchHookClosed:
+        return facts(fetchTurn() + [event("card_closed", 4, ["card": 3])])
+      case .editDialogLeft:
+        return facts(editTurn() + [event("dialog_closed", 4, ["card": 3])])
+      case .editRestartedThenDialogLeft:
+        return CardlessPrompt.restarted(editTurn(), then: [event("dialog_closed", 4, ["card": 3])])
+      case .notificationOnly:
+        return facts([
+          event("UserPromptSubmit", 0, ["prompt": "go"]), CardlessPrompt.permissionNotification,
+        ])
+      case .unmarkedQuestionRestarted:
+        return CardlessPrompt.restarted(CardlessPrompt.unmarkedQuestionTurn())
+      case .notificationAfterTheFetchCardWent:
+        return facts(
+          fetchTurn() + [event("card_closed", 4, ["card": 3]), CardlessPrompt.permissionNotification])
+      }
+    }
+
+    var reason: String {
+      switch self {
+      case .fetchRestarted, .fetchHookClosed, .unmarkedQuestionRestarted, .notificationAfterTheFetchCardWent:
+        CardlessPrompt.unreadable
+      case .editDialogLeft: CardlessPrompt.dialogLeft
+      case .editRestartedThenDialogLeft: CardlessPrompt.dialogLeftAfterHookClosed
+      case .notificationOnly: CardlessPrompt.notificationOnly
+      }
+    }
+  }
+
+  @Test(arguments: Cause.allCases)
+  func eachCauseLeavesAnOpenPromptWithoutACard(_ cause: Cause) {
+    let f = cause.sessionFacts
+
+    #expect(f.cards.isEmpty)
+    #expect(f.openPermission != nil || f.openQuestion != nil)
+  }
+
+  @Test(arguments: Cause.allCases)
+  func eachCauseGivesItsReason(_ cause: Cause) {
+    #expect(cause.sessionFacts.cardlessPromptReason == cause.reason)
+  }
+
+  @Test(arguments: Cause.allCases)
+  func theVerdictsSummaryIsTheReason(_ cause: Cause) {
+    let verdict = Attention.evaluate(session(), cause.sessionFacts, now: 30)
+
+    #expect(verdict.summary == cause.reason)
+  }
+
+  @Test(arguments: Cause.allCases)
+  func theInboxItemsSummaryIsTheReason(_ cause: Cause) {
+    let f = cause.sessionFacts
+
+    let item = Triage.liveItem(f, Attention.evaluate(session(), f, now: 30))
+
+    #expect(item?.summary == cause.reason)
+  }
+
+  @Test func theVerdictOfARestartedFetchNamesTheTool() {
+    let verdict = Attention.evaluate(session(), CardlessPrompt.restarted(fetchTurn()), now: 30)
+
+    #expect(verdict.reason == "approve WebFetch")
+  }
+
+  @Test(arguments: [permissionTurn(), questionTurn(), editTurn()])
+  func aFindableCardThatARestartKeepsGivesNoReason(_ turn: [Event]) {
+    let f = CardlessPrompt.restarted(turn)
+
+    #expect(f.cards.map(\.hookClosed) == [true])
+    #expect(f.cardlessPromptReason == nil)
+  }
+
+  @Test func anOpenCardGivesNoSummary() {
+    #expect(Attention.evaluate(session(), facts(permissionTurn()), now: 30).summary == nil)
+  }
+
+  @Test(arguments: [
+    fetchTurn() + [
+      event("card_closed", 4, ["card": 3]),
+      event("PostToolUse", 5, tool("WebFetch", ["url": "https://example.com"], id: "f1")),
+    ],
+    editTurn() + [event("dialog_closed", 4, ["card": 3, "allowed": true])],
+    permissionTurn() + [event("answered", 4, ["card": 3, "behavior": "allow"])],
+  ])
+  func noOpenPromptGivesNoReason(_ events: [Event]) {
+    let f = facts(events)
+
+    #expect(f.openPermission == nil && f.openQuestion == nil)
+    #expect(f.cardlessPromptReason == nil)
+  }
+
+  static let bashRequest = Event(
+    id: 5, session: "s1", t: 6, kind: "PermissionRequest", data: .object(tool("Bash", ["command": "ls"])))
+
+  @Test func aNewPermissionRequestAfterARestartOpensACardWithoutAReason() {
+    let f = CardlessPrompt.restarted(fetchTurn(), then: [CardlessPrompt.bashRequest])
+
+    #expect(f.cards.map(\.id) == [5])
+    #expect(f.cardlessPromptReason == nil)
+  }
+
+  /// The Bash call finishes, and a question opens before its card does. The
+  /// fetch's cause must not explain that question.
+  @Test func aNewPermissionRequestForgetsTheCauseOfTheCardBeforeIt() {
+    let f = CardlessPrompt.restarted(
+      fetchTurn(),
+      then: [
+        CardlessPrompt.bashRequest, event("PostToolUse", 7, tool("Bash", ["command": "ls"], id: "b2")),
+        CardlessPrompt.questionWithoutACard,
+      ])
+
+    #expect(f.cards.isEmpty)
+    #expect(f.cardlessPromptReason == CardlessPrompt.noCard)
+  }
+
+  @Test func aSubagentsPermissionRequestKeepsTheCause() {
+    let call = tool("Bash", ["command": "ls"], agent: "a1")
+    let request = Event(id: 5, session: "s1", t: 6, kind: "PermissionRequest", data: .object(call))
+
+    let f = CardlessPrompt.restarted(fetchTurn(), then: [event("SubagentStart", 5, ["agent_id": "a1"]), request])
+
+    #expect(f.cardlessPromptReason == CardlessPrompt.unreadable)
+  }
+
+  /// The Bash card's allow closes the prompt while the fetch's card stays.
+  /// The restart then removes that card with no prompt open, so the question
+  /// that opens next has no cause.
+  @Test func aRestartWithNoOpenPromptLeavesNoCause() {
+    let f = CardlessPrompt.restarted(
+      fetchTurn() + [CardlessPrompt.bashRequest, event("answered", 6, ["card": 5, "behavior": "allow"])],
+      then: [CardlessPrompt.questionWithoutACard])
+
+    #expect(f.cards.isEmpty)
+    #expect(f.cardlessPromptReason == CardlessPrompt.noCard)
+  }
+
+  @Test func aUserPromptAfterARestartLeavesNoReason() {
+    let f = CardlessPrompt.restarted(fetchTurn(), then: [event("UserPromptSubmit", 6, ["prompt": "go on"])])
+
+    #expect(f.cardlessPromptReason == nil)
+  }
+
+  @Test func aUserPromptForgetsTheCause() {
+    let f = CardlessPrompt.restarted(
+      fetchTurn(), then: [event("UserPromptSubmit", 6, ["prompt": "go on"]), CardlessPrompt.questionWithoutACard])
+
+    #expect(f.cardlessPromptReason == CardlessPrompt.noCard)
+  }
+
+  /// The fetch finishes, a Notification opens a new prompt, and a tool
+  /// finishing closes that prompt. The fetch's cause must not explain the
+  /// question that opens next.
+  @Test func aNotificationThatOpensANewPromptForgetsTheCause() {
+    let f = facts(
+      fetchTurn() + [
+        event("card_closed", 4, ["card": 3]),
+        event("PostToolUse", 5, tool("WebFetch", ["url": "https://example.com"], id: "f1")),
+        CardlessPrompt.permissionNotification, event("PostToolUse", 11, tool("Bash", ["command": "ls"], id: "b2")),
+        CardlessPrompt.questionWithoutACard,
+      ])
+
+    #expect(f.cardlessPromptReason == CardlessPrompt.noCard)
+  }
+
+  @Test func aQuestionWithoutACardYetHasTheNoCardReason() {
+    let f = facts([event("UserPromptSubmit", 0, ["prompt": "go"]), CardlessPrompt.questionWithoutACard])
+
+    #expect(f.cardlessPromptReason == CardlessPrompt.noCard)
+  }
+
+  @Test func aCardThatLeavesBecauseItsDialogLeftReplacesAnEarlierCause() {
+    let f = CardlessPrompt.restarted(
+      fetchTurn(),
+      then: [
+        CardlessPrompt.bashRequest, event("card_closed", 7, ["card": 5]), event("dialog_closed", 8, ["card": 5]),
+      ])
+
+    #expect(f.cardlessPromptReason == CardlessPrompt.dialogLeftAfterHookClosed)
   }
 }
 

@@ -79,7 +79,8 @@ extension Service {
     case .done:
       return Request(op: "done", args: ["session": session])
     case .allow, .deny, .allowAutoMode, .answer:
-      guard item.source == .card, let card = entries[id]!.facts.cards.first else {
+      // A conversation's item can name a card behind a send card.
+      guard item.source == .card, let card = entries[id]!.facts.cards.first(where: { $0.ref == item.ref }) else {
         throw APIError("\(name) has no prompt to answer")
       }
       var answer: [String: JSON] = ["session": session, "card": .number(Double(card.id))]
@@ -87,7 +88,7 @@ extension Service {
       case .answer: answer["answers"] = [.string(option.message ?? option.label)]
       case .allowAutoMode:
         answer["behavior"] = "allow"
-        answer["autoMode"] = true
+        answer[AllowExtra.autoMode.argument] = true
       default: answer["behavior"] = .string(option.action.rawValue)
       }
       return Request(op: "answer", args: .object(answer))
@@ -150,7 +151,7 @@ extension Service {
       return
     }
     let session = summary(id)
-    guard Triage.mayHaveItem(session) else { return }
+    guard Triage.summarizes(session.kind) else { return }
     let reply = e.facts.lastReply ?? ""
     let input = TriageSummarizer.input(session: session, reply: reply)
     let env = headlessEnv(session: id, account: config.triage.account)

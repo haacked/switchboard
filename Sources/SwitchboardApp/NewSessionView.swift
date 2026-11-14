@@ -7,6 +7,15 @@ struct NewSessionRequest: Identifiable {
   let id = UUID()
   /// The id of the group that the sheet starts with.
   var group: String?
+  /// The owner/name of the repository that the sheet starts with, as the Issues view's Edit the Prompt First sets it.
+  var repo: String?
+  var branch: String?
+  var prompt: String?
+  /// The issue that the session works on.
+  var issue: IssueRef?
+  /// True starts the session in manual mode, whatever the settings say, as for an issue that someone outside the
+  /// team wrote.
+  var manualMode = false
   /// The id of the Manager conversation that starts the new session, from its pane's New Task button.
   var parent: String?
 }
@@ -20,32 +29,52 @@ struct NewSessionView: View {
     @Published var branch = ""
     @Published var name = ""
     @Published var prompt = ""
+    @Published var planMode = false
     /// The folder of the chosen account, or empty for the active one.
     @Published var account = ""
     /// The id of the group that the session joins, or nil for none.
     @Published private(set) var group: String?
+    /// The owner/name that the sheet starts with, which wins over the group's preferred repository.
+    private let repoName: String?
+    /// The issue that the session works on.
+    let issue: IssueRef?
+    let manualMode: Bool
     /// The id of the conversation that starts the session, or nil for none.
     let parent: String?
     /// The last offer, which a group change selects from again.
     private var offered: (repos: [KnownRepo]?, sessions: [SessionSummary]) = (nil, [])
 
-    init(group: String? = nil, parent: String? = nil) {
-      self.group = group
-      self.parent = parent
+    convenience init(group: String? = nil, parent: String? = nil) {
+      self.init(request: NewSessionRequest(group: group, parent: parent))
     }
 
-    convenience init(request: NewSessionRequest) { self.init(group: request.group, parent: request.parent) }
+    init(request: NewSessionRequest) {
+      group = request.group
+      parent = request.parent
+      repoName = request.repo
+      issue = request.issue
+      manualMode = request.manualMode
+      branch = request.branch ?? ""
+      prompt = request.prompt ?? ""
+    }
 
     func pick(_ repo: KnownRepo?) {
       self.repo = repo
       picked = true
     }
 
-    /// Selects the repository that `KnownRepos.preferred` names for the group until the user picks one. The
-    /// sheet first offers the list that the app kept from its last opening, then the list that sbd answers.
+    /// Selects the repository that the request names, or else the one that `KnownRepos.preferred` names for the
+    /// group, until the user picks one. A named repository with no known checkout selects none, so Start waits for
+    /// the user's pick. The sheet first offers the list that the app kept from its last opening, then the list that
+    /// sbd answers.
     func offer(_ repos: [KnownRepo]?, sessions: [SessionSummary] = []) {
       offered = (repos, sessions)
-      if !picked { repo = repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) } }
+      guard !picked else { return }
+      if let repoName {
+        repo = repos?.first { Dependencies.sameRepo($0.name, repoName) }
+      } else {
+        repo = repos.flatMap { KnownRepos.preferred($0, group: group, sessions: sessions) }
+      }
     }
 
     func choose(group: String?) {
@@ -69,17 +98,22 @@ struct NewSessionView: View {
       return NewSession(
         path: repo.path, branch: worktree ? optional(branch) : nil, name: optional(name), worktree: worktree,
         prompt: optional(prompt), parent: parent, account: groupAccount(groups) == nil ? optional(account) : nil,
-        group: group)
+        group: group, planMode: planMode ? true : nil, manualMode: manualMode ? true : nil, issue: issue)
     }
   }
 
   @EnvironmentObject var model: BoardModel
   @Environment(\.dismiss) private var dismiss
-  @AppStorage("createWorktree") private var createWorktree = false
+  static let createWorktreeKey = "createWorktree"
+  /// The user's last choice of the toggle, which a later sheet starts from.
+  @AppStorage(Self.createWorktreeKey) private var createWorktree = false
   @StateObject private var form: Form
+  /// This sheet's toggle. A request that names a branch starts with it on and leaves the saved choice alone.
+  @State private var worktree: Bool
 
   init(request: NewSessionRequest) {
     _form = StateObject(wrappedValue: Form(request: request))
+    _worktree = State(initialValue: request.branch != nil || UserDefaults.standard.bool(forKey: Self.createWorktreeKey))
   }
 
   var body: some View {
@@ -93,9 +127,17 @@ struct NewSessionView: View {
         LabeledContent("Repository") {
           RepoPicker(selection: Binding(get: { form.repo }, set: { form.pick($0) }))
         }
-        Toggle("Create a worktree", isOn: $createWorktree)
-          .help("Start in a new worktree of the repository")
-        if createWorktree {
+        Toggle(
+          "Create a worktree",
+          isOn: Binding(
+            get: { worktree },
+            set: {
+              worktree = $0
+              createWorktree = $0
+            })
+        )
+        .help("Start in a new worktree of the repository")
+        if worktree {
           TextField("Branch", text: $form.branch, prompt: Text("optional: made from the name when blank"))
         }
         TextField("Name", text: $form.name, prompt: Text("optional: the branch or folder name"))
@@ -113,6 +155,13 @@ struct NewSessionView: View {
             Text(Self.defaultAccountLabel(parent: parentSession, active: model.activeAccount)).tag("")
             ForEach(model.accounts) { Text($0.name).tag($0.folder) }
           }
+        }
+        Toggle("Start in plan mode", isOn: $form.planMode)
+          .help("Claude writes a plan and waits for your approval before it edits a file")
+        if form.manualMode {
+          Text("Starts in manual mode, because someone outside your team wrote the issue.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         VStack(alignment: .leading) {
           Text("First prompt")
@@ -144,7 +193,7 @@ struct NewSessionView: View {
   }
 
   private func start() {
-    if let session = form.request(worktree: createWorktree, groups: model.groups) {
+    if let session = form.request(worktree: worktree, groups: model.groups) {
       model.create(session)
     }
   }

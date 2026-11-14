@@ -89,7 +89,10 @@ extension Service {
   /// transaction records it in `removed_host_sessions`, so the spool cut may
   /// remove its leftover lines. It runs on the state queue.
   func forgetSession(_ id: String, resolving: Set<String>) throws {
+    // Only a merged PR leaves marks. Other removals skip the summary.
+    let removed = entries[id]?.facts.pr?.state == .merged ? summary(id) : nil
     try store.delete(session: id, resolving: checkTodos(id, resolving: resolving), onHost: entries[id]?.session.host)
+    if let removed { markAddressedIssues(removed) }
     entries[id] = nil
     slashListings[id] = nil
     hostEvents[id] = nil

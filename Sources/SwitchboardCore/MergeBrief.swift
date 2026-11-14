@@ -35,9 +35,6 @@ public struct MergeBrief: Codable, Equatable, Sendable {
     Headless.arguments(model: model, schema: schema, system: system)
   }
 
-  /// The `<` of a `<pr-body>` or `</pr-body>` tag in any case and spacing.
-  static let tag = try! NSRegularExpression(pattern: #"<(?=\s*/?\s*pr-body\b)"#, options: [.caseInsensitive])
-
   public static func input(_ pr: PullRequest, description: String) -> String {
     // Text from the PR that holds a tag could end the data early.
     let data = untagged(description)
@@ -51,9 +48,7 @@ public struct MergeBrief: Codable, Equatable, Sendable {
       """
   }
 
-  static func untagged(_ text: String) -> String {
-    tag.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "&lt;")
-  }
+  static func untagged(_ text: String) -> String { UntrustedText.untagged(text, tags: "pr-body") }
 
   /// Reads the output of `claude -p --output-format json`. The text comes
   /// back as plain text on one line, at most `maxText` characters. Throws

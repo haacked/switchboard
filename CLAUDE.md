@@ -23,7 +23,9 @@ The design plan is `~/dev/haacked/notes/Dev/repositories/haacked/switchboard/pla
 
 Build and test only through `bin/build`, `bin/test`, `bin/test-gui`, and `bin/bundle`. Never run bare `swift build`, `swift test`, or `swift run`, because they skip the build queue and overload the machine. Extra arguments pass through to SwiftPM, for example `bin/build --product sb` and `bin/test --filter X`. `bin/fmt` does not compile, so run it directly.
 
-The scripts wait for a machine-wide build slot, so at most 3 builds or test runs share the CPU at once. They also cap each build's compile jobs. Many sessions share this machine, so a wait of several minutes is normal.
+The scripts wait for a machine-wide build slot, so at most `SB_BUILD_SLOTS` builds or test processes (3 by default) share the CPU at once. They also cap each build's compile jobs, which `SB_BUILD_JOBS` sets. `bin/test` prints both values when it starts. Many sessions share this machine, so a wait of several minutes is normal.
+
+Never pass `--shards` or `--force-shards` to `bin/test` locally. Each shard takes its own build slot, so a local sharded run holds several slots at once and makes other sessions wait. Sharding is for CI. `bin/test --shards` prints a warning outside CI.
 
 Always start these scripts with `run_in_background`. The wait for a slot counts toward a foreground Bash call's timeout, which kills the call after 2 minutes by default and 10 at most.
 
@@ -47,6 +49,16 @@ Before you implement a feature or fix, read the code it touches and ask whether 
 - In the plan, list the refactors as their own stage before the implementation stages.
 - In the PR description, say what you restructured and why the feature needed it.
 - In review, treat code that works around a design problem instead of fixing it as a finding.
+
+## PR titles
+
+Write every PR title as a [Conventional Commits](https://www.conventionalcommits.org/) title: `type: summary` or `type(scope): summary`. Add `!` after the type or scope when the change breaks existing behavior, for example `feat!: Rename the sb list command`. The types are `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, and `chore`. The summary starts with a capital letter and an imperative verb, for example `feat: Print the changes since the last update`.
+
+This applies when you open a PR and when you edit its title later. It also applies when the `create-pr` skill suggests a different form. CI's `pr-title` check runs `bin/check-pr-title` on the title and fails the PR when the title breaks this rule. Run it locally to check a title first.
+
+GitHub writes the PR title as the first line of the merge commit's body, and `bin/changelog` prints that line. `bin/update` shows it to the user as a changelog entry, so write a single line that a user can read without opening the PR.
+
+This rule covers PR titles only. Write the commit messages inside a PR the way the commit skill writes them.
 
 ## Branch upkeep and merging
 

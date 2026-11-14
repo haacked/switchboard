@@ -54,24 +54,95 @@ extension GitHub {
   /// the checked-out branch writes "Branch: renamed refs/heads/<a> to
   /// refs/heads/<b>".
   public static func checkedOutBranches(reflog: String) -> Set<String> {
-    let checkout = "\tcheckout: moving from "
-    let renamed = "\tBranch: renamed "
-    let heads = "refs/heads/"
     var branches: Set<String> = []
     for line in reflog.split(separator: "\n") {
-      if let range = line.range(of: checkout) {
-        let names = line[range.upperBound...].split(separator: " ")
-        guard names.count == 3, names[1] == "to" else { continue }
-        branches.insert(String(names[0]))
-        branches.insert(String(names[2]))
-      } else if let range = line.range(of: renamed) {
-        let names = line[range.upperBound...].split(separator: " ")
-        guard names.count == 3, names[1] == "to", names[0].hasPrefix(heads), names[2].hasPrefix(heads) else { continue }
-        branches.insert(String(names[0].dropFirst(heads.count)))
-        branches.insert(String(names[2].dropFirst(heads.count)))
+      guard let tab = line.firstIndex(of: "\t"), let move = switchEntry(line[line.index(after: tab)...]) else {
+        continue
       }
+      branches.insert(move.from)
+      branches.insert(move.to)
     }
     return branches
+  }
+
+  /// The two branches of a reflog message that moved HEAD from one branch to
+  /// another: a checkout or a rename of the checked-out branch.
+  static func switchEntry(_ message: Substring) -> (from: String, to: String)? {
+    let heads = "refs/heads/"
+    if message.hasPrefix("checkout: moving from ") {
+      let names = message.dropFirst("checkout: moving from ".count).split(separator: " ")
+      guard names.count == 3, names[1] == "to" else { return nil }
+      return (String(names[0]), String(names[2]))
+    }
+    if message.hasPrefix("Branch: renamed ") {
+      let names = message.dropFirst("Branch: renamed ".count).split(separator: " ")
+      guard names.count == 3, names[1] == "to", names[0].hasPrefix(heads), names[2].hasPrefix(heads) else { return nil }
+      return (String(names[0].dropFirst(heads.count)), String(names[2].dropFirst(heads.count)))
+    }
+    return nil
+  }
+
+  /// Whether the PR belongs to the session's earlier work in this folder: it
+  /// is in the branch's repo, its head is another branch, and the folder had
+  /// that head checked out before.
+  public static func isEarlierWork(_ pr: PullRequest, repo: String, branch: String, checkedOut: Set<String>) -> Bool {
+    pr.repo.lowercased() == repo.lowercased() && pr.head != branch && checkedOut.contains(pr.head)
+  }
+
+  /// Whether a linked or recorded PR counts as the session's while its
+  /// branch has no PR of its own.
+  public enum EarlierStanding: Equatable, Sendable {
+    /// The PR counts: it is not earlier work, or the folder made its head
+    /// commit on the current branch.
+    case current
+    /// The PR is open earlier work. It does not count now, and a later head
+    /// that the folder made brings it back.
+    case hidden
+    /// The PR is merged or closed earlier work, and it stops counting for good.
+    case dropped
+  }
+
+  /// `made` is what `commitsSinceSwitch` gives for the folder's branch.
+  public static func earlierStanding(
+    _ pr: PullRequest, repo: String, branch: String, checkedOut: Set<String>, made: Set<String>?
+  ) -> EarlierStanding {
+    guard isEarlierWork(pr, repo: repo, branch: branch, checkedOut: checkedOut) else { return .current }
+    if !pr.headSha.isEmpty, made?.contains(pr.headSha) == true { return .current }
+    return pr.state == .open ? .hidden : .dropped
+  }
+
+  /// Whether a reflog message records a new commit. A reset, a checkout, a
+  /// fast-forward, and a rebase's start and finish only move HEAD to a commit
+  /// that already exists.
+  static func makesCommit(_ message: Substring) -> Bool {
+    if ["commit", "cherry-pick", "revert"].contains(where: { message.hasPrefix($0) }) { return true }
+    if message.hasPrefix("rebase") || message.hasPrefix("pull --rebase") {
+      return !["(start)", "(finish)", "(abort)"].contains(where: { message.contains($0) })
+    }
+    if message.hasPrefix("merge ") || message.hasPrefix("pull:") || message.hasPrefix("pull ") {
+      return !message.hasSuffix("Fast-forward")
+    }
+    return false
+  }
+
+  /// The commits that a HEAD reflog shows the folder made after the last
+  /// entry that moved HEAD to `branch`: a checkout or a rename. The commit
+  /// that the switch itself moved to is not one of them. nil when no entry
+  /// moved HEAD to `branch`.
+  public static func commitsSinceSwitch(reflog: String, to branch: String) -> Set<String>? {
+    var made: Set<String>?
+    for line in reflog.split(separator: "\n") {
+      guard let tab = line.firstIndex(of: "\t") else { continue }
+      let message = line[line.index(after: tab)...]
+      if switchEntry(message)?.to == branch {
+        made = []
+        continue
+      }
+      guard made != nil, makesCommit(message) else { continue }
+      let fields = line[..<tab].split(separator: " ")
+      if fields.count >= 2 { made?.insert(String(fields[1])) }
+    }
+    return made
   }
 
   /// The values of `git config --get-regexp` output, by key.

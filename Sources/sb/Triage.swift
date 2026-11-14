@@ -14,8 +14,9 @@ func printTriage(_ s: SessionSummary, position: Int? = nil) {
     out("      [\(c.kind.rawValue)] \(c.title)\(c.body.isEmpty ? "" : ": \(oneLine(c.body, max: 200))")")
   }
   for draft in item.drafts {
-    out("   Draft\(draft.label.map { ": \($0)" } ?? ""):")
+    out("   Draft \(draft.number)\(draft.label.map { ": \($0)" } ?? ""):")
     for line in draft.text.split(separator: "\n", omittingEmptySubsequences: false) { out("      > \(line)") }
+    if let state = draftStateLine(draft, session: s.id) { out("      \(state)") }
   }
   out("   Action:")
   if item.hasTickable {

@@ -15,6 +15,14 @@ public struct StopPolicy: Sendable {
     public var messageWaiting: Bool
     /// Whether a terminal shows the session's Claude pane.
     public var attached: Bool
+    /// The session's `LivePriority` rank, or nil while sbd hasn't read the
+    /// repository that would rank it. The live cap doesn't stop a session
+    /// whose rank is unknown.
+    public var rank: Int? = 0
+    /// When a terminal last showed the session or the user last opened it, or 0.
+    public var lastViewed: Int64 = 0
+    /// Whether the user opened this session after every other one.
+    public var openedLast = false
 
     public init(
       session: Session, facts: SessionFacts, lastJobSeen: Int64 = 0, jobs: Int = 0, messageWaiting: Bool = false,
@@ -70,16 +78,17 @@ public struct StopPolicy: Sendable {
   /// The running claudes that sbd may stop to free a slot, in the order to
   /// stop them. Each one is quiet, with no card open except a deferred one,
   /// no subagent, and no background job seen in the last `capJobGraceMs`.
-  /// Sessions in Done or with an open wait come first, then the rest, each
-  /// longest idle first.
+  /// Its rank is known, and the user didn't open it last. The lowest rank
+  /// goes first, then the one the user touched or viewed longest ago, then
+  /// the one idle longest.
   public func capOrder(_ claudes: [Claude], now: Int64) -> [String] {
     let candidates = claudes.filter { c in
       now - c.lastJobSeen >= StopPolicy.capJobGraceMs && isQuiet(c) && c.facts.cards.allSatisfy(\.deferred)
-        && c.facts.subagents.isEmpty
+        && c.facts.subagents.isEmpty && !c.openedLast && c.rank != nil
     }
-    func tier(_ c: Claude) -> Int {
-      c.session.done || c.facts.lastState == .done || !(c.session.waits ?? []).isEmpty ? 0 : 1
+    func key(_ c: Claude) -> (Int, Int64, Int64, String) {
+      (c.rank ?? 0, c.facts.lastSeen(viewed: c.lastViewed), c.idleSince, c.id)
     }
-    return candidates.sorted { (tier($0), $0.idleSince, $0.id) < (tier($1), $1.idleSince, $1.id) }.map(\.id)
+    return candidates.sorted { key($0) < key($1) }.map(\.id)
   }
 }

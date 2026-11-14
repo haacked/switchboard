@@ -46,8 +46,8 @@ public struct AutoContinueInput {
   /// A message is in flight or queued for the session.
   public var busy = false
   public var onScreen = false
-  /// The last tick that saw the pane on screen, or 0.
-  public var lastOnScreen: Int64 = 0
+  /// When the user last viewed the session, or 0.
+  public var lastViewed: Int64 = 0
   /// Sessions whose claude runs or is starting, this one included.
   public var live = 0
   /// `Config.liveCap`. A continue that has to start claude needs a free slot.
@@ -120,7 +120,7 @@ public enum AutoContinue {
       return "an open card"
     }
     // A continue would answer the reply while the user answers its decisions.
-    if f.decisionList != nil || Triage.item(f, input.verdict)?.hasDecisionList == true {
+    if f.decisionList != nil || Triage.item(f, input.verdict, kind: input.session.kind)?.hasDecisionList == true {
       return "decisions to answer"
     }
     if !(input.session.waits ?? []).isEmpty { return "an open wait" }
@@ -128,7 +128,7 @@ public enum AutoContinue {
     if input.busy { return "a message is on its way" }
     if input.process == .starting || (input.process == .running && !f.live) { return "claude is starting or stopping" }
     if input.onScreen { return "on screen" }
-    let touched = max(f.lastTouched, input.lastOnScreen)
+    let touched = f.lastSeen(viewed: input.lastViewed)
     let quiet = Int64(s.quietSeconds) * 1000
     if touched > 0, input.now - touched < quiet { return "you touched it \((input.now - touched) / 1000) s ago" }
     let recent = f.autoContinues.filter { input.now - $0 < hourMs }.count

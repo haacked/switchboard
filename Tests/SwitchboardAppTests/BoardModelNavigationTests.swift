@@ -171,8 +171,8 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.selection == "x")
     }
 
-    @Test(arguments: [1, -1], [MainView.inbox, .board])
-    func withNoSessionsTheInboxAndBoardStayEmpty(step: Int, view: MainView) {
+    @Test(arguments: [1, -1], [MainView.inbox, .board, .issues])
+    func withNoSessionsEachMainViewStaysEmpty(step: Int, view: MainView) {
       let model = offlineModel()
       model.show(view)
 
@@ -444,7 +444,7 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.listFocusTarget == .sidebar)
     }
 
-    @Test(arguments: [(MainView.inbox, ListFocus.inbox), (.board, .board)])
+    @Test(arguments: [(MainView.inbox, ListFocus.inbox), (.board, .board), (.issues, .issues)])
     func noSelectionTargetsTheMainView(_ view: MainView, _ target: ListFocus) {
       let model = appliedModel([needsItem("a")])
       model.show(view)
@@ -637,6 +637,30 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
 
       #expect(model.selection == "other")
       #expect(model.terminalFocus == "other")
+    }
+
+    /// The Inbox's Open Terminal button shows the item's terminal in the
+    /// Inbox's right pane and gives it the keys.
+    @Test(arguments: [Place.inboxTerminalOff, .inboxTerminalOn])
+    func openInboxTerminalShowsAndFocusesTheCurrentItemsTerminal(_ place: Place) throws {
+      let model = try model(needsItem("a"), at: place)
+
+      model.openInboxTerminal()
+
+      #expect(model.showingTerminal)
+      #expect(model.terminalFocus == "a")
+    }
+
+    /// With the Terminal toggle off, `focusTerminal` alone would select the
+    /// item and leave the Inbox.
+    @Test func openInboxTerminalStaysInTheInbox() throws {
+      let model = try model(needsItem("a"), at: .inboxTerminalOff)
+
+      model.openInboxTerminal()
+
+      #expect(model.selection == nil)
+      #expect(model.visibleView == .inbox)
+      #expect(model.currentInboxItem == "a")
     }
 
     @Test(arguments: Place.allCases)
