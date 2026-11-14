@@ -454,7 +454,9 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     #expect(rig.swiftCalls().isEmpty, "\(rig.swiftCalls())")
   }
 
-  @Test(arguments: [["--shards"], ["--shards", "--force-shards", "2"], ["--shards", "2", "--filter", "X"]])
+  @Test(arguments: [
+    ["--shards"], ["--shards", "--force-shards", "2"], ["--shards", "2", "--filter", "X"], ["--shards", "2", "--part"],
+  ])
   func aMalformedShardsCallPrintsTheUsageAndRunsNothing(_ arguments: [String]) throws {
     let rig = try ShardRig()
     defer { rig.stop() }
@@ -495,5 +497,18 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
     if c.arguments.first == "--shards" {
       #expect(Set(rig.shardCalls().map(\.id)) == Set(ShardRig.shardIds), "\(rig.swiftCalls())")
     }
+  }
+
+  /// shard-plan runs MeasureTests in the last part only, and CoreTests in part 1 only.
+  @Test func aPartRunsOnlyThatPartsShards() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(["--shards", "2", "--part", "2/2"], env: ["CI": "true"])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    let ids = Set(rig.shardCalls().map(\.id))
+    #expect(ids.contains("MeasureTests"), "\(ids)")
+    #expect(!ids.contains("CoreTests"), "\(ids)")
   }
 }

@@ -189,6 +189,8 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     JobsCase(cpus: 18, value: "", printed: "4"),
     JobsCase(cpus: 18, value: "6", printed: "6"),
     JobsCase(cpus: 18, value: "0", printed: "0"),
+    JobsCase(cpus: 18, value: "08", printed: "8"),
+    JobsCase(cpus: 18, value: "00", printed: "0"),
   ])
   fileprivate func jobsPrintsTheEffectiveJobCount(_ c: JobsCase) throws {
     let rig = try ScriptRig(cpus: c.cpus)
@@ -213,7 +215,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     #expect(rig.swiftCalls().isEmpty)
   }
 
-  /// bin/test asks for the count before a sharded run, which holds no slot.
+  /// bin/test asks for the count before it holds a slot, on both paths.
   /// A live ticket fills the only slot, so a --jobs that queued would wait.
   @Test func jobsRunsNoSwiftAndTakesNoSlot() throws {
     let rig = try ScriptRig(cpus: 18)
