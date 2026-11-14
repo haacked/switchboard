@@ -713,12 +713,16 @@ final class GitHubPoller {
       }
     } else if let pr = s.facts.pr,
       !mayRead(pr.repo, for: t.host)
-        || (t.branch.key != nil && t.branch.lookedUp != nil && (t.transcript.link == nil || t.transcript.lookedUp))
+        || (t.branch.key != nil
+          && (t.branch.lookedUp != nil || readable(t.branch.key, for: t.host) == nil)
+          && (readable(t.transcript.link, for: t.host) == nil || t.transcript.lookedUp))
     {
-      // GitHub answered that the branch has no PR. Without a branch, as in a
-      // folder outside git, the session keeps the PR that it had. A PR that
-      // `mayRead` refuses was recorded before the check existed, and the
-      // session drops it.
+      // GitHub answered that the branch has no PR. A branch or link in a repo
+      // that `mayRead` refuses counts as one with no PR, because the poller
+      // never looks it up. Without a branch, as in a folder outside git, the
+      // session keeps the PR that it had. The session also drops a recorded
+      // PR in a repo that `mayRead` refuses. An older sbd can record one, and
+      // so can sbd while the host's `repos` still listed the repo.
       event(s.id, "pr", ["pr": .null, "comments": []])
       changed = true
     }

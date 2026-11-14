@@ -185,8 +185,8 @@ extension RequestOrigin {
 
 /// What a host may read of the data that this Mac's GitHub login read. A process on the box chooses its session's
 /// repo through the git remote and the transcript that the poller reads. `GitHubPoller.mayRead` keeps the poller
-/// from reading a repo that the host's `repos` don't list. The event log can still hold data that an earlier sbd read
-/// before that check existed. The copies that reach the box leave that data out.
+/// from reading a repo that the host's `repos` don't list. The event log can still hold data that sbd read while the
+/// host's `repos` listed the repo, or that an older sbd read. The copies that reach the box leave that data out.
 extension Service {
   /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it.
   static let gitHubEventKinds: Set<String> = [
@@ -240,12 +240,18 @@ extension Service {
   /// Throws when host `host` sets a wait that the GitHub poller resolves on session `id`, unless the session is on
   /// `host` and has a PR in a repo that `host` may read. Before a PR exists, the poller takes the repo from the
   /// branch's tracking remote or the transcript, which the box chooses, so an origin remote alone doesn't count.
-  /// It runs on the state queue.
+  /// A deploy wait that names a service also reads the charts repo, so `host` must list that repo too. It runs on
+  /// the state queue.
   func requireGitHubWait(_ wait: Wait, on id: String, from host: String) throws {
     guard GitHubPoller.waitKinds.contains(wait.kind) else { return }
     guard let e = entries[id], e.session.host == host, hostMayRead(e.facts.pr?.repo, on: host) else {
       throw APIError(
         "a \(wait.kind.rawValue) wait from \(host) reads GitHub with this Mac's login, so it needs the session's PR open in a repo that the repos of \(host) in \(home.config) name"
+      )
+    }
+    if wait.service != nil, !hostMayRead(Wait.chartsRepository, on: host) {
+      throw APIError(
+        "a deploy wait with a service from \(host) reads \(Wait.chartsRepository) with this Mac's login, which the repos of \(host) in \(home.config) don't name"
       )
     }
   }

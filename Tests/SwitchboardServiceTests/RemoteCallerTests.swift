@@ -570,7 +570,9 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
     }
   }
 
-  /// The box writes the body of its listed PR, so a `Depends on` line there can name a PR in an unlisted repo.
+  /// The box writes the body of its listed PR, so a `Depends on` line there can name a PR in an unlisted repo. The
+  /// session also holds a stored edge to that PR, as an older sbd or a host whose `repos` once listed the repo
+  /// leaves.
   @Test(.timeLimit(.minutes(1)))
   func aDependsOnLineThatNamesAnUnlistedRepoIsNotRead() throws {
     var listed = listedPR
@@ -581,6 +583,8 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
     try withPoller(github) { service, p, facts in
       try makeCheckout("\(facts.home)/listed", origin: "https://github.com/secret/listed.git")
       add(service, "m1", host: "mini", cwd: "\(facts.home)/listed")
+      let held = try JSON(encoding: [Dependency(via: .body, repo: "secret/vault", number: 4242, state: .open)])
+      service.queue.sync { _ = service.record("m1", "dependencies", ["dependencies": held]) }
 
       // The first poll reads the PR's body, and the second reads the PRs it names.
       poll(p)
@@ -644,8 +648,8 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
     }
   }
 
-  /// An sbd without this check recorded a PR in an unlisted repo for a host's session. The poll doesn't read it, and
-  /// the session drops it.
+  /// A host's session holds a recorded PR in an unlisted repo. An older sbd can record one, and so can sbd while the
+  /// host's `repos` still listed the repo. The poll doesn't read it, and the session drops it.
   @Test(.timeLimit(.minutes(1)))
   func aRecordedPRInAnUnlistedRepoIsNotReadAndIsDropped() throws {
     let github = FakeGraphQL([vaultPR, listedPR])
@@ -661,6 +665,28 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
       #expect(!github.asked("secret/vault"), "\(github.lookups)")
       #expect(service.queue.sync { service.entries["m1"]?.facts.pr } == nil)
       #expect(try prEvents(service, "m1").last?.data["pr"] == .null)
+    }
+  }
+
+  /// The poller never looks up a branch in an unlisted repo, so the session drops the listed PR that its branch had.
+  @Test(.timeLimit(.minutes(1)))
+  func aBranchThatMovesToAnUnlistedRepoDropsItsListedPR() throws {
+    let github = FakeGraphQL([vaultPR, listedPR])
+    try withPoller(github) { service, p, facts in
+      let repo = "\(facts.home)/repo"
+      try makeCheckout(repo, origin: "https://github.com/secret/listed.git")
+      add(service, "m1", host: "mini", cwd: repo)
+
+      poll(p)
+
+      #expect(service.queue.sync { service.entries["m1"]?.facts.pr?.id } == listedPR.id)
+
+      try sh("git remote set-url origin https://github.com/secret/vault.git", in: repo)
+      poll(p)
+
+      #expect(p.queue.sync { p.tracked["m1"]?.branch.key?.repo } == "secret/vault")
+      #expect(!github.asked("secret/vault"), "\(github.lookups)")
+      #expect(service.queue.sync { service.entries["m1"]?.facts.pr } == nil)
     }
   }
 

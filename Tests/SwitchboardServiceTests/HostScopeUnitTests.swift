@@ -985,6 +985,23 @@ private func text(_ answer: Response) -> String {
     }
   }
 
+  /// A deploy wait that names a service reads the charts repo, which mini's `repos` don't list.
+  @Test(.timeLimit(.minutes(1)))
+  func aDeployWaitWithAServiceFromTheHostIsRefusedWhenTheHostDoesNotListCharts() throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: true)
+      let before = try service.scopeState()
+
+      let answer = service.handle(
+        Request(op: "wait", args: ["session": "m1", "kind": "deploy", "target": "77", "service": "vault-api"]),
+        origin: .remote("mini"))
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains(Wait.chartsRepository) == true, "\(answer.error ?? "")")
+      #expect(try service.scopeState() == before)
+    }
+  }
+
   @Test(.timeLimit(.minutes(1)))
   func aGitHubWaitFromThisMacOnAnUnlistedRepoIsSet() throws {
     try withSessions(hosts: listedHosts) { service in

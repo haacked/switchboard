@@ -52,7 +52,7 @@ extension GitHubPoller {
       let pr = currentPR(s)
       let old = s.facts.dependencies
       // `withState` reads the PRs that the poller read for any session. An edge in a repo that the session's host
-      // may not read therefore never reaches it.
+      // may not read therefore never reaches `withState`.
       let kept = readableEdges(s)
       var edges = pr.map { dependencies(of: s, $0, owned: owned, recorded: kept) } ?? []
       if pr?.state == .open {
