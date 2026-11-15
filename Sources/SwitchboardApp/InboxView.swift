@@ -30,10 +30,27 @@ struct InboxView: View {
       }
     } else {
       ListDetailSplit {
+        // The list stays mounted under the empty state. A new list would take the focus from the detail's message
+        // field when an item arrives, and ⌘L would have no list to focus.
         TriageList()
+          .overlay {
+            if model.triage.isEmpty {
+              ContentUnavailableView(
+                Self.emptyTitle(
+                  hiddenNeedingYou: model.hiddenNeedingYou, hasPlanProposals: !model.planProposals.isEmpty),
+                systemImage: "checkmark.circle")
+            }
+          }
       } detail: {
         if let id = model.currentInboxItem, let session = model.sessions.first(where: { $0.id == id }) {
-          TriageDetail(session: session).id(session.id)
+          VStack(spacing: 0) {
+            // The detail keeps an answered item while Claude works on it, so the banner says that it left the list.
+            if model.leftInboxItem != nil {
+              LeftInboxBanner(session: session, hasNext: !model.triage.isEmpty)
+              Divider()
+            }
+            TriageDetail(session: session).id(session.id)
+          }
         } else {
           ContentUnavailableView("Select an item", systemImage: "tray")
         }
@@ -136,5 +153,39 @@ struct TriageRow: View {
     .contextMenu { SnoozeMenuItems(session: session) }
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(current ? .isSelected : [])
+  }
+}
+
+/// The line above an Inbox item that is no longer in the Inbox, such as one Claude works on after an answer. The
+/// header below it has the Open button.
+struct LeftInboxBanner: View {
+  @EnvironmentObject var model: BoardModel
+  let session: SessionSummary
+  let hasNext: Bool
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "arrow.uturn.right.circle").foregroundStyle(.secondary).accessibilityHidden(true)
+      Text(Self.message(session.state)).foregroundStyle(.secondary).lineLimit(1)
+      Spacer(minLength: 0)
+      if hasNext {
+        Button("Next Item") { model.moveInbox(by: 1) }.fixedSize()
+          .help("Show the first item that still needs you")
+      }
+    }
+    .font(.callout)
+    .padding(.horizontal, 10)
+    .padding(.vertical, 6)
+  }
+
+  /// What the banner says for a session in `state`.
+  static func message(_ state: AttentionState) -> String { "Left the Inbox: \(state.title)" }
+}
+
+extension BoardModel {
+  /// The shown Inbox session when it is not in the Inbox list, such as one Claude works on after an answer.
+  var leftInboxItem: SessionSummary? {
+    guard let id = currentInboxItem, !triage.contains(where: { $0.id == id }) else { return nil }
+    return sessions.first { $0.id == id }
   }
 }

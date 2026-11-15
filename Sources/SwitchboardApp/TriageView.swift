@@ -77,27 +77,37 @@ struct TriageDetail: View {
   }
 
   private var bar: some View {
+    // Every item keeps to one line. When the pane is narrow, the repo and branch truncate first, then the PR link,
+    // then the name. The buttons keep their full width.
     HStack(spacing: 8) {
-      Text(model.inboxName(session)).fontWeight(.medium)
+      Text(model.inboxName(session)).fontWeight(.medium).lineLimit(1).layoutPriority(2)
+        .help(model.inboxName(session))
       if let repo = session.repoFolder {
-        Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary)
+        let name = repo.split(separator: "/").last.map(String.init) ?? repo
+        Text(name).foregroundStyle(.secondary).lineLimit(1).help(name)
       }
-      if let branch = session.branch { Text(branch).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle) }
+      if let branch = session.branch {
+        Text(branch).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(branch)
+      }
       if let link = Self.prLink(for: session) {
         HStack(spacing: 4) {
-          PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link)
+          PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link).lineLimit(1)
+            .help(link.label)
           if let owners = link.owners { CodeOwnerShield(status: owners) }
           if let head = link.head {
-            Text("uses \(head)").font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-              .help("The PR's branch. This folder is on \(session.branch ?? "another branch").")
+            Text("uses \(head)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+              .help("The PR's branch, \(head). This folder is on \(session.branch ?? "another branch").")
           }
         }
+        .layoutPriority(1)
       }
-      Spacer()
+      Spacer(minLength: 0)
       Button("Open") { model.selection = session.id }
+        .fixedSize()
         .help("Show the session in the sidebar, with its terminals")
       Toggle("Terminal", isOn: $model.showingTerminal)
         .toggleStyle(.button)
+        .fixedSize()
         .disabled(!session.runsClaude)
         .help(
           session.waitsToStart
