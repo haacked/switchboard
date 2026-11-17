@@ -18,13 +18,22 @@ func account(_ a: Args) {
     printAccounts(accounts, json: false)
     printMove(decode(moved, as: AccountMove.self))
   case "move":
-    guard words.count == 2 else { die("usage: sb account move <name|folder> [--dry-run]") }
-    let result = call(
-      "account-move", ["account": .string(words[1]), "dryRun": .bool(a.switches.contains("--dry-run"))])
-    if a.json { return printJSON(result) }
-    printMove(decode(result, as: AccountMove.self), dryRun: a.switches.contains("--dry-run"))
+    guard words.count == 2 else { die("usage: sb account move <name|folder> [--session <ref>]... [--dry-run]") }
+    let sessions = a.allValues["--session"] ?? []
+    let dryRun = a.switches.contains("--dry-run")
+    var args: [String: JSON] = ["account": .string(words[1]), "dryRun": .bool(dryRun)]
+    if !sessions.isEmpty { args["sessions"] = .array(sessions.map(JSON.string)) }
+    let result = call("account-move", args)
+    let move = decode(result, as: AccountMove.self)
+    if a.json { printJSON(result) } else { printMove(move, dryRun: dryRun) }
+    if !sessions.isEmpty && !move.blocked.isEmpty {
+      let n = move.blocked.count
+      die("\(n) named session\(n == 1 ? "" : "s") did not move")
+    }
   default:
-    die("usage: sb account [use <name|folder> [--move | --new-only] | move <name|folder> [--dry-run]]")
+    die(
+      "usage: sb account [use <name|folder> [--move | --new-only] | move <name|folder> [--session <ref>]... [--dry-run]]"
+    )
   }
 }
 

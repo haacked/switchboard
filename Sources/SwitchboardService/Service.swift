@@ -510,6 +510,8 @@ public final class Service {
       return try sendWithImages(request, hookGone: hookGone)
     case "account-use", "account-move", "group-account":
       try requireSignedIn(request.args)
+    case "stop":
+      return .success(try stopRequest(request, origin: origin))
     default:
       break
     }
@@ -643,10 +645,6 @@ public final class Service {
       return .object(reply)
     case "dependency-resolved":
       return try dependencyResolved(args)
-    case "stop":
-      let id = try lookup(args)
-      try stop(id, reason: "asked")
-      return try JSON(encoding: summary(id, for: origin))
     case "pause":
       return try pauseRequest(args)
     case "resume":
@@ -1658,13 +1656,32 @@ public final class Service {
     while FileManager.default.fileExists(atPath: "\(home.path)/\(gate)") { usleep(50_000) }
   }
 
-  /// Defers the session's held questions first, so that their cards stay.
-  func stop(_ id: String, reason: String) throws {
+  /// Defers the session's held questions first, so that their cards stay. Returns the pid that it signalled.
+  @discardableResult func stop(_ id: String, reason: String) throws -> Int {
     try requireRead(id)
     guard case .running(let pid) = claudeState(id) else { throw APIError("\(id) is not running") }
     deferQuestions(id)
     try stopClaude(id, pid)
     record(id, "stopped", ["reason": .string(reason), "pid": .number(Double(pid))])
+    return pid
+  }
+
+  /// Answers a `stop` once claude exits, or after 5 s. A request that follows, such as an `account-move`,
+  /// refuses a session whose claude still runs. The wait runs off the state queue.
+  func stopRequest(_ request: Request, origin: RequestOrigin) throws -> JSON {
+    var stopped: (id: String, pid: Int, site: any SessionSite)?
+    _ = try prepared(request, origin: origin) {
+      let id = try lookup(request.args)
+      stopped = (id, try stop(id, reason: "asked"), try site(of: id))
+      return .null
+    }
+    guard let stopped else { throw APIError("sbd stopped no claude") }
+    _ = try? waitForExit([stopped.pid], seconds: 5, at: stopped.site)
+    let fresh = buildSnapshot()
+    return try queue.sync {
+      install(fresh)
+      return try JSON(encoding: summary(stopped.id, for: origin))
+    }
   }
 
   /// Stops claude, removes the worktree when asked, then closes the panes and

@@ -49,8 +49,10 @@ let usage = """
                                   run new sessions under this account. --move
                                   moves the sessions whose claude is stopped
                                   too. A terminal asks when neither is given
-    account move <name|folder> [--dry-run]
-                                  move the sessions whose claude is stopped
+    account move <name|folder> [--session <ref>]... [--dry-run]
+                                  move the sessions whose claude is stopped.
+                                  --session moves only the sessions it names,
+                                  and exits nonzero when one of them stays
     usage                         show each account's use of its 5-hour and
                                   weekly limits, and when each resets
     manager [<conv>] [<text>]     open a Manager conversation, a session that manages

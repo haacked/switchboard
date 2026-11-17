@@ -113,7 +113,7 @@ extension Service {
   }
 
   /// Waits up to `seconds` for every pid to exit at the site. Returns the pids that still run.
-  private func waitForExit(_ pids: Set<Int>, seconds: TimeInterval, at site: any SessionSite) throws -> Set<Int> {
+  func waitForExit(_ pids: Set<Int>, seconds: TimeInterval, at site: any SessionSite) throws -> Set<Int> {
     let deadline = Date().addingTimeInterval(seconds)
     var alive = try site.alive(pids)
     while !alive.isEmpty, Date() < deadline {

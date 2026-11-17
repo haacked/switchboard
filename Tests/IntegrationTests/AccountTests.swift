@@ -106,12 +106,20 @@ import Testing
   }
 
   /// A session under A that has answered one prompt and then stopped.
-  func stoppedSession(_ sbd: Instance, prompt: String = "hello") throws -> SessionSummary {
+  func stoppedSession(_ sbd: Instance, prompt: String = "hello", name: String? = nil) throws -> SessionSummary {
     try sbd.sb("account", "use", "A")
-    let s = try decode(sbd.sb("new", "--json", "--prompt", prompt, sbd.work))
+    let s = try decode(
+      sbd.sb(["new", "--json", "--prompt", prompt] + (name.map { ["--name", $0] } ?? []) + [sbd.work]))
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: \(prompt)" }
     try sbd.sb("stop", s.id)
     return try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+  }
+
+  /// A move that names a session that stays, which makes `sb` exit nonzero.
+  func refusedMove(_ sbd: Instance, _ extra: String...) throws -> AccountMove {
+    let r = try sbd.run(["account", "move", "--json", "B"] + extra)
+    #expect(r.status != 0)
+    return try JSONCoding.decode(AccountMove.self, from: r.stdout)
   }
 
   func transcript(_ sbd: Instance, _ account: String, _ s: SessionSummary) -> String? {
@@ -325,6 +333,77 @@ import Testing
     let plan = try move(sbd, "--dry-run")
     #expect(plan.moved.isEmpty)
     #expect(plan.blocked.map(\.session) == [s.id])
+  }
+
+  @Test func theSessionFlagMovesOnlyTheNamedSessions() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let named = try stoppedSession(sbd, name: "first")
+    let other = try stoppedSession(sbd, prompt: "second", name: "second")
+
+    let plan = try move(sbd, "--dry-run", "--session", "first")
+    #expect(plan.moved == [named.id])
+    #expect(plan.blocked.isEmpty)
+    #expect(try sbd.get(named.id).account == sbd.account("A"))
+
+    let result = try move(sbd, "--session", named.id, "--session", "first")
+    #expect(result.moved == [named.id])
+    #expect(result.blocked.isEmpty)
+    #expect(try sbd.get(named.id).account == sbd.account("B"))
+    #expect(try sbd.get(other.id).account == sbd.account("A"))
+    #expect(transcript(sbd, "B", other) == nil)
+
+    let again = try refusedMove(sbd, "--session", "first")
+    #expect(again.moved.isEmpty)
+    #expect(again.blocked.map(\.session) == [named.id])
+    #expect(again.blocked.first?.reason.contains("already runs under") == true)
+  }
+
+  @Test func aNamedSessionWhoseClaudeRunsFailsTheMoveWhileTheOthersMove() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    try sbd.sb("account", "use", "A")
+    let live = try sbd.idleSession(name: "live")
+    let stopped = try stoppedSession(sbd, prompt: "second", name: "stopped")
+
+    let result = try refusedMove(sbd, "--session", "live", "--session", "stopped")
+    #expect(result.account == sbd.account("B"))
+    #expect(result.moved == [stopped.id])
+    #expect(result.blocked.map(\.session) == [live.id])
+    #expect(result.blocked.first?.name == "live")
+    #expect(result.blocked.first?.reason.contains("Stop it first") == true)
+    #expect(try sbd.get(stopped.id).account == sbd.account("B"))
+    #expect(try sbd.get(live.id).account == sbd.account("A"))
+    #expect(transcript(sbd, "B", live) == nil)
+  }
+
+  @Test func aSessionListWithAnUnknownRefOrNoSessionMovesNothing() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    let s = try stoppedSession(sbd, name: "first")
+
+    let error = try #require(throws: TestError.self) {
+      try sbd.sb("account", "move", "--json", "B", "--session", "first", "--session", "nosuch")
+    }
+    #expect(error.description.contains("no session nosuch"))
+    for value: JSON in [.array([]), .string(s.id)] {
+      let line = Instance.requestLine("account-move", ["account": "B", "sessions": value])
+      let answer = try #require(try sbd.sendLine(line, to: sbd.home.socket))
+      #expect(answer["ok"]?.bool == false, "sessions: \(value.text)")
+    }
+    #expect(try sbd.get(s.id).account == sbd.account("A"))
+    #expect(transcript(sbd, "B", s) == nil)
+  }
+
+  /// The stub's claude exits 1 s after SIGTERM, as claude takes a moment to. `stop` answers only after the exit.
+  @Test func aMoveRightAfterTheStopTakesTheSession() throws {
+    let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
+    try sbd.sb("account", "use", "A")
+    let s = try sbd.new(prompt: "linger 1", name: "first")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "I'll linger 1 s when I stop." && $0.claudePid != nil }
+
+    try sbd.sb("stop", "first")
+    let result = try move(sbd, "--session", "first")
+
+    #expect(result.moved == [s.id])
+    #expect(result.blocked.isEmpty)
   }
 
   @Test func theUseCommandRefusesBothAnswers() throws {

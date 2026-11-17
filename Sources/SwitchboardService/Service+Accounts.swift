@@ -118,27 +118,46 @@ extension Service {
   /// lists the ones that would move. Only a session whose claude is stopped
   /// moves: a claude that runs, or a message on its way, keeps writing the
   /// old account's transcript, and a second claude that resumes the
-  /// conversation forks it.
+  /// conversation forks it. `sessions`, a list of session refs, limits the
+  /// move to those sessions. The result lists each named session that does
+  /// not move in `blocked`, including one already on the account.
   func moveSessions(_ args: JSON) throws -> AccountMove {
     guard let ref = args["account"]?.string, !ref.isEmpty else { throw APIError("name an account") }
     let target = try resolveAccount(ref)
     let dryRun = args["dryRun"]?.bool ?? false
+    let named = try args["sessions"].map { value in
+      guard let refs = value.array, !refs.isEmpty else { throw APIError("sessions is a list of one or more sessions") }
+      return try Set(refs.map { try lookup(["session": $0]) })
+    }
     var result = AccountMove(account: target)
-    for id in entries.keys.sorted() {
-      guard let session = entries[id]?.session, !session.cwd.isEmpty, claudeAccount(of: id) != target else { continue }
+    for id in named?.sorted() ?? entries.keys.sorted() {
+      guard let session = entries[id]?.session else { continue }
+      let block = { (reason: String) in result.blocked.append(.init(session: id, name: session.name, reason: reason)) }
+      if let reason = notMovable(session, to: target) {
+        if named != nil { block(reason) }
+        continue
+      }
       if let reason = moveRefusal(id, to: target) {
-        result.blocked.append(.init(session: id, name: session.name, reason: reason))
+        block(reason)
         continue
       }
       do {
         if !dryRun { try move(id, to: target) }
         result.moved.append(id)
       } catch {
-        result.blocked.append(.init(session: id, name: session.name, reason: "\(error)"))
+        block("\(error)")
       }
     }
     if !dryRun && !result.moved.isEmpty { logLine("moved \(result.moved.count) sessions to the account \(target)") }
     return result
+  }
+
+  /// Why the session is not one that a move takes. A move of every session
+  /// skips such a session without listing it.
+  private func notMovable(_ session: Session, to target: String) -> String? {
+    if session.cwd.isEmpty { return "it has not started" }
+    if claudeAccount(of: session.id) == target { return "it already runs under \(ClaudeAccount.name(target))" }
+    return nil
   }
 
   /// Why the session cannot move now, so that `dryRun` lists the same
