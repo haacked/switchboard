@@ -187,6 +187,20 @@ import Testing
     #expect(text.contains("Ask Ana first."), "\(text)")
   }
 
+  /// `show` keeps a note's line breaks, indents each later line, and names who wrote each note.
+  @Test func showIndentsANotesLaterLinesAndNamesItsAuthor() throws {
+    let sbd = try Instance()
+    _ = try shared.add(sbd, "Flags")
+    try sbd.sb("group", "note", "Flags", "First line.\nSecond line.")
+    try sbd.sb(["group", "note", "Flags", "Ask Ana first."], env: shared.inside(try sbd.new(name: "writer").id))
+
+    let lines = try sbd.sb("group", "show", "Flags").split(separator: "\n")
+
+    #expect(lines.contains("  note by you: First line."), "\(lines)")
+    #expect(lines.contains("    Second line."), "\(lines)")
+    #expect(lines.contains("  note by Claude: Ask Ana first."), "\(lines)")
+  }
+
   @Test func showPrintsTheArtifactsOfTheGroupsSessions() throws {
     let sbd = try Instance()
     let a = try sbd.new(name: "alpha")

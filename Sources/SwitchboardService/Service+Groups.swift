@@ -105,17 +105,17 @@ extension Service {
     }
   }
 
-  /// The group of the session that starts a new one, or nil without a parent.
+  /// The group of the session that `id` names, or nil without one.
   /// A chat's group is the one it manages, while that group exists.
-  func groupOfParent(_ parent: String?) -> String? {
-    guard let session = parent.flatMap({ entries[$0]?.session }) else { return nil }
+  func groupOf(_ id: String?) -> String? {
+    guard let session = id.flatMap({ entries[$0]?.session }) else { return nil }
     if let chat = session.chat { return groups[chat] == nil ? nil : chat }
     return session.group
   }
 
   /// The group that a new session joins: the one that `ref` names, else its parent's.
   func groupOfNew(_ ref: String?, parent: String?) throws -> String? {
-    guard let ref else { return groupOfParent(parent) }
+    guard let ref else { return groupOf(parent) }
     return try lookupGroup(["group": .string(ref)])
   }
 
@@ -267,7 +267,7 @@ extension Service {
       throw APIError("name a group. In a Switchboard session, the group defaults to the session's group")
     }
     let session = try lookup(args)
-    guard let own = groupOfParent(session).flatMap({ groups[$0] }) else {
+    guard let own = groupOf(session).flatMap({ groups[$0] }) else {
       throw APIError("\(session) is in no group. Name a group: sb group show <group>")
     }
     if case .remote(let host) = origin, let key = args["group"]?.string,
@@ -307,7 +307,8 @@ extension Service {
   func groupContextNotice(_ id: String) -> String? {
     guard let e = entries[id], let group = contextGroup(of: e.session) else { return nil }
     let heardBefore = e.facts.groupContextHeard != nil
-    guard hearGroupContext(id), heardBefore else { return nil }
+    let changed = hearGroupContext(id)
+    guard changed, heardBefore else { return nil }
     return GroupContext.changedNotice(name: group.name, id: group.id)
   }
 

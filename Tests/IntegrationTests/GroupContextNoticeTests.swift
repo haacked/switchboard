@@ -173,6 +173,37 @@ import Testing
     #expect(notices(sbd, b, g, after: beforeB).count == 1, "\(contexts(sbd, b))")
   }
 
+  /// The group's id is part of the context, so a running session that joins the group, from no group or from
+  /// another one, hears the line once.
+  @Test(arguments: [false, true]) func aRunningSessionMovedIntoTheGroupHearsItOnce(fromAnotherGroup: Bool) throws {
+    let sbd = try Instance()
+    let g = try addGroup(sbd, "Flags")
+    let s = try fromAnotherGroup ? member(sbd, addGroup(sbd, "Billing")) : sbd.idleSession(name: "loose")
+    let before = contexts(sbd, s).count
+
+    try sbd.sb("group", "move", s.id, "--to", "Flags")
+    try prompt(sbd, s, "next")
+
+    #expect(notices(sbd, s, g, after: before).count == 1, "\(contexts(sbd, s))")
+    let later = contexts(sbd, s).count
+    try prompt(sbd, s, "again")
+    #expect(notices(sbd, s, g, after: later).isEmpty, "\(contexts(sbd, s))")
+  }
+
+  /// sbd keeps what each member heard across a restart, from a snapshot or from a replay.
+  @Test(arguments: [false, true]) func aChangeBeforeARestartIsHeardOnceAfterIt(snapshot: Bool) throws {
+    let sbd = try Instance()
+    let g = try addGroup(sbd, "Flags")
+    let s = try member(sbd, g)
+    let before = contexts(sbd, s).count
+
+    try sbd.sb("group", "note", "Flags", "Ask Ana before the rollout.")
+    try ChatReadTests().restart(sbd, snapshot: snapshot, checking: [s.id])
+    try prompt(sbd, s, "next")
+
+    #expect(notices(sbd, s, g, after: before).count == 1, "\(contexts(sbd, s))")
+  }
+
   // MARK: Who hears nothing
 
   @Test func aSessionOutsideTheGroupHearsNothing() throws {
