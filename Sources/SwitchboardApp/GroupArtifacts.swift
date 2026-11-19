@@ -49,19 +49,13 @@ struct GroupArtifactRows {
 /// The lane link that opens a group's artifact list. It draws nothing when the group has no artifacts.
 struct GroupArtifactsLink: View {
   let group: GroupSummary
-  @State private var showing = false
 
   var body: some View {
     if let title = GroupArtifactRows.linkTitle(group) {
-      Button(title) { showing = true }
-        .buttonStyle(.link).font(.caption).lineLimit(1)
-        .help("Show the artifacts that this group's sessions published")
-        .accessibilityLabel("\(title) in group \(group.name)")
-        .accessibilityIdentifier("group-artifacts-\(group.id)")
-        .popover(isPresented: $showing, arrowEdge: .bottom) { GroupArtifactList(group: group).frame(width: 420) }
-        // `showing` stays true when the link leaves the view because the group has no artifacts. Without the reset,
-        // the popover would open by itself when the group lists an artifact again.
-        .onDisappear { showing = false }
+      GroupLaneLink(
+        title: title, help: "Show the artifacts that this group's sessions published",
+        label: "\(title) in group \(group.name)", id: "group-artifacts-\(group.id)", width: 420
+      ) { GroupArtifactList(group: group) }
     }
   }
 }
