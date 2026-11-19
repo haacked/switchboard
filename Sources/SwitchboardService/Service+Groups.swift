@@ -260,7 +260,8 @@ extension Service {
 
   /// The group that `group-show` reads: the one that `group` names, else the group of the session that `session`
   /// names. A request from a host reads only the group of the host's session that it names, so it never learns
-  /// another group's name or text.
+  /// the name or text of a group that holds none of the host's sessions. Any process on the host can name any of
+  /// the host's sessions.
   func groupShow(_ args: JSON, origin: RequestOrigin) throws -> GroupSummary {
     if origin == .mac, args["group"] != nil { return groupSummary(try lookupGroup(args)) }
     guard args["session"] != nil else {
@@ -273,7 +274,7 @@ extension Service {
     if case .remote(let host) = origin, let key = args["group"]?.string,
       (try? resolveRef(key, "group", [(own.id, own.name)])) == nil
     {
-      throw APIError("a session on \(host) reads only its own group")
+      throw APIError("a request from \(host) reads only the group of the session that it names")
     }
     return groupSummary(own.id)
   }
