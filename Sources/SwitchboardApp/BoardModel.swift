@@ -1045,6 +1045,18 @@ final class BoardModel: ObservableObject {
     }
     return true
   }
+
+  /// Saves a draft from the description field. A draft that still matches `opened`, the text that the field opened
+  /// with, sends nothing. This holds even when sbd's text changed while the field was open.
+  @discardableResult
+  func describeGroup(_ id: String, _ text: String, opened: String?) -> Bool {
+    // A refused draft falls through, so the other overload reports why. `try?` would read it as a blank draft.
+    do {
+      if try SessionGroup.cleanDescription(text) == opened { return true }
+    } catch {}
+    return describeGroup(id, text)
+  }
+
   /// The ids, in the given order, that `moveToGroup` would move to `group`: each names a work session on the
   /// Board that is not already in that lane. None qualify when sbd didn't list `group`.
   func movableIDs(_ ids: [String], to group: String?) -> [String] {

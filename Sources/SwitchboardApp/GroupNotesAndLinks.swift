@@ -88,14 +88,17 @@ struct GroupLinkList: View {
       HStack(spacing: 8) {
         TextField("Link title (optional)", text: $title).onSubmit(add)
         Button("Add", action: add)
-          .disabled(url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          .disabled(!hasURL)
           .clickAnchor("group-link-add-\(group.id)")
       }
     }
     .padding(12)
   }
 
+  private var hasURL: Bool { !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
   private func add() {
+    guard hasURL else { return }
     let sent = (url, title)
     model.addGroupLink(group.id, url: url, title: title) {
       // A failed request keeps the text. The user can then fix it and send it again.

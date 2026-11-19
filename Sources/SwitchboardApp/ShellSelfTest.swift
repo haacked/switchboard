@@ -262,11 +262,8 @@ enum ShellSelfTest {
   /// Types `text` into the text field whose placeholder is `placeholder`, in any of the app's windows, as an input
   /// method inserts it.
   private static func fill(placeholder: String, with text: String) -> String {
-    func field(in view: NSView) -> NSTextField? {
-      if let field = view as? NSTextField, field.placeholderString == placeholder { return field }
-      return view.subviews.lazy.compactMap(field).first
-    }
-    guard let field = roots.lazy.compactMap(field).first else {
+    guard let field = roots.lazy.compactMap({ TerminalSelfTest.textField(placeholder: placeholder, in: $0) }).first
+    else {
       return "no field \(placeholder)"
     }
     guard field.window?.makeFirstResponder(field) == true, let editor = field.currentEditor() as? NSTextView else {

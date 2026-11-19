@@ -77,6 +77,38 @@ import Testing
     #expect(got.first?.args == ["group": "g1", "text": "Ship the flag cache.", "by": "you"])
   }
 
+  /// Claude rewrites the description while the field is open with the old text. Leaving the field unchanged must not
+  /// replace Claude's newer text with the old text as yours.
+  @Test func anUnchangedDraftKeepsTextThatSbdChangedWhileTheFieldWasOpen() async {
+    let (model, sent) = model(description: "Ship the flag cache.", by: .claude)
+
+    #expect(model.describeGroup("g1", "Ship the cache.", opened: "Ship the cache."))
+
+    #expect(await requests(model, sent).isEmpty)
+    #expect(model.groups[0].description == "Ship the flag cache.")
+    #expect(model.groups[0].descriptionBy == .claude)
+  }
+
+  /// Claude describes the group while the field is open on an empty group. Leaving the field blank must not clear
+  /// Claude's text.
+  @Test func aBlankDraftKeepsADescriptionAddedWhileTheFieldWasOpen() async {
+    let (model, sent) = model(description: "Ship the cache.", by: .claude)
+
+    #expect(model.describeGroup("g1", "  ", opened: nil))
+
+    #expect(await requests(model, sent).isEmpty)
+    #expect(model.groups[0].description == "Ship the cache.")
+  }
+
+  @Test func aDraftOverTheLimitIsRefusedEvenWhenTheFieldOpenedEmpty() async {
+    let (model, sent) = model()
+
+    #expect(!model.describeGroup("g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1), opened: nil))
+
+    #expect(model.actionError != nil)
+    #expect(await requests(model, sent).isEmpty)
+  }
+
   // MARK: Links
 
   @Test func addSendsTheTrimmedURLAndTitle() async {
@@ -106,6 +138,34 @@ import Testing
 
     #expect(model.actionError != nil)
     #expect(await requests(model, sent).isEmpty)
+    #expect(!added)
+  }
+
+  /// The add form clears its fields only when `added` runs.
+  @Test func addRunsAddedOnceSbdStoresTheLink() async {
+    let (model, sent) = model()
+    var added = false
+
+    model.addGroupLink("g1", url: "https://example.com/rfc", title: "") { added = true }
+
+    await sent.wait(for: "group-link-add")
+    await settle { added }
+    #expect(added)
+  }
+
+  /// A refusal from sbd, such as a URL that the group already has, keeps what the user typed.
+  @Test func addDoesNotRunAddedWhenSbdRefusesTheLink() async {
+    let (model, sent) = recordingModel(refuse: { op, _ in
+      op == "group-link-add" ? "Flags already has a link to https://example.com/rfc" : nil
+    })
+    model.groups = [GroupSummary(SessionGroup(id: "g1", name: "Flags", created: 0), sessions: [])]
+    var added = false
+
+    model.addGroupLink("g1", url: "https://example.com/rfc", title: "") { added = true }
+
+    await sent.wait(for: "group-link-add")
+    await settle { model.actionError != nil }
+    #expect(model.actionError?.contains("already has a link") == true)
     #expect(!added)
   }
 

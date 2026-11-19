@@ -10,6 +10,7 @@ struct GroupDescriptionView: View {
   let group: GroupSummary
   @State private var editing = false
   @State private var draft = ""
+  @State private var opened: String?
   @FocusState private var focused: Bool
 
   var body: some View {
@@ -44,6 +45,7 @@ struct GroupDescriptionView: View {
   private var descriptionButton: some View {
     Button {
       draft = group.description ?? ""
+      opened = group.description
       editing = true
     } label: {
       InlineText(plain: group.description ?? "Add a description", links: false)
@@ -79,6 +81,6 @@ struct GroupDescriptionView: View {
 
   /// Text that the model refuses stays in the open field, so the user can shorten it.
   private func save() {
-    if model.describeGroup(group.id, draft) { editing = false }
+    if model.describeGroup(group.id, draft, opened: opened) { editing = false }
   }
 }
