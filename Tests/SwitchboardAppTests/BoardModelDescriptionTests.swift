@@ -24,7 +24,7 @@ import Testing
         sent.resume(returning: (op, args))
         return .null
       }
-      model.describeGroup("g1", text)
+      model.describeGroup("g1", text, opened: model.groups.first?.description)
       shown = model.groups.first { $0.id == "g1" }?.description
     }
     return (op, args, shown)
@@ -58,8 +58,9 @@ import Testing
       return .null
     }
 
-    model.describeGroup("g1", "Flag evaluation")
-    model.describeGroup("g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1))
+    model.describeGroup("g1", "Flag evaluation", opened: "Flag evaluation")
+    model.describeGroup(
+      "g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1), opened: "Flag evaluation")
 
     #expect(sent.value == 0)
     #expect(model.groups[0].description == "Flag evaluation")
@@ -71,8 +72,10 @@ import Testing
     let model = model(description: "Flag evaluation")
     model.send = { _, _ in .null }
 
-    #expect(model.describeGroup("g1", "Flag evaluation"))
-    #expect(!model.describeGroup("g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1)))
-    #expect(model.describeGroup("g1", "New text"))
+    #expect(model.describeGroup("g1", "Flag evaluation", opened: "Flag evaluation"))
+    #expect(
+      !model.describeGroup(
+        "g1", String(repeating: "a", count: SessionGroup.descriptionLimit + 1), opened: "Flag evaluation"))
+    #expect(model.describeGroup("g1", "New text", opened: "Flag evaluation"))
   }
 }

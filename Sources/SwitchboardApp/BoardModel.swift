@@ -1022,11 +1022,12 @@ final class BoardModel: ObservableObject {
   static let startNowHelp =
     "Start claude now. When the live cap is full, sbd stops the lowest-priority idle session to make room."
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
-  /// Sets the group's description, or clears it when `text` is blank. The
-  /// Board shows the new text before sbd answers. It returns false when it
+  /// Saves the description field's draft as the group's description, or clears it when the draft is blank. `opened`
+  /// is the text that the field opened with. A draft that still matches it sends nothing, even when sbd's text
+  /// changed while the field was open. The Board shows the new text before sbd answers. It returns false when it
   /// refuses the text, such as text over the length limit.
   @discardableResult
-  func describeGroup(_ id: String, _ text: String) -> Bool {
+  func describeGroup(_ id: String, _ text: String, opened: String?) -> Bool {
     guard let index = groups.firstIndex(where: { $0.id == id }) else { return true }
     let clean: String?
     do {
@@ -1035,7 +1036,7 @@ final class BoardModel: ObservableObject {
       actionError = "\(error)"
       return false
     }
-    guard clean != groups[index].description else { return true }
+    guard clean != opened else { return true }
     groups[index].description = clean
     groups[index].descriptionBy = nil
     if let clean {
@@ -1044,17 +1045,6 @@ final class BoardModel: ObservableObject {
       perform("group-describe", ["group": .string(id), "clear": true])
     }
     return true
-  }
-
-  /// Saves a draft from the description field. A draft that still matches `opened`, the text that the field opened
-  /// with, sends nothing. This holds even when sbd's text changed while the field was open.
-  @discardableResult
-  func describeGroup(_ id: String, _ text: String, opened: String?) -> Bool {
-    // A refused draft falls through, so the other overload reports why. `try?` would read it as a blank draft.
-    do {
-      if try SessionGroup.cleanDescription(text) == opened { return true }
-    } catch {}
-    return describeGroup(id, text)
   }
 
   /// The ids, in the given order, that `moveToGroup` would move to `group`: each names a work session on the

@@ -61,7 +61,7 @@ import Testing
   @Test func anUnchangedEditKeepsClaudeAsTheAuthor() async {
     let (model, sent) = model(description: "Ship the cache.", by: .claude)
 
-    model.describeGroup("g1", "Ship the cache.")
+    model.describeGroup("g1", "Ship the cache.", opened: "Ship the cache.")
 
     #expect(await requests(model, sent).isEmpty)
     #expect(model.groups[0].descriptionBy == .claude)
@@ -70,7 +70,7 @@ import Testing
   @Test func anEditThatChangesClaudesTextMakesItYours() async {
     let (model, sent) = model(description: "Ship the cache.", by: .claude)
 
-    model.describeGroup("g1", "Ship the flag cache.")
+    model.describeGroup("g1", "Ship the flag cache.", opened: "Ship the cache.")
 
     #expect(model.groups[0].descriptionBy == nil)
     let got = await requests(model, sent)
