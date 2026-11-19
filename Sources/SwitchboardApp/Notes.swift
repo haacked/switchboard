@@ -139,18 +139,18 @@ struct NotesList: View {
       if let badge = NotesBadge(session) {
         ForEach(badge.open, id: \.id) { note in
           HStack(alignment: .firstTextBaseline, spacing: 8) {
-            row(note)
+            NoteRow(note: note)
             Spacer(minLength: 0)
             Button("Resolve") { model.resolveNote(session.id, note: note.id) }
               .help("Mark the to-do done. It stays in the notes as resolved.")
               .accessibilityLabel("Resolve: \(note.text)")
           }
         }
-        ForEach(badge.plain, id: \.id) { row($0) }
+        ForEach(badge.plain, id: \.id) { NoteRow(note: $0) }
         if !badge.resolved.isEmpty {
           DisclosureGroup(badge.resolvedTitle, isExpanded: $showingResolved) {
             VStack(alignment: .leading, spacing: 8) {
-              ForEach(badge.resolved, id: \.id) { row($0).foregroundStyle(.secondary) }
+              ForEach(badge.resolved, id: \.id) { NoteRow(note: $0).foregroundStyle(.secondary) }
             }
             .padding(.top, 4)
           }
@@ -166,19 +166,24 @@ struct NotesList: View {
     }
   }
 
-  private func row(_ note: Note) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      MarkdownView(text: note.text)
-      Text("\(note.by.rawValue) · \(ago(note.t)) ago").font(.caption).foregroundStyle(.secondary)
-    }
-  }
-
   private func add() {
     let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !clean.isEmpty else { return }
     model.addNote(session.id, text: clean, todo: todo) {
       // A failed request keeps the text. The user can then send it again.
       if text.trimmingCharacters(in: .whitespacesAndNewlines) == clean { text = "" }
+    }
+  }
+}
+
+/// A note's text, and who added it how long ago.
+struct NoteRow: View {
+  let note: Note
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      MarkdownView(text: note.text)
+      Text("\(note.by.rawValue) · \(ago(note.t)) ago").font(.caption).foregroundStyle(.secondary)
     }
   }
 }
