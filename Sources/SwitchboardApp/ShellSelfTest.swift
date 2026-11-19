@@ -26,6 +26,9 @@ import SwiftUI
 /// <session> [cmd]` drags from the empty space beside the first card, on the side that faces the second, to the
 /// middle of the second. The three report `posted on` the hit view's type and send their events over the next
 /// half second. `board-selection` reports the selected ids, sorted and joined by commas, or `none`.
+/// `click-anchor <name>` clicks the view with that `clickAnchor` in any of the app's windows, a popover included.
+/// `fill <placeholder>|<text>` types the text into the field with that placeholder. `anchors <prefix>` reports the
+/// names of the anchors that start with the prefix, sorted and joined by commas, or `none`.
 @MainActor
 enum ShellSelfTest {
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
@@ -146,6 +149,16 @@ enum ShellSelfTest {
     case "board-selection":
       let ids = model.multiSelection.sorted()
       return ids.isEmpty ? "none" : ids.joined(separator: ",")
+    case "click-anchor":
+      return click(anchor: rest, throughWindow: false)
+    case "fill":
+      let parts = rest.split(separator: "|", maxSplits: 1).map(String.init)
+      guard parts.count == 2 else { return "fill needs <placeholder>|<text>" }
+      return fill(placeholder: parts[0], with: parts[1])
+    case "anchors":
+      let names = roots.flatMap { ClickAnchorView.all(in: $0) }.map(\.name)
+      let found = Set(names.filter { $0.hasPrefix(rest) }).sorted()
+      return found.isEmpty ? "none" : found.joined(separator: ",")
     default:
       return "unknown command"
     }
@@ -225,10 +238,12 @@ enum ShellSelfTest {
   /// goes to that view. A window that is not key drops a first click on a button, and a hidden launch never makes
   /// its window key. A sidebar row needs the window, because the window's handling of the mouse-down selects the row.
   private static func click(anchor name: String, throughWindow: Bool) -> String {
-    guard let window, let root = window.contentView else { return "no window" }
-    guard let anchor = ClickAnchorView.find(name, in: root) ?? scrollIntoView(name, in: root) else {
-      return "no \(name)"
-    }
+    guard let main = roots.first else { return "no window" }
+    guard
+      let anchor = roots.lazy.compactMap({ ClickAnchorView.find(name, in: $0) }).first
+        ?? scrollIntoView(name, in: main),
+      let window = anchor.window, let root = window.contentView
+    else { return "no \(name)" }
     // A row near the edge of the sidebar can be built but partly hidden under another view.
     anchor.scrollToVisible(anchor.bounds)
     root.layoutSubtreeIfNeeded()
@@ -242,6 +257,23 @@ enum ShellSelfTest {
       return "no event"
     }
     return "clicked at \(Int(point.x)),\(Int(point.y)) on \(type(of: hit))"
+  }
+
+  /// Types `text` into the text field whose placeholder is `placeholder`, in any of the app's windows, as an input
+  /// method inserts it.
+  private static func fill(placeholder: String, with text: String) -> String {
+    func field(in view: NSView) -> NSTextField? {
+      if let field = view as? NSTextField, field.placeholderString == placeholder { return field }
+      return view.subviews.lazy.compactMap(field).first
+    }
+    guard let field = roots.lazy.compactMap(field).first else {
+      return "no field \(placeholder)"
+    }
+    guard field.window?.makeFirstResponder(field) == true, let editor = field.currentEditor() as? NSTextView else {
+      return "no focus"
+    }
+    editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    return "filled"
   }
 
   /// Adds the table row that holds the anchor named `name` to that table's selection. A posted ⌘-click
@@ -341,6 +373,12 @@ enum ShellSelfTest {
 
   private static var window: NSWindow? { TerminalSelfTest.window }
 
+  /// The content views of the app's windows, the main window's first. A popover draws in a window of its own.
+  private static var roots: [NSView] {
+    let main = window?.contentView
+    return [main].compactMap { $0 } + NSApp.windows.compactMap(\.contentView).filter { $0 !== main }
+  }
+
   private static func panes() -> [TerminalView] { TerminalSelfTest.panes() }
 
   /// The right terminal, when the window shows two.
@@ -375,11 +413,10 @@ final class ClickAnchorView: NSView {
   /// The anchored view gets every click.
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-  static func find(_ name: String, in view: NSView) -> ClickAnchorView? {
-    if let anchor = view as? ClickAnchorView, anchor.name == name { return anchor }
-    for subview in view.subviews {
-      if let found = find(name, in: subview) { return found }
-    }
-    return nil
+  /// The anchors under `view`, `view` included.
+  static func all(in view: NSView) -> [ClickAnchorView] {
+    ((view as? ClickAnchorView).map { [$0] } ?? []) + view.subviews.flatMap(all)
   }
+
+  static func find(_ name: String, in view: NSView) -> ClickAnchorView? { all(in: view).first { $0.name == name } }
 }

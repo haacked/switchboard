@@ -1039,7 +1039,7 @@ final class BoardModel: ObservableObject {
     groups[index].description = clean
     groups[index].descriptionBy = nil
     if let clean {
-      perform("group-describe", ["group": .string(id), "text": .string(clean)])
+      perform("group-describe", ["group": .string(id), "text": .string(clean), "by": .string(Author.you.rawValue)])
     } else {
       perform("group-describe", ["group": .string(id), "clear": true])
     }

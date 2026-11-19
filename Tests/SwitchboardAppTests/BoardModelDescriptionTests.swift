@@ -36,7 +36,7 @@ import Testing
     let (op, args, shown) = await sent(model, "  Flag  evaluation \n")
 
     #expect(op == "group-describe")
-    #expect(args == ["group": "g1", "text": "Flag evaluation"])
+    #expect(args == ["group": "g1", "text": "Flag evaluation", "by": "you"])
     #expect(shown == "Flag evaluation")
   }
 

@@ -45,8 +45,12 @@
 # The wake check stops a session's claude three times through the app's WakeSelfTest,
 # and checks that three keys in its terminal start it once, that a click starts it,
 # and that a drag does not.
+# The group check shows the Board in group lanes and drives a group's label through the app's ShellSelfTest
+# commands. It clicks Accept on a description that Claude wrote and checks through sb that the description is
+# the user's. It opens the Links popover, removes the seeded link, adds a link through its fields, and checks both
+# through sb. It opens the Notes link and checks that the popover shows each note.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# boardselect, wake). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# boardselect, wake, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -61,9 +65,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | boardselect | wake) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | boardselect | wake | group) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, boardselect, and wake." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, boardselect, wake, and group." >&2
     exit 2
     ;;
   esac
@@ -886,3 +890,55 @@ check_wake() {
 }
 
 if wants wake; then check_wake; fi
+
+check_group() {
+  check=group
+  local shots="$home/shots/group" group rfc notes result
+  mkdir "$shots"
+  echo "Checking a group's description author, notes, and links on the Board…"
+  # sb records Claude as the author when CLAUDECODE is set, as it is when a Claude session runs this script.
+  you() { env -u CLAUDECODE "$bin_dir/sb" "$@"; }
+  new_session group-work
+  you group add group-context "$session" >/dev/null
+  group=$(sb groups --json | jq -r '.groups[] | select(.name == "group-context") | .id')
+  CLAUDECODE=1 sb group describe "$group" "Ship the flag cache." >/dev/null
+  you group note "$group" "Ask Ana before the deploy." >/dev/null
+  you group note "$group" "The cache lives in Redis." >/dev/null
+  you group link add "$group" https://example.com/rfc --title RFC >/dev/null
+  rfc=$(sb groups --json | jq -r --arg g "$group" '.groups[] | select(.id == $g) | .links[0].id')
+  group_json() { sb groups --json | jq -c --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
+  author_is() { [ "$(group_json '.descriptionBy // "you"')" = "\"$1\"" ]; }
+  links_are() { [ "$(group_json '[.links[]?.title]')" = "$1" ]; }
+  shows() { [ "$(app where)" = "$1" ]; }
+  # A control can draw a moment after the Board shows, so each first click on it is retried.
+  clicked() {
+    result=$(app click-anchor "$1")
+    [[ $result == clicked* ]]
+  }
+  notes=$(group_json '[.notes[].id | "group-note-" + .] | sort | join(",")' | tr -d '"')
+  notes_shown() { [ "$(app anchors group-note-)" = "$notes" ]; }
+  author_is claude || fail "sb did not record Claude as the author: $(group_json .descriptionBy)"
+
+  SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  wait_for 10 clicked "group-description-accept-$group" || fail "the app could not click Accept: $result"
+  wait_for 10 author_is you || fail "Accept did not make the description yours: $(group_json .descriptionBy)"
+  [ "$(group_json .description)" = '"Ship the flag cache."' ] || fail "Accept changed the text: $(group_json .description)"
+  wait_for 10 clicked "group-links-$group" || fail "the app could not open the links: $result"
+  wait_for 5 clicked "group-link-rm-$rfc" || fail "the links popover did not show the RFC link: $result"
+  wait_for 10 links_are '[]' || fail "the remove button did not remove the link: $(group_json .links)"
+  [ "$(app fill 'Link URL|https://example.com/design')" = filled ] || fail "the app could not fill the URL field"
+  [ "$(app fill 'Link title (optional)|Design doc')" = filled ] || fail "the app could not fill the title field"
+  clicked "group-link-add-$group" || fail "the app could not click Add: $result"
+  wait_for 10 links_are '["Design doc"]' || fail "Add did not add the link: $(group_json .links)"
+  app snapshot "$shots/links.png" >/dev/null
+  wait_for 10 clicked "group-notes-$group" || fail "the app could not open the notes: $result"
+  wait_for 5 notes_shown || fail "the notes popover did not show $notes: $(app anchors group-note-)"
+  app snapshot "$shots/notes.png" >/dev/null
+  end_app
+  save_shots
+  echo "ok: group (Accept, links add and remove, notes)"
+}
+
+if wants group; then check_group; fi
