@@ -105,17 +105,17 @@ extension Service {
     }
   }
 
-  /// The group of the session that starts a new one, or nil without a parent.
+  /// The group of the session that `id` names, or nil without one.
   /// A chat's group is the one it manages, while that group exists.
-  func groupOfParent(_ parent: String?) -> String? {
-    guard let session = parent.flatMap({ entries[$0]?.session }) else { return nil }
+  func groupOf(_ id: String?) -> String? {
+    guard let session = id.flatMap({ entries[$0]?.session }) else { return nil }
     if let chat = session.chat { return groups[chat] == nil ? nil : chat }
     return session.group
   }
 
   /// The group that a new session joins: the one that `ref` names, else its parent's.
   func groupOfNew(_ ref: String?, parent: String?) throws -> String? {
-    guard let ref else { return groupOfParent(parent) }
+    guard let ref else { return groupOf(parent) }
     return try lookupGroup(["group": .string(ref)])
   }
 
@@ -247,10 +247,70 @@ extension Service {
   private func groupSummary(_ id: String, rowFollowups: PlanRowFollowups? = nil) -> GroupSummary {
     var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
     summary.plans = planSummaries(group: id, rowFollowups: rowFollowups)
-    let live = artifactRows(of: entries.values.filter { artifactGroup(of: $0.session) == id })
-    let artifacts = GroupArtifacts.list(live + (groups[id]?.keptArtifacts ?? []))
+    let artifacts = groupArtifacts(id)
     if !artifacts.isEmpty { summary.artifacts = artifacts }
     return summary
+  }
+
+  /// The artifacts of the group's sessions, its chat, and its removed sessions, newest first.
+  private func groupArtifacts(_ id: String) -> [GroupArtifact] {
+    let live = artifactRows(of: entries.values.filter { artifactGroup(of: $0.session) == id })
+    return GroupArtifacts.list(live + (groups[id]?.keptArtifacts ?? []))
+  }
+
+  /// The group that `group-show` reads: the one that `group` names, else the group of the session that `session`
+  /// names. A request from a host reads only the group of the host's session that it names, so it never learns
+  /// the name or text of a group that holds none of the host's sessions. Any process on the host can name any of
+  /// the host's sessions.
+  func groupShow(_ args: JSON, origin: RequestOrigin) throws -> GroupSummary {
+    if origin == .mac, args["group"] != nil { return groupSummary(try lookupGroup(args)) }
+    guard args["session"] != nil else {
+      throw APIError("name a group. In a Switchboard session, the group defaults to the session's group")
+    }
+    let session = try lookup(args)
+    guard let own = groupOf(session).flatMap({ groups[$0] }) else {
+      throw APIError("\(session) is in no group. Name a group: sb group show <group>")
+    }
+    if case .remote(let host) = origin, let key = args["group"]?.string,
+      (try? resolveRef(key, "group", [(own.id, own.name)])) == nil
+    {
+      throw APIError("a request from \(host) reads only the group of the session that it names")
+    }
+    return groupSummary(own.id)
+  }
+
+  /// The group whose context a work session hears in its system prompt and its change notices, or nil for a
+  /// session of another kind or in no group.
+  private func contextGroup(of session: Session) -> SessionGroup? {
+    guard session.kind == .work else { return nil }
+    return session.group.flatMap { groups[$0] }
+  }
+
+  /// The group block of a work session's appended system prompt, or nil when the session has no context group.
+  func groupPromptBlock(for session: Session) -> String? {
+    contextGroup(of: session).map { GroupContext.systemPromptBlock($0, artifacts: groupArtifacts($0.id).count) }
+  }
+
+  /// Records that a work session heard its group's current context, because a launch passes the context in the
+  /// system prompt. A session in no group hears an empty context, so joining a group later counts as a change. It
+  /// records nothing, and returns false, when the session already heard the same context.
+  @discardableResult func hearGroupContext(_ id: String) -> Bool {
+    guard let e = entries[id], e.session.kind == .work else { return false }
+    let context = contextGroup(of: e.session).map(GroupContext.fingerprint) ?? ""
+    guard e.facts.groupContextHeard != context else { return false }
+    record(id, GroupContext.heardEvent, ["context": .string(context)])
+    return true
+  }
+
+  /// The line that tells a work session its group's context changed since the session last heard it, or nil. It
+  /// records the current context as heard, so each change reaches the session once. A session that never heard a
+  /// context, such as one that an older sbd launched, hears the current one without a notice.
+  func groupContextNotice(_ id: String) -> String? {
+    guard let e = entries[id], let group = contextGroup(of: e.session) else { return nil }
+    let heardBefore = e.facts.groupContextHeard != nil
+    let changed = hearGroupContext(id)
+    guard changed, heardBefore else { return nil }
+    return GroupContext.changedNotice(name: group.name, id: group.id)
   }
 
   func groupList() -> GroupList {

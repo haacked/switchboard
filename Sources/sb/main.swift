@@ -400,6 +400,9 @@ let usage = """
 
   Groups:
     group ls                      list the groups with their sessions, then Ungrouped
+    group show [<group>]          show one group with its links, every note in
+                                  full, its artifacts, and its plans. The group
+                                  defaults to the one of $SB_SESSION_ID
     group add <name> [<session>...] [--note N] [--description D]
     group rm <group>              remove the group; its sessions become ungrouped
     group move <session>... --to <group> | --ungrouped

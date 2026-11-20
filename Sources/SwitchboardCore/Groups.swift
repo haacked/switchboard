@@ -69,6 +69,10 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
     text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
   }
 
+  /// The text as a one-line Markdown quote. A line break would end the quote, so every whitespace run becomes one
+  /// space.
+  static func quoted(_ text: String) -> String { "> " + collapsingWhitespace(text) }
+
   /// The text on one line, or nil when nothing remains. It refuses text over `limit` characters.
   /// The refusal names the text as `noun`.
   static func cleanLine(_ text: String?, limit: Int, noun: String) throws -> String? {

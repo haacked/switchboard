@@ -198,6 +198,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var decisionList: DecisionList?
   /// What sbd found for each draft's reply target.
   public var draftReplies = DraftReplyFacts()
+  /// The `GroupContext.fingerprint` of the group context that the session last heard, from its launch or from a
+  /// change notice. Nil before the first `group_context_heard`.
+  public var groupContextHeard: String?
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.
   public var submittedDecisionsRef: String?
@@ -447,6 +450,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       merge = try? JSONCoding.convert(event.data, to: MergeAttempt.self)
     case ReviewRequestAttempt.event:
       reviewRequest = try? JSONCoding.convert(event.data, to: ReviewRequestAttempt.self)
+    case GroupContext.heardEvent:
+      groupContextHeard = d["context"]?.string
     default:
       break
     }
