@@ -166,6 +166,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// When the PR was opened, as GitHub sends it. nil when the poll did not read it, as in events that an older sbd
   /// recorded.
   public var createdAt: String?
+  /// The number of commits on the PR. nil when the poll did not read it.
+  public var commitCount: Int?
   /// The code owner groups that the changed files need. nil when the base
   /// branch requires no code owner review. Also nil when sbd cannot tell.
   public var codeOwners: CodeOwnerRequirement?
@@ -442,6 +444,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var additions: Int?
   public var deletions: Int?
   public var rereview: Rereview?
+  /// The number of commits on the PR. nil until sbd reads it.
+  public var commitCount: Int?
 
   public init(_ pr: PullRequest) {
     number = pr.number
@@ -468,6 +472,7 @@ public struct PRSummary: Codable, Equatable, Sendable {
     additions = pr.mergeDetails?.additions
     deletions = pr.mergeDetails?.deletions
     rereview = pr.rereview
+    commitCount = pr.commitCount
   }
 
   /// The PR's branch when it differs from `branch`, the folder's branch.

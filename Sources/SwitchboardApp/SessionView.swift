@@ -251,6 +251,9 @@ struct SessionView: View {
           HStack(spacing: 4) {
             Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
             if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
+            if let count = pr.commitCount {
+              Text("\(count) \(count == 1 ? "commit" : "commits")").font(.caption).foregroundStyle(.secondary)
+            }
           }
         }
         IssueBadge(session: session)
