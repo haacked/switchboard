@@ -25,7 +25,8 @@ extension BoardModel {
   /// Whether the detail pane shows `MultiSelectionView`. The Board shows its own selection in place.
   var showsMultiSelectionPane: Bool { showsMultiSelection && visibleView != .board }
 
-  /// The multi-selected sessions in the order the sidebar lists them, collapsed sections included.
+  /// The multi-selected sessions in the order the sidebar lists them. It includes rows in collapsed sections
+  /// and rows that the sidebar's search field hides, because the Board selects cards that the field hides.
   var multiSelected: [SessionSummary] { sidebarRows.filter { multiSelection.contains($0.id) } }
 
   /// The number of multi-selected sessions that a work-scope plan can delete. sbd skips the others.
@@ -33,7 +34,7 @@ extension BoardModel {
 
   private var sidebarRows: [SessionSummary] {
     let c = conversations
-    return c.pinned + c.active + c.archived + sidebarGroups.flatMap { $0.rows.map(\.session) }
+    return c.pinned + c.active + c.archived + Self.sidebarGroups(workBoard).flatMap { $0.rows.map(\.session) }
   }
 
   /// Sets `multiSelection` to `ids`, the ids that are still listed after a refresh or a filter change. With

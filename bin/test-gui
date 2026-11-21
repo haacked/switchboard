@@ -18,6 +18,8 @@
 # a switch to another session, that Open Shell starts it again, that the pane
 # attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
+# It reads the titles in the View, Go, and Session menus and checks which menu holds each
+# view and navigation item.
 # It also presses mouse buttons 4 and 5 and checks that they go back and forward
 # between two selected sessions.
 # Last it drops sets of files on the message field of a session, the Inbox, and
@@ -517,6 +519,21 @@ check_shell() {
   app snapshot "$shots/chat-closed.png" >/dev/null
   # Close acts on the key window. An app that a script starts may have none, so this checks only the binding.
   [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
+  file_menu=$(app titles File) view=$(app titles View) go=$(app titles Go) session_menu=$(app titles Session)
+  [[ $file_menu == *"|New Loop…|"* ]] || fail "the File menu has no New Loop…: $file_menu"
+  [[ $session_menu != *"|New Loop…|"* ]] || fail "the Session menu still has New Loop…: $session_menu"
+  for item in "Show Inbox" "Show Board" "Show Issues" "Show Loops" "Filter Sessions…"; do
+    [[ $view == *"|$item|"* ]] || fail "the View menu has no $item: $view"
+    [[ $session_menu != *"|$item|"* ]] || fail "the Session menu still has $item: $session_menu"
+  done
+  for item in Back Forward "Show Recent Places" "Next Needing You" "Next Session" "Previous Session" \
+    "Open Manager" "Search Sessions…" "Ask Switchboard…" "Move Focus to List" "Move Focus to Terminal"; do
+    [[ $go == *"|$item|"* ]] || fail "the Go menu has no $item: $go"
+    [[ $session_menu != *"|$item|"* ]] || fail "the Session menu still has $item: $session_menu"
+  done
+  for item in "Message Claude" "Stop Claude"; do
+    [[ $session_menu == *"|$item|"* ]] || fail "the Session menu has no $item: $session_menu"
+  done
   # A focused terminal keeps every key but the menu's, so these must reach their own menu items. Without a
   # key window, SwiftUI does not refresh the menu's enabled states. Move Focus to Terminal then keeps its
   # state from launch, disabled, and the result names the item that owns ⌘T instead. ⌘K goes last, because

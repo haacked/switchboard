@@ -8,7 +8,8 @@ import SwiftUI
 /// `click close` clicks the × on the Shell pane's label with mouse events at the button's place in the
 /// window. `click open` clicks Open Shell on the Claude pane's label the same way. SwiftUI builds no
 /// accessibility elements without an assistive app, so the test can't press a button by its label.
-/// `menu <menu> <item>` runs a menu item. `show-terminal` shows the terminals of an Inbox item, as its Terminal
+/// `menu <menu> <item>` runs a menu item. `titles <menu>` reports the menu's item titles, each between bars, as in
+/// `|Back|Forward|`. `show-terminal` shows the terminals of an Inbox item, as its Terminal
 /// toggle does. `select <session>` selects a session. `type <text>` types the text and
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
 /// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
@@ -64,15 +65,15 @@ enum ShellSelfTest {
       return "shown"
     case "menu":
       let names = rest.split(separator: " ", maxSplits: 1).map(String.init)
-      guard names.count == 2, let menu = NSApp.mainMenu?.item(withTitle: names[0])?.submenu else { return "no menu" }
-      // SwiftUI sets the items' titles when the menu opens.
-      menu.delegate?.menuNeedsUpdate?(menu)
-      menu.update()
+      guard names.count == 2, let menu = refreshedMenu(names[0]) else { return "no menu" }
       let index = menu.indexOfItem(withTitle: names[1])
       guard index >= 0 else { return "not found in \(menu.items.map(\.title))" }
       guard menu.items[index].isEnabled else { return "disabled" }
       menu.performActionForItem(at: index)
       return "ran"
+    case "titles":
+      guard let menu = refreshedMenu(rest) else { return "no menu" }
+      return "|" + menu.items.filter { !$0.isSeparatorItem }.map(\.title).joined(separator: "|") + "|"
     case "select":
       model.selection = rest
       return "selected"
@@ -169,6 +170,15 @@ enum ShellSelfTest {
     default:
       return "unknown command"
     }
+  }
+
+  /// The menu bar's menu with `title`. SwiftUI sets the items' titles when the menu opens. This function asks for
+  /// them first.
+  private static func refreshedMenu(_ title: String) -> NSMenu? {
+    guard let menu = NSApp.mainMenu?.item(withTitle: title)?.submenu else { return nil }
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.update()
+    return menu
   }
 
   /// The frame of the session's Board card in window coordinates, after the Board scrolls the card and 24 pt
