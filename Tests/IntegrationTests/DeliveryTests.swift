@@ -398,12 +398,13 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// A test arms `hold-delivered` after an earlier message's reply. That message's paste can still be on its way to
   /// the gate. `hold-paste` keeps the earlier paste there while the test arms `hold-delivered`. The earlier paste
   /// records `delivered`. The next message still reaches claude, and `hold-delivered` holds its `delivered`.
-  @Test func aPasteThatStartedBeforeHoldDeliveredDoesNotWaitAtIt() throws {
+  @Test func aPasteQueuedBeforeHoldDeliveredDoesNotWaitAtIt() throws {
     let sbd = try Instance(config: Path.direct.config)
     let s = try Path.direct.session(sbd)
     sbd.hold("hold-paste")
     let first = "pasted before the hold"
-    #expect(try sbd.sb("send", s.id, first) == "pasted\n")
+    let delivery = try sbd.sb("send", s.id, first)
+    try #require(delivery == "pasted\n", "sbd sent it another way: \(delivery)")
     sbd.hold("hold-delivered")
     try sbd.release("hold-paste")
 

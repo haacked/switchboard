@@ -1879,7 +1879,7 @@ public final class Service {
     entries[id]?.inFlight = InFlight(pastedAt)
     let site = try? site(of: id)
     let terminals = try? site?.terminals()
-    // Only a paste that starts while `hold-delivered` exists waits at it. An earlier paste can still be on its way to
+    // Only a paste queued while `hold-delivered` exists waits at it. An earlier paste can still be on its way to
     // the gate after claude replied to it. Holding that paste would hold every paste behind it on the paste queue.
     let holdsDelivered = gateIsSet("hold-delivered")
     pasteQueue.async { [self] in
