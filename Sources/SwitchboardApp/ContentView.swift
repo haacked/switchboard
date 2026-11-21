@@ -289,6 +289,20 @@ struct Sidebar: View {
     } message: { move in
       Text(move.message)
     }
+    // The overlay comes before the safe area insets, so the empty state fills only the space between them and
+    // never covers Search Sessions or New Group.
+    .overlay {
+      if model.sidebarIsEmpty {
+        ContentUnavailableView {
+          Label("No sessions", systemImage: "rectangle.stack")
+        } description: {
+          Text("Start a session, or import ones that are already running.")
+        } actions: {
+          Button("Start a Session…") { model.openNewSession() }
+          Button("Import Sessions…") { model.showingImport = true }
+        }
+      }
+    }
     // Another toolbar item would push New Session into the overflow menu at the minimum window width, so search
     // sits here. It looks like a search field, and the panel holds the real one.
     .safeAreaInset(edge: .top) {
@@ -328,18 +342,6 @@ struct Sidebar: View {
         .help("Create an empty group on the Board (⇧⌘G)")
         .accessibilityIdentifier("sidebar-new-group")
         RemovalStatusView()
-      }
-    }
-    .overlay {
-      if model.sidebarIsEmpty {
-        ContentUnavailableView {
-          Label("No sessions", systemImage: "rectangle.stack")
-        } description: {
-          Text("Start a session, or import ones that already run.")
-        } actions: {
-          Button("Start a Session…") { model.openNewSession() }
-          Button("Import Sessions…") { model.showingImport = true }
-        }
       }
     }
   }
