@@ -41,7 +41,7 @@ struct IssuesView: View {
       } else {
         // Computing the sections filters, groups, and sorts every issue. Each render computes them once.
         let sections = model.issueSections
-        ListDetailSplit {
+        ListDetailSplit(widthKey: "listWidth.issues") {
           VStack(spacing: 0) {
             IssueListHeader()
             Divider()

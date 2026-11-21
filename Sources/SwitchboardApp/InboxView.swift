@@ -30,7 +30,7 @@ struct InboxView: View {
         Button("Show Board") { model.show(.board) }
       }
     } else {
-      ListDetailSplit {
+      ListDetailSplit(widthKey: "listWidth.inbox") {
         // The list stays mounted under the empty state. A new list would take the focus from the detail's message
         // field when an item arrives, and ⌘L would have no list to focus.
         TriageList()

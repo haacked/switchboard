@@ -53,6 +53,22 @@ struct ContentView: View {
   static func viewLabel(_ name: String, _ count: Int) -> String { count > 0 ? "\(name) \(count)" : name }
 
   @EnvironmentObject var model: BoardModel
+  @State private var sidebar = SidebarFit()
+  @State private var windowWidth: CGFloat = 0
+
+  private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+    Binding(get: { sidebar.visibility }, set: { sidebar.userSet($0) })
+  }
+
+  /// Shows or hides the sidebar for the window's width and the detail column's view. The change does not animate. A
+  /// view switch in a narrow window therefore does not slide the sidebar each time.
+  private func fitSidebar() {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      sidebar.update(windowWidth: windowWidth, isListDetail: model.showsListDetail)
+    }
+  }
 
   private var isConfirmingDelete: Binding<Bool> {
     Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
@@ -87,7 +103,8 @@ struct ContentView: View {
   }
 
   var body: some View {
-    NavigationSplitView {
+    let column = model.detailColumn
+    NavigationSplitView(columnVisibility: sidebarVisibility) {
       Sidebar()
         .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: Self.sidebarIdealWidth, max: 420)
     } detail: {
@@ -98,21 +115,15 @@ struct ContentView: View {
         if let error = model.actionError {
           WarningBanner(error) { Button("Dismiss") { model.actionError = nil } }
         }
-        if model.showsMultiSelectionPane {
-          MultiSelectionView()
-        } else if let s = model.selected, let f = s.followup, f.started == nil {
-          FollowupView(session: s, followup: f).id(s.id)
-        } else if let s = model.selected, let d = s.docket {
-          DocketView(session: s, docket: d).id(s.id)
-        } else if let s = model.selected {
-          SessionView(session: s).id(s.id)
-        } else {
-          switch model.mainView {
-          case .inbox: InboxView()
-          case .board: BoardView()
-          case .issues: IssuesView()
-          case .loops: LoopsView()
-          }
+        switch column {
+        case .multiSelection: MultiSelectionView()
+        case .followup(let s, let f): FollowupView(session: s, followup: f).id(s.id)
+        case .docket(let s, let d): DocketView(session: s, docket: d).id(s.id)
+        case .session(let s): SessionView(session: s).id(s.id)
+        case .main(.inbox): InboxView()
+        case .main(.board): BoardView()
+        case .main(.issues): IssuesView()
+        case .main(.loops): LoopsView()
         }
       }
       // The delete dialog is on the split view. Two dialogs on one view can hide each other.
@@ -127,6 +138,14 @@ struct ContentView: View {
       .mainToolbar()
     }
     .removingToolbarTitle()
+    // The rule reads only whether the window is narrower than `collapseBelow`. Wider widths need no update.
+    .onGeometryChange(for: CGFloat.self) {
+      min($0.size.width, SidebarFit.collapseBelow)
+    } action: {
+      windowWidth = $0
+      fitSidebar()
+    }
+    .onChange(of: model.showsListDetail) { fitSidebar() }
     .confirmationDialog(
       "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
       presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
