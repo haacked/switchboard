@@ -25,6 +25,14 @@ func makeShortTempFolder() throws -> String {
   return String(cString: folder)
 }
 
+/// Copies /bin/sleep to the path with an ad hoc signature. macOS kills a copy of a system program that keeps Apple's
+/// signature, and it hides the environment of a program that ships with macOS.
+func copySleep(to path: String) throws {
+  try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
+  let signed = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
+  try #require(signed.status == 0, "codesign failed: \(signed.stderr)")
+}
+
 func withService(_ body: (Service, Home) throws -> Void) throws {
   let home = Home(path: try makeShortTempFolder())
   defer { try? FileManager.default.removeItem(atPath: home.path) }

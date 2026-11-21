@@ -331,12 +331,6 @@ private func withBench(folderName: String = "w", _ body: (Bench) throws -> Void)
   }
 
   /// Copies /bin/sleep with an ad hoc signature, because macOS kills a copy that keeps Apple's.
-  private func copySleep(to path: String) throws {
-    try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
-    let signed = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
-    try #require(signed.status == 0, "codesign failed: \(signed.stderr)")
-  }
-
   private func uses(_ users: [FolderUser], of pids: [Int32]) -> [String] {
     users.filter { pids.contains(Int32($0.pid)) }.sorted { $0.pid < $1.pid }.map { "\($0.pid) \($0.use.rawValue)" }
   }

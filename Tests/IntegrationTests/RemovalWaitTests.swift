@@ -69,12 +69,13 @@ private final class Strays {
     return fromFiles.compactMap { $0 } + spawned.map(\.processIdentifier)
   }
 
-  /// Starts the program in the folder, outside every pane.
-  func spawn(_ path: String, _ args: [String], cwd: String) throws {
+  /// Starts the program in the folder, outside every pane, with the test's environment and `environment` over it.
+  func spawn(_ path: String, _ args: [String], cwd: String, environment: [String: String] = [:]) throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
     p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
     p.standardInput = FileHandle.nullDevice
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
@@ -188,6 +189,34 @@ private final class Strays {
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(how, sbd, s)
     for pid in pids { #expect(Processes.exists(Int(pid)), "sbd ended \(pid)") }
+  }
+
+  /// Runs the script under sh in the session's folder, with the pid file's path as `$1` and a copy of sleep outside
+  /// the worktree as `$2`, and waits for sh to exit. The script starts a background process and writes its pid to
+  /// `$1`. sh's environment holds `SB_SESSION_ID` set to `sessionId`, which is the session's id unless given. The
+  /// result is that process, once it runs sleep. macOS hides the environment of /bin/sleep, so the copy stands in
+  /// for a dev watcher such as python.
+  private func startOrphan(
+    _ s: SessionSummary, _ strays: Strays, sessionId: String? = nil,
+    _ script: String = "\"$2\" 100 </dev/null >/dev/null 2>&1 & echo $! > \"$1\""
+  ) throws -> pid_t {
+    let file = "orphan.pid"
+    strays.pidFiles.append(file)
+    let path = "\(strays.sbd.home.path)/\(file)"
+    let sleep = "\(strays.sbd.home.path)/orphan-bin/sleep"
+    if !FileManager.default.fileExists(atPath: sleep) {
+      try FileManager.default.createDirectory(
+        atPath: (sleep as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+      try copySleep(to: sleep)
+    }
+    try strays.spawn(
+      "/bin/sh", ["-c", script, "sh", path, sleep], cwd: s.cwd, environment: ["SB_SESSION_ID": sessionId ?? s.id])
+    strays.spawned.last?.waitUntilExit()
+    let pid = try #require(strays.sbd.stubPid(file), "sh wrote no pid to \(path)")
+    let ppid = ProcessTable.readLocal().row(Int(pid))?.ppid
+    try #require(ppid == 1, "the parent of \(pid) is \(String(describing: ppid)), not launchd")
+    try strays.sbd.waitFor("\(pid) to run sleep") { runsSleep(pid) }
+    return pid
   }
 
   // MARK: claude that has not exited
@@ -381,6 +410,87 @@ private final class Strays {
 
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(how, sbd, s)
+  }
+
+  // MARK: Leftovers that launchd adopted
+
+  /// The process works in the worktree, launchd is its parent, it started after the session, and its environment
+  /// holds the session's id, so the removal stops it and goes ahead. launchd reaps it after the removal, so the test
+  /// waits a short time for it to go.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func removesAfterItStopsAnOrphanThatWorksInTheFolder(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(s, strays)
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(how, sbd, s)
+    try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+  }
+
+  /// The subshell ignores SIGTERM before it execs sleep, and sleep keeps that disposition. Only the SIGKILL after
+  /// the stop wait can end it. The test sends its own SIGTERM first to show that the fixture ignores it.
+  @Test func rmStopsAnOrphanThatIgnoresSIGTERM() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(
+      s, strays, "(trap '' TERM; exec \"$2\" 100) </dev/null >/dev/null 2>&1 & echo $! > \"$1\"")
+    kill(orphan, SIGTERM)
+    Thread.sleep(forTimeInterval: 0.3)
+    try #require(runsSleep(orphan), "\(orphan) ended on SIGTERM")
+
+    let r = try sbd.removeWorktree(.rm, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(.rm, sbd, s)
+    try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+  }
+
+  /// The child of the test runner has a live parent, so it is not a leftover. sbd stops leftovers only when every
+  /// process in the folder is one, so it refuses and sends the orphan no signal either.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func refusesAndSparesTheOrphanWhileAProcessWithALiveParentWorksInTheFolder(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(s, strays)
+    try strays.spawn("/bin/sleep", ["100"], cwd: s.cwd)
+    let child = try #require(strays.spawned.last).processIdentifier
+    try sbd.waitFor("\(child) to run sleep") { runsSleep(child) }
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    try #require(r.status != 0, Comment(rawValue: r.stderr))
+    #expect(names(r.stderr, child), Comment(rawValue: "\(child) is not in: \(r.stderr)"))
+    #expect(runsSleep(orphan), "sbd ended \(orphan)")
+    #expect(runsSleep(child), "sbd ended \(child)")
+    try expectKept(sbd, repo, s)
+  }
+
+  /// The orphan's environment holds another session's id, as a process that another session started in this
+  /// worktree would. launchd is its parent and it started after the session, but sbd refuses and sends it no signal.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func refusesAndSparesAnOrphanThatAnotherSessionStarted(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(
+      s, strays, sessionId: "swb_other")
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    try #require(r.status != 0, Comment(rawValue: r.stderr))
+    #expect(names(r.stderr, orphan), Comment(rawValue: "\(orphan) is not in: \(r.stderr)"))
+    #expect(runsSleep(orphan), "sbd ended \(orphan)")
+    try expectKept(sbd, repo, s)
   }
 
   // MARK: To-dos

@@ -7,8 +7,8 @@ public struct ProcessRow: Sendable, Equatable {
   public var ppid: Int
   public var pgid: Int
   /// Microseconds since the epoch. A row parsed from `ps` text holds 0.
-  var startTime: Int64 = 0
-  var isZombie = false
+  public var startTime: Int64 = 0
+  public var isZombie = false
 }
 
 /// The processes of one machine, from one read.
@@ -132,24 +132,47 @@ public struct ProcessTable: Sendable {
 
   /// The process's argv as it reads now, which a process can overwrite to rename itself. It is empty when the kernel
   /// refuses the read, as it does for another user's process.
-  public static func argv(of pid: pid_t) -> [String] {
+  public static func argv(of pid: pid_t) -> [String] { argv(fromProcArgs: procArgs(of: pid)) }
+
+  /// The process's environment as it was when the process ran exec, one `NAME=value` string per variable. It is empty
+  /// when the kernel refuses the read, as it does for another user's process. It is also empty for a program that
+  /// ships with macOS, such as /bin/sh, because the kernel leaves that environment out of the buffer.
+  public static func environment(of pid: pid_t) -> [String] { environment(fromProcArgs: procArgs(of: pid)) }
+
+  /// The process's `KERN_PROCARGS2` buffer, or an empty one when the kernel refuses the read.
+  private static func procArgs(of pid: pid_t) -> [UInt8] {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
     guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
-    let buffer = [UInt8](unsafeUninitializedCapacity: size) { buffer, count in
+    return [UInt8](unsafeUninitializedCapacity: size) { buffer, count in
       count = sysctl(&mib, 3, buffer.baseAddress, &size, nil, 0) == 0 ? size : 0
     }
-    return argv(fromProcArgs: buffer)
   }
 
-  /// The argv in a `KERN_PROCARGS2` buffer, read as `ps` reads it. The buffer holds argc, the program path, NUL
-  /// padding, argv, and then the environment. The parse stops at the end of the buffer, so it is empty for a buffer
-  /// that ends before its first argument.
-  static func argv(fromProcArgs buffer: [UInt8]) -> [String] {
+  /// The argv in a `KERN_PROCARGS2` buffer, read as `ps` reads it. The parse stops at the end of the buffer, so it is
+  /// empty for a buffer that ends before its first argument.
+  static func argv(fromProcArgs buffer: [UInt8]) -> [String] { argvAndRest(buffer).argv }
+
+  /// The environment in a `KERN_PROCARGS2` buffer. An empty string ends it. It is empty unless the buffer holds
+  /// every argument.
+  static func environment(fromProcArgs buffer: [UInt8]) -> [String] {
+    guard var rest = argvAndRest(buffer).rest else { return [] }
+    var environment: [String] = []
+    while let end = rest.firstIndex(of: 0), end > rest.startIndex {
+      environment.append(String(decoding: rest[..<end], as: UTF8.self))
+      rest = rest[(end + 1)...]
+    }
+    return environment
+  }
+
+  /// The argv in a `KERN_PROCARGS2` buffer and the bytes after it, which hold the environment. The buffer holds
+  /// argc, the program path, NUL padding, argv, and then the environment. `rest` is nil unless the buffer holds
+  /// every argument.
+  private static func argvAndRest(_ buffer: [UInt8]) -> (argv: [String], rest: ArraySlice<UInt8>?) {
     let argcSize = MemoryLayout<Int32>.size
-    guard buffer.count >= argcSize else { return [] }
+    guard buffer.count >= argcSize else { return ([], nil) }
     let argc = buffer.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
-    guard argc > 0, let pathEnd = buffer[argcSize...].firstIndex(of: 0) else { return [] }
+    guard argc > 0, let pathEnd = buffer[argcSize...].firstIndex(of: 0) else { return ([], nil) }
     // An empty argv[0] reads as padding, as it does in ps.
     var rest = buffer[pathEnd...].drop { $0 == 0 }
     var args: [String] = []
@@ -157,7 +180,7 @@ public struct ProcessTable: Sendable {
       args.append(String(decoding: rest[..<end], as: UTF8.self))
       rest = rest[(end + 1)...]
     }
-    return args
+    return (args, args.count == argc ? rest : nil)
   }
 
   /// The path of the process's program, or nil when the kernel can't read it.
