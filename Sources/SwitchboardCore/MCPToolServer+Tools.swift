@@ -96,7 +96,9 @@ extension MCPToolServer {
         "prompt": string("The first prompt."),
         "base": string("The commit that the branch starts from, such as origin/main. A follow-up takes none."),
         "name": string("The session's name."),
-        "model": string("The model to run, such as sonnet or opus."),
+        "model": string(
+          "The model to run, such as opus. Leave it out unless the user asked for a model: the session then runs config.json's `model`, opus by default."
+        ),
         "account": string("The Claude account, by name or folder."),
         "followup": boolean("Adds a follow-up instead of starting the session."),
         "planMode": boolean(

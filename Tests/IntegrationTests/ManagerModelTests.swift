@@ -2,8 +2,8 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-/// The model that a Manager conversation runs. sbd passes `--model` with config.json's `manager.model`, which is
-/// sonnet by default, and `sb manager model` shows and changes it. The Operator and work sessions don't take it.
+/// The model that a Manager conversation, the operator, and a group chat run. sbd passes `--model` with config.json's
+/// `manager.model`, which is sonnet by default. `sb manager model` shows and changes it. Work sessions don't take it.
 @Suite(.blocking(timeLimit: .seconds(120))) struct ManagerModelTests {
   let conversationHelpers = ManagerConversationsTests()
 
@@ -71,15 +71,14 @@ import Testing
     #expect(try launchModel(sbd, m.id) == "haiku")
     let second = try live(sbd, "manager", "new")
     #expect(try launchModel(sbd, second.id) == "haiku")
-    #expect(try launchModel(sbd, try liveWorkSession(sbd).id) == nil)
+    #expect(try launchModel(sbd, try liveWorkSession(sbd).id) == "opus")
 
     sbd.stopSbd()
     try sbd.startSbd()
     #expect(try shown(sbd) == ["model": "haiku"])
   }
 
-  /// The operator's model belongs to #410. Until then the operator runs config.json's global `model`.
-  @Test func theManagerModelReachesOnlyManagerConversations() throws {
+  @Test func theManagerModelReachesEveryCoordinatorAndNoWorkSession() throws {
     let sbd = try Instance(config: ["model": "opus", "manager": ["model": "haiku"]])
 
     let m = try liveManager(sbd)
@@ -87,7 +86,7 @@ import Testing
     let work = try liveWorkSession(sbd)
 
     #expect(try launchModel(sbd, m.id) == "haiku")
-    #expect(try launchModel(sbd, op.id) == "opus")
+    #expect(try launchModel(sbd, op.id) == "haiku")
     #expect(try launchModel(sbd, work.id) == "opus")
     #expect(try sbd.sb("manager", "model").contains("haiku"))
     #expect(try sbd.client.call("manager-model") == ["model": "haiku"])

@@ -99,8 +99,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var livePriority: [String] = []
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
-  /// The model for new sessions, or nil for claude's default.
-  public var model: String?
+  /// The model that a new work session stores and starts on, unless its caller names one.
+  public var model = "opus"
   /// Where `sb new --branch` creates worktrees: <root>/<repo>/<branch>.
   public var worktreeRoot: String = "~/dev/worktrees"
   /// The tmux binary, or nil to look on PATH, then in Homebrew's and the
@@ -248,7 +248,7 @@ public struct Config: Codable, Equatable, Sendable {
     let priority = LivePriority.parse(try c.decodeIfPresent(JSON.self, forKey: .livePriority))
     livePriority = priority.entries
     for problem in priority.problems { logLine("skipping \(problem)") }
-    model = try c.decodeIfPresent(String.self, forKey: .model)
+    model = SessionModel.configModel(try c.decodeIfPresent(JSON.self, forKey: .model), key: "model") ?? d.model
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)
     shell = try c.decodeIfPresent(String.self, forKey: .shell)

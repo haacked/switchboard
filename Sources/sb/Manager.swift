@@ -123,7 +123,7 @@ private func managerModel(_ a: Args, _ words: [String]) {
   let result = call("manager-model", args)
   if a.json { return printJSON(result) }
   let model = result["model"]?.string ?? ""
-  print("Manager conversations run \(model)".printable)
+  print("Manager conversations, the operator, and group chats run \(model)".printable)
   if !args.isEmpty { print("A running conversation switches when its claude next starts.") }
 }
 

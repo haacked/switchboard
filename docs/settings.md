@@ -5,7 +5,7 @@
 ```json
 {
   "idleStopSeconds": 900,
-  "model": "sonnet",
+  "model": "opus",
   "worktreeRoot": "~/dev/worktrees",
   "autoMode": true,
   "claudeArgs": ["--strict-mcp-config"],
@@ -23,6 +23,8 @@
   "conversationHintTokens": 120000
 }
 ```
+
+`model` (default `opus`) is the model that each new work session starts on: one from `sb new`, the app's New Session sheet, `sb spawn`, the `spawn` MCP tool, an issue, a follow-up, or the work queue. `manager.model` (default `sonnet`) is the model of Manager conversations, the operator, and group chats. sbd passes the model to claude with `--model`, so the account's own `model` setting, which `/model` in any session changes, doesn't pick it, and a session never takes its parent's model. A `--model` on `sb new` or `sb spawn`, or `model` on the `spawn` tool, wins. A work session stores its model when it is created and resumes on it. A Manager conversation, the operator, and a group chat read `manager.model` each time their claude starts, so `sb manager model <name>` moves them at their next start. A work session created before work sessions stored their model resumes without `--model`, on the model it ran. `"default"` gives the account's own model. sbd logs a value that is empty, contains a space, or starts with a dash, and keeps the default.
 
 `recheckSeconds` sets how long each kind of wait holds a session in Waiting before the session moves to Needs you, in whole seconds, `acknowledged` sets how long an acknowledgment holds it, and `requested` sets how long a message that answers a rule's item can hold it (see [The Inbox](inbox.md)). The defaults are `ci` 7200 (2 h), `bot-review` 3600 (1 h), `review`, `approval`, `merge`, `session`, and `manual` 86400 (1 d), `queue` and `deploy` 14400 (4 h), and `acknowledged` and `requested` 3600 (1 h). A missing key keeps its default. `sbd` logs an unknown key or a value that isn't a whole number from 1 to 315360000 (10 years), and keeps the default for it. A wait's recheck time is set when the wait is set, so a change applies to new waits. A wait set before `sbd` had recheck times gets one that counts from the next `sbd` start.
 
