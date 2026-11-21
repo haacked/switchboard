@@ -243,4 +243,92 @@ import Testing
 
     #expect(throws: (any Error).self) { try GroupLink.cleanTitle(title, url: "https://a.example") }
   }
+
+  // MARK: Links to claude.ai artifacts
+
+  @Test(arguments: [
+    ("\(artifactShortURL)#section-2", artifactShortURL),
+    ("\(artifactShortURL)?tab=preview", artifactShortURL),
+    ("\(artifactShortURL)/", artifactShortURL),
+    ("https://claude.ai//artifact/\(artifactShortId)", artifactShortURL),
+    ("https://CLAUDE.AI/artifact/\(artifactShortId)", artifactShortURL),
+    ("  \(artifactShortURL)#top \n", artifactShortURL),
+    ("\(artifactCodeURL)/?x=1#y", artifactCodeURL),
+  ])
+  func cleanURLNormalizesAClaudeArtifactLink(_ url: String, _ expected: String) throws {
+    #expect(try GroupLink.cleanURL(url) == expected)
+  }
+
+  @Test(arguments: [
+    "https://example.com/a#b", "https://example.com/a/", "http://claude.ai/artifact/\(artifactShortId)",
+    "https://claude.ai/chat/\(artifactShortId)", "https://claude.ai.evil.com/artifact/\(artifactShortId)",
+  ])
+  func cleanURLLeavesALinkThatIsNotAClaudeArtifactAsGiven(_ url: String) throws {
+    #expect(try GroupLink.cleanURL(url) == url)
+  }
+
+  /// Links already stored keep their form, so `addLink` compares artifact links by their normalized form.
+  @Test(arguments: [
+    (artifactShortURL, "\(artifactShortURL)#frag"),
+    ("\(artifactShortURL)/", artifactShortURL),
+    (artifactShortURL, "https://Claude.ai/artifact/\(artifactShortId)"),
+    ("\(artifactShortURL)?tab=preview", "\(artifactShortURL)#top"),
+    (artifactCodeURL, "\(artifactCodeURL)/"),
+  ])
+  func addLinkRefusesASecondFormOfTheSameArtifact(_ stored: String, _ added: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+
+    let result = g.addLink(link("l2", added))
+
+    #expect(!result)
+    #expect(g.links?.map(\.id) == ["l1"])
+  }
+
+  /// sbd cannot tell that a short link and a code link name one page. Links that are not artifacts, an `http`
+  /// claude.ai link among them, compare exactly.
+  @Test(arguments: [
+    (artifactShortURL, artifactCodeURL),
+    ("https://example.com/a#b", "https://example.com/a"),
+    ("http://claude.ai/artifact/\(artifactShortId)", artifactShortURL),
+  ])
+  func addLinkAddsALinkThatNamesAnotherURL(_ stored: String, _ added: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+
+    let result = g.addLink(link("l2", added))
+
+    #expect(result)
+    #expect(g.links?.map(\.url) == [stored, added])
+  }
+
+  /// `absorbing` adds each link through `addLink`, so both refuse the same links.
+  @Test(arguments: [
+    (artifactShortURL, "\(artifactShortURL)#frag"),
+    ("\(artifactShortURL)/", artifactShortURL),
+    (artifactShortURL, artifactCodeURL),
+    ("https://example.com/a#b", "https://example.com/a"),
+    ("https://example.com/a", "https://example.com/a"),
+    ("http://claude.ai/artifact/\(artifactShortId)", artifactShortURL),
+  ])
+  func absorbingRefusesTheLinksThatAddLinkRefuses(_ stored: String, _ incoming: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+    let added = g.addLink(link("l2", incoming))
+
+    let merged = group("g1", "Flags", links: [link("l1", stored)]).absorbing(
+      group("g2", "Docs", links: [link("l2", incoming)]), now: 30)
+
+    #expect(merged.links?.count == (added ? 2 : 1))
+  }
+
+  /// A merge keeps your titled link over Claude's link to the same artifact, in either direction.
+  @Test(arguments: [false, true])
+  func absorbingKeepsYourLinkOverClaudesLinkToTheSameArtifact(_ yoursInKept: Bool) {
+    let yours = link("l1", artifactShortURL + "#top", title: "Tracker")
+    let claudes = link("l2", artifactShortURL, by: .claude)
+
+    let merged = group("g1", "Flags", links: [yoursInKept ? yours : claudes]).absorbing(
+      group("g2", "Docs", links: [yoursInKept ? claudes : yours]), now: 30)
+
+    #expect(merged.links?.map(\.title) == ["Tracker"])
+    #expect(merged.links?.map(\.by) == [.you])
+  }
 }

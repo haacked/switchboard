@@ -33,10 +33,18 @@ struct GroupArtifactRows {
       let action: Action =
         planLinks.contains(where: artifact.names) ? .plan : artifact.removed == nil ? .useAsPlan : .removed
       return Row(
-        artifact: artifact, sessionLabel: "by \(liveNames[artifact.session] ?? artifact.sessionName)",
+        artifact: artifact, sessionLabel: Self.sessionLabel(artifact, group: group, liveNames: liveNames),
         caption: artifact.caption(now: now), action: action)
     }
     linkTitle = Self.linkTitle(group)
+  }
+
+  /// `by <session>` for a row that a session published, else who added the group link that names it.
+  private static func sessionLabel(_ artifact: GroupArtifact, group: GroupSummary, liveNames: [String: String])
+    -> String
+  {
+    if let session = artifact.session { return "by \(liveNames[session] ?? artifact.sessionName ?? session)" }
+    return group.links?.first(where: { $0.id == artifact.link })?.by == .claude ? "added by Claude" : "added by you"
   }
 
   static func linkTitle(_ group: GroupSummary) -> String? {
@@ -55,7 +63,7 @@ struct GroupArtifactsLink: View {
     if let title = GroupArtifactRows.linkTitle(group) {
       Button(title) { showing = true }
         .buttonStyle(.link).font(.caption).lineLimit(1)
-        .help("Show the artifacts that this group's sessions published")
+        .help("Show the artifacts that this group's sessions published or its links point to")
         .accessibilityLabel("\(title) in group \(group.name)")
         .accessibilityIdentifier("group-artifacts-\(group.id)")
         .popover(isPresented: $showing, arrowEdge: .bottom) { GroupArtifactList(group: group).frame(width: 420) }

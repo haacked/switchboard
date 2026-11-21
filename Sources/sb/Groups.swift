@@ -149,7 +149,10 @@ private func printGroups(_ list: GroupList) {
     printLinks(g)
     for note in g.notes { print("  note: \(oneLine(note.text, max: 200))".printable) }
     for a in g.artifacts ?? [] {
-      print("  artifact: \(a.title)  \(a.url)  by \(a.sessionName)\(a.removed == nil ? "" : " (removed)")".printable)
+      let source = [a.sessionName.map { "by \($0)" }, a.link.map { "link \($0)" }].compactMap { $0 }
+      print(
+        "  artifact: \(a.title)  \(a.url)  \(source.joined(separator: ", "))\(a.removed == nil ? "" : " (removed)")"
+          .printable)
     }
     for p in g.plans ?? [] { printPlan(p, indent: "  ") }
     print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))

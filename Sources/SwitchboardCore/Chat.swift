@@ -56,6 +56,7 @@ public enum Chat {
     - `set_wait` resumes you once when something happens, such as a PR merging or a session reaching a state. `clear_wait` cancels a wait.
     - `add_schedule` has Switchboard send a prompt to a session, or to you, on an interval such as 30m. A schedule survives restarts, so use one for a recurring check, not `/loop`. `list_schedules` lists the schedules, and `remove_schedule` removes one. `edit_schedule` changes a schedule's interval or prompt and keeps its run history, and `run_schedule` makes one due now.
     - `add_note` adds a note to a session, and `add_group_note` adds one to the group.
+    - `add_group_artifact` attaches a claude.ai artifact to the group, so it lists on the Board. `remove_group_artifact` removes one that you attached.
     - `pause` stops a session, or every session in the group, and holds its messages until `resume` or its `until` condition starts it again. To free CPU or to hold work, pause a session instead of stopping it, because a stopped session moves to Needs you and wakes on the next message.
 
     ## What changed

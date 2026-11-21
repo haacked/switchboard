@@ -162,17 +162,6 @@ import Testing
     #expect(one.descriptionBy == all.descriptionBy)
   }
 
-  /// Only the user adds or removes a group's links.
-  @Test func noToolAddsOrRemovesALink() throws {
-    let sbd = try Instance()
-    let mcp = try MCPClient(sbd)
-
-    let names = try mcp.toolNames()
-
-    #expect(!names.isEmpty)
-    #expect(!names.contains { $0.lowercased().contains("link") }, "\(names)")
-  }
-
   // MARK: send_group
 
   func answer(_ sbd: Instance, _ session: String, _ card: Int64, allow: Bool) throws {
@@ -355,6 +344,72 @@ import Testing
 
     let flags = try #require(groups.first { $0["id"]?.string == g.id })
     #expect(flags["artifacts"]?.array?.compactMap { $0["session"]?.string } == [a.id])
+  }
+
+  // MARK: Group artifact links
+
+  /// The tool takes no title, so a title that Claude passes never reaches the link.
+  @Test func addGroupArtifactAddsAClaudeLinkTitledWithTheNormalizedURL() throws {
+    let sbd = try Instance()
+    let g = try addGroup(sbd, "Flags")
+    let billing = try addGroup(sbd, "Billing")
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call(
+      "add_group_artifact", ["group": "Flags", "url": .string("\(artifactPageURL)#top"), "title": "Delta Rates"])
+
+    #expect(!result.isError, "\(result.text)")
+    #expect(result.json?["id"]?.string == g.id)
+    let links = try #require(result.json?["links"]?.array)
+    #expect(links.compactMap { $0["url"]?.string } == [artifactPageURL])
+    #expect(links.compactMap { $0["title"]?.string } == [artifactPageURL])
+    #expect(links.compactMap { $0["by"]?.string } == ["claude"])
+    let rows = result.json?["artifacts"]?.array ?? []
+    #expect(rows.compactMap { $0["url"]?.string } == [artifactPageURL])
+    #expect(rows.compactMap { $0["link"]?.string } == links.compactMap { $0["id"]?.string })
+    #expect(try sbd.groupLinks(billing.id).isEmpty)
+  }
+
+  @Test func addGroupArtifactOfALinkThatIsNotAnArtifactIsAnErrorAndAddsNothing() throws {
+    let sbd = try Instance()
+    let g = try addGroup(sbd, "Flags")
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call("add_group_artifact", ["group": "Flags", "url": "https://example.com/rfc"])
+
+    #expect(result.isError)
+    #expect(try sbd.groupLinks(g.id).isEmpty)
+  }
+
+  @Test func removeGroupArtifactOfAClaudeLinkRemovesTheRow() throws {
+    let sbd = try Instance()
+    _ = try addGroup(sbd, "Flags")
+    let id = try sbd.addGroupLink(group: "Flags", url: artifactPageURL, by: .claude)
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call("remove_group_artifact", ["group": "Flags", "link": .string(id)])
+
+    #expect(!result.isError, "\(result.text)")
+    let links = result.json?["links"]?.array ?? []
+    #expect(links.isEmpty)
+    #expect(result.json?["artifacts"] == nil)
+  }
+
+  @Test func removeGroupArtifactOfAUsersLinkIsAnErrorAndKeepsIt() throws {
+    let sbd = try Instance()
+    let g = try addGroup(sbd, "Flags")
+    let ids = [
+      try sbd.addGroupLink(group: "Flags", url: artifactPageURL),
+      try sbd.addGroupLink(group: "Flags", url: "https://example.com/rfc"),
+    ]
+    let mcp = try MCPClient(sbd)
+
+    for id in ids {
+      let result = try mcp.call("remove_group_artifact", ["group": "Flags", "link": .string(id)])
+      #expect(result.isError, "\(id)")
+    }
+
+    #expect(try sbd.groupLinks(g.id).map(\.id) == ids)
   }
 
   @Test func theListGroupsDescriptionNamesArtifacts() throws {

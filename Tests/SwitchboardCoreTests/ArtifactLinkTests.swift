@@ -177,4 +177,52 @@ private func planAttachLink(_ doc: String) -> String? {
 
     #expect(ArtifactLink.id(of: normalized) == ArtifactLink.id(of: link))
   }
+
+  // MARK: artifactId(of:)
+
+  /// Only a `/code/artifact/<id>` link's id is the `artifact_id` that a publish records.
+  @Test(arguments: [
+    "https://claude.ai/code/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90",
+    "https://claude.ai/code/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90#section-2",
+    "https://claude.ai/code/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90?x=1",
+    "https://claude.ai/code/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90/",
+    "https://Claude.AI/code/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90",
+  ])
+  func artifactIdOfACodeLinkIsItsId(_ link: String) {
+    #expect(ArtifactLink.artifactId(of: link) == "0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90")
+  }
+
+  @Test(arguments: [
+    "https://claude.ai/artifact/0f3c9a2e-6b1d-4c8e-9a7f-2d5e8b1c4a90",
+    "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv",
+    "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv#section-2",
+    "https://Claude.AI/artifact/AbCdEfGhIjKlMnOpQrStUv/",
+  ])
+  func artifactIdOfAShortLinkIsNil(_ link: String) {
+    #expect(ArtifactLink.artifactId(of: link) == nil)
+  }
+
+  @Test(arguments: refused)
+  func artifactIdOfALinkThatIsNotAClaudeArtifactIsNil(_ link: String) {
+    #expect(ArtifactLink.artifactId(of: link) == nil)
+  }
+
+  // MARK: A group link's artifact row and plan attach
+
+  /// "Use as plan" sends a link row's URL to plan attach, so a link becomes a row exactly when plan attach takes
+  /// its URL as an artifact, and the row's URL is the one plan attach reads.
+  @Test(arguments: allInputs.filter { $0 == $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+  func aLinkBecomesAnArtifactRowExactlyWhenPlanAttachAcceptsIt(_ link: String) {
+    let row = GroupArtifact(link: GroupLink(id: "l1", title: "Plan", url: link, by: .you, t: 1))
+
+    #expect(row?.url == planAttachLink(link), "\(link.debugDescription)")
+  }
+
+  @Test(arguments: allInputs)
+  func aLinkRowsURLIsACleanClaudeArtifactLink(_ link: String) throws {
+    guard let row = GroupArtifact(link: GroupLink(id: "l1", title: "Plan", url: link, by: .you, t: 1)) else { return }
+
+    #expect(try isCleanArtifactLink(row.url), "\(link.debugDescription) gave \(row.url)")
+    #expect(planAttachLink(row.url) == row.url)
+  }
 }

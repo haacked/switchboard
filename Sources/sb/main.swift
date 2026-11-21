@@ -417,9 +417,14 @@ let usage = """
                                   most \(SessionGroup.descriptionLimit) characters
     group link add <group> <url> [--title T]
                                   add an http or https link, such as an RFC;
-                                  the title defaults to the URL. Only you add
-                                  links: inside Claude it is refused
+                                  the title defaults to the URL. A claude.ai
+                                  artifact link also lists under the group's
+                                  artifacts. Inside Claude, only a claude.ai
+                                  artifact link can be added, without --title:
+                                  its title is its URL
     group link rm <group> <link-id>
+                                  remove a link. Inside Claude, only a link
+                                  that Claude added can be removed
     group account <group> [<account> | --clear]
                                   show, set, or clear the Claude account that the
                                   group's sessions run under. A stopped session

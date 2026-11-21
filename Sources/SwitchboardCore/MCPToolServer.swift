@@ -212,6 +212,14 @@ public struct MCPToolServer: Sendable {
       return try client.call(
         "group-note",
         ["group": try groupID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
+    case "add_group_artifact":
+      return try client.call(
+        "group-link-add",
+        ["group": try groupID(args, scoped), "url": args["url"] ?? .null, "by": MCPToolServer.byClaude])
+    case "remove_group_artifact":
+      return try client.call(
+        "group-link-rm",
+        ["group": try groupID(args, scoped), "link": args["link"] ?? .null, "by": MCPToolServer.byClaude])
     case "suggest_groups":
       return try client.call("group-suggest", pick(args, ["accept"]))
     case "plan_artifact":

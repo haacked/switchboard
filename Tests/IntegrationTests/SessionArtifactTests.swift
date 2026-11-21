@@ -78,6 +78,20 @@ extension Instance {
   func addArtifactGroup(_ name: String, _ sessions: String...) throws -> String {
     try #require(JSON.parse(try sb(["group", "add", "--json", name] + sessions))?["id"]?.string)
   }
+
+  /// Adds a link to the group with a raw `group-link-add` as `by`, and returns the new link's id.
+  @discardableResult
+  func addGroupLink(group: String, url: String, by author: Author = .you) throws -> String {
+    let added = try client.call(
+      "group-link-add", ["group": .string(group), "url": .string(url), "by": .string(author.rawValue)])
+    return try #require(added["links"]?.array?.last?["id"]?.string)
+  }
+
+  /// The group's links in `sb group ls --json`.
+  func groupLinks(_ id: String) throws -> [GroupLink] {
+    let list = try JSONCoding.decode(GroupList.self, from: sb("group", "ls", "--json"))
+    return list.groups.first { $0.id == id }?.links ?? []
+  }
 }
 
 /// The JSON of every group row in sbd's database, read with sqlite3 after sbd stopped.
@@ -468,6 +482,122 @@ private func storedGroupsJSON(_ sbd: Instance) throws -> String {
     let text = try sbd.sb("group", "ls")
 
     #expect(text.contains("  artifact: Delta Rates  \(artifactPageURL)  by flags-cache (removed)"), "\(text)")
+  }
+
+  // MARK: A session's artifact and a group link to it
+
+  /// The fields that a merged row of a session's publish and a link must show: the session's title and name and
+  /// the link's id.
+  private func expectSessionRowWithLink(
+    _ rows: [JSON], session: String, name: String, link: String, sourceLocation: SourceLocation = #_sourceLocation
+  ) {
+    #expect(rows.count == 1, sourceLocation: sourceLocation)
+    #expect(rows.first?["url"]?.string == artifactPageURL, sourceLocation: sourceLocation)
+    #expect(rows.first?["title"]?.string == "Delta Rates", sourceLocation: sourceLocation)
+    #expect(rows.first?["session"]?.string == session, sourceLocation: sourceLocation)
+    #expect(rows.first?["sessionName"]?.string == name, sourceLocation: sourceLocation)
+    #expect(rows.first?["link"]?.string == link, sourceLocation: sourceLocation)
+  }
+
+  /// The publish's URL differs in form from the link's. A short link has no `artifactId`, so the rows join only
+  /// because the hook records the normalized URL.
+  @Test func aPublishThenALinkListOneRowWithTheSessionsTitleAndTheLinksId() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    try sbd.postArtifactHook(
+      s.id, response: Instance.artifactResponse(url: "https://Claude.ai/artifact/\(artifactPageId)/"))
+    try sbd.advanceClock(60_000)
+
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageURL)
+
+    expectSessionRowWithLink(try #require(try sbd.groupArtifacts(g)), session: s.id, name: "flags-cache", link: link)
+    let text = try sbd.sb("group", "ls")
+    #expect(text.contains("  artifact: Delta Rates  \(artifactPageURL)  by flags-cache, link \(link)\n"), "\(text)")
+  }
+
+  /// A link older than the first publish leaves `published` at the publish, not at the link's time.
+  @Test func aLinkThenAPublishListOneRowPublishedAtThePublish() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageURL)
+    try sbd.advanceClock(60_000)
+
+    let t = try sbd.postArtifactHook(s.id)
+
+    let rows = try #require(try sbd.groupArtifacts(g))
+    expectSessionRowWithLink(rows, session: s.id, name: "flags-cache", link: link)
+    #expect(rows.first?["published"]?.int.map(Int64.init) == t)
+    #expect(rows.first?["updated"]?.int.map(Int64.init) == t)
+  }
+
+  @Test func aKeptRowAndALinkListOneRowWithTheSessionsTitleAndTheLinksId() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    try sbd.postArtifactHook(s.id)
+    try sbd.sb("rm", s.id)
+    try sbd.advanceClock(60_000)
+
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageURL)
+
+    expectSessionRowWithLink(try #require(try sbd.groupArtifacts(g)), session: s.id, name: "flags-cache", link: link)
+  }
+
+  /// A link added after a delete leaves the row removed, and a republish after that clears `removed`.
+  @Test func aLinkAddedAfterADeleteLeavesTheRowRemovedUntilARepublish() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    let published = try sbd.postArtifactHook(s.id)
+    try sbd.advanceClock(60_000)
+    let deleted = try sbd.postArtifactHook(
+      s.id, input: ["action": "delete", "url": .string(artifactPageURL)], response: nil)
+    try sbd.advanceClock(60_000)
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageURL)
+
+    let removedRows = try #require(try sbd.groupArtifacts(g))
+    #expect(removedRows.count == 1)
+    #expect(removedRows.first?["removed"]?.int.map(Int64.init) == deleted)
+    #expect(removedRows.first?["updated"]?.int.map(Int64.init) == published)
+    #expect(removedRows.first?["link"]?.string == link)
+
+    try sbd.advanceClock(60_000)
+    try sbd.postArtifactHook(s.id, response: Instance.artifactResponse(republish: true))
+
+    let rows = try #require(try sbd.groupArtifacts(g))
+    #expect(rows.count == 1)
+    #expect(rows.first?["removed"] == nil)
+    #expect(rows.first?["link"]?.string == link)
+  }
+
+  /// The `/code/artifact/<uuid>` link names the uuid that the publish's `artifact_id` holds.
+  @Test func aLinkToTheCodeURLJoinsAPublishOfTheShortURL() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    try sbd.postArtifactHook(s.id)
+
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageCodeURL)
+
+    expectSessionRowWithLink(try #require(try sbd.groupArtifacts(g)), session: s.id, name: "flags-cache", link: link)
+  }
+
+  @Test func rmOfTheLinkLeavesTheSessionRowWithoutLink() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "flags-cache")
+    let g = try sbd.addArtifactGroup("Flags", s.id)
+    try sbd.postArtifactHook(s.id)
+    let link = try sbd.addGroupLink(group: "Flags", url: artifactPageURL)
+    try #require(try sbd.groupArtifacts(g)?.first?["link"]?.string == link)
+
+    try sbd.sb("group", "link", "rm", "Flags", link)
+
+    let rows = try #require(try sbd.groupArtifacts(g))
+    #expect(rows.count == 1)
+    #expect(rows.first?["session"]?.string == s.id)
+    #expect(rows.first?["link"] == nil)
   }
 
   // MARK: Sessions in no group, and sb group rm

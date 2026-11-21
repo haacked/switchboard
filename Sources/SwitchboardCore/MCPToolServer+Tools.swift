@@ -146,7 +146,8 @@ extension MCPToolServer {
       ], required: ["session", "text"]),
     Tool(
       "list_groups",
-      "Lists the groups with their descriptions, sessions, notes, and artifacts, then the sessions in no group."),
+      "Lists the groups with their descriptions, sessions, notes, links, and artifacts, then the sessions in no group. A group's artifacts include its links to claude.ai artifacts."
+    ),
     Tool(
       "add_group", "Adds a group.",
       [
@@ -165,6 +166,15 @@ extension MCPToolServer {
     Tool(
       "add_group_note", "Adds a note to a group.", ["group": group, "text": string("The note.")],
       required: ["text"]),
+    Tool(
+      "add_group_artifact",
+      "Attaches a claude.ai artifact to a group as a link, so it lists among the group's artifacts. It takes only a https://claude.ai/artifact/ or https://claude.ai/code/artifact/ link, and the link's title is its URL.",
+      ["group": group, "url": string("The claude.ai artifact link.")], required: ["url"]),
+    Tool(
+      "remove_group_artifact",
+      "Removes a link that `add_group_artifact` attached to a group. It refuses a link that the user added.",
+      ["group": group, "link": string("The link's id: the `link` of an artifact in `list_groups`.")],
+      required: ["link"]),
     Tool(
       "suggest_groups",
       "Lists at most \(GroupSuggestions.defaultLimit) groups suggested from dependencies, branch prefixes, and PR title scopes. With `accept`, it accepts that suggestion instead.",

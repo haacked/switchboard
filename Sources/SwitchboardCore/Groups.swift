@@ -45,10 +45,12 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   }
 
   /// Adds `link` after the group's links, under a new id when the group already uses its id. It adds nothing and
-  /// returns false when the group already has a link to the same URL.
+  /// returns false when the group already has a link to the same URL, or to the same claude.ai artifact in another
+  /// form.
   @discardableResult public mutating func addLink(_ link: GroupLink) -> Bool {
     var all = links ?? []
-    guard !all.contains(where: { $0.url == link.url }) else { return false }
+    let target = link.target
+    guard !all.contains(where: { $0.target == target }) else { return false }
     var link = link
     if all.contains(where: { $0.id == link.id }) { link.id = shortId("l", taken: all.map(\.id)) }
     all.append(link)
@@ -101,14 +103,21 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   /// `other`'s becomes a note at `now` by its author, so no text is lost.
   /// This group keeps its account and never takes `other`'s. It adds
   /// `other`'s kept artifact rows after its own, and `other`'s links after
-  /// its own, leaving out each link whose URL this group already has.
+  /// its own, leaving out each link that `addLink` refuses. A link of yours
+  /// replaces Claude's link to the same artifact, so the merge keeps your title.
   public func absorbing(_ other: SessionGroup, now: Int64) -> SessionGroup {
     var kept = keeping(other.keptArtifacts ?? [])
     for var note in other.notes {
       if kept.notes.contains(where: { $0.id == note.id }) { note.id = shortId("n", taken: kept.notes.map(\.id)) }
       kept.notes.append(note)
     }
-    for link in other.links ?? [] { kept.addLink(link) }
+    for link in other.links ?? [] {
+      guard !kept.addLink(link), link.by == .you,
+        let claudes = kept.links?.first(where: { $0.by == .claude && $0.target == link.target })
+      else { continue }
+      _ = kept.removeLink(id: claudes.id)
+      kept.addLink(link)
+    }
     if kept.description == nil {
       if let theirs = other.description {
         kept.describe(theirs, by: other.descriptionBy)
@@ -126,7 +135,8 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   }
 }
 
-/// A web page that the user attached to a group, such as an RFC or a design doc. Only the user adds one.
+/// A web page attached to a group, such as an RFC or a design doc. A link to a claude.ai artifact also lists among
+/// the group's artifacts. The user adds any link. A Claude Code session adds only a link to a claude.ai artifact.
 public struct GroupLink: Codable, Equatable, Sendable, Identifiable {
   public var id: String
   public var title: String
@@ -148,8 +158,12 @@ public struct GroupLink: Codable, Equatable, Sendable, Identifiable {
     self.t = t
   }
 
-  /// The URL without surrounding whitespace. It refuses a URL that is not http or https, that has no host, or that
-  /// holds whitespace, because sessions will read it as one token.
+  /// The URL that two links to the same page share: the normalized form of a claude.ai artifact link, else the URL.
+  var target: String { ArtifactLink.normalized(url) ?? url }
+
+  /// The URL without surrounding whitespace, and a claude.ai artifact link in its normalized form. It refuses a URL
+  /// that is not http or https, that has no host, or that holds whitespace, because sessions will read it as one
+  /// token.
   public static func cleanURL(_ text: String?) throws -> String {
     let url = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     guard !url.isEmpty else { throw APIError("a link needs a URL") }
@@ -159,7 +173,7 @@ public struct GroupLink: Codable, Equatable, Sendable, Identifiable {
     guard !url.contains(where: \.isWhitespace), let parsed = URL(string: url),
       let scheme = parsed.scheme?.lowercased(), ["http", "https"].contains(scheme), parsed.host?.isEmpty == false
     else { throw APIError("a link needs an http or https URL with a host, not \(url)") }
-    return url
+    return ArtifactLink.normalized(url) ?? url
   }
 
   /// The title on one line. Without a title, it is the URL, cut to `titleLimit` characters with an ellipsis when it
@@ -182,7 +196,8 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var sessions: [String]
   /// The plans attached to the group, or nil when it has none.
   public var plans: [PlanSummary]?
-  /// The artifacts of the group's sessions, its chat, and its removed sessions, newest first, or nil when it has none.
+  /// The artifacts of the group's sessions, its chat, its removed sessions, and its links to claude.ai artifacts,
+  /// newest first, or nil when it has none.
   public var artifacts: [GroupArtifact]?
   public var links: [GroupLink]?
 
