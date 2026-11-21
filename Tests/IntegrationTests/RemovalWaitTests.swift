@@ -44,9 +44,11 @@ private func runsSleep(_ pid: pid_t) -> Bool {
   return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("sleep")
 }
 
-/// Copies /bin/sleep to the path. macOS kills a copy of a system program that keeps Apple's signature, so the copy
-/// gets an ad hoc signature.
+/// Copies /bin/sleep to the path, and creates the path's folder first. macOS kills a copy of a system program that
+/// keeps Apple's signature, so the copy gets an ad hoc signature.
 private func copySleep(to path: String) throws {
+  try FileManager.default.createDirectory(
+    atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
   try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
   let r = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
   guard r.status == 0 else { throw TestError(description: "codesign: \(r.stderr)") }
@@ -204,11 +206,7 @@ private final class Strays {
     strays.pidFiles.append(file)
     let path = "\(strays.sbd.home.path)/\(file)"
     let sleep = "\(strays.sbd.home.path)/orphan-bin/sleep"
-    if !FileManager.default.fileExists(atPath: sleep) {
-      try FileManager.default.createDirectory(
-        atPath: (sleep as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-      try copySleep(to: sleep)
-    }
+    if !FileManager.default.fileExists(atPath: sleep) { try copySleep(to: sleep) }
     try strays.spawn(
       "/bin/sh", ["-c", script, "sh", path, sleep], cwd: s.cwd, environment: ["SB_SESSION_ID": sessionId ?? s.id])
     strays.spawned.last?.waitUntilExit()
@@ -300,8 +298,6 @@ private final class Strays {
     try expectRefusalUntilTheyExit(how) { sbd, _, terminals, strays in
       strays.pidFiles = ["shell.pid"]
       let sleep = "\(sbd.home.path)/job-bin/sleep"
-      try FileManager.default.createDirectory(
-        atPath: (sleep as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
       try copySleep(to: sleep)
       try sbd.typeInShell(terminals, "nohup \"\(sleep)\" 100 >/dev/null 2>&1 & echo $! > \"$SB_HOME/shell.pid\"")
     }
@@ -347,7 +343,6 @@ private final class Strays {
       try FileManager.default.createDirectory(
         atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
       try ".build/\n".write(toFile: exclude, atomically: true, encoding: .utf8)
-      try FileManager.default.createDirectory(atPath: "\(s.cwd)/.build", withIntermediateDirectories: true)
       try copySleep(to: "\(s.cwd)/.build/sleep")
       try strays.spawn("\(s.cwd)/.build/sleep", ["100"], cwd: "/")
     }
@@ -372,7 +367,6 @@ private final class Strays {
   func removesWhileAnSSHMultiplexerWorksInTheFolder(_ how: WorktreeRemoval) throws {
     try expectRemovalWhileTheyRun(how) { s, strays in
       let bin = "\(strays.sbd.home.path)/fake-ssh"
-      try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
       try copySleep(to: "\(bin)/ssh")
       try strays.spawn(
         "/bin/bash", ["-c", "exec -a \"ssh: $0/sock [mux]\" \"$0/ssh\" 100", bin], cwd: s.cwd)
