@@ -117,9 +117,9 @@ public struct Config: Codable, Equatable, Sendable {
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
   /// Lets the `clock` request move sbd's clock forward. While the home holds
-  /// `hold-paste`, each paste waits before it starts. While the home holds
-  /// `hold-delivered`, each paste waits before sbd records `delivered`. Only
-  /// tests set it.
+  /// `hold-paste`, each paste waits before it starts. A paste that starts
+  /// while the home holds `hold-delivered` waits before sbd records
+  /// `delivered`. Only tests set it.
   public var testClock = false
   /// Makes sbd append every call on this Mac's machine and site to `Home.machineLog`. Only tests set it.
   public var machineLog = false

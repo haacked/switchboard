@@ -1879,6 +1879,9 @@ public final class Service {
     entries[id]?.inFlight = InFlight(pastedAt)
     let site = try? site(of: id)
     let terminals = try? site?.terminals()
+    // Only a paste that starts while `hold-delivered` exists waits at it. An earlier paste can still be on its way to
+    // the gate after claude replied to it. Holding that paste would hold every paste behind it on the paste queue.
+    let holdsDelivered = gateIsSet("hold-delivered")
     pasteQueue.async { [self] in
       waitAtGate("hold-paste")
       guard let site, let terminals, (try? site.screen(name, colors: true)).map(ClaudeScreen.promptIsEmpty) == true
@@ -1895,7 +1898,7 @@ public final class Service {
       guard queue.sync(execute: { startPaste(id, message) }) else { return }
       do {
         try terminals.paste(name, parts?.text ?? text, attachments: parts?.paths)
-        waitAtGate("hold-delivered")
+        if holdsDelivered { waitAtGate("hold-delivered") }
         queue.async {
           self.record(id, "delivered", ["text": .string(text)])
           // Claude Code runs a built-in command without a turn. No UserPromptSubmit clears its paste.
@@ -1984,8 +1987,12 @@ public final class Service {
   /// gates, and they run on the paste queue or the removal queue, never on
   /// the state queue.
   func waitAtGate(_ gate: String) {
-    guard config.testClock else { return }
-    while FileManager.default.fileExists(atPath: "\(home.path)/\(gate)") { usleep(50_000) }
+    while gateIsSet(gate) { usleep(50_000) }
+  }
+
+  /// Whether the gate file exists in the home of a test instance.
+  func gateIsSet(_ gate: String) -> Bool {
+    config.testClock && FileManager.default.fileExists(atPath: "\(home.path)/\(gate)")
   }
 
   /// Defers the session's held questions first, so that their cards stay.

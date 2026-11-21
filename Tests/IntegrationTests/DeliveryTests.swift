@@ -254,7 +254,9 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     case .delivered:
       try sbd.sb("decide", s.id, "--submit")
       try sbd.waitFor(s.id, "the reply to the decisions") { $0.lastReply?.hasPrefix("Done: My decisions") == true }
-      try #require(try !sbd.events(s.id, "delivered", text: try sbd.submittedMessage(s.id)).isEmpty)
+      // The paste can record `delivered` after claude replies.
+      let message = try sbd.submittedMessage(s.id)
+      try sbd.waitFor("the submit's delivered") { try !sbd.events(s.id, "delivered", text: message).isEmpty }
     }
   }
 }
@@ -393,6 +395,32 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     #expect(sbd.settledStubInputCount(text) == 1)
   }
 
+  /// A test arms `hold-delivered` after an earlier message's reply. That message's paste can still be on its way to
+  /// the gate. `hold-paste` keeps the earlier paste there while the test arms `hold-delivered`. The earlier paste
+  /// records `delivered`. The next message still reaches claude, and `hold-delivered` holds its `delivered`.
+  @Test func aPasteThatStartedBeforeHoldDeliveredDoesNotWaitAtIt() throws {
+    let sbd = try Instance(config: Path.direct.config)
+    let s = try Path.direct.session(sbd)
+    sbd.hold("hold-paste")
+    let first = "pasted before the hold"
+    #expect(try sbd.sb("send", s.id, first) == "pasted\n")
+    sbd.hold("hold-delivered")
+    try sbd.release("hold-paste")
+
+    try sbd.waitFor("the first paste's delivered", timeout: 20) {
+      try !sbd.events(s.id, "delivered", text: first).isEmpty
+    }
+    try sbd.waitFor(s.id, "the first message's reply", timeout: 20) { $0.lastReply == "Done: \(first)" }
+    let second = "pasted after the hold"
+    try sbd.sb("send", s.id, second)
+    try sbd.waitFor("the second message at the stub", timeout: 20) { sbd.stubInputCount(second) == 1 }
+    #expect(try sbd.events(s.id, "delivered", text: second).isEmpty, "hold-delivered let delivered through")
+    try sbd.release("hold-delivered")
+    try sbd.waitFor("the second paste's delivered", timeout: 20) {
+      try !sbd.events(s.id, "delivered", text: second).isEmpty
+    }
+  }
+
   /// The transcript already holds the text from an earlier send that
   /// arrived. Only a line written after this send's `sent` event shows that
   /// this paste landed, and the stub's hold keeps that line from being written.
@@ -403,7 +431,8 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.sb("send", s.id, text)
     try sbd.waitFor(s.id, "the first copy's reply") { $0.lastReply == "Done: \(text)" }
     try #require(sbd.transcriptContains(s, text))
-    let deliveredBefore = try sbd.events(s.id, "delivered", text: text).count
+    // The paste can record `delivered` after claude replies.
+    try sbd.waitFor("the first copy's delivered") { try sbd.events(s.id, "delivered", text: text).count == 1 }
     sbd.hold("hold-delivered")
     sbd.hold("hold")
     let before = sbd.completePastes()
@@ -416,7 +445,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.startSbd()
 
     try sbd.waitFor("delivery_unknown") { try sbd.events(s.id, "delivery_unknown", text: text).count == 1 }
-    #expect(try sbd.events(s.id, "delivered", text: text).count == deliveredBefore)
+    #expect(try sbd.events(s.id, "delivered", text: text).count == 1)
   }
 
   static let draft = "half a thought"
