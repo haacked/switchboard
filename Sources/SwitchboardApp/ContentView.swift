@@ -817,7 +817,7 @@ private struct LaneDrop: ViewModifier {
 }
 
 /// A lane's label column. A group lane also shows the group's description,
-/// its chat, and its plans' Follow up rows and pending updates.
+/// its chat, its notes and links, and its plans' Follow up rows and pending updates.
 private struct LaneLabel: View {
   @EnvironmentObject var model: BoardModel
   let title: String
@@ -856,6 +856,10 @@ private struct LaneLabel: View {
             .accessibilityLabel("Delete group \(group.name)")
         }
         GroupPauseButtons(group: group)
+        HStack(spacing: 8) {
+          GroupNotesLink(group: group)
+          GroupLinksLink(group: group)
+        }
         GroupArtifactsLink(group: group)
       }
       let plans = group?.plans ?? []
