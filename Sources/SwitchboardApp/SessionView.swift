@@ -261,6 +261,10 @@ struct SessionView: View {
           SessionAccountControl(session: session)
           if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
           if session.kind == .manager { ManagerHeaderControls(session: session) }
+          if let repo = RepoLabels.label(for: session) {
+            Text(repo).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+              .help("The repo this session works in")
+          }
           Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
             .font(.caption)
             .foregroundStyle(.tertiary)
