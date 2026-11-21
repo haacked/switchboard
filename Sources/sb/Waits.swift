@@ -29,10 +29,7 @@ func waitCommand(_ a: Args) {
   if block && a.values["--then"] != nil { die("--block reports the outcome itself, so it doesn't take --then") }
   if a.values["--then"] == Wait.Then.caller.rawValue { die(WaitRequest.unknownThen("caller").description) }
   if !block && a.values["--timeout"] != nil { die("--timeout goes with --block") }
-  let timeout = a.values["--timeout"].map { text in
-    guard let seconds = TimeInterval(text), seconds > 0 else { die("--timeout needs a positive number of seconds") }
-    return seconds
-  }
+  let timeout = timeoutSeconds(a)
   let session = a.positional.first ?? ProcessInfo.processInfo.environment["SB_SESSION_ID"]
   if clearing {
     guard let session else { die("wait needs a session") }
@@ -63,6 +60,14 @@ func waitCommand(_ a: Args) {
     print(action.kind.confirmation)
   } else if holder.waits.last?.handedFrom != nil {
     print("the operator follows this through")
+  }
+}
+
+/// The seconds that `--timeout` gives, or nil without it. A value that is not a positive number ends sb.
+func timeoutSeconds(_ a: Args) -> TimeInterval? {
+  a.values["--timeout"].map { text in
+    guard let seconds = TimeInterval(text), seconds > 0 else { die("--timeout needs a positive number of seconds") }
+    return seconds
   }
 }
 

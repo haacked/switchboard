@@ -194,8 +194,8 @@ public final class Service {
   var checkedUnknown: Set<String> = []
   /// gh's login, which the look for an unknown post's reply reads.
   var ghLogin: String?
-  /// The sessions whose decision list `decision-submit` is sending.
-  var submittingDecisions: Set<String> = []
+  /// The sessions to which sbd is sending a decisions submit, resend, or question.
+  var sendingAboutDecisions: Set<String> = []
   /// The sessions that the removal job takes next, in order.
   var removalOrder: [String] = []
   /// The timer that starts a pass of the removal job at the earliest `notBefore` of the queued removals.
@@ -615,7 +615,7 @@ public final class Service {
       return .success(try JSON(encoding: importSessions(request.args)))
     case "triage", "choose", "reply", "summary-set", "item-context":
       return try triageRequest(request, origin: origin)
-    case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard":
+    case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard", "decision-ask":
       return try decisionRequest(request.op, request.args)
     case "plan-attach", "plan-update":
       return .success(try planDocumentRequest(request.op, request.args))

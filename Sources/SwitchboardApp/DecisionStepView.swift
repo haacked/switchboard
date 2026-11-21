@@ -2,9 +2,9 @@ import SwiftUI
 import SwitchboardCore
 
 /// What has the keyboard in the step view: the view itself, whose keys
-/// move through the steps, or the Other answer field.
+/// move through the steps, the Other answer field, or the thread's field.
 enum DecisionFocus: Hashable {
-  case steps, other
+  case steps, other, ask
 }
 
 /// The Inbox card's decisions, one step at a time, with a strip of dots that
@@ -20,6 +20,9 @@ struct DecisionStepView: View {
   @State private var confirmingDiscard = false
   @State private var confirmingNewer = false
   @State private var finishingFirst = false
+  /// Where the thread goes, from the step view's width. Each decision's body has its own identity, so the
+  /// placement lives here and survives a change of step.
+  @State private var placement = DecisionThread.Placement.under
 
   private var steps: DecisionSteps { DecisionSteps(list) }
   private var current: DecisionStep { steps.resolve(step) }
@@ -27,17 +30,34 @@ struct DecisionStepView: View {
     guard case .decision(let n) = current else { return nil }
     return list.decisions.first { $0.number == n }
   }
+  /// Why sbd refuses an answer, Submit, or Discard now, or nil.
+  private var pendingAskReason: String? { list.pendingAskReason }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      if !list.newer.isEmpty, !finishingFirst { newerBanner }
+      if !list.newer.isEmpty, !finishingFirst { newerBanner() }
       DecisionDots(list: list, current: current) { step = $0 }
       Divider()
       if let decision {
         decisionBody(decision)
       } else {
-        review
+        review()
       }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .onGeometryChange(for: DecisionThread.Placement.self) {
+      DecisionThread.placement(width: $0.size.width)
+    } action: {
+      placement = $0
+    }
+    .onChange(of: list.pendingAsk) { asked, now in
+      // VoiceOver does not announce the answer that replaces the spinner on the next poll.
+      guard let asked, now == nil, let done = list.exchanges.last(where: { $0.number == asked && !$0.pending })
+      else { return }
+      let text =
+        done.reply.map { "Answer about decision \(asked): \(String($0.prefix(300)))" }
+        ?? "Your question about decision \(asked) got no answer: \(done.error ?? "")"
+      AccessibilityNotification.Announcement(text).post()
     }
     .background {
       Color.clear.contentShape(Rectangle()).onTapGesture { focus = .steps }
@@ -51,17 +71,25 @@ struct DecisionStepView: View {
   // MARK: Keys
 
   private func handle(_ press: KeyPress) -> KeyPress.Result {
-    guard focus != .other else { return .ignored }
     guard
       let action = DecisionSteps.keyAction(
-        press.key, modifiers: press.modifiers, onReview: current == .review, options: decision?.options.count ?? 0)
+        press.key, modifiers: press.modifiers, onReview: current == .review, options: decision?.options.count ?? 0,
+        focus: focus)
     else { return .ignored }
+    switch action {
+    case .pick, .skip, .submit:
+      // A key reaches these actions while a pending question turns their buttons off.
+      if pendingAskReason != nil { return .handled }
+    default:
+      break
+    }
     switch action {
     case .next: step = steps.next(from: current)
     case .previous: step = steps.previous(from: current)
     case .review: step = .review
     case .pick(let n): if let decision { pick(decision, n) }
     case .focusOther: focus = .other
+    case .focusAsk: focus = .ask
     case .skip: if let decision { skip(decision) }
     case .submit: submit()
     }
@@ -71,6 +99,32 @@ struct DecisionStepView: View {
   // MARK: One decision
 
   private func decisionBody(_ decision: PendingDecision) -> some View {
+    let thread = DecisionThread(
+      session: session.id, list: list, decision: decision.number,
+      draft: model.askDraft(session: session.id, ref: list.ref, decision: decision.number), focus: $focus)
+    return Group {
+      switch placement {
+      case .beside:
+        HStack(alignment: .top, spacing: 0) {
+          decisionColumn(decision).frame(maxWidth: .infinity, alignment: .leading)
+          HStack(alignment: .top, spacing: 0) {
+            Divider().padding(.horizontal, 12)
+            thread
+          }
+          .frame(width: DecisionThread.width, alignment: .leading)
+        }
+      case .under:
+        VStack(alignment: .leading, spacing: 12) {
+          decisionColumn(decision)
+          Divider()
+          thread
+        }
+      }
+    }
+    .id(decision.number)
+  }
+
+  private func decisionColumn(_ decision: PendingDecision) -> some View {
     let answer = list.answer(decision.number)
     return VStack(alignment: .leading, spacing: 8) {
       InlineText(plain: decision.header).font(.headline).textSelection(.enabled)
@@ -88,19 +142,20 @@ struct DecisionStepView: View {
       }
       OtherAnswer(
         session: session.id, ref: list.ref, decision: decision.number, answered: answer?.text,
+        disabledReason: pendingAskReason,
         draft: model.otherAnswerDraft(session: session.id, ref: list.ref, decision: decision.number),
         focus: $focus)
-      HStack {
+      HStack(alignment: .firstTextBaseline) {
+        if let pendingAskReason { PendingAskNote(reason: pendingAskReason) }
         Spacer()
         let skipped = answer?.skip == true
         Button(skipped ? "Skipped" : "Skip for now") { skip(decision) }
-          .disabled(skipped)
-          .help("Answers \"\(DecisionList.skipText)\" (S)")
+          .disabled(skipped || pendingAskReason != nil)
+          .help(pendingAskReason ?? "Answers \"\(DecisionList.skipText)\" (S)")
           .accessibilityLabel(
             skipped ? "Decision \(decision.number) is skipped" : "Skip decision \(decision.number) for now")
       }
     }
-    .id(decision.number)
   }
 
   private func optionBox(_ decision: PendingDecision, _ i: Int, picked: Bool) -> some View {
@@ -113,7 +168,8 @@ struct DecisionStepView: View {
         description: option.detail, tag: option.recommended ? "Recommended" : nil)
     }
     .buttonStyle(OptionCardStyle(ticked: picked))
-    .help(i < 9 ? "Press \(i + 1)" : "")
+    .disabled(pendingAskReason != nil)
+    .help(pendingAskReason ?? (i < 9 ? "Press \(i + 1)" : ""))
     .accessibilityLabel(option.recommended ? "\(option.label), recommended" : option.label)
     .accessibilityHint(option.detail ?? "")
     .accessibilityAddTraits(picked ? .isSelected : [])
@@ -149,7 +205,7 @@ struct DecisionStepView: View {
 
   // MARK: Review
 
-  private var review: some View {
+  private func review() -> some View {
     let recommendable = list.decisions.filter { d in
       list.answer(d.number) == nil && d.options.contains(where: \.recommended)
     }
@@ -163,9 +219,11 @@ struct DecisionStepView: View {
             model.answerDecision(session.id, ref: list.ref, number: d.number, .options([i + 1]))
           }
         }
+        .disabled(pendingAskReason != nil)
+        .help(pendingAskReason ?? "")
       }
-      submitBox
-      if session.decisions != nil { discard }
+      submitBox()
+      if session.decisions != nil { discard() }
     }
   }
 
@@ -189,24 +247,27 @@ struct DecisionStepView: View {
     .accessibilityElement(children: .contain)
   }
 
-  private var submitBox: some View {
+  private func submitBox() -> some View {
     let message = list.message
     let open = list.unanswered.map(String.init)
+    let sendable = message != nil && pendingAskReason == nil
     let note =
-      message.map { "Sends:\n\($0)" }
+      pendingAskReason.map { "\($0)." }
+      ?? message.map { "Sends:\n\($0)" }
       ?? "Off until decision\(open.count == 1 ? "" : "s") \(englishList(open)) \(open.count == 1 ? "has" : "have") an answer."
     return VStack(alignment: .leading, spacing: 8) {
       Button(action: submit) {
-        OptionCardLabel(mark: .go, title: "Submit", note: note, shortcut: message != nil)
+        OptionCardLabel(mark: .go, title: "Submit", note: note, shortcut: sendable)
       }
-      .buttonStyle(OptionCardStyle(prominent: message != nil))
-      .disabled(message == nil || model.deciding.contains("\(session.id)/submit"))
+      .buttonStyle(OptionCardStyle(prominent: sendable))
+      .disabled(!sendable || model.deciding.contains("\(session.id)/submit"))
       .primaryShortcut(true)
       .accessibilityLabel("Submit the answers")
       .accessibilityHint(note)
       if confirmingStale {
         confirmation(
-          "The session replied since these decisions. Send your answers anyway?", action: "Send Anyway"
+          "The session replied since these decisions. Send your answers anyway?", action: "Send Anyway",
+          disabledReason: pendingAskReason
         ) {
           model.submitDecisions(session.id, stale: true)
         } cancel: {
@@ -222,30 +283,37 @@ struct DecisionStepView: View {
   }
 
   @ViewBuilder
-  private var discard: some View {
+  private func discard() -> some View {
     if confirmingDiscard {
-      confirmation("Discard your answers to these decisions?", action: "Discard Answers") {
+      confirmation(
+        "Discard your answers to these decisions?", action: "Discard Answers", disabledReason: pendingAskReason
+      ) {
         model.discardDecisions(session.id)
       } cancel: {
         confirmingDiscard = false
       }
     } else {
       Button("Discard answers…") { confirmingDiscard = true }
-        .disabled(model.deciding.contains("\(session.id)/discard"))
+        .disabled(pendingAskReason != nil || model.deciding.contains("\(session.id)/discard"))
+        .help(pendingAskReason ?? "")
         .accessibilityLabel("Discard answers")
+        .accessibilityHint(pendingAskReason ?? "")
     }
   }
 
   // MARK: Newer decisions
 
-  private var newerBanner: some View {
+  private func newerBanner() -> some View {
     let count = list.newer.count
     let style = CalloutView.style(.decision)
     return VStack(alignment: .leading, spacing: 8) {
       Label("The session replied with \(count) new decision\(count == 1 ? "" : "s").", systemImage: style.icon)
         .fontWeight(.medium)
       if confirmingNewer {
-        confirmation("Discard your answers to these decisions and answer the new ones?", action: "Discard Answers") {
+        confirmation(
+          "Discard your answers to these decisions and answer the new ones?", action: "Discard Answers",
+          disabledReason: pendingAskReason
+        ) {
           model.discardDecisions(session.id)
         } cancel: {
           confirmingNewer = false
@@ -253,6 +321,8 @@ struct DecisionStepView: View {
       } else {
         WrappingRow(spacing: 8) {
           Button("Answer the new ones…") { confirmingNewer = true }
+            .disabled(pendingAskReason != nil)
+            .help(pendingAskReason ?? "")
           Button("Finish these first") { finishingFirst = true }
         }
       }
@@ -263,9 +333,10 @@ struct DecisionStepView: View {
   }
 
   /// A question that the card asks inside itself, with a button that does the
-  /// change and Cancel.
+  /// change and Cancel. `disabledReason` turns the change off and says why.
   private func confirmation(
-    _ question: String, action: String, confirm: @escaping () -> Void, cancel: @escaping () -> Void
+    _ question: String, action: String, disabledReason: String? = nil, confirm: @escaping () -> Void,
+    cancel: @escaping () -> Void
   ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(question).fixedSize(horizontal: false, vertical: true)
@@ -274,8 +345,11 @@ struct DecisionStepView: View {
           cancel()
           confirm()
         }
+        .disabled(disabledReason != nil)
+        .help(disabledReason ?? "")
         Button("Cancel", action: cancel)
       }
+      if let disabledReason { PendingAskNote(reason: disabledReason) }
     }
   }
 }
@@ -291,9 +365,10 @@ struct DecisionDots: View {
   static let size: CGFloat = 22
 
   var body: some View {
+    let marks = list.threadMarks
     WrappingRow(spacing: 8) {
       ForEach(Array(list.decisions.enumerated()), id: \.element.number) { i, d in
-        dot(d, position: i + 1)
+        dot(d, position: i + 1, mark: marks[d.number])
       }
       reviewButton
         .controlSize(.small)
@@ -320,10 +395,15 @@ struct DecisionDots: View {
     return "Decision \(i + 1) of \(list.decisions.count)"
   }
 
-  private func dot(_ d: PendingDecision, position: Int) -> some View {
+  private func dot(_ d: PendingDecision, position: Int, mark: DecisionThreadMark?) -> some View {
     let answer = list.answer(d.number)
     let here = current == .decision(d.number)
-    let status = answer == nil ? "unanswered" : answer?.skip == true ? "skipped" : "answered"
+    var status = answer == nil ? "unanswered" : answer?.skip == true ? "skipped" : "answered"
+    switch mark {
+    case .asked: status += ", you asked about it"
+    case .answering: status += ", the session is answering your question"
+    case nil: break
+    }
     return Button {
       go(.decision(d.number))
     } label: {
@@ -341,12 +421,28 @@ struct DecisionDots: View {
       .frame(width: Self.size, height: Self.size)
       .padding(3)
       .overlay(Circle().strokeBorder(here ? Color.accentColor : .clear, lineWidth: 2))
+      .overlay(alignment: .topTrailing) { threadMark(mark).offset(x: 4, y: -2) }
       .contentShape(Circle())
     }
     .buttonStyle(.plain)
     .help(d.header)
     .accessibilityLabel("Decision \(position) of \(list.decisions.count), \(d.header), \(status)")
     .accessibilityAddTraits(here ? .isSelected : [])
+  }
+
+  /// A speech mark on a decision that the user asked about, and a spinner while the session answers.
+  @ViewBuilder
+  private func threadMark(_ mark: DecisionThreadMark?) -> some View {
+    switch mark {
+    case .asked:
+      Image(systemName: "bubble.left.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+        .padding(1).background(Circle().fill(.background))
+    case .answering:
+      ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+        .background(Circle().fill(.background))
+    case nil:
+      EmptyView()
+    }
   }
 }
 
@@ -410,6 +506,8 @@ struct OtherAnswer: View {
   let ref: String
   let decision: Int
   let answered: String?
+  /// Why sbd refuses an answer now, or nil.
+  let disabledReason: String?
   @ObservedObject var draft: MessageField.Draft
   var focus: FocusState<DecisionFocus?>.Binding
 
@@ -428,14 +526,17 @@ struct OtherAnswer: View {
             .accessibilityLabel("Other answer to decision \(decision)")
             .accessibilityHint(answered.map { "Your answer: \($0)" } ?? "")
           Button("Answer", action: send)
-            .disabled(trimmed.isEmpty || model.deciding.contains("\(session)/\(decision)"))
+            .disabled(trimmed.isEmpty || disabledReason != nil || model.deciding.contains("\(session)/\(decision)"))
+            .help(disabledReason ?? "")
             .accessibilityLabel("Answer decision \(decision) with the typed text")
         }
       }
     }
   }
 
+  /// Return sends too, so it checks the pending question that turns the Answer button off.
   private func send() {
+    guard disabledReason == nil else { return }
     Self.submit($draft.text, session: session, ref: ref, decision: decision, to: model)
   }
 

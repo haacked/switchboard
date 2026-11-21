@@ -10,7 +10,7 @@ Each session is the real `claude` CLI in its own folder or git worktree, under y
 
 ### The Inbox: answer sessions without opening a terminal
 
-Every session that needs you gets one item in the Inbox. A permission prompt shows as a card with Allow and Deny. A question from Claude shows its options. When Claude's reply asks you to make several decisions, the Inbox lists them with the answer Claude recommends, and you send all your answers as one message. ⌘J moves to the next item.
+Every session that needs you gets one item in the Inbox. A permission prompt shows as a card with Allow and Deny. A question from Claude shows its options. When Claude's reply asks you to make several decisions, the Inbox lists them with the answer Claude recommends, and you send all your answers as one message. Before you answer one, you can ask the session about it in the decision's step, or with `sb decide <session> --ask <n> "<question>"`. Its reply shows under that decision while the session keeps its place in the Inbox, and the session gets your question with a request to answer in text only (see [Decision lists](docs/inbox.md#decision-lists)). ⌘J moves to the next item.
 
 ![A permission card in the Inbox, with the Bash command Claude wants to run and buttons to allow or deny it](docs/images/inbox-permission.png)
 

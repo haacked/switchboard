@@ -141,6 +141,21 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   return s
 }
 
+/// A yes-or-no decision headed "Header N" that asks "Question N?".
+func yesNoDecision(_ number: Int) -> PendingDecision {
+  PendingDecision(
+    number: number, header: "Header \(number)", question: "Question \(number)?",
+    options: [PendingDecision.Option(label: "Yes"), PendingDecision.Option(label: "No")])
+}
+
+/// A session whose item shows yes-or-no decisions 1 to 3 under `ref`.
+func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
+  var s = needsItem(id)
+  s.triage?.ref = ref
+  s.triage?.decisions = [1, 2, 3].map(yesNoDecision)
+  return s
+}
+
 /// A session whose triage item comes from a real card of `kind`, as sbd builds it.
 func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .needsYou, waitingOn kind: Card.Kind) throws
   -> SessionSummary

@@ -25,9 +25,15 @@ extension Service {
   /// Records the card that the session wrote for its current turn. A new
   /// prompt drops it. When the card asks the user something, `childItems`
   /// lists the session's children that ask the user in their own Inbox item,
-  /// so the CLI can say not to ask their questions again.
+  /// so the CLI can say not to ask their questions again. A clarifying turn's card would replace the item that
+  /// the user asked from, so sbd refuses it.
   private func setSummary(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
+    if let ask = entries[id]!.facts.clarifying, ask.started {
+      throw APIError(
+        "This turn answers a question about decision \(ask.number). Switchboard did not save a summary card. Reply in text, and Switchboard shows your reply under that decision."
+      )
+    }
     guard let raw = args["card"] else { throw APIError("summary set needs the card as JSON") }
     let cleaned = try TriageCard.clean(raw, now: nowMs())
     let event = record(id, Triage.sessionEvent, try JSON(encoding: cleaned.card))

@@ -70,6 +70,7 @@ sb decide <session> 2 to-do  # answer decision 2 with an option, by number or la
 sb decide <session> 3 --skip # or --text "..." for a typed answer
 sb decide <session> --submit # send every answer as one message
 sb decide <session> --resend # send them again when sbd can't tell whether they arrived
+sb decide <session> --ask 2 "why not B?"  # ask the session about decision 2 and print its reply
 sb reply <session>           # the session's last reply, as Markdown
 sb context <session>         # Claude's steps up to the session's Inbox item (--steps N)
 sb summary set < card.json   # inside a session: write its Inbox card for this turn

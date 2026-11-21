@@ -488,6 +488,97 @@ import Testing
     #expect(MessageDrafts.replyKeys([s]).isEmpty)
   }
 
+  // MARK: decisionKeys(_:)
+
+  /// A session whose item carries yes-or-no decisions with `numbers` under `ref`. sbd has opened no list for it.
+  func deciding(_ id: String, ref: String = "summary:1", _ numbers: [Int]) -> SessionSummary {
+    var s = needsItem(id)
+    s.triage?.ref = ref
+    s.triage?.decisions = numbers.map(yesNoDecision)
+    return s
+  }
+
+  /// The Other answer key and the ask key of each decision in `numbers`.
+  func keys(_ session: String, _ ref: String, _ numbers: [Int]) -> Set<String> {
+    Set(numbers.flatMap { ["decision:\(session)/\(ref)/\($0)/other", "decision:\(session)/\(ref)/\($0)/ask"] })
+  }
+
+  @Test func decisionKeysNameEachDecisionOfTheItemsList() {
+    #expect(MessageDrafts.decisionKeys([deciding("s1", [1, 2, 3])]) == keys("s1", "summary:1", [1, 2, 3]))
+  }
+
+  /// The reply's numbers need not run 1, 2, 3.
+  @Test func decisionKeysUseTheDecisionsOwnNumbers() {
+    #expect(MessageDrafts.decisionKeys([deciding("s1", [3, 7, 9])]) == keys("s1", "summary:1", [3, 7, 9]))
+  }
+
+  /// Once the first answer opens the list, the open list's ref and decisions name the keys, not the item's.
+  @Test func decisionKeysFollowTheOpenListOverTheItem() {
+    var s = deciding("s1", ref: "summary:2", [1, 2, 3])
+    s.decisions = DecisionList(
+      decisions: deciding("s1", [4, 5]).triage!.decisions, ref: "summary:1",
+      answers: [DecisionAnswer(number: 4, labels: ["Yes"])])
+
+    #expect(MessageDrafts.decisionKeys([s]) == keys("s1", "summary:1", [4, 5]))
+  }
+
+  /// Each decision's step has a thread field, so each decision keeps an unsent question as well as an unsent
+  /// Other answer.
+  @Test func decisionKeysIncludeTheAskKeyOfEachDecision() {
+    let found = MessageDrafts.decisionKeys([deciding("s1", [1, 2])])
+
+    #expect(
+      Set(found.filter { $0.hasSuffix("/ask") }) == ["decision:s1/summary:1/1/ask", "decision:s1/summary:1/2/ask"])
+  }
+
+  /// An exchange on the list doesn't add or remove a key. The ask key belongs to the decision, not to the question.
+  @Test func decisionKeysOfAListWithExchangesAreTheSameKeys() throws {
+    var s = deciding("s1", [1, 2])
+    s.decisions = DecisionList(
+      decisions: s.triage!.decisions, ref: "summary:1",
+      exchanges: [decisionExchange("q-1", about: 2, pending: true)])
+
+    #expect(MessageDrafts.decisionKeys([s]) == keys("s1", "summary:1", [1, 2]))
+  }
+
+  @Test func decisionKeysLeaveOutAnItemWhoseAnswersSbdSent() {
+    var s = deciding("s1", [1, 2, 3])
+    s.decisionsSent = true
+
+    #expect(MessageDrafts.decisionKeys([s]).isEmpty)
+  }
+
+  /// One decision shows no step view, so it has no Other answer field and no thread field.
+  @Test func decisionKeysLeaveOutAnItemWithASingleDecision() {
+    #expect(MessageDrafts.decisionKeys([deciding("s1", [1])]).isEmpty)
+  }
+
+  @Test func decisionKeysOfASessionWithoutAnItemAreEmpty() {
+    var s = needsItem("s1")
+    s.triage = nil
+
+    #expect(MessageDrafts.decisionKeys([s]).isEmpty)
+  }
+
+  /// A group chat keeps its message draft under `group:<id>`. Its decision keys still name the session.
+  @Test func decisionKeysOfAGroupChatNameTheSessionNotTheGroup() {
+    var s = deciding("c1", [1, 2])
+    s.chat = "g1"
+    s.kind = .chat
+
+    #expect(MessageDrafts.decisionKeys([s]) == keys("c1", "summary:1", [1, 2]))
+  }
+
+  @Test func decisionKeysCoverEverySession() {
+    let found = MessageDrafts.decisionKeys([deciding("s1", [1, 2]), deciding("s2", ref: "stop:9", [1, 2])])
+
+    #expect(found == keys("s1", "summary:1", [1, 2]).union(keys("s2", "stop:9", [1, 2])))
+  }
+
+  @Test func decisionKeysOfNoSessionsAreEmpty() {
+    #expect(MessageDrafts.decisionKeys([]).isEmpty)
+  }
+
   // MARK: saveNow() and loading
 
   @Test(arguments: [

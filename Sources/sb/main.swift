@@ -370,6 +370,11 @@ let usage = """
     decide <session> --resend     send the submitted answers again, only when sbd
                                   restarted while sending them and can't tell whether
                                   the session got them
+    decide <session> --ask <n> <question> [--no-wait] [--timeout S]
+                                  ask the session about decision n and print its reply,
+                                  waiting up to S seconds (600 by default). The session
+                                  answers in a turn that keeps its Inbox item. --no-wait
+                                  prints the question's id. Refuses inside Claude Code
     reply <session>               the session's last reply, as Markdown
     context <session> [--steps N] Claude's last steps up to the session's Inbox item, with
                                   N steps before it (5 by default)

@@ -102,6 +102,7 @@ enum HostScope {
       "removal-notices", "removal-notice-dismiss",
       "host-disconnect", "live", "live-next", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
       "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+      "decision-ask",
       "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
       "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
       "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
@@ -211,9 +212,10 @@ extension RequestOrigin {
 /// from reading a repo that the host's `repos` don't list. The event log can still hold data that sbd read while the
 /// host's `repos` listed the repo, or that an older sbd read. The copies that reach the box leave that data out.
 extension Service {
-  /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it.
+  /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it. The
+  /// data of `decision_asked` holds a copy of the session's verdict and Inbox item, which can come from either.
   static let gitHubEventKinds: Set<String> = [
-    "pr", "dependencies", "merge", "cleanup", "worktree", "triage", "digest", MergeBrief.event,
+    "pr", "dependencies", "merge", "cleanup", "worktree", "triage", "digest", "decision_asked", MergeBrief.event,
     ReviewRequestAttempt.event, AutoContinue.eventKind, DraftReplies.targetEvent, DraftReplies.postingEvent,
     DraftReplies.postedEvent, DraftReplies.failedEvent, DraftReplies.unknownEvent,
   ]
@@ -285,7 +287,9 @@ extension SessionFacts {
   /// The facts without what this Mac's GitHub login read, and without what sbd derived from it: the PR, its
   /// comments, dependencies, merge and review-request attempts, the model's briefs, the drafts' targets, the
   /// cleanup checks, the board moves, and the outcome of a wait that the GitHub poller resolved. The turn summary
-  /// goes too, because its model call read the session's summary with its PR.
+  /// goes too, because its model call read the session's summary with its PR. The hold of a question about a
+  /// decision goes too, because its saved verdict and item can come from the PR. The host then sees the verdict and
+  /// the item of the clarifying turn.
   var withoutGitHub: SessionFacts {
     var f = self
     f.pr = nil
@@ -302,6 +306,7 @@ extension SessionFacts {
     f.boardSince = nil
     f.boardBack = nil
     f.triage = nil
+    f.heldAsk = nil
     if f.waitOutcomeKind.map(GitHubPoller.waitKinds.contains) == true {
       f.waitOutcome = nil
       f.waitOutcomeKind = nil

@@ -248,10 +248,13 @@ final class BoardModel: ObservableObject {
   /// replies, so a second click can't ask the group's chat to read the artifact again.
   @Published var usingAsPlan: Set<String> = []
   /// The decision requests that wait for sbd: `<session>/<number>` for an
-  /// answer, and `<session>/submit` and `<session>/discard`.
+  /// answer, `<session>/ask` for a question, and `<session>/submit` and `<session>/discard`.
   @Published var deciding: Set<String> = []
   /// sbd's refusal of the last decision request, by session. The card shows it.
   @Published var decisionErrors: [String: String] = [:]
+  /// The step that each session's step view shows, by session id, with the ref of the list that the step belongs
+  /// to. Nil shows the first unanswered decision.
+  @Published private(set) var decisionSteps: [String: DecisionStepEntry] = [:]
   /// sbd's refusal of the last Clear wait, by session. The wait panel shows it.
   @Published var waitErrors: [String: String] = [:]
   /// The waits, as `<session>/<wait>`, whose Clear wait sbd has not answered. Their buttons stay disabled, so a
@@ -787,8 +790,12 @@ final class BoardModel: ObservableObject {
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       messageDrafts.prune(
-        keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list))
+        keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.decisionKeys(list))
           .union(MessageDrafts.replyKeys(list)).union(MessageDrafts.operatorAnswerKeys(list)))
+      let ids = Set(list.map(\.id))
+      if decisionSteps.keys.contains(where: { !ids.contains($0) }) {
+        decisionSteps = decisionSteps.filter { ids.contains($0.key) }
+      }
       if !sameShown(allSessions, list) { allSessions = list }
       // After the new list, so that the filter change reads each session's group from the same poll as the groups.
       if let groups { applyGroups(groups) }
@@ -1477,6 +1484,20 @@ final class BoardModel: ObservableObject {
     perform("choose", args, finally: { self.choosing.remove(key) })
   }
 
+  /// The step set for the list with `ref`. A list with another ref has no step, so a new list starts on its first
+  /// unanswered decision.
+  func decisionStep(session: String, ref: String) -> DecisionStep? {
+    decisionSteps[session].flatMap { $0.ref == ref ? $0.step : nil }
+  }
+
+  /// Sets the step for the list with `ref`. A write for a list that the session no longer shows is dropped, because
+  /// `DecisionStepView` sets the step after sbd accepts an answer, and the list can change in the meantime.
+  func setDecisionStep(_ step: DecisionStep?, session: String, ref: String) {
+    guard allSessions.first(where: { $0.id == session })?.stepList?.ref == ref else { return }
+    let entry = step.map { DecisionStepEntry(ref: ref, step: $0) }
+    if decisionSteps[session] != entry { decisionSteps[session] = entry }
+  }
+
   /// Answers one decision of the list whose ref the user saw. `answered`
   /// runs once sbd accepts the answer.
   func answerDecision(
@@ -1505,6 +1526,15 @@ final class BoardModel: ObservableObject {
 
   func discardDecisions(_ session: String) {
     decide(session, "decision-discard", ["session": .string(session)], key: "\(session)/discard")
+  }
+
+  /// Asks the session about one decision of the list whose ref the user saw. `asked` runs once sbd accepts the
+  /// question. sbd takes one question per session at a time, so a second ask waits for the first whatever its decision.
+  func askDecision(_ session: String, ref: String, number: Int, text: String, asked: (() -> Void)? = nil) {
+    let args: [String: JSON] = [
+      "session": .string(session), "ref": .string(ref), "number": .number(Double(number)), "text": .string(text),
+    ]
+    decide(session, "decision-ask", args, key: "\(session)/ask", then: asked)
   }
 
   /// A second request with the same key does nothing until sbd answers the first.
@@ -1701,6 +1731,11 @@ final class BoardModel: ObservableObject {
   /// What the user typed as the Other answer to one decision and has not sent.
   func otherAnswerDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, ref: ref, decision: decision))
+  }
+
+  /// What the user typed as a question about one decision and has not asked.
+  func askDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.askKey(session: session, ref: ref, decision: decision))
   }
 
   /// The user's edit of a draft reply. An empty field starts again with `initial`, the session's text.

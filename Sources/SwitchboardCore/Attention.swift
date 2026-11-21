@@ -201,6 +201,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The decisions that the user started to answer, from the first answer
   /// until a submit or a discard.
   public var decisionList: DecisionList?
+  /// The ask whose turn has not ended, from its `decision_asked` until that turn's Stop.
+  public var clarifying: Clarifying?
+  /// The first ask about a decision of the open list, while that list is open and fresh. `Attention.rules`
+  /// returns its verdict and `Triage.liveItem` its item, so the clarifying turns change neither.
+  public var heldAsk: DecisionAsk?
   /// What sbd found for each draft's reply target.
   public var draftReplies = DraftReplyFacts()
   /// The ref of the item whose decisions the last accepted submit sent.
@@ -472,12 +477,13 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyCards(event, userPrompt: userPrompt)
     applyTriage(event)
     applyMergeBrief(event)
-    applyDecisions(event)
+    let turnEnded = turnWasRunning && !turnRunning
+    applyDecisions(event, turnEnded: turnEnded)
     applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
     applySnooze(event, before: snoozeBefore, touchedBefore: touchedBefore)
-    applyRequest(event, userPrompt: userPrompt, turnEnded: turnWasRunning && !turnRunning)
+    applyRequest(event, userPrompt: userPrompt, turnEnded: turnEnded)
     applyReports(event)
   }
 
@@ -588,6 +594,9 @@ public struct Verdict: Equatable, Sendable {
   public var overdueWaits: [String] = []
   /// True for the failed removal's Needs you. Its item offers Retry and Keep, so it takes no reply question.
   public var removalFailed = false
+  /// True for the verdict that the session had when the user first asked about a decision of the open list.
+  /// No later layer of `evaluate` changes it.
+  public var savedAtAsk = false
   /// True for a verdict that the operator's routed asks or waits gave. Its item has source `.report`.
   public var fromOperator = false
 
@@ -640,7 +649,7 @@ public enum Attention {
     let verdict = unheld(session, facts, now: now, stateOf: stateOf)
     // A held verdict is Waiting. The hold comes after `readyForReview`, which would turn it into Ready for review.
     // While sbd can't read the host, the hold must not move the kept state either.
-    return facts.unread != nil ? verdict : requested(verdict, facts, now: now)
+    return facts.unread != nil || verdict.savedAtAsk ? verdict : requested(verdict, facts, now: now)
   }
 
   /// The verdict without the hold of the user's request, which a new
@@ -654,7 +663,7 @@ public enum Attention {
     if session.kind != .work { facts.pr = nil }
     let verdict = rules(session, facts, now: now, stateOf: stateOf)
     // A PR that became ready while sbd can't read the host must not move the kept state.
-    if facts.unread != nil { return verdict }
+    if facts.unread != nil || verdict.savedAtAsk { return verdict }
     return readyForReview(verdict, facts) ?? verdict
   }
 
@@ -698,6 +707,13 @@ public enum Attention {
     }
     if facts.exitedAtTrust { return trustExitVerdict }
     if let v = openPromptVerdict(facts) { return v }
+    if let held = facts.heldAsk {
+      // A clarifying turn would read Working and then take its reply's state, which would drop the Inbox item,
+      // fire a banner, and notify the parent.
+      var v = Verdict(state: held.verdict.state, reason: held.verdict.reason)
+      v.savedAtAsk = true
+      return v
+    }
     if let ask { return ask }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning { return workingVerdict(facts, now: now) }

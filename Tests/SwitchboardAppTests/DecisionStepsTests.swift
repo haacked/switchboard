@@ -5,17 +5,10 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// A yes-or-no decision.
-private func decision(_ number: Int, options: [String] = ["Yes", "No"]) -> PendingDecision {
-  PendingDecision(
-    number: number, header: "Header \(number)", question: "Question \(number)?",
-    options: options.map { PendingDecision.Option(label: $0) })
-}
-
 /// A list of yes-or-no decisions with the given numbers, where each decision in `answered` has the answer Yes.
 private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
   DecisionList(
-    decisions: numbers.map { decision($0) }, ref: "session:1",
+    decisions: numbers.map(yesNoDecision), ref: "session:1",
     answers: answered.map { DecisionAnswer(number: $0, labels: ["Yes"]) })
 }
 
@@ -107,12 +100,18 @@ private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
   static let tableKeys: [(KeyEquivalent, DecisionKeyAction)] = [
     (KeyEquivalent("]"), .next), (.rightArrow, .next), (KeyEquivalent("["), .previous), (.leftArrow, .previous),
     (KeyEquivalent("o"), .focusOther), (KeyEquivalent("s"), .skip), (KeyEquivalent("r"), .review),
+    (KeyEquivalent("a"), .focusAsk), (KeyEquivalent("/"), .focusAsk),
   ]
 
+  /// The fields of the step view. A key typed into one is text, not a step action.
+  static let textFields: [DecisionFocus] = [.other, .ask]
+
   private func action(
-    _ key: KeyEquivalent, _ modifiers: EventModifiers = [], onReview: Bool = false, options: Int = 3
+    _ key: KeyEquivalent, _ modifiers: EventModifiers = [], onReview: Bool = false, options: Int = 3,
+    focus: DecisionFocus? = nil
   ) -> DecisionKeyAction? {
-    DecisionSteps.keyAction(key, modifiers: modifiers, onReview: onReview, options: onReview ? 0 : options)
+    DecisionSteps.keyAction(
+      key, modifiers: modifiers, onReview: onReview, options: onReview ? 0 : options, focus: focus)
   }
 
   @Test(arguments: tableKeys)
@@ -156,8 +155,12 @@ private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
   }
 
   /// ⌘J moves to the next Inbox item, and ⌘1 and ⌘R belong to the menus.
+  /// ⌘A selects all and ⌘/ belongs to the menus too.
   @Test(
-    arguments: [KeyEquivalent("]"), .rightArrow, KeyEquivalent("1"), KeyEquivalent("s"), KeyEquivalent("r")],
+    arguments: [
+      KeyEquivalent("]"), .rightArrow, KeyEquivalent("1"), KeyEquivalent("s"), KeyEquivalent("r"),
+      KeyEquivalent("a"), KeyEquivalent("/"),
+    ],
     commandOptionOrControl)
   func aTableKeyWithCommandOptionOrControlIsLeftAlone(_ key: KeyEquivalent, _ modifiers: EventModifiers) {
     #expect(action(key, modifiers) == nil)
@@ -166,17 +169,40 @@ private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
   @Test func capsLockChangesNothing() {
     #expect(action(KeyEquivalent("s"), .capsLock) == .skip)
   }
+
+  /// Review has no thread, so a and / have no field to focus there. This is an assumption: the plan puts the
+  /// thread "in each step" and says nothing about Review.
+  @Test(arguments: ["a", "/"])
+  func theAskKeysOnReviewAreLeftAlone(_ key: String) {
+    #expect(action(KeyEquivalent(Character(key)), onReview: true) == nil)
+  }
+
+  // MARK: Keys while a text field has focus
+
+  /// Typing "a" or "2" into the Other answer or the thread field must type it, not focus the thread or pick option 2.
+  @Test(arguments: tableKeys.map(\.0), textFields)
+  func aTableKeyTypedIntoAFieldIsLeftToTheField(_ key: KeyEquivalent, _ focus: DecisionFocus) {
+    #expect(action(key, focus: focus) == nil)
+  }
+
+  @Test(arguments: ["1", "2", "3"], textFields)
+  func aDigitTypedIntoAFieldIsLeftToTheField(_ digit: String, _ focus: DecisionFocus) {
+    #expect(action(KeyEquivalent(Character(digit)), focus: focus) == nil)
+  }
+
+  /// A field sends with Return, so ⇧⌘Return must not also move the step or submit from inside it.
+  @Test(arguments: [false, true], textFields)
+  func commandShiftReturnInAFieldIsLeftToTheField(_ onReview: Bool, _ focus: DecisionFocus) {
+    #expect(action(.return, [.command, .shift], onReview: onReview, focus: focus) == nil)
+  }
+
+  @Test(arguments: tableKeys)
+  func aTableKeyWithTheStepsFocusedDoesItsAction(_ key: KeyEquivalent, _ expected: DecisionKeyAction) {
+    #expect(action(key, focus: .steps) == expected)
+  }
 }
 
 // MARK: Other answer drafts
-
-/// A session whose item shows decisions 1 to 3 under `ref`.
-private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
-  var s = needsItem(id)
-  s.triage?.ref = ref
-  s.triage?.decisions = list([1, 2, 3]).decisions
-  return s
-}
 
 @MainActor
 @Suite struct DecisionDrafts {
@@ -323,11 +349,12 @@ private func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
   }
 
   enum Request: String, CaseIterable, CustomStringConvertible {
-    case answer, submit, discard, resend
+    case answer, submit, discard, resend, ask
     var description: String { rawValue }
 
     @MainActor func run(on model: BoardModel, _ session: String) {
       switch self {
+      case .ask: model.askDecision(session, ref: "session:3", number: 1, text: "why not B?")
       case .answer: model.answerDecision(session, ref: "session:3", number: 1, .skip)
       case .submit: model.submitDecisions(session)
       case .discard: model.discardDecisions(session)
