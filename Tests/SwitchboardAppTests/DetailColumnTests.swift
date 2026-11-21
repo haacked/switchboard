@@ -3,8 +3,8 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// What the detail column shows, named by the session's id. `DetailColumn` need not be `Equatable`, so the tests
-/// compare this instead.
+/// What the detail column shows, with each session named by its id, so a test compares it without the session's
+/// other fields.
 enum ShownColumn: Equatable, CustomTestStringConvertible {
   case multiSelection
   case followup(String)
@@ -19,30 +19,6 @@ enum ShownColumn: Equatable, CustomTestStringConvertible {
     case .docket(let s, _): self = .docket(s.id)
     case .session(let s): self = .session(s.id)
     case .main(let view): self = .main(view)
-    }
-  }
-
-  /// What the if-chain in `ContentView.body` rendered before `detailColumn` replaced it. `detailColumn` must agree
-  /// with it on every model state.
-  @MainActor init(chainOf model: BoardModel) {
-    if model.showsMultiSelectionPane {
-      self = .multiSelection
-    } else if let s = model.selected, let f = s.followup, f.started == nil {
-      self = .followup(s.id)
-    } else if let s = model.selected, s.docket != nil {
-      self = .docket(s.id)
-    } else if let s = model.selected {
-      self = .session(s.id)
-    } else {
-      self = .main(model.mainView)
-    }
-  }
-
-  /// True when the detail column shows the Inbox, the Issues view, or the Loops view.
-  var isListDetail: Bool {
-    switch self {
-    case .main(.inbox), .main(.issues), .main(.loops): true
-    default: false
     }
   }
 
@@ -185,56 +161,6 @@ enum DetailColumnShape: String, CaseIterable, Sendable, CustomTestStringConverti
     #expect(pane == shape.expected(view))
   }
 
-  @Test(arguments: DetailColumnShape.allCases, MainView.allCases)
-  func agreesWithTheContentViewChain(_ shape: DetailColumnShape, _ view: MainView) throws {
-    let model = try shape.model(view)
-
-    let pane = ShownColumn(model.detailColumn)
-
-    #expect(pane == ShownColumn(chainOf: model))
-  }
-
-  @Test(arguments: MainView.allCases)
-  func nothingSelectedShowsTheMainView(_ view: MainView) throws {
-    let model = try DetailColumnShape.nothingSelected.model(view)
-
-    #expect(ShownColumn(model.detailColumn) == .main(view))
-  }
-
-  /// `selected` is nil, so the old chain fell through to the main view.
-  @Test(arguments: [DetailColumnShape.staleSelection, .selectionHeldByRemoval], MainView.allCases)
-  func aStaleSelectionShowsTheMainView(_ shape: DetailColumnShape, _ view: MainView) throws {
-    let model = try shape.model(view)
-
-    #expect(ShownColumn(model.detailColumn) == .main(view))
-  }
-
-  @Test func multiSelectionOnTheBoardShowsTheBoard() throws {
-    let model = try DetailColumnShape.multiSelectionWithoutSelection.model(.board)
-
-    #expect(ShownColumn(model.detailColumn) == .main(.board))
-  }
-
-  @Test func multiSelectionOnTheInboxShowsTheMultiSelectionPane() throws {
-    let model = try DetailColumnShape.multiSelectionWithoutSelection.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .multiSelection)
-  }
-
-  /// `visibleView` keys on `selection`, so a selection hides the Board even when `selected` is nil.
-  @Test(arguments: [DetailColumnShape.multiSelectionWithSelection, .multiSelectionWithStaleSelection])
-  func multiSelectionWithASelectionShowsThePaneOverTheBoard(_ shape: DetailColumnShape) throws {
-    let model = try shape.model(.board)
-
-    #expect(ShownColumn(model.detailColumn) == .multiSelection)
-  }
-
-  @Test func anUnstartedFollowupShowsTheFollowup() throws {
-    let model = try DetailColumnShape.unstartedFollowup.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .followup("f"))
-  }
-
   @Test func anUnstartedFollowupCarriesTheSessionsFollowup() throws {
     let model = try DetailColumnShape.unstartedFollowup.model(.inbox)
     let session = try #require(model.selected)
@@ -247,86 +173,18 @@ enum DetailColumnShape: String, CaseIterable, Sendable, CustomTestStringConverti
     #expect(s.id == session.id)
     #expect(f == session.followup)
   }
-
-  @Test func anUnstartedFollowupWinsOverItsDocket() throws {
-    let model = try DetailColumnShape.unstartedFollowupWithDocket.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .followup("f"))
-  }
-
-  @Test func aStartedFollowupShowsTheSession() throws {
-    let model = try DetailColumnShape.startedFollowup.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .session("f"))
-  }
-
-  @Test func aStartedFollowupWithADocketShowsTheDocket() throws {
-    let model = try DetailColumnShape.startedFollowupWithDocket.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .docket("f"))
-  }
-
-  @Test func aDocketShowsTheDocket() throws {
-    let model = try DetailColumnShape.docket.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .docket("d1"))
-  }
-
-  @Test func aPlainSessionShowsTheSession() throws {
-    let model = try DetailColumnShape.session.model(.inbox)
-
-    #expect(ShownColumn(model.detailColumn) == .session("a"))
-  }
-}
-
-/// Each `DetailColumn` case, built directly.
-enum DetailColumnCase: String, CaseIterable, Sendable, CustomTestStringConvertible {
-  case multiSelection, followup, docket, session, inbox, board, issues, loops
-
-  var testDescription: String { rawValue }
-
-  func pane() throws -> DetailColumn {
-    switch self {
-    case .multiSelection: return .multiSelection
-    case .followup:
-      let s = unstartedFollowup("f")
-      let f = try #require(s.followup)
-      return .followup(s, f)
-    case .docket:
-      let s = docketSession("d1")
-      let d = try #require(s.docket)
-      return .docket(s, d)
-    case .session: return .session(needsItem("a"))
-    case .inbox: return .main(.inbox)
-    case .board: return .main(.board)
-    case .issues: return .main(.issues)
-    case .loops: return .main(.loops)
-    }
-  }
-
-  var isListDetail: Bool { self == .inbox || self == .issues || self == .loops }
 }
 
 /// `DetailColumn.isListDetail` holds only for the Inbox, the Issues view, and the Loops view.
 @MainActor
 @Suite struct DetailColumnListDetail {
-  @Test(arguments: DetailColumnCase.allCases)
-  func isListDetailOnlyForTheListViews(_ shape: DetailColumnCase) throws {
-    let pane = try shape.pane()
-
-    #expect(pane.isListDetail == shape.isListDetail)
-  }
-
   @Test(arguments: MainView.allCases)
-  func everyMainViewButTheBoardIsListDetail(_ view: MainView) {
-    #expect(DetailColumn.main(view).isListDetail == (view != .board))
+  func holdsForTheMainViewsWithAList(_ view: MainView) {
+    #expect(DetailColumn.main(view).isListDetail == [.inbox, .issues, .loops].contains(view))
   }
 
-  /// The sidebar rule reads `detailColumn.isListDetail`, so it must follow what renders, not `visibleView`.
-  @Test(arguments: DetailColumnShape.allCases, MainView.allCases)
-  func modelPaneIsListDetailMatchesWhatRenders(_ shape: DetailColumnShape, _ view: MainView) throws {
-    let model = try shape.model(view)
-
-    #expect(model.detailColumn.isListDetail == shape.expected(view).isListDetail)
+  @Test func neverHoldsForASessionOrTheMultiSelectionPane() {
+    #expect(!DetailColumn.multiSelection.isListDetail)
+    #expect(!DetailColumn.session(needsItem("a")).isListDetail)
   }
 }

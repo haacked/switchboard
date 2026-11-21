@@ -18,20 +18,30 @@ struct PRLink: View {
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .modifier(LinkPointer())
+    .pointer(.link)
     .accessibilityLabel(Self.accessibilityLabel(text))
     .accessibilityAddTraits(.isLink)
     .accessibilityRemoveTraits(.isButton)
   }
 }
 
-/// macOS 14 has no `pointerStyle`. The pointer stays an arrow there.
-private struct LinkPointer: ViewModifier {
-  func body(content: Content) -> some View {
+/// The pointer shapes that views in the app ask for.
+enum Pointer {
+  case link
+  case columnResize
+}
+
+extension View {
+  /// Shows `pointer` while the pointer is over the view. macOS 14 has no `pointerStyle`. The pointer stays an arrow
+  /// there.
+  @ViewBuilder func pointer(_ pointer: Pointer) -> some View {
     if #available(macOS 15, *) {
-      content.pointerStyle(.link)
+      switch pointer {
+      case .link: pointerStyle(.link)
+      case .columnResize: pointerStyle(.columnResize)
+      }
     } else {
-      content
+      self
     }
   }
 }

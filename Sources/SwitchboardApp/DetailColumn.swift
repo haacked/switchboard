@@ -1,7 +1,7 @@
 import SwitchboardCore
 
 /// What the window's detail column shows.
-enum DetailColumn: Equatable {
+enum DetailColumn {
   case multiSelection
   case followup(SessionSummary, Followup)
   case docket(SessionSummary, DocketSummary)
@@ -11,8 +11,8 @@ enum DetailColumn: Equatable {
   /// True for a main view that shows a list beside the current item's detail.
   var isListDetail: Bool {
     switch self {
-    case .main(let view): view != .board
-    default: false
+    case .main(.inbox), .main(.issues), .main(.loops): true
+    case .main(.board), .multiSelection, .followup, .docket, .session: false
     }
   }
 }
