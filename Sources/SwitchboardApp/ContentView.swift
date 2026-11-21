@@ -299,9 +299,13 @@ struct Sidebar: View {
         } description: {
           Text("Start a session, or import ones that are already running.")
         } actions: {
-          Button("Start a Session…") { model.openNewSession() }
-          Button("Import Sessions…") { model.showingImport = true }
+          // Side by side, the two buttons overflow the sidebar at its minimum width.
+          VStack {
+            Button("Start a Session…") { model.openNewSession() }
+            Button("Import Sessions…") { model.showingImport = true }
+          }
         }
+        .padding(.horizontal)
       }
     }
     // A toolbar search field would push New Session into the overflow menu at the minimum window width.
