@@ -113,6 +113,8 @@ final class BoardModel: ObservableObject {
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
   @Published var knownRepos: [KnownRepo]?
   @Published var showingSearch = false
+  /// The text in the sidebar's search field. The sidebar lists only the work sessions that it matches.
+  @Published var sidebarQuery = ""
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
   @Published var confirmingDelete: SessionSummary?
@@ -643,13 +645,31 @@ final class BoardModel: ObservableObject {
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
   /// one with no parent. A session whose parent is another session nests under
-  /// that parent while both are in the same group.
-  var sidebarGroups: [SidebarGroup] {
-    let listed = workBoard
-    return AttentionState.allCases.compactMap { state in
+  /// that parent while both are in the same group. It lists only the work sessions that `sidebarQuery` matches.
+  var sidebarGroups: [SidebarGroup] { Self.sidebarGroups(sidebarSessions) }
+
+  /// `listed` grouped by state, as the sidebar groups its rows.
+  static func sidebarGroups(_ listed: [SessionSummary]) -> [SidebarGroup] {
+    AttentionState.allCases.compactMap { state in
       let group = listed.filter { $0.state == state }
       return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))
     }
+  }
+
+  /// The work sessions that `sidebarQuery` matches, in `workBoard` order. A blank query matches every one.
+  private var sidebarSessions: [SessionSummary] {
+    let listed = workBoard
+    guard !sidebarQuery.allSatisfy(\.isWhitespace) else { return listed }
+    let matched = Set(SessionSearch.rank(listed, query: sidebarQuery).map(\.id))
+    return listed.filter { matched.contains($0.id) }
+  }
+
+  /// True when the sidebar's search field hides every work session that the filters show.
+  var sidebarQueryHidesAll: Bool { !workBoard.isEmpty && sidebarSessions.isEmpty }
+
+  /// True when the filters show `session` but the sidebar's search field hides its row.
+  func sidebarQueryHides(_ session: SessionSummary) -> Bool {
+    workBoard.contains { $0.id == session.id } && !sidebarSessions.contains { $0.id == session.id }
   }
 
   var triage: [SessionSummary] { Triage.order(sessions) }
@@ -673,10 +693,10 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
-  /// True while the sidebar has no rows and sbd answers. It is false when the filters hide every work session,
-  /// because the sidebar then shows `FilterHidesAll` instead.
+  /// True while the sidebar has no rows and sbd answers. It is false when the filters or the search field hide
+  /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
-    sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
+    workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
   }
 
   /// The main view while no session is selected, else nil.

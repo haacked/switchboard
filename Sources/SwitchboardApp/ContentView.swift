@@ -221,6 +221,7 @@ struct Sidebar: View {
     List(selection: model.sidebarSelection) {
       ConversationsSection(activeAccount: activeAccount, removableSelection: removableSelection)
       if groups.isEmpty && model.filterHidesAllWork { FilterHidesAll() }
+      if groups.isEmpty && model.sidebarQueryHidesAll { ContentUnavailableView.search(text: model.sidebarQuery) }
       ForEach(groups) { group in
         let state = group.state
         Section(isExpanded: expanded(state)) {
@@ -289,8 +290,8 @@ struct Sidebar: View {
     } message: { move in
       Text(move.message)
     }
-    // The overlay comes before the safe area insets, so the empty state fills only the space between them and
-    // never covers Search Sessions or New Group.
+    // The overlay comes before the bottom safe area inset, so the empty state fills only the space above it and
+    // never covers New Group.
     .overlay {
       if model.sidebarIsEmpty {
         ContentUnavailableView {
@@ -303,31 +304,8 @@ struct Sidebar: View {
         }
       }
     }
-    // Another toolbar item would push New Session into the overflow menu at the minimum window width, so search
-    // sits here. It looks like a search field, and the panel holds the real one.
-    .safeAreaInset(edge: .top) {
-      Button {
-        model.showingSearch = true
-      } label: {
-        HStack(spacing: 4) {
-          Image(systemName: "magnifyingglass")
-          Text("Search Sessions")
-          Spacer(minLength: 4)
-          Text("⌘K")
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .padding(.horizontal, 8)
-      .padding(.top, 4)
-      .help("Find a session by name, repo, branch, PR, issue, group, reason, or note (⌘K)")
-      .accessibilityLabel("Search Sessions")
-      .accessibilityIdentifier("sidebar-search")
-    }
+    // A toolbar search field would push New Session into the overflow menu at the minimum window width.
+    .searchable(text: $model.sidebarQuery, placement: .sidebar, prompt: "Search Sessions")
     .safeAreaInset(edge: .bottom, spacing: 0) {
       VStack(spacing: 0) {
         FilterBar()
