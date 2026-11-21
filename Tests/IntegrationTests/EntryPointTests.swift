@@ -22,6 +22,19 @@ import Testing
     return String(cString: dir)
   }
 
+  @Test func sbdRefusesToStartWithoutItsPromptFiles() throws {
+    let empty = try scratch()
+    defer { try? FileManager.default.removeItem(atPath: empty) }
+    let sbd = "\(Instance.bin)/sbd"
+
+    let broken = try runCommand(
+      sbd, ["--check-prompts"], env: ["SB_PROMPTS_DIR": empty], input: Data(), timeout: 30, cwd: empty)
+    let found = try runCommand(sbd, ["--check-prompts"], env: [:], input: Data(), timeout: 30, cwd: empty)
+
+    #expect(broken.status == 1 && broken.stderr.contains("can't read prompt \(empty)/"), "\(broken.stderr)")
+    #expect(found.status == 0 && found.stdout.contains("prompts ok"), "\(found.stderr)")
+  }
+
   @Test func serviceInstallCreatesTheLaunchAgentsFolder() throws {
     let sbd = try Instance()
     let fakeHome = sbd.home.path

@@ -38,14 +38,16 @@ extension Service {
     let request = try HostCLIRequest.parse(args)
     let runner = hostCLIRunner
     let socket = try HostServer.socketPath(for: host, in: home)
-    let profile = try HostCLI.profile(sb: runner.program, socket: socket)
+    let prompts = Prompts.folderInUse.path
+    let profile = try HostCLI.profile(sb: runner.program, socket: socket, promptsFolder: prompts)
     // `sb` reaches the socket through this folder. The sandbox denies reading a link on the way to it.
     let folder = (socket as NSString).deletingLastPathComponent
     let hostHome = HostCLI.resolvedPath(folder) ?? folder
     try runner.run(
       host: host, profile: profile, argv: request.argv,
       environment: HostCLI.environment(
-        hostHome: hostHome, host: host, cwd: request.cwd, session: request.session, claudecode: request.claudecode),
+        hostHome: hostHome, host: host, cwd: request.cwd, session: request.session, claudecode: request.claudecode,
+        promptsFolder: prompts),
       cwd: hostHome, stdin: request.stdin, cancelled: cancelled
     ) { output in
       reply(
