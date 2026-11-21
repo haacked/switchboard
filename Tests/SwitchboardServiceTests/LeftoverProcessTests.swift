@@ -147,4 +147,23 @@ import Testing
 
     #expect(result == [100, 101])
   }
+
+  // MARK: Spared
+
+  /// The server 500 is not an ancestor of the pane's process, so only the server's own entry spares it.
+  @Test func paneAncestryHoldsEachPanesProcessItsAncestorsAndItsServer() throws {
+    try withService { service, _ in
+      let spared = service.queue.sync {
+        service.mac.snapshot.panes["a-claude"] = PaneRow(pid: 300, dead: false, clients: 0, server: 500)
+        service.mac.snapshot.processes = ProcessTable(nativeRows: [
+          ProcessRow(pid: 300, ppid: 250, pgid: 300), ProcessRow(pid: 250, ppid: 1, pgid: 250),
+          ProcessRow(pid: 500, ppid: 1, pgid: 500), ProcessRow(pid: 400, ppid: 1, pgid: 400),
+        ])
+        return service.paneAncestry()
+      }
+
+      #expect(spared.isSuperset(of: [300, 250, 500]))
+      #expect(!spared.contains(400))
+    }
+  }
 }

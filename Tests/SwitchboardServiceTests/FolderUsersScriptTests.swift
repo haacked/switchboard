@@ -330,7 +330,6 @@ private func withBench(folderName: String = "w", _ body: (Bench) throws -> Void)
     throw CancellationError()
   }
 
-  /// Copies /bin/sleep with an ad hoc signature, because macOS kills a copy that keeps Apple's.
   private func uses(_ users: [FolderUser], of pids: [Int32]) -> [String] {
     users.filter { pids.contains(Int32($0.pid)) }.sorted { $0.pid < $1.pid }.map { "\($0.pid) \($0.use.rawValue)" }
   }

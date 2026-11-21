@@ -292,12 +292,18 @@ private final class Strays {
     }
   }
 
-  /// A plain `&` job dies from the SIGHUP that closing the pane sends, so the shell starts it with nohup.
+  /// A plain `&` job dies from the SIGHUP that closing the pane sends, so the shell starts it with nohup. The job
+  /// runs a signed copy of sleep, so macOS shows its environment. Once the pane closes, the job meets every other
+  /// condition of a leftover, and only its descent from the shell pane keeps sbd from stopping it.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAProcessFromTheShellPaneExits(_ how: WorktreeRemoval) throws {
     try expectRefusalUntilTheyExit(how) { sbd, _, terminals, strays in
       strays.pidFiles = ["shell.pid"]
-      try sbd.typeInShell(terminals, "nohup sleep 100 >/dev/null 2>&1 & echo $! > \"$SB_HOME/shell.pid\"")
+      let sleep = "\(sbd.home.path)/job-bin/sleep"
+      try FileManager.default.createDirectory(
+        atPath: (sleep as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+      try copySleep(to: sleep)
+      try sbd.typeInShell(terminals, "nohup \"\(sleep)\" 100 >/dev/null 2>&1 & echo $! > \"$SB_HOME/shell.pid\"")
     }
   }
 
@@ -430,6 +436,8 @@ private final class Strays {
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(how, sbd, s)
     try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+    let log = try String(contentsOfFile: sbd.home.log, encoding: .utf8)
+    #expect(log.contains("sending signal \(SIGTERM) to leftover \(orphan) "), Comment(rawValue: log))
   }
 
   /// The subshell ignores SIGTERM before it execs sleep, and sleep keeps that disposition. Only the SIGKILL after
@@ -450,6 +458,12 @@ private final class Strays {
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(.rm, sbd, s)
     try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+    let log = try String(contentsOfFile: sbd.home.log, encoding: .utf8)
+    let sentTerm = try #require(
+      log.range(of: "sending signal \(SIGTERM) to leftover \(orphan) "), Comment(rawValue: log))
+    let sentKill = try #require(
+      log.range(of: "sending signal \(SIGKILL) to leftover \(orphan) "), Comment(rawValue: log))
+    #expect(sentTerm.lowerBound < sentKill.lowerBound, Comment(rawValue: log))
   }
 
   /// The child of the test runner has a live parent, so it is not a leftover. sbd stops leftovers only when every

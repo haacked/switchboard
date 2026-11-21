@@ -289,6 +289,7 @@ import Testing
     ] as [(String, [UInt8])])
   func argvOfABufferWithNoArgumentsIsEmpty(_ what: String, buffer: [UInt8]) {
     #expect(ProcessTable.argv(fromProcArgs: buffer) == [], "\(what)")
+    #expect(ProcessTable.environment(fromProcArgs: buffer) == [], "\(what)")
   }
 
   /// The kernel ends the environment with an empty string and pads the rest of the buffer with NULs, which can

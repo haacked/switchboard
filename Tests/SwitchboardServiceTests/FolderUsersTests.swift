@@ -37,8 +37,6 @@ import Testing
     Issue.record("\(p.processIdentifier) never exec'd sleep")
   }
 
-  /// Copies /bin/sleep to `path`. macOS kills a copy of a system program that keeps Apple's signature, so the copy
-  /// gets an ad hoc signature.
   private static let muxTitle = "ssh: /tmp/x/sock [mux]"
 
   /// A copy of /bin/sleep named `ssh`, outside `folder`, so that its program path doesn't match.
