@@ -32,14 +32,16 @@ enum Pointer {
 }
 
 extension View {
-  /// Shows `pointer` while the pointer is over the view. macOS 14 has no `pointerStyle`. The pointer stays an arrow
-  /// there.
+  /// Shows `pointer` while the pointer is over the view. macOS 14 has no `pointerStyle`. A link keeps the arrow there.
+  /// A column resize pushes the AppKit resize cursor there instead.
   @ViewBuilder func pointer(_ pointer: Pointer) -> some View {
     if #available(macOS 15, *) {
       switch pointer {
       case .link: pointerStyle(.link)
       case .columnResize: pointerStyle(.columnResize)
       }
+    } else if pointer == .columnResize {
+      onHover { inside in inside ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
     } else {
       self
     }
