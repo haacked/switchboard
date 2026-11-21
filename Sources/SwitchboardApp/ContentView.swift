@@ -66,7 +66,7 @@ struct ContentView: View {
     var transaction = Transaction()
     transaction.disablesAnimations = true
     withTransaction(transaction) {
-      sidebar.update(windowWidth: windowWidth, isListDetail: model.detailColumn.isListDetail)
+      sidebar.update(windowWidth: windowWidth, isListDetail: model.showsListDetail)
     }
   }
 
@@ -145,7 +145,7 @@ struct ContentView: View {
       windowWidth = $0
       fitSidebar()
     }
-    .onChange(of: column.isListDetail) { fitSidebar() }
+    .onChange(of: model.showsListDetail) { fitSidebar() }
     .confirmationDialog(
       "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
       presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }

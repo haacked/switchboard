@@ -18,6 +18,10 @@ enum DetailColumn {
 }
 
 extension BoardModel {
+  /// True when the detail column shows a list and detail view that no selected session is about to replace. A selection
+  /// whose session has not loaded yet still renders the main view. A refresh clears a selection that never loads.
+  var showsListDetail: Bool { selection == nil && detailColumn.isListDetail }
+
   var detailColumn: DetailColumn {
     if showsMultiSelectionPane { return .multiSelection }
     guard let s = selected else { return .main(mainView) }

@@ -188,3 +188,24 @@ enum DetailColumnShape: String, CaseIterable, Sendable, CustomTestStringConverti
     #expect(!DetailColumn.session(needsItem("a")).isListDetail)
   }
 }
+
+/// The sidebar rule reads `showsListDetail`, which also requires that no session is selected.
+@MainActor
+@Suite struct ShowsListDetail {
+  @Test func holdsOnTheInboxWithNothingSelected() throws {
+    #expect(try DetailColumnShape.nothingSelected.model(.inbox).showsListDetail)
+  }
+
+  /// At launch a selection names a session that sbd has not listed yet, and the Inbox renders until it loads.
+  @Test(arguments: [DetailColumnShape.staleSelection, .selectionHeldByRemoval])
+  func doesNotHoldWhileASelectedSessionHasNotLoaded(_ shape: DetailColumnShape) throws {
+    let model = try shape.model(.inbox)
+
+    #expect(model.detailColumn.isListDetail)
+    #expect(!model.showsListDetail)
+  }
+
+  @Test func doesNotHoldOnTheBoard() throws {
+    #expect(try !DetailColumnShape.nothingSelected.model(.board).showsListDetail)
+  }
+}
