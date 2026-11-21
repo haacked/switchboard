@@ -111,6 +111,7 @@ private typealias Split = ListDetailSplit<EmptyView, EmptyView>
     try withDefaults(stored: 500) { defaults in
       let width = try listWidth(host(width: besideTheSidebar, defaults: defaults))
       #expect(width == 383)
+      #expect(defaults.double(forKey: Self.key) == 500)
     }
   }
 

@@ -243,6 +243,17 @@ private let wide: CGFloat = 1440
     #expect(fit.showsSidebar)
   }
 
+  /// A toggle on a view that is not a list and detail view does not stop the rule from hiding the sidebar later.
+  @Test func aUserToggleOutsideTheConditionLeavesTheRuleOn() {
+    var fit = measured(narrow, listDetail: false)
+    fit.userSet(.detailOnly)
+    fit.userSet(.all)
+
+    fit.update(windowWidth: narrow, isListDetail: true)
+
+    #expect(!fit.showsSidebar)
+  }
+
   /// The user hid the sidebar last. The rule shows only a sidebar that the rule hid.
   @Test func aUserHideAfterAUserShowOnTheInboxStaysHiddenOnTheBoard() throws {
     var fit = try userShownOnTheInbox()
@@ -261,6 +272,7 @@ private let wide: CGFloat = 1440
   @Test(
     arguments: [
       (narrow, true, .detailOnly), (narrow, false, .all), (wide, true, .all), (narrow, false, .doubleColumn),
+      (narrow, false, .automatic),
     ] as [(CGFloat, Bool, NavigationSplitViewVisibility)])
   func aValueThatMatchesTheSidebarChangesNothing(
     _ width: CGFloat, _ listDetail: Bool, _ value: NavigationSplitViewVisibility

@@ -44,7 +44,8 @@ struct ListDetailSplit<ListContent: View, Detail: View>: View {
     let width = Self.listWidth(stored: base + dragOffset, available: available)
     HStack(spacing: 0) {
       list().frame(width: width)
-      divider(base: base, width: width)
+      // The detail comes later in the stack. Without the z-index, the detail covers the right part of the drag area.
+      divider(base: base, width: width).zIndex(1)
       detail().frame(minWidth: Self.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minWidth: Self.listMinWidth + Self.dividerWidth + Self.detailMinWidth)
