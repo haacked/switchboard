@@ -60,7 +60,7 @@ extension Service {
 
     let settings = operatorSettings
     let call = headlessCall(
-      .topupPick, session: holder, arguments: TopupPick.arguments(model: settings.judgeModel),
+      .topupPick, session: holder, arguments: TopupPick.arguments(model: settings.model),
       input: TopupPick.input(rubric: gate.rubric, k: k, candidates: built.candidates, sessions: status.counted),
       env: env, folder: home.path, timeout: Double(settings.topupTimeoutSeconds)
     ) { try TopupPick.parse($0, candidates: built.candidates, k: k) }

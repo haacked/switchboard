@@ -644,6 +644,9 @@ public final class Service {
     case "quick-ask":
       // A quick ask can run claude for minutes. It runs off the state queue.
       return .success(try quickAsk(request.args, clientGone: hookGone))
+    case "operator-judge":
+      // A judgment can run claude for a minute. It runs off the state queue.
+      return .success(try operatorJudge(request.args, clientGone: hookGone))
     case "manager-skills":
       // A relabel scans the folders and the transcript, so it runs off the state queue.
       return .success(try managerSkills(request.args))
@@ -856,6 +859,8 @@ public final class Service {
       return try managerHint(args)
     case "manager-model":
       return try managerModelRequest(args)
+    case "operator-model":
+      return try operatorModelRequest(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -1576,7 +1581,10 @@ public final class Service {
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
     }
-    if let model = Manager.launchModel(for: session.kind, stored: session.model, managerModel: managerModel) {
+    if let model = Manager.launchModel(
+      for: session.kind, stored: session.model, managerModel: managerModel,
+      operatorModel: operatorSettings.model)
+    {
       args += ["--model", model]
     }
     if local { args += config.claudeArgs }

@@ -134,6 +134,15 @@ let usage = """
                                   message asks about, after reading the
                                   session's last reply in it. Only the operator
                                   runs it, in its own pane
+    operator model [<name>]       show or set the model of the operator and of its
+                                  judges, sonnet by default. The operator switches
+                                  when its claude next starts, and a judge call
+                                  from the next call
+    operator judge --kind reply-gate|ci-failure|pick-issues --input <file> [--model M]
+                                  run one judgment through the operator's judge
+                                  path, for comparing models. The file is JSON
+                                  with the arguments of the kind's prompt: see
+                                  bin/operator-eval. It acts on nothing
     operator reports [--all]      list the operator's reports, oldest first, and
                                   whether each is open. --all lifts the limit of
                                   \(Event.defaultLimit)
@@ -599,7 +608,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file",
+      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

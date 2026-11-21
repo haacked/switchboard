@@ -65,18 +65,24 @@ import Testing
 
   // MARK: Launch model
 
-  @Test(arguments: [SessionKind.work, .manager, .chat, .operator])
-  func aStoredModelWinsForEveryKind(_ kind: SessionKind) {
-    #expect(Manager.launchModel(for: kind, stored: "opus", managerModel: "haiku") == "opus")
+  @Test(arguments: [SessionKind.work, .manager, .chat])
+  func aStoredModelWinsForEveryKindButTheOperator(_ kind: SessionKind) {
+    #expect(Manager.launchModel(for: kind, stored: "opus", managerModel: "haiku", operatorModel: "sonnet") == "opus")
+  }
+
+  @Test(arguments: [nil, "opus"])
+  func theOperatorRunsTheOperatorModelWhateverItStores(_ stored: String?) {
+    #expect(
+      Manager.launchModel(for: .operator, stored: stored, managerModel: "opus", operatorModel: "haiku") == "haiku")
   }
 
   @Test func aManagerConversationWithoutAStoredModelRunsTheManagerModel() {
-    #expect(Manager.launchModel(for: .manager, stored: nil, managerModel: "haiku") == "haiku")
+    #expect(Manager.launchModel(for: .manager, stored: nil, managerModel: "haiku", operatorModel: "sonnet") == "haiku")
   }
 
-  @Test(arguments: [SessionKind.work, .chat, .operator])
+  @Test(arguments: [SessionKind.work, .chat])
   func anyOtherKindWithoutAStoredModelRunsClaudesDefault(_ kind: SessionKind) {
-    #expect(Manager.launchModel(for: kind, stored: nil, managerModel: "haiku") == nil)
+    #expect(Manager.launchModel(for: kind, stored: nil, managerModel: "haiku", operatorModel: "sonnet") == nil)
   }
 
   // MARK: Model names

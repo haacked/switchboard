@@ -78,7 +78,7 @@ import Testing
     #expect(try shown(sbd) == ["model": "haiku"])
   }
 
-  /// The operator's model belongs to #410. Until then the operator runs config.json's global `model`.
+  /// The operator runs `operator.model`, and a work session runs config.json's global `model`.
   @Test func theManagerModelReachesOnlyManagerConversations() throws {
     let sbd = try Instance(config: ["model": "opus", "manager": ["model": "haiku"]])
 
@@ -87,7 +87,7 @@ import Testing
     let work = try liveWorkSession(sbd)
 
     #expect(try launchModel(sbd, m.id) == "haiku")
-    #expect(try launchModel(sbd, op.id) == "opus")
+    #expect(try launchModel(sbd, op.id) == OperatorSettings.defaultModel)
     #expect(try launchModel(sbd, work.id) == "opus")
     #expect(try sbd.sb("manager", "model").contains("haiku"))
     #expect(try sbd.client.call("manager-model") == ["model": "haiku"])

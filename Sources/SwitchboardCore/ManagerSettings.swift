@@ -32,14 +32,18 @@ public enum AutoCompact {
 
 extension Manager {
   /// The model that sbd passes with `--model` when it starts claude for a session, or nil for claude's default.
-  /// A model stored on the session wins. Otherwise a Manager conversation runs `managerModel`, and every other
-  /// kind runs claude's default.
-  public static func launchModel(for kind: SessionKind, stored: String?, managerModel: String) -> String? {
+  /// The operator always runs `operatorModel`, because a model stored on its session came from config.json's
+  /// `model` when sbd created it. For every other kind a stored model wins. Otherwise a Manager conversation runs
+  /// `managerModel`, and every other kind runs claude's default.
+  public static func launchModel(
+    for kind: SessionKind, stored: String?, managerModel: String, operatorModel: String
+  ) -> String? {
+    if kind == .operator { return operatorModel }
     if let stored { return stored }
     return kind == .manager ? managerModel : nil
   }
 
-  /// Why `model` can't be the Manager's model, or nil when it can. claude reads a value that starts with a dash
+  /// Why `model` can't be the Manager's or the operator's model, or nil when it can. claude reads a value that starts with a dash
   /// as an option.
   public static func modelProblem(_ model: String) -> String? {
     if model.isEmpty { return "the model needs a name, such as sonnet" }
