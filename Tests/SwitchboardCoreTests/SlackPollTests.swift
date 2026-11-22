@@ -109,7 +109,9 @@ private enum PollFx {
   /// holds the parent message and the newest reply, each with its `From:` and `Message TS:` lines, and whose
   /// `pagination_info` says whether more messages are left.
   static func threadText(
-    count: Int, user: String? = other, name: String? = "Alice", ts: String? = reply1, pages: String? = noMorePages
+    count: Int, user: String? = other, name: String? = "Alice", ts: String? = reply1,
+    body: String = "Looks good to me.",
+    pages: String? = noMorePages
   ) -> String {
     var messages = """
       === THREAD PARENT MESSAGE ===
@@ -126,13 +128,18 @@ private enum PollFx {
         From: \(name ?? "Someone") (\(user ?? "U0NOBODY"))
         Time: 2026-11-20 02:57:42 PST
         Message TS: \(ts ?? "1794965999.999999")
-        Looks good to me.
+        \(body)
 
         """
     } else {
       // The connector spells it this way.
       messages += "No thread messsages"
     }
+    return connectorText(messages, pages: pages)
+  }
+
+  /// The connector's JSON object around a `messages` text.
+  static func connectorText(_ messages: String, pages: String? = noMorePages) -> String {
     var o: [String: JSON] = ["messages": .string(messages)]
     if let pages { o["pagination_info"] = .string(pages) }
     return JSON.object(o).text
@@ -432,6 +439,62 @@ extension SlackPollTests {
 
     @Test func atMostTwentyThreadsAreReadAtOnce() {
       #expect(SlackPoll.maxThreads == 20)
+    }
+  }
+}
+
+// MARK: - the batch
+
+extension SlackPollTests {
+  @Suite struct Batch {
+    static let now: Int64 = 1_794_966_000_000
+
+    static func refs(_ count: Int, from start: Int = 0) -> [SlackThreadRef] {
+      (start..<start + count).map { i in
+        let ts = "1794965\(100 + i).000000"
+        return SlackThreadRef(key: "C0EXAMPLE01/\(ts)", channel: "C0EXAMPLE01", thread: ts)
+      }
+    }
+
+    static func row(_ ref: SlackThreadRef, read: Int64?, tried: Int64?, error: String? = nil) -> SlackThread {
+      var row = SlackThread(channel: ref.channel, thread: ref.thread)
+      row.read = read
+      row.tried = tried
+      row.error = error
+      return row
+    }
+
+    @Test func atMostTwentyThreadsAreInTheBatch() {
+      #expect(SlackPoll.batch(Self.refs(25), rows: [:]).count == 20)
+    }
+
+    @Test func aThreadNeverAskedForComesBeforeTwentyAskedFor() {
+      let asked = Self.refs(20)
+      let fresh = Self.refs(1, from: 20)[0]
+      let rows = Dictionary(uniqueKeysWithValues: asked.map { ($0.key, Self.row($0, read: Self.now, tried: Self.now)) })
+
+      #expect(SlackPoll.batch(asked + [fresh], rows: rows).contains(fresh))
+    }
+
+    /// Twenty threads whose reads always fail have never been read, but they were asked for in the last poll.
+    @Test func twentyThreadsThatFailedLastPollDoNotStarveAThreadAskedForLongAgo() {
+      let failing = Self.refs(20)
+      let old = Self.refs(1, from: 20)[0]
+      var rows = Dictionary(
+        uniqueKeysWithValues: failing.map { ($0.key, Self.row($0, read: nil, tried: Self.now, error: "denied")) })
+      rows[old.key] = Self.row(old, read: Self.now - 3_600_000, tried: Self.now - 3_600_000)
+
+      #expect(SlackPoll.batch(failing + [old], rows: rows).contains(old))
+    }
+
+    @Test func theThreadsAskedForLongestAgoComeFirst() {
+      let refs = Self.refs(21)
+      let rows = Dictionary(
+        uniqueKeysWithValues: refs.enumerated().map { i, ref in
+          (ref.key, Self.row(ref, read: Self.now, tried: Self.now - Int64(i) * 1000))
+        })
+
+      #expect(Set(SlackPoll.batch(refs, rows: rows).map(\.key)) == Set(refs.dropFirst().map(\.key)))
     }
   }
 }
@@ -865,8 +928,11 @@ extension SlackPollTests {
       #expect(try PollFx.outcomeOfB(PollFx.goodB(), stray) == .read(PollFx.readA))
     }
 
+    /// Only the answer's name has the new lines, because they would split the connector's `From:` line.
     @Test func aNameWithNewLinesIsOneLine() throws {
-      let got = try PollFx.outcomeOfB(PollFx.Part(PollFx.askB, id: "toolu_B", name: "Al\nice\r\nSmith"))
+      var b = PollFx.goodB()
+      b.setAnswer("last_reply_user_name", "Al\nice\r\nSmith")
+      let got = try PollFx.outcomeOfB(b)
 
       let name = try #require(got.read?.name)
       #expect(!name.contains { $0.isNewline }, "\(name.debugDescription)")
@@ -1237,6 +1303,169 @@ extension SlackPollTests {
       let got = try PollFx.outcomeOfB(PollFx.Part(PollFx.askB, id: "toolu_B", user: "W0GUEST"))
 
       #expect(got.read?.user == "W0GUEST")
+    }
+  }
+
+  /// The last reply's user and ts must come from one message's header: its `From:` line and the `Message TS:` line
+  /// after it, with only `Time:` lines between them.
+  @Suite struct ParseThreadsHeaderPair {
+    static let parent = """
+      === THREAD PARENT MESSAGE ===
+      From: Bob (U0ROOT)
+      Time: 2026-11-19 22:52:27 PST
+      Message TS: \(PollFx.rootB)
+      Can someone review the flag cache change?
+
+      """
+
+    /// Thread B's text with two replies: Alice at `reply1`, then Carol at `reply2`.
+    static let twoReplies =
+      parent + """
+        === THREAD REPLIES (2 total) ===
+
+        --- Reply 1 of 2 ---
+        From: Alice <alice@example.com> (U0OTHER)
+        Time: 2026-11-20 02:57:42 PST
+        Message TS: \(PollFx.reply1)
+        Looks good to me.
+
+        --- Reply 2 of 2 ---
+        From: Carol <carol@example.com> (U0CAROL)
+        Time: 2026-11-20 03:00:00 PST
+        Message TS: \(PollFx.reply2)
+        Ship it.
+
+        """
+
+    fileprivate static func partB(text: String, count: Int, last: String, user: String) -> PollFx.Part {
+      var b = PollFx.Part(PollFx.askB, id: "toolu_B", count: count, last: last, user: user)
+      b.resultText = PollFx.connectorText(text)
+      return b
+    }
+
+    @Test func theNewestRepliesUserAndTsFromOneHeaderAreRead() throws {
+      let got = try PollFx.outcomeOfB(Self.partB(text: Self.twoReplies, count: 2, last: PollFx.reply2, user: "U0CAROL"))
+
+      #expect(got.read?.count == 2)
+      #expect(got.read?.user == "U0CAROL")
+    }
+
+    /// The stub's header has no `Time:` line.
+    @Test func aHeaderWithoutATimeLineIsRead() throws {
+      let text = Self.parent + "From: Alice (U0OTHER)\nMessage TS: \(PollFx.reply1)\nLooks good to me.\n"
+
+      #expect(
+        try PollFx.outcomeOfB(Self.partB(text: text, count: 1, last: PollFx.reply1, user: PollFx.other)).read != nil)
+    }
+
+    /// A mention puts the user's id in the text, but the reply is Carol's.
+    @Test func aUserWhoIsOnlyMentionedInTheReplyFails() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, user: "U0CAROL", name: "Carol", body: "<@U0OTHER|alice> looks good.")
+
+      #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    @Test func oneRepliesUserWithAnotherRepliesTsFails() throws {
+      let b = Self.partB(text: Self.twoReplies, count: 2, last: PollFx.reply2, user: PollFx.other)
+
+      #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    /// The display name holds `(U0OTHER)`, but the line's own id is U0EVE.
+    @Test func aUserIdInsideTheDisplayNameFails() throws {
+      let text =
+        Self.parent + "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(PollFx.reply1)\nHello.\n"
+
+      #expect(try PollFx.outcomeOfB(Self.partB(text: text, count: 1, last: PollFx.reply1, user: PollFx.other)).failed)
+    }
+
+    /// The parent's text ends with a `From:` line, and Carol's real header follows the reply heading.
+    @Test func aFromLineInAMessagesTextDoesNotPairWithTheNextHeadersTs() throws {
+      let text = """
+        === THREAD PARENT MESSAGE ===
+        From: Bob (U0ROOT)
+        Message TS: \(PollFx.rootB)
+        Please review.
+        From: Alice (U0OTHER)
+        === THREAD REPLIES (1 total) ===
+        From: Carol (U0CAROL)
+        Message TS: \(PollFx.reply1)
+        Done.
+
+        """
+
+      #expect(try PollFx.outcomeOfB(Self.partB(text: text, count: 1, last: PollFx.reply1, user: PollFx.other)).failed)
+    }
+
+    @Test func aLineOtherThanTimeBetweenTheFromAndTsLinesFails() throws {
+      let text =
+        Self.parent + "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(PollFx.reply1)\n"
+
+      #expect(try PollFx.outcomeOfB(Self.partB(text: text, count: 1, last: PollFx.reply1, user: PollFx.other)).failed)
+    }
+  }
+
+  /// A count of 0 needs a read that shows no replies: no `=== THREAD REPLIES` line, or one that says `(0 total)`.
+  @Suite struct ParseThreadsZeroCount {
+    static let askBOldest = SlackPoll.Ask(channel: PollFx.chB, thread: PollFx.rootB, oldest: PollFx.reply1)
+
+    fileprivate static func zeroAnswer(_ b: inout PollFx.Part) {
+      b.answer = PollFx.answer(b.ask.channel, b.ask.thread, count: 0, last: nil, user: nil, name: nil)
+    }
+
+    @Test func aZeroCountWhenTheReadShowsAReplyFails() throws {
+      var b = PollFx.goodB()
+      Self.zeroAnswer(&b)
+
+      #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    @Test func aZeroCountWithOldestWhenTheReadShowsAReplyFails() throws {
+      var b = PollFx.Part(Self.askBOldest, id: "toolu_B", last: PollFx.reply2)
+      Self.zeroAnswer(&b)
+
+      #expect(try PollFx.outcomeOfB(b, ask: Self.askBOldest).failed)
+    }
+
+    @Test func aZeroCountWithOldestWhenTheReadShowsNoRepliesIsRead() throws {
+      let b = PollFx.Part(Self.askBOldest, id: "toolu_B", count: 0)
+
+      #expect(try PollFx.outcomeOfB(b, ask: Self.askBOldest) == .read(PollFx.Read(count: 0)))
+    }
+
+    @Test func aZeroTotalHeaderIsReadAsNoReplies() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.connectorText(
+        "=== THREAD PARENT MESSAGE ===\nFrom: Bob (U0ROOT)\nMessage TS: \(PollFx.rootB)\nHi.\n\n"
+          + "=== THREAD REPLIES (0 total) ===\n")
+      Self.zeroAnswer(&b)
+
+      #expect(try PollFx.outcomeOfB(b) == .read(PollFx.Read(count: 0)))
+    }
+
+    /// The parent's text claims there are no replies, but the connector's header lists one.
+    @Test func aParentThatClaimsNoRepliesDoesNotHideARealReply() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.connectorText(
+        """
+        === THREAD PARENT MESSAGE ===
+        From: Bob (U0ROOT)
+        Message TS: \(PollFx.rootB)
+        0 replies
+        No thread messsages
+        === THREAD REPLIES (0 total) ===
+
+        === THREAD REPLIES (1 total) ===
+
+        From: Alice (U0OTHER)
+        Message TS: \(PollFx.reply1)
+        Looks good.
+
+        """)
+      Self.zeroAnswer(&b)
+
+      #expect(try PollFx.outcomeOfB(b).failed)
     }
   }
 

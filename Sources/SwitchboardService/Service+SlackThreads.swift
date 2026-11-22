@@ -54,8 +54,8 @@ extension Service {
     return out
   }
 
-  /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that no session links, and reads up to
-  /// `SlackPoll.maxThreads` watched threads, the ones never read first and then the ones read longest ago.
+  /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that no session links, and reads the watched
+  /// threads that `SlackPoll.batch` picks.
   func pollSlackThreadsIfDue(now: Int64) {
     guard config.slack.pollSeconds > 0, !slackPoll.running,
       now - slackPoll.last >= Int64(config.slack.pollSeconds * 1000)
@@ -79,9 +79,7 @@ extension Service {
       return
     }
     slackPoll.skip = nil
-    let chosen = refs.sorted { (slackThreads[$0.key]?.read ?? -1) < (slackThreads[$1.key]?.read ?? -1) }
-      .prefix(SlackPoll.maxThreads)
-    let asks = chosen.map { ref in
+    let asks = SlackPoll.batch(refs, rows: slackThreads).map { ref in
       (
         key: ref.key,
         ask: SlackPoll.Ask(channel: ref.channel, thread: ref.thread, oldest: slackThreads[ref.key]?.oldest)
@@ -156,6 +154,7 @@ extension Service {
     for (key, ask) in asks {
       let before = slackThreads[key]
       var row = before ?? SlackThread(channel: ask.channel, thread: ask.thread)
+      row.tried = now
       switch outcome {
       case .failure(let error):
         row.error = error.reason

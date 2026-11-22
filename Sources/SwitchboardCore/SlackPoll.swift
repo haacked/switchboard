@@ -28,6 +28,13 @@ public enum SlackPoll {
   static let slackPrefix = "mcp__claude_ai_Slack"
   /// The most threads that one poll reads.
   public static let maxThreads = 20
+
+  /// The threads that one poll reads: up to `maxThreads`, the ones never asked for first and then the ones asked
+  /// for longest ago. A failed read counts as asked, so threads whose reads always fail can't take every slot.
+  public static func batch(_ refs: [SlackThreadRef], rows: [String: SlackThread]) -> [SlackThreadRef] {
+    Array(refs.sorted { (rows[$0.key]?.tried ?? -1) < (rows[$1.key]?.tried ?? -1) }.prefix(maxThreads))
+  }
+
   /// The settings that override what `--setting-sources user` loads: no hooks, no memory, no CLAUDE.md, and no
   /// advisor, which `--disallowedTools` can't remove.
   static let settings =
@@ -304,11 +311,12 @@ public enum SlackPoll {
   }
 
   /// The result of each asked thread, keyed by `Ask.key`. An answer is accepted only when a `slack_read_thread`
-  /// call for exactly the asked channel, ts, and oldest got a result that isn't an error, the answer says `ok`
-  /// with a whole count from 0 to 10000, and, with replies, the last reply's ts and user id are well formed, the ts
-  /// comes after the root and the oldest, and both appear as whole words in that call's result. An answer for a
-  /// thread that wasn't asked is dropped. A last reply more than an hour after `now`, the scan's time, is refused,
-  /// because a made-up ts would become the oldest of every later read. It throws when the call failed as a whole.
+  /// call for exactly the asked channel, ts, and oldest got a result that isn't an error, and the answer says `ok`
+  /// with a whole count from 0 to 10000. A count of 0 needs a result that shows no replies. With replies, the last
+  /// reply's ts and user id must be well formed, the ts must come after the root and the oldest, and one message
+  /// header in that call's result must hold both. An answer for a thread that wasn't asked is dropped. A last reply
+  /// more than an hour after `now`, the scan's time, is refused, because a made-up ts would become the oldest of
+  /// every later read. It throws when the call failed as a whole.
   public static func parseThreads(_ output: String, asked: [Ask], now: Int64) throws
     -> [String: Result<ThreadRead, ReadError>]
   {
@@ -344,7 +352,12 @@ public enum SlackPoll {
     guard let count = answer["reply_count"]?.int, (0...10000).contains(count) else {
       throw ReadError("claude's reply count is not a whole number from 0 to 10000")
     }
-    guard count > 0 else { return ThreadRead(count: 0) }
+    guard count > 0 else {
+      guard results.contains(where: showsNoReplies) else {
+        throw ReadError("claude counted no replies, but the thread's read shows replies")
+      }
+      return ThreadRead(count: 0)
+    }
     guard let ts = answer["last_reply_ts"]?.string, let last = tsValue(ts), let root = tsValue(ask.thread),
       last > root
     else { throw ReadError("claude's last reply ts is not a ts after the thread's") }
@@ -357,8 +370,8 @@ public enum SlackPoll {
     guard let user = answer["last_reply_user_id"]?.string, isUserId(user) else {
       throw ReadError("claude's last reply user is not a Slack user id")
     }
-    guard results.contains(where: { hasWord($0, user) && hasWord($0, ts) }) else {
-      throw ReadError("the thread's read doesn't hold claude's last reply")
+    guard results.contains(where: { hasHeader($0, user: user, ts: ts) }) else {
+      throw ReadError("no message in the thread's read is from claude's last reply user at its ts")
     }
     let name = answer["last_reply_user_name"]?.string.map { oneLine($0, max: 80) }.flatMap { $0.isEmpty ? nil : $0 }
     return ThreadRead(count: count, lastReplyTs: ts, lastReplyUser: user, lastReplyName: name)
@@ -406,15 +419,24 @@ public enum SlackPoll {
     return s * 1_000_000 + us
   }
 
-  /// Whether the word appears in the text with no letter, digit, or `_` next to it.
-  static func hasWord(_ text: String, _ word: String) -> Bool {
-    func joins(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" }
-    var from = text.startIndex
-    while let r = text.range(of: word, range: from..<text.endIndex) {
-      let before = r.lowerBound == text.startIndex ? nil : text[text.index(before: r.lowerBound)]
-      let after = r.upperBound == text.endIndex ? nil : text[r.upperBound]
-      if !(before.map(joins) ?? false), !(after.map(joins) ?? false) { return true }
-      from = text.index(after: r.lowerBound)
+  /// Whether a `slack_read_thread` result shows no replies. The connector heads the replies with a line such as
+  /// `=== THREAD REPLIES (6 total) ===` and leaves that line out when the read finds none. A message's text can
+  /// hold a made-up `(0 total)` line, so any other count on such a line means replies.
+  static func showsNoReplies(_ text: String) -> Bool {
+    !text.split(separator: "\n").contains {
+      $0.hasPrefix("=== THREAD REPLIES") && $0 != "=== THREAD REPLIES (0 total) ==="
+    }
+  }
+
+  /// Whether one message header in the text holds the user and the ts. The connector writes a header as a
+  /// `From: Name <email> (U0123)` line, a `Time:` line, and a `Message TS:` line. So the user must close a `From:`
+  /// line, and the next line that isn't a `Time:` line must be the ts's `Message TS:` line. A mention of the user
+  /// in a message's text doesn't count. A message's text can still hold a made-up header.
+  static func hasHeader(_ text: String, user: String, ts: String) -> Bool {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    for (i, line) in lines.enumerated() where line.hasPrefix("From: ") && line.hasSuffix(" (\(user))") {
+      let next = lines[(i + 1)...].first { !$0.hasPrefix("Time: ") }
+      if next.map(String.init) == "Message TS: \(ts)" { return true }
     }
     return false
   }

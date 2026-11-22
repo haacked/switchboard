@@ -16,6 +16,8 @@ public struct SlackThread: Codable, Equatable, Sendable {
   public var lastReplyYou: Bool
   /// When the last successful read ended, in ms since the epoch.
   public var read: Int64?
+  /// When sbd last asked for the thread, whether or not the read succeeded, in ms since the epoch.
+  public var tried: Int64?
   /// Why the last read failed. A successful read clears it.
   public var error: String?
 
