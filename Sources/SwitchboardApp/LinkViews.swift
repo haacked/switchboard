@@ -13,7 +13,8 @@ struct LinkRowView: View {
       icon: PanelRow.Icon(symbol: row.link.kind.symbol, label: row.link.kind.label),
       title: row.title,
       open: URL(string: row.link.url).map {
-        PanelRow.Open(url: $0, help: row.link.url, label: "Open link \(row.spokenTitle)")
+        PanelRow.Open(
+          url: $0, help: row.link.url, label: "Open link \(row.spokenTitle)", action: { model.openLink(row) })
       },
       caption: row.caption,
       titleLines: 2,

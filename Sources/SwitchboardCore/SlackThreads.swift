@@ -112,17 +112,28 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
     return seconds * 1000 + micros / 1000
   }
 
+  /// The text on one line with control characters escaped, then cut to `max`. Escaping first keeps the cut a bound
+  /// on what the row shows, because an escape is several characters long.
+  private static func clipped(_ text: String, max: Int) -> String { truncated(oneLine(text).printable, max: max) }
+
   /// The status as `sb get` and the app show it, such as "3 replies, last from Alice 2h ago, read 5m ago".
   public func line(now: Int64) -> String {
-    guard let replies else { return (error.map { "not read: \(oneLine($0, max: 200))" } ?? "not read yet").printable }
+    guard let replies else {
+      return (error.map { "not read: \(Self.clipped($0, max: 200))" } ?? "not read yet").printable
+    }
     var text = replies == 0 ? "no replies" : replies == 1 ? "1 reply" : "\(replies) replies"
     if let lastReply {
-      let who = lastReply.you ? "you" : oneLine(lastReply.name ?? lastReply.user, max: 80)
+      let who = lastReply.you ? "you" : Self.clipped(lastReply.name ?? lastReply.user, max: 80)
       text += ", last from \(who) \(ago(lastReply.t, now: now)) ago"
     }
     if let read { text += ", read \(ago(read, now: now)) ago" }
     if newReply { text += ", new reply" }
-    if let error { text += "; reads since then failed: \(oneLine(error, max: 200))" }
+    if let error { text += "; reads since then failed: \(Self.clipped(error, max: 200))" }
     return text.printable
   }
+}
+
+extension SessionSummary {
+  /// Whether any of the session's links has a Slack reply from someone else since the user last looked.
+  public var hasNewReply: Bool { links?.contains { $0.status?.newReply == true } ?? false }
 }

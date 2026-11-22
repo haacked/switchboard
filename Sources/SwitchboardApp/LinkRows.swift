@@ -101,9 +101,10 @@ struct LinkRows {
     return oneLine(host + path, max: ExternalLink.titleLimit)
   }
 
-  /// The caption starts with the owner's name when there is one.
+  /// The caption starts with the owner's name when there is one, and ends with a Slack thread's status when sbd sent
+  /// one.
   private static func row(_ link: ExternalLink, owner: Owner, ownerName: String? = nil, now: Int64) -> Row {
-    let caption = link.caption(now: now)
+    let caption = [link.caption(now: now), link.status?.line(now: now)].compactMap { $0 }.joined(separator: " · ")
     return Row(
       link: link, owner: owner, ownerName: ownerName, caption: ownerName.map { "\($0) · \(caption)" } ?? caption)
   }

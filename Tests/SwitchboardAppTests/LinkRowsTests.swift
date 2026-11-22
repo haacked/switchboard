@@ -483,3 +483,152 @@ extension LinkRowsTests {
     }
   }
 }
+
+// MARK: - Slack thread status
+
+/// sbd sends a `status` on a Slack link that it reads. The row's caption shows the status's line after the link's
+/// own caption.
+extension LinkRowsTests {
+  @Suite struct SlackStatus {
+    /// A found Slack link with `status`, found 3 hours ago.
+    static func slackLink(_ status: SlackThreadStatus?) -> ExternalLink {
+      var link = foundFixture("fabc12", t: now - 3 * hour)
+      link.status = status
+      return link
+    }
+
+    static func newReplyStatus() throws -> SlackThreadStatus {
+      try slackStatusFixture(
+        replies: 1, lastReply: LastReplyFixture(t: now - 2 * hour), read: now - 5 * minute, newReply: true)
+    }
+
+    @Test func aSlackRowWithAStatusShowsTheStatusAfterTheCaption() throws {
+      let rows = sessionRows([Self.slackLink(try Self.newReplyStatus())])
+
+      #expect(rows.map(\.caption) == ["found 3h ago · 1 reply, last from Alice 2h ago, read 5m ago, new reply"])
+    }
+
+    @Test func aSlackRowWithoutAStatusKeepsItsCaption() {
+      #expect(sessionRows([Self.slackLink(nil)]).map(\.caption) == ["found 3h ago"])
+    }
+
+    /// The caption and the status line both come from the `now` that the rows were built with.
+    @Test func theStatusLineUsesTheRowsNow() throws {
+      let link = Self.slackLink(try Self.newReplyStatus())
+      let later = now + hour
+
+      let rows = LinkRows(session: sessionFixture(links: [link]), now: later).rows
+
+      #expect(rows.map(\.caption) == ["found 4h ago · 1 reply, last from Alice 3h ago, read 1h ago, new reply"])
+    }
+
+    @Test func aWatchedThreadBeforeItsFirstReadSaysSo() throws {
+      #expect(sessionRows([Self.slackLink(try slackStatusFixture())]).map(\.caption) == ["found 3h ago · not read yet"])
+    }
+
+    @Test func aThreadWithNoRepliesSaysSo() throws {
+      let status = try slackStatusFixture(replies: 0, read: now - 5 * minute)
+
+      #expect(sessionRows([Self.slackLink(status)]).map(\.caption) == ["found 3h ago · no replies, read 5m ago"])
+    }
+
+    @Test func aReplyYouWroteSaysLastFromYou() throws {
+      let status = try slackStatusFixture(
+        replies: 2, lastReply: LastReplyFixture(t: now - 2 * hour, user: "U0SELF", name: "Phil", you: true),
+        read: now - 5 * minute)
+
+      #expect(
+        sessionRows([Self.slackLink(status)]).map(\.caption) == [
+          "found 3h ago · 2 replies, last from you 2h ago, read 5m ago"
+        ])
+    }
+
+    @Test func aFailedFirstReadShowsTheError() throws {
+      let status = try slackStatusFixture(error: "the claude.ai Slack connector is needs-auth")
+
+      #expect(
+        sessionRows([Self.slackLink(status)]).map(\.caption) == [
+          "found 3h ago · not read: the claude.ai Slack connector is needs-auth"
+        ])
+    }
+
+    @Test func aFailedReadAfterAGoodOneKeepsTheLastStatusAndShowsTheError() throws {
+      let status = try slackStatusFixture(
+        replies: 1, lastReply: LastReplyFixture(t: now - 2 * hour), read: now - 30 * minute,
+        error: "slack poll failed")
+
+      #expect(
+        sessionRows([Self.slackLink(status)]).map(\.caption) == [
+          "found 3h ago · 1 reply, last from Alice 2h ago, read 30m ago; reads since then failed: slack poll failed"
+        ])
+    }
+
+    /// The Board lane's popover lists a member's Slack link with the member's name, the link's caption, and the
+    /// status, in that order.
+    @Test func aMembersSlackRowInTheGroupListShowsTheStatusAfterTheOwnerAndCaption() throws {
+      let member = sessionFixture("s1", name: "fix-cache", links: [Self.slackLink(try Self.newReplyStatus())])
+
+      let rows = groupRows(nil, live: [member])
+
+      #expect(
+        rows.map(\.caption) == [
+          "fix-cache · found 3h ago · 1 reply, last from Alice 2h ago, read 5m ago, new reply"
+        ])
+    }
+
+    @Test func aStatusOnOneLinkLeavesTheOtherRowsCaptionsAlone() throws {
+      let links = [
+        Self.slackLink(try Self.newReplyStatus()), linkFixture("l1", url: linearURL, t: now - hour),
+      ]
+
+      #expect(
+        sessionRows(links).map(\.caption) == [
+          "added by you 1h ago", "found 3h ago · 1 reply, last from Alice 2h ago, read 5m ago, new reply",
+        ])
+    }
+
+    // MARK: Untrusted text
+
+    /// A reply's author name and a read's error come from Slack and from the model. The caption is one line of
+    /// printable text whatever they hold.
+    static let hostile = [
+      "Alice\nEvil", "Alice\r\nEvil", "Alice\rEvil", "Alice\u{1B}[31mEvil", "Alice\u{0}Evil", "Alice\u{7}Evil",
+      "Alice\u{2028}Evil", "Alice\u{85}Evil",
+    ]
+
+    static func isOnePrintableLine(_ text: String) -> Bool {
+      !text.contains(where: \.isNewline)
+        && !text.unicodeScalars.contains { $0.properties.generalCategory == .control && $0 != "\t" }
+    }
+
+    @Test(arguments: hostile)
+    func aReplyNameWithControlCharactersGivesOnePrintableLine(_ name: String) throws {
+      let status = try slackStatusFixture(
+        replies: 1, lastReply: LastReplyFixture(t: now - 2 * hour, name: name), read: now - 5 * minute,
+        newReply: true)
+
+      let caption = try #require(sessionRows([Self.slackLink(status)]).first).caption
+
+      try #require(caption.contains("Evil"), "The caption shows the status: \(caption.debugDescription)")
+      #expect(Self.isOnePrintableLine(caption), "\(caption.debugDescription)")
+    }
+
+    @Test(arguments: hostile)
+    func anErrorBeforeTheFirstReadWithControlCharactersGivesOnePrintableLine(_ error: String) throws {
+      let caption = try #require(sessionRows([Self.slackLink(try slackStatusFixture(error: error))]).first).caption
+
+      try #require(caption.contains("Evil"), "The caption shows the status: \(caption.debugDescription)")
+      #expect(Self.isOnePrintableLine(caption), "\(caption.debugDescription)")
+    }
+
+    @Test(arguments: hostile)
+    func anErrorAfterAGoodReadWithControlCharactersGivesOnePrintableLine(_ error: String) throws {
+      let status = try slackStatusFixture(replies: 0, read: now - 5 * minute, error: error)
+
+      let caption = try #require(sessionRows([Self.slackLink(status)]).first).caption
+
+      try #require(caption.contains("Evil"), "The caption shows the status: \(caption.debugDescription)")
+      #expect(Self.isOnePrintableLine(caption), "\(caption.debugDescription)")
+    }
+  }
+}

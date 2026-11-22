@@ -1868,6 +1868,13 @@ final class BoardModel: ObservableObject {
     }
   }
 
+  /// Records an Open of a session's link, which clears a Slack link's new-reply mark. The Open button opens the URL
+  /// itself. sbd keeps no Open time for a group's own link, so that Open sends nothing.
+  func openLink(_ row: LinkRows.Row) {
+    guard case .session(let id) = row.owner else { return }
+    perform("link-open", ["session": .string(id), "link": .string(row.link.id), "by": .string(Author.you.rawValue)])
+  }
+
   /// Every listed session by id, whatever the sidebar's filters hide.
   var sessionsByID: [String: SessionSummary] { Dictionary(allSessions.map { ($0.id, $0) }) { first, _ in first } }
 

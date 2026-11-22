@@ -273,6 +273,33 @@ func notedSession(_ notes: [Note], state: AttentionState = .done, id: String = "
     attached: false, lastReply: nil, waits: [], notes: notes)
 }
 
+/// The last reply of a Slack thread's status, as sbd sends it.
+struct LastReplyFixture {
+  var t: Int64
+  var user = "U0OTHER"
+  var name: String? = "Alice"
+  var you = false
+}
+
+/// A Slack link's `status` as sbd sends it in `ls`. The app decodes it from this JSON.
+func slackStatusFixture(
+  replies: Int? = nil, lastReply: LastReplyFixture? = nil, read: Int64? = nil, error: String? = nil,
+  watched: Bool = true, newReply: Bool = false
+) throws -> SlackThreadStatus {
+  var json: [String: JSON] = ["watched": .bool(watched), "newReply": .bool(newReply)]
+  if let replies { json["replies"] = .number(Double(replies)) }
+  if let read { json["read"] = .number(Double(read)) }
+  if let error { json["error"] = .string(error) }
+  if let lastReply {
+    var reply: [String: JSON] = [
+      "t": .number(Double(lastReply.t)), "user": .string(lastReply.user), "you": .bool(lastReply.you),
+    ]
+    if let name = lastReply.name { reply["name"] = .string(name) }
+    json["lastReply"] = .object(reply)
+  }
+  return try JSONCoding.convert(JSON.object(json), to: SlackThreadStatus.self)
+}
+
 /// An artifact at `https://claude.ai/artifact/<id>`, first published at `published`.
 func artifactFixture(
   _ id: String, title: String? = nil, artifactId: String? = nil, published: Int64 = 0, updated: Int64? = nil,

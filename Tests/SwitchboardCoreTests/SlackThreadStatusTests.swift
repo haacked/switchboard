@@ -312,6 +312,24 @@ private enum StatusFx {
     #expect(StatusFx.noControl(line), "\(line.debugDescription)")
   }
 
+  @Test func escapedControlCharactersStayWithinTheNameAndErrorLimits() throws {
+    let s = try StatusFx.status(
+      row: try StatusFx.readRow(
+        name: String(repeating: "\u{1B}", count: 80), error: String(repeating: "\u{07}", count: 200)),
+      lookedAt: StatusFx.linkT)
+
+    let line = s.line(now: StatusFx.now)
+
+    #expect(line.count <= StatusFx.aliceLine.count + 80 + 200 + 60, "\(line.count): \(line.debugDescription)")
+    #expect(StatusFx.noControl(line), "\(line.debugDescription)")
+  }
+
+  @Test func escapedControlCharactersStayWithinTheNotReadLimit() throws {
+    let s = try StatusFx.status(row: try StatusFx.row(["error": .string(String(repeating: "\u{1B}", count: 200))]))
+
+    #expect(s.line(now: StatusFx.now).count <= "not read: ".count + 200)
+  }
+
   // MARK: Encoding
 
   @Test func aLinkWithAStatusRoundTrips() throws {
