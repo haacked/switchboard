@@ -107,7 +107,7 @@ extension Service {
     while running.isEmpty, !users.isEmpty {
       if local {
         let found = Self.leftovers(
-          users, in: ProcessTable.readLocal(), sessionId: session.id, startedSince: session.created,
+          users, in: try site.processes(), sessionId: session.id, startedSince: session.created,
           sparing: stop.spared)
         if users.allSatisfy({ found[$0.pid] != nil }) {
           leftovers = found
@@ -119,7 +119,7 @@ extension Service {
       users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
     }
     if let leftovers {
-      stopLeftovers(leftovers, of: session, at: site)
+      try stopLeftovers(leftovers, of: session, at: site)
       users = try site.folderUsers(session.cwd)
     }
     guard !running.isEmpty || !users.isEmpty else { return }
@@ -158,8 +158,8 @@ extension Service {
   /// parent is pid 1, so no process waits on it. It is not a zombie, and it started at or after `since`, which is in
   /// milliseconds since the epoch. Its environment holds the session's `SB_SESSION_ID`, so the session started it.
   /// The Bash tool runs each command in a new POSIX session, so the environment is the only link between the
-  /// session and a watcher that a Bash command starts. macOS hides the environment of a program that ships with
-  /// macOS, such as /bin/sh, so such a program is never a leftover. A pid in `sparing` is never a leftover. A table
+  /// session and a watcher that a Bash command starts. A process whose environment the kernel leaves out, as
+  /// `ProcessTable.environment(of:)` describes, is never a leftover. A pid in `sparing` is never a leftover. A table
   /// parsed from `ps` holds start time 0, so it gives no leftover.
   static func leftovers(
     _ users: [FolderUser], in table: ProcessTable, sessionId: String, startedSince since: Int64,
@@ -179,18 +179,19 @@ extension Service {
   /// Sends SIGTERM to each leftover on this Mac, waits up to `stopWaitSeconds` for them to exit, then sends
   /// SIGKILL to each that still runs. A pid whose start time differs from the recorded one names another
   /// process, so it gets no signal.
-  private func stopLeftovers(_ leftovers: [Int: Int64], of session: Session, at site: any SessionSite) {
-    let signal = { (sig: Int32) in
-      let table = ProcessTable.readLocal()
+  private func stopLeftovers(_ leftovers: [Int: Int64], of session: Session, at site: any SessionSite) throws {
+    let signal = { (sig: Int32) throws in
+      let table = try site.processes()
       for (pid, start) in leftovers where table.row(pid)?.startTime == start {
         logLine("sending signal \(sig) to leftover \(pid) (\(table.command(of: pid) ?? "?")) of \(session.id)")
         site.machine.signal(pid, sig)
       }
     }
-    signal(SIGTERM)
-    guard !Processes.waitForExit(Set(leftovers.keys), seconds: config.stopWaitSeconds).isEmpty else { return }
-    signal(SIGKILL)
-    _ = Processes.waitForExit(Set(leftovers.keys), seconds: 1)
+    try signal(SIGTERM)
+    let pids = Set(leftovers.keys)
+    guard try !waitForExit(pids, seconds: config.stopWaitSeconds, at: site).isEmpty else { return }
+    try signal(SIGKILL)
+    _ = try waitForExit(pids, seconds: 1, at: site)
   }
 
   /// Waits up to `seconds` for every pid to exit at the site. Returns the pids that still run.

@@ -307,7 +307,7 @@ import Testing
     #expect(ProcessTable.environment(fromProcArgs: buffer) == [])
   }
 
-  /// macOS hides the environment of /bin/sleep, so the process runs a copy with an ad hoc signature.
+  /// macOS can hide the environment of /bin/sleep, so the process runs a copy with an ad hoc signature.
   @Test func environmentOfALiveProcessHoldsWhatItStartedWith() throws {
     let folder = try makeShortTempFolder()
     defer { try? FileManager.default.removeItem(atPath: folder) }
@@ -316,13 +316,6 @@ import Testing
     defer { sleep.stop() }
 
     #expect(ProcessTable.environment(of: sleep.process.processIdentifier) == ["SB_SESSION_ID=swb_live"])
-  }
-
-  @Test func environmentOfAProgramThatShipsWithMacOSIsEmpty() throws {
-    let sleep = try Child("/bin/sleep", ["120"], environment: ["SB_SESSION_ID": "swb_live"])
-    defer { sleep.stop() }
-
-    #expect(ProcessTable.environment(of: sleep.process.processIdentifier) == [])
   }
 }
 

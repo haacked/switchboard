@@ -135,8 +135,9 @@ public struct ProcessTable: Sendable {
   public static func argv(of pid: pid_t) -> [String] { argv(fromProcArgs: procArgs(of: pid)) }
 
   /// The process's environment as it was when the process ran exec, one `NAME=value` string per variable. It is empty
-  /// when the kernel refuses the read, as it does for another user's process. It is also empty for a program that
-  /// ships with macOS, such as /bin/sh, because the kernel leaves that environment out of the buffer.
+  /// when the kernel refuses the read, as it does for another user's process. The kernel can also leave the
+  /// environment out of the buffer for a program that ships with macOS, such as /bin/sh. Whether it does depends on
+  /// the Mac: it does on a developer's Mac and doesn't on a CI runner.
   public static func environment(of pid: pid_t) -> [String] { environment(fromProcArgs: procArgs(of: pid)) }
 
   /// The process's `KERN_PROCARGS2` buffer, or an empty one when the kernel refuses the read.

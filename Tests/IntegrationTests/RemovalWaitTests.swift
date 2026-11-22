@@ -196,8 +196,8 @@ private final class Strays {
   /// Runs the script under sh in the session's folder, with the pid file's path as `$1` and a copy of sleep outside
   /// the worktree as `$2`, and waits for sh to exit. The script starts a background process and writes its pid to
   /// `$1`. sh's environment holds `SB_SESSION_ID` set to `sessionId`, which is the session's id unless given. The
-  /// result is that process, once it runs sleep. macOS hides the environment of /bin/sleep, so the copy stands in
-  /// for a dev watcher such as python.
+  /// result is that process, once it runs sleep. macOS can hide the environment of /bin/sleep, so the copy stands
+  /// in for a dev watcher such as python.
   private func startOrphan(
     _ s: SessionSummary, _ strays: Strays, sessionId: String? = nil,
     _ script: String = "\"$2\" 100 </dev/null >/dev/null 2>&1 & echo $! > \"$1\""
@@ -291,7 +291,7 @@ private final class Strays {
   }
 
   /// A plain `&` job dies from the SIGHUP that closing the pane sends, so the shell starts it with nohup. The job
-  /// runs a signed copy of sleep, so macOS shows its environment. Once the pane closes, the job meets every other
+  /// runs a signed copy of sleep, so macOS always shows its environment. Once the pane closes, the job meets every other
   /// condition of a leftover, and only its descent from the shell pane keeps sbd from stopping it.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAProcessFromTheShellPaneExits(_ how: WorktreeRemoval) throws {
