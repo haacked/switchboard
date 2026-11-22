@@ -68,7 +68,12 @@ extension SessionFacts {
     case "ack":
       acknowledgment = try? JSONCoding.convert(event.data, to: Acknowledgment.self)
       acknowledgment?.at = event.t
-    case "unack": acknowledgment = nil
+      ackBeforeLast = lastAcknowledged
+      lastAcknowledged = event.t
+    case "unack":
+      acknowledgment = nil
+      lastAcknowledged = ackBeforeLast
+      ackBeforeLast = nil
     default: if let before, openPrompts.opened(since: before) { acknowledgment = nil }
     }
   }

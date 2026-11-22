@@ -52,8 +52,9 @@ extension ExternalLink {
 }
 
 extension SessionFacts {
-  /// Records the links of known kinds in a prompt, and the link of a Slack message that the session sent. A link
-  /// whose page the list already holds changes nothing, so the first sighting's URL and time stay.
+  /// Records the links of known kinds in a prompt, the link of a Slack message that the session sent, and an Open
+  /// of a link from Switchboard. A link whose page the list already holds changes nothing, so the first sighting's
+  /// URL and time stay.
   mutating func applyLinks(_ event: Event) {
     switch event.kind {
     case "UserPromptSubmit":
@@ -71,6 +72,8 @@ extension SessionFacts {
       }
     case "PostToolUse":
       if let sent = SlackSendCall.parse(event) { addFoundLink(url: sent.url, target: sent.target, t: event.t) }
+    case "link-opened":
+      if let key = event.data["key"]?.string { linkOpened[key] = max(linkOpened[key] ?? 0, event.t) }
     default:
       break
     }

@@ -32,4 +32,18 @@ extension Service {
     record(id, event.kind, event.data)
     return try JSON(encoding: summary(id, for: origin))
   }
+
+  /// `link-open` records that the user opened one of the session's links from Switchboard. A Slack link's new-reply
+  /// mark then stays off until a newer reply. Only the user acts, so a session can't hide its own marks.
+  func linkOpenRequest(_ args: JSON, origin: RequestOrigin) throws -> JSON {
+    let id = try lookup(args)
+    try requireUser(args, "Only you can open a link.")
+    let e = entries[id]!
+    let linkId = args["link"]?.string ?? ""
+    guard let link = e.session.links(found: e.facts.links).first(where: { $0.id == linkId }) else {
+      throw APIError("\(e.session.name) has no link \(linkId)")
+    }
+    record(id, "link-opened", ["link": .string(link.id), "key": .string(ExternalLink.pageKey(link.url))])
+    return try JSON(encoding: summary(id, for: origin))
+  }
 }

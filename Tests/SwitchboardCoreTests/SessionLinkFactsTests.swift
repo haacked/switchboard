@@ -467,3 +467,112 @@ private let replyTs = LinkFixtures.replyTs
     #expect(refreshed.snapshot.replay.facts.links.map(\.id) == old.snapshot.replay.facts.links.map(\.id))
   }
 }
+
+/// The suites nest under `SessionLinkFactsTests`, so its filter runs them.
+extension SessionLinkFactsTests {
+  /// A `link-opened` event records when the user opened a link from Switchboard, keyed by the link's page (H3).
+  @Suite struct Opened {
+    static let key = LinkFixtures.slackRootKey
+    static let otherKey = "slack:example/C0EXAMPLE02/1794965100.000200"
+
+    func opened(_ t: Int64, key: String = Self.key, link: String = "l1") -> Event {
+      event("link-opened", t, ["link": .string(link), "key": .string(key)])
+    }
+
+    @Test func aNewSessionHasNoOpens() {
+      #expect(SessionFacts().linkOpened.isEmpty)
+    }
+
+    @Test func anOpenRecordsItsTimeUnderItsKey() {
+      let f = facts([linkPrompt(1000, "Review \(rootURL)"), opened(2000)])
+
+      #expect(f.linkOpened == [Self.key: 2000])
+    }
+
+    @Test func aLaterOpenWins() {
+      let f = facts([opened(2000), opened(3000)])
+
+      #expect(f.linkOpened[Self.key] == 3000)
+    }
+
+    @Test func anOpenOfAnotherKeyLeavesThisKeyAlone() {
+      let f = facts([opened(2000), opened(3000, key: Self.otherKey, link: "l2")])
+
+      #expect(f.linkOpened == [Self.key: 2000, Self.otherKey: 3000])
+    }
+
+    @Test(arguments: [[String: JSON](), ["link": "l1"], ["link": "l1", "key": 7]])
+    func anOpenWithoutAKeyRecordsNothing(_ data: [String: JSON]) {
+      let f = facts([event("link-opened", 2000, data)])
+
+      #expect(f.linkOpened.isEmpty)
+    }
+
+    @Test func anOpenAddsNoLink() {
+      let f = facts([opened(2000)])
+
+      #expect(f.links.isEmpty)
+    }
+
+    @Test func theOpensSurviveEncoding() throws {
+      let f = facts([opened(2000), opened(3000, key: Self.otherKey, link: "l2")])
+
+      let decoded = try JSONCoding.decode(SessionFacts.self, from: try JSONCoding.encode(f))
+
+      #expect(decoded.linkOpened == f.linkOpened)
+    }
+  }
+
+  /// The inputs of "last looked" come from replay, so a snapshot and the events after it give what a full replay
+  /// gives, wherever the snapshot cuts the log.
+  @Suite struct LookedAtSnapshot {
+    let session = Session(id: "s1", name: "one", cwd: "/tmp/a", branch: "main", claudeSessionId: "u1", created: 5)
+    static let key = LinkFixtures.slackRootKey
+
+    func history() -> [Event] {
+      let opened: [String: JSON] = ["link": .string(hashedFoundId(Self.key)), "key": .string(Self.key)]
+      let ack: [String: JSON] = ["state": "needs_you", "reason": "read its last reply and decide what's next"]
+      return [
+        linkPrompt(700, "Review \(rootURL)"),
+        event("link-opened", 800, opened),
+        event("Stop", 900, ["last_assistant_message": "Done."]),
+        event("ack", 1000, ack),
+        event("ack", 1100, ack),
+        event("unack", 1200),
+        event("link-opened", 1300, opened),
+        linkPrompt(1400, "Keep going"),
+        event("Stop", 1500, ["last_assistant_message": "Done again."]),
+      ]
+    }
+
+    /// What the history leaves, so a parity check over two empty values can't pass.
+    @Test func aFullReplayBuildsTheExpectedOpensAndAcknowledgment() {
+      let f = SessionReplay.replaying(history(), session: session).facts
+
+      #expect(f.linkOpened == [Self.key: 1300])
+      #expect(f.lastAcknowledged == 1000)
+    }
+
+    @Test func theSnapshotAndTheTailBuildWhatAFullReplayBuildsAtEveryCut() throws {
+      let dir = try tempFolder()
+      defer { try? FileManager.default.removeItem(atPath: dir) }
+      let store = try Store(path: "\(dir)/sb.db")
+      let events = history()
+      for cut in 1..<events.count {
+        try store.delete(session: SessionRemoval(id: session.id, name: session.name))
+        try store.save(session)
+        for e in events[..<cut] { try store.append(e) }
+        try Snapshots.refresh(store, session, build: "b1")
+        for e in events[cut...] { try store.append(e) }
+
+        let second = try Snapshots.refresh(store, session, build: "b1")
+
+        let full = SessionReplay.replaying(try store.events(session: session.id), session: session)
+        #expect(second.snapshot.replay.facts.linkOpened == full.facts.linkOpened, "cut \(cut)")
+        #expect(second.snapshot.replay.facts.lastAcknowledged == full.facts.lastAcknowledged, "cut \(cut)")
+        #expect(second.snapshot.replay.facts.linkOpened == [Self.key: 1300], "cut \(cut)")
+        #expect(second.snapshot.replay.facts.lastAcknowledged == 1000, "cut \(cut)")
+      }
+    }
+  }
+}

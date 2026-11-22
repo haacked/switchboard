@@ -186,6 +186,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var reviewRequest: ReviewRequestAttempt?
   /// The Inbox item that the user acknowledged during this turn.
   public var acknowledgment: Acknowledgment?
+  /// When the last `ack` was recorded. Unlike `acknowledgment`, it outlasts the turn.
+  public var lastAcknowledged: Int64?
+  /// The `lastAcknowledged` before the last `ack`, which an `unack` puts back. Only one is kept.
+  public var ackBeforeLast: Int64?
   /// The user's snooze of the session, from the last `snooze` event, until
   /// `unsnooze` or, once it ended, until the user acts on the session.
   public var snooze: Snooze?
@@ -230,6 +234,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The links of known kinds that sbd found in the session's prompts and sent Slack messages, in first-sighting
   /// order.
   public var links: [ExternalLink] = []
+  /// When the user last opened each page from Switchboard, keyed by the page's `LinkTarget` key, from
+  /// `link-opened` events.
+  public var linkOpened: [String: Int64] = [:]
   /// The operator's `needsYou` reports that the user has not answered or acknowledged, oldest first.
   public var openReports: [OperatorReport] = []
   /// The reports that the latest `ack` closed, oldest first. An `unack` reopens them. It is empty while a report

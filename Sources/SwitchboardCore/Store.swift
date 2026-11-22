@@ -45,6 +45,7 @@ public final class Store {
     try exec("CREATE TABLE IF NOT EXISTS snapshots (session TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, json TEXT NOT NULL)")
+    try exec("CREATE TABLE IF NOT EXISTS slack_threads (key TEXT PRIMARY KEY, json TEXT NOT NULL)")
     try exec("CREATE TABLE IF NOT EXISTS declined_suggestions (id TEXT PRIMARY KEY)")
     try exec("CREATE TABLE IF NOT EXISTS known_repos (path TEXT PRIMARY KEY, used INTEGER NOT NULL)")
     // `delete(session:)` leaves a session's activity rows, so the log outlives the session.
@@ -232,6 +233,29 @@ public final class Store {
   public func plans() throws -> [PlanDocument] {
     try query("SELECT json FROM plans ORDER BY id", []) { row in
       try JSONCoding.decode(PlanDocument.self, from: row.text(0))
+    }
+  }
+
+  /// The stored Slack threads by key. It skips and logs a row that fails to decode, which costs that thread one
+  /// full read.
+  public func slackThreads() throws -> [String: SlackThread] {
+    let rows = try query("SELECT key, json FROM slack_threads", []) { row in (row.text(0), row.text(1)) }
+    var threads: [String: SlackThread] = [:]
+    for (key, json) in rows {
+      do { threads[key] = try JSONCoding.decode(SlackThread.self, from: json) } catch {
+        logLine("skipping the stored Slack thread \(key): \(error)")
+      }
+    }
+    return threads
+  }
+
+  /// Saves the threads and deletes the keys in one transaction.
+  public func save(slackThreads: [String: SlackThread], deleting: [String]) throws {
+    try transaction {
+      for (key, thread) in slackThreads {
+        try run("INSERT OR REPLACE INTO slack_threads (key, json) VALUES (?, ?)", [key, try JSONCoding.encode(thread)])
+      }
+      for key in deleting { try run("DELETE FROM slack_threads WHERE key = ?", [key]) }
     }
   }
 

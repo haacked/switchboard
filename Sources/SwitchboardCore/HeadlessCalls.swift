@@ -2,7 +2,8 @@ import Foundation
 
 /// The one-shot `claude -p` calls that sbd makes for itself.
 public enum HeadlessKind: String, Codable, Sendable {
-  case triage, mergeBrief, quickAsk, planUpdate, skillLabel, replyGate, ciFailure, topupPick, sessionName
+  case triage, mergeBrief, quickAsk, planUpdate, skillLabel, replyGate, ciFailure, topupPick, sessionName, slackThreads,
+    slackSelf
 }
 
 /// One `claude -p` call that sbd made for itself, as the `headless_calls` table stores it. `kind` is a

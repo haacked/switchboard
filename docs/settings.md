@@ -24,6 +24,7 @@ The app's Settings window (Switchboard ▸ Settings…, or ⌘,) changes the mos
   "depot": {"enabled": true},
   "trunk": {"path": "trunk", "timeoutSeconds": 30},
   "docket": {"path": "docket", "pollSeconds": 30, "timeoutSeconds": 120, "startTimeoutSeconds": 240},
+  "slack": {"pollSeconds": 1200, "model": "haiku"},
   "recheckSeconds": {"ci": 7200, "review": 86400, "acknowledged": 3600},
   "removalDelaySeconds": 5,
   "conversationHintTokens": 120000
@@ -31,6 +32,8 @@ The app's Settings window (Switchboard ▸ Settings…, or ⌘,) changes the mos
 ```
 
 `recheckSeconds` sets how long each kind of wait holds a session in Waiting before the session moves to Needs you, in whole seconds, `acknowledged` sets how long an acknowledgment holds it, and `requested` sets how long a message that answers a rule's item can hold it (see [The Inbox](inbox.md)). The defaults are `ci` 7200 (2 h), `bot-review` 3600 (1 h), `review`, `approval`, `merge`, `session`, and `manual` 86400 (1 d), `queue` and `deploy` 14400 (4 h), and `acknowledged` and `requested` 3600 (1 h). A missing key keeps its default. `sbd` logs an unknown key or a value that isn't a whole number from 1 to 315360000 (10 years), and keeps the default for it. A wait's recheck time is set when the wait is set, so a change applies to new waits. A wait set before `sbd` had recheck times gets one that counts from the next `sbd` start.
+
+`slack.pollSeconds` (default 1200) sets how often `sbd` reads the watched Slack threads among the sessions' links, and 0 turns that poll off. `slack.model` (default `haiku`) is the model of that call. The poll runs on the account of `sbd`'s own environment and `config.env`, because only an account with the claude.ai Slack connector can read Slack. See [Slack threads](cli.md#slack-threads).
 
 `removalDelaySeconds` (default 5, from 0 to 86400) sets how long the removal job waits after a delete from the app or `sb rm --done` before it starts a session, which is how long the Removing row offers Undo. 0 starts each session at once and turns Undo off. `sbd` logs a value that isn't a whole number from 0 to 86400 (1 d), and keeps the default. Retry starts a failed delete again with no wait.
 

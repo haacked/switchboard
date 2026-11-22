@@ -10,6 +10,8 @@ public struct ExternalLink: Codable, Equatable, Sendable, Identifiable {
   public var by: LinkAuthor
   /// Milliseconds since the epoch.
   public var t: Int64
+  /// What sbd read of a Slack link's thread. Only a session summary sets it, so stored links never carry it.
+  public var status: SlackThreadStatus?
 
   /// The longest title, in characters.
   public static let titleLimit = 200
@@ -29,7 +31,7 @@ public struct ExternalLink: Codable, Equatable, Sendable, Identifiable {
   /// The kind of page that the URL names: the kind that `LinkTarget.parse(_:)` finds, else `web`.
   public var kind: LinkKind { linkTarget?.kind ?? .web }
 
-  private enum CodingKeys: String, CodingKey { case id, title, url, by, t }
+  private enum CodingKeys: String, CodingKey { case id, title, url, by, t, status }
   private enum DerivedKeys: String, CodingKey { case kind, channel, thread }
 
   /// Writes the stored fields and the fields that the URL gives. Decoding reads only the stored fields, so the URL
@@ -41,6 +43,7 @@ public struct ExternalLink: Codable, Equatable, Sendable, Identifiable {
     try stored.encode(url, forKey: .url)
     try stored.encode(by, forKey: .by)
     try stored.encode(t, forKey: .t)
+    try stored.encodeIfPresent(status, forKey: .status)
     let target = linkTarget
     var derived = encoder.container(keyedBy: DerivedKeys.self)
     try derived.encode(target?.kind ?? .web, forKey: .kind)
@@ -76,7 +79,7 @@ public struct ExternalLink: Codable, Equatable, Sendable, Identifiable {
 
   /// The key that two URLs of one page share: the `LinkTarget` key of a known kind, else `target`'s form. Hiding a
   /// found link matches on it, so a reply's link and its thread's link hide together.
-  static func pageKey(_ url: String) -> String { LinkTarget.parse(url)?.key ?? target(url) }
+  public static func pageKey(_ url: String) -> String { LinkTarget.parse(url)?.key ?? target(url) }
 
   /// The title on one line. Without a title, it is the URL, cut to `titleLimit` characters with an ellipsis when it
   /// is longer. It refuses a given title over `titleLimit`.

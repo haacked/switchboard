@@ -181,6 +181,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var autoContinue = AutoContinueSettings()
   public var usage = UsageSettings()
   public var docket = DocketSettings()
+  /// How sbd reads the Slack threads among the sessions' links.
+  public var slack = SlackSettings()
   public var planUpdates = PlanUpdateSettings()
   public var quickAsk = QuickAskSettings()
   public var `operator` = OperatorSettings()
@@ -199,7 +201,7 @@ public struct Config: Codable, Equatable, Sendable {
     case testClock, machineLog, hostWaitSeconds, pasteSettleSeconds, stopWaitSeconds, reviewTimeoutSeconds, mcpServers,
       ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
       cleanupDeletes, supacode, removalDelaySeconds, conversationHintTokens
-    case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates,
+    case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, slack, planUpdates,
       quickAsk, managerSkills, sessionNames
     case manager
     case issues, `operator`
@@ -307,6 +309,7 @@ public struct Config: Codable, Equatable, Sendable {
     autoContinue = try c.decodeIfPresent(AutoContinueSettings.self, forKey: .autoContinue) ?? d.autoContinue
     usage = try c.decodeIfPresent(UsageSettings.self, forKey: .usage) ?? d.usage
     docket = try c.decodeIfPresent(DocketSettings.self, forKey: .docket) ?? d.docket
+    slack = try c.decodeIfPresent(SlackSettings.self, forKey: .slack) ?? d.slack
     planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
     quickAsk = try c.decodeIfPresent(QuickAskSettings.self, forKey: .quickAsk) ?? d.quickAsk
     managerSkills = try c.decodeIfPresent(ManagerSkillSettings.self, forKey: .managerSkills) ?? d.managerSkills

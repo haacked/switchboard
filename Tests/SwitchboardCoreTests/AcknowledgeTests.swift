@@ -827,3 +827,90 @@ extension AcknowledgeTests {
     }
   }
 }
+
+/// The time of the last acknowledgment, which "last looked" reads for a Slack thread's mark (D10). Unlike the
+/// acknowledgment itself, it outlasts the turn. `unack` puts back the one before it.
+extension AcknowledgeTests {
+  @Suite struct LastAcknowledged {
+    @Test func aNewSessionHasNoLastAcknowledgment() {
+      #expect(SessionFacts().lastAcknowledged == nil)
+    }
+
+    @Test func anAckSetsTheLastAcknowledgmentToItsTime() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)])
+
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    @Test func aLaterAckMovesIt() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply)])
+
+      #expect(f.lastAcknowledged == 5)
+    }
+
+    /// The acknowledgment covers one turn, and the time it was made outlasts it.
+    @Test func aNewTurnClearsTheAcknowledgmentButKeepsItsTime() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)] + turn("Done again.", start: 3))
+
+      #expect(f.acknowledgment == nil)
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    @Test func anUnackAfterOneAckClearsIt() throws {
+      let f = facts(turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), event("unack", 3)])
+
+      #expect(f.lastAcknowledged == nil)
+    }
+
+    @Test func anUnackPutsBackTheEarlierAcknowledgmentsTime() throws {
+      let f = facts(
+        turn("Done.") + [
+          try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply), event("unack", 6),
+        ])
+
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    @Test func anUnackPutsBackAnAcknowledgmentFromAnEarlierTurn() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)] + turn("Done again.", start: 3) + [
+          try ackEvent(5, .needsYou, readTheReply), event("unack", 6),
+        ])
+
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    /// Only one earlier time is kept, so a second unack in a row leaves none.
+    @Test func twoUnacksInARowLeaveNoLastAcknowledgment() throws {
+      let f = facts(
+        turn("Done.") + [
+          try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply), event("unack", 6),
+          event("unack", 7),
+        ])
+
+      #expect(f.lastAcknowledged == nil)
+    }
+
+    @Test func anAckAfterAnUnackRemembersTheRestoredTime() throws {
+      let f = facts(
+        turn("Done.") + [
+          try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply), event("unack", 6),
+          try ackEvent(8, .needsYou, readTheReply), event("unack", 9),
+        ])
+
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    @Test func theLastAcknowledgmentSurvivesEncoding() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply)])
+
+      let decoded = try JSONCoding.decode(SessionFacts.self, from: try JSONCoding.encode(f))
+
+      #expect(decoded.lastAcknowledged == 5)
+      #expect(decoded == f)
+    }
+  }
+}
