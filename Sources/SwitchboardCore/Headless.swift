@@ -17,9 +17,12 @@ public enum Headless {
   /// Runs `claude` with the arguments and the input on stdin, in the folder,
   /// and returns what it printed. It ends the process after `timeout`
   /// seconds, or within 100 ms of `cancelled` returning true, and then throws.
+  /// `onLine` gets each line of stdout as it arrives, on the calling thread.
+  /// A non-nil return refuses the line: `run` stops reading, ends the process
+  /// with SIGTERM and after 1 s with SIGKILL, and throws `Refused`.
   public static func run(
     claude: String, arguments: [String], input: String, env: [String: String], folder: String,
-    timeout: Double, cancelled: @escaping @Sendable () -> Bool = { false }
+    timeout: Double, cancelled: @escaping @Sendable () -> Bool = { false }, onLine: ((String) -> String?)? = nil
   ) throws -> String {
     if cancelled() { throw NotStarted(reason: "cancelled") }
     // Process raises an Objective-C exception for a NUL. Swift can't catch it, and it would end sbd.
@@ -57,21 +60,74 @@ public enum Headless {
     monitor.resume()
     try? stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8))
     try? stdin.fileHandleForWriting.close()
-    let output = stdout.fileHandleForReading.readDataToEndOfFile()
+    let (output, refusal) = readStdout(stdout.fileHandleForReading, onLine: onLine)
+    var escalation: DispatchWorkItem?
+    if let refusal {
+      ending.withLock { end in
+        guard end == nil else { return }
+        end = .refused(refusal)
+        if p.isRunning { p.terminate() }
+      }
+      try? stdout.fileHandleForReading.close()
+      // A process can ignore SIGTERM. A refused claude must not reach its first model turn.
+      let kill = DispatchWorkItem { if p.isRunning { Darwin.kill(p.processIdentifier, SIGKILL) } }
+      DispatchQueue(label: "Headless.kill").asyncAfter(deadline: .now() + 1, execute: kill)
+      escalation = kill
+    }
     p.waitUntilExit()
+    escalation?.cancel()
     monitor.cancel()
     let end = ending.withLock { end in
       if end == nil { end = .exited }
       return end
     }
+    let text = String(decoding: output, as: UTF8.self)
     switch end {
     case .cancelled: throw APIError("cancelled")
     case .timedOut: throw TimedOut(description: "timed out after \(Int(timeout)) s")
+    case .refused(let reason): throw Refused(reason: reason, output: text)
     case .exited, nil: break
     }
-    let text = String(decoding: output, as: UTF8.self)
     guard p.terminationStatus == 0 else { throw ExitError(status: p.terminationStatus, output: text) }
     return text
+  }
+
+  /// Reads stdout to its end and hands each line to `onLine`, including a last line without a newline. It splits
+  /// the bytes before it decodes them, so a character split across two reads arrives whole. It stops at the first
+  /// line that `onLine` refuses, because a child of claude can keep the pipe open after claude ends. It returns the
+  /// bytes that it read and the refusal.
+  private static func readStdout(_ handle: FileHandle, onLine: ((String) -> String?)?) -> (Data, String?) {
+    var output = Data()
+    var lineStart = 0
+    var chunk = [UInt8](repeating: 0, count: 65536)
+    while true {
+      // read(2) reports an error through errno. FileHandle raises an Objective-C exception, which would end sbd.
+      let count = read(handle.fileDescriptor, &chunk, chunk.count)
+      if count < 0, errno == EINTR { continue }
+      guard count > 0 else { break }
+      let scanStart = output.count
+      output.append(chunk, count: count)
+      guard let onLine else { continue }
+      for index in scanStart..<output.count where output[index] == UInt8(ascii: "\n") {
+        if let reason = onLine(String(decoding: output[lineStart..<index], as: UTF8.self)) { return (output, reason) }
+        lineStart = index + 1
+      }
+    }
+    if let onLine, lineStart < output.count,
+      let reason = onLine(String(decoding: output[lineStart...], as: UTF8.self))
+    {
+      return (output, reason)
+    }
+    return (output, nil)
+  }
+
+  /// What `run` throws when `onLine` refuses a line. `output` holds what claude printed up to then, which can
+  /// include a few lines after the refused one.
+  public struct Refused: Error, CustomStringConvertible {
+    public let reason: String
+    public let output: String
+
+    public var description: String { reason }
   }
 
   /// What `run` throws when `claude` exits with a nonzero status. claude exits with status 1 after an error
@@ -92,7 +148,7 @@ public enum Headless {
     public var description: String { reason }
   }
 
-  private enum RunEnd: Sendable { case exited, timedOut, cancelled }
+  private enum RunEnd: Sendable { case exited, timedOut, cancelled, refused(String) }
 
   /// `run` throws it when the run outlasts its timeout.
   public struct TimedOut: Error, CustomStringConvertible {
@@ -102,7 +158,7 @@ public enum Headless {
   /// The output with the model and the tokens that its envelope reports. It reads them even when the answer is an
   /// error or holds no JSON object, because the call spent the tokens either way.
   public static func reply(_ output: String) -> HeadlessReply {
-    guard let envelope = JSON.parse(output)?.object else { return HeadlessReply(output: output) }
+    guard let envelope = envelope(output) else { return HeadlessReply(output: output) }
     if let models = envelope["modelUsage"]?.object, !models.isEmpty {
       let usage = models.values.map {
         HeadlessUsage(
@@ -120,9 +176,19 @@ public enum Headless {
         cacheWrite: usage["cache_creation_input_tokens"]?.int ?? 0))
   }
 
-  /// The JSON object that the output of `claude -p --output-format json` answers with.
+  /// The result envelope of `claude -p`. The output of `--output-format json` is the envelope alone. The output of
+  /// `--output-format stream-json` ends with it on the last line, as an object whose `type` is `result`.
+  public static func envelope(_ output: String) -> [String: JSON]? {
+    if let whole = JSON.parse(output)?.object { return whole }
+    guard let last = output.split(whereSeparator: \.isNewline).last(where: { !$0.allSatisfy(\.isWhitespace) }),
+      let line = JSON.parse(String(last))?.object, line["type"]?.string == "result"
+    else { return nil }
+    return line
+  }
+
+  /// The JSON object that the envelope of `claude -p` answers with.
   public static func answer(_ output: String) throws -> [String: JSON] {
-    guard let envelope = JSON.parse(output) else {
+    guard let envelope = envelope(output) else {
       throw APIError("claude printed no JSON: \(oneLine(output, max: 200))")
     }
     if envelope["is_error"]?.bool == true {
