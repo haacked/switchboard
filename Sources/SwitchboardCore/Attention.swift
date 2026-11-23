@@ -234,7 +234,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The links of known kinds that sbd found in the session's prompts and sent Slack messages, in first-sighting
   /// order.
   public var links: [ExternalLink] = []
-  /// When the user last opened each page from Switchboard, keyed by the page's `LinkTarget` key, from
+  /// When the user last opened each page from Switchboard, keyed by `ExternalLink.pageKey` of its URL, from
   /// `link-opened` events.
   public var linkOpened: [String: Int64] = [:]
   /// The operator's `needsYou` reports that the user has not answered or acknowledged, oldest first.

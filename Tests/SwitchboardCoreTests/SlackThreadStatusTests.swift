@@ -54,7 +54,7 @@ private enum StatusFx {
   }
 
   static func lookedAt(_ link: ExternalLink, _ facts: SessionFacts) -> Int64 {
-    SlackThreadStatus.lookedAt(link: link, key: ExternalLink.pageKey(link.url), facts: facts)
+    SlackThreadStatus.lookedAt(link: link, facts: facts)
   }
 
   /// The status as the wire carries it.

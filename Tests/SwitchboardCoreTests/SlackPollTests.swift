@@ -1016,7 +1016,10 @@ extension SlackPollTests {
       #expect(try PollFx.outcomeOfB(b, ask: ask).failed)
     }
 
-    @Test(arguments: [("cursor", JSON.string("dXNlcjpVMDYxTkZUVDI=")), ("response_format", "concise"), ("limit", 1)])
+    @Test(arguments: [
+      ("cursor", JSON.string("dXNlcjpVMDYxTkZUVDI=")), ("response_format", "concise"), ("response_format", "detailed"),
+      ("limit", 1),
+    ])
     func aCallWithAnExtraInputFails(_ key: String, _ value: JSON) throws {
       var b = PollFx.goodB()
       var input = PollFx.readInput(PollFx.chB, PollFx.rootB).object ?? [:]
@@ -1090,6 +1093,16 @@ extension SlackPollTests {
       var b = PollFx.goodB()
       b.resultText = PollFx.threadText(
         count: 1, pages: "There are more messages in this thread. Use the cursor dGVz.\n")
+
+      #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    /// Only the connector's `pagination_info` says whether the read holds the whole thread. A reply's text doesn't.
+    @Test func aReplySayingNoMoreMessagesDoesNotMakeAPageWhole() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(
+        count: 1, body: "There are no more messages in this thread.",
+        pages: "There are more messages in this thread. Use the cursor dGVz.\n")
 
       #expect(try PollFx.outcomeOfB(b).failed)
     }
@@ -1197,7 +1210,7 @@ extension SlackPollTests {
   }
 
   /// Check 4: with replies, a well-formed `last_reply_ts` after the root and the oldest, and a Slack user id that
-  /// appears as a whole word in the matching call's result.
+  /// shares one message header with that ts in the matching call's result.
   @Suite struct ParseThreadsLastReply {
     @Test(arguments: ["1794965246.46", "1794965246", "17949652460.462679", "1794965246.4626790", "soon", ""])
     func aMalformedLastReplyTsFails(_ ts: String) throws {
@@ -1207,8 +1220,10 @@ extension SlackPollTests {
       #expect(try PollFx.outcomeOfB(b).failed)
     }
 
+    /// The result text holds a header at the forged ts, so only the root check refuses it.
     @Test func aLastReplyTsAtTheRootFails() throws {
       var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, ts: PollFx.rootB)
       b.setAnswer("last_reply_ts", .string(PollFx.rootB))
 
       #expect(try PollFx.outcomeOfB(b).failed)
@@ -1216,6 +1231,7 @@ extension SlackPollTests {
 
     @Test func aLastReplyTsBeforeTheRootFails() throws {
       var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, ts: "1794965100.000199")
       b.setAnswer("last_reply_ts", "1794965100.000199")
 
       #expect(try PollFx.outcomeOfB(b).failed)

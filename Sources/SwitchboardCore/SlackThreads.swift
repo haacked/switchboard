@@ -84,7 +84,7 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
   public var newReply: Bool
 
   /// The status of a link from its `LinkTarget` and its thread's row. It is nil for a target that is not Slack, and
-  /// for a Slack thread with neither a row nor a watch. `lookedAt` is the time from `lookedAt(link:key:facts:)`.
+  /// for a Slack thread with neither a row nor a watch. `lookedAt` is the time from `lookedAt(link:facts:)`.
   public init?(target: LinkTarget, row: SlackThread?, watched: Bool, lookedAt: Int64) {
     guard target.kind == .slack, row != nil || watched else { return nil }
     replies = row?.replies
@@ -101,9 +101,9 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
 
   /// When the user last looked at the link's thread: the latest of the time the link entered the list, an Open of
   /// its page from Switchboard, and the session's last acknowledgment. The floor at the link's time keeps a pasted
-  /// link to an old thread from marking the replies that already exist. `key` is the link's `LinkTarget.key`.
-  public static func lookedAt(link: ExternalLink, key: String, facts: SessionFacts) -> Int64 {
-    max(link.t, facts.linkOpened[key] ?? 0, facts.lastAcknowledged ?? 0)
+  /// link to an old thread from marking the replies that already exist.
+  public static func lookedAt(link: ExternalLink, facts: SessionFacts) -> Int64 {
+    max(link.t, facts.linkOpened[ExternalLink.pageKey(link.url)] ?? 0, facts.lastAcknowledged ?? 0)
   }
 
   /// The text on one line with control characters escaped, then cut to `max`. Escaping first keeps the cut a bound

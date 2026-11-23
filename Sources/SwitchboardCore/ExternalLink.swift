@@ -34,8 +34,8 @@ public struct ExternalLink: Codable, Equatable, Sendable, Identifiable {
   private enum CodingKeys: String, CodingKey { case id, title, url, by, t, status }
   private enum DerivedKeys: String, CodingKey { case kind, channel, thread }
 
-  /// Writes the stored fields and the fields that the URL gives. Decoding reads only the stored fields, so the URL
-  /// stays the one source of the derived ones.
+  /// Writes the stored fields, a summary's `status`, and the fields that the URL gives. Decoding reads the stored
+  /// fields and `status`, so the URL stays the one source of the derived ones.
   public func encode(to encoder: any Encoder) throws {
     var stored = encoder.container(keyedBy: CodingKeys.self)
     try stored.encode(id, forKey: .id)

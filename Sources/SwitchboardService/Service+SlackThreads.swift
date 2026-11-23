@@ -51,7 +51,7 @@ extension Service {
     var out = link
     out.status = SlackThreadStatus(
       target: target, row: slackThreads[target.key], watched: watched.contains(target.key),
-      lookedAt: SlackThreadStatus.lookedAt(link: link, key: target.key, facts: facts))
+      lookedAt: SlackThreadStatus.lookedAt(link: link, facts: facts))
     return out
   }
 

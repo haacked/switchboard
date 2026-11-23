@@ -306,7 +306,9 @@ public enum SlackPoll {
       return object.keys.sorted().compactMap { object[$0]?.string }.joined(separator: "\n")
     }
 
-    /// The structured output of a successful call. It throws when the call failed as a whole.
+    /// The structured output of a successful call. It throws when the call failed as a whole. Unlike
+    /// `Headless.answer`, it reads no JSON from the `result` text, because only `structured_output` passed claude's
+    /// check against the schema.
     func answer() throws -> [String: JSON] {
       guard let envelope else { throw ReadError("claude printed no result") }
       if envelope["is_error"]?.bool == true {

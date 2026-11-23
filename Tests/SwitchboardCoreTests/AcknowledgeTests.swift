@@ -882,15 +882,27 @@ extension AcknowledgeTests {
       #expect(f.lastAcknowledged == 2)
     }
 
-    /// The facts hold only one earlier time, so a second unack in a row leaves none.
-    @Test func twoUnacksInARowLeaveNoLastAcknowledgment() throws {
+    /// The first unack undoes the ack at 5. The second finds no ack in force, so it keeps the restored time.
+    @Test func aSecondUnackInARowKeepsTheRestoredTime() throws {
       let f = facts(
         turn("Done.") + [
           try ackEvent(2, .needsYou, readTheReply), try ackEvent(5, .needsYou, readTheReply), event("unack", 6),
           event("unack", 7),
         ])
 
-      #expect(f.lastAcknowledged == nil)
+      #expect(f.lastAcknowledged == 2)
+    }
+
+    /// sbd records `unack` to undo a request hold after a new turn has cleared the acknowledgment. That unack
+    /// undoes no ack, so a Slack reply that the user acknowledged at 2 stays acknowledged.
+    @Test func anUnackThatUndoesARequestKeepsTheTime() throws {
+      let f = facts(
+        turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)] + turn("Done again.", start: 3) + [
+          event("request", 5, ["state": "needs_you", "reason": .string(readTheReply), "message": "merge it"]),
+          event("unack", 6),
+        ])
+
+      #expect(f.lastAcknowledged == 2)
     }
 
     @Test func anAckAfterAnUnackRemembersTheRestoredTime() throws {

@@ -13,8 +13,7 @@ private struct SlackReply {
 /// format lives here.
 extension Instance {
   /// The runs that the stub logged in the file, oldest first, each as its arguments. The stub writes each argument
-  /// followed by a NUL, so a run starts at each `-p`. A record that holds a whole run joined by spaces also reads as
-  /// one run, split at the spaces.
+  /// followed by a NUL, so a run starts at each `-p`.
   fileprivate func slackRuns(_ file: String) -> [[String]] {
     let text = (try? String(contentsOfFile: "\(home.path)/\(file)", encoding: .utf8)) ?? ""
     var runs: [[String]] = []
@@ -22,8 +21,6 @@ extension Instance {
     for record in text.split(separator: "\0", omittingEmptySubsequences: false).dropLast().map(String.init) {
       if record == "-p" {
         runs.append([record])
-      } else if record.hasPrefix("-p ") {
-        runs.append(record.split(separator: " ", omittingEmptySubsequences: false).map(String.init))
       } else if !runs.isEmpty {
         runs[runs.count - 1].append(record)
       }
@@ -308,6 +305,12 @@ extension Instance {
     let asked = try #require(sbd.slackAsks().last?.first { $0["message_ts"]?.string == SlackExample.rootTs })
     #expect(asked["oldest"]?.string == first.ts)
     #expect(asked["channel_id"]?.string == SlackExample.channel)
+
+    // A read that finds nothing after `oldest` keeps the count and the last reply.
+    let quiet = try pollAndRead(sbd, s.id)
+    #expect(quiet["replies"]?.int == 2)
+    #expect(quiet["lastReply"]?["user"]?.string == "U0CAROL")
+    #expect(quiet["newReply"]?.bool == true)
   }
 
   /// The profile call runs first, so it learns `mcp__other` before the poll's first attempt.
@@ -403,7 +406,7 @@ extension Instance {
 
     let refusal = failure(
       sbd, "link-open", ["session": .string(s.id), "link": .string(linkId), "by": "claude", "caller": .string(s.id)])
-    #expect(refusal != "no error")
+    #expect(refusal.contains("Only you can open a link."), "\(refusal)")
     #expect(try status(sbd, s.id)?["newReply"]?.bool == true)
   }
 
@@ -429,7 +432,7 @@ extension Instance {
   // MARK: Storage and readers
 
   /// A restart drops the clock offset and the profile id, so the first scan after it polls at once. The stub fails
-  /// that poll, so the status it shows is the stored one.
+  /// the profile call, so sbd makes no thread call (D3) and the status keeps the stored values.
   @Test func statusSurvivesARestart() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.new(name: "flags-cache")
@@ -437,13 +440,17 @@ extension Instance {
     try sbd.writeSlackThread([SlackReply(ts: Self.ts(t + 60_000), user: Self.other, name: "Alice")])
     let before = try pollAndRead(sbd, s.id)
     try sbd.writeSlackSwitch("slack-fail")
+    let runs = sbd.slackRuns("slack-calls.log").count
 
     sbd.stopSbd()
     try sbd.startSbd()
 
-    let after = try #require(try status(sbd, s.id))
+    let after = try waitForStatus(sbd, s.id, "the profile error") {
+      $0["error"]?.string?.contains("can't read your Slack profile") == true
+    }
     #expect(after["replies"]?.int == 1)
     #expect(kept(after) == kept(before))
+    #expect(sbd.slackRuns("slack-calls.log").count == runs)
   }
 
   @Test func mcpGetSessionCarriesTheStatus() throws {

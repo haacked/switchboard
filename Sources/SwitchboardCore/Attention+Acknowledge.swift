@@ -71,9 +71,13 @@ extension SessionFacts {
       ackBeforeLast = lastAcknowledged
       lastAcknowledged = event.t
     case "unack":
+      // sbd also records `unack` to undo a request hold. That `unack` undoes no ack, so it keeps the time.
+      // `applyReports` runs after this, so `acknowledgedReports` still holds what the last ack closed.
+      if acknowledgment != nil || !acknowledgedReports.isEmpty {
+        lastAcknowledged = ackBeforeLast
+        ackBeforeLast = nil
+      }
       acknowledgment = nil
-      lastAcknowledged = ackBeforeLast
-      ackBeforeLast = nil
     default: if let before, openPrompts.opened(since: before) { acknowledgment = nil }
     }
   }
