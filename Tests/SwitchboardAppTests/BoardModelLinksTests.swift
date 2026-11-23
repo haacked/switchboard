@@ -11,7 +11,8 @@ private func session(_ id: String, links: [ExternalLink]) -> SessionSummary {
   return s
 }
 
-/// Test arguments are read outside the main actor, so the links that `openLink`'s tests take live at file scope.
+/// Swift Testing reads test arguments outside the main actor, so the links that `openLink`'s tests take live at file
+/// scope.
 private let openSlackLink = ExternalLink(
   id: "fabc12", title: "Slack thread in C0123ABCD", url: "https://acme.slack.com/archives/C0123ABCD/p1700000000123456",
   by: .found, t: now - 60_000)

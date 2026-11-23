@@ -42,10 +42,19 @@ private enum StatusFx {
     return try row(fields)
   }
 
+  /// The status of the link from its `LinkTarget`. It is nil for a link without one.
+  static func make(_ link: ExternalLink, row: SlackThread?, watched: Bool, lookedAt: Int64) -> SlackThreadStatus? {
+    link.linkTarget.flatMap { SlackThreadStatus(target: $0, row: row, watched: watched, lookedAt: lookedAt) }
+  }
+
   static func status(
     _ link: ExternalLink = StatusFx.link(), row: SlackThread?, watched: Bool = true, lookedAt: Int64 = linkT
   ) throws -> SlackThreadStatus {
-    try #require(SlackThreadStatus(link: link, row: row, watched: watched, lookedAt: lookedAt))
+    try #require(make(link, row: row, watched: watched, lookedAt: lookedAt))
+  }
+
+  static func lookedAt(_ link: ExternalLink, _ facts: SessionFacts) -> Int64 {
+    SlackThreadStatus.lookedAt(link: link, key: ExternalLink.pageKey(link.url), facts: facts)
   }
 
   /// The status as the wire carries it.
@@ -56,10 +65,6 @@ private enum StatusFx {
   }
 
   static func keys(_ json: JSON) -> Set<String> { Set(json.object?.keys.map { $0 } ?? []) }
-
-  static func opened(_ t: Int64, key: String = LinkFixtures.slackRootKey) -> Event {
-    event("link-opened", t, ["link": "l1", "key": .string(key)])
-  }
 
   static func ack(_ t: Int64) -> Event { event("ack", t, ["state": "needs_you", "reason": "read its last reply"]) }
 
@@ -107,14 +112,14 @@ private enum StatusFx {
 
   /// D14: a link with neither a row nor a watch carries no status.
   @Test func aLinkWithNeitherARowNorAWatchHasNoStatus() {
-    #expect(SlackThreadStatus(link: StatusFx.link(), row: nil, watched: false, lookedAt: StatusFx.linkT) == nil)
+    #expect(StatusFx.make(StatusFx.link(), row: nil, watched: false, lookedAt: StatusFx.linkT) == nil)
   }
 
   @Test(arguments: [LinkFixtures.linear, "https://example.com/doc"])
   func aLinkThatIsNotSlackHasNoStatus(_ url: String) throws {
     let row = try StatusFx.readRow()
 
-    #expect(SlackThreadStatus(link: StatusFx.link(url), row: row, watched: true, lookedAt: StatusFx.linkT) == nil)
+    #expect(StatusFx.make(StatusFx.link(url), row: row, watched: true, lookedAt: StatusFx.linkT) == nil)
   }
 
   @Test func aRowThatNoLinkWatchesKeepsItsValuesAndIsNotWatched() throws {
@@ -176,48 +181,48 @@ private enum StatusFx {
 
   @Test func lookedAtIsTheLinksTimeWhenThatIsTheLatest() {
     let link = StatusFx.link(t: 5000)
-    let f = facts([StatusFx.opened(3000), StatusFx.ack(4000)])
+    let f = facts([LinkFixtures.opened(3000), StatusFx.ack(4000)])
 
-    #expect(SlackThreadStatus.lookedAt(link: link, facts: f) == 5000)
+    #expect(StatusFx.lookedAt(link, f) == 5000)
   }
 
   @Test func lookedAtIsTheOpenWhenThatIsTheLatest() {
     let link = StatusFx.link(t: 3000)
-    let f = facts([StatusFx.ack(4000), StatusFx.opened(5000)])
+    let f = facts([StatusFx.ack(4000), LinkFixtures.opened(5000)])
 
-    #expect(SlackThreadStatus.lookedAt(link: link, facts: f) == 5000)
+    #expect(StatusFx.lookedAt(link, f) == 5000)
   }
 
   @Test func lookedAtIsTheAcknowledgmentWhenThatIsTheLatest() {
     let link = StatusFx.link(t: 3000)
-    let f = facts([StatusFx.opened(4000), StatusFx.ack(5000)])
+    let f = facts([LinkFixtures.opened(4000), StatusFx.ack(5000)])
 
-    #expect(SlackThreadStatus.lookedAt(link: link, facts: f) == 5000)
+    #expect(StatusFx.lookedAt(link, f) == 5000)
   }
 
   @Test func lookedAtIsTheLinksTimeWithNoOpenAndNoAcknowledgment() {
-    #expect(SlackThreadStatus.lookedAt(link: StatusFx.link(t: 3000), facts: SessionFacts()) == 3000)
+    #expect(StatusFx.lookedAt(StatusFx.link(t: 3000), SessionFacts()) == 3000)
   }
 
   @Test func anOpenOfAnotherThreadDoesNotCount() {
     let link = StatusFx.link(t: 3000)
-    let f = facts([StatusFx.opened(5000, key: "slack:example/C0EXAMPLE02/1794965100.000200")])
+    let f = facts([LinkFixtures.opened(5000, key: LinkFixtures.otherThreadKey)])
 
-    #expect(SlackThreadStatus.lookedAt(link: link, facts: f) == 3000)
+    #expect(StatusFx.lookedAt(link, f) == 3000)
   }
 
   /// A reply link and its root share a key, so opening either one counts for the thread.
   @Test func anOpenOfTheThreadCountsForAReplyLink() {
     let link = StatusFx.link(LinkFixtures.slackReply, t: 3000)
-    let f = facts([StatusFx.opened(5000)])
+    let f = facts([LinkFixtures.opened(5000)])
 
-    #expect(SlackThreadStatus.lookedAt(link: link, facts: f) == 5000)
+    #expect(StatusFx.lookedAt(link, f) == 5000)
   }
 
   /// The floor at `link.t` keeps a pasted link to an old thread from marking a reply that already existed.
   @Test func aReplyFromBeforeTheLinkWasAddedIsNotNew() throws {
     let link = StatusFx.link(t: StatusFx.replyMs + 60_000)
-    let lookedAt = SlackThreadStatus.lookedAt(link: link, facts: SessionFacts())
+    let lookedAt = StatusFx.lookedAt(link, SessionFacts())
 
     let json = try StatusFx.wire(link, row: try StatusFx.readRow(), lookedAt: lookedAt)
 
@@ -232,11 +237,11 @@ private enum StatusFx {
     let row = try StatusFx.readRow()
 
     #expect(
-      try StatusFx.wire(link, row: row, lookedAt: SlackThreadStatus.lookedAt(link: link, facts: acked))["newReply"]?
+      try StatusFx.wire(link, row: row, lookedAt: StatusFx.lookedAt(link, acked))["newReply"]?
         .bool
         == false)
     #expect(
-      try StatusFx.wire(link, row: row, lookedAt: SlackThreadStatus.lookedAt(link: link, facts: undone))["newReply"]?
+      try StatusFx.wire(link, row: row, lookedAt: StatusFx.lookedAt(link, undone))["newReply"]?
         .bool == true)
   }
 
@@ -293,6 +298,13 @@ private enum StatusFx {
     let s = try StatusFx.status(row: try StatusFx.readRow(error: "slack poll failed"), lookedAt: StatusFx.replyMs)
 
     #expect(s.line(now: StatusFx.now) == StatusFx.aliceLine + "; reads since then failed: slack poll failed")
+  }
+
+  @Test func anErrorUnderTheLimitKeepsEveryCharacter() throws {
+    let error = String(repeating: "e", count: 150)
+    let s = try StatusFx.status(row: try StatusFx.row(["error": .string(error)]))
+
+    #expect(s.line(now: StatusFx.now) == "not read: \(error)")
   }
 
   @Test func theLineHoldsNoControlCharacters() throws {

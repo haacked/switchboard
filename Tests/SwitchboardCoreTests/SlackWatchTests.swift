@@ -7,8 +7,6 @@ private enum WatchFx {
   /// D6: 3 days, spelled out so a change to `SlackWatch.windowMs` fails here.
   static let windowMs: Int64 = 3 * 24 * 60 * 60 * 1000
   static let t: Int64 = 1_794_960_000_000
-  static let otherThread = "https://example.slack.com/archives/C0EXAMPLE02/p1794965100000200"
-  static let otherThreadKey = "slack:example/C0EXAMPLE02/1794965100.000200"
 
   static func link(_ url: String = LinkFixtures.slackRoot, t: Int64 = t, id: String = "l1", by: LinkAuthor = .you)
     -> ExternalLink
@@ -17,7 +15,7 @@ private enum WatchFx {
   }
 
   static func watched(_ link: ExternalLink, now: Int64, replyWaits: Set<String> = []) -> Bool {
-    SlackWatch.isWatched(link, now: now, replyWaits: replyWaits)
+    link.linkTarget.map { SlackWatch.isWatched(link, target: $0, now: now, replyWaits: replyWaits) } ?? false
   }
 
   static func keys(_ links: [ExternalLink], now: Int64, replyWaits: Set<String> = []) -> [String] {
@@ -64,7 +62,7 @@ private enum WatchFx {
   @Test func aReplyWaitOnAnotherThreadDoesNotKeepALinkWatched() {
     let late = WatchFx.t + WatchFx.windowMs
 
-    #expect(!WatchFx.watched(WatchFx.link(), now: late, replyWaits: [WatchFx.otherThreadKey]))
+    #expect(!WatchFx.watched(WatchFx.link(), now: late, replyWaits: [LinkFixtures.otherThreadKey]))
   }
 
   @Test(arguments: [
@@ -101,10 +99,10 @@ private enum WatchFx {
 
   @Test func threadsLeaveOutLinksPastTheirWindow() {
     let links = [
-      WatchFx.link(LinkFixtures.slackRoot, t: WatchFx.t - WatchFx.windowMs), WatchFx.link(WatchFx.otherThread),
+      WatchFx.link(LinkFixtures.slackRoot, t: WatchFx.t - WatchFx.windowMs), WatchFx.link(LinkFixtures.otherThread),
     ]
 
-    #expect(WatchFx.keys(links, now: WatchFx.t) == [WatchFx.otherThreadKey])
+    #expect(WatchFx.keys(links, now: WatchFx.t) == [LinkFixtures.otherThreadKey])
   }
 
   @Test func threadsKeepALinkPastItsWindowThatAReplyWaitNames() {
@@ -114,9 +112,9 @@ private enum WatchFx {
   }
 
   @Test func twoThreadsGiveTwoRefs() {
-    let links = [WatchFx.link(id: "l1"), WatchFx.link(WatchFx.otherThread, id: "l2")]
+    let links = [WatchFx.link(id: "l1"), WatchFx.link(LinkFixtures.otherThread, id: "l2")]
 
-    #expect(Set(WatchFx.keys(links, now: WatchFx.t)) == [LinkFixtures.slackRootKey, WatchFx.otherThreadKey])
+    #expect(Set(WatchFx.keys(links, now: WatchFx.t)) == [LinkFixtures.slackRootKey, LinkFixtures.otherThreadKey])
   }
 
   // MARK: Hidden links
@@ -139,7 +137,7 @@ private enum WatchFx {
 
   // MARK: One thread in two sessions
 
-  /// The root's link in one session and a reply's link in another name one thread, which is read once.
+  /// The root's link in one session and a reply's link in another name one thread, and sbd reads it once.
   @Test func oneThreadInTwoSessionsIsOneRef() {
     let links = [
       WatchFx.link(LinkFixtures.slackRoot, id: "l1"), WatchFx.link(LinkFixtures.slackReply, t: WatchFx.t + 5000),

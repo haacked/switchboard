@@ -180,7 +180,7 @@
 # test writes, or {"picks":[],"skips":[]} when the file is missing, in the
 # same envelope.
 # A `claude -p` prompt that starts with <slack-self> or <slack-threads> is the
-# Slack profile call or the Slack thread poll. They are checked first, and they
+# Slack profile call or the Slack thread poll. The stub checks them first. They
 # print stream-json as claude does with --output-format stream-json --verbose:
 # an init message, the tool call and tool result of each read, and the
 # envelope. See slack_init, slack_self, and slack_threads. Each run appends its

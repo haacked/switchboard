@@ -248,7 +248,7 @@ private let parityScripts = [
 
   // MARK: The line handler: refusal
 
-  /// The criterion's own script. /bin/sh runs `sleep` as a child, and that child keeps stdout open after sh ends.
+  /// /bin/sh runs `sleep` as a child, and that child keeps stdout open after sh ends.
   /// A run that reads stdout to its end after a refusal therefore waits the full 30 s.
   @Test func aRefusalOnTheFirstLineThrowsRefusedWithinTwoSeconds() throws {
     let folder = try scratchFolder()

@@ -53,8 +53,9 @@ extension Service {
   /// you, or when its item is the card that it wrote. The list leaves out a Ready to merge child that shows only
   /// sbd's merge item, because whether to merge is the parent's own decision.
   private func childItems(of id: String, for origin: RequestOrigin) -> [JSON] {
+    let watched = watchedSlackKeys(now: nowMs())
     let children: [SessionSummary] = entries.values.filter { parentOf($0.session) == id }
-      .map { summary($0.session.id, for: origin) }
+      .map { summary($0.session.id, watchedSlack: watched, for: origin) }
     var items: [JSON] = []
     for child in children.sorted(by: { $0.name < $1.name }) {
       guard let item = child.triage, child.state == .needsYou || item.source == .session else { continue }

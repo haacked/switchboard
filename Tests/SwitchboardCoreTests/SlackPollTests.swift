@@ -228,14 +228,18 @@ private enum PollFx {
   /// The scan's time, a little after the replies.
   static let now: Int64 = 1_794_966_000_000
 
+  /// The outcomes by "channel/thread", so a test can name `keyA` and `keyB`.
   static func outcomes(_ output: String, asked: [SlackPoll.Ask], now: Int64 = now) throws -> [String: Outcome] {
-    try SlackPoll.parseThreads(output, asked: asked, now: now).mapValues { (result) -> Outcome in
+    let results = try SlackPoll.parseThreads(output, asked: asked, now: now)
+    #expect(results.count == asked.count)
+    let outcomes = results.map { (result) -> Outcome in
       switch result {
       case .success(let r):
         .read(Read(count: Int(r.count), ts: r.lastReplyTs, user: r.lastReplyUser, name: r.lastReplyName))
       case .failure(let error): .failed("\(error)")
       }
     }
+    return Dictionary(uniqueKeysWithValues: zip(asked.map { "\($0.channel)/\($0.thread)" }, outcomes))
   }
 
   static func goodA() -> Part { Part(askA, id: "toolu_A") }
@@ -307,7 +311,7 @@ private enum PollFx {
   /// the refused line, and the extra tools that the handler recorded. Every assumption about the handler's
   /// interface lives here.
   static func feed(_ lines: [String], allowed: String = read) -> (refusal: String?, at: Int?, extra: Set<String>) {
-    let handler = SlackPoll.lineHandler(allowed: allowed, account: account)
+    let handler = SlackPoll.LineHandler(allowed: allowed, account: account)
     for (i, line) in lines.enumerated() {
       if let reason = handler.onLine(line) { return (reason, i + 1, Set(handler.extraTools)) }
     }
@@ -476,7 +480,7 @@ extension SlackPollTests {
       #expect(SlackPoll.batch(asked + [fresh], rows: rows).contains(fresh))
     }
 
-    /// Twenty threads whose reads always fail have never been read, but they were asked for in the last poll.
+    /// Twenty threads whose reads always fail have never been read, but the last poll asked for them.
     @Test func twentyThreadsThatFailedLastPollDoNotStarveAThreadAskedForLongAgo() {
       let failing = Self.refs(20)
       let old = Self.refs(1, from: 20)[0]
@@ -502,8 +506,9 @@ extension SlackPollTests {
 // MARK: - the learning order of a fresh sbd
 
 extension SlackPollTests {
-  /// D4: on a fresh sbd, claude lists every Slack tool. The profile call is refused at init, sbd learns from it,
-  /// and the poll's arguments then don't deny `slack_read_thread`. Each call is refused once and passes on retry.
+  /// D4: on a fresh sbd, claude lists every Slack tool. sbd refuses the profile call at init and learns a deny list
+  /// from it. The poll's arguments then don't deny `slack_read_thread`. sbd refuses each call once, and each call
+  /// passes on retry.
   @Suite struct LearningOrder {
     @Test func aFreshSbdLearnsTheDenyListAndEachCallPassesOnItsRetry() throws {
       var deny: [String] = []
@@ -622,7 +627,7 @@ extension SlackPollTests {
       #expect(PollFx.check(JSON.object(o).text).refused)
     }
 
-    // Risk 2
+    // MARK: Risk 2
 
     @Test func noSlackServerIsRefusedAsAnAccountWithoutConnectors() {
       let got = PollFx.check(tools: PollFx.pollTools, servers: [["name": "posthog-db", "status": "connected"]])
@@ -743,6 +748,13 @@ extension SlackPollTests {
 
     @Test func aSecondGoodInitIsRefusedToo() {
       #expect(PollFx.feed([Self.goodInit, Self.goodInit]).at == 2)
+    }
+
+    /// JSON can spell a letter as a \u escape, so a second init's text need not hold "init".
+    @Test func aSecondInitWithAnEscapedSubtypeIsRefused() {
+      let escaped = #"{"type":"system","subtype":"\u0069nit","session_id":"0b5f2c4e"}"#
+
+      #expect(PollFx.feed([Self.goodInit, Self.call, escaped]).at == 3)
     }
 
     @Test func aLineThatIsNotJSONAfterAGoodInitPasses() {
@@ -1002,6 +1014,16 @@ extension SlackPollTests {
       b.input = PollFx.readInput(PollFx.chB, PollFx.rootB, oldest: "1794965250.000000")
 
       #expect(try PollFx.outcomeOfB(b, ask: ask).failed)
+    }
+
+    @Test(arguments: [("cursor", JSON.string("dXNlcjpVMDYxTkZUVDI=")), ("response_format", "concise"), ("limit", 1)])
+    func aCallWithAnExtraInputFails(_ key: String, _ value: JSON) throws {
+      var b = PollFx.goodB()
+      var input = PollFx.readInput(PollFx.chB, PollFx.rootB).object ?? [:]
+      input[key] = value
+      b.input = .object(input)
+
+      #expect(try PollFx.outcomeOfB(b).failed)
     }
 
     @Test(arguments: [JSON.null, 1794965100.0002, ""])

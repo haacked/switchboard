@@ -236,8 +236,8 @@ public final class Store {
     }
   }
 
-  /// The stored Slack threads by key. It skips and logs a row that fails to decode, which costs that thread one
-  /// full read.
+  /// The stored Slack threads by key. It skips and logs a row that fails to decode. That thread's next read then
+  /// reads the whole thread.
   public func slackThreads() throws -> [String: SlackThread] {
     let rows = try query("SELECT key, json FROM slack_threads", []) { row in (row.text(0), row.text(1)) }
     var threads: [String: SlackThread] = [:]

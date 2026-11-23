@@ -19,9 +19,10 @@ struct SlackAccountState {
   var deny: [String] = []
 }
 
-/// The outcome of one poll run: the user's Slack id and each asked thread's result, or why the whole run failed.
+/// The outcome of one poll run: the user's Slack id and each asked thread's result in the order of the asks, or why
+/// the whole run failed.
 typealias SlackPollOutcome = Result<
-  (selfId: String, reads: [String: Result<SlackPoll.ThreadRead, SlackPoll.ReadError>]), SlackPoll.ReadError
+  (selfId: String, reads: [Result<SlackPoll.ThreadRead, SlackPoll.ReadError>]), SlackPoll.ReadError
 >
 
 /// sbd reads the Slack threads among the sessions' links through headless `claude -p` calls on the claude.ai Slack
@@ -46,11 +47,11 @@ extension Service {
   /// The link with its Slack thread's status, when it is a Slack link with a row or a watch. `watched` is the
   /// result of `watchedSlackKeys`.
   func withSlackStatus(_ link: ExternalLink, facts: SessionFacts, watched: Set<String>) -> ExternalLink {
-    guard link.kind == .slack, let key = link.linkTarget?.key else { return link }
+    guard let target = link.linkTarget, target.kind == .slack else { return link }
     var out = link
     out.status = SlackThreadStatus(
-      link: link, row: slackThreads[key], watched: watched.contains(key),
-      lookedAt: SlackThreadStatus.lookedAt(link: link, facts: facts))
+      target: target, row: slackThreads[target.key], watched: watched.contains(target.key),
+      lookedAt: SlackThreadStatus.lookedAt(link: link, key: target.key, facts: facts))
     return out
   }
 
@@ -103,17 +104,20 @@ extension Service {
     let label = account.isDefault ? "~/.claude" : account.folder
     var state = slackAccounts[account.folder] ?? SlackAccountState()
     defer { slackAccounts[account.folder] = state }
-    if state.selfId == nil {
+    let selfId: String
+    if let known = state.selfId {
+      selfId = known
+    } else {
       let profile = slackCall(
         .slackSelf, allowed: SlackPoll.profileTool, schema: SlackPoll.selfSchema, system: SlackPoll.selfSystem,
         input: SlackPoll.selfInput, timeout: 60, env: env, account: label, model: model, deny: &state.deny,
         parse: SlackPoll.parseSelf)
       switch profile {
-      case .success(let id): state.selfId = id
+      case .success(let id): selfId = id
       case .failure(let error): return .failure(SlackPoll.ReadError("can't read your Slack profile: \(error)"))
       }
+      state.selfId = selfId
     }
-    guard let selfId = state.selfId else { return .failure(SlackPoll.ReadError("no Slack user id")) }
     let poll = slackCall(
       .slackThreads, allowed: SlackPoll.readTool, schema: SlackPoll.threadsSchema, system: SlackPoll.threadsSystem,
       input: SlackPoll.threadsInput(asks), timeout: 60 + 20 * Double(asks.count), env: env, account: label,
@@ -127,7 +131,7 @@ extension Service {
     env: [String: String], account: String, model: String, deny: inout [String], parse: (String) throws -> T
   ) -> Result<T, any Error> {
     func attempt() -> (Result<T, any Error>, extra: [String]) {
-      let handler = SlackPoll.lineHandler(allowed: allowed, account: account)
+      let handler = SlackPoll.LineHandler(allowed: allowed, account: account)
       let call = headlessCall(
         kind, session: nil,
         arguments: SlackPoll.arguments(model: model, schema: schema, system: system, allowed: allowed, deny: deny),
@@ -151,7 +155,7 @@ extension Service {
       slackPoll.lastError = nil
     }
     var changed: [String: SlackThread] = [:]
-    for (key, ask) in asks {
+    for (i, (key, ask)) in asks.enumerated() {
       let before = slackThreads[key]
       var row = before ?? SlackThread(channel: ask.channel, thread: ask.thread)
       row.tried = now
@@ -159,7 +163,7 @@ extension Service {
       case .failure(let error):
         row.error = error.reason
       case .success(let poll):
-        switch poll.reads[ask.key] ?? .failure(SlackPoll.ReadError("claude gave no result for the thread")) {
+        switch poll.reads[i] {
         case .success(let read):
           row.replies = ask.oldest == nil ? read.count : (row.replies ?? 0) + read.count
           if let ts = read.lastReplyTs, let user = read.lastReplyUser {

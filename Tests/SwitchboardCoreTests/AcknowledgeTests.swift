@@ -849,7 +849,7 @@ extension AcknowledgeTests {
       #expect(f.lastAcknowledged == 5)
     }
 
-    /// The acknowledgment covers one turn, and the time it was made outlasts it.
+    /// The acknowledgment covers one turn. Its time outlasts the turn.
     @Test func aNewTurnClearsTheAcknowledgmentButKeepsItsTime() throws {
       let f = facts(
         turn("Done.") + [try ackEvent(2, .needsYou, readTheReply)] + turn("Done again.", start: 3))
@@ -882,7 +882,7 @@ extension AcknowledgeTests {
       #expect(f.lastAcknowledged == 2)
     }
 
-    /// Only one earlier time is kept, so a second unack in a row leaves none.
+    /// The facts hold only one earlier time, so a second unack in a row leaves none.
     @Test func twoUnacksInARowLeaveNoLastAcknowledgment() throws {
       let f = facts(
         turn("Done.") + [

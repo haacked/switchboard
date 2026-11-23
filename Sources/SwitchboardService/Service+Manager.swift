@@ -237,7 +237,8 @@ extension Service {
 
   /// The `manager-ls` request: every conversation, newest activity first.
   func managerList() -> [SessionSummary] {
-    managerSessions.map { summary($0.id) }.sorted(by: Manager.newestFirst)
+    let watched = watchedSlackKeys(now: nowMs())
+    return managerSessions.map { summary($0.id, watchedSlack: watched) }.sorted(by: Manager.newestFirst)
   }
 
   func mostRecentManager() -> String? { managerList().first?.id }

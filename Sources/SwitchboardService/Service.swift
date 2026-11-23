@@ -2942,7 +2942,9 @@ public final class Service {
   }
 
   /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
-  /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil.
+  /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil
+  /// and the session lists a Slack link. A caller that builds many summaries computes the set once and passes it to
+  /// each call.
   func summary(
     _ id: String, rowFollowups: PlanRowFollowups? = nil, watchedSlack: Set<String>? = nil,
     for origin: RequestOrigin = .mac

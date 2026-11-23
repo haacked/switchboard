@@ -186,9 +186,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var reviewRequest: ReviewRequestAttempt?
   /// The Inbox item that the user acknowledged during this turn.
   public var acknowledgment: Acknowledgment?
-  /// When the last `ack` was recorded. Unlike `acknowledgment`, it outlasts the turn.
+  /// When sbd recorded the last `ack`. Unlike `acknowledgment`, it outlasts the turn.
   public var lastAcknowledged: Int64?
-  /// The `lastAcknowledged` before the last `ack`, which an `unack` puts back. Only one is kept.
+  /// The `lastAcknowledged` before the last `ack`, which an `unack` puts back. It holds only one earlier time.
   public var ackBeforeLast: Int64?
   /// The user's snooze of the session, from the last `snooze` event, until
   /// `unsnooze` or, once it ended, until the user acts on the session.

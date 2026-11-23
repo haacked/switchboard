@@ -473,10 +473,10 @@ extension SessionLinkFactsTests {
   /// A `link-opened` event records when the user opened a link from Switchboard, keyed by the link's page (H3).
   @Suite struct Opened {
     static let key = LinkFixtures.slackRootKey
-    static let otherKey = "slack:example/C0EXAMPLE02/1794965100.000200"
+    static let otherKey = LinkFixtures.otherThreadKey
 
     func opened(_ t: Int64, key: String = Self.key, link: String = "l1") -> Event {
-      event("link-opened", t, ["link": .string(link), "key": .string(key)])
+      LinkFixtures.opened(t, key: key, link: link)
     }
 
     @Test func aNewSessionHasNoOpens() {

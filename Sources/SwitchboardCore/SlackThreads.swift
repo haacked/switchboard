@@ -45,19 +45,18 @@ public enum SlackWatch {
   public static let windowMs: Int64 = 3 * 24 * 60 * 60 * 1000
 
   /// Whether sbd reads the link's thread: a Slack link inside its window, or one whose thread an open `reply` wait
-  /// names.
-  public static func isWatched(_ link: ExternalLink, now: Int64, replyWaits: Set<String>) -> Bool {
-    guard let target = link.linkTarget, target.kind == .slack else { return false }
-    return now < link.t + windowMs || replyWaits.contains(target.key)
+  /// names. `target` is the link's `linkTarget`.
+  public static func isWatched(_ link: ExternalLink, target: LinkTarget, now: Int64, replyWaits: Set<String>) -> Bool {
+    target.kind == .slack && (now < link.t + windowMs || replyWaits.contains(target.key))
   }
 
   /// The threads that the links watch, one per thread key, in the order of their first watched link.
   public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: Set<String>) -> [SlackThreadRef] {
     var seen = Set<String>()
     var refs: [SlackThreadRef] = []
-    for link in links where isWatched(link, now: now, replyWaits: replyWaits) {
-      guard let target = link.linkTarget, let channel = target.channel, let thread = target.thread,
-        seen.insert(target.key).inserted
+    for link in links {
+      guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: replyWaits),
+        let channel = target.channel, let thread = target.thread, seen.insert(target.key).inserted
       else { continue }
       refs.append(SlackThreadRef(key: target.key, channel: channel, thread: thread))
     }
@@ -84,15 +83,17 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
   /// Whether the last reply is someone else's and came after the user last looked.
   public var newReply: Bool
 
-  /// The status of a Slack link from its thread's row. It is nil for a link that is not Slack, and for a Slack
-  /// link with neither a row nor a watch. `lookedAt` is the time from `lookedAt(link:facts:)`.
-  public init?(link: ExternalLink, row: SlackThread?, watched: Bool, lookedAt: Int64) {
-    guard link.kind == .slack, row != nil || watched else { return nil }
+  /// The status of a link from its `LinkTarget` and its thread's row. It is nil for a target that is not Slack, and
+  /// for a Slack thread with neither a row nor a watch. `lookedAt` is the time from `lookedAt(link:key:facts:)`.
+  public init?(target: LinkTarget, row: SlackThread?, watched: Bool, lookedAt: Int64) {
+    guard target.kind == .slack, row != nil || watched else { return nil }
     replies = row?.replies
     read = row?.read
     error = row?.error
     self.watched = watched
-    if let row, (row.replies ?? 0) > 0, let ts = row.lastReplyTs, let t = Self.ms(ts), let user = row.lastReplyUser {
+    if let row, (row.replies ?? 0) > 0, let ts = row.lastReplyTs, let t = SlackPoll.tsValue(ts).map({ $0 / 1000 }),
+      let user = row.lastReplyUser
+    {
       lastReply = LastReply(t: t, user: user, name: row.lastReplyName, you: row.lastReplyYou)
     }
     newReply = lastReply.map { !$0.you && $0.t > lookedAt } ?? false
@@ -100,21 +101,16 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
 
   /// When the user last looked at the link's thread: the latest of the time the link entered the list, an Open of
   /// its page from Switchboard, and the session's last acknowledgment. The floor at the link's time keeps a pasted
-  /// link to an old thread from marking the replies that already exist.
-  public static func lookedAt(link: ExternalLink, facts: SessionFacts) -> Int64 {
-    max(link.t, facts.linkOpened[ExternalLink.pageKey(link.url)] ?? 0, facts.lastAcknowledged ?? 0)
-  }
-
-  /// A Slack ts such as `1794965246.462679` in ms, truncated.
-  static func ms(_ ts: String) -> Int64? {
-    let parts = ts.split(separator: ".", omittingEmptySubsequences: false)
-    guard parts.count == 2, let seconds = Int64(parts[0]), let micros = Int64(parts[1]) else { return nil }
-    return seconds * 1000 + micros / 1000
+  /// link to an old thread from marking the replies that already exist. `key` is the link's `LinkTarget.key`.
+  public static func lookedAt(link: ExternalLink, key: String, facts: SessionFacts) -> Int64 {
+    max(link.t, facts.linkOpened[key] ?? 0, facts.lastAcknowledged ?? 0)
   }
 
   /// The text on one line with control characters escaped, then cut to `max`. Escaping first keeps the cut a bound
   /// on what the row shows, because an escape is several characters long.
-  private static func clipped(_ text: String, max: Int) -> String { truncated(oneLine(text).printable, max: max) }
+  private static func clipped(_ text: String, max: Int) -> String {
+    truncated(oneLine(text, max: .max).printable, max: max)
+  }
 
   /// The status as `sb get` and the app show it, such as "3 replies, last from Alice 2h ago, read 5m ago".
   public func line(now: Int64) -> String {

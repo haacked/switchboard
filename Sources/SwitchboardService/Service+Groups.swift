@@ -30,7 +30,8 @@ extension Service {
       guard !ids.isEmpty else { throw APIError("group move needs a session") }
       let group = args["ungrouped"]?.bool == true ? nil : try lookupGroup(args)
       try place(ids, in: group)
-      return try JSON(encoding: ids.map { summary($0) })
+      let watched = watchedSlackKeys(now: nowMs())
+      return try JSON(encoding: ids.map { summary($0, watchedSlack: watched) })
     case "group-note":
       return try updateGroup(args) { group in
         group.notes.append(try groupNote(args["text"]?.string, args, after: group.notes))

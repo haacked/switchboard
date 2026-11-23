@@ -65,8 +65,8 @@ extension Instance {
 /// sbd reads the Slack threads among the sessions' links through a headless `claude -p` call on the claude.ai
 /// Slack connector, and shows each one's reply count, last reply, and last read as the link's `status`.
 ///
-/// Every call on a fresh sbd is refused once at init and retried, so the tests assert on the status and on the
-/// arguments of the runs, not on raw run counts. A link can land before sbd's first scan, so a poll may run before
+/// On a fresh sbd, sbd refuses every call once at init and retries it, so the tests assert on the status and on
+/// the arguments of the runs, not on raw run counts. A link can land before sbd's first scan, so a poll may run before
 /// the first clock advance. Each test waits for a status that only a poll after the advance gives.
 @Suite(.blocking(timeLimit: .seconds(240))) struct SlackThreadPollTests {
   static let config: [String: JSON] = ["slack": ["pollSeconds": 1200]]
@@ -137,7 +137,7 @@ extension Instance {
 
   // MARK: The mark
 
-  /// Required by the issue.
+  /// #503 requires this case.
   @Test func newReplyFromSomeoneElseShowsTheMark() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.new(name: "flags-cache")
@@ -159,7 +159,7 @@ extension Instance {
     #expect(text.contains("new reply"), "\(text)")
   }
 
-  /// Required by the issue. The stub's profile answer gives the id in `slack-self-id`.
+  /// #503 requires this case. The stub's profile answer gives the id in `slack-self-id`.
   @Test func replyYouWroteIsNotNew() throws {
     let sbd = try Instance(config: Self.config)
     try sbd.writeSlackSwitch("slack-self-id", "U0EXAMPLEME")
@@ -177,7 +177,7 @@ extension Instance {
     #expect(!text.contains("new reply"), "\(text)")
   }
 
-  /// Required by the issue.
+  /// #503 requires this case.
   @Test func failedReadKeepsTheLastStatus() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.new(name: "flags-cache")
@@ -203,7 +203,7 @@ extension Instance {
     #expect(signedOut["watched"]?.bool == true)
   }
 
-  /// Required by the issue.
+  /// #503 requires this case.
   @Test func threadStopsBeingWatchedAfterThreeDays() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.new(name: "flags-cache")
@@ -267,8 +267,8 @@ extension Instance {
     #expect(Self.value(after: "--output-format", in: profile) == "stream-json", "\(profile)")
   }
 
-  /// D4: on a fresh sbd, claude lists every Slack tool, so the first attempt of each call is refused at init and
-  /// retried with the learned deny list. A refused call stores a `headless_calls` row with its error.
+  /// D4: on a fresh sbd, claude lists every Slack tool, so sbd refuses the first attempt of each call at init and
+  /// retries it with the learned deny list. A refused call stores a `headless_calls` row with its error.
   @Test func aFreshSbdRefusesEachCallOnceAndRetries() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.new(name: "flags-cache")
@@ -277,7 +277,7 @@ extension Instance {
 
     let rows = try sbd.headlessUsageRows()
 
-    // The report sums by day, and a clock move can cross midnight, so the rows of a kind are added up.
+    // The report sums by day, and a clock move can cross midnight, so the test adds up the rows of a kind.
     for kind in ["slackSelf", "slackThreads"] {
       let mine = rows.filter { $0["kind"]?.string == kind }
       #expect(mine.reduce(0) { $0 + ($1["errors"]?.int ?? 0) } >= 1, "\(kind): \(rows)")
