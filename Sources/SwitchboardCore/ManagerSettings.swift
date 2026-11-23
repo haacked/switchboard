@@ -1,6 +1,6 @@
 /// config.json's `manager` section, for sessions of kind `manager`.
 public struct ManagerSettings: Codable, Equatable, Sendable {
-  /// The model that a Manager conversation runs, unless the conversation has its own.
+  /// The model that a Manager conversation and a group chat run, unless the session has its own.
   public var model = "sonnet"
   /// The auto-compact window, in tokens, that sbd sets as `CLAUDE_CODE_AUTO_COMPACT_WINDOW` when it starts or
   /// resumes a Manager conversation. Claude Code compacts about 33k tokens below the window, so 183000 compacts
@@ -12,7 +12,7 @@ public struct ManagerSettings: Codable, Equatable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = ManagerSettings()
-    model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
+    model = SessionModel.configModel(try c.decodeIfPresent(JSON.self, forKey: .model), key: "manager.model") ?? d.model
     autoCompactWindow = try c.decodeIfPresent(Int.self, forKey: .autoCompactWindow) ?? d.autoCompactWindow
   }
 }
@@ -31,19 +31,7 @@ public enum AutoCompact {
 }
 
 extension Manager {
-  /// The model that sbd passes with `--model` when it starts claude for a session, or nil for claude's default.
-  /// The operator always runs `operatorModel`, because a model stored on its session came from config.json's
-  /// `model` when sbd created it. For every other kind a stored model wins. Otherwise a Manager conversation runs
-  /// `managerModel`, and every other kind runs claude's default.
-  public static func launchModel(
-    for kind: SessionKind, stored: String?, managerModel: String, operatorModel: String
-  ) -> String? {
-    if kind == .operator { return operatorModel }
-    if let stored { return stored }
-    return kind == .manager ? managerModel : nil
-  }
-
-  /// Why `model` can't be the Manager's or the operator's model, or nil when it can. claude reads a value that starts with a dash
+  /// Why `model` can't be a session's model, or nil when it can. claude reads a value that starts with a dash
   /// as an option.
   public static func modelProblem(_ model: String) -> String? {
     if model.isEmpty { return "the model needs a name, such as sonnet" }

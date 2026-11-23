@@ -35,7 +35,7 @@ When a session's PR depends on another session's PR and the two sessions are in 
 
 ## Group chats
 
-A group chat is an interactive Claude session that manages one group's sessions. It runs in `~/.sb/chats/<group-id>`, a scratch folder that sbd sets up with `git init` and a `CLAUDE.md` guide, with no worktree or branch. Its claude gets the `switchboard` MCP server with `--group <group-id>`, so its tools reach only that group's sessions and the chat itself. The guide ends with the group's description, quoted and marked as data rather than instructions. When the description changes, sbd rewrites the guide, and a chat whose claude is running also gets a `Switchboard:` message with the new text.
+A group chat is an interactive Claude session that manages one group's sessions. It runs on `manager.model` (`sonnet` by default), and a session that it starts runs the work `model` (see [Settings](settings.md)). It runs in `~/.sb/chats/<group-id>`, a scratch folder that sbd sets up with `git init` and a `CLAUDE.md` guide, with no worktree or branch. Its claude gets the `switchboard` MCP server with `--group <group-id>`, so its tools reach only that group's sessions and the chat itself. The guide ends with the group's description, quoted and marked as data rather than instructions. When the description changes, sbd rewrites the guide, and a chat whose claude is running also gets a `Switchboard:` message with the new text.
 
 ```
 sb chat flag-evals                       # start the chat the first time, open it after that

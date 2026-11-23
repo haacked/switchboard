@@ -95,9 +95,9 @@ let usage = """
                                   conversation loads none. --all loads the full
                                   setup, which a claude.ai connector needs. A change
                                   restarts its claude, after the turn when one runs
-    manager model [<name>]        show or set the model of each Manager conversation,
-                                  sonnet by default. It applies from the next time a
-                                  conversation's claude starts, and not to the operator
+    manager model [<name>]        show or set the model of each Manager conversation
+                                  and group chat, sonnet by default. It applies
+                                  from the next time their claude starts
     manager skills [<conv>]       list the skills that the Manager conversations
                                   and the operator can load, or only those of
                                   the conversation's account, each labeled work
