@@ -37,12 +37,12 @@ struct GroupLinksLink: View {
 
   var body: some View {
     let links = LinkRows(group: group, liveSessions: model.sessionsByID)
-    let title = links.linkTitle ?? "Add a link"
+    let (help, label) =
+      links.rows.isEmpty
+      ? ("Add a link, such as an RFC or a design doc", "Add a link to group \(group.name)")
+      : ("Show the links of this group and its sessions", "\(links.linkTitle) in group \(group.name)")
     LanePopoverLink(
-      title: title,
-      help: links.rows.isEmpty
-        ? "Add a link, such as an RFC or a design doc" : "Show the links of this group and its sessions",
-      accessibilityLabel: links.rows.isEmpty ? "Add a link to group \(group.name)" : "\(title) in group \(group.name)",
+      title: links.linkTitle, help: help, accessibilityLabel: label,
       identifier: "group-links-\(group.id)"
     ) {
       ForEach(links.rows) { row in

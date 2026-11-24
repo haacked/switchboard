@@ -157,6 +157,18 @@ wait_for() { # <seconds> <command…>
 
 app_gone() { ! kill -0 "$app_pid" 2>/dev/null; }
 
+# The ShellSelfTest helpers below set the calling check's local `result`.
+clicked() { # <anchor>
+  result=$(app click-anchor "$1")
+  [[ $result == "clicked at "* ]]
+}
+
+# Sets the window to the 1024 pt width of CI's display. The check runs `app width restore` before it ends the app.
+pinned() {
+  result=$(app width 1024)
+  [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
+}
+
 end_app() {
   kill -KILL "$app_pid" 2>/dev/null || true
   wait "$app_pid" 2>/dev/null || true
@@ -1054,16 +1066,8 @@ check_links() {
     result=$(app anchors panel-link- session-side-panel)
     all_in "$result" "panel-link-$rfc" "panel-link-$rfc-remove" "panel-link-$slack" "panel-link-$slack-remove"
   }
-  clicked() {
-    result=$(app click-anchor "$1")
-    [[ $result == "clicked at "* ]]
-  }
   terminal_shows() { [ "$(app panes)" = 1 ]; }
   only_link_left() { [ "$(sb get "$a" --json | jq -c '[.links[]?.id]')" = "[\"$1\"]" ]; }
-  pinned() {
-    result=$(app width 1024)
-    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
-  }
 
   # A launch argument shows the side panel for this run only, whatever the user's saved setting is.
   SB_SELECT="$a" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -sessionSidePanel YES >>"$shots/app.log" 2>&1 &
@@ -1114,22 +1118,14 @@ check_group() {
   sb group note "$group" "Ask Ana before the deploy." >/dev/null
   sb group note "$group" "The cache lives in Redis." >/dev/null
   sb group link add "$group" https://example.com/rfc --title RFC >/dev/null
-  group_json() { sb group ls --json | jq -c --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
-  rfc=$(group_json '.links[0].id' | tr -d '"')
-  notes=$(group_json '[.notes[].id | "group-note-" + . + ":in"] | sort | join(",")' | tr -d '"')
-  author_is() { [ "$(group_json '.descriptionBy // "you"')" = "\"$1\"" ]; }
+  group_json() { sb group ls --json | jq -rc --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
+  rfc=$(group_json '.links[0].id')
+  notes=$(group_json '[.notes[].id | "group-note-" + . + ":in"] | sort | join(",")')
+  author_is() { [ "$(group_json '.descriptionBy // "you"')" = "$1" ]; }
   links_are() { [ "$(group_json '[.links[]?.title]')" = "$1" ]; }
   shows() { [ "$(app where)" = "$1" ]; }
   # A control can draw a moment after the Board shows, so each first click on it is retried.
-  clicked() {
-    result=$(app click-anchor "$1")
-    [[ $result == "clicked at "* ]]
-  }
   notes_shown() { [ "$(app anchors group-note-)" = "$notes" ]; }
-  pinned() {
-    result=$(app width 1024)
-    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
-  }
   author_is claude || fail "sb did not record Claude as the author: $(group_json .descriptionBy)"
 
   SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
@@ -1138,7 +1134,7 @@ check_group() {
   pinned
   wait_for 10 clicked "group-description-accept-$group" || fail "the app could not click Accept: $result"
   wait_for 10 author_is you || fail "Accept did not make the description yours: $(group_json .descriptionBy)"
-  [ "$(group_json .description)" = '"Ship the flag cache."' ] || fail "Accept changed the text: $(group_json .description)"
+  [ "$(group_json .description)" = "Ship the flag cache." ] || fail "Accept changed the text: $(group_json .description)"
   wait_for 10 clicked "group-links-$group" || fail "the app could not open the links: $result"
   wait_for 5 clicked "group-link-$group-$rfc-remove" || fail "the links popover did not show the RFC link: $result"
   wait_for 10 links_are '[]' || fail "Remove did not remove the link: $(group_json .links)"

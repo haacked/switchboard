@@ -351,7 +351,7 @@ enum ShellSelfTest {
 
   private static func anchors(prefix: String, container: String?) -> String {
     var found: [String] = []
-    for root in NSApp.windows.compactMap(\.contentView) {
+    for root in roots {
       // The frame view is the window's whole area. A content view can be larger than it, and a click outside it
       // hits nothing.
       let frameView = root.superview ?? root
