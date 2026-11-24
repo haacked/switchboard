@@ -8,7 +8,7 @@ struct MessageField: View {
   let session: String
   /// From `BoardModel.messageDraft(for:)` or `inboxDraft(for:)`, so that the text survives a switch to another view.
   @ObservedObject var draft: Draft
-  var shortcut: KeyboardShortcut?
+  var shortcut: AppShortcut?
   /// The ref of the Inbox item that the field answers, so sbd can hold the session while it works on the
   /// message.
   var ref: String?
@@ -40,7 +40,7 @@ struct MessageField: View {
       HStack {
         field
         Button("Send", action: send)
-          .keyboardShortcut(shortcut)
+          .shortcut(shortcut)
           .disabled(model.sending.contains(session) || draft.isEmpty)
       }
       if let error = draft.error {

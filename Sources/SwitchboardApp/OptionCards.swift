@@ -97,7 +97,9 @@ struct OptionCardLabel: View {
       .multilineTextAlignment(.leading)
       .fixedSize(horizontal: false, vertical: true)
       Spacer(minLength: 0)
-      if shortcut { Text("⇧⌘↩").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true) }
+      if shortcut {
+        Text(AppShortcut.primaryAction.glyphs).font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+      }
       if case .go = mark {
         Image(systemName: "chevron.right").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
           .accessibilityHidden(true)
@@ -114,11 +116,8 @@ struct OptionCardLabel: View {
 }
 
 extension View {
-  /// Gives the view ⌘⇧Return when `on`. One control per card owns it.
-  @ViewBuilder
-  func primaryShortcut(_ on: Bool) -> some View {
-    if on { keyboardShortcut(OptionButton.primaryShortcut) } else { self }
-  }
+  /// Gives the view ⇧⌘Return when `on`. One control per card owns it.
+  func primaryShortcut(_ on: Bool) -> some View { shortcut(on ? .primaryAction : nil) }
 }
 
 /// The ticked options of a multi-select card, by 1-based number. The picks
@@ -271,8 +270,6 @@ struct OptionButton: View {
   let primary: Bool
   var shortcut = false
   var onClick: (() -> Void)?
-
-  static let primaryShortcut = KeyboardShortcut(.return, modifiers: [.command, .shift])
 
   var body: some View {
     let effect = option.effect(mergeMethod: session.pr?.mergeMethod)

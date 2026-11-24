@@ -246,8 +246,8 @@ struct Sidebar: View {
       return .handled
     }
     .onKeyPress(keys: [.delete]) { press in
-      guard press.modifiers.intersection([.command, .option, .control, .shift]) == .command,
-        model.showsMultiSelection, removableSelection > 0, !model.showingDoneRemoval
+      guard SelectionKey.action(press.key, modifiers: press.modifiers) == .delete, model.showsMultiSelection,
+        removableSelection > 0, !model.showingDoneRemoval
       else { return .ignored }
       model.checkSelectionRemoval()
       return .handled
@@ -291,7 +291,7 @@ struct Sidebar: View {
         .buttonStyle(.borderless)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
-        .help("Create an empty group on the Board (⇧⌘G)")
+        .help("Create an empty group on the Board (\(AppShortcut.newGroup.glyphs))")
         .accessibilityIdentifier("sidebar-new-group")
         RemovalStatusView()
       }
@@ -372,13 +372,14 @@ struct ManagerButton: View {
     switch icon {
     case .needsMe:
       guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
-        return "A Manager conversation needs you (⇧⌘M)"
+        return "A Manager conversation needs you (\(AppShortcut.openManager.glyphs))"
       }
-      return "\(waiting.name) needs you: \(reason) (⇧⌘M)"
-    case .unread: return "A Manager conversation has unread replies (⇧⌘M)"
+      return "\(waiting.name) needs you: \(reason) (\(AppShortcut.openManager.glyphs))"
+    case .unread: return "A Manager conversation has unread replies (\(AppShortcut.openManager.glyphs))"
     case .outline:
       return managers.isEmpty
-        ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
+        ? "Start a session that manages the others through sb (\(AppShortcut.openManager.glyphs))"
+        : "Open the latest Manager conversation (\(AppShortcut.openManager.glyphs))"
     }
   }
 }

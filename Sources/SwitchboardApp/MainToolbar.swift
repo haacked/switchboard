@@ -73,7 +73,9 @@ private struct ViewPicker: View {
       }
       .pickerStyle(.segmented)
       .labelsHidden()
-      .help("Show the Inbox (⌘1), the Board (⌘2), Issues (⌘3), or Loops (⌘4)")
+      .help(
+        "Show the Inbox (\(AppShortcut.showInbox.glyphs)), the Board (\(AppShortcut.showBoard.glyphs)), Issues (\(AppShortcut.showIssues.glyphs)), or Loops (\(AppShortcut.showLoops.glyphs))"
+      )
     }
   }
 }
@@ -87,7 +89,7 @@ private struct ImportButton: View {
     } label: {
       Label("Import Sessions", systemImage: "square.and.arrow.down")
     }
-    .help("Import Claude sessions that run outside Switchboard (⇧⌘I)")
+    .help("Import Claude sessions that run outside Switchboard (\(AppShortcut.importSessions.glyphs))")
   }
 }
 
@@ -100,6 +102,6 @@ private struct NewSessionButton: View {
     } label: {
       Label("New Session", systemImage: "plus")
     }
-    .help("Start a session (⌘N)")
+    .help("Start a session (\(AppShortcut.newSession.glyphs))")
   }
 }

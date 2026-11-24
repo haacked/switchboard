@@ -477,7 +477,9 @@ struct DecisionStepBar: View {
             Label(next == .review ? "Review" : "Next", systemImage: "chevron.right").labelStyle(TrailingIcon())
           }
           .primaryShortcut(true)
-          .help("\(next == .review ? "Review every answer" : "Next decision") (] or ⇧⌘↩)")
+          .help(
+            "\(next == .review ? "Review every answer" : "Next decision") (] or \(AppShortcut.primaryAction.glyphs))"
+          )
           .accessibilityLabel(next == .review ? "Review" : "Next")
         }
       }

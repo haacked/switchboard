@@ -29,13 +29,13 @@ enum MainView: CaseIterable {
     }
   }
 
-  /// The key that, with ⌘, shows the view from the View menu.
-  var shortcutKey: Character {
+  /// The View menu's shortcut that shows the view.
+  var shortcut: AppShortcut {
     switch self {
-    case .inbox: "1"
-    case .board: "2"
-    case .issues: "3"
-    case .loops: "4"
+    case .inbox: .showInbox
+    case .board: .showBoard
+    case .issues: .showIssues
+    case .loops: .showLoops
     }
   }
 }

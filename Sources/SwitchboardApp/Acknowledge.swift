@@ -45,7 +45,7 @@ struct AcknowledgeButton: View {
       }
     }
     .disabled(model.acknowledging.contains(session.id))
-    .help(undo ? Self.detail(undo: true) : "\(Self.detail(undo: false)) (⇧⌘A)")
+    .help(undo ? Self.detail(undo: true) : "\(Self.detail(undo: false)) (\(AppShortcut.acknowledge.glyphs))")
     .primaryShortcut(primary)
     if boxed { button.buttonStyle(OptionCardStyle(prominent: primary)) } else { button.buttonStyle(.bordered) }
   }

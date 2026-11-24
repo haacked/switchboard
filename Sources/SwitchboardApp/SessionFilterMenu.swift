@@ -23,7 +23,7 @@ struct SessionFilterMenu: View {
       }
       .foregroundStyle(on ? Color.accentColor : .primary)
     }
-    .help("Show sessions from some GitHub orgs or groups only (⇧⌘O)")
+    .help("Show sessions from some GitHub orgs or groups only (\(AppShortcut.filterSessions.glyphs))")
     .accessibilityIdentifier("session-filter")
     .popover(isPresented: $model.showingFilter, arrowEdge: .bottom) {
       SessionFilterList(orgEntries: orgEntries, groupEntries: groupEntries)

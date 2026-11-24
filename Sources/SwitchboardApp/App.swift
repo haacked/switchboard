@@ -33,22 +33,22 @@ struct SwitchboardApp: App {
         // A sheet blocks the window's buttons but not the menu bar. Without
         // the check, a menu command opens a second sheet over the first.
         Button("New Session…") { model.openNewSession() }
-          .keyboardShortcut("n")
+          .shortcut(.newSession)
           .disabled(model.presentingSheet)
         let newSessionGroup = model.newSessionGroup
         Button(newSessionGroup.map { "New Session in \($0.name)…" } ?? "New Session in Group…") {
           model.openNewSession(group: newSessionGroup?.id)
         }
-        .keyboardShortcut("n", modifiers: [.command, .shift])
+        .shortcut(.newSessionInGroup)
         .disabled(model.presentingSheet || newSessionGroup == nil)
         Button("New Conversation") { model.openManager(new: true) }
-          .keyboardShortcut(NavShortcuts.newConversation)
+          .shortcut(.newConversation)
           .disabled(model.presentingSheet)
         Button("Import Sessions…") { model.showingImport = true }
-          .keyboardShortcut("i", modifiers: [.command, .shift])
+          .shortcut(.importSessions)
           .disabled(model.presentingSheet)
         Button("New Group") { model.startNewGroup() }
-          .keyboardShortcut("g", modifiers: [.command, .shift])
+          .shortcut(.newGroup)
           .disabled(model.presentingSheet)
         Button("New Loop…") { model.loopEditor = .new }
           .disabled(model.presentingSheet)
@@ -56,49 +56,49 @@ struct SwitchboardApp: App {
       CommandGroup(after: .sidebar) {
         ForEach(MainView.allCases, id: \.self) { view in
           Button("Show \(view.title)") { model.show(view) }
-            .keyboardShortcut(KeyEquivalent(view.shortcutKey))
+            .shortcut(view.shortcut)
         }
         Button("Filter Sessions…") { model.showingFilter.toggle() }
-          .keyboardShortcut("o", modifiers: [.command, .shift])
+          .shortcut(.filterSessions)
           .disabled(model.presentingSheet)
       }
       CommandMenu("Go") {
         Group {
           Button("Back") { model.goBack() }
-            .keyboardShortcut(NavShortcuts.back)
+            .shortcut(.back)
             .disabled(!model.canGoBack)
           Button("Forward") { model.goForward() }
-            .keyboardShortcut(NavShortcuts.forward)
+            .shortcut(.forward)
             .disabled(!model.canGoForward)
           Button("Show Recent Places") { model.showingRecentPlaces.toggle() }
-            .keyboardShortcut(NavShortcuts.showRecentPlaces)
+            .shortcut(.showRecentPlaces)
             .disabled(!model.hasRecentPlaces)
         }
         .disabled(model.presentingSheet)
         Divider()
         Button("Next Needing You") { model.selectNextNeedingYou() }
-          .keyboardShortcut("j")
+          .shortcut(.nextNeedingYou)
         Group {
           Button("Next Session") { model.selectAdjacentSession(by: 1) }
-            .keyboardShortcut(NavShortcuts.nextSession)
+            .shortcut(.nextSession)
           Button("Previous Session") { model.selectAdjacentSession(by: -1) }
-            .keyboardShortcut(NavShortcuts.previousSession)
+            .shortcut(.previousSession)
         }
         .disabled(model.presentingSheet)
         Divider()
         Button("Open Manager") { model.openManager() }
-          .keyboardShortcut("m", modifiers: [.command, .shift])
+          .shortcut(.openManager)
           .operatorTranscriptAlternate { model.openOperator() }
         Group {
           Button("Search Sessions…") { model.showingSearch = true }
-            .keyboardShortcut(NavShortcuts.searchSessions)
+            .shortcut(.searchSessions)
           Button("Ask Switchboard…") { model.openQuickAsk() }
-            .keyboardShortcut(NavShortcuts.quickAsk)
+            .shortcut(.quickAsk)
           Divider()
           Button("Move Focus to List") { model.requestListFocus() }
-            .keyboardShortcut(NavShortcuts.focusList)
+            .shortcut(.focusList)
           Button("Move Focus to Terminal") { model.focusTerminal() }
-            .keyboardShortcut(NavShortcuts.focusTerminal)
+            .shortcut(.focusTerminal)
             .disabled(!model.canFocusTerminal)
         }
         .disabled(model.presentingSheet)
@@ -106,16 +106,16 @@ struct SwitchboardApp: App {
       CommandMenu("Session") {
         let acknowledgeTarget = model.acknowledgeTarget
         Button("Message Claude") { model.revealMessageField() }
-          .keyboardShortcut(NavShortcuts.messageField)
+          .shortcut(.messageClaude)
           .disabled(model.presentingSheet || model.messageFieldTarget == nil)
         Divider()
         // The items act on `selection`, which the detail pane does not show during a multi-selection.
         Group {
           Button("Stop Claude") { model.selection.map(model.stop) }
-            .keyboardShortcut(".", modifiers: [.command])
+            .shortcut(.stopClaude)
             .disabled(model.selected?.live != true)
           Button("Resume Claude") { model.selection.map(model.resume) }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .shortcut(.resumeClaude)
             .disabled(model.selected == nil || model.selected?.live == true || model.selected?.runsClaude == false)
           Button(model.selected?.shellClosed == true ? "Open Shell" : "Close Shell") {
             if let s = model.selected { model.setShellOpen(s.id, s.shellClosed == true) }
@@ -124,12 +124,12 @@ struct SwitchboardApp: App {
           Button(model.selected?.markedDone == true ? "Mark Not Done" : "Mark Done") {
             if let s = model.selected { model.setDone(s.id, !s.markedDone) }
           }
-          .keyboardShortcut("d", modifiers: [.command, .shift])
+          .shortcut(.markDone)
           .disabled(model.selected == nil)
           Button(acknowledgeTarget?.acknowledgeTitle ?? "Acknowledge") {
             if let s = model.acknowledgeTarget { model.acknowledge(s.id, undo: s.acknowledged == true) }
           }
-          .keyboardShortcut("a", modifiers: [.command, .shift])
+          .shortcut(.acknowledge)
           .disabled(acknowledgeTarget?.canAcknowledge != true)
           CopyLinkMenuItem(session: model.selected)
         }

@@ -32,7 +32,7 @@ struct ConversationsSection: View {
             Image(systemName: "plus")
           }
           .buttonStyle(.borderless)
-          .help("Start a Manager conversation (⌥⌘N)")
+          .help("Start a Manager conversation (\(AppShortcut.newConversation.glyphs))")
           .accessibilityLabel("New Manager conversation")
         }
       }

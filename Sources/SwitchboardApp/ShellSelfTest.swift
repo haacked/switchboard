@@ -13,7 +13,7 @@ import SwiftUI
 /// toggle does. `select <session>` selects a session. `type <text>` types the text and
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
 /// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
-/// `NavShortcuts` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
+/// `navKeys` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
 /// `mouse <3|4>` posts a press of mouse button 4 or 5 (button numbers 3 and 4) over the window to the app's
 /// event queue, so it passes through the app's event monitors as a real press does. `where` reports the place
 /// that the window shows. `snapshot <path>` draws the window as SB_SNAPSHOT does. `click-row <session>` clicks the
@@ -41,6 +41,13 @@ import SwiftUI
 /// with that click anchor in the main window, as `click-delete-selected` does.
 @MainActor
 enum ShellSelfTest {
+  /// The shortcuts that `nav-keys` sends, in order. Search Sessions is last, because it opens a sheet. New
+  /// Conversation, Message Claude, and Ask Switchboard stay out, because each one starts a conversation, moves
+  /// focus into a field, or opens a sheet that `bin/test-gui shell` does not expect.
+  nonisolated static let navKeys: [AppShortcut] = [
+    .nextSession, .previousSession, .focusList, .focusTerminal, .back, .forward, .showRecentPlaces, .searchSessions,
+  ]
+
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
   /// `board-drag` hides this view so that it can't take a card drag.
   private static var dragControl: NSView?
@@ -115,7 +122,7 @@ enum ShellSelfTest {
       return "handled \(handled) by \(owner?.title ?? "no item")"
     case "nav-keys":
       guard let window else { return "no window" }
-      return NavShortcuts.all.map { menuItem(running: $0, in: window) }.joined(separator: "; ")
+      return navKeys.map { menuItem(running: $0.binding, in: window) }.joined(separator: "; ")
     case "settings-key":
       guard let window else { return "no window" }
       return menuItem(running: KeyboardShortcut(","), in: window)
