@@ -9,11 +9,11 @@ import Testing
   let shared = GroupTests()
 
   /// Runs `sb` with `args` as a tool call of `owner`'s claude, without CLAUDECODE.
-  func sbWithoutClaudeCode(
-    _ sbd: Instance, of owner: SessionSummary, _ args: [String], prefix: String = "", name: String
-  ) throws -> CommandResult {
+  func sbWithoutClaudeCode(_ sbd: Instance, of owner: SessionSummary, _ args: [String], name: String) throws
+    -> CommandResult
+  {
     let sb = ([shellQuote("\(Instance.bin)/sb")] + args.map(shellQuote)).joined(separator: " ")
-    try sbd.writeScript(name, "\(prefix)env -u CLAUDECODE \(sb)")
+    try sbd.writeScript(name, "env -u CLAUDECODE \(sb)")
     return try panes.runInPane(sbd, of: owner, name)
   }
 
@@ -45,6 +45,7 @@ import Testing
       sbd, of: worker, ["group", "link", "add", "Flags", "https://example.com/rfc", "--title", "RFC"], name: "link")
 
     #expect(r.status != 0, "\(r.stdout)")
+    #expect(r.stderr.contains("from a terminal outside the sessions"), "\(r.stderr)")
     #expect(try group(sbd, g.id).links == nil)
   }
 

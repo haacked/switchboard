@@ -34,7 +34,9 @@ import Testing
     GroupContext.systemPromptBlock(g, artifacts: artifacts)
   }
 
-  func lines(_ text: String) -> [Substring] { text.split(separator: "\n", omittingEmptySubsequences: false) }
+  func lines(_ text: String) -> [Substring] {
+    text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+  }
 
   // MARK: What every block holds
 
@@ -201,6 +203,7 @@ import Testing
   func theNoticeIsOneLineWhateverTheName(breaker: String) {
     let notice = GroupContext.changedNotice(name: "Flags\(breaker)\(Self.injected)", id: Self.id)
 
-    #expect(!notice.contains("\n") && !notice.contains("\r") && !notice.contains("\u{2028}"), "\(notice)")
+    let breaksLine = notice.contains(where: \.isNewline)
+    #expect(!breaksLine, "\(notice)")
   }
 }

@@ -211,3 +211,32 @@ private let otherSecrets = ["billing-secret", "docs-secret", "ops-secret"]
     }
   }
 }
+
+/// What sbd records when it can't tell who wrote a group's context or which context a session last heard.
+@Suite struct GroupContextServiceTests {
+  /// sbd can't show that a client whose pid it can't read runs outside every session.
+  @Test(.timeLimit(.minutes(1)))
+  func aDescriptionFromAClientWithoutAPidIsClaudes() throws {
+    try withGroups { service in
+      let answer = service.handle(
+        Request(op: "group-describe", args: ["group": "gflag2", "text": "From nowhere."]), caller: .client(pid: nil))
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let after = service.queue.sync { service.groups["gflag2"] }
+      #expect(after?.description == "From nowhere.")
+      #expect(after?.descriptionBy == .claude)
+    }
+  }
+
+  /// A session that an older sbd launched has no context on record.
+  @Test(.timeLimit(.minutes(1)))
+  func aSessionThatNeverHeardAContextHearsTheCurrentOneWithoutANotice() throws {
+    try withGroups { service in
+      let notice = service.queue.sync { service.groupContextNotice("l2") }
+
+      #expect(notice == nil)
+      let heard = service.queue.sync { service.entries["l2"]?.facts.groupContextHeard }
+      #expect(heard == GroupContext.fingerprint(groups[0]))
+    }
+  }
+}

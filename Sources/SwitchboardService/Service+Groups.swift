@@ -50,7 +50,8 @@ extension Service {
         if by == .claude {
           guard ArtifactLink.normalized(url) != nil else {
             throw APIError(
-              "Claude can add only a claude.ai artifact link to a group. Ask the user to run sb group link add")
+              "Claude can add only a claude.ai artifact link to a group, and a command that runs inside a session "
+                + "counts as Claude's. Ask the user to run sb group link add from a terminal outside the sessions")
           }
           // A link's title reaches other sessions as text. Claude's link therefore has its URL as its title.
           guard args["title"]?.string == nil else {
@@ -71,7 +72,9 @@ extension Service {
           throw APIError("\(group.name) has no link \(linkId)")
         }
         guard by == .you || link.by == .claude else {
-          throw APIError("Only you can remove a link you added. Ask the user to run sb group link rm")
+          throw APIError(
+            "Only you can remove a link you added, and a command that runs inside a session counts as Claude's. "
+              + "Ask the user to run sb group link rm from a terminal outside the sessions")
         }
         _ = group.removeLink(id: linkId)
       }

@@ -43,8 +43,8 @@ public enum GroupContext {
 
   /// The line that tells a running session its group's context changed.
   public static func changedNotice(name: String, id: String) -> String {
-    "Switchboard: the description, notes, or links of the group \"\(SessionGroup.collapsingWhitespace(name))\" changed. "
-      + "Read them with: sb group show \(id)"
+    "Switchboard: this session is in the group \"\(SessionGroup.collapsingWhitespace(name))\", and its description, "
+      + "notes, or links changed. Read them with: sb group show \(id)"
   }
 
   /// A digest of what a session hears about `group` beyond its name: the group's id, the user-written description,
