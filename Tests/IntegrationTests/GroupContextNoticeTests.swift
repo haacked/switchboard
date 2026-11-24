@@ -53,7 +53,7 @@ import Testing
     var testDescription: String { rawValue }
 
     /// Makes the change. `setUp` runs before the member launches, so the launch has heard it.
-    func setUp(_ t: GroupContextNoticeTests, _ sbd: Instance) throws {
+    func setUp(_ sbd: Instance) throws {
       switch self {
       case .linkRm: try sbd.sb("group", "link", "add", "Flags", GroupContextNoticeTests.rfc)
       case .clearDescription: try sbd.sb("group", "describe", "Flags", "Ship the flag cache.")
@@ -81,7 +81,7 @@ import Testing
   func aChangeIsHeardOnceAtTheNextPrompt(change: Change) throws {
     let sbd = try Instance()
     let g = try addGroup(sbd, "Flags")
-    try change.setUp(self, sbd)
+    try change.setUp(sbd)
     let s = try member(sbd, g)
     let before = contexts(sbd, s).count
 

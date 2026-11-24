@@ -169,7 +169,7 @@ private func printGroupDetail(_ g: GroupSummary) {
   print("\(g.name)  (\(g.id))".printable)
   printGroupHeader(g)
   for note in g.notes {
-    let lines = note.text.split(separator: "\n", omittingEmptySubsequences: false)
+    let lines = note.text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
     print("  note by \(authorName(note.by)): \(lines.first ?? "")".printable)
     for line in lines.dropFirst() { print("    \(line)".printable) }
   }

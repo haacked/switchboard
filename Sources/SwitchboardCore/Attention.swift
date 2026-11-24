@@ -209,7 +209,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// What sbd found for each draft's reply target.
   public var draftReplies = DraftReplyFacts()
   /// The `GroupContext.fingerprint` of the group context that the session last heard, from its launch or from a
-  /// change notice. Nil before the first `group_context_heard`.
+  /// change notice. An empty string means the session was in no group. Nil before the first `group_context_heard`.
   public var groupContextHeard: String?
   /// The ref of the item whose decisions the last accepted submit sent.
   /// It matters only while that item is the session's item.

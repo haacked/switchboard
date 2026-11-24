@@ -228,6 +228,77 @@ private let otherSecrets = ["billing-secret", "docs-secret", "ops-secret"]
     }
   }
 
+  /// Sends what `sb` sends outside Claude, `by: you`, from a client whose pid sbd can't read.
+  private func fromNowhere(_ service: Service, _ op: String, _ args: [String: JSON]) -> Response {
+    var args = args
+    args["by"] = "you"
+    return service.handle(Request(op: op, args: .object(args)), caller: .client(pid: nil))
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aDescriptionSentAsTheUsersFromAClientWithoutAPidIsClaudes() throws {
+    try withGroups { service in
+      let answer = fromNowhere(service, "group-describe", ["group": "gflag2", "text": "From nowhere."])
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let after = service.queue.sync { service.groups["gflag2"] }
+      #expect(after?.description == "From nowhere.")
+      #expect(after?.descriptionBy == .claude)
+    }
+  }
+
+  /// `group add --description` is a second way to write a description.
+  @Test(.timeLimit(.minutes(1)))
+  func aGroupAddedByAClientWithoutAPidHasClaudesDescription() throws {
+    try withGroups { service in
+      let answer = fromNowhere(service, "group-add", ["name": "New", "description": "From nowhere."])
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let added = service.queue.sync { service.groups.values.first { $0.name == "New" } }
+      #expect(added?.description == "From nowhere.")
+      #expect(added?.descriptionBy == .claude)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aNoteFromAClientWithoutAPidIsClaudes() throws {
+    try withGroups { service in
+      let answer = fromNowhere(service, "group-note", ["group": "gflag2", "text": "From nowhere."])
+
+      #expect(answer.ok, "\(answer.error ?? "")")
+      let note = service.queue.sync { service.groups["gflag2"]?.notes.last }
+      #expect(note?.text == "From nowhere.")
+      #expect(note?.by == .claude)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aLinkFromAClientWithoutAPidIsRefused() throws {
+    try withGroups { service in
+      let answer = fromNowhere(service, "group-link-add", ["group": "gflag2", "url": "https://example.com/rfc"])
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("Claude can add only a claude.ai artifact link") == true, "\(answer.error ?? "")")
+      let links = service.queue.sync { service.groups["gflag2"]?.links }
+      #expect((links ?? []).isEmpty)
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aClientWithoutAPidCannotRemoveALinkTheUserAdded() throws {
+    try withGroups { service in
+      let link = ExternalLink(id: "l1", title: "RFC", url: "https://example.com/rfc", by: .you, t: 1)
+      service.queue.sync { service.groups["gflag2"]?.links = [link] }
+
+      let answer = fromNowhere(service, "group-link-rm", ["group": "gflag2", "link": "l1"])
+
+      #expect(!answer.ok)
+      #expect(answer.error?.contains("Only you can remove a link you added") == true, "\(answer.error ?? "")")
+      let links = service.queue.sync { service.groups["gflag2"]?.links }
+      #expect(links == [link])
+    }
+  }
+
   /// A session that an older sbd launched has no context on record.
   @Test(.timeLimit(.minutes(1)))
   func aSessionThatNeverHeardAContextHearsTheCurrentOneWithoutANotice() throws {
